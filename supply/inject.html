@@ -13694,6 +13694,38 @@
     return '<button class="smp-actbadge" data-rid="'+r.id+'" title="Action owner: '+(manual?'set manually':'auto-derived')+' — click to change (D&B → Supplier → No action → Auto)" '
       +'style="font-size:10px;font-weight:700;border:1px solid '+(solid?m[1]:'var(--line)')+';background:'+(solid?m[1]:'transparent')+';color:'+m[2]+';border-radius:10px;padding:1px 8px;cursor:pointer;line-height:1.6;white-space:nowrap">'
       +m[0]+(manual?'':' <span style="opacity:.55;font-weight:600">auto</span>')+'</button>'; }
+  // v27.820 (Ben): mobile SAMPLING card — one card per development request (approved artifact). Reuses the grid's action
+  // classes (.smp-openreq / .smp-manage / .smp-actbadge / .smp-tl / .smp-sw) so every existing handler binds unchanged;
+  // sample versions become a horizontal, tappable chip strip (.smpc-samp → opens MANAGE on that sample's tab).
+  function _smpKColor(k){ return {dev:'var(--muted)',shp:'var(--amber)',pkg:'var(--violet)',rv:'var(--violet)',ok:'var(--pos)',rj:'var(--neg)',stop:'var(--neg)'}[k]||'var(--muted)'; }
+  function smpMobileCard(r){
+    var swSrc='/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'');
+    var sw=r.has_swatch?'<img class="smpc-sw smp-sw" data-src="'+swSrc+'" src="'+swSrc+'" title="tap to enlarge">':'<span class="smpc-sw none">—</span>';
+    var name=esc(String(r.bulk_colour_name||'').trim()||String(r.colour_name||'').trim()||r.item_ref);
+    var typ=[r.category].filter(Boolean).map(esc).join(' · ');
+    var m=stageMeta(r.stage);
+    var stageBadge='<span class="smpc-stage" style="background:'+m[3]+';color:'+m[4]+'">'+esc(m[1])+'</span>';
+    var openBtn='<button class="smpc-open smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'">Open ↗</button>';
+    var samps=(r.samples||[]);
+    var strip=samps.length?samps.map(function(s,i){ var st=_smpStatus(s), latest=(i===samps.length-1);
+        return '<button class="smpc-samp'+(latest?' latest':'')+'" data-rid="'+r.id+'" data-sid="'+s.id+'" title="tap to review / receive">'
+          +'<span class="smpc-sv"><span class="smpc-sdot smp-tick k-'+st.k+'">'+_smpGlyph(st.k)+'</span>S'+(i+1)+'</span>'
+          +'<span class="smpc-sst" style="color:'+_smpKColor(st.k)+'">'+esc(st.t)+'</span>'
+          +'<span class="smpc-sdt">'+esc(s.received_at?_smpDM(s.received_at):'sub '+_smpDM(s.sample_date||s.created_at))+'</span>'
+        +'</button>'; }).join(''):'<span class="smpc-nosamp">No samples yet — awaiting supplier</span>';
+    var acc=r.supplier_accepted_at?'<span class="smpc-acc ok">✓ Accepted</span>':'<span class="smpc-acc wait">⏳ Awaiting</span>';
+    var tl='<button class="smpc-tl smp-tl" data-ref="'+esc(r.item_ref)+'" title="timeline">💬 '+(r.notes||0)+(r.unread_supplier?' <span class="smpc-unread">'+r.unread_supplier+'</span>':'')+'</button>';
+    var manage='<button class="smpc-manage smp-manage" data-rid="'+r.id+'">Manage</button>';
+    return '<div class="smpc">'
+      +'<div class="smpc-top">'+sw
+        +'<div class="smpc-id"><div class="smpc-name">'+name+'</div><div class="smpc-ref">'+esc(r.ref)+'</div>'
+          +'<div class="smpc-meta">'+esc(r.supplier_name||'')+(typ?' <span class="smpc-sep">·</span> '+typ:'')+'</div></div>'
+        +'<div class="smpc-right">'+stageBadge+openBtn+'</div>'
+      +'</div>'
+      +'<div class="smpc-samps">'+strip+'</div>'
+      +'<div class="smpc-foot">'+smpActBadge(r)+acc+tl+manage+'</div>'
+    +'</div>';
+  }
   function renderProductSampling(c){ if(!c)return;
     if(_smpView==='batch'){   // v27.714 (Ben): Sample batch review is a view of SAMPLING — enter a sample shipment (batch) and review every sample on it
       c.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+smpViewPills()+'</div><div id="smp-batch"></div>'; wireSmpViewPills(c,c); renderProductBatchReview(c.querySelector('#smp-batch')); return; }
@@ -13742,8 +13774,11 @@
         var maxV=4; f.forEach(function(r){ maxV=Math.max(maxV,(r.samples||[]).length); });
         var g=c.querySelector('#smp-grid');
         if(!f.length){ g.innerHTML='<div style="text-align:center;padding:44px 16px;color:var(--muted)"><div style="font-size:30px;margin-bottom:8px">🧵</div>'+(rows.length?'No requests match these filters.':'No development requests yet — create one from a product\'s [+] on PLAN, or with the button above.')+'</div>'; return; }
-        var ths=['','Product · request','Colour / Type','Supplier','Stage']; /* v27.726 (Ben): Age removed from the grid; Stage is its own column, widened so the dropdown never clips */ for(var k=1;k<=maxV;k++)ths.push('S'+k); ths.push('Timeline');   // v27.770 (Ben): dropped the Shipment · tracking column — each S-cell now carries its own sample's SR + tracking
-        var html='<table class="smp-tbl hz-stack"><thead><tr>'+ths.map(function(h,i){ return '<th'+(i>=5&&i<5+maxV?' class="smp-scell" style="text-align:center"':(h==='Stage'?' class="smp-stage"':''))+'>'+h+'</th>'; }).join('')+'</tr></thead><tbody>';
+        var isMob=(window.innerWidth||document.documentElement.clientWidth||999)<=640;   // v27.820 (Ben): phone → card layout; ths length 1 keeps the shared Manage/timeline colspans correct
+        var ths, html;
+        if(isMob){ ths=['']; html='<table class="smp-tbl smpc-tbl"><tbody>'; }
+        else { ths=['','Product · request','Colour / Type','Supplier','Stage']; /* v27.726 (Ben): Age removed from the grid; Stage is its own column, widened so the dropdown never clips */ for(var k=1;k<=maxV;k++)ths.push('S'+k); ths.push('Timeline');   // v27.770 (Ben): dropped the Shipment · tracking column — each S-cell now carries its own sample's SR + tracking
+          html='<table class="smp-tbl hz-stack"><thead><tr>'+ths.map(function(h,i){ return '<th'+(i>=5&&i<5+maxV?' class="smp-scell" style="text-align:center"':(h==='Stage'?' class="smp-stage"':''))+'>'+h+'</th>'; }).join('')+'</tr></thead><tbody>'; }
         // v27.762 (Ben): group by SEASON → TYPE (category), same as the PRODUCT grid; no colour in the headers, larger text, clear collapsible carets
         f=f.slice().sort(function(a,b){ var sc=String(b.season||'').localeCompare(String(a.season||'')); if(sc)return sc; var cc=String(a.category||'').localeCompare(String(b.category||'')); if(cc)return cc; return String(a.ref||'').localeCompare(String(b.ref||'')); });
         var _sSeasonCount={}, _sCatCount={}; f.forEach(function(r){ var sk=r.season||'', ck=(r.season||'')+'|'+(r.category||''); _sSeasonCount[sk]=(_sSeasonCount[sk]||0)+1; _sCatCount[ck]=(_sCatCount[ck]||0)+1; });
@@ -13759,7 +13794,9 @@
             : '<span class="smp-acc pend" title="Waiting for the supplier to accept this development request in the portal">⏳ Awaiting accept</span>';
           // v27.776 (Ben): swatch cell tracks the swatch size (no fixed width); ref on one row (col 2); component moves under the single colour (col 3)
           var oneColour=String(r.bulk_colour_name||'').trim()||String(r.colour_name||'').trim()||'—';   // bulk if set, else development colour
-          var cells='<td class="l smp-swcell">'+sw+'</td>'
+          var cells;
+          if(isMob){ cells='<td class="smpc-cell">'+smpMobileCard(r)+'</td>'; }
+          else { cells='<td class="l smp-swcell">'+sw+'</td>'
             +'<td class="l smp-refcell"><div class="smp-ref"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div style="margin-top:4px">'+acc+'</div><div style="margin-top:5px"><button class="smp-manage" data-rid="'+r.id+'" title="Manage this request: master data, timeline, and each sample in tabs">⚙ Manage</button></div></td>'
             +'<td class="l"><div style="font-size:12px;font-weight:600">'+esc(oneColour)+'</div>'+(compTxt?'<div class="mut" style="font-size:11px;margin-top:2px">'+esc(compTxt)+'</div>':'')+'<div style="margin-top:3px">'+(r.category?hzCatBadge(r.category,r.category_colour):'<span class="mut tiny">no category</span>')+'</div></td>'   // v27.776 (Ben): single colour + component under it + category badge
             +'<td class="l">'+esc(r.supplier_name)+(r.supplier_code?' <span class="mut tiny">'+esc(r.supplier_code)+'</span>':'')+'<div style="margin-top:3px"><span class="smp-type'+(/custom/i.test(r.type||'')?' custom':'')+'">'+esc(/custom/i.test(r.type||'')?'Custom order':'Development')+'</span></div></td>'
@@ -13781,6 +13818,7 @@
                 return '<div class="smp-cellship"><span class="smp-cellship-top"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment">📦 '+esc(sh.ref)+'</a>'+badge+'</span>'
                   +(sh.tracking?'<span class="smp-celltrk">'+carrierTrackLinkInj(sh.carrier,sh.tracking)+'</span>':'')+'</div>'; })()+'</td>'; }
           cells+='<td class="l"><a class="smp-tl" data-ref="'+esc(r.item_ref)+'" style="cursor:pointer;color:var(--blue);font-weight:600;text-decoration:underline">'+(r.notes||0)+'</a>'+(r.unread_supplier?' <span class="ex-badge" title="unread supplier messages">'+r.unread_supplier+'</span>':'')+'</td>';   // v27.770: Shipment column removed — per-sample SR/tracking now sits under each tick
+          }
           html+='<tr class="smp-row" data-rid="'+r.id+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'">'+cells+'</tr>'; });
         g.innerHTML=html+'</tbody></table>';
         hzFillTrackPills(g);   // v27.720: populate DHL tracking pills in the Shipment cells from the cache
@@ -13793,7 +13831,7 @@
         g.querySelectorAll('tr.smp-cathdr').forEach(function(h){ h.onclick=function(){ var kk=h.dataset.season+'|'+h.dataset.cat; _smpCatCollapsed[kk]=!_smpCatCollapsed[kk]; _smpApplyCollapse(); }; });
         _smpApplyCollapse();
         // v27.763 (Ben): alternative grouping layouts (CONFIG ▸ Product) — reuse the rendered rows, swap the navigation chrome.
-        if((_smpGroupMode||'inline')!=='inline'){
+        if(!isMob && (_smpGroupMode||'inline')!=='inline'){   // v27.820: mobile keeps the simple season/type grouping
           var _tbl=g.querySelector('table.smp-tbl');
           g.querySelectorAll('tr.smp-seasonhdr, tr.smp-cathdr').forEach(function(h){ h.remove(); });   // headers replaced by tabs / tree nav
           var _seas=[]; f.forEach(function(r){ var s=r.season||''; if(_seas.indexOf(s)<0)_seas.push(s); });
@@ -13850,6 +13888,10 @@
             try{ if(r)prodItemInvalidate(r.item_ref); pgetClear(); }catch(e2){} }); }; });
         // v27.753 (Ben): clicking a sample opens the MANAGE panel on that sample's sub-tab (was a duplicate inline pop-down alongside the MANAGE tabs). Switches the tab if MANAGE is already open for the row.
         g.querySelectorAll('.smp-sdate, .smp-n').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var rid=a.dataset.rid, sid=a.dataset.sid; var r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return; var tr=a.closest('tr'); var idx=(r.samples||[]).map(function(x){return String(x.id);}).indexOf(String(sid)); if(idx<0)idx=0;
+          var mopen=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mopen){ var t=mopen.querySelector('.smp-mtab[data-t="s'+idx+'"]'); if(t){ t.click(); return; } mopen.remove(); }
+          smpManage(tr, r, ths.length, 'S'+(idx+1)); }; });
+        // v27.820 (Ben): mobile — tap a sample chip → open MANAGE on that sample's tab (same as .smp-sdate on desktop)
+        g.querySelectorAll('.smpc-samp').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var rid=a.dataset.rid, sid=a.dataset.sid; var r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return; var tr=a.closest('tr'); var idx=(r.samples||[]).map(function(x){return String(x.id);}).indexOf(String(sid)); if(idx<0)idx=0;
           var mopen=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mopen){ var t=mopen.querySelector('.smp-mtab[data-t="s'+idx+'"]'); if(t){ t.click(); return; } mopen.remove(); }
           smpManage(tr, r, ths.length, 'S'+(idx+1)); }; });
         if(_smpScroll){ var trS=g.querySelector('tr.smp-row[data-rid="'+_smpScroll+'"]'); _smpScroll=null; if(trS){ try{ trS.scrollIntoView({block:'center'}); }catch(e){} trS.style.outline='2px solid var(--blue)'; setTimeout(function(){ trS.style.outline=''; },2200); } }

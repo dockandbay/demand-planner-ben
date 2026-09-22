@@ -883,6 +883,44 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 @media (max-width:640px){ #app #product-root .smp-legend{display:none} }
 /* v27.819 (Ben): bigger, easier-to-tap phrase/Pantone picker rows on mobile (the picker is a bottom sheet there) */
 @media (max-width:640px){ .pt-pi{padding:12px 13px!important;font-size:13.5px!important} }
+
+/* v27.820 (Ben): mobile SAMPLING — one card per request. JS renders table.smpc-tbl only at <=640px; the table/rows go
+   display:block so cards stack, and the shared MANAGE / timeline expansion rows (.smp-mexp/.smp-tlexp) drop below each card. */
+#app #product-root .smpc-tbl,#app #product-root .smpc-tbl tbody{display:block;width:100%}
+#app #product-root .smpc-tbl tr{display:block}
+#app #product-root .smpc-tbl td{display:block;padding:0;border:0}
+#app #product-root .smpc-tbl tr.smp-seasonhdr td{padding:15px 2px 6px;font-size:13px;font-weight:800;letter-spacing:.02em;color:var(--ink);background:transparent}
+#app #product-root .smpc-tbl tr.smp-cathdr td{padding:2px 2px 8px;font-size:12px;font-weight:700;color:var(--muted)}
+#app #product-root .smpc-tbl tr.smp-seasonhdr,#app #product-root .smpc-tbl tr.smp-cathdr{cursor:pointer}
+#app #product-root .smpc-tbl tr.smp-row{margin:0 0 11px}
+#app #product-root .smpc-tbl tr.smp-mexp td,#app #product-root .smpc-tbl tr.smp-tlexp td{padding:0 0 11px}
+#app #product-root .smpc{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(15,23,42,.05),0 6px 16px rgba(15,23,42,.06);overflow:hidden}
+#app #product-root .smpc-top{display:flex;gap:11px;padding:12px 13px 10px}
+#app #product-root .smpc-sw{width:52px;height:52px;border-radius:11px;flex:0 0 auto;border:1px solid var(--line);background:var(--hover);object-fit:cover;cursor:pointer}
+#app #product-root .smpc-sw.none{display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:14px}
+#app #product-root .smpc-id{flex:1;min-width:0}
+#app #product-root .smpc-name{font-size:15px;font-weight:800;line-height:1.2;word-break:break-word}
+#app #product-root .smpc-ref{font-size:11px;color:var(--faint);font-family:ui-monospace,Menlo,monospace;margin-top:2px}
+#app #product-root .smpc-meta{font-size:12px;color:var(--muted);margin-top:5px;word-break:break-word}
+#app #product-root .smpc-meta .smpc-sep{color:var(--faint)}
+#app #product-root .smpc-right{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:7px}
+#app #product-root .smpc-stage{font-size:11px;font-weight:800;padding:4px 9px;border-radius:8px;white-space:normal;max-width:118px;text-align:center;line-height:1.25}
+#app #product-root .smpc-open{border:1px solid var(--line);background:var(--card);color:var(--blue);font-size:11px;font-weight:800;padding:5px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
+#app #product-root .smpc-samps{display:flex;gap:8px;overflow-x:auto;padding:2px 13px 12px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+#app #product-root .smpc-samps::-webkit-scrollbar{display:none}
+#app #product-root .smpc-samp{flex:0 0 auto;min-width:86px;border:1px solid var(--line);border-radius:11px;padding:8px 10px;background:var(--card);cursor:pointer;text-align:left;font:inherit;color:var(--ink)}
+#app #product-root .smpc-samp.latest{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-soft)}
+#app #product-root .smpc-sv{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800}
+#app #product-root .smpc-sdot.smp-tick{width:12px;height:12px;flex:0 0 auto;margin:0;font-size:9px;line-height:12px;min-width:0}
+#app #product-root .smpc-sst{display:block;font-size:10.5px;font-weight:700;margin-top:3px}
+#app #product-root .smpc-sdt{display:block;font-size:10.5px;color:var(--faint);margin-top:1px;font-variant-numeric:tabular-nums}
+#app #product-root .smpc-nosamp{font-size:12px;color:var(--muted);padding:0 2px 4px}
+#app #product-root .smpc-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 13px;border-top:1px solid var(--line2);background:var(--hover)}
+#app #product-root .smpc-acc{font-size:11.5px;font-weight:700}
+#app #product-root .smpc-acc.ok{color:var(--pos)} #app #product-root .smpc-acc.wait{color:var(--amber)}
+#app #product-root .smpc-tl{margin-left:auto;border:0;background:none;font:inherit;font-size:12px;color:var(--muted);font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+#app #product-root .smpc-unread{background:var(--neg);color:#fff;border-radius:999px;font-size:10px;font-weight:800;padding:0 6px;line-height:16px;min-width:16px;text-align:center;display:inline-block}
+#app #product-root .smpc-manage{border:1px solid var(--nav);background:var(--nav);color:#fff;border-radius:8px;font-size:11px;font-weight:800;letter-spacing:.03em;padding:6px 12px;cursor:pointer}
 #app #product-root .smp-tick.smp-leg{width:15px;height:15px;font-size:9px;border-width:2px;cursor:default}
 #app #product-root .smp-tick.smp-leg:hover{box-shadow:none}
 #app #product-root .smp-tick:hover:not(.none){box-shadow:0 0 0 3px var(--blue-soft)}
