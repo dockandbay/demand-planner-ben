@@ -1,3 +1,31 @@
+## v27.865 to v27.874 deploy note (Ben): portal + sampling polish, shipment deep-link/rename, new "Sample delivered" stage
+
+Everything since the v27.835 to v27.864 note. **No migrations, no new env vars, no artifact rebuild this batch** — only three served-fresh files changed: `server.mjs`, `supply/inject.html`, `supply/portal-view.js` (Vercel picks them up on the normal deploy). `artifact_v16.7.html` is UNCHANGED in this batch.
+
+### Still outstanding from the PREVIOUS note (please confirm applied on prod)
+
+- **Migrations 298 + 299** (`298_supplier_notes_supplier_scope_backfill.sql`, `299_feedback_notes_sample_id_backfill.sql`) — the per-supplier timeline scoping (v27.857/860) and the feedback sample-version chip (v27.863) rely on them for HISTORY. Apply 298 first, then 299. Both additive, rollback-safe. Going forward the columns are stamped on write; these only backfill existing rows.
+
+### Behaviour to know
+
+- **New request stage `sample_delivered`** (v27.874). It's a new value stored in `planner.product_dev_requests.stage`. That column is **free text (no CHECK/enum constraint — verified on prod)**, so **no migration is needed**. The tracking poller sets it automatically when a sample shipment's carrier tracking shows delivered (forward-only; never clobbers a decision). It sits between `sample_shipped` and `sample_in_review`; `PROD_STAGES`/`REQ_RANK` (server) and `STAGE_META` (client) were extended in lock-step. No demand/buy numbers move.
+- **Sampling decision default** (v27.874): on a received-but-undecided sample, the per-component decision dropdown now defaults to "Sample in review" (was "Sample development"). Display default only — nothing is written until the reviewer saves.
+
+### Changes in this batch (CLIENT + SERVER, no migration/env)
+
+- **v27.869 (SERVER):** shipment `POs aboard` (`/api/supply/shipment-detail/:ref`) now includes the master PO even when its `shipment_ref` is NULL or renamed (was filtering on `shipment_ref` alone, dropping the master).
+- **v27.868 (CLIENT):** shipment deep-link `#/supply/purchase-orders/shipments/<ref>` expands that shipment; inline rename of the shipment reference on the Dates & tracking view (cascades to every PO on it, reuses `/api/supply/shipment/:ref/rename`).
+- **v27.871 (SERVER+CLIENT):** portal Master-data "Size variants & components" grouped by which supplier samples each component (`productItemPayload` returns `req_suppliers` per component; portal shows a "You sample …" banner + You/Other groups).
+- **v27.873 (SERVER+CLIENT):** timeline sample-version chips scoped to the request's supplier (`/api/product/samples/:ref?supplier=`) — was showing every supplier's samples.
+- **v27.866 (SERVER+CLIENT):** supplier portal feedback + timeline render Pantone swatches, note images and the sample chip (portal `product-notes` endpoint returns pantone/attachment/sample_version; `productSampleList` attaches a resolved pantone array per aspect).
+- **v27.865 / 872 / 867 / 870 (CLIENT):** Colour/Quality headings → badges (portal + admin timeline); QR sample-review card (left-align status, stacked outlined Colour/Quality, per-aspect Add photo); compact single-letter D/T tracking badge in the narrow sampling column; the "+ Development request" modal left-aligns its inputs and closes immediately on Create.
+
+### FYI — a DATA-quality issue in the demand revenue view (not a code change; for the data pipeline owner)
+
+Ben flagged UK B2B Feb-2027 showing a wildly inflated **value (£4.01M, +513%)** while units were only +22%. Root cause is **not** the forecast or the code: the revenue view prices each subcategory at its prior-year same-month (Feb) UK B2B **revenue ÷ units**, and several `planner.sales_actuals` rows have revenue booked on tiny/zero units, so the ASP explodes. The dominant one: **Picnic Blanket, Feb-2026 — £41,890 revenue on 17 units (£2,464/unit)**, which alone contributes ~£1.5M of the £4M. Others: Bag-Cooling (£1,999 on 1 unit), Non-Core, Poncho, Beach Pillow. These look like revenue-without-matching-units artefacts (credit notes / MOQ or sample charges / un-recorded units / mis-mapped SKUs) in the sales feed. **Action:** correct those historical `sales_actuals` rows in the source (Airtable/n8n). Ben and Claude are separately considering an artifact-side ASP clamp so bad history can't inflate the forecast — that would be a future code change, flagged here for awareness.
+
+---
+
 ## v27.835 to v27.864 deploy note (Ben): FedEx tracking, portal per-supplier scoping, plus a buy-engine fix that MOVES NUMBERS
 
 Everything since the v27.803 to v27.834 note. Read the **BUY ENGINE change** block first — it changes buy-plan quantities across the estate (intended: less over-buying), so it wants a sanity pass on live before it is trusted broadly. `artifact_v16.7.html` changed (v27.859 + v27.862), so it updates only on a fresh deploy.
