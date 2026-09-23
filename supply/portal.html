@@ -124,6 +124,7 @@
       +'<span class="pv-div"></span>'
       +'<h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
       +'</header><div id="pv-wrap"><div id="pv"></div></div>';   // Sign out removed — sessions expire on their own
+    try{ window.__PV_STANDALONE=true; }catch(e){}   // v27.855 (Ben): mark the real supplier portal, so portal-view.js's global tracking-pill click handler only runs here — NOT when the admin app loads portal-view.js (where it was hijacking DHL pill clicks and opening an ownership-scoped modal that fails for admin)
     var s=document.createElement('script'); s.src='/portal-view.js?v='+Date.now();   // cache-bust: always fetch the latest portal-view.js (tunnels/proxies were serving stale CSS + JS)
     s.onload=function(){
       window.DBPortalView.mount({
