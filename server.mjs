@@ -2655,6 +2655,18 @@ async function fulfilResolveProducts(skus) {
   if (!uniq.length) return out;
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', uniq]], 0, uniq.length, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
   (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = { id: r.id, uom: r.purchase_uom || r.default_uom || 1 }; });   // v27.736: carry the product's purchase UOM for the required line 'unit'
+  // v27.839 (Ben): tolerate stray leading/trailing whitespace in a Fulfil product code — a trailing TAB on
+  // "POLYBAG 215*320+50mm\t" (Fulfil id 2091) made the exact IN match miss and blocked the whole PO push. For each SKU
+  // still missing, refetch by ilike (SQL wildcards in the SKU escaped) and accept only a code that equals it once trimmed.
+  const missing = uniq.filter(s => !(String(s) in out));
+  for (const s of missing) {
+    const pat = '%' + String(s).replace(/([\\%_])/g, '\\$1') + '%';
+    try {
+      const cand = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'ilike', pat]], 0, 20, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
+      const hit = (cand || []).find(r => r && r.code != null && String(r.code).trim() === String(s).trim());
+      if (hit) out[String(s)] = { id: hit.id, uom: hit.purchase_uom || hit.default_uom || 1 };
+    } catch (e) { /* best-effort whitespace fallback */ }
+  }
   return out;
 }
 // push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
