@@ -4746,7 +4746,9 @@
       fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(res){ opBuild(lines,c,res[0]||[],res[1]||[]); }).catch(function(){opBuild(lines,c,[],[]);}); }
   function opBuild(lines,c,skuMaster,plc){ plc=plc||[];
-    lines=(lines||[]).filter(function(l){ return !/^POLYBAG /i.test(l.sku||''); });   // POLYBAG lines are shown only at PO level (order-plan panel), never on the main ORDER PLAN tab / export (Ben)
+    // v27.841 (Ben): POLYBAG lines now DO appear on the main ORDER PLAN tab AND in the XLSX report (previously filtered to
+    // the per-PO panel only). They carry no category/attrs, so they sort to the bottom of the SKU pivot.
+    lines=(lines||[]);
     var plcMap={}; plc.forEach(function(x){ plcMap[x.po+'|'+x.sku]=x; });   // (po|sku) → supplier change (for inline confirm in cells)
     function uniq(k){var s={};lines.forEach(function(l){if(l[k])s[l[k]]=1;});return Object.keys(s).sort();}
     var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no').reverse(), batches=uniq('batch_id').reverse();   // prod# / batch dropdowns: descending (newest first)
