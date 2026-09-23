@@ -111,6 +111,9 @@ body{margin:0;font-family:var(--font,system-ui,-apple-system,sans-serif);font-si
 .cat-opt:hover{background:var(--hover)}
 .pill-lbl{font-size:11px;color:var(--muted);white-space:nowrap;width:64px;flex-shrink:0;font-weight:600;letter-spacing:.02em}
 #ctabs-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.hz-brand{position:relative;display:inline-block}
+.hz-brand.hz-busy::after{content:'';position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;border:2.5px solid rgba(255,255,255,.28);border-top-color:#fff;animation:hzspin .65s linear infinite;pointer-events:none}   /* v27.877: loading ring over the HORIZON mark while a view-only grid build runs */
+@keyframes hzspin{to{transform:rotate(360deg)}}
 #ctabs-row .pill-lbl.ch-lbl{width:auto;margin-left:2px}
 .bar{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .save-btn{font-size:12px;padding:4px 14px;height:26px;cursor:pointer;border:1px solid var(--line);border-radius:4px;background:var(--card);white-space:nowrap}
@@ -1500,7 +1503,9 @@ var PRICE_CHANGES=[];   // DEMAND ▸ Revenue: definitive price changes (server-
 // CLEARED at the top of render() and renderMain(), so it can never go stale: any edit that changes IV triggers a
 // re-render, which wipes it. calc()'s return is never mutated by callers, so sharing the object is safe.
 var CALC_MEMO={};
-var _VIEW_ONLY_RENDER=false;   // v27.876 (perf): armed by view-only triggers (country/channel pills, category/filters, display toggles) so render()/renderMain() KEEP the forecast memos instead of recomputing every SKU. Consumed (reset) at the top of render() so it can never leak into a later data-changing render.
+var _VIEW_ONLY_RENDER=false;
+var _hzBuildPending=false,_hzBusyN=0;   // v27.877 (perf UX): one queued grid build per frame + a counted busy spinner over the HORIZON mark
+function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)return; _hzBusyN=Math.max(0,_hzBusyN+(on?1:-1)); b.classList.toggle('hz-busy',_hzBusyN>0); }catch(e){} }   // v27.876 (perf): armed by view-only triggers (country/channel pills, category/filters, display toggles) so render()/renderMain() KEEP the forecast memos instead of recomputing every SKU. Consumed (reset) at the top of render() so it can never leak into a later data-changing render.
 // Buy plan reads its demand from a runtime overlay (buildLiveDemand, off the live forecast). A PLAN forecast edit
 // makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
 // instead of only refreshing on BUY-tab entry.
@@ -9695,28 +9700,43 @@ function renderMain(viewOnly){
     fcNotesLoad(CUR,CF,function(){ fcChangeKeysLoad(CUR,CF,function(){ try{refreshAllCellRails();}catch(e){} }); }); }
   SKU_VIEW=null;
   SMOOTH_PREVIEW=null; // drop any pending smooth preview when the grid is rebuilt
-  // Always reset tw — SKU view replaces its contents so we can't rely on #t existing
-  var tw=document.querySelector('.tw');
-  tw.innerHTML='<table id="t"></table>';
-  const t=document.getElementById('t');
-  t.appendChild(buildColgroup());
-  t.appendChild(buildHdr());
-  const tb=document.createElement('tbody');tb.appendChild(buildBody());t.appendChild(tb);
-  (function(){var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}})();
-  syncTabs();
-  // Re-open any inline SKU expansions after a full rebuild (e.g. country/channel switch),
-  // re-rendering them for the current country so dates/forecasts update. The PLAN_SKU_QRY
-  // path already injects matching rows, so skip then to avoid duplicates.
-  if(!PLAN_SKU_QRY&&EXPANDED.size){
-    EXPANDED.forEach(function(k){
-      var p=k.split('|');
-      var pTr=document.querySelector('tr[data-rowkey="'+k+'"]');
-      if(pTr)insertInlineSkuRows(p[0],p[1],p[2],pTr);
-    });
+  // v27.877 (Ben): INSTANT feedback on a view-only select. The heavy grid build is deferred ONE FRAME so the new pill /
+  // toggle state (+ a loading ring over the HORIZON mark) paints BEFORE the main thread blocks on buildBody(); rapid
+  // clicks coalesce into a single build of the final state. Data-changing renders (edits / undo / smooth) stay fully
+  // synchronous exactly as before.
+  function _hzBuildGrid(){
+    // Always reset tw — SKU view replaces its contents so we can't rely on #t existing
+    var tw=document.querySelector('.tw'); if(!tw)return;
+    tw.innerHTML='<table id="t"></table>';
+    const t=document.getElementById('t');
+    t.appendChild(buildColgroup());
+    t.appendChild(buildHdr());
+    const tb=document.createElement('tbody');tb.appendChild(buildBody());t.appendChild(tb);
+    (function(){var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}})();
+    syncTabs();
+    // Re-open any inline SKU expansions after a full rebuild (e.g. country/channel switch),
+    // re-rendering them for the current country so dates/forecasts update. The PLAN_SKU_QRY
+    // path already injects matching rows, so skip then to avoid duplicates.
+    if(!PLAN_SKU_QRY&&EXPANDED.size){
+      EXPANDED.forEach(function(k){
+        var p=k.split('|');
+        var pTr=document.querySelector('tr[data-rowkey="'+k+'"]');
+        if(pTr)insertInlineSkuRows(p[0],p[1],p[2],pTr);
+      });
+    }
+    if(typeof planRevPopRefresh==='function')planRevPopRefresh(); // keep the pop-out in sync with forecast/scope changes
+    try{ paintHighlights(); }catch(e){}   // apply the active cell-highlight from each cell's precomputed data-hld/data-hlg
+    if(typeof hzPlanSave==='function')hzPlanSave();   // persist the current plan filters (1h)
   }
-  if(typeof planRevPopRefresh==='function')planRevPopRefresh(); // keep the pop-out in sync with forecast/scope changes
-  try{ paintHighlights(); }catch(e){}   // apply the active cell-highlight from each cell's precomputed data-hld/data-hlg
-  if(typeof hzPlanSave==='function')hzPlanSave();   // persist the current plan filters (1h)
+  if(viewOnly){
+    try{ syncTabs(); }catch(e){}   // flip the pill active state NOW, before the yield — the instant "yes, that registered"
+    if(_hzBuildPending)return;      // a build is already queued; it renders the latest state (rapid clicks coalesce into one build)
+    _hzBuildPending=true; hzBusy(true);
+    var _ran=false;
+    var _go=function(){ if(_ran)return; _ran=true; _hzBuildPending=false; try{ _hzBuildGrid(); }catch(e){ if(window.console)console.error('renderMain',e); }finally{ hzBusy(false); } };
+    requestAnimationFrame(function(){ setTimeout(_go,0); });   // visible tab: let the new pill/toggle state + spinner PAINT first, then build
+    setTimeout(_go,80);                                          // hidden / throttled tab: rAF never fires there — this fallback guarantees the build still runs and the pending flag can never wedge
+  } else { _hzBuildGrid(); }
 }
 
 // Planner SKU filter: re-render body to surface matching SKUs (input lives in the toolbar so it keeps focus)
