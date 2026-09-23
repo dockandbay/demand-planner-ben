@@ -1,3 +1,37 @@
+## v27.879 deploy note (Ben): SUPPLIER PORTAL performance (Phase 0 + Phase 1 of the perf review) + migration 300 (indexes)
+
+**One migration: `migrations/300_perf_indexes.sql`** (idempotent, guarded, no data change): covering indexes for the 14 unindexed foreign keys the Supabase performance advisor flagged, and drops 4 exact-duplicate indexes (`dtc_so_lines_soid_idx`, `po_lines_po_idx`, `tpl_cin7_orders_con_idx`, `tpl_cin7_orders_ref_idx`; the descriptively named twin is kept). Applied to sandbox. The ~20 `*_bak_*` tables the advisor lists are NOT dropped: your call which are dead. **No new env vars.** Files: `server.mjs`, `supply/portal.html`, `supply/portal-view.js`, `supply/inject.html` (one log-level tweak).
+
+### Why
+The perf review found the supplier portal was the slowest surface in HORIZON and nobody was looking at it: `GET /api/portal/bootstrap` was **9.5s cold** on the sandbox pooler (~14 sequential round trips + an N+1 over the spec list), its 10-min cache was wiped by ANY supplier's write or ANY admin supply edit (so it was cold most of the working day), every portal request paid ~0.6s for two sequential auth queries, and `portal-view.js` (490KB) went to every phone uncompressed and un-cacheable (`no-cache` + `?v=Date.now()`), loaded only AFTER `/api/portal/me` had returned.
+
+### Server (`server.mjs`)
+- **`portalBootstrapBuild(names, ids, inclArch)`**: the bootstrap body is now a function. Round A fires every supplier-keyed query at once (deposits, notes, submissions, SKUs, sample requests, payments, shipment plan (+ unread counts chained on it), product flag + list, specs). The PO rows run after the archive cutoff, then Round B runs every PO-keyed follow-on (lines, line costs, crossdock, additional costs, approved_lines snapshot, documents, barcode projects) in one go. **3 round trips instead of ~14. Same JSON, verified key-for-key and count-for-count against the old payload.** Sandbox: 9.5s → **1.55s cold**, 3ms cached.
+- Spec relevance: `specSupplierSetCached` (5-min memo per scope) resolved in parallel instead of one products scan per spec in series.
+- **Scoped invalidation**: a portal POST drops only the writer's own bootstrap key(s) and price-list cache (was: everyone's), then **rebuilds the writer's payload in the background** (`portalBootstrapPrewarm`, 250ms debounce, single-flight) so their next load is served from cache. Verified: write → 3s later bootstrap = 3ms. Admin edits still clear all (Phase 2 will scope those by PO → supplier).
+- **`portalAuth` memoised** per session token for 60s (`_portalAuthMemo`); logout drops the entry; `/api/portal/me` keeps its China flag on the same memo. `/api/portal/me`: 0.93s → **1ms**; every other portal endpoint loses ~0.6s.
+- **`/portal-view.js`**: gzip (490KB → 133KB), `ETag` (304 on revalidate), and `Cache-Control: public, max-age=31536000, immutable` when requested as `?v=<APP_VERSION>` (the page stamps that at serve time, so a new deploy is a new URL and no supplier can run a stale copy). Plain `/portal-view.js` stays `no-cache` + ETag.
+- **`/portal`**: gzip (62KB → 23KB). Still `no-store` (it carries the sandbox banner + version stamp).
+
+### Client (`supply/portal.html`, `supply/portal-view.js`)
+- The three loads used to be serial (me → script → bootstrap). Now `/api/portal/me`, `/api/portal/bootstrap` and `portal-view.js?v=__APP_VERSION__` all start at once at the top of the page; `mount()`'s first `getData()` consumes the prefetched bootstrap (falls back to a live fetch if it failed). Verified in Chrome: all three start at 18ms; on a repeat visit `portal-view.js` transfers 0 bytes.
+- `window.__PV_STANDALONE` is set before the script loads (it was set later; same meaning).
+- `loadPreview()` no longer blanks the view to a skeleton when data is already on screen (re-load after a save keeps the page until the fresh payload lands).
+
+### Measured (sandbox, remote pooler)
+| | Before | After |
+|---|---|---|
+| bootstrap cold | 9.5s | 1.55s |
+| bootstrap after own write | cold every time | cached (~3ms) within ~3s |
+| `/api/portal/me` | 0.93s | 1ms (memo) |
+| portal-view.js over the wire | 490KB every load | 133KB once per deploy, then 0B |
+| /portal HTML | 62KB | 23KB |
+
+### Notes for Diviyaj
+- Prod runs the pool at `max: 4`; Round A is ~11 concurrent queries so they queue, but each is short. If you see pooler pressure, the two knobs are `PORTAL_AUTH_TTL_MS` and the 250ms prewarm debounce.
+- Nothing here touches PO_ROWS_SQL / ORDER_PLAN_SELECT / root handler / hzUpload. `POS_SQL_PORTAL` is called exactly as before.
+- `pg_stat_statements` on prod (since 20-Aug): the PO rows query is 15k calls at 2.7s mean (11 DB-hours), PO lines 7.4k at 1.8s, `v_product_inventory` full read 16.9k calls. Phase 2 of the plan (cache the PO build per epoch, serve the portal from the same build) needs you; I have not started it.
+
 ## v27.878 deploy note (Ben): PRODUCTS + SAMPLING paint instantly (client read cache with stale-while-revalidate) + fewer server round trips
 
 **No migrations, no new env vars, no data changes.** Files: `supply/inject.html` (client), `server.mjs` (three read endpoints restructured, same JSON shape).

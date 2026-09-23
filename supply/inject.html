@@ -13673,7 +13673,7 @@
         if(had&&_hzqTyping())return arr;   // user is typing in this view: don't yank the DOM from under them; the next open paints the new data
         console.debug('[hzq] '+(had?'repaint (changed)':'first paint')+' @'+Math.round(performance.now())+'ms',us.join(' '));
         return Promise.resolve(paint(arr,false)).then(function(){ return arr; }); });
-      return had?pFresh.catch(function(e){ console.warn('hzq: revalidate failed',e); return cur; }):pFresh; }   // once painted from cache a failed revalidate is silent
+      return had?pFresh.catch(function(e){ console.debug('[hzq] revalidate repaint skipped (view moved on or fetch failed):',e&&e.message||e); return cur; }):pFresh; }   // once painted from cache a failed revalidate is silent — typically the user has already switched view and the paint target is gone
     return { then:function(ok,ko){ var p=run(ok||function(){}); return ko?p.then(null,ko):p; }, catch:function(ko){ return run(function(){}).then(null,ko); } }; }
   function hzqSwr(url,opts){ var a=hzqAll([url],opts); return { then:function(ok,ko){ return a.then(function(arr,stale){ return ok?ok(arr[0],stale):undefined; },ko); } }; }
   function hzqDrop(re){ Object.keys(_hzQ).forEach(function(k){ if(!re||re.test(k)){ delete _hzQ[k]; try{ sessionStorage.removeItem(_hzqKey(k)); }catch(e){} } }); }

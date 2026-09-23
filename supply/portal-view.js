@@ -3162,7 +3162,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   rerenderRow(row,po,'invoice');   // row now shows the ⏳ "Submitted, awaiting approval" badge (no submit button)
                   ppNotice('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
-    function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';
+    function loadPreview(){ tabsEl.style.display=''; if(!_ppData)body.innerHTML='<div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';   // v27.879: a re-load keeps the current view on screen until the fresh payload lands (no skeleton flash after a save)
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();

@@ -116,6 +116,14 @@
     if(q.has('anon')||q.has('as')){ var v=q.get('as'); if(v==null) v=(q.get('anon')==='0'?'':'ACME Inc');
       if(v) localStorage.setItem('pp_anon_name', v); else localStorage.removeItem('pp_anon_name'); } }catch(e){} })();
   var ANON_NAME=(function(){ try{ return localStorage.getItem('pp_anon_name')||''; }catch(e){ return ''; } })();
+  // v27.879 (Ben, portal perf): the three loads used to run one after another (me → portal-view.js → bootstrap). All
+  // three start now, in parallel: the script tag goes in straight away (version-stamped so the browser can cache it),
+  // and the bootstrap is fetched alongside /me; mount() consumes the prefetched promise on its first getData().
+  try{ window.__PV_STANDALONE=true; }catch(e){}   // this IS the real supplier portal (portal-view.js reads it for its global tracking-pill handler)
+  var _bootP=fetch('/api/portal/bootstrap').then(function(r){ if(r.status===401)throw {auth:true}; return r.json(); }).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; });
+  _bootP.catch(function(){});   // consumed (or discarded) inside showPortal; never an unhandled rejection
+  var _jsP=new Promise(function(res,rej){ var s=document.createElement('script'); s.src='/portal-view.js?v=__APP_VERSION__'; s.onload=function(){ res(); }; s.onerror=function(){ rej(new Error('portal-view.js failed to load')); }; document.head.appendChild(s); });
+  _jsP.catch(function(){});
   function showPortal(me){
     var realSup=(me.suppliers||[]).join(', ')||'Supplier';
     var sup=ANON_NAME||realSup;
@@ -124,14 +132,15 @@
       +'<span class="pv-div"></span>'
       +'<h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
       +'</header><div id="pv-wrap"><div id="pv"></div></div>';   // Sign out removed — sessions expire on their own
-    try{ window.__PV_STANDALONE=true; }catch(e){}   // v27.855 (Ben): mark the real supplier portal, so portal-view.js's global tracking-pill click handler only runs here — NOT when the admin app loads portal-view.js (where it was hijacking DHL pill clicks and opening an ownership-scoped modal that fails for admin)
-    var s=document.createElement('script'); s.src='/portal-view.js?v='+Date.now();   // cache-bust: always fetch the latest portal-view.js (tunnels/proxies were serving stale CSS + JS)
-    s.onload=function(){
+    // v27.855 (Ben): window.__PV_STANDALONE marks the real supplier portal so portal-view.js's global tracking-pill click handler only runs here — NOT when the admin app loads portal-view.js. Set at the top of this script now (v27.879), before portal-view.js runs.
+    // v27.879: portal-view.js is already loading (version-stamped, cacheable) and the first bootstrap is already in flight (_jsP / _bootP above).
+    _jsP.then(function(){
       window.DBPortalView.mount({
         root: document.getElementById('pv'),
         ep: EP, by: me.email, sid: null, supplierName: realSup,
         anon: ANON_NAME ? {name:ANON_NAME, realNames:(me.suppliers||[])} : null,
-        getData: function(){ return fetch('/api/portal/bootstrap'+(window.__ppInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
+        getData: function(){ var fresh=function(){ return fetch('/api/portal/bootstrap'+(window.__ppInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); };
+          var pre=_bootP; _bootP=null; return (pre&&!window.__ppInclArch)?pre.catch(fresh):fresh(); }   // first call: the payload prefetched at page start (live fetch if that failed); later calls: live
       });
       // Price List = a real FINANCE tab: register AFTER the portal script has loaded and mounted (v27.504; v27.503 ran too early).
       if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
@@ -143,9 +152,7 @@
         var sp=top.querySelector('.sp'); if(sp&&sp.nextSibling)top.insertBefore(lg,sp.nextSibling); else top.appendChild(lg);
         lg.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ window.DBPortalView.setLang(b.dataset.lang); }; });
         var cur=(window.ppGetLang&&window.ppGetLang())||'en'; if(cur==='zh')window.DBPortalView.setLang('zh'); else lg.querySelector('[data-lang="en"]').classList.add('on'); } }
-    };
-    s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
-    document.body.appendChild(s);
+    }).catch(function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; });
   }
 
   // ── Supplier Price List (gated: only shown when the server enables it) ──
