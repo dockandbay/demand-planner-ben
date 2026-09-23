@@ -1,4 +1,4 @@
-## v27.835 to v27.862 deploy note (Ben): FedEx tracking, portal per-supplier scoping, plus a buy-engine fix that MOVES NUMBERS
+## v27.835 to v27.864 deploy note (Ben): FedEx tracking, portal per-supplier scoping, plus a buy-engine fix that MOVES NUMBERS
 
 Everything since the v27.803 to v27.834 note. Read the **BUY ENGINE change** block first — it changes buy-plan quantities across the estate (intended: less over-buying), so it wants a sanity pass on live before it is trusted broadly. `artifact_v16.7.html` changed (v27.859 + v27.862), so it updates only on a fresh deploy.
 
@@ -12,9 +12,10 @@ The 3PL cover buy now credits **scheduled inbound (real POs already on the water
 - **Verify on live:** `TOWLB-CAB-LG-ORANG-R` UK → the Sep/Oct buy should be gone; a couple of normal mid-replenishment SKUs → buys only shrink where a PO covers the window, nothing new stocks out. (Ben's local app runs on sandbox data without the spike, so this could not be shown pre-deploy.)
 - Code: `artifact_v16.7.html` approx line 3748 (the `_fwdInbCover` block before `const gap`).
 
-### ACTION FOR DIVIYAJ 2: apply migration 298 to prod
+### ACTION FOR DIVIYAJ 2: apply migrations 298 + 299 to prod
 
 - `298_supplier_notes_supplier_scope_backfill.sql`: backfills `supplier_id` on the derivable existing `planner.supplier_notes` (acceptance, request-creation, submission, single-supplier feedback) so the per-supplier product/portal timeline scoping (v27.857/860) stops showing other suppliers' events on live. Additive, rollback-safe, no data dropped. Going forward the column is stamped on write; this only fixes history. **Item-level notes stay `supplier_id` NULL by design** (a product-dev item has no supplier → shows on every supplier's timeline).
+- `299_feedback_notes_sample_id_backfill.sql` (v27.863): backfills `supplier_notes.sample_id` on existing feedback notes ("Feedback on <item>_v<N> · …") so the timeline shows the "🧪 vN" sample chip without manual tagging. Matches by the note's supplier where set, else the single-sample-per-(item,version) case (mirrors 298's conservatism). Apply **after** 298 (it relies on the note supplier scope). Additive, rollback-safe. Going forward `upsert-feedback` stamps `sample_id` on write.
 
 ### New env vars (FedEx live tracking, v27.849) — optional, inert until set
 
@@ -38,6 +39,8 @@ FedEx tracking mirrors the existing DHL poller (same cache + carrier pill). **Fu
 - **POLYBAG lines** on the main ORDER PLAN tab + XLSX report (v27.841).
 - **Master shipment rename** from PO ▸ Shipments (v27.858, `/api/supply/shipment/:ref/rename` — cascades PO/shipment/log/notes/submission/lock refs).
 - Sampling/scan card: split Colour/Quality comments + auto-save (v27.847/852); DHL modal fixes (v27.853/854/855/856); product deep-link + grid dropdown cleanup + sampling action picker (v27.842); portal green Accept button + favicon (v27.843/844); "c39" component-key resolution (v27.850).
+- **Feedback timeline auto-tags the sample version** (v27.863): `upsert-feedback` stamps `supplier_notes.sample_id` from every save path (MANAGE review / scan card / batch review / product-samples), so the timeline shows the "🧪 vN" chip with no manual tagging. Needs migration 299 for history.
+- **Attach photos/files to a component's Colour/Quality comments** in the MANAGE review card (v27.864, CLIENT only): mirrors the existing batch-review/product-samples upload (`/api/product/sample/:id/photo` with the component `aspect`), pre-renders existing per-component files, and links the file onto the timeline. No migration, no env.
 
 ---
 
