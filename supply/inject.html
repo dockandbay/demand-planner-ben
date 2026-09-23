@@ -13898,7 +13898,7 @@
                   :(sh.received_at?' <span class="smp-celldel" title="Delivered '+esc(fd(sh.received_at))+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;font-size:10px;font-weight:800;background:#e6f7ec;color:#1a7f37;border:1px solid #1a7f3744;vertical-align:middle">D</span>':'');   // v27.867 (Ben): compact D badge (was "● Delivered", cut off in the narrow column)
                 return '<div class="smp-cellship"><span class="smp-cellship-top"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment">📦 '+esc(sh.ref)+'</a>'+badge+'</span>'
                   +(sh.tracking?'<span class="smp-celltrk">'+carrierTrackLinkInj(sh.carrier,sh.tracking)+'</span>':'')+'</div>'; })()+'</td>'; }
-          cells+='<td class="l"><a class="smp-tl" data-ref="'+esc(r.item_ref)+'" style="cursor:pointer;color:var(--blue);font-weight:600;text-decoration:underline">'+(r.notes||0)+'</a>'+(r.unread_supplier?' <span class="ex-badge" title="unread supplier messages">'+r.unread_supplier+'</span>':'')+'</td>';   // v27.770: Shipment column removed — per-sample SR/tracking now sits under each tick
+          cells+='<td class="l"><a class="smp-tl" data-ref="'+esc(r.item_ref)+'" data-sup="'+esc(r.supplier_name||'')+'" style="cursor:pointer;color:var(--blue);font-weight:600;text-decoration:underline">'+(r.notes||0)+'</a>'+(r.unread_supplier?' <span class="ex-badge" title="unread supplier messages">'+r.unread_supplier+'</span>':'')+'</td>';   // v27.873 (Ben): data-sup scopes the inline timeline (and its /s sample chips) to this request's supplier
           }
           html+='<tr class="smp-row" data-rid="'+r.id+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'">'+cells+'</tr>'; });
         g.innerHTML=html+'</tbody></table>';
@@ -13962,11 +13962,11 @@
           setTimeout(function(){ document.addEventListener('mousedown',onDoc,true); },0);
           menu.querySelectorAll('.smp-actopt').forEach(function(op){ op.onclick=function(){ var next=op.dataset.v; closeMenu();
             shipPost('/api/product/request/'+rid,{action_owner:next},function(j){ if(j&&j.error){alert(j.error);return;} r.action_owner=next||null; draw(); }); }; }); }; });
-        g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
+        g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, _tlsup=a.dataset.sup||'', tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
           var ex=g.querySelector('tr.smp-tlexp'); if(ex){ var same=ex.getAttribute('data-ref')===ref; ex.remove(); if(same)return; }
           var exp=document.createElement('tr'); exp.className='smp-tlexp'; exp.setAttribute('data-ref',ref);
           exp.innerHTML='<td colspan="'+ths.length+'"><div class="smp-tlbox" style="padding:8px 8px;background:var(--hover);border-radius:8px"><div class="mut">Loading timeline…</div></div></td>';
-          tr.parentNode.insertBefore(exp,tr.nextSibling); renderProdTimeline(exp.querySelector('.smp-tlbox'),ref); }; });
+          tr.parentNode.insertBefore(exp,tr.nextSibling); renderProdTimeline(exp.querySelector('.smp-tlbox'),ref,{supplier:_tlsup}); }; });   // v27.873 (Ben): scope to this request's supplier
         g.querySelectorAll('img.smp-sw').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
         g.querySelectorAll('.smp-link').forEach(function(a){ a.onclick=function(){ openProductDrawer(a.dataset.ref,null,'samples'); }; });
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==='function'?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });
@@ -16261,7 +16261,8 @@
     renderProdTimeline._filt=renderProdTimeline._filt||{};   // per-ref tag filter, persists across the re-render on post
     renderProdTimeline._sup=renderProdTimeline._sup||{}; if(!opts.quiet && 'supplier' in opts)renderProdTimeline._sup[ref]=opts.supplier||''; var _sup=renderProdTimeline._sup[ref]||'';   // v27.857 (Ben): per-supplier timeline scope, persisted across quiet re-renders
     var _notesUrl='/api/product/notes/'+encodeURIComponent(ref)+(_sup?'?supplier='+encodeURIComponent(_sup):'');
-    Promise.all([_prodCachedJson(_notesUrl),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes'),_prodCachedJson('/api/product/timeline-config'),_prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).catch(function(){return [];})]).then(function(_r){
+    var _smpUrl='/api/product/samples/'+encodeURIComponent(ref)+(_sup?'?supplier='+encodeURIComponent(_sup):'');   // v27.873 (Ben): scope the /s sample-version chips to THIS supplier's request (was showing every supplier's samples)
+    Promise.all([_prodCachedJson(_notesUrl),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes'),_prodCachedJson('/api/product/timeline-config'),_prodCachedJson(_smpUrl).catch(function(){return [];})]).then(function(_r){
       var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[], _hid=rocIsHidden(ref);
       // v27.750 (P6): sample versions for the /s chip (product-dimension only), newest label first
       var _smpList=(Array.isArray(_r[3])?_r[3]:[]).map(function(s){ return { id:s.id, version:s.version, label:'Sample '+s.version, received:!!s.received_at }; });

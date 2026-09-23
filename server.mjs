@@ -8174,7 +8174,7 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/samples/:ref', async (req, res) => {
-  try { res.json(await productSampleList(decodeURIComponent(req.params.ref))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const sup = String(req.query.supplier || '').trim(); res.json(await productSampleList(decodeURIComponent(req.params.ref), sup ? { supplierScope: [sup] } : {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }   // v27.873 (Ben): ?supplier scopes the sample list to that supplier's request (timeline /s chips)
 });
 // Sample REQUESTS (SR-nn) linked to this product — either a line SKU maps to one of the product's sizes,
 // or a dev-sample on the request belongs to this product (product_dev_samples.item_ref = ref).
