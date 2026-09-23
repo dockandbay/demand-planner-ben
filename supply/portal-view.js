@@ -2310,7 +2310,17 @@
                     +'<div style="font-size:12px;font-weight:600;margin:4px 0 2px">Item types in this sample</div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:12px;margin:0 12px 3px 0;cursor:pointer"><input type="checkbox" class="pp-meta-aspect" value="'+a[0]+'"'+((s.sampled_aspects||[]).indexOf(a[0])>=0?' checked':'')+' style="vertical-align:middle;margin-right:4px">'+a[1]+'</label>';}).join('')
                     +'<div style="margin-top:6px"><button class="save-btn pp-meta-save" data-id="'+s.id+'" style="font-size:12px">Save</button></div></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
-                  +(s.admin_feedback?'<div style="margin:6px 0;padding:8px 11px;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:7px"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:2px">💬 Feedback from Dock &amp; Bay</div><div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+esc(s.admin_feedback)+'</div></div>':'')
+                  +(function(){   // v27.850 (Ben): show ALL Dock & Bay feedback — the per-component aspect feedback (same as the printed sample card), not just the legacy single note
+                      var af=(s.aspect_feedback||[]).filter(function(x){ return x&&(x.feedback||x.awc_comment||(x.decision&&x.decision!=='pending')); });
+                      if(!af.length && !s.admin_feedback) return '';
+                      var decLbl=function(d){ return {approved:'Approved',approved_with_comments:'Approved with comments',rejected_new_sample:'New sample needed',stop_development:'Development stopped',rejected:'Rejected'}[d]||''; };
+                      var rows=af.map(function(x){ var dl=decLbl(x.decision);
+                        return '<div style="margin-bottom:6px"><div style="font-size:11.5px;font-weight:700;color:#78350f">'+esc(x.component||ASP_LBL[x.aspect]||x.aspect)+(dl?' <span style="font-weight:600;color:#92400e">— '+esc(dl)+'</span>':'')+'</div>'
+                          +(x.feedback?'<div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+esc(x.feedback)+'</div>':'')
+                          +(x.awc_comment?'<div style="font-size:11.5px;color:#92400e;white-space:pre-wrap;margin-top:1px">'+esc(x.awc_comment)+'</div>':'')+'</div>'; }).join('');
+                      if(s.admin_feedback){ rows+='<div style="font-size:12px;color:#78350f;white-space:pre-wrap'+(af.length?';margin-top:2px':'')+'">'+esc(s.admin_feedback)+'</div>'; }
+                      return '<div style="margin:6px 0;padding:8px 11px;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:7px"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:4px">💬 Feedback from Dock &amp; Bay</div>'+rows+'</div>';
+                    })()
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
                   +'<div style="margin-top:6px"><label style="font-size:12px;color:var(--muted)">Upload photo / document <span style="color:var(--faint)">(≤10MB each)</span><input type="file" class="pp-samp-file" data-id="'+s.id+'" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:12px;display:block;margin-top:4px"></label> <span class="pp-samp-msg" data-id="'+s.id+'" style="font-size:12px"></span></div>'
                   +'</div>'   // close LEFT column (sample details)

@@ -8042,8 +8042,9 @@ async function productSampleList(itemRef, opts) {
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
       WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
-    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'awc_comment',coalesce(af.awc_comment,''),'updated_at',to_char(af.updated_at,'DD-Mon-YY HH24:MI'),'updated_by',coalesce(af.updated_by,'')) ORDER BY af.aspect)
-      FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
+    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'awc_comment',coalesce(af.awc_comment,''),'updated_at',to_char(af.updated_at,'DD-Mon-YY HH24:MI'),'updated_by',coalesce(af.updated_by,''),
+        'component',coalesce((SELECT c.name FROM planner.product_dev_components c WHERE c.item_ref=ps.item_ref AND ('c'||c.id=af.aspect OR c.dimension=af.aspect) ORDER BY (c.dimension=af.aspect) DESC LIMIT 1),'')) ORDER BY af.aspect)
+      FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,   -- v27.850 (Ben): resolve the aspect key (c<id> / dimension) to the component's real name so nothing shows "c39"
     coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect)
       FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons,
     ${_fbNotes}
@@ -8368,6 +8369,9 @@ async function sampleCardPdf(sampleId) {
       coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, to_char(approved_at,'YYYY-MM-DD') approved_at
       FROM planner.product_dev_items WHERE ref=$1`, [sr.item_ref])).rows[0] || {};
     const CL = { product: 'Product', packaging: 'Packaging', labels: 'Labels/wraps', polybag: 'Polybags', other: 'Other components' };
+    // v27.850 (Ben): map component keys (c<id> AND their dimension) to the real component name so the card reads "Product body:", never "c39:".
+    const _cardComps = (await pool.query(`SELECT id, coalesce(name,'') name, coalesce(dimension,'') dimension FROM planner.product_dev_components WHERE item_ref=$1`, [sr.item_ref])).rows;
+    _cardComps.forEach(c => { if (c.name) { CL['c' + c.id] = c.name; if (c.dimension) CL[c.dimension] = c.name; } });
     const decs = (sr.aspect_feedback || []).map(x => x.decision || '');
     const hasReject = decs.some(d => d === 'rejected_new_sample' || d === 'stop_development' || d === 'rejected');
     const hasAwc = decs.some(d => d === 'approved_with_comments');
