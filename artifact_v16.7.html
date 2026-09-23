@@ -3746,12 +3746,19 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+nextZalCover;
 
     let bQ=0,bPi=-1;
-    const gap=tg3-c3;
-    // Only buy if gap is meaningful (>= case pack) OR stock is dangerously low (≤0)
-    const meaningfulGap=gap>=cp||c3<=0;
+    // v27.862 (Ben): size the buy against PREDICTED stock, not stock at this instant. Credit scheduled inbound
+    // (real POs already on the water) that lands INSIDE the cover window — month i's own inbound is already in c3,
+    // so we sum the remaining window (i+1…) for the same t3eff weeks. This stops lumpy demand (e.g. an early-season
+    // B2B spike) that a pending PO will cover from triggering a redundant buy. _fwdInbCover=0 for a SKU with no
+    // in-window inbound → gap/meaningfulGap/condition are byte-for-byte the old behaviour (no estate-wide change).
+    let _fwdInbCover=0; { let _wl=Math.max(t3eff-4.33,0); for(let _fi=i+1;_fi<PROJ.length&&_wl>0;_fi++){ if(PROJ[_fi].isActual||PROJ[_fi].isForecast)continue; _fwdInbCover+=(ib3[PROJ[_fi].key]||[]).reduce((s,x)=>s+(x.qty||0),0); _wl-=4.33; } }
+    const gap=tg3-c3-_fwdInbCover;
+    // Only buy if the NET shortfall is meaningful (>= case pack). A bare month-i stockout with inbound arriving
+    // inside the window is left to the arrival-date-aware Urgent scan; only a genuine no-inbound stockout forces a buy.
+    const meaningfulGap=gap>=cp||(c3<=0&&_fwdInbCover<=0);
     // No Buy-3PL that would LAND in/after the effective discontinue month — a standard-lead order can't be
     // sold once the product is discontinued (a true near-term gap still surfaces in Buy 3PL Urgent).
-    if(c3<tg3&&(w3next>0||nextZalCover>0)&&meaningfulGap&&!afterDisc){   // ||nextZalCover: a pure-Zalando SKU (no DTC/B2B fwd demand) still needs a Buy 3PL
+    if((c3+_fwdInbCover)<tg3&&(w3next>0||nextZalCover>0)&&meaningfulGap&&!afterDisc){   // ||nextZalCover: a pure-Zalando SKU (no DTC/B2B fwd demand) still needs a Buy 3PL
       // Ideal placement = arrival month i minus lead months. Allow placement as early as
       // the current actionable month (index 1 = current-month "Remaining" / "ship today").
       // If the ideal placement is in the past (pi<1) the order is already late: clamp it to
