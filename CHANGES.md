@@ -1,3 +1,46 @@
+## v27.835 to v27.862 deploy note (Ben): FedEx tracking, portal per-supplier scoping, plus a buy-engine fix that MOVES NUMBERS
+
+Everything since the v27.803 to v27.834 note. Read the **BUY ENGINE change** block first — it changes buy-plan quantities across the estate (intended: less over-buying), so it wants a sanity pass on live before it is trusted broadly. `artifact_v16.7.html` changed (v27.859 + v27.862), so it updates only on a fresh deploy.
+
+### ACTION FOR DIVIYAJ 1: BUY ENGINE change — MOVES NUMBERS (v27.862, `artifact_v16.7.html`)
+
+The 3PL cover buy now credits **scheduled inbound (real POs already on the water) that lands inside the cover window** before flagging a shortfall — it sizes to *predicted* stock, not stock at the instant. Previously it compared the 12-week forward-demand target against stock-at-that-month only, ignoring a PO arriving later in the same window, so lumpy demand (e.g. an early-season B2B spike) already covered by an in-flight PO triggered a **redundant buy on top of the PO**. This was Ben's report on `TOWLB-CAB-LG-ORANG-R` UK (Feb-27 B2B lump of 2,110 already covered by PO-58UKXR1, 1,080, ETA 2-Feb) recommending an extra ~840/1000.
+
+- Behaviour: `_fwdInbCover = Σ in-flight PO qty in months (i+1 … end of the t3-week window)`; `gap = target − stock_now − _fwdInbCover`.
+- **No-op for a SKU with no in-window inbound** (gap/condition are byte-for-byte the old logic there). SKUs mid-replenishment will see buys *shrink* where a PO already covers the window — this is the intended anti-over-buy effect.
+- **Timing backstop:** if a credited PO lands late in the window while demand is front-loaded, the arrival-date-aware **Urgent scan** still catches any genuine near-term stockout — so crediting inbound cannot silently create one.
+- **Verify on live:** `TOWLB-CAB-LG-ORANG-R` UK → the Sep/Oct buy should be gone; a couple of normal mid-replenishment SKUs → buys only shrink where a PO covers the window, nothing new stocks out. (Ben's local app runs on sandbox data without the spike, so this could not be shown pre-deploy.)
+- Code: `artifact_v16.7.html` approx line 3748 (the `_fwdInbCover` block before `const gap`).
+
+### ACTION FOR DIVIYAJ 2: apply migration 298 to prod
+
+- `298_supplier_notes_supplier_scope_backfill.sql`: backfills `supplier_id` on the derivable existing `planner.supplier_notes` (acceptance, request-creation, submission, single-supplier feedback) so the per-supplier product/portal timeline scoping (v27.857/860) stops showing other suppliers' events on live. Additive, rollback-safe, no data dropped. Going forward the column is stamped on write; this only fixes history. **Item-level notes stay `supplier_id` NULL by design** (a product-dev item has no supplier → shows on every supplier's timeline).
+
+### New env vars (FedEx live tracking, v27.849) — optional, inert until set
+
+FedEx tracking mirrors the existing DHL poller (same cache + carrier pill). **Fully inert without keys** — no behaviour change until these are set on prod:
+- `FEDEX_API_KEY`, `FEDEX_SECRET_KEY` (OAuth client-credentials), `FEDEX_ACCOUNT_NUMBER`.
+- `FEDEX_API_BASE` — defaults to `https://apis-sandbox.fedex.com`. Set to `https://apis.fedex.com` for production once Ben has production FedEx credentials. Ben is still on the FedEx sandbox; leave on the sandbox default until he says otherwise.
+
+### Rebuild / served-fresh note
+
+- `artifact_v16.7.html` (demand planner) changed (v27.859 buy-plan tooltip date fix; v27.862 buy engine) — read once at startup, updates on fresh deploy (Vercel automatic).
+- `supply/inject.html`, `supply/portal-view.js`, `supply/portal.html`, `hz-theme.css` — served fresh per request.
+- No new bundled asset files in this batch.
+
+### The rest of the batch (no migration / no env, CLIENT + SERVER)
+
+- **Portal product list is per development request** (v27.861): one row per `product_dev_requests` for the supplier, showing the request ref (e.g. `SS27-TOWEL-CLASSICBLUE-BL`) and inheriting product data via request→item. Data endpoints stay keyed by the item ref (display/accept/URL use the request ref).
+- **Per-supplier timeline scoping** (v27.857 admin, v27.860 portal): `?supplier=` / portal supplier-array filter on notes (needs migration 298 for history).
+- **Server-enforced supplier isolation** for the portal product view + per-sample supplier attribution + short codes (v27.845, v27.848, v27.851).
+- **FedEx + DHL carrier status** on the Sample-requests table with a Supplier column (v27.846, v27.849).
+- **Fulfil push** (v27.840): popup totals + PO deep-link, payment term from supplier credit days, confirmed-PO revert→edit→re-confirm, blank requested-date drift fix. (Confirmed-PO button flow implemented, still wants one sandbox round-trip.)
+- **POLYBAG lines** on the main ORDER PLAN tab + XLSX report (v27.841).
+- **Master shipment rename** from PO ▸ Shipments (v27.858, `/api/supply/shipment/:ref/rename` — cascades PO/shipment/log/notes/submission/lock refs).
+- Sampling/scan card: split Colour/Quality comments + auto-save (v27.847/852); DHL modal fixes (v27.853/854/855/856); product deep-link + grid dropdown cleanup + sampling action picker (v27.842); portal green Accept button + favicon (v27.843/844); "c39" component-key resolution (v27.850).
+
+---
+
 ## v27.803 to v27.834 deploy note (Ben): product + sampling + mobile, plus two demand-engine fixes
 
 Everything since the v27.800 to v27.802 portal note. Read the **FULFIL LIVE WRITES** action block first: it is the outstanding go-live item and Ben wants it actioned.
