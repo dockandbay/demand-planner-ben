@@ -537,6 +537,7 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 #pv-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);z-index:100060;max-width:min(560px,92vw);background:var(--nav);color:#fff;padding:11px 18px;border-radius:999px;font-size:13px;font-weight:600;line-height:1.35;box-shadow:0 12px 34px -8px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s ease,transform .25s cubic-bezier(.2,.8,.2,1);text-align:left}
 #pv-toast.on{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
 #pv-toast.err{background:var(--neg)}
+#pv-toast.ok{background:var(--pos)}   /* v27.843 (Ben): success toast is green (was falling back to the dark navy base) */
 #pv-toast.err::before{content:"!";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.22);font-weight:800;font-size:12px;margin-right:9px;vertical-align:-3px}
 #pv-toast.ok::before{content:"✓";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.18);font-weight:800;font-size:12px;margin-right:9px;vertical-align:-3px}
 @media (prefers-reduced-motion:reduce){ #pv-toast{transition:none} }
