@@ -2500,10 +2500,12 @@ async function activeFulfilEnv() {
 // PO archive cutoff (CONFIG ▸ Admin ▸ General). Returns the production number below which COMPLETE POs are archived
 // (hidden from the admin PO grid + Order Plan by default), or null when archiving is off. Never affects the supplier
 // portal or cashflow. app_settings key 'po_archive_before_prod'.
+let _poCutoffMemo = { t: 0, v: null };   // v27.881: read on every PO grid / portal load (one pooler round trip each) → 15s memo
 async function poArchiveCutoff() {
+  if (Date.now() - _poCutoffMemo.t < 15000) return _poCutoffMemo.v;
   try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='po_archive_before_prod'`)).rows[0];
-    const n = r ? parseInt(r.value, 10) : NaN; return (Number.isFinite(n) && n > 0) ? n : null; }
-  catch (e) { return null; }
+    const n = r ? parseInt(r.value, 10) : NaN; const v = (Number.isFinite(n) && n > 0) ? n : null; _poCutoffMemo = { t: Date.now(), v }; return v; }
+  catch (e) { return _poCutoffMemo.v; }
 }
 // SQL fragment: TRUE when a row is archived (complete + numeric prod_no below the cutoff). `alias` = the table/subquery
 // alias exposing status + prod_no. Non-numeric/blank prod_no → never archived. Bind the cutoff as the given $param.
@@ -4582,10 +4584,19 @@ async function queryCapped(sql, params, _ms) {
 // opts.proactive=false → no 10-min re-warm timer; the cache refreshes lazily (on the first request after it goes
 // stale, serving stale meanwhile). Use for EXPENSIVE builds so an idle app doesn't re-run a 6s query 144×/day and
 // hold a connection each time. Correctness is unaffected: get() still rebuilds on a cold miss or an epoch change.
+// v27.881 (Ben, perf phase 2b): an epoch change used to REBUILD on the next request (block once) — on prod that was ~430
+// full PO builds a day (15k × 2.7s since 20-Aug = 11 DB-hours), one per admin edit per instance, and every other query
+// queued behind them on the max-4 pool. Now: an epoch change serves the LAST build at once and rebuilds in the background,
+// and background rebuilds are rate-limited to one per SUPPLY_REBUILD_MIN_MS per cache (default 30s) so a burst of edits is
+// one rebuild. The writer's own row is kept exact by cache.patch() (see poRowsPatchPo below), so the only thing that can
+// lag up to that window is a cross-row effect of somebody else's edit (e.g. a shared deposit's remaining balance).
+// Cold (no build yet) still blocks once. TTL expiry keeps its request-driven SWR. No timers: request-driven only (Vercel).
+const SUPPLY_REBUILD_MIN_MS = Math.max(0, Number(process.env.SUPPLY_REBUILD_MIN_MS || 30000));
 function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
-  let entry = null, inflight = null;
+  let entry = null, inflight = null, lastStart = 0;
   function refresh(ep) {
     if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
+    lastStart = Date.now();
     inflight = Promise.resolve().then(builder)
       .then((v) => { entry = { v, at: Date.now(), epoch: (ep != null ? ep : _epochVal) }; inflight = null; return v; })
       .catch((e) => { inflight = null; throw e; });
@@ -4594,9 +4605,15 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   async function get() {
     const ep = await currentSupplyEpoch();
     if (entry && entry.epoch === ep) { if (Date.now() - entry.at >= ttlMs && !inflight) refresh(ep).catch(() => {}); return entry.v; }
-    return refresh(ep);                            // cold OR epoch changed → rebuild (block once)
+    if (entry && opts.blockOnEpoch !== true) {     // epoch moved on → serve the last build now, rebuild behind (rate-limited)
+      if (!inflight && Date.now() - lastStart >= SUPPLY_REBUILD_MIN_MS) refresh(ep).catch(() => {});
+      return entry.v;
+    }
+    return refresh(ep);                            // cold → rebuild (block once)
   }
-  const c = { name, get, refresh, invalidate() { entry = null; refresh().catch(() => {}); } };
+  function peek() { return entry ? entry.v : null; }
+  function patch(fn) { if (!entry) return false; try { const v = fn(entry.v); if (v !== undefined) entry.v = v; return true; } catch (e) { return false; } }   // in-place row patch (keeps the epoch: a rebuild still follows, rate-limited)
+  const c = { name, get, refresh, peek, patch, invalidate() { entry = null; refresh().catch(() => {}); } };
   _supplyCaches.push(c);
   // On Vercel, DON'T boot-warm or install a re-warm timer: an idle/frozen container fires the builder (opening a pooled
   // backend) with no request in flight → stranded connections + overnight reap spikes (Diviyaj 01-Sep). get() builds
@@ -4945,7 +4962,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
         let _kept = _cut ? _all.filter((r) => !_poRowArchived(r, _cut)) : _all;
         // Child POs are kept OUT of poRowsCache (so Cash Flow above doesn't double-count the master) but SHOULD appear in
         // the grid — append them here only. The client suppresses their actions + shows a 'child' badge.
-        const _kids = (await queryCapped(PO_ROWS_SQL + ` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows;
+        const _kids = await poKidsCache.get();   // v27.881: cached (epoch-aware), was a PO_ROWS_SQL run per grid load
         if (_kids.length) _kept = _kept.concat(_kids);
         // COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action fields but shed
         // the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost, delivery notes, ERP
@@ -5701,6 +5718,7 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn
   vals.push(keyVal);
   try {
     const r = await pool.query(`UPDATE ${table} SET ${sets.join(',')} WHERE ${keyCol}=$${i}${keyType ? '::' + keyType : ''}`, vals);
+    if (table === 'planner.purchase_orders' && keyCol === 'po') { try { await poRowsPatchPo(keyVal); } catch (e) { /* the epoch rebuild below still covers it */ } }   // v27.881: exact row now, full rebuild later (rate-limited)
     bumpSupplyEpoch();   // any supply edit bumps the shared epoch → cached sections (cash flow, PO rows…) rebuild cross-instance, not just after the 10-min TTL
     let extra = {};
     if (extraFn) { try { extra = (await extraFn(r.rowCount)) || {}; } catch (e) { /* non-fatal — still report the save */ } }
@@ -17473,6 +17491,22 @@ function _poRowArchived(r, cutoff) {
 // Full, unfiltered PO grid rows (the expensive PO_ROWS_SQL, run once). Feeds the admin PO grid (archive-filtered in
 // JS per request) and Cash Flow (uses the full set as today). The per-supplier / portal-preview path stays live.
 const poRowsCache = makeCache('po-rows', async () => (await queryCapped(PO_ROWS_SQL + ' ORDER BY po')).rows.filter(r => !r.master_po), SUPPLY_CACHE_TTL_MS, { proactive: false });   // CHILD POs are consolidated into their master and hidden from the grid + cash flow (the master, is_master, stays)
+// v27.881: after a write to ONE PO, re-read just that PO's row (PO_ROWS_SQL is used as a black box, same as the other
+// per-PO callers) and swap it into the cached grid — the writer sees their edit exact on the next read without a full
+// rebuild. A PO that became a child (master_po set) leaves the grid; a new PO is inserted in po order. Best-effort.
+// v27.881: child POs (consolidated under a master) were re-read with PO_ROWS_SQL on EVERY grid load (prod: 15,048 calls at
+// 0.29s since 20-Aug). Same epoch-aware cache as the parent rows; the grid appends them from here.
+const poKidsCache = makeCache('po-kids', async () => (await queryCapped(PO_ROWS_SQL + ` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows, SUPPLY_CACHE_TTL_MS, { proactive: false });
+async function poRowsPatchPo(po) {
+  if (!po || !poRowsCache.peek()) return false;
+  const fresh = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [po])).rows[0] || null;
+  return poRowsCache.patch((rows) => {
+    const i = rows.findIndex(r => r.po === po);
+    if (!fresh || fresh.master_po) { if (i >= 0) rows.splice(i, 1); return rows; }
+    if (i >= 0) rows[i] = fresh; else { const j = rows.findIndex(r => String(r.po) > String(po)); if (j < 0) rows.push(fresh); else rows.splice(j, 0, fresh); }
+    return rows;
+  });
+}
 // Default ORDER PLAN grid (no supplier, archived hidden per the cutoff) — the common heavy load. supplier/includeArchived variants run live in the route.
 const orderPlanCache = makeCache('order-plan', async () => {
   const cut = await poArchiveCutoff();

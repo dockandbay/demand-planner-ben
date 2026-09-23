@@ -1,3 +1,28 @@
+## v27.881 deploy note (Ben): ADMIN PO grid — Phase 2b implemented here after all (cache layer only; your PO_ROWS_SQL text is untouched)
+
+**No migrations. One optional env knob: `SUPPLY_REBUILD_MIN_MS` (default 30000).** File: `server.mjs` only.
+
+Diviyaj: I said in v27.880 I would leave this to you. On reflection every change is in the *cache layer* (`makeCache`, the PO handler, one hook in `patch()`), none in the SQL strings you restructured, so a pull should merge cleanly onto your `PO_ROWS_SQL`. Please read the three points below before deploying; the 30s window is a judgement call you may want to tune.
+
+### What changed
+1. **`makeCache`: an epoch change no longer blocks the next request on a full rebuild.** It serves the last build immediately and rebuilds in the background, and background rebuilds are **rate-limited to one per `SUPPLY_REBUILD_MIN_MS` per cache** (a burst of edits = one rebuild). Cold start still blocks once; TTL expiry keeps its existing request-driven SWR; no timers anywhere (request-driven only, Vercel-safe). `opts.blockOnEpoch: true` restores the old behaviour per cache if ever needed. New: `cache.peek()`, `cache.patch(fn)`.
+2. **The writer's own row is exact immediately.** `patch()` on `planner.purchase_orders` now runs `PO_ROWS_SQL WHERE calc4.po=$1` (0.3s, the same black-box use the per-PO routes already make) and swaps that row into the cached grid (`poRowsPatchPo`: replace / insert in po order / drop if it became a child) before bumping the epoch. What can lag up to the 30s window is a **cross-row effect of somebody else's edit** (e.g. a shared deposit's `deposit_remaining`, a master's roll-up) as seen from a different instance. The 5s epoch poll used to guarantee that; the trade is 11 DB-hours of rebuilds. Set `SUPPLY_REBUILD_MIN_MS=0` to get per-edit rebuilds back (still non-blocking).
+3. **Two per-request queries on every PO grid load are cached:** the child-PO re-read (`PO_ROWS_SQL WHERE … master_po IS NOT NULL`, the 15,048 × 0.29s line in prod stats) is now `poKidsCache` on the same epoch mechanism, and `poArchiveCutoff()` has a 15s memo (it was one round trip on every grid + portal load).
+
+### Measured (sandbox, remote pooler)
+| | Before | After |
+|---|---|---|
+| `/api/supply/purchase-orders` warm | 1.0s | **0.02s** |
+| same, right after a PO field save | 2 to 4s (blocking rebuild) | **0.35s**, row already carries the edit |
+| PO save (`POST /api/supply/po/:po`) | ~0.8s | ~1.1s (+0.3s for the exact-row re-read) |
+| rows returned | 1378 (1 child) | 1378 (1 child), identical |
+
+Expected on prod: full PO builds drop from ~430/day to roughly the number of edit *bursts*; with the pool no longer queued behind them, the 0.3s "floor" the portal and the other supply reads pay should come down too (the deposits query executes in 1.9ms on prod but averaged 854ms: queueing).
+
+### Not done (next candidates, same shape)
+- `/api/supply/cashflow` warm is 1.8s: `cashflowResponse()` runs its own queries per request on top of the cached rows.
+- `orderPlanCache` (6.6s build) gets the same non-blocking treatment automatically via `makeCache`, but has no per-row patch yet (line edits show after the rate-limited rebuild). A `patchPo` for it needs `ORDER_PLAN_SELECT … WHERE l.po=$1`, which is your SQL to confirm is filterable.
+
 ## v27.880 deploy note (Ben): SUPPLIER PORTAL Phase 2 — admin edits no longer make suppliers wait; + a spec for the admin PO-build cost (yours, Diviyaj)
 
 **No migrations, no new env vars** (one optional knob: `PORTAL_PREWARM=0`). Files: `server.mjs`, `supply/portal.html`, `supply/portal-view.js`.
