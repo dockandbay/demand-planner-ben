@@ -7618,17 +7618,19 @@ app.post('/api/product/note/upsert-feedback', async (req, res) => {
   const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   const pantone = cleanPantone(b.pantone);
   const att = (b.attachment_id != null && String(b.attachment_id).trim() !== '') ? Number(b.attachment_id) : null;   // v27.556: optional file on the note (portal_attachments id)
+  // v27.863 (Ben): feedback is always about ONE sample version — stamp sample_id so the timeline auto-tags the "v2 sample" chip (no manual tag).
+  const smpId = (b.sample_id != null && String(b.sample_id).trim() !== '') ? Number(b.sample_id) : null;
   // v27.857 (Ben): scope this feedback to the supplier whose sample it is — the caller (MANAGE / scan review) knows it.
   let supId = null; const fbSup = String(b.supplier || '').trim();
   if (fbSup) { const s = (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=lower($1) LIMIT 1`, [fbSup])).rows[0]; supId = s ? s.id : null; }
   try {
     const like = prefix.replace(/[\\%_]/g, m => '\\' + m) + '%';
-    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6, attachment_id=coalesce($7::bigint, attachment_id), supplier_id=coalesce($8::bigint, supplier_id)
+    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6, attachment_id=coalesce($7::bigint, attachment_id), supplier_id=coalesce($8::bigint, supplier_id), sample_id=coalesce($9::bigint, sample_id)
       WHERE id=(SELECT id FROM planner.supplier_notes WHERE po=$1 AND author_kind='internal' AND body LIKE $2 ORDER BY created_at DESC LIMIT 1) RETURNING id, to_char(now(),'DD-Mon-YY HH24:MI') at`,
-      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email), att, supId]);
+      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email), att, supId, smpId]);
     if (up.rows.length) return res.json({ ok: true, id: up.rows[0].id, updated: true, at: up.rows[0].at });
-    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, tags, pantone, attachment_id) VALUES ($1,$7,$2,'internal',$3,$4::jsonb,$5::jsonb,$6) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
-      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att, supId]);
+    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, tags, pantone, attachment_id, sample_id) VALUES ($1,$7,$2,'internal',$3,$4::jsonb,$5::jsonb,$6,$8) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
+      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att, supId, smpId]);
     res.json({ ok: true, id: r.rows[0].id, updated: false, at: r.rows[0].at });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
