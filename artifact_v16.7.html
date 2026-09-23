@@ -1500,6 +1500,7 @@ var PRICE_CHANGES=[];   // DEMAND ▸ Revenue: definitive price changes (server-
 // CLEARED at the top of render() and renderMain(), so it can never go stale: any edit that changes IV triggers a
 // re-render, which wipes it. calc()'s return is never mutated by callers, so sharing the object is safe.
 var CALC_MEMO={};
+var _VIEW_ONLY_RENDER=false;   // v27.876 (perf): armed by view-only triggers (country/channel pills, category/filters, display toggles) so render()/renderMain() KEEP the forecast memos instead of recomputing every SKU. Consumed (reset) at the top of render() so it can never leak into a later data-changing render.
 // Buy plan reads its demand from a runtime overlay (buildLiveDemand, off the live forecast). A PLAN forecast edit
 // makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
 // instead of only refreshing on BUY-tab entry.
@@ -4874,26 +4875,26 @@ var PLAN_RW='ALL';   // planner Release Window filter (dd next to Category); 'AL
 var PLAN_FROM_REP=false;   // "From replacement SKU" filter — show only SKUs that inherit a predecessor (products.replacement_sku)
 function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); var c=document.getElementById('plan-fromrep-chk'); if(c)c.checked=PLAN_FROM_REP; render(); }
 var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
-function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
+function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain(true);}
 // #5 — quarter (3-mo) / half-year (6-mo) sum-total columns, toggled in More Filters. Off by default. Shown ONLY inside
 // expanded FYs; each is rendered like the FY-total column (units / revenue / growth) but over its own month set.
 var SHOW_Q=(function(){try{return localStorage.getItem('hzShowQtr')==='1';}catch(e){return false;}})();
 var SHOW_H=(function(){try{return localStorage.getItem('hzShowHalf')==='1';}catch(e){return false;}})();
 try{TIME_COLS=buildTimeCols();}catch(e){}   // rebuild now that SHOW_Q/SHOW_H hold their persisted values — the early init build ran before these vars were assigned, so persisted-on quarter/half columns were missing on load
-function setShowQtr(on){SHOW_Q=!!on;try{localStorage.setItem('hzShowQtr',SHOW_Q?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('qtr-tot-toggle');if(b){b.classList.toggle('active',SHOW_Q);b.setAttribute('aria-pressed',SHOW_Q?'true':'false');}render();}
-function setShowHalf(on){SHOW_H=!!on;try{localStorage.setItem('hzShowHalf',SHOW_H?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('half-tot-toggle');if(b){b.classList.toggle('active',SHOW_H);b.setAttribute('aria-pressed',SHOW_H?'true':'false');}render();}
+function setShowQtr(on){SHOW_Q=!!on;try{localStorage.setItem('hzShowQtr',SHOW_Q?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('qtr-tot-toggle');if(b){b.classList.toggle('active',SHOW_Q);b.setAttribute('aria-pressed',SHOW_Q?'true':'false');}_VIEW_ONLY_RENDER=true;render();}
+function setShowHalf(on){SHOW_H=!!on;try{localStorage.setItem('hzShowHalf',SHOW_H?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('half-tot-toggle');if(b){b.classList.toggle('active',SHOW_H);b.setAttribute('aria-pressed',SHOW_H?'true':'false');}_VIEW_ONLY_RENDER=true;render();}
 var SHOW_VARIANT_IMG=(function(){try{return localStorage.getItem('hzShowVarImg')==='1';}catch(e){return false;}})(); // variant-image thumbnail in the SKU label — hidden by default; toggle in More Filters & Settings
 var SHOW_RUNOFF_CATS=(function(){try{return localStorage.getItem('hzShowRunoffCats')==='1';}catch(e){return false;}})(); // run-off (discontinued) CATEGORIES in the plan — hidden by default; toggle in Display Settings
-function setShowRunoffCats(on){ SHOW_RUNOFF_CATS=!!on; try{localStorage.setItem('hzShowRunoffCats',SHOW_RUNOFF_CATS?'1':'0');}catch(e){} render(); }
+function setShowRunoffCats(on){ SHOW_RUNOFF_CATS=!!on; try{localStorage.setItem('hzShowRunoffCats',SHOW_RUNOFF_CATS?'1':'0');}catch(e){} _VIEW_ONLY_RENDER=true;render(); }
 var SHOW_FC_ACT=(function(){try{return localStorage.getItem('hzShowFcAct')!=='0';}catch(e){return true;}})(); // locked-forecast-vs-actual "fc … +%" in completed-month cells; on by default; toggle in Display Settings
-function setShowVariantImg(on){SHOW_VARIANT_IMG=!!on;try{localStorage.setItem('hzShowVarImg',SHOW_VARIANT_IMG?'1':'0');}catch(e){}var b=document.getElementById('var-img-toggle');if(b){b.classList.toggle('active',SHOW_VARIANT_IMG);b.setAttribute('aria-pressed',SHOW_VARIANT_IMG?'true':'false');}renderMain();}
-function setShowFcAct(on){SHOW_FC_ACT=!!on;try{localStorage.setItem('hzShowFcAct',SHOW_FC_ACT?'1':'0');}catch(e){}try{renderMain();}catch(e){}}
+function setShowVariantImg(on){SHOW_VARIANT_IMG=!!on;try{localStorage.setItem('hzShowVarImg',SHOW_VARIANT_IMG?'1':'0');}catch(e){}var b=document.getElementById('var-img-toggle');if(b){b.classList.toggle('active',SHOW_VARIANT_IMG);b.setAttribute('aria-pressed',SHOW_VARIANT_IMG?'true':'false');}renderMain(true);}
+function setShowFcAct(on){SHOW_FC_ACT=!!on;try{localStorage.setItem('hzShowFcAct',SHOW_FC_ACT?'1':'0');}catch(e){}try{renderMain(true);}catch(e){}}
 // Display-settings cell highlights (baby blue #8FD9FB, both OFF by default).
 var HL_BLUE='#8FD9FB';
 var HL_FC_LT_ACT=(function(){try{return localStorage.getItem('hzHlFcLtAct')==='1';}catch(e){return false;}})();   // shade current-month cell where actuals ≥ forecast
-function setHlFcLtAct(on){ HL_FC_LT_ACT=!!on; try{localStorage.setItem('hzHlFcLtAct',HL_FC_LT_ACT?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
+function setHlFcLtAct(on){ HL_FC_LT_ACT=!!on; try{localStorage.setItem('hzHlFcLtAct',HL_FC_LT_ACT?'1':'0');}catch(e){} try{renderMain(true);}catch(e){} }
 var HL_NOFC_INV=(function(){try{return localStorage.getItem('hzHlNoFcInv')==='1';}catch(e){return false;}})();     // shade forecast cells that are 0 while stock is on hand
-function setHlNoFcInv(on){ HL_NOFC_INV=!!on; try{localStorage.setItem('hzHlNoFcInv',HL_NOFC_INV?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
+function setHlNoFcInv(on){ HL_NOFC_INV=!!on; try{localStorage.setItem('hzHlNoFcInv',HL_NOFC_INV?'1':'0');}catch(e){} try{renderMain(true);}catch(e){} }
 var HL_FCACT_DISC=(function(){try{return localStorage.getItem('hzHlFcActDisc')==='1';}catch(e){return false;}})();  // shade past-4-completed-month cells by actual-vs-locked-forecast discrepancy
 function setHlFcActDisc(on){ HL_FCACT_DISC=!!on; try{localStorage.setItem('hzHlFcActDisc',HL_FCACT_DISC?'1':'0');}catch(e){}
   if(HL_FCACT_DISC){ HL_GROWTH_LY=false; try{localStorage.setItem('hzHlGrowthLY','0');}catch(e){} var _g=document.getElementById('filt-hl-growthly'); if(_g)_g.checked=false; }   // mutually exclusive with Growth-on-LY (Ben)
@@ -6273,7 +6274,7 @@ var FC_CHANGE_KEYS=new Set();
 var SHOW_CHANGES=(function(){try{return localStorage.getItem('show_changes')==='1';}catch(e){return false;}})();
 // Hide the R record-of-change indicator on PAST months (< current month). Default TRUE.
 var HIDE_PAST_CHANGES=(function(){try{return localStorage.getItem('hide_past_changes')!=='0';}catch(e){return true;}})();
-function setHidePastChanges(on){ HIDE_PAST_CHANGES=!!on; try{localStorage.setItem('hide_past_changes',on?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
+function setHidePastChanges(on){ HIDE_PAST_CHANGES=!!on; try{localStorage.setItem('hide_past_changes',on?'1':'0');}catch(e){} try{renderMain(true);}catch(e){} }
 function _meEmail(){ return (typeof ME!=='undefined'&&ME&&ME.email)||null; }
 function fcChangeKeysLoad(co,ch,cb){ if(!SHOW_CHANGES){ FC_CHANGE_KEYS=new Set(); if(cb)cb(); return; }
   fetch('/api/forecast/changes/keys?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch))
@@ -6305,7 +6306,7 @@ function bufferChange(level,item,co,ch,m,action,fromV,toV){ if(!item||!m)return;
   if(SHOW_CHANGES){ try{refreshCellRail(nk);}catch(e){} } }
 function flushChangeBuffer(){ if(_CHG_BUFFER.length){ logChangesBulk(_CHG_BUFFER.splice(0)); } }
 function setShowChanges(on){ SHOW_CHANGES=!!on; try{localStorage.setItem('show_changes',on?'1':'0');}catch(e){}
-  if(on){ fcChangeKeysLoad(CUR,CF,function(){ try{renderMain();}catch(e){} }); } else { FC_CHANGE_KEYS=new Set(); try{renderMain();}catch(e){} } }
+  if(on){ fcChangeKeysLoad(CUR,CF,function(){ try{renderMain(true);}catch(e){} }); } else { FC_CHANGE_KEYS=new Set(); try{renderMain(true);}catch(e){} } }
 function _fcNk(nk){ var p=(nk||'').split('|'); return {level:p[0],item:p[1],co:p[2],ch:p[3],month:p[4]}; }
 function _fcMlbl(m){ var p=String(m||'').split(/[-_]/); if(p.length<2)return m||''; var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (mn[(+p[1])-1]||'')+" '"+String(p[0]).slice(2); }
 function shortEml(e){ e=String(e||''); return e.indexOf('@')>=0?e.split('@')[0]+'@':e; }   // top-level so Zalando + Klaviyo + anywhere can shorten dockandbay emails to local-part@ (was nested in Klaviyo view → Zalando threw "shortEml is not defined")
@@ -7756,7 +7757,7 @@ function filteredSkus(s,co,ch,all,inclLyo){
 var SETS_VIEW=(function(){try{return localStorage.getItem('hzSetsView')||'show';}catch(e){return 'show';}})();   // DEMAND SKU view: show | hide | only — how build-on-fly SET SKUs display (display-only; does not touch shares/buy)
 function setSetsView(v){ SETS_VIEW=(v==='hide'||v==='only')?v:'show'; try{localStorage.setItem('hzSetsView',SETS_VIEW);}catch(e){}
   if(SKU_VIEW&&typeof renderSkuView==='function'){ renderSkuView(); }
-  else if(typeof renderMain==='function'){ renderMain(); }   // main plan: re-render so inline SKU expansions re-apply the filter
+  else if(typeof renderMain==='function'){ renderMain(true); }   // main plan: re-render so inline SKU expansions re-apply the filter
 }
 function renderSkuView(){
   if(!SKU_VIEW)return;
@@ -7802,7 +7803,7 @@ function renderSkuView(){
   wrap.appendChild(hdr);
 
   // Wire filter buttons
-  document.getElementById('sku-back-btn').onclick=function(){SKU_VIEW=null;renderMain();};
+  document.getElementById('sku-back-btn').onclick=function(){SKU_VIEW=null;renderMain(true);};
   hdr.querySelectorAll('.sku-tf').forEach(function(b){
     b.onclick=function(){SKU_FILTER.tier=b.dataset.tier;renderSkuView();};
   });
@@ -9680,9 +9681,9 @@ function remapExpanded(dim,newVal){
   EXPANDED.forEach(function(k){var p=k.split('|');if(dim==='co')p[1]=newVal;else if(dim==='ch')p[2]=newVal;ne.add(p.join('|'));});
   EXPANDED=ne;
 }
-function renderMain(){
+function renderMain(viewOnly){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
-  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534/545) — covers direct renderMain() calls (filters/toggles) too
+  if(!viewOnly){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; }   // v27.876 (perf): view-only callers pass true and keep the memos; data-changing callers (auto-smooth apply/cancel, undo, scope flags, cell-sheet) leave it unset → clear as before
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
@@ -9720,9 +9721,9 @@ function renderMain(){
 
 // Planner SKU filter: re-render body to surface matching SKUs (input lives in the toolbar so it keeps focus)
 var _skuQryTimer=null;
-function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();clearTimeout(_skuQryTimer);_skuQryTimer=setTimeout(function(){renderMain();},300);}   // debounce the re-render ~300ms so typing doesn't refilter on every keystroke
+function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();clearTimeout(_skuQryTimer);_skuQryTimer=setTimeout(function(){renderMain(true);},300);}   // debounce the re-render ~300ms so typing doesn't refilter on every keystroke
 // Planner Release Window filter (dropdown next to Category) — filters SKUs by release window, surfacing matching SKU rows.
-function setPlanRw(v){PLAN_RW=v||'ALL';try{_rwSelStyle();}catch(e){}renderMain();}
+function setPlanRw(v){PLAN_RW=v||'ALL';try{_rwSelStyle();}catch(e){}renderMain(true);}
 // v27.524: the Release dropdown (More filters) reads BLACK when a season is selected, white when All — so the active filter is visible without a chip.
 function _rwSelStyle(){ var sel=document.getElementById('plan-rw-sel'); if(!sel)return; var on=sel.value&&sel.value!=='ALL';
   sel.style.background=on?'var(--ink)':'#fff'; sel.style.color=on?'#fff':''; sel.style.borderColor=on?'var(--ink)':'var(--line)'; sel.style.fontWeight=on?'700':''; }
@@ -9769,8 +9770,8 @@ function hzPlanRestore(){ try{ var raw=localStorage.getItem('hzPlanFilters'); if
   if(Array.isArray(f.SEL)&&f.SEL.length)SEL=new Set(f.SEL);
   PLAN_SKU_QRY=''; }catch(e){} }   // v27.632: always start the demand plan with an empty, independent SKU filter (never restore/carry it)
 
-function setPlanActiveStart(v){SKU_FILTER.startDate=v||'';renderMain();}
-function setPlanActiveEnd(v){SKU_FILTER.endDate=v||'';renderMain();}
+function setPlanActiveStart(v){SKU_FILTER.startDate=v||'';renderMain(true);}
+function setPlanActiveEnd(v){SKU_FILTER.endDate=v||'';renderMain(true);}
 // Reset = Active mode default: today → today+180 days. Used by the ↻ button and any caller
 // that wants to land back on the default Active window.
 function resetPlanActiveDates(){setPlanActiveMode('active');}
@@ -9801,7 +9802,7 @@ function setPlanActiveMode(mode){
   var ba=document.getElementById('plan-active-btn');if(ba)ba.className='pill catpill'+(mode==='active'?' active':'');
   var bl=document.getElementById('plan-all-btn');   if(bl)bl.className='pill catpill'+(mode==='all'?' active':'');
   var b18=document.getElementById('plan-18m-btn');  if(b18)b18.className='pill catpill'+(mode==='18m'?' active':'');
-  renderMain();
+  renderMain(true);
 }
 // Back-compat wrapper for any old call sites that still toggle the legacy single button.
 // (Removed dead togglePlanActive — toggle drives setPlanActiveMode directly. v25.652)
@@ -9810,7 +9811,7 @@ function setPlanTier(t){
   document.querySelectorAll('#plan-tier-pills .ptier').forEach(function(b){
     b.className='pill catpill ptier'+(b.dataset.tier===t?' active':'');
   });
-  renderMain();
+  renderMain(true);
 }
 // ── DEMAND ▸ Plan toolbar (redesign): Filters popover + Tools menu + active-filter badge ──
 function _planPopClose(){ ['plan-filters-pop','plan-tools-menu','cat-pop','plan-display-pop'].forEach(function(id){var x=document.getElementById(id);if(x)x.style.display='none';}); }
@@ -9848,7 +9849,7 @@ function setPlanSort(v){
   document.querySelectorAll('#plan-sort-pills .psort').forEach(function(b){
     b.className='pill catpill psort'+(b.dataset.sort===v?' active':'');
   });
-  renderMain();
+  renderMain(true);
 }
 
 function syncTabs(){
@@ -9865,7 +9866,8 @@ function syncTabs(){
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
-  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534/545) (see decl) — cleared here so it never survives an edit
+  var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
+  if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
@@ -9959,7 +9961,7 @@ function render(){
   planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
   var twp=document.getElementById('tw'); if(twp)twp.style.display='';
   var db=document.getElementById('demand-body'); if(db)db.remove();
-  if(SKU_VIEW){renderSkuView();}else{renderMain();}
+  if(SKU_VIEW){renderSkuView();}else{renderMain(_vo);}
 }
 // DEMAND ▸ KPIs — level-3 sub-nav (In Stock | Slow moving | Inventory). In Stock = % of active SKUs per
 // market×channel with on-hand stock above a (per-channel toggleable) threshold; plus the A-player subset.
@@ -9981,7 +9983,7 @@ var TGT_FILT_Q=(function(){try{return localStorage.getItem('tgt_filt_q')||'';}ca
 var TGT_FILT_CATS=(function(){try{var s=localStorage.getItem('tgt_filt_cats');var a=s?JSON.parse(s):null;return (a&&a.length)?new Set(a):null;}catch(e){return null;}})();
 var TGT_CAT_OPEN=false, _tgtCatDocBound=false;   // Set-targets category multi-select dropdown open state
 var SUMM_CCY=(function(){try{return localStorage.getItem('disp_ccy')||'GBP';}catch(e){return 'GBP';}})();   // GLOBAL display currency mode: GBP | LOCAL (one toggle in the DEMAND nav; applies to plan + summary + reports)
-function setDispCcy(m){ SUMM_CCY=m; try{localStorage.setItem('disp_ccy',m);}catch(e){} if(typeof render==='function')render(); }
+function setDispCcy(m){ SUMM_CCY=m; try{localStorage.setItem('disp_ccy',m);}catch(e){} if(typeof render==='function')_VIEW_ONLY_RENDER=true;render(); }
 // (Re)build the DEMAND-nav currency toggle for the CURRENT market — call whenever CUR changes so the local
 // currency label follows the tab (USD on US, EUR on EU, AUD on AU). Empty (spacer only) for GBP-only markets.
 function refreshDispCcy(){ var w=document.getElementById('demand-ccy'); if(!w)return; var lc=mktCcy(CUR);
@@ -16705,13 +16707,13 @@ var FLAGS={'UK':'🇬🇧','US':'🇺🇸','EU':'🇪🇺','AU':'🇦🇺','CA':
 CTRS.forEach(function(co){
   const b=document.createElement('button');b.className='pill'+(co===CUR?' active':'');b.dataset.co=co;
   b.innerHTML=(FLAGS[co]||'')+' '+co;
-  b.onclick=function(){remapExpanded('co',co);CUR=co;render();try{refreshDispCcy();}catch(e){}if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
+  b.onclick=function(){remapExpanded('co',co);CUR=co;_VIEW_ONLY_RENDER=true;render();try{refreshDispCcy();}catch(e){}if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
   document.getElementById('ctabs').appendChild(b);
 });
 
 // Channel tabs
 document.querySelectorAll('#chtabs .pill').forEach(function(b){
-  b.onclick=function(){remapExpanded('ch',b.dataset.ch);CF=b.dataset.ch;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
+  b.onclick=function(){remapExpanded('ch',b.dataset.ch);CF=b.dataset.ch;_VIEW_ONLY_RENDER=true;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
 });
 
 // ── Category multiselect (Option A: compact dropdown + chips; "All" pinned top) ──
@@ -16817,7 +16819,7 @@ function setCat(cat){
   var p=document.getElementById('cat-pop');
   if(p&&p.style.display==='block')buildCatPop();
   buildCatChecklist();   // inline category checklist in More Filters
-  renderCatControl();render();
+  renderCatControl();_VIEW_ONLY_RENDER=true;render();
 }
 function catOptRow(cat,label,on,bold,span){
   return '<div class="cat-opt" data-cat="'+cat+'" data-name="'+String(label).replace(/"/g,'&quot;')+'" '
