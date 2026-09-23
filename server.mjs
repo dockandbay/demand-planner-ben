@@ -6948,6 +6948,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
       pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
+        coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),'') supplier,   -- v27.845 (Ben): the ONE supplier that submitted this sample (via request_id). Lets the portal hide other suppliers' samples.
         coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
@@ -7028,6 +7029,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
+        coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),'') supplier,   -- v27.845 (Ben): the ONE supplier that submitted this sample (via request_id). Lets the portal hide other suppliers' samples.
         coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
@@ -8015,6 +8017,7 @@ async function productSampleList(itemRef, opts) {
       FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND (n.sample_id=ps.id OR n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %')),'[]'::json) feedback_notes`;
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
+    coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),'') supplier,   -- v27.845 (Ben): the ONE supplier that submitted this sample (via its request). A sample belongs to exactly one supplier — never the product's whole supplier list.
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,
     coalesce(ps.supplier_status,'in_development') supplier_status, coalesce(ps.not_shipped,false) not_shipped,
     coalesce(ps.approved_for_photography,false) approved_for_photography, coalesce(ps.photography_notes,'') photography_notes,
