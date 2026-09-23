@@ -18350,8 +18350,14 @@ async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.l
   return (await pool.query(`SELECT 1 FROM planner.product_dev_items i WHERE i.ref=$1 AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($2))`, [ref, req.portal.suppliers])).rowCount > 0; }   // v27.749 (P5): ownership via development REQUESTS only (item-level supplier column dropped)
 app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [ref])).rows); }
+  try {
+    // v27.860 (Ben): a supplier must only see THEIR request's timeline + product-wide notes — never another supplier's
+    // (a development request belongs to one supplier). Scope by the caller's supplier(s); supplier_id NULL = product-wide.
+    const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase().trim());
+    const ids = (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=ANY($1)`, [sups.length ? sups : ['']])).rows.map(r => r.id);
+    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes
+    WHERE po=$1 AND (supplier_id IS NULL OR supplier_id = ANY($2::bigint[])) ORDER BY created_at`, [ref, ids.length ? ids : [-1]])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
