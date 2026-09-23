@@ -1,6 +1,10 @@
-## v27.865 to v27.874 deploy note (Ben): portal + sampling polish, shipment deep-link/rename, new "Sample delivered" stage
+## v27.865 to v27.875 deploy note (Ben): portal + sampling polish, shipment deep-link/rename, "Sample delivered" stage, + an ASP clamp that MOVES REVENUE NUMBERS
 
-Everything since the v27.835 to v27.864 note. **No migrations, no new env vars, no artifact rebuild this batch** — only three served-fresh files changed: `server.mjs`, `supply/inject.html`, `supply/portal-view.js` (Vercel picks them up on the normal deploy). `artifact_v16.7.html` is UNCHANGED in this batch.
+Everything since the v27.835 to v27.864 note. **No migrations, no new env vars.** Files changed: `server.mjs`, `supply/inject.html`, `supply/portal-view.js` (served fresh), **and `artifact_v16.7.html` (v27.875 only)** — the artifact is read once at startup, so it updates on a fresh deploy (Vercel does this automatically).
+
+### ACTION FOR DIVIYAJ: ASP clamp — MOVES REVENUE NUMBERS (v27.875, `artifact_v16.7.html`)
+
+The demand **revenue** view (Summary, plan revenue line, £ targets, downloads — NOT the buy plan, which never reads ASP) prices each subcategory at its prior-year same-month revenue÷units. A few `sales_actuals` months have revenue booked on tiny/zero units, so the derived ASP exploded and inflated the forecast £ (e.g. UK B2B Feb-2027 showed £4.01M / +513%, ~£1.5M of it from Picnic Blanket alone whose Feb-26 was £41,890 on 17 units = £2,464/unit). `getASPraw` now **caps a history-derived ASP at 1.2× the retail-list ASP** for that subcat×channel (`retailAspGBP`); actual months keep their real ASP untouched. This pulls the inflated £ back to a sane level and makes the revenue forecast robust to bad history. It is display/revenue only — units, the buy plan and PO logic are unaffected. (The underlying `sales_actuals` data anomalies are still worth correcting at source — see the DATA FYI below.)
 
 ### Still outstanding from the PREVIOUS note (please confirm applied on prod)
 
