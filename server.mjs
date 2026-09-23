@@ -6667,7 +6667,7 @@ app.get('/api/product/unread', async (_req, res) => {   // total unread supplier
 });
 // PRODUCT ▸ STAGE state machine (v27.395). One stored field on product_dev_items drives everything;
 // APPROVAL (.status, read by PIM/Buy Plan/POs) derives from the terminal stage.
-const PROD_STAGES = ['sample_development', 'sample_shipped', 'sample_in_review', 'approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development'];
+const PROD_STAGES = ['sample_development', 'sample_shipped', 'sample_delivered', 'sample_in_review', 'approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development'];   // v27.874 (Ben): sample_delivered = carrier tracking shows delivered, before D&B receives/reviews
 const PROD_STAGE_DECIDED = new Set(['approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development']);   // D&B decisions — auto-advance never clobbers these (rejected_new_sample = sent back to the supplier for a fresh sample; D&B moves it back to sampling when the resample comes in)
 const prodStageRank = (s) => { const i = PROD_STAGES.indexOf(s); return i < 0 ? 0 : i; };
 const prodStatusFromStage = (stage) => (stage === 'approved' || stage === 'approved_with_comments') ? 'approved' : (stage === 'stop_development' ? 'dropped' : 'in_development');
@@ -6696,7 +6696,7 @@ async function prodStageAdvance(itemRef, target, opts) {
 // ── PRODUCT split P1 (v27.702, mig 278) — development REQUESTS ─────────────────────────────────────────────────────────
 // Product stage is DERIVED from its requests (item.stage = optional manual override). Rule: ignore stopped requests;
 // all live requests approved → approved (approved_with_comments if any carry comments); else the most advanced stage.
-const REQ_RANK = { sample_development: 1, sample_shipped: 2, sample_in_review: 3 };
+const REQ_RANK = { sample_development: 1, sample_shipped: 2, sample_delivered: 3, sample_in_review: 4 };   // v27.874
 function deriveProductStage(reqs, override) {
   if (override && PROD_STAGES.includes(override)) return { stage: override, overridden: true };
   const list = Array.isArray(reqs) ? reqs : [];
@@ -8843,6 +8843,15 @@ async function upsertTracking(n, res) {
     try { const cfg = await getDhlConfig(); if (cfg.auto_package_received) {
       await pool.query(`UPDATE planner.sample_requests SET received_at=$2::timestamptz, updated_at=now() WHERE id=$1::bigint AND received_at IS NULL`, [n.source_id, res.delivered_at]);
     } } catch (e) { /* auto-mark best-effort */ }
+  }
+  // v27.874 (Ben): a DELIVERED sample shipment advances the development request(s) it carries to "Sample delivered"
+  // (before D&B receives/reviews). Always on (independent of the auto-receive toggle); prodStageAdvance is forward-only
+  // and never clobbers a D&B decision or a later stage (e.g. once received → in_review, delivered no longer applies).
+  if (n.source_table === 'sample_requests' && res.status_code === 'delivered') {
+    try {
+      const ds = (await pool.query(`SELECT ps.item_ref, ps.request_id FROM planner.product_dev_samples ps JOIN planner.sample_request_dev_samples l ON l.dev_sample_id=ps.id WHERE l.sample_request_id=$1::bigint`, [n.source_id])).rows;
+      for (const d of ds) { if (d.item_ref && d.request_id) await prodStageAdvance(d.item_ref, 'sample_delivered', { requestId: d.request_id }); }
+    } catch (e) { /* best-effort */ }
   }
 }
 
