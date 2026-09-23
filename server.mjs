@@ -8688,34 +8688,103 @@ async function dhlLookupOne(number) {
   };
 }
 
-// Every DHL tracking number in Horizon: sample shipments (two carrier/tracking slots) + bulk shipments.
+// ── FedEx "Basic Integrated Visibility" (formerly Track API), v27.849 (Ben) ──
+// Same cache + pill as DHL. OAuth client_credentials (key + secret) → POST /track/v1/trackingnumbers.
+// INERT without FEDEX_API_KEY + FEDEX_SECRET_KEY. Sandbox base by default (FEDEX_API_BASE).
+function fedexConfig() {
+  const key = (process.env.FEDEX_API_KEY || '').trim(), secret = (process.env.FEDEX_SECRET_KEY || '').trim();
+  const base = (process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com').trim().replace(/\/+$/, '');
+  return { key, secret, base, account: (process.env.FEDEX_ACCOUNT_NUMBER || '').trim(), key_present: !!(key && secret) };
+}
+let _fedexTok = { token: null, exp: 0 };
+async function fedexToken() {
+  const cfg = fedexConfig(); if (!cfg.key_present) return null;
+  const now = Date.now();
+  if (_fedexTok.token && now < _fedexTok.exp - 60000) return _fedexTok.token;   // reuse until ~1min before expiry
+  const r = await fetch(cfg.base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: cfg.key, client_secret: cfg.secret }) });
+  if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error('FedEx OAuth ' + r.status + ': ' + String(t).slice(0, 200)); e.code = r.status; throw e; }
+  const j = await r.json();
+  _fedexTok = { token: j.access_token, exp: now + (Number(j.expires_in) || 3600) * 1000 };
+  return _fedexTok.token;
+}
+// Map FedEx status → the 5 normalised codes the pill/cache use (same set as DHL). Code first, then a
+// status-text fallback so any wording FedEx uses is caught even for scan codes not enumerated here.
+function _fedexNormCode(code, text) {
+  const c = String(code || '').toUpperCase();
+  if (c === 'DL') return 'delivered';
+  if (['OC', 'RG', 'PL', 'PM'].includes(c)) return 'pre-transit';                                   // order created / label / in-progress before pickup
+  if (['DE', 'SE', 'CA', 'RS', 'DY', 'DD', 'CD', 'CDE'].includes(c)) return 'failure';               // exceptions / delays / cancelled / returned
+  if (['IT', 'OD', 'PU', 'DP', 'AR', 'AF', 'AP', 'TR', 'CC', 'OF', 'FD', 'HL', 'AA', 'AD', 'EO', 'ED', 'EP', 'SF', 'SP', 'TP', 'LO', 'CU', 'PF', 'PD', 'RR', 'RM', 'RC', 'RD'].includes(c)) return 'transit';
+  const tx = String(text || '').toLowerCase();
+  if (tx.includes('deliver')) return /exception|unable|failed|attempt/.test(tx) ? 'failure' : 'delivered';
+  if (/exception|unable|returned|cancel|refused|held|delay/.test(tx)) return 'failure';
+  if (/transit|picked up|pickup|departed|arrived|out for|on the way|en route|scan|facility/.test(tx)) return 'transit';
+  if (/label|information sent|created|shipment info/.test(tx)) return 'pre-transit';
+  return 'unknown';
+}
+// Single live FedEx lookup, normalised to the shared shape. null when no key configured.
+async function fedexLookupOne(number) {
+  const cfg = fedexConfig(); if (!cfg.key_present) return null;
+  const tok = await fedexToken();
+  const r = await fetch(cfg.base + '/track/v1/trackingnumbers', { method: 'POST',
+    headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
+    body: JSON.stringify({ includeDetailedScans: true, trackingInfo: [{ trackingNumberInfo: { trackingNumber: number } }] }) });
+  if (!r.ok) { const e = new Error('FedEx HTTP ' + r.status); e.code = r.status; throw e; }
+  const j = await r.json().catch(() => ({}));
+  const tr = (((j.output || {}).completeTrackResults || [])[0] || {}).trackResults || [];
+  const t0 = tr[0];
+  if (!t0 || t0.error) return { number, status_code: 'unknown', status_text: (t0 && t0.error && (t0.error.message || t0.error.code)) || 'No data', eta: null, delivered_at: null, last_event: null, events: [] };
+  const lsd = t0.latestStatusDetail || {};
+  const code = _fedexNormCode(lsd.code || lsd.derivedCode, lsd.statusByLocale || lsd.description);
+  const dts = Array.isArray(t0.dateAndTimes) ? t0.dateAndTimes : [];
+  const findDt = (type) => { const d = dts.find(x => String(x.type || '').toUpperCase() === type); return d ? d.dateTime : null; };
+  const eta = findDt('ESTIMATED_DELIVERY') || findDt('ESTIMATED_DELIVERY_WINDOW') || ((t0.estimatedDeliveryTimeWindow || {}).window || {}).ends || null;
+  const sc = Array.isArray(t0.scanEvents) ? t0.scanEvents : [];
+  const events = sc.slice(0, 25).map(e => ({ timestamp: e.date, statusCode: e.eventType, status: e.derivedStatus, description: e.eventDescription,
+    location: e.scanLocation ? { addressLocality: e.scanLocation.city || '', countryCode: e.scanLocation.countryCode || '' } : null }));
+  return {
+    number, status_code: code,
+    status_text: lsd.statusByLocale || lsd.description || '',
+    eta: eta ? String(eta).slice(0, 10) : null,
+    delivered_at: code === 'delivered' ? (findDt('ACTUAL_DELIVERY') || (sc.find(e => String(e.eventType || '').toUpperCase() === 'DL') || {}).date || null) : null,
+    last_event: (sc[0] && sc[0].eventDescription) || lsd.description || '',
+    events,
+  };
+}
+// route a collected number to its carrier's lookup
+function _trackLookup(carrier, number) { return String(carrier).toLowerCase().indexOf('fedex') === 0 || /^fed ?ex/i.test(String(carrier)) ? fedexLookupOne(number) : dhlLookupOne(number); }
+function _carrierTag(raw) { return /^fed ?ex/i.test(String(raw || '')) ? 'FedEx' : 'DHL'; }
+
+// Every DHL / FedEx tracking number in Horizon: sample shipments (two carrier/tracking slots) + bulk shipments.
 async function collectTrackingNumbers() {
   const out = [], seen = new Set();
-  const push = (raw, source_table, source_id) => {
+  const push = (raw, source_table, source_id, carrier) => {
     // v27.725: split comma-lists, strip internal spaces, keep only plausible tracking numbers
     // (>=8 chars, alphanumeric, has a digit) so junk like 'AIR' / mode words / blanks never hit DHL.
     for (const n of String(raw || '').split(',').map(x => x.replace(/\s+/g, ''))
         .filter(x => x.length >= 8 && x.length <= 40 && /\d/.test(x) && /^[A-Za-z0-9]+$/.test(x))) {
-      if (seen.has(n)) continue; seen.add(n); out.push({ number: n, carrier: 'DHL', source_table, source_id: String(source_id) });
+      if (seen.has(n)) continue; seen.add(n); out.push({ number: n, carrier: carrier || 'DHL', source_table, source_id: String(source_id) });
     }
   };
+  const _isTracked = (c) => /^dhl/i.test(String(c || '')) || /^fed ?ex/i.test(String(c || ''));   // v27.849: DHL or FedEx
   // samples: skip ones already received (Ben: don't poll delivered/complete items)
   const sr = (await pool.query(`
     SELECT id, carrier, tracking_code, carrier_2, tracking_code_2 FROM planner.sample_requests
     WHERE received_at IS NULL AND (
-         (carrier ILIKE 'dhl%' AND coalesce(tracking_code,'') <> '')
-      OR (carrier_2 ILIKE 'dhl%' AND coalesce(tracking_code_2,'') <> ''))`)).rows;
+         ((carrier ILIKE 'dhl%' OR carrier ILIKE 'fedex%' OR carrier ILIKE 'fed ex%') AND coalesce(tracking_code,'') <> '')
+      OR ((carrier_2 ILIKE 'dhl%' OR carrier_2 ILIKE 'fedex%' OR carrier_2 ILIKE 'fed ex%') AND coalesce(tracking_code_2,'') <> ''))`)).rows;
   for (const r of sr) {
-    if (/^dhl/i.test(r.carrier || '')) push(r.tracking_code, 'sample_requests', r.id);
-    if (/^dhl/i.test(r.carrier_2 || '')) push(r.tracking_code_2, 'sample_requests', r.id);
+    if (_isTracked(r.carrier)) push(r.tracking_code, 'sample_requests', r.id, _carrierTag(r.carrier));
+    if (_isTracked(r.carrier_2)) push(r.tracking_code_2, 'sample_requests', r.id, _carrierTag(r.carrier_2));
   }
   // bulk shipments: skip arrived / complete / cancelled (Ben: don't poll completed items)
   const sh = (await pool.query(`
-    SELECT shipment_ref, carrier_ref FROM planner.shipments
-    WHERE carrier ILIKE 'dhl%' AND coalesce(carrier_ref,'') <> ''
+    SELECT shipment_ref, carrier, carrier_ref FROM planner.shipments
+    WHERE (carrier ILIKE 'dhl%' OR carrier ILIKE 'fedex%' OR carrier ILIKE 'fed ex%') AND coalesce(carrier_ref,'') <> ''
       AND arrival_date IS NULL
       AND coalesce(lower(status),'') NOT IN ('complete','completed','delivered','arrived','closed','cancelled')`)).rows;
-  for (const r of sh) push(r.carrier_ref, 'shipments', r.shipment_ref);
+  for (const r of sh) push(r.carrier_ref, 'shipments', r.shipment_ref, _carrierTag(r.carrier));
   return out;
 }
 
@@ -8735,7 +8804,8 @@ async function upsertTracking(n, res) {
   // Bulk shipments: DHL is the first automatic tracked_source, so the existing arrival logic picks it up unchanged.
   if (n.source_table === 'shipments') {
     const eff = res.delivered_at ? String(res.delivered_at).slice(0, 10) : (res.eta || null);
-    if (eff) await pool.query(`UPDATE planner.shipments SET tracked_delivery_date=$1, tracked_source='dhl', updated_at=now() WHERE carrier_ref=$2 AND carrier ILIKE 'dhl%'`, [eff, n.number]);
+    const src = n.carrier === 'FedEx' ? 'fedex' : 'dhl';   // v27.849: carrier-aware tracked_source
+    if (eff) await pool.query(`UPDATE planner.shipments SET tracked_delivery_date=$1, tracked_source=$3, updated_at=now() WHERE carrier_ref=$2`, [eff, n.number, src]);
   }
   // v27.770 (Ben): a DELIVERED sample shipment → auto-set the SR received_at (→ status "Package received") when the CONFIG toggle is on.
   if (n.source_table === 'sample_requests' && res.status_code === 'delivered' && res.delivered_at) {
@@ -8750,7 +8820,8 @@ async function upsertTracking(n, res) {
 let _dhlPollBusy = false;
 async function pollTracking(opts = {}) {
   const cfg = await getDhlConfig();
-  if (!cfg.key_present) return { ok: true, numbers: 0, polled: 0, skipped: 0, note: 'DHL_API_KEY not set' };
+  const fedexOn = fedexConfig().key_present;   // v27.849: FedEx uses its own key pair; poll whichever carriers are configured
+  if (!cfg.key_present && !fedexOn) return { ok: true, numbers: 0, polled: 0, skipped: 0, note: 'no carrier key set (DHL_API_KEY / FEDEX_API_KEY)' };
   if (!opts.force && !cfg.enabled) return { ok: true, numbers: 0, polled: 0, skipped: 0, note: 'disabled' };
   if (_dhlPollBusy) return { ok: true, note: 'already running' };
   _dhlPollBusy = true;
@@ -8766,6 +8837,8 @@ async function pollTracking(opts = {}) {
     let polled = 0, skipped = 0, errors = 0, delivered = 0;
     for (const n of nums) {
       if (polled >= MAX) { skipped++; continue; }
+      const isFedex = n.carrier === 'FedEx';
+      if (isFedex ? !fedexOn : !cfg.key_present) { skipped++; continue; }   // v27.849: skip a carrier whose key isn't set
       const c = cache[n.number];
       if (!opts.force && c && c.last_polled_at) {
         if (c.status_code === 'delivered' && c.delivered_at &&
@@ -8775,12 +8848,12 @@ async function pollTracking(opts = {}) {
         if ((now - new Date(c.last_polled_at).getTime()) / 3600000 < need) { skipped++; continue; }
       }
       let res;
-      try { res = await dhlLookupOne(n.number); }
+      try { res = isFedex ? await fedexLookupOne(n.number) : await dhlLookupOne(n.number); }   // v27.849: route to the number's carrier
       catch (e) { errors++; if (e.code === 429) break; continue; }   // rate limited: stop this run, try next tick
       if (!res) { skipped++; continue; }
       await upsertTracking(n, res);
       polled++; if (res.status_code === 'delivered') delivered++;
-      await new Promise(r => setTimeout(r, 1100));                    // <=1 req/sec (free plan)
+      await new Promise(r => setTimeout(r, isFedex ? 350 : 1100));    // DHL free plan <=1 req/sec; FedEx allows more
     }
     return { ok: true, numbers: nums.length, polled, skipped, errors, delivered };
   } finally { _dhlPollBusy = false; }
@@ -8797,9 +8870,13 @@ app.post('/api/tracking/poll', async (req, res) => {
 app.post('/api/tracking/test', async (req, res) => {
   const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const number = String((req.body || {}).number || '').trim();
+  const carrier = String((req.body || {}).carrier || '').trim();   // v27.849: 'fedex' → FedEx lookup, else DHL
   if (!number) return res.status(400).json({ error: 'tracking number required' });
+  const isFedex = /^fed ?ex/i.test(carrier);
+  if (isFedex) { if (!fedexConfig().key_present) return res.json({ ok: false, key_present: false, note: 'FEDEX_API_KEY / FEDEX_SECRET_KEY not set on this server' });
+    try { return res.json({ ok: true, key_present: true, carrier: 'FedEx', result: await fedexLookupOne(number) }); } catch (e) { return res.status(502).json({ ok: false, error: e.message }); } }
   if (!process.env.DHL_API_KEY) return res.json({ ok: false, key_present: false, note: 'DHL_API_KEY not set on this server' });
-  try { res.json({ ok: true, key_present: true, result: await dhlLookupOne(number) }); }
+  try { res.json({ ok: true, key_present: true, carrier: 'DHL', result: await dhlLookupOne(number) }); }
   catch (e) { res.status(502).json({ ok: false, error: e.message }); }
 });
 // Read-only cache for the UI pills. numbers=comma,list. Never triggers DHL.
