@@ -122,7 +122,7 @@
     try{ new MutationObserver(function(){ if(pend)return; pend=setTimeout(scan,200); }).observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();
   // DHL tracking LOG (v27.727, portal): a filled pill opens an overlay with status + delivery date + every event.
   function hzTrkStamp(ts){ if(!ts)return ''; try{ var d=new Date(ts); if(isNaN(d.getTime()))return String(ts).slice(0,16).replace('T',' '); var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; function p(x){return String(x).length<2?'0'+x:''+x;} return d.getDate()+'-'+mo[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return String(ts); } }
-  function hzTrackLogHtml(r){ if(!r)return '<div class="mut" style="padding:10px 2px">No tracking detail yet.</div>';
+  function hzTrackLogHtml(r){ if(!r)return '<div class="mut" style="padding:12px 2px;font-size:12.5px;line-height:1.5">Horizon hasn\'t synced this tracking number yet — the status here refreshes on our periodic DHL sync.<br>For live detail right now, use the carrier\'s tracking link.</div>';   /* v27.853 (Ben): the old "No tracking detail yet." read like an error even though DHL has live detail */
     var code=String(r.status_code||'').toLowerCase();
     var keyLine=code==='delivered'?('Delivered '+esc(hzTrkDate(r.delivered_at))):(r.eta?('Estimated delivery '+esc(hzTrkDate(r.eta))):'No delivery estimate yet');
     var ev=Array.isArray(r.events)?r.events:[];
