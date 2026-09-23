@@ -1,3 +1,41 @@
+## v27.878 deploy note (Ben): PRODUCTS + SAMPLING paint instantly (client read cache with stale-while-revalidate) + fewer server round trips
+
+**No migrations, no new env vars, no data changes.** Files: `supply/inject.html` (client), `server.mjs` (three read endpoints restructured, same JSON shape).
+
+### What Ben asked for
+"Every tab under PRODUCTS and SAMPLING to load faster, be painted instantly. Consider cache where it will improve performance but any changes related to that item should refresh cache on change as well."
+
+### Client (`supply/inject.html`, PRODUCT module ~13636)
+- **One read cache for every PRODUCT GET** (`_hzQ`, helpers `hzqAll` / `hzqSwr` / `hzqGet`). Replaces the three separate caches (`_prodJsonCache`, `_pget`, `_prodItemCache` TTL gate). Legacy names (`pget`, `_prodCachedJson`, `_prodJsonBust`, `pgetClear`, `prodItemInvalidate`) are kept as thin wrappers, so every existing call site still works.
+- **Stale-while-revalidate**: a tab paints at once from the last payload (even past its 30s TTL), the stale URLs are re-fetched in the background, and the tab repaints ONLY if the JSON actually changed. Cold (never fetched) behaves exactly like before. Concurrent callers share one in-flight fetch per URL. While the user is typing in an input inside PRODUCT the repaint is skipped (no DOM yanked mid-keystroke).
+- **Survives a reload**: list payloads (items, sampling, dashboard, specs, config, reference lists…) persist in `sessionStorage` keyed by build version (`hzq:<APP_VERSION>:<url>`), so after a reload the PRODUCTS grid paints before the first byte comes back, then revalidates. A new deploy never paints from an older build's payload shape.
+- **Invalidation on change** (the "refresh cache on change" half):
+  - `shipPost` → any `/api/product/*` POST → `hzqAfterProductWrite(ep, body)`: drops every per-product entry (`/api/product/item/…`, `/samples/…`, `/notes/…`, `…/sample-requests`), drops the GET list the POST targets (`/spec/…` → `/specs`, `/config` → `/config`, `/note/…` → `/notes/…` etc.), drops entries for `body.ref` / `body.item_ref`, and marks everything else product-related stale (paints instantly, revalidates immediately).
+  - `prodItemInvalidate(ref)` drops that product's entries + marks the grids stale. `pgetClear()` drops all per-product entries + marks all product lists stale. Grids stay paintable after a save because their rows were already patched in place (`prodSyncGridCell`, the sampling tick handler).
+  - Result: the thing you just changed always re-fetches (you never see its old data); unrelated tabs keep their instant paint.
+- **Converted tabs**: PRODUCTS grid, Range, Dashboard, SAMPLING grid, MANAGE panel (S-tabs), Sample batch review (list + shipment), SPECIFICATIONS, REPORTS, CONFIG, and inside a product: Master/Size & variants (core + sizes now fetched in parallel, shell repaints only on change), Requests, Samples, Documents, Timeline, component chooser, "+ Development request" form (uses the cached item when present).
+- Repaint-safety: a revalidate repaint of the PRODUCTS grid re-opens the product that was open (same tab); a SAMPLING repaint re-opens the MANAGE panel on the same S-tab; batch review keeps the picked shipment.
+- PRODUCTS grid no longer waits for `/api/supply/actions/state` before painting (that only feeds the SKU-mapping snooze badge; the grid redraws in place when it lands).
+- Warm-up (`pgetWarm`) only runs on a cold session (nothing hydrated) and staggers the reference lists by 1.5s so they never queue ahead of the user's first click. Local pg pool is 8, Vercel 4, so this matters on prod.
+- Fix: `prodCan()` threw `Cannot read properties of null (reading 'is_admin')` inside `boot()` before `/api/me` landed (window.ME is the planner's own object; the module's `ME` is null until fetched). Now guarded.
+- `console.debug('[hzq] …')` lines (Verbose level, hidden by default) show each cached paint / first paint / repaint with its timestamp, handy when checking prod.
+
+### Server (`server.mjs`) — same JSON, fewer round trips (each round trip is ~0.3s on the remote pooler)
+- `productItemPayload` (`GET /api/product/item/:ref`, also the portal's item call): 3 sequential rounds → **1 round** of 9 parallel queries (sample files, size×component rows and their files now scope themselves by ref with a subquery). Local: ~1.0s → ~0.6s.
+- `GET /api/product/item/:ref/sizes`: 3 rounds → **1 round** (5 parallel queries). ~1.0s → ~0.4s.
+- `productSampleList` (`GET /api/product/samples/:ref`, batch review, portal): 3 sequential → **1 round**. ~1.0s → ~0.3s.
+- Verified payloads identical in shape and counts (sizes/dimensions/files/samples/photos/pantone hits) on SS27-TOWEL-CLASSICBLUE and SS27-HAIRW-LOVELYHAIR before/after.
+
+### Measured in sandbox (Chrome, MutationObserver from click to painted)
+- Top tabs PRODUCTS / SAMPLING / SPECIFICATIONS / REPORTS / CONFIG: **0 to 44ms** on every switch (was one or more 0.3 to 1s round trips each time).
+- Product detail tabs Requests / Samples / Documents / Size & variants / Master: **0 to 41ms** once seen; re-open a product **3ms**; cold open still bounded by the network (~330ms core + 430ms sizes, painted as each lands).
+- SAMPLING MANAGE panel: re-open **4ms**, S-tab switch **2ms**; cold ~0.9s (one item fetch).
+- Write check: un-receive + re-receive a sample → the next MANAGE open re-fetched `/api/product/item/<ref>` (entry dropped), the grid stayed painted.
+
+### Notes for Diviyaj
+- Nothing here touches your PO_ROWS_SQL / ORDER_PLAN_SELECT / root handler / hzUpload divergences. Your browser-side de-dupe of identical concurrent `GET /api` fetches overlaps with `hzqGet`'s per-URL de-dupe: both are harmless together, keep yours.
+- The `sessionStorage` cache is per tab, per build, cleared when the tab closes; nothing is written to localStorage.
+
 ## v27.865 to v27.877 deploy note (Ben): portal + sampling polish, shipment deep-link/rename, "Sample delivered" stage, + an ASP clamp that MOVES REVENUE NUMBERS
 
 Everything since the v27.835 to v27.864 note. **No migrations, no new env vars.** Files changed: `server.mjs`, `supply/inject.html`, `supply/portal-view.js` (served fresh), **and `artifact_v16.7.html` (v27.875 + v27.876 + v27.877)** — the artifact is read once at startup, so it updates on a fresh deploy (Vercel does this automatically).

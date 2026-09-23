@@ -6107,7 +6107,7 @@
   var CARRIERS=['DHL','FedEx','UPS','Flexport','SF Express','Genfreight','Other'];   // consistent carrier set across shipments, samples & portal (legacy values preserved by the select builder)
   function shipReload(){ delete cache['shipments']; showPoSub('shipments'); }
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(ep.indexOf('/api/product/')>=0){ try{ _prodItemCache={}; pgetClear(); }catch(e){} } cb&&cb(j); })
+    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(ep.indexOf('/api/product/')>=0)hzqAfterProductWrite(ep,body); cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
   // Shared config card-editor. Collapses the identical list/search/edit/save plumbing behind the config editors
   // (Key accounts, Consignees, …): a searchable CARD LIST + a one-at-a-time grouped EDIT FORM. Only the bespoke
@@ -13636,11 +13636,52 @@
   // ════════ PRODUCT module (top-level; migration 128) ════════
   var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodSeed=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _pendingProdTab=null, _prodOpenTab=null, _prodDraw=null, _prodRows=null;
   var _pgSwatchSize=(function(){ try{ return localStorage.getItem('pgSwatchSize')||'md'; }catch(e){ return 'md'; } })();   // PRODUCT grid swatch size: sm | md | lg
-  // Per-tab JSON cache: switching between a product's tabs used to re-fetch every click (slow on the remote pooler).
-  // Cache the payload per URL (2-min TTL); _prodJsonBust(ref) clears a product's entries after a write (upload/note/sample).
-  var _prodJsonCache={};
-  function _prodCachedJson(url,ttl){ ttl=ttl||120000; var c=_prodJsonCache[url]; if(c&&Date.now()-c.t<ttl)return Promise.resolve(c.d); return fetch(url).then(function(r){return r.json();}).then(function(d){ _prodJsonCache[url]={t:Date.now(),d:d}; return d; }); }
-  function _prodJsonBust(ref){ if(!ref)return; var e=encodeURIComponent(ref); Object.keys(_prodJsonCache).forEach(function(k){ if(k.indexOf(e)>=0||k.indexOf(ref)>=0)delete _prodJsonCache[k]; }); }
+  // ════ v27.878 PRODUCT read cache (Ben: "every tab under PRODUCTS / SAMPLING should paint instantly") ════
+  // ONE store (_hzQ) for every PRODUCT GET — grids, per-product tabs, reference lists. Stale-while-revalidate:
+  //   hzqAll([urls]).then(paint)  → paint() runs at once with the last-known payloads (even if past TTL), the stale ones are
+  //   re-fetched in the background and paint() runs AGAIN only when the JSON actually changed. With nothing cached it behaves
+  //   exactly like Promise.all(fetch…). Concurrent callers share one in-flight request per URL. An entry in a urls array may be
+  //   ['/api/x', fallback] = use `fallback` when that fetch fails (the old .catch(function(){return fallback;}) idiom).
+  // Invalidation: a write to product X DROPS X's entries (you never see old data for the thing you just changed — its next open
+  //   shows the loader as before) and marks the grids STALE (they still paint instantly, then revalidate). shipPost does this
+  //   automatically for every /api/product/* POST; prodItemInvalidate(ref) / pgetClear() are the explicit hooks (see below).
+  // The list payloads persist in sessionStorage (per tab, per build) so a reload paints the grid before the first byte arrives.
+  var _hzQ={}, _HZQ_TTL=30000, _hzqPersistT=null, _hzqDirty={};
+  var _HZQ_PERSIST=/^\/api\/(product\/(items|sampling|dashboard|config|specs|spec-types|spec-scope-options|timeline-config|reject-reasons|component-types|reports\/sampling|batch-review-list)|app-settings|supply\/all-users)(\?|$)/;
+  var _HZQ_GRIDS=/^\/api\/(product\/(items|sampling|dashboard|reports|batch-review|unread|skus)|app-settings)/;   // big lists: soft-stale on a write (paint stale, revalidate)
+  var _HZQ_PERITEM=/^\/api\/product\/(item|samples|notes)\/|\/sample-requests(\?|$)/;   // per-product entries: dropped on a write
+  function _hzqKey(u){ return 'hzq:__APP_VERSION__:'+u; }   // stamped at serve time → a new deploy never paints from an older build's payload shape
+  (function(){ try{ var pre=_hzqKey(''); for(var i=0;i<sessionStorage.length;i++){ var k=sessionStorage.key(i); if(k&&k.indexOf(pre)===0){ var v=JSON.parse(sessionStorage.getItem(k)||'null'); if(v&&v.d!==undefined)_hzQ[k.slice(pre.length)]={t:0,d:v.d,p:null}; } } }catch(e){} })();   // hydrate (stale → revalidates on first use)
+  function _hzqPersist(url){ if(!_HZQ_PERSIST.test(url))return; _hzqDirty[url]=1; clearTimeout(_hzqPersistT);
+    _hzqPersistT=setTimeout(function(){ var d=_hzqDirty; _hzqDirty={}; Object.keys(d).forEach(function(u){ try{ var e=_hzQ[u]; if(!e||e.d===undefined){ sessionStorage.removeItem(_hzqKey(u)); return; } var s=JSON.stringify({d:e.d}); if(s.length<1500000)sessionStorage.setItem(_hzqKey(u),s); }catch(x){} }); },400); }
+  function _hzqEnt(url){ return _hzQ[url]||(_hzQ[url]={t:0,d:undefined,p:null}); }
+  function hzqPeek(url){ var e=_hzQ[url]; return (e&&e.d!==undefined)?e.d:undefined; }
+  function hzqFresh(url,ttl){ var e=_hzQ[url]; return !!(e&&e.d!==undefined&&(Date.now()-e.t)<(ttl||_HZQ_TTL)); }
+  function hzqSet(url,d){ var e=_hzqEnt(url); e.t=Date.now(); e.d=d; _hzqPersist(url); return d; }
+  function hzqGet(url,force){ var e=_hzqEnt(url); if(!force&&hzqFresh(url))return Promise.resolve(e.d); if(e.p)return e.p;   // fetch+json, de-duped; force ignores freshness
+    var p=fetch(url).then(function(r){return r.json();}).then(function(d){ e.p=null; return hzqSet(url,d); }); e.p=p; p.catch(function(){ e.p=null; }); return p; }
+  function _hzqOne(u,force){ var url=Array.isArray(u)?u[0]:u, fb=Array.isArray(u)&&u.length>1; var p=hzqGet(url,force); return fb?p.catch(function(){ var d=hzqPeek(url); return d!==undefined?d:u[1]; }):p; }
+  function _hzqTyping(){ var a=document.activeElement; if(!a||a===document.body)return false; var tg=a.tagName; if(tg!=='INPUT'&&tg!=='TEXTAREA'&&!a.isContentEditable)return false; var pr=document.getElementById('product-root'); return !!(pr&&pr.contains(a)); }
+  function hzqAll(urls,opts){ opts=opts||{}; var ttl=opts.ttl||_HZQ_TTL;
+    function run(paint){ var us=urls.map(function(u){return Array.isArray(u)?u[0]:u;});
+      var had=us.every(function(u){return hzqPeek(u)!==undefined;}), fresh=had&&us.every(function(u){return hzqFresh(u,ttl);});
+      var cur=had?us.map(hzqPeek):null, before=had?cur.map(function(d){return JSON.stringify(d);}):null;
+      var pStale=had?Promise.resolve().then(function(){ try{ console.debug('[hzq] cached paint @'+Math.round(performance.now())+'ms'+(fresh?' (fresh)':' (revalidating)'),us.join(' ')); paint(cur,true); }catch(x){ console.warn('hzq: stale paint failed',x); } }):null;   // instant paint (microtask keeps the caller's ordering)
+      if(fresh&&!opts.force)return pStale.then(function(){ return cur; });
+      var pFresh=Promise.all(urls.map(function(u,i){ return (hzqFresh(us[i],ttl)&&!opts.force)?Promise.resolve(hzqPeek(us[i])):_hzqOne(u,true); })).then(function(arr){
+        if(had&&!arr.some(function(d,i){ return JSON.stringify(d)!==before[i]; })){ us.forEach(function(u,i){ var e=_hzQ[u]; if(e&&e.d!==undefined)e.d=cur[i]; }); return cur; }   // nothing changed → leave the DOM alone; keep the objects the view already holds (rows are patched in place after saves)
+        if(had&&_hzqTyping())return arr;   // user is typing in this view: don't yank the DOM from under them; the next open paints the new data
+        console.debug('[hzq] '+(had?'repaint (changed)':'first paint')+' @'+Math.round(performance.now())+'ms',us.join(' '));
+        return Promise.resolve(paint(arr,false)).then(function(){ return arr; }); });
+      return had?pFresh.catch(function(e){ console.warn('hzq: revalidate failed',e); return cur; }):pFresh; }   // once painted from cache a failed revalidate is silent
+    return { then:function(ok,ko){ var p=run(ok||function(){}); return ko?p.then(null,ko):p; }, catch:function(ko){ return run(function(){}).then(null,ko); } }; }
+  function hzqSwr(url,opts){ var a=hzqAll([url],opts); return { then:function(ok,ko){ return a.then(function(arr,stale){ return ok?ok(arr[0],stale):undefined; },ko); } }; }
+  function hzqDrop(re){ Object.keys(_hzQ).forEach(function(k){ if(!re||re.test(k)){ delete _hzQ[k]; try{ sessionStorage.removeItem(_hzqKey(k)); }catch(e){} } }); }
+  function hzqStale(re){ Object.keys(_hzQ).forEach(function(k){ if(!re||re.test(k))_hzQ[k].t=0; }); }
+  // Legacy names kept so the ~60 existing call sites keep working on the unified store.
+  var _prodJsonCache=_hzQ;
+  function _prodCachedJson(url,ttl){ return hzqGet(url,!hzqFresh(url,ttl||_HZQ_TTL)); }
+  function _prodJsonBust(ref){ if(!ref)return; var e=encodeURIComponent(ref); Object.keys(_hzQ).forEach(function(k){ if(k.indexOf(e)>=0||k.indexOf(ref)>=0)delete _hzQ[k]; }); }
   // Keep the grid ⇄ detail views in sync for the fields shown in both (season / category / colour). No disruptive full redraw.
   function prodSyncGridCell(ref,field,val){
     if(_prodRows){ var ro=_prodRows.filter(function(x){return x.ref===ref;})[0]; if(ro)ro[field]=val; }
@@ -13662,22 +13703,31 @@
   // Grid change → reflect into an open detail form for the same product (reverse direction).
   function prodSyncDetailField(ref,field,val){ if(_prodDetail&&_prodDetail.item&&_prodDetail.item.ref===ref){ _prodDetail.item[field]=val; var fld=document.querySelector('.pm-fld[data-f="'+field+'"]'); if(fld&&fld.value!==val){ fld.value=val; if(field==='status')fld.setAttribute('style',prodStatusStyle(val)); } } if(_prodSeed&&_prodSeed.ref===ref)_prodSeed[field]=val; }
   // Product item cache (A) — expand re-open is instant; entries expire after TTL and are cleared on any save to that ref.
-  var _prodItemCache={}, _PROD_ITEM_TTL=60000;
-  function prodItemInvalidate(ref){ if(ref){ delete _prodItemCache[ref]; _prodJsonBust(ref); } pgetClear(); }
-  // PRODUCT list GETs (items / dashboard / specs / reports / config lists): 45s client cache so switching sub-tabs is instant;
-  // cleared by any product write (shipPost → /api/product/*, prodItemInvalidate). Same promise is shared by concurrent callers. v27.492
-  var _pget={}, _PGET_TTL=45000;
-  function pget(url){ var e=_pget[url]; if(e&&(Date.now()-e.t)<_PGET_TTL)return e.p;
-    var p=fetch(url).then(function(r){return r.json();}); _pget[url]={t:Date.now(),p:p}; p.catch(function(){ delete _pget[url]; }); return p; }
-  function pgetClear(){ _pget={}; }
-  function pgetWarm(){ try{ ['/api/product/items','/api/product/dashboard','/api/product/specs','/api/product/specs/past','/api/product/spec-types','/api/product/spec-scope-options','/api/product/reports'].forEach(function(u){ pget(u).catch(function(){}); }); }catch(e){} }
-  function prodItemCached(ref){ var e=_prodItemCache[ref]; return (e && (Date.now()-e.t)<_PROD_ITEM_TTL) ? e.d : null; }
+  var _prodItemCache={}, _PROD_ITEM_TTL=_HZQ_TTL;
+  // v27.878: explicit invalidation after a write. prodItemInvalidate(ref) DROPS that product's entries (item, tabs, samples, notes,
+  // docs …) and marks the grids stale; pgetClear() drops every per-product entry + the reference lists, grids go stale. Both keep
+  // the grids paintable so PRODUCTS / SAMPLING still open instantly after a save (rows were already synced in place).
+  function prodItemInvalidate(ref){ if(ref){ delete _prodItemCache[ref]; _prodJsonBust(ref); } hzqStale(_HZQ_GRIDS); }
+  function pget(url){ return hzqGet(url); }
+  function pgetClear(){ hzqDrop(_HZQ_PERITEM); hzqStale(/^\/api\/(product\/|app-settings)/); _prodCfg=null; }   // reference lists (reject reasons, tags, component types…) go stale, not dropped: the list a POST targets is dropped by hzqAfterProductWrite
+  // shipPost calls this for every /api/product/* POST: drop the product touched (ref from the URL / payload) + all per-product
+  // entries, drop the reference list the POST belongs to (config → /config, spec → /specs…), and soft-stale everything else.
+  function hzqAfterProductWrite(ep,payload){ try{ _prodItemCache={}; hzqDrop(_HZQ_PERITEM);
+      var seg=(String(ep).replace(/^\/api\/product\//,'').split(/[\/?]/)[0]||'').replace(/s$/,''); if(seg)hzqDrop(new RegExp('^/api/product/'+seg.replace(/[-]/g,'\\-')+'s?(/|\\?|$)'));   // POST /api/product/spec/… → drop /api/product/specs; /item/… → /items; /note/… → /notes/…
+      var ref=(payload&&(payload.ref||payload.item_ref))||''; if(ref)_prodJsonBust(ref);
+      hzqStale(/^\/api\/(product\/|app-settings)/); _prodCfg=null; }catch(e){} }
+  // Warm a COLD session only (nothing hydrated from sessionStorage): the two grids + app-settings now, the reference lists a
+  // moment later so they never queue ahead of the click the user is about to make. Cached entries revalidate when a tab opens.
+  function pgetWarm(){ try{ var cold=function(u){ return hzqPeek(u)===undefined; };
+      ['/api/product/items','/api/product/sampling','/api/app-settings'].filter(cold).forEach(function(u){ hzqGet(u).catch(function(){}); });
+      setTimeout(function(){ ['/api/product/reject-reasons','/api/product/timeline-config','/api/product/component-types','/api/supply/all-users','/api/product/config','/api/product/dashboard','/api/product/specs','/api/product/specs/past','/api/product/spec-types','/api/product/spec-scope-options','/api/product/reports/sampling','/api/product/batch-review-list'].filter(cold).forEach(function(u){ hzqGet(u).catch(function(){}); }); },1500); }catch(e){} }
+  function prodItemCached(ref,anyAge){ var e=_prodItemCache[ref]; return (e && (anyAge || (Date.now()-e.t)<_PROD_ITEM_TTL)) ? e.d : null; }
   function loadProdItem(ref,cb,force){ var c=force?null:prodItemCached(ref);   // returns cached data synchronously via cb when fresh
     if(c)return cb(c,true);
-    fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(d&&d.item)_prodItemCache[ref]={t:Date.now(),d:d}; cb(d,false); }).catch(function(){ cb(null,false); }); }
+    hzqGet('/api/product/item/'+encodeURIComponent(ref),true).then(function(d){ if(d&&d.item)_prodItemCache[ref]={t:Date.now(),d:d}; cb(d,false); }).catch(function(){ cb(null,false); }); }
   function wireProdTopSearch(){ var box=document.getElementById('hz-search'); if(!box||box._prodWired)return; box._prodWired=1;
     box.addEventListener('input',function(){ var pr=document.getElementById('product-root'); if(!pr||pr.style.display==='none')return; _prodFilt.q=box.value; if(_prodDraw)_prodDraw(); }); }
-  function prodCan(){ return !window.ME || ME.is_admin || ME.product_edit || ME.live===false; }
+  function prodCan(){ var m=ME||null; return !m || m.is_admin || m.product_edit || m.live===false; }   // v27.878: ME is null until /api/me lands (window.ME may be the planner's own object) — was throwing in boot()
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
@@ -13800,7 +13850,8 @@
     if(_smpView==='batch'){   // v27.714 (Ben): Sample batch review is a view of SAMPLING — enter a sample shipment (batch) and review every sample on it
       c.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+smpViewPills()+'</div><div id="smp-batch"></div>'; wireSmpViewPills(c,c); renderProductBatchReview(c.querySelector('#smp-batch')); return; }
     c.innerHTML='<div id="smp-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div>'+smpTickLegend()+'<div id="smp-grid" class="tw smp-sw-'+_smpSwSize+'"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div>';
-    Promise.all([fetch('/api/product/sampling').then(function(r){return r.json();}), fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var rows=_res[0]; rows=Array.isArray(rows)?rows:[];
+    hzqAll(['/api/product/sampling',['/api/app-settings',{}]]).then(function(_res){ var rows=_res[0]; rows=Array.isArray(rows)?rows:[];   // v27.878: paints from cache at once (sessionStorage across reloads), revalidates behind, repaints only on change
+      (function(){ var mo=c.querySelector('#smp-grid tr.smp-mexp'); if(mo&&mo.dataset.rid&&!_smpManagePending)_smpManagePending={rid:mo.dataset.rid, tab:_smpTabSlug(mo._shownT||'master')}; })();   // a revalidate repaint re-opens the MANAGE panel on the same tab
       var _st=_res[1]||{}; _smpGroupMode=(_st.sampling_group_mode==='tabs'||_st.sampling_group_mode==='tree')?_st.sampling_group_mode:'inline';   // v27.763 (Ben): CONFIG-set grouping layout
       var uniq=function(k){ var o={}; rows.forEach(function(r){ if(r[k])o[r[k]]=1; }); return Object.keys(o).sort(); };
       var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category'); var me=((window.ME&&ME.email)||'').toLowerCase();
@@ -14129,14 +14180,14 @@
         exp.innerHTML='<td colspan="'+ncols+'"><div class="smp-mcard"><div class="smp-mhd"><div class="po-subnav">'+tabDefs.map(function(t,i){ return '<button class="rtab smp-mtab'+(i===0?' active':'')+'" data-t="'+t[0]+'">'+t[2]+esc(t[1])+'</button>'; }).join('')+'</div></div><div class="smp-mbody"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div></div></td>';
         tr.parentNode.insertBefore(exp, tr.nextSibling);
         var body=exp.querySelector('.smp-mbody');
-        Promise.all([fetch('/api/product/item/'+encodeURIComponent(r.item_ref)).then(function(x){return x.json();}), fetch('/api/product/reject-reasons').then(function(x){return x.json();}).catch(function(){return {reasons:[]};}), pget('/api/product/timeline-config').catch(function(){return {snippets:[]};})]).then(function(a){
+        hzqAll(['/api/product/item/'+encodeURIComponent(r.item_ref), ['/api/product/reject-reasons',{reasons:[]}], ['/api/product/timeline-config',{snippets:[]}]]).then(function(a){   // v27.878: paints from cache at once, revalidates behind
           var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[], SNIPS=((a[2]&&a[2].snippets)||[]).filter(function(x){return x.active!==false;});
-          function show(t){ if(!document.body.contains(exp))return; exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.classList.toggle('active', b.dataset.t===t); }); body.innerHTML=''; try{ writeHash(['product','sampling', r.ref, _smpTabSlug(t)]); }catch(e){}   // v27.735: URL follows the open tab
+          function show(t){ if(!document.body.contains(exp))return; exp._shownT=t; exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.classList.toggle('active', b.dataset.t===t); }); body.innerHTML=''; try{ writeHash(['product','sampling', r.ref, _smpTabSlug(t)]); }catch(e){}   // v27.735: URL follows the open tab
             if(t==='master'){ _smpMasterReadonly(body, d); }
             else if(t==='timeline'){ body.innerHTML='<div class="smp-tlgrid"><div class="smp-tlmain"></div><div class="smp-tlside"></div></div>'; renderProdTimeline(body.querySelector('.smp-tlmain'), r.item_ref, {supplier:r.supplier_name}); _smpFacts(body.querySelector('.smp-tlside'), d, r); }   // v27.759 facts column; v27.857 (Ben): this MANAGE panel is one supplier's request → scope the timeline to that supplier
             else { var idx=parseInt(t.slice(1),10)||0; var rs=(r.samples||[])[idx]; var sm=(d.samples||[]).filter(function(s){ return String(s.id)===String(rs&&rs.id); })[0]; if(sm){ _smpReviewInto(body, r, sm, rs, REASONS, SNIPS); } else { body.innerHTML='<div class="mut" style="padding:8px">No sample submitted for this version yet.</div>'; } } }
           exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.onclick=function(){ show(b.dataset.t); }; });
-          show(initialTab?_smpSlugToTab(initialTab):'master');
+          show(exp._shownT||(initialTab?_smpSlugToTab(initialTab):'master'));   // a revalidate repaint stays on the tab the user is on
         }).catch(function(e){ body.innerHTML='<div style="color:var(--neg);padding:8px">Failed: '+esc(e.message||e)+'</div>'; });
       }
       draw();
@@ -14166,12 +14217,13 @@
         if(hit){ pick(hit); if(meta)meta.innerHTML='<span style="color:var(--pos);font-weight:700;margin-left:6px">✓ '+esc(sc)+' → '+esc(hit.ref)+'</span>'; }
         else { sel.value=sc; try{sel.focus();}catch(e){} draw(); if(meta)meta.innerHTML='<span style="color:var(--amber);font-weight:700;margin-left:6px">'+esc(sc)+' isn’t on a sample shipment carrying development samples.</span>'; }
       }}); };
-    fetch('/api/product/batch-review-list').then(function(r){return r.json();}).then(function(list){ LIST=(Array.isArray(list)?list:[]).slice().sort(function(a,b){ return (Number(b.id)||0)-(Number(a.id)||0); });   // v27.557: only shipments carrying development samples
+    hzqSwr('/api/product/batch-review-list').then(function(list){ LIST=(Array.isArray(list)?list:[]).slice().sort(function(a,b){ return (Number(b.id)||0)-(Number(a.id)||0); });   // v27.557: only shipments carrying development samples; v27.878 cached + revalidated
+      if(_cur){ if(menu.style.display!=='none')draw(); return; }   // revalidate repaint: keep the shipment already picked
       var want=_batchSR||(function(){ try{ return localStorage.getItem('hzBatchSR'); }catch(e){ return null; } })(); var hit=want?LIST.filter(function(x){ return String(x.id)===String(want); })[0]:null; if(hit)pick(hit);
     }).catch(function(){ sel.placeholder='could not load shipments'; });
     function load(id,quiet){ if(!quiet){ body.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>'; meta.innerHTML=''; }
-      Promise.all([fetch('/api/product/batch-review/'+encodeURIComponent(id)).then(function(r){return r.json();}), new Promise(function(res){ loadRejectReasons(res); }), fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};})])
-        .then(function(_r){ var d=_r[0]||{}; if(d.error){ body.innerHTML='<div style="color:var(--neg)">'+esc(d.error)+'</div>'; return; } _last=[d,_r[1]||[],_r[2]||{}]; paint(_last[0],_last[1],_last[2]); })
+      hzqAll(['/api/product/batch-review/'+encodeURIComponent(id), ['/api/product/reject-reasons',{reasons:[]}], ['/api/product/timeline-config',{tags:[],snippets:[]}]])   // v27.878: instant from cache, revalidated
+        .then(function(_r){ var d=_r[0]||{}; if(d.error){ body.innerHTML='<div style="color:var(--neg)">'+esc(d.error)+'</div>'; return; } _last=[d,(_r[1]&&_r[1].reasons)||[],_r[2]||{}]; paint(_last[0],_last[1],_last[2]); })
         .catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
     function paint(d,reasons,tlc){ var sr=d.sr||{}, allItems=d.items||[], _q=(fq.value||'').toLowerCase().trim();
       var items=_q?allItems.filter(function(it){ return _q.split(/\s+/).every(function(w){ return ((it.ref||'')+' '+(it.name||'')+' '+(it.colour_name||'')+' '+(it.product_type||'')+' '+(it.category||'')+' '+(it.season||'')+' '+(it.supplier||'')).toLowerCase().indexOf(w)>=0; }); }):allItems;
@@ -14273,12 +14325,7 @@
   var _specView='list', _specQ='', _specTypeFilter={};   // list = grouped by category; matrix = category × type. Persist across redraws.
   function renderProductSpecs(c){
     c.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading specifications…</div>';
-    Promise.all([
-      pget('/api/product/spec-types'),
-      pget('/api/product/spec-scope-options'),
-      pget('/api/product/specs'),
-      pget('/api/product/specs/past')
-    ]).then(function(res){
+    hzqAll(['/api/product/spec-types','/api/product/spec-scope-options','/api/product/specs','/api/product/specs/past']).then(function(res){   // v27.878: instant from cache, revalidated
       var types=Array.isArray(res[0])?res[0]:[], opts=res[1]||{}, specs=Array.isArray(res[2])?res[2]:[], past=Array.isArray(res[3])?res[3]:[];
       var cats=opts.categories||[], catSizes=opts.catSizes||{}, prods=opts.productions||[];
       function scopeLabel(s){ if(s.scope_type==='category')return 'Category · '+esc(s.scope_category); if(s.scope_type==='size')return 'Size · '+esc(s.scope_category)+' / '+esc(s.scope_size); if(s.scope_type==='sku')return 'SKU · '+esc(s.scope_skus); return 'All products'; }
@@ -14500,7 +14547,7 @@
   var _rangeSeason=null, _rangeApprovedOnly=false, _rangeView='normal';   // range plan view: normal | photography
   function renderProductRange(c){
     c.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading range…</div>';
-    pget('/api/product/items').then(function(rows){ rows=Array.isArray(rows)?rows:[];
+    hzqSwr('/api/product/items').then(function(rows){ rows=Array.isArray(rows)?rows:[];   // v27.878: instant from cache, revalidated
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       if(!_rangeSeason||seasons.indexOf(_rangeSeason)<0)_rangeSeason=seasons[seasons.length-1]||'';
       function stPill(s){ var ap=s==='approved'; return '<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;'+(ap?'background:var(--pos-bg);color:var(--pos)':'background:var(--amber-bg);color:var(--amber)')+'">'+(ap?'approved':'in development')+'</span>'; }
@@ -14543,7 +14590,7 @@
   function renderProductDashboard(c){
     c.innerHTML='<div class="count" style="padding:10px 2px">Loading dashboard…</div>';
     var DIMS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other']];
-    pget('/api/product/dashboard').then(function(rows){ rows=Array.isArray(rows)?rows:[];
+    hzqSwr('/api/product/dashboard').then(function(rows){ rows=Array.isArray(rows)?rows:[];   // v27.878: instant from cache, revalidated
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       if(!_dashSeason||(_dashSeason!=='__all'&&seasons.indexOf(_dashSeason)<0))_dashSeason=seasons[seasons.length-1]||'__all';
       function ovPill(s){ var m={approved:['Approved','var(--pos)','var(--pos-bg)'],dropped:['Rejected','var(--neg)','var(--neg-bg)']}, x=m[s]||['In development','var(--amber)','var(--amber-bg)']; return '<span class="db-ov" style="background:'+x[2]+';color:'+x[1]+'">'+x[0]+'</span>'; }
@@ -14923,7 +14970,7 @@
     }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+(e&&e.message||e)+'</div>'; });
   }
   function renderProductReports(c){ c.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>';
-    pget('/api/product/reports/sampling').then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
+    hzqSwr('/api/product/reports/sampling').then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
       var big=d.big||{}, ts=d.typeSeason||{seasons:[],types:[],cells:{}}, ss=d.supplierSeason||[], detail=d.detail||{};
       function kpi(v,lbl,sub){ return '<div class="pr-kpi"><div class="pr-kpi-v">'+v+'</div><div class="pr-kpi-l">'+esc(lbl)+'</div>'+(sub?'<div class="pr-kpi-s">'+esc(sub)+'</div>':'')+'</div>'; }
       var tiles='<div class="pr-kpis">'
@@ -15028,7 +15075,7 @@
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
   // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
   function renderProductConfig(b){ b.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading…</div>';
-    Promise.all([pget('/api/product/config'),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),pget('/api/product/component-types').catch(function(){return {types:[],suppliers:[]};}),fetch('/api/product/reject-reasons?all=1').then(function(r){return r.json();}).catch(function(){return {reasons:[]};}),fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[]; d.groupMode=(function(v){return (v==='tabs'||v==='tree')?v:'inline';})((_cfg[4]||{}).sampling_group_mode);
+    hzqAll(['/api/product/config',['/api/product/timeline-config',{tags:[],snippets:[]}],['/api/product/component-types',{types:[],suppliers:[]}],['/api/product/reject-reasons?all=1',{reasons:[]}],['/api/app-settings',{}]]).then(function(_cfg){ /* v27.878: instant from cache, revalidated */ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[]; d.groupMode=(function(v){return (v==='tabs'||v==='tree')?v:'inline';})((_cfg[4]||{}).sampling_group_mode);
       function autoCat(name){ return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'PROD'; }   // mirrors server _prodCatCode
       function draw(){
         var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
@@ -15154,8 +15201,9 @@
     }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; }); }
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="pg-stagepills" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px"></div><div id="pg-grid"><div style="color:var(--faint)">Loading…</div></div>';
-    if(!_poActStateLoaded){ loadPoActState(function(){ renderProductPlan(c); }); return; }   // need snooze state for the SKU-mapping reminder
-    Promise.all([pget('/api/product/items'),fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_pr){ var rows=Array.isArray(_pr[0])?_pr[0]:[];
+    if(!_poActStateLoaded){ loadPoActState(function(){ if(PRODUCT_SUB==='plan'&&_prodDraw)try{ _prodDraw(); }catch(e){} }); }   // snooze state for the SKU-mapping reminder — v27.878: no longer gates the first paint; the grid redraws in place once it lands
+    hzqAll(['/api/product/items',['/api/app-settings',{}]]).then(function(_pr){ var rows=Array.isArray(_pr[0])?_pr[0]:[];   // v27.878: paints from cache at once (sessionStorage across reloads), revalidates behind, repaints only on change
+      (function(){ var o=c.querySelector('#pg-grid tr.pg-openrow .pg-open, #pg-grid .pgm-card.open'); if(o&&o.dataset.ref&&!_pendingProdRef){ _pendingProdRef=o.dataset.ref; _pendingProdTab=_prodDetailTab||'master'; } })();   // a revalidate repaint keeps the open product open
       var _st=_pr[1]||{}; _smpGroupMode=(_st.sampling_group_mode==='tabs'||_st.sampling_group_mode==='tree')?_st.sampling_group_mode:'inline';   // v27.766 (Ben): PRODUCTS shares the SAMPLING grid-layout toggle
       _prodRows=rows;
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
@@ -15429,19 +15477,27 @@
   function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box; _prodSeed=seed||null;
     try{ if(!_prodDrawerOpen) writeHash(_prodDetailTab&&_prodDetailTab!=='master'?['product','products',ref,_prodDetailTab]:['product','products',ref]); }catch(e){}   // v27.842 (Ben): canonical deep link is /product/products/<ref>. drawer keeps the current (range/dashboard) hash
     try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // warm suppliers + config
-    var cached=prodItemCached(ref);
-    if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached,seed); return; }   // instant re-open from cache
-    // (1) INSTANT: paint the sub-tabs from the grid seed (no fetch). Badges come from the seed's counts.
-    _prodDetail={ item:{ref:ref, colour_name:(seed&&seed.colour_name)||'', bulk_colour_name:(seed&&seed.bulk_colour_name)||'', stage:(seed&&seed.stage)||'sample_development', category:(seed&&seed.category)||'', season:(seed&&seed.season)||'', supplier:(seed&&seed.supplier)||'', status:(seed&&seed.status)||'', has_swatch:!!(seed&&seed.has_swatch)}, unread_supplier:(seed&&seed.unread_supplier)||0, _partial:true };
-    renderProdDetailShell(box, _prodDetail, seed);
-    // (2) FAST: tiny core call → real Master-data fields render immediately.
-    fetch('/api/product/item/'+encodeURIComponent(ref)+'/core').then(function(r){return r.json();}).then(function(cd){ if(box!==_prodDetailBox)return; if(!cd||cd.error||!cd.item){ box.innerHTML='<div style="color:var(--neg)">Not found</div>'; return; }
-      _prodDetail.item=cd.item; _prodDetail.unread_supplier=cd.unread_supplier; _prodDetail._coreLoaded=true;
-      renderProdDetailShell(box, _prodDetail, seed);
-      // (3) HEAVY: sizes + components load in the background → the size table fills in; then cache the full thing.
-      fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(box!==_prodDetailBox)return; _prodDetail.sizes=(sd&&sd.sizes)||[]; _prodDetail.samples=(sd&&sd.samples)||[]; _prodDetail.components=(sd&&sd.components)||[]; _prodDetail._sizesLoaded=true; _prodItemCache[ref]={t:Date.now(),d:_prodDetail};
-        if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_prodDetail); } else renderProdDetailShell(box,_prodDetail,seed); }).catch(function(){});
-    }).catch(function(e){ box.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
+    // v27.878 (Ben): stale-while-revalidate. A product seen before paints from its cached payload at once (any age); if that
+    // payload is past TTL the core + sizes calls run behind it (in parallel) and the shell repaints only when something changed.
+    var cached=prodItemCached(ref,true), _fresh=!!(cached&&prodItemCached(ref));
+    if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached,seed); if(_fresh)return; }   // instant re-open from cache
+    else {
+      // (1) INSTANT: paint the sub-tabs from the grid seed (no fetch). Badges come from the seed's counts.
+      _prodDetail={ item:{ref:ref, colour_name:(seed&&seed.colour_name)||'', bulk_colour_name:(seed&&seed.bulk_colour_name)||'', stage:(seed&&seed.stage)||'sample_development', category:(seed&&seed.category)||'', season:(seed&&seed.season)||'', supplier:(seed&&seed.supplier)||'', status:(seed&&seed.status)||'', has_swatch:!!(seed&&seed.has_swatch)}, unread_supplier:(seed&&seed.unread_supplier)||0, _partial:true };
+      renderProdDetailShell(box, _prodDetail, seed); }
+    var _reval=!!(cached&&cached.item), _D=_prodDetail;   // _reval: the shell already shows real data — only repaint on change
+    var _snap=function(){ try{ return JSON.stringify([_D.item,_D.unread_supplier,_D.sizes,_D.samples,_D.components]); }catch(e){ return ''; } };
+    var _before=_reval?_snap():null;
+    var _repaint=function(){ if(box!==_prodDetailBox||_prodDetail!==_D)return; if(_reval&&(_snap()===_before||_hzqTyping()))return;
+      if(_D._sizesLoaded&&_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b){ renderProdMaster(_b,_D); return; } } renderProdDetailShell(box,_D,seed); };
+    // (2) FAST: tiny core call → real Master-data fields; (3) HEAVY: sizes + samples + components — fired together, painted as each lands.
+    var _coreP=hzqGet('/api/product/item/'+encodeURIComponent(ref)+'/core',true), _sizesP=hzqGet('/api/product/item/'+encodeURIComponent(ref)+'/sizes',true);
+    _coreP.then(function(cd){ if(box!==_prodDetailBox||_prodDetail!==_D)return; if(!cd||cd.error||!cd.item){ if(!_reval)box.innerHTML='<div style="color:var(--neg)">Not found</div>'; return; }
+      _D.item=cd.item; _D.unread_supplier=cd.unread_supplier; _D._coreLoaded=true; _D._partial=false;
+      if(!_reval)renderProdDetailShell(box,_D,seed);
+      return _sizesP.then(function(sd){ if(box!==_prodDetailBox||_prodDetail!==_D||!sd||sd.error)return; _D.sizes=sd.sizes||[]; _D.samples=sd.samples||[]; _D.components=sd.components||[]; _D._sizesLoaded=true; _prodItemCache[ref]={t:Date.now(),d:_D};
+        if(_reval)_repaint(); else if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_D); } else renderProdDetailShell(box,_D,seed); }).catch(function(){});
+    }).catch(function(e){ if(!_reval)box.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   // ── v27.703 PRODUCT split P1 slice 2 — development REQUESTS on the client ─────────────────────────────────────────────
   // A request = one supplier × chosen components (× sizes) with its own stage. Chips: "CODE ● stage" coloured by stage.
   function prodRequestChip(q,ref){ var m=stageMeta(q.stage||'sample_development'); return '<span class="pg-reqchip" data-ref="'+esc(ref)+'" data-rid="'+q.id+'" title="'+esc(q.ref)+' · '+esc(q.supplier_name)+' · '+esc(m[1])+(q.components&&q.components.length?' · '+esc(q.components.map(function(c){return c.name;}).join(', ')):'')+(q.samples?' · '+q.samples+' sample'+(q.samples===1?'':'s')+' ('+(q.samples_received||0)+' received)':'')+'" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:2px 8px 2px 6px;border-radius:999px;background:'+m[3]+';color:'+m[4]+';cursor:pointer;white-space:nowrap;line-height:1.4"><span style="font-family:ui-monospace,Menlo,monospace">'+esc(q.supplier_code||q.supplier_name)+'</span><span style="opacity:.55">●</span><span style="font-weight:600">'+esc(m[1])+'</span>'+(q.samples?'<span style="opacity:.7;font-weight:500">·&nbsp;'+(q.samples_received||0)+'/'+q.samples+'</span>':'')+'</span>'; }
@@ -15464,7 +15520,7 @@
   document.addEventListener('change',function(e){ var t=e.target; if(t&&t.classList&&t.classList.contains('hz-prod-view'))selectProductSub(t.value); });   // one delegated handler covers Plan / Range / Dashboard bars
   // Requests tab: every request on the product — inline-editable stage / approval / country / dev start / sizes / stakeholders / emails / components, + delete, + "+ Development request".
   function renderProdRequests(body,ref){ body.innerHTML='<div style="color:var(--faint)">Loading…</div>';
-    Promise.all([fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}), fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {suppliers:[]};}), fetch('/api/supply/all-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[], reqs=it.requests||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
+    hzqAll(['/api/product/item/'+encodeURIComponent(ref), ['/api/product/component-types',{suppliers:[]}], ['/api/supply/all-users',[]]]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[], reqs=it.requests||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
       var STG=STAGE_META.map(function(m){return m[0];}); function m_(s){ return stageMeta(s||'sample_development'); }
       var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><div style="font-weight:700;font-size:13px">Development requests <span class="mut" style="font-weight:400;font-size:11px">— one per supplier × component set; product stage is '+(it.stage_overridden?'<b>overridden</b>':'derived from these')+'</span></div><button class="save-btn pr-new" style="background:var(--blue);color:#fff;border-color:var(--blue);margin-left:auto">+ Development request</button></div>';
       if(!reqs.length){ body.innerHTML=head+'<div style="text-align:center;padding:30px 14px;color:var(--muted);border:1px dashed var(--line);border-radius:10px"><div style="font-size:26px;margin-bottom:6px">🧵</div>No development request yet — assign a supplier to one or more components to start sampling.</div>'; body.querySelector('.pr-new').onclick=function(){ openRequestForm(ref,{}); }; return; }
@@ -15526,7 +15582,7 @@
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   // "+ Development request" — modal: supplier · components (pre-ticked from [+]) · sizes · approval · country · dev start · stakeholders · notify emails
   function openRequestForm(ref,opts){ opts=opts||{}; closeShPop&&0;
-    Promise.all([fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}), fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {suppliers:[]};}), fetch('/api/supply/all-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
+    Promise.all([(function(u){ return hzqPeek(u)!==undefined?Promise.resolve(hzqPeek(u)):hzqGet(u,true); })('/api/product/item/'+encodeURIComponent(ref)), hzqGet('/api/product/component-types').catch(function(){return {suppliers:[]};}), hzqGet('/api/supply/all-users').catch(function(){return [];})]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
       var pre=(opts.component_ids||[]).map(String); var defSup=''; comps.forEach(function(c){ if(pre.indexOf(String(c.id))>=0&&c.supplier&&!defSup)defSup=c.supplier; });
       var ov=document.createElement('div'); ov.id='pr-form-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200050;display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto';
       ov.innerHTML='<style>#pr-form-ov .fci{text-align:left}</style><div style="background:var(--card);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.35);width:100%;max-width:640px;padding:16px 18px;text-align:left">'   /* v27.870 (Ben): the .fci class right-aligns (for numeric grid cells) — force LEFT on this form's inputs */
@@ -15583,7 +15639,7 @@
   function renderProdComponents(body,ref,opts){ opts=opts||{}; var compact=!!opts.compact; if(!opts.quiet||!body.firstChild)body.innerHTML='<div style="color:var(--faint)">Loading…</div>';   // v27.712 quiet: keep the current table until the fresh one is ready
     var _self=function(){ renderProdComponents(body,ref,opts); };
     var _reload=opts.reload||_self;   // structural changes (add/remove/mode) refresh this chooser; in the merged Sizes tab they reload the whole tab so the grid rebuilds
-    fetch('/api/product/item/'+encodeURIComponent(ref)+'/components').then(function(r){return r.json();}).then(function(d){ d=d||{};
+    hzqSwr('/api/product/item/'+encodeURIComponent(ref)+'/components').then(function(d){ d=d||{};   // v27.878: instant from cache, revalidated
       var comps=d.components||[], cat=d.catalogue||[], sups=d.suppliers||[], psup=d.product_supplier||'';
       function byId(id){ return comps.filter(function(x){return String(x.id)===String(id);})[0]||{}; }
       function supSel(id,cur){ return '<select class="pc2-sup" data-id="'+id+'" style="font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card)"><option value=""'+(!cur?' selected':'')+'>— choose supplier —</option>'+sups.map(function(s){return '<option'+(s===cur?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'; }   // v27.712: no "product supplier" any more — each component names its own
@@ -15749,7 +15805,7 @@
   function hzTlIndicator(sm,ref,aspect,label,af){ var pfx='Feedback on '+ref+'_v'+(sm.version||'?')+' · '+label+':'; var n=(sm.feedback_notes||[]).filter(function(x){ return String(x.body||'').indexOf(pfx)===0; })[0];
     var parts=[]; if(n)parts.push('on timeline '+n.at); if(af&&af.updated_at)parts.push('saved '+af.updated_at+(af.updated_by?' · '+esc(String(af.updated_by).replace(/@.*/,'@')):'')); return parts.join(' · '); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:var(--faint)">Loading…</div>';
-    Promise.all([_prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)), new Promise(function(res){ loadRejectReasons(res); }), fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}), fetch('/api/product/item/'+encodeURIComponent(ref)+'/components').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_arr){ var list=Array.isArray(_arr[0])?_arr[0]:[]; var reasons=_arr[1]||[];
+    hzqAll(['/api/product/samples/'+encodeURIComponent(ref), ['/api/product/reject-reasons',{reasons:[]}], ['/api/product/timeline-config',{tags:[],snippets:[]}], ['/api/product/item/'+encodeURIComponent(ref)+'/components',{}]]).then(function(_arr){ var list=Array.isArray(_arr[0])?_arr[0]:[]; var reasons=(_arr[1]&&_arr[1].reasons)||[];   // v27.878: instant from cache, revalidated
       var _cmp=((_arr[3]||{}).components)||[], _LBL=Object.assign({},COMP_LBL); _cmp.forEach(function(c){ _LBL[c.dimension||('c'+c.id)]=c.name; }); function _aspLbl(k){ return _LBL[k]||k; }   // v27.533: component names for component-keyed aspects
       // v27.530: feedback boxes share the timeline composer's quick phrases ("/"), Pantone search ("/p") and tags
       var _tlc=_arr[2]||{}, SNIPS=(_tlc.snippets||[]).filter(function(x){return x.active!==false;}), ACTTAGS=(_tlc.tags||[]).filter(function(t){return t.active!==false;}); var _fbPan={}, _fbTags={};
@@ -16206,7 +16262,7 @@
     var _pz=body.querySelector('#pm-swatch-paste'); if(_pz)_pz.addEventListener('paste',function(e){ var items=(e.clipboardData&&e.clipboardData.items)||[]; for(var k=0;k<items.length;k++){ if(items[k].type&&items[k].type.indexOf('image')===0){ var f=items[k].getAsFile(); if(f){ e.preventDefault(); swUp(f); return; } } } });
   }); }); }
   function renderProdDocs(body,ref){ body.innerHTML='<div class="count" style="color:var(--faint);padding:6px 2px">Loading…</div>';
-    _prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/docs').then(function(d){ if(!d||d.error){ body.innerHTML='<div style="color:var(--neg)">Failed to load documents</div>'; return; } var docs=d.docs||[];
+    hzqSwr('/api/product/item/'+encodeURIComponent(ref)+'/docs').then(function(d){ if(!d||d.error){ body.innerHTML='<div style="color:var(--neg)">Failed to load documents</div>'; return; } var docs=d.docs||[];   // v27.878: instant from cache, revalidated
     var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
     function isImg(m){ return /^image\//i.test(String(m||'')); }
     function dt(s){ if(!s)return '<span class="mut tiny">—</span>'; var t=/(\d{2}:\d{2})/.exec(String(s)); return esc(fd(s)+(t?' '+t[1]:'')); }   // YYYY-MM-DD HH:MM -> dd-mmm-yy HH:MM
@@ -16265,7 +16321,7 @@
     renderProdTimeline._sup=renderProdTimeline._sup||{}; if(!opts.quiet && 'supplier' in opts)renderProdTimeline._sup[ref]=opts.supplier||''; var _sup=renderProdTimeline._sup[ref]||'';   // v27.857 (Ben): per-supplier timeline scope, persisted across quiet re-renders
     var _notesUrl='/api/product/notes/'+encodeURIComponent(ref)+(_sup?'?supplier='+encodeURIComponent(_sup):'');
     var _smpUrl='/api/product/samples/'+encodeURIComponent(ref)+(_sup?'?supplier='+encodeURIComponent(_sup):'');   // v27.873 (Ben): scope the /s sample-version chips to THIS supplier's request (was showing every supplier's samples)
-    Promise.all([_prodCachedJson(_notesUrl),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes'),_prodCachedJson('/api/product/timeline-config'),_prodCachedJson(_smpUrl).catch(function(){return [];})]).then(function(_r){
+    hzqAll([_notesUrl,'/api/product/item/'+encodeURIComponent(ref)+'/changes','/api/product/timeline-config',[_smpUrl,[]]]).then(function(_r){   // v27.878: instant from cache, revalidated
       var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[], _hid=rocIsHidden(ref);
       // v27.750 (P6): sample versions for the /s chip (product-dimension only), newest label first
       var _smpList=(Array.isArray(_r[3])?_r[3]:[]).map(function(s){ return { id:s.id, version:s.version, label:'Sample '+s.version, received:!!s.received_at }; });
@@ -16409,7 +16465,7 @@
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
       document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed; keep pills masked unless on DEMAND
     }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }
-  }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
+  }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message,e&&e.stack); } }
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');
   boot(); document.addEventListener('DOMContentLoaded',boot); window.addEventListener('load',boot);
   setTimeout(boot,600); setTimeout(boot,1800); setTimeout(boot,4000);

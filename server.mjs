@@ -6933,8 +6933,10 @@ app.get('/api/product/dashboard', async (req, res) => {
 async function productItemPayload(ref, supplierScope) {
   const _scope = (Array.isArray(supplierScope) && supplierScope.length) ? supplierScope.map(x => String(x).toLowerCase().trim()) : null;
   {
-    // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
-    const [itemR, sizesR, docsR, samplesR, unreadR, compsR] = await Promise.all([
+    // ONE round — item + sizes + docs + samples + unread + components + sample files + size×component rows + their files, all in
+    // parallel. v27.878 (Ben, PRODUCT perf): the file/dimension queries used to wait for round-1 ids (3 round trips ≈ 1s on the
+    // remote pooler); they now scope themselves by ref with a subquery, so the whole payload is one round trip.
+    const [itemR, sizesR, docsR, samplesR, unreadR, compsR, sfR, dimsR, dfR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
         coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce((SELECT r.recipient_countries FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'UK') recipient_countries,
         coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'') supplier, coalesce((SELECT string_agg(DISTINCT r.supplier_code, ', ') FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id AND coalesce(r.supplier_code,'')<>''),'') supplier_code,   -- v27.749 (P5): derived from the development requests (item-level supplier/… columns dropped, mig 285)
@@ -6963,21 +6965,18 @@ async function productItemPayload(ref, supplierScope) {
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort,
         coalesce((SELECT array_agg(DISTINCT rq.supplier_name) FROM planner.product_dev_request_components rc JOIN planner.product_dev_requests rq ON rq.id=rc.request_id WHERE rc.component_id=product_dev_components.id),'{}') req_suppliers
         FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),   /* v27.871 (Ben): supplier(s) assigned to sample each component (via requests) → portal groups yours vs other suppliers */
+      pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE category='product_sample' AND po IN (SELECT 'PSAMPLE-'||ps.id FROM planner.product_dev_samples ps WHERE ps.item_ref=$1) ORDER BY uploaded_at`, [ref]),
+      pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id, sampling_mode, spec_id
+        FROM planner.product_dev_size_dimensions WHERE size_id IN (SELECT s.id FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1)`, [ref]),
+      pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments
+        WHERE category='product_dim' AND po IN (SELECT 'PDIM-'||sd.id FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1) ORDER BY version NULLS LAST, uploaded_at`, [ref]),
     ]);
     const item = itemR.rows[0]; if (!item) return null; applyDerivedStage(item);   // v27.702 stage derived from requests
     const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n, components = compsR.rows;
-    // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
-    const [sfR, dimsR] = await Promise.all([
-      samples.length ? pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [samples.map(s => 'PSAMPLE-' + s.id)]) : Promise.resolve({ rows: [] }),
-      sizes.length ? pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id, sampling_mode, spec_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : Promise.resolve({ rows: [] }),
-    ]);
     { const byV = {}; sfR.rows.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); }); samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; }); }
     const dims = dimsR.rows;
-    if (dims.length) {   // Round 3 — component files
-      const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
-      const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version, uploaded_by: f.uploaded_by, uploader_kind: f.uploader_kind, uploaded_at: f.uploaded_at }); });
-      dims.forEach(d => { d.files = byDim[d.id] || []; });
-    }
+    { const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version, uploaded_by: f.uploaded_by, uploader_kind: f.uploader_kind, uploaded_at: f.uploaded_at }); });
+      dims.forEach(d => { d.files = byDim[d.id] || []; }); }
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     return { item, sizes, docs, samples, unread_supplier, components };
@@ -7039,7 +7038,11 @@ app.get('/api/product/item/:ref/changes', async (req, res) => {
 app.get('/api/product/item/:ref/sizes', async (req, res) => {
   const ref = req.params.ref;
   try {
-    const [sizesR, compsR, samplesR] = await Promise.all([
+    const [dimsR, dfR, sizesR, compsR, samplesR] = await Promise.all([   // v27.878: one round trip (dimension rows + files scope themselves by ref)
+      pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id, sampling_mode, spec_id
+        FROM planner.product_dev_size_dimensions WHERE size_id IN (SELECT s.id FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1)`, [ref]),
+      pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments
+        WHERE category='product_dim' AND po IN (SELECT 'PDIM-'||sd.id FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1) ORDER BY version NULLS LAST, uploaded_at`, [ref]),
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort,
@@ -7056,13 +7059,9 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
     ]);
     const sizes = sizesR.rows, samples = samplesR.rows;
-    const dimsR = sizes.length ? await pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id, sampling_mode, spec_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : { rows: [] };
     const dims = dimsR.rows;
-    if (dims.length) {
-      const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
-      const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version, uploaded_by: f.uploaded_by, uploader_kind: f.uploader_kind, uploaded_at: f.uploaded_at }); });
-      dims.forEach(d => { d.files = byDim[d.id] || []; });
-    }
+    { const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version, uploaded_by: f.uploaded_by, uploader_kind: f.uploader_kind, uploaded_at: f.uploaded_at }); });
+      dims.forEach(d => { d.files = byDim[d.id] || []; }); }
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     res.json({ sizes, samples, components: compsR.rows });
@@ -8046,7 +8045,8 @@ async function productSampleList(itemRef, opts) {
   const _fbNotes = opts.skipFeedbackNotes ? `'[]'::json feedback_notes` :
     `coalesce((SELECT json_agg(json_build_object('body',n.body,'at',to_char(n.created_at,'DD-Mon-YY HH24:MI')) ORDER BY n.created_at DESC)
       FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND (n.sample_id=ps.id OR n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %')),'[]'::json) feedback_notes`;
-  const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
+  // v27.878 (Ben, PRODUCT perf): samples + their photos + the product's Pantone notes in ONE round trip (was 3 sequential).
+  const [rowsR, phR, pnR] = await Promise.all([pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     coalesce(ps.short_code,'') short_code, ps.item_ref,
     coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),'') supplier,   -- v27.845 (Ben): the ONE supplier that submitted this sample (via its request). A sample belongs to exactly one supplier — never the product's whole supplier list.
@@ -8067,10 +8067,13 @@ async function productSampleList(itemRef, opts) {
     FROM planner.product_dev_samples ps
     WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product'
       AND ($2::text[] IS NULL OR lower(coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),''))=ANY($2))   -- v27.848 (Ben): optional supplier scope — the portal passes its own supplier(s) so a supplier never receives another's samples
-    ORDER BY ps.version`, [itemRef, _sampleScope(opts)])).rows;
+    ORDER BY ps.version`, [itemRef, _sampleScope(opts)]),
+    pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind, aspect FROM planner.portal_attachments WHERE category='product_sample' AND po IN (SELECT 'PSAMPLE-'||ps.id FROM planner.product_dev_samples ps WHERE ps.item_ref=$1) ORDER BY uploaded_at`, [itemRef]),
+    pool.query(`SELECT pantone FROM planner.supplier_notes WHERE po=$1 AND pantone IS NOT NULL AND pantone <> '[]'::jsonb`, [itemRef]).catch(() => ({ rows: [] })),
+  ]);
+  const rows = rowsR.rows;
   if (rows.length) {
-    const keys = rows.map(r => 'PSAMPLE-' + r.id);
-    const ph = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind, aspect FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
+    const ph = phR.rows;
     const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename, mime: p.mime, uploader_kind: p.uploader_kind, aspect: p.aspect || null }); });
     rows.forEach(r => { r.photos = byKey['PSAMPLE-' + r.id] || []; });
   }
@@ -8078,7 +8081,7 @@ async function productSampleList(itemRef, opts) {
   // renders the colour chip, not a bare "🎨 <code>". Codes + hexes come from THIS product's own feedback notes
   // (supplier_notes.pantone, stored at save), matched by the exact "🎨 <code>" token — same basis as the admin timeline.
   try {
-    const pn = (await pool.query(`SELECT pantone FROM planner.supplier_notes WHERE po=$1 AND pantone IS NOT NULL AND pantone <> '[]'::jsonb`, [itemRef])).rows;
+    const pn = pnR.rows;
     const panByCode = {}; pn.forEach(row => { (Array.isArray(row.pantone) ? row.pantone : []).forEach(p => { if (p && p.code && !panByCode[p.code]) panByCode[p.code] = p; }); });
     const allP = Object.values(panByCode);
     if (allP.length) rows.forEach(r => (r.aspect_feedback || []).forEach(af => {
