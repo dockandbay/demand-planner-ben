@@ -3521,7 +3521,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     var td=new Date(), ck=td.getFullYear()+'_'+('0'+(td.getMonth()+1)).slice(-2);
     var pd=(pj.key===ck)?td:new Date(pj.y,pj.m,1);
     var ar=new Date(pd.getTime()); ar.setDate(ar.getDate()+Math.round(l3*7));
-    var _f=function(d){return ('0'+d.getDate()).slice(-2)+'-'+MN[d.getMonth()]+'-'+String(d.getFullYear()).slice(2);};
+    var _f=function(d){ if(!d||isNaN(d.getTime()))return '—'; return ('0'+d.getDate()).slice(-2)+'-'+MN[d.getMonth()+1]+'-'+String(d.getFullYear()).slice(2);};   // v27.859 (Ben): BP's MN is 1-indexed (MN[1]=Jan), so index with getMonth()+1 — was off by one (and Jan → empty month)
     return 'place order '+_f(pd)+', arrives '+_f(ar)+(buyCalc[i]?('<br>———<br>'+buyCalc[i]):''); }
 
   // Buy FBA is NOT an independent buy. It is the FBA top-up portion of the 3PL buy made VISIBLE — the future
