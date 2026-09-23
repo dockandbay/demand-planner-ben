@@ -3072,7 +3072,7 @@
         var r=(typeof poBy!=='undefined'&&poBy[po])||{};
         var hzDate=s.push_req_delivery||r.delivery||r.checkin||'';   // v27.836 (Ben): compare against the EXACT date the push writes (est_delivery, computed server-side in grid-status) so the flag never flip-flops vs the grid's r.delivery
         var linesPending=(Number(s.fulfil_lines_pending)>0)||(s.in_fulfil && Number(s.fulfil_lines)!==Number(s.horizon_lines));
-        var datePending=!!(s.in_fulfil && s.fulfil_req_delivery && hzDate && _fdrift(s.fulfil_req_delivery,hzDate));
+        var datePending=!!(s.in_fulfil && hzDate && (!s.fulfil_req_delivery || _fdrift(s.fulfil_req_delivery,hzDate)));   // v27.840 (Ben): a BLANK Fulfil requested-delivery date while Horizon has one is itself a drift — must show "Update date", not "in sync"
         var estyle='cursor:pointer;border:none';
         var lineTip=s.in_fulfil?((Number(s.fulfil_lines_pending)||0)+' order-plan line(s) differ from Fulfil (qty)'):'not in Fulfil yet — pushing creates the PO';
         var dateTip='Fulfil delivery date '+esc(fd(s.fulfil_req_delivery))+' ≠ Horizon '+esc(fd(hzDate))+' (this PO’s delivery-to-warehouse date)';
@@ -3082,7 +3082,7 @@
         else if(s.in_fulfil) el.innerHTML='<span class="tool-badge bg-green" title="order-plan lines &amp; delivery date match Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'">✓ in sync</span>';
         else el.innerHTML='<button class="po-fpush tool-badge bg-blue" data-po="'+esc(po)+'" data-fup="lines" style="'+estyle+'" title="'+lineTip+'">Update lines</button>'; });
       document.querySelectorAll('#sup-grid .po-cin7[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; if(s&&s.cin7_not_required)el.innerHTML='<span class="mut tiny" title="marked not required in Cin7 (order plan)">n/a</span>'; });
-      document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ fulfilPushPO(b.dataset.po, b); }; });
+      document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ erpUploadInert(b.dataset.po, false, 'fulfil'); }; });   // v27.840 (Ben): open the same confirm/preview popup as the Order Plan tab instead of pushing straight away
     }).catch(function(){}); }
   function fulfilPushPO(po, btn){ var t=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
     fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines?erp=fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed: '+j.error); return; } fillErpFulfil(); }).catch(function(){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed'); }); }
@@ -3148,8 +3148,9 @@
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines'+_eq,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'+cin7TraceHtml(j.cin7_trace); return; }
         var _tc=(Number(j.total_cost)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ '+EN+' PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')
+        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ '+EN+' PO '+((j.mode==='created'||j.action==='create')?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')
           +'<div style="margin-top:4px;font-weight:700">TOTAL COST: '+esc(j.currency||'')+' '+_tc+' &nbsp;·&nbsp; TOTAL UNITS: '+units(j.total_units)+'</div>'
+          +(j.fulfil_url?'<div style="margin-top:6px"><a href="'+esc(j.fulfil_url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700;text-decoration:none">↗ Open '+EN+' PO '+esc(po)+'</a></div>':'')   // v27.840 (Ben): deep-link to the Fulfil PO after a push
           +cin7TraceHtml(j.cin7_trace);
         invalidateDerived(); delete cache['purchase-orders']; try{fillErpFulfil();}catch(e){}   // v27.777 (Ben): refresh ERP status SILENTLY — no full-section re-render; drift flags recompute on next natural render (cache cleared)
       }).catch(function(e){ msg.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; }); };

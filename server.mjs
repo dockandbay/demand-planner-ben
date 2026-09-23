@@ -2537,7 +2537,29 @@ const FULFIL_MAP = {
   incoterm: 'incoterm',                 // v27.764 (Ben): always FOB (selection value is uppercase 'FOB')
   reqShipDate: 'requested_shipping_date',   // v27.764 (Ben): = Horizon production end date
   reqDelivDate: 'requested_delivery_date',  // v27.764 (Ben): = Horizon estimated delivery-to-warehouse (landing) date — the ERP date-sync field
+  paymentTerm: 'payment_term',              // v27.840 (Ben): many2one → account.invoice.payment_term, set from the supplier's credit days
+  paymentTermModel: 'account.invoice.payment_term',
 };
+// v27.840 (Ben): payment term follows the supplier's confirmed credit days — 90→"Net 90", 60→"Net 60", 30→"Net 30",
+// anything else (0/blank/other) → "Immediate". Term ids differ per tenant (like currency/party), so resolve by NAME.
+function fulfilPaymentTermName(creditDays) {
+  const d = Number(creditDays);
+  if (d === 90) return 'Net 90';
+  if (d === 60) return 'Net 60';
+  if (d === 30) return 'Net 30';
+  return 'Immediate';
+}
+const _paymentTermCache = {};   // keyed `${env}:${name}` → id (or null)
+async function fulfilResolvePaymentTerm(creditDays) {
+  const name = fulfilPaymentTermName(creditDays);
+  const env = await activeFulfilEnv();
+  const key = env + ':' + name;
+  if (key in _paymentTermCache) return _paymentTermCache[key];
+  const r = await fulfilSearchOne(FULFIL_MAP.paymentTermModel, [['name', '=', name]], ['id', 'name']);
+  const id = r ? r.id : null;
+  _paymentTermCache[key] = id;
+  return id;
+}
 // v27.760 (Ben): the final destination goes on the metafield (mandatory) AND the PO comment (human-readable). One source of the wording.
 function fulfilFinalDestComment(branch) { return 'Destination 3PL after China Port: ' + String(branch || '').trim(); }
 // v27.778 (Ben): two Fulfil companies — Dock & Bay Ltd (UK business, company id 1) and Dock & Bay Pty Ltd (AU business,
@@ -2569,6 +2591,20 @@ async function fulfilFetchCfg(cfg, method, path, body) {
 async function fulfilFindPO(reference) {
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[[FULFIL_MAP.ref, '=', reference]], 0, 1, null, ['id', FULFIL_MAP.ref]]);
   return (Array.isArray(rows) && rows[0]) ? rows[0].id : null;
+}
+// v27.840 (Ben): a purchase.purchase is only line-editable in draft/quotation. To change lines on a CONFIRMED PO we must
+// revert it to draft, edit, then confirm again. Read the current workflow state so the push can decide.
+async function fulfilPOState(fulfilId) {
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'state']]);
+  return (Array.isArray(rows) && rows[0]) ? String(rows[0].state || '') : '';
+}
+// Trigger a Fulfil workflow button (draft / confirm / quote / …) on one PO via the v2 instance-method endpoint, then
+// verify the state actually moved to `expect` — Fulfil silently no-ops an out-of-sequence button, so we must read back.
+async function fulfilPOButton(fulfilId, button, expect) {
+  await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId + '/' + button, [[fulfilId]]);
+  const st = await fulfilPOState(fulfilId);
+  if (expect && st !== expect) { const e = new Error('Fulfil PO ' + fulfilId + ' did not move to "' + expect + '" after "' + button + '" (still "' + st + '")'); e.code = 'FULFIL_STATE'; throw e; }
+  return st;
 }
 // update the delivery date on an existing Fulfil PO (a date alone can't create a PO — absent → report missing)
 async function fulfilSyncDate(po, completion) {
@@ -2701,6 +2737,7 @@ async function fulfilPushLines(po, completion) {
       ) price
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po, supName])).rows;
   const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id,
+      credit_days,
       coalesce(address_1,'') address_1, coalesce(address_2,'') address_2, coalesce(city,'') city, coalesce(state,'') state, coalesce(country,'') country, coalesce(postcode,'') postcode
     FROM planner.suppliers WHERE name=$1`, [supName])).rows[0] || {};
   const curCode = supRow.c || 'USD';
@@ -2713,6 +2750,8 @@ async function fulfilPushLines(po, completion) {
   const storedPartyId = /^\d+$/.test(String(supRow.fulfil_id || '')) ? parseInt(supRow.fulfil_id, 10) : null;
   const partyId = storedPartyId || (await fulfilResolveParty(supName));
   const currencyId = await fulfilResolveCurrency(curCode);
+  const paymentTermName = fulfilPaymentTermName(supRow.credit_days);   // v27.840 (Ben): 90/60/30 credit days → Net 90/60/30, else Immediate
+  const paymentTermId = await fulfilResolvePaymentTerm(supRow.credit_days);
   // v27.754 (Ben): EVERY PO is received at CHINA PORT in Fulfil. The Horizon branch is the FINAL destination and goes on
   // the PO as the `final_destination` metafield (fulfilUpsertMetafield), not as the warehouse. Both resolved per env.
   const finalDestination = String(poRow.warehouse || '').trim();
@@ -2727,12 +2766,14 @@ async function fulfilPushLines(po, completion) {
     country_code: poRow.country_code || null, company_id: fulfilCompanyForCountry(poRow.country_code), company: fulfilCompanyName(fulfilCompanyForCountry(poRow.country_code)),
     branch: finalDestination, final_destination: finalDestination, final_destination_metafield: fdDef ? 'defined' : 'MISSING', final_destination_comment: fulfilFinalDestComment(finalDestination),
     incoterm: 'FOB', requested_shipping_date: poRow.prod_end || null, requested_delivery_date: poRow.est_delivery || null,
+    credit_days: (supRow.credit_days == null ? null : Number(supRow.credit_days)), payment_term: paymentTermName, payment_term_id: paymentTermId,   // v27.840 (Ben)
     warehouse_id: warehouseId, warehouse_source: warehouseId ? ('china-port(' + FULFIL_MAP.chinaPortCode + ')') : 'unresolved',
     invoice_address_id: existingAddr, invoice_address_source: existingAddr ? 'fulfil-party' : (partyId ? 'will-create-from-horizon' : 'no-party'),
     products_found: Object.keys(prodMap).length, products_total: lines.length, missing_skus: missingSkus };
   const problems = [];
   if (!fulfilId && !partyId) problems.push('supplier "' + supName + '" is not a party in Fulfil (create it / import suppliers first)');
   if (!currencyId) problems.push('currency ' + curCode + ' not found in Fulfil');
+  if (!paymentTermId) problems.push('payment term "' + paymentTermName + '" not found in Fulfil (define it under Financial ▸ Payment Terms)');
   if (!warehouseId) problems.push('Fulfil receiving warehouse "China Port" (code ' + FULFIL_MAP.chinaPortCode + ') not found in this tenant');
   if (!fdDef) problems.push('Fulfil metafield "' + FULFIL_MAP.finalDestMetafield + '" is not defined on purchase orders in this tenant — define it in Fulfil settings first');
   if (!finalDestination) problems.push('PO has no Horizon branch to write as the final destination');
@@ -2752,14 +2793,20 @@ async function fulfilPushLines(po, completion) {
     [FULFIL_MAP.incoterm]: 'FOB',                                     // v27.764 (Ben): always FOB
     [FULFIL_MAP.reqShipDate]: poRow.prod_end || null,                // v27.764: production end date
     [FULFIL_MAP.reqDelivDate]: poRow.est_delivery || null,           // v27.764: estimated delivery-to-warehouse (ERP date-sync field)
+    [FULFIL_MAP.paymentTerm]: paymentTermId || null,                 // v27.840 (Ben): supplier credit days → Net 90/60/30 else Immediate
     [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
 
   // v27.799 (review item 5): block real writes to LIVE Fulfil unless FULFIL_LIVE_WRITES=true. Sandbox is unaffected.
   const _activeEnv = await activeFulfilEnv();
   const _liveBlocked = _activeEnv === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true';
+  // v27.840 (Ben): carry the PO totals + a link to the Fulfil PO back to the client's push popup.
+  const _totUnits = lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
+  const _totCost = lines.reduce((a, l) => a + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
+  const _fCfg = fulfilConfigFor(_activeEnv);
+  const _fulfilUrl = (fid) => (fid && _fCfg.subdomain) ? ('https://' + _fCfg.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fid + '?window_name=default') : null;
   if (!FULFIL_LINES_SEND || _liveBlocked) {
-    return { ok: problems.length === 0, dry_run: true, live_blocked: _liveBlocked,
+    return { ok: problems.length === 0, dry_run: true, live_blocked: _liveBlocked, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId),
       note: _liveBlocked ? 'LIVE Fulfil writes are DISABLED (go-live safety gate) — set FULFIL_LIVE_WRITES=true to enable real ' + (fulfilId ? 'updates' : 'creates') + '. Payload below is what would be sent.'
         : (problems.length ? 'Not ready to push — resolve the issues below (usually: import the catalog/supplier into the Fulfil sandbox), then re-run.' : 'All references resolved. Set FULFIL_LINES_SEND=true to perform the real ' + (fulfilId ? 'update' : 'create') + '.'),
       action: fulfilId ? 'update' : 'create', fulfil_id: fulfilId, resolution, problems, would_send: headerPayload };
@@ -2770,20 +2817,30 @@ async function fulfilPushLines(po, completion) {
 
   if (fulfilId) {
     // UPDATE: replace the existing PO's lines and refresh the delivery date. (delete existing + create fresh)
+    // v27.840 (Ben): lines are only editable in draft/quotation. If the PO is CONFIRMED, revert it to draft first, apply
+    // the edit, then re-confirm — so a confirmed PO can still be reconciled from Horizon. States past confirmation
+    // (processing/done = goods in motion/received) are NOT auto-reverted; those must be handled in Fulfil by hand.
+    const _preState = await fulfilPOState(fulfilId);
+    let _reconfirm = false;
+    if (_preState === 'confirmed') { await fulfilPOButton(fulfilId, 'draft', 'draft'); _reconfirm = true; }
+    else if (_preState && _preState !== 'draft' && _preState !== 'quotation') {
+      const e = new Error('Fulfil PO is "' + _preState + '" — its lines can\'t be edited automatically. Revert it to draft in Fulfil, then push again.'); e.code = 'FULFIL_STATE_LOCKED'; throw e;
+    }
     const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
     const ids = (existing || []).map(r => r.id);
     if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
-    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: poRow.est_delivery || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates
+    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: poRow.est_delivery || null, [FULFIL_MAP.paymentTerm]: paymentTermId || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates + v27.840: payment term
     await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
+    if (_reconfirm) await fulfilPOButton(fulfilId, 'confirm', 'confirmed');   // v27.840 (Ben): restore the PO to confirmed after the edit
     try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
-    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution };
+    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null };
   }
   // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
   const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
   const newId = Array.isArray(created) ? (created[0] && (typeof created[0] === 'object' ? created[0].id : created[0])) : (created && created.id);
   await fulfilUpsertMetafield(newId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (definition pre-flighted above)
   try { await fulfilMirrorOne(newId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738
-  return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution };
+  return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(newId) };
 }
 // ── v27.738: Fulfil PO MIRROR (drift) — import Fulfil POs into planner.fulfil_purchase_orders (mig 282) ──
 function _fulfilNum(v) { if (v == null) return null; if (typeof v === 'object' && v.decimal != null) return Number(v.decimal); const n = Number(v); return Number.isFinite(n) ? n : null; }
