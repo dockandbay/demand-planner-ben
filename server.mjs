@@ -6960,7 +6960,9 @@ async function productItemPayload(ref, supplierScope) {
           AND ($2::text[] IS NULL OR lower(coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),''))=ANY($2))
         ORDER BY ps.dimension, ps.version`, [ref, _scope]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
-      pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
+      pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort,
+        coalesce((SELECT array_agg(DISTINCT rq.supplier_name) FROM planner.product_dev_request_components rc JOIN planner.product_dev_requests rq ON rq.id=rc.request_id WHERE rc.component_id=product_dev_components.id),'{}') req_suppliers
+        FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),   /* v27.871 (Ben): supplier(s) assigned to sample each component (via requests) → portal groups yours vs other suppliers */
     ]);
     const item = itemR.rows[0]; if (!item) return null; applyDerivedStage(item);   // v27.702 stage derived from requests
     const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n, components = compsR.rows;
@@ -7040,7 +7042,9 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
     const [sizesR, compsR, samplesR] = await Promise.all([
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
-      pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
+      pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort,
+        coalesce((SELECT array_agg(DISTINCT rq.supplier_name) FROM planner.product_dev_request_components rc JOIN planner.product_dev_requests rq ON rq.id=rc.request_id WHERE rc.component_id=product_dev_components.id),'{}') req_suppliers
+        FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),   /* v27.871 (Ben): supplier(s) assigned to sample each component (via requests) → portal groups yours vs other suppliers */
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
         coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),'') supplier,   -- v27.845 (Ben): the ONE supplier that submitted this sample (via request_id). Lets the portal hide other suppliers' samples.
