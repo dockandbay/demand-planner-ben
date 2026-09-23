@@ -2173,7 +2173,7 @@
               if(t==='timeline')ppProdTimeline(bd,ref); else if(t==='documents')ppProdDocs(bd,ref); else if(t==='master')ppProdMaster(bd,ref); else ppProdSamples(bd,ref); }
             box.querySelectorAll('.pd2-tab').forEach(function(b){ b.onclick=function(){ sel(b.dataset.t); }; }); sel('master'); }
           function ppProdMaster(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
-            fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;
+            fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;   // v27.848 (Ben): real portal → the supplier-scoped /api/portal/product-item; admin preview falls back to the admin endpoint (still filtered client-side)
               // v27.845 (Ben): a supplier must NEVER see another supplier's sample versions/shipments. Each sample carries its ONE supplier (server, via request_id). Scope to the current supplier; when no supplier context (admin, not previewing) show all.
               var _mySup=String(STATE.supplierName||'').trim().toLowerCase();
               var _samplesScoped=(d.samples||[]).filter(function(sm){ return !_mySup || String(sm.supplier||'').trim().toLowerCase()===_mySup; });

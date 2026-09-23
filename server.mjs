@@ -6928,9 +6928,11 @@ app.get('/api/product/dashboard', async (req, res) => {
     res.json(r.rows.map(applyDerivedStage));   // v27.702
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/product/item/:ref', async (req, res) => {
-  const ref = req.params.ref;
-  try {
+// v27.848 (Ben): shared item payload. supplierScope (array of supplier names) scopes the samples server-side so the
+// supplier portal never receives another supplier's sample versions/shipments; pass null for the full (admin) view.
+async function productItemPayload(ref, supplierScope) {
+  const _scope = (Array.isArray(supplierScope) && supplierScope.length) ? supplierScope.map(x => String(x).toLowerCase().trim()) : null;
+  {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
     const [itemR, sizesR, docsR, samplesR, unreadR, compsR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
@@ -6954,12 +6956,13 @@ app.get('/api/product/item/:ref', async (req, res) => {
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
         coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
           FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
-        FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
+        FROM planner.product_dev_samples ps WHERE ps.item_ref=$1
+          AND ($2::text[] IS NULL OR lower(coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),''))=ANY($2))
+        ORDER BY ps.dimension, ps.version`, [ref, _scope]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
     ]);
-    const item = itemR.rows[0]; if (item) applyDerivedStage(item);   // v27.702 stage derived from requests
-    if (!item) return res.status(404).json({ error: 'not found' });
+    const item = itemR.rows[0]; if (!item) return null; applyDerivedStage(item);   // v27.702 stage derived from requests
     const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n, components = compsR.rows;
     // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
     const [sfR, dimsR] = await Promise.all([
@@ -6975,8 +6978,19 @@ app.get('/api/product/item/:ref', async (req, res) => {
     }
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
-    res.json({ item, sizes, docs, samples, unread_supplier, components });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    return { item, sizes, docs, samples, unread_supplier, components };
+  }
+}
+app.get('/api/product/item/:ref', async (req, res) => {
+  try { const p = await productItemPayload(req.params.ref, null); if (!p) return res.status(404).json({ error: 'not found' }); res.json(p); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v27.848 (Ben): portal-scoped item — same shape, but samples are limited to the caller's own supplier(s) server-side.
+app.get('/api/portal/product-item/:ref', portalAuth, async (req, res) => {
+  const ref = decodeURIComponent(req.params.ref || '');
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); res.json(p); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
 app.get('/api/product/item/:ref/core', async (req, res) => {
@@ -8006,6 +8020,8 @@ app.post('/api/product/timeline-snippet/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_timeline_snippets WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
+// v27.848 (Ben): normalise an optional supplier scope for the samples query — array of names → lowercased array, else null (no scope).
+function _sampleScope(opts) { const s = opts && opts.supplierScope; return (Array.isArray(s) && s.length) ? s.map(x => String(x).toLowerCase().trim()) : null; }
 async function productSampleList(itemRef, opts) {
   opts = opts || {};
   // feedback_notes runs a supplier_notes body-LIKE scan per sample — heavy, and only the Samples tab uses it. The
@@ -8032,7 +8048,9 @@ async function productSampleList(itemRef, opts) {
       FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons,
     ${_fbNotes}
     FROM planner.product_dev_samples ps
-    WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
+    WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product'
+      AND ($2::text[] IS NULL OR lower(coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),''))=ANY($2))   -- v27.848 (Ben): optional supplier scope — the portal passes its own supplier(s) so a supplier never receives another's samples
+    ORDER BY ps.version`, [itemRef, _sampleScope(opts)])).rows;
   if (rows.length) {
     const keys = rows.map(r => 'PSAMPLE-' + r.id);
     const ph = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind, aspect FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
@@ -18248,7 +18266,7 @@ app.post('/api/portal/product-accept', portalAuth, async (req, res) => { const r
 // PORTAL product-sample versions (supplier-created, scoped to their assigned products)
 app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { res.json(await productSampleList(ref)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  try { res.json(await productSampleList(ref, { supplierScope: req.portal.suppliers })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });   // v27.848 (Ben): server-enforced — only THIS supplier's sample versions leave the server
 // v27.533: the components THIS supplier is responsible for on a product → the portal's "Aspects sampled" list. A component with
 // no supplier of its own belongs to the product's main supplier. Spec-linked components are not sampled, so they are left out.
 app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
