@@ -2122,7 +2122,7 @@
             var f=items.filter(function(p){ if(PORTAL_PROD_SEASON&&p.season!==PORTAL_PROD_SEASON)return false;
               if(PORTAL_PROD_STATUS==='dev_actions'){ if(!(p.status==='in_development' || Number(p.unread_dnb)>0 || Number(p.dev_unaccepted)>0))return false; }   // v27.761: not-yet-accepted is an open action
               else if(PORTAL_PROD_STATUS&&p.status!==PORTAL_PROD_STATUS)return false;
-              if(q){ var hay=((p.ref||'')+' '+(p.colour_name||'')+' '+(p.category||'')+' '+(p.supplier||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });
+              if(q){ var hay=((p.request_ref||'')+' '+(p.ref||'')+' '+(p.colour_name||'')+' '+(p.category||'')+' '+(p.supplier||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });
             var cnt=document.querySelector('.pp-prod-count'); if(cnt)cnt.textContent=f.length+' of '+items.length;
             if(!f.length){ host.innerHTML='<div class="count" style="padding:14px 2px;text-align:left">No items match these filters.</div>'; return; }
             // group by season (newest first) then category (A–Z), mirroring the admin PLAN grid
@@ -2138,8 +2138,8 @@
                 if(sKey!==_ppS){ _ppS=sKey; _ppC=null; hdr+='<tr class="ppp-grp"><td colspan="5">'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:var(--muted)">('+seasonCount[sKey]+')</span></td></tr>'; }
                 if(cKey!==_ppC){ _ppC=cKey; hdr+='<tr class="ppp-cathdr"><td colspan="5">'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:var(--faint)">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
                 return hdr+'<tr id="ppprow-'+i+'"><td><div style="display:flex;align-items:center;gap:8px">'+sw
-                    +'<button class="planbtn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">PLAN</button>'
-                    +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10.5px;color:var(--faint)">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
+                    +'<button class="planbtn pp-prod-open" data-ref="'+esc(p.request_ref||p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">PLAN</button>'
+                    +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.request_ref||p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10.5px;color:var(--faint)">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
                   +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
                   // detail renders in a row directly UNDER this product; pinned to the left edge + capped to the viewport so it stays usable while the table scrolls sideways on a phone
                   +'<tr class="ppp-detrow" id="ppdet-'+i+'" style="display:none"><td colspan="5" style="position:sticky;left:0;padding:0;background:#fff;box-shadow:none"><div class="pp-prod-det" style="text-align:left;max-width:96vw;box-sizing:border-box;padding:10px 6px 14px"></div></td></tr>'; }).join('')
@@ -2164,15 +2164,16 @@
               +'<button class="save-btn pp-prod-accept" data-ref="'+esc(ref)+'" style="margin-left:auto;background:var(--pos);color:#fff;border:0;font-weight:800;box-shadow:0 6px 16px -6px rgba(17,138,78,.55)">Accept development request</button></div>';   // v27.843 (Ben): green like the PO "Confirm order" button
             if(it.dev_accepted_at) return '<div class="pp-acc-bar" style="margin:0 0 10px;padding:8px 12px;border-radius:var(--r-sm,8px);background:var(--pos-bg);border:1px solid var(--pos-bd);font-size:12px;color:var(--pos);font-weight:600">✓ <span>Development request accepted</span> '+esc(it.dev_accepted_at)+(it.dev_accepted_by?' · '+esc(it.dev_accepted_by):'')+'</div>';
             return ''; }
-          function ppProdDetail(box, ref){ var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{}; var _un=Number(_it.unread_dnb)||0;
+          function ppProdDetail(box, ref){ var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.request_ref===ref;})[0]||((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{}; var _un=Number(_it.unread_dnb)||0;
+            var itemRef=_it.ref||ref;   // v27.861 (Ben): `ref` here is the development-REQUEST ref (SS27-…-BL) used for display/accept/URL; the data endpoints (item / samples / notes) are keyed by the ITEM ref inherited from the linked product
             var tabs=[['master','Master data'],['samples','Samples'],['documents','Documents'],['timeline','Timeline'+(_un?' <span class="ex-badge">'+_un+'</span>':'')]];
             box.innerHTML=ppProdAcceptBar(ref,_it)+'<div class="po-subnav pp-prod-nav">'+tabs.map(function(t,ti){return '<button class="rtab pd2-tab'+(ti===0?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
-            var _ab=box.querySelector('.pp-prod-accept'); if(_ab)_ab.onclick=function(){ if(!EP.productAccept){ppNotice('Not available in preview.');return;} _ab.disabled=true; postJSON(EP.productAccept,{ref:ref},function(j){ if(j&&j.error){ _ab.disabled=false; ppNotice(j.error); return; } _it.dev_unaccepted=0; _it.dev_accepted_at=(j&&j.accepted_at)||new Date().toISOString().slice(0,10); _it.dev_accepted_by=STATE.supplierName||''; try{ setProdBadge(); }catch(e){} ppNotice('Development request accepted','ok'); ppProdDetail(box, ref); try{ drawProdGrid(); }catch(e){} }); };   /* v27.843 (Ben): success toast = green, not the red error style */
+            var _ab=box.querySelector('.pp-prod-accept'); if(_ab)_ab.onclick=function(){ if(!EP.productAccept){ppNotice('Not available in preview.');return;} _ab.disabled=true; postJSON(EP.productAccept,{ref:itemRef},function(j){ if(j&&j.error){ _ab.disabled=false; ppNotice(j.error); return; } _it.dev_unaccepted=0; _it.dev_accepted_at=(j&&j.accepted_at)||new Date().toISOString().slice(0,10); _it.dev_accepted_by=STATE.supplierName||''; try{ setProdBadge(); }catch(e){} ppNotice('Development request accepted','ok'); ppProdDetail(box, ref); try{ drawProdGrid(); }catch(e){} }); };   /* v27.843 (Ben): success toast = green, not the red error style */
             var bd=box.querySelector('.pd2-body');
             function sel(t){ box.querySelectorAll('.pd2-tab').forEach(function(b){ b.classList.toggle('active',b.dataset.t===t); });
-              if(t==='timeline')ppProdTimeline(bd,ref); else if(t==='documents')ppProdDocs(bd,ref); else if(t==='master')ppProdMaster(bd,ref); else ppProdSamples(bd,ref); }
+              if(t==='timeline')ppProdTimeline(bd,itemRef); else if(t==='documents')ppProdDocs(bd,itemRef); else if(t==='master')ppProdMaster(bd,itemRef,ref); else ppProdSamples(bd,itemRef); }
             box.querySelectorAll('.pd2-tab').forEach(function(b){ b.onclick=function(){ sel(b.dataset.t); }; }); sel('master'); }
-          function ppProdMaster(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+          function ppProdMaster(box, ref, dispRef){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;   // v27.848 (Ben): real portal → the supplier-scoped /api/portal/product-item; admin preview falls back to the admin endpoint (still filtered client-side)
               // v27.845 (Ben): a supplier must NEVER see another supplier's sample versions/shipments. Each sample carries its ONE supplier (server, via request_id). Scope to the current supplier; when no supplier context (admin, not previewing) show all.
               var _mySup=String(STATE.supplierName||'').trim().toLowerCase();
@@ -2201,7 +2202,7 @@
               var _mswU=(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'');
               var sw=it.has_swatch?'<img class="pp-dimimg" data-src="'+_mswU+'" src="'+_mswU+'" title="click to enlarge" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in">':'';
               box.innerHTML='<div style="max-width:660px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
-                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))
+                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(dispRef||it.ref)+'</b>'+((dispRef&&dispRef!==it.ref)?' <span class="mut tiny">· product '+esc(it.ref)+'</span>':''))+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))
                 /* v27.749 (P5): Supplier / Recipient / Approval are per development REQUEST now (not the product) — shown on the request, dropped from the item master to avoid mixing another supplier's data */
                 +row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')
                 +'<div style="padding:10px 0 4px"><div style="color:var(--ink-soft);font-weight:700;font-size:12.5px;margin-bottom:7px">Size variants &amp; components</div>'+sizes+'</div></div>';

@@ -18204,17 +18204,21 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     }
     // PRODUCT (supplier-assigned) — only surfaced when this supplier is flagged for product development.
     const productEnabled = names.length ? (await q(`SELECT 1 FROM planner.suppliers WHERE name = ANY($1) AND include_product_dev LIMIT 1`, [names])).length > 0 : false;
+    // v27.861 (Ben): the portal product list is ONE ROW PER DEVELOPMENT REQUEST (not per product). Each row shows the
+    // request's own ref (e.g. SS27-TOWEL-CLASSICBLUE-BL) and inherits the product data from the linked item. `ref` stays
+    // the item ref so the data endpoints (product-item / notes / samples, all keyed by item ref) work unchanged.
     const products = (productEnabled && names.length) ? await q(`
-      SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.colour_name,'') colour_name,
-        coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,   -- v27.749 (P5): supplier derived from requests
+      SELECT r.ref request_ref, r.id request_id, i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.colour_name,'') colour_name,
+        r.supplier_name supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
-        (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb,
-        -- v27.761: development-request acceptance (whole-product grain, scoped to THIS supplier). dev_unaccepted>0 = open action.
-        (SELECT count(*)::int FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1) AND r.supplier_accepted_at IS NULL) dev_unaccepted,
-        to_char((SELECT max(r.supplier_accepted_at) FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)),'YYYY-MM-DD') dev_accepted_at,
-        coalesce((SELECT r.supplier_accepted_by FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1) AND r.supplier_accepted_at IS NOT NULL ORDER BY r.supplier_accepted_at DESC LIMIT 1),'') dev_accepted_by
-      FROM planner.product_dev_items i WHERE EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)) ORDER BY i.created_at DESC`, [names]) : [];   // v27.749 (P5): a development REQUEST grants portal visibility (item-level supplier column dropped)
+        (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL AND (n.supplier_id IS NULL OR n.supplier_id=r.supplier_id)) unread_dnb,
+        -- v27.761/861: acceptance is now per THIS request.
+        (CASE WHEN r.supplier_accepted_at IS NULL THEN 1 ELSE 0 END) dev_unaccepted,
+        to_char(r.supplier_accepted_at,'YYYY-MM-DD') dev_accepted_at,
+        coalesce(r.supplier_accepted_by,'') dev_accepted_by
+      FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id
+      WHERE r.supplier_name = ANY($1) ORDER BY i.created_at DESC, r.id`, [names]) : [];
     // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
     // powers the Documents list + the "submit for approval" workflow in the portal.
     const _pokeys = pos.map(p => p.po);
