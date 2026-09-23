@@ -10633,7 +10633,7 @@
   // or a bare 3-char Crockford code. Product/carton/inner barcodes are long numeric strings, so they never collide.
   function _sampleScanCode(v){ v=String(v||'').trim(); var m=/\/product\/scan\/([0-9A-Za-z]{3})(?:$|[/?#])/.exec(v); if(m)return m[1].toUpperCase(); if(/^[0-9A-Za-z]{3}$/.test(v)&&/[A-Za-z]/.test(v))return v.toUpperCase(); return null; }
   function _bscAutoRecv(){ try{ return localStorage.getItem('hzSampleAutoReceive')==='1'; }catch(e){ return false; } }
-  function openBarcodeScanner(){ closeBarcodeScanner(); var ph=isPhone();
+  function openBarcodeScanner(opts){ opts=opts||{}; closeBarcodeScanner(); var ph=isPhone();   // v27.842 (Ben): opts.onCode(code) → hand the scanned/typed code back to the caller (e.g. batch review) instead of the default SKU/sample lookup
     var ov=document.createElement('div'); ov.id='bsc-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200080;background:rgba(15,23,42,.55);display:flex;align-items:'+(ph?'stretch':'flex-start')+';justify-content:center;padding:'+(ph?'0':'40px 16px');
     ov.innerHTML='<div id="bsc-box" style="background:var(--card);border-radius:'+(ph?'0':'12px')+';width:'+(ph?'100%':'min(920px,100%)')+';max-height:'+(ph?'100%':'calc(100vh - 80px)')+';overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column">'
       +'<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card);z-index:2"><b style="font-size:14px">📷 Barcode scanner</b><span id="bsc-status" class="mut tiny"></span><button id="bsc-x" aria-label="Close" style="margin-left:auto;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--card);font-size:15px;cursor:pointer">✕</button></div>'
@@ -10673,7 +10673,9 @@
             +'<span>Inner barcode</span><b style="color:var(--ink);font-family:ui-monospace,Menlo,monospace">'+esc(bc.inner||'—')+'</b>'
           +'</div></div></div>'
         +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px"><div style="flex:1 1 220px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px">Prices</div>'+prices+'</div><div style="flex:2 1 300px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px">Inventory</div>'+inv+'</div></div>'; }
-    function lookup(code,quiet){ code=String(code||'').trim(); if(!code)return; var now=Date.now(); if(!quiet&&code===_bscState.last&&now-_bscState.lastAt<2500)return; _bscState.last=code; _bscState.lastAt=now;
+    function lookup(code,quiet){ code=String(code||'').trim(); if(!code)return;
+      if(opts.onCode){ var _oc=_sampleScanCode(code)||code; closeBarcodeScanner(); try{ opts.onCode(_oc); }catch(e){} return; }   // v27.842 (Ben): caller-supplied handler (batch review) — hand back the code, don't run the default lookup
+      var now=Date.now(); if(!quiet&&code===_bscState.last&&now-_bscState.lastAt<2500)return; _bscState.last=code; _bscState.lastAt=now;
       var _sc=_sampleScanCode(code); if(_sc){ var _ar=ov.querySelector('#bsc-autorecv'); closeBarcodeScanner(); hzScanCardOpen(_sc,{autoReceive:_ar?_ar.checked:_bscAutoRecv()}); return; }   // v27.748: a sample-card QR / short code opens the phone sample card (not a SKU lookup)
       status.textContent='looking up '+code+'…'; res.innerHTML='<div class="hz-skel"><i></i><i></i><i></i></div>';
       fetch('/api/supply/barcode-lookup?code='+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(d){
@@ -10703,7 +10705,10 @@
       if(hasDet){ var det; try{ det=new window.BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code']}); }catch(e){ det=new window.BarcodeDetector(); }
         var busy=false; _bscState.timer=setInterval(function(){ if(busy||!v.videoWidth)return; busy=true; det.detect(v).then(function(codes){ busy=false; if(codes&&codes.length){ var c=(codes[0].rawValue||'').trim(); if(c)lookup(c,false); } }).catch(function(){ busy=false; }); },320);
       } else { _bscQrLoop(v); }
-    }).catch(function(e){ cam.innerHTML='Camera not available ('+esc(e&&e.message||e)+'). Use a USB scanner or type the code below.'; });
+    }).catch(function(e){ var nm=(e&&(e.name||e.message))||''; var denied=/NotAllowed|Permission|denied/i.test(nm);   // v27.842 (Ben): clearer guidance when the browser/OS blocks the camera (common on Mac laptops)
+      cam.innerHTML=denied
+        ? '<div style="text-align:left;font-size:11.5px;line-height:1.6;padding:4px 2px">📷 <b>Camera blocked.</b> This site needs camera permission:<br>• Click the camera / lock icon in the address bar → allow the camera → reload.<br>• On a Mac also check <b>System Settings ▸ Privacy &amp; Security ▸ Camera</b> and enable your browser.<br><br>Or just use a <b>USB scanner</b> or type the code below — that always works.</div>'
+        : 'Camera not available ('+esc(e&&e.message||e)+'). Use a USB scanner or type the code below.'; });
   }
   // ── v27.746 (P4c) Phone SAMPLE CARD (Ben) — opened by scanning a sample-card QR or typing its short code.
   // Mobile-first full-screen: clear swatch, identity, "Mark received", per-component decision + feedback + reject
@@ -11083,7 +11088,7 @@
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
       var _prodSubs={plan:1,products:1,sampling:1,batch:1,dashboard:1,range:1,specs:1,reports:1,config:1};   // v27.704 sampling; v27.711 'products' = URL slug of the PRODUCTS tab
-      if(seg[1]==='products')seg[1]='plan';   // v27.711: #/product/products → the PRODUCTS tab (internal key 'plan'; old #/product/plan still works)
+      if(seg[1]==='products'){ if(seg[2]){ _pendingProdRef=decodeURIComponent(seg[2]); if(seg[3])_pendingProdTab=decodeURIComponent(seg[3]); } seg[1]='plan'; }   // v27.711: #/product/products → the PRODUCTS tab (internal key 'plan'); v27.842 (Ben): #/product/products/<ref>[/<tab>] is now the canonical product deep link
       if(seg[1]==='scan'&&seg[2]){ selectProductSub('sampling'); hzScanCardOpen(decodeURIComponent(seg[2])); }   // v27.746 (P4c): #/product/scan/<code> → the phone sample card (QR / typed short code)
       else if(seg[1]&&!_prodSubs[seg[1]]){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
       else if(seg[1]==='config'&&seg[2]){ try{_prodCfgTab=decodeURIComponent(seg[2]);}catch(e){} selectProductSub('config'); }   // #/product/config/<season|cats|tags|phrases>
@@ -12037,7 +12042,7 @@
         w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);renderLines();};});
         w.querySelectorAll('.sf-lgo').forEach(function(x){x.onclick=function(){ var r=x.dataset.ref; if(!r)return;
           try{ _pendingProdRef=r; try{_pendingProdTab=null;}catch(_e){} selectProductSub('plan'); }   // open the product-development item directly (mirrors the #/product/<ref> router)
-          catch(e){ location.hash='#/product/'+encodeURIComponent(r); } };}); }
+          catch(e){ location.hash='#/product/products/'+encodeURIComponent(r); } };}); }
       renderLines();
       // Supplier picker — searchable dropdown (type to filter the supplier list; click to assign). Fills .sf-supplier,
       // which also scopes the SKU search below.
@@ -12156,7 +12161,7 @@
         w.querySelectorAll('.sl-sku').forEach(function(x){x.onchange=function(){slines[x.dataset.k].sku=x.value;saveSlines();};});
         w.querySelectorAll('.sl-qty').forEach(function(x){x.onchange=function(){slines[x.dataset.k].qty=x.value;saveSlines();};});
         w.querySelectorAll('.sl-rm').forEach(function(x){x.onclick=function(){slines.splice(x.dataset.k,1);renderSlines();saveSlines();};});
-        w.querySelectorAll('.sl-go').forEach(function(x){x.onclick=function(){ var r=x.dataset.ref; if(!r)return; try{ _pendingProdRef=r; try{_pendingProdTab=null;}catch(_e){} selectProductSub('plan'); }catch(e){ location.hash='#/product/'+encodeURIComponent(r); } };}); }
+        w.querySelectorAll('.sl-go').forEach(function(x){x.onclick=function(){ var r=x.dataset.ref; if(!r)return; try{ _pendingProdRef=r; try{_pendingProdTab=null;}catch(_e){} selectProductSub('plan'); }catch(e){ location.hash='#/product/products/'+encodeURIComponent(r); } };}); }
       function paint(){
         var charges=(d.charges||[]).map(function(ch){ var tot=(Number(ch.freight_cost)||0)+(Number(ch.product_cost)||0);
           return '<tr><td class="l">'+sampleChargeChip(ch.status)+'</td><td class="l">'+money(ch.freight_cost)+'</td><td class="l">'+money(ch.product_cost)+'</td><td class="l"><b>'+money(tot)+'</b></td><td class="l">'+esc(ch.description||'')+'</td><td class="l">'+(ch.status==='pending'?'<button class="save-btn samp-charge-acc" data-id="'+ch.id+'" style="background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">Accept → Other Payments</button> <button class="save-btn light samp-charge-rej" data-id="'+ch.id+'">Reject</button>':(ch.status==='rejected'?'<a class="lnk-btn samp-charge-unrej" data-id="'+ch.id+'" style="color:var(--blue);cursor:pointer;text-decoration:underline;font-size:11px" title="put back to pending so it can be accepted">↺ un-reject</a>':''))+'</td></tr>'; }).join('')||'<tr><td colspan="6" class="mut">no charges</td></tr>';
@@ -13705,8 +13710,9 @@
   function _smpManualOwner(r){ var o=r&&r.action_owner; return (o==='db'||o==='supplier'||o==='none')?o:null; }
   function effAction(r){ return _smpManualOwner(r)||deriveAction(r); }
   function smpActBadge(r){ var ea=effAction(r), manual=!!_smpManualOwner(r);
-    var m={db:['▸ With D&B','var(--blue)','#fff'],supplier:['▸ With supplier','var(--amber)','#7c2d12'],none:['— No action','var(--line)','var(--muted)']}[ea], solid=ea!=='none';
-    return '<button class="smp-actbadge" data-rid="'+r.id+'" title="Action owner: '+(manual?'set manually':'auto-derived')+' — click to change (D&B → Supplier → No action → Auto)" '
+    // v27.842 (Ben): lowercase "with"/"no action"; "with supplier" = brighter orange on white text (was brown on amber).
+    var m={db:['▸ with D&B','var(--blue)','#fff'],supplier:['▸ with supplier','#f97316','#fff'],none:['— no action','var(--line)','var(--muted)']}[ea], solid=ea!=='none';
+    return '<button class="smp-actbadge" data-rid="'+r.id+'" title="Action owner: '+(manual?'set manually':'auto-derived')+' — click to choose who it sits with" '
       +'style="font-size:10px;font-weight:700;border:1px solid '+(solid?m[1]:'var(--line)')+';background:'+(solid?m[1]:'transparent')+';color:'+m[2]+';border-radius:10px;padding:1px 8px;cursor:pointer;line-height:1.6;white-space:nowrap">'
       +m[0]+(manual?'':' <span style="opacity:.55;font-weight:600">auto</span>')+'</button>'; }
   // v27.820 (Ben): mobile SAMPLING card — one card per development request (approved artifact). Reuses the grid's action
@@ -13751,14 +13757,16 @@
       var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category'); var me=((window.ME&&ME.email)||'').toLowerCase();
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };
       var fb=c.querySelector('#smp-filters');
+      var _grpNav=(_smpGroupMode==='tabs'||_smpGroupMode==='tree');   // v27.842 (Ben): in season-tab / season-type-tree layouts the Season+Category are chosen by the tabs/tree nav, so drop those two dropdowns from the toolbar
+      if(_grpNav){ _smpFilt.season=''; _smpFilt.category=''; }   // clear any stale season/category filter — otherwise it silently over-filters the tabs/tree view with no dropdown to reset it
       fb.innerHTML=smpViewPills()+'<span class="smp-qwrap" style="position:relative;display:inline-block"><input class="fci" id="smp-q" value="'+esc(_smpFilt.q)+'" placeholder="🔍 product / request / supplier / code…" style="width:220px;max-width:66vw;text-align:left;padding-right:36px">'
         +'<button id="smp-scan" class="smp-qscan" title="Scan a sample-card QR / barcode, or just type the 3-char code above" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;cursor:pointer;padding:3px 5px;line-height:0;color:var(--muted);display:inline-flex;align-items:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5V5.5A1.5 1.5 0 0 1 5.5 4H7.5"/><path d="M16.5 4h2A1.5 1.5 0 0 1 20 5.5v2"/><path d="M20 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-2"/><path d="M7.5 20h-2A1.5 1.5 0 0 1 4 18.5v-2"/><path d="M7.5 8.5v7M10.5 8.5v7M13.5 8.5v7M16.5 8.5v7" stroke-width="1.5"/></svg></button></span>'   /* v27.823 (Ben): professional barcode-scanner icon (was 📷) */
         +'<button class="save-btn smp-filt-toggle" id="smp-filt-toggle" title="Show / hide filters">⚙ Filters</button>'   /* v27.822 (Ben): phone — all filters behind a button, like the SUPPLY grids */
         +'<span class="smp-filtgrp">'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Supplier</span><select class="fci" id="smp-sup" style="'+selDark(_smpFilt.supplier)+'"><option value="">All</option>'+sups.map(function(s){return '<option'+(s===_smpFilt.supplier?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Stage</span><select class="fci" id="smp-stage" style="'+selDark(_smpFilt.stage)+'"><option value="">All</option>'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===_smpFilt.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></span>'
-        +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Season</span><select class="fci" id="smp-season" style="'+selDark(_smpFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option'+(s===_smpFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
-        +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Category</span><select class="fci" id="smp-cat" style="'+selDark(_smpFilt.category)+'"><option value="">All</option>'+cats.map(function(s){return '<option'+(s===_smpFilt.category?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
+        +(_grpNav?'':'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Season</span><select class="fci" id="smp-season" style="'+selDark(_smpFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option'+(s===_smpFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>')
+        +(_grpNav?'':'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Category</span><select class="fci" id="smp-cat" style="'+selDark(_smpFilt.category)+'"><option value="">All</option>'+cats.map(function(s){return '<option'+(s===_smpFilt.category?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>')
         +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="smp-mine"'+(_smpFilt.mine?' checked':'')+'> Mine</label>'
         +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer" title="a submitted sample not yet received, or nothing moved for 14+ days"><input type="checkbox" id="smp-overdue"'+(_smpFilt.overdue?' checked':'')+'> Overdue</label>'
         +'<span class="smp-actfilt" title="Whose court the ball is in — D&B to review / Supplier to resample / no action needed" style="display:inline-flex;gap:4px;align-items:center">'+[['','All'],['db','With D&B'],['supplier','With supplier'],['none','No action']].map(function(o){ var on=_smpFilt.action===o[0]; return '<button class="smp-actpill" data-a="'+o[0]+'" style="font-size:11px;padding:3px 9px;border-radius:12px;border:1px solid var(--line);cursor:pointer;background:'+(on?'var(--nav)':'var(--card)')+';color:'+(on?'#fff':'var(--ink)')+'">'+o[1]+'</button>'; }).join('')+'</span>'   /* v27.815 (Ben): action-owner filter pills */
@@ -13888,9 +13896,23 @@
         g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ try{ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }catch(err){ try{ alert('Could not open this product: '+(err&&err.message||err)); }catch(_){} } }; });   // v27.821: surface any error instead of failing silently (mobile)
         function _smpScrollPanel(rid){ if(!isMob)return; var mx=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mx)setTimeout(function(){ try{ mx.scrollIntoView({block:'start',behavior:'smooth'}); }catch(_){} },60); }   // v27.821 (Ben): the MANAGE panel opens below the card — bring it into view on mobile
         g.querySelectorAll('.smp-manage').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var r=f.filter(function(x){return String(x.id)===b.dataset.rid;})[0]; if(!r)return; try{ smpManage(b.closest('tr'), r, ths.length); _smpScrollPanel(r.id); }catch(err){ try{ alert('Could not open Manage: '+(err&&err.message||err)); }catch(_){} } }; });   // v27.730: MANAGE → inline tabbed panel; v27.821: mobile scroll-to + error surface
-        g.querySelectorAll('.smp-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var rid=b.dataset.rid, r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return;   // v27.815 (Ben): cycle action owner — auto → D&B → Supplier → No action → auto
-          var cur=_smpManualOwner(r), next=cur==null?'db':cur==='db'?'supplier':cur==='supplier'?'none':'';
-          shipPost('/api/product/request/'+rid,{action_owner:next},function(j){ if(j&&j.error){alert(j.error);return;} r.action_owner=next||null; draw(); }); }; });
+        g.querySelectorAll('.smp-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var rid=b.dataset.rid, r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return;   // v27.842 (Ben): click opens an options picker (was an auto-cycle) so you choose the owner directly
+          var cur=_smpManualOwner(r)||'';   // '' = auto (derive from stage)
+          var opts=[['','Auto (from stage)'],['db','with D&B'],['supplier','with supplier'],['none','no action']];
+          var old=document.getElementById('smp-actmenu'); if(old)old.remove();
+          var menu=document.createElement('div'); menu.id='smp-actmenu';
+          menu.style.cssText='position:fixed;z-index:100050;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:4px;min-width:200px;font-size:12px';
+          menu.innerHTML=opts.map(function(o){ var on=(o[0]===cur); return '<div class="smp-actopt" data-v="'+o[0]+'" style="padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:7px;'+(on?'background:var(--hover);font-weight:700':'')+'"><span style="width:11px;display:inline-block;color:var(--pos)">'+(on?'✓':'')+'</span>'+esc(o[1])+'</div>'; }).join('');
+          document.body.appendChild(menu);
+          var rc=b.getBoundingClientRect(), mh=menu.offsetHeight, mw=menu.offsetWidth;
+          var top=rc.bottom+4; if(top+mh>innerHeight)top=Math.max(4,rc.top-mh-4);
+          var left=rc.left; if(left+mw>innerWidth)left=Math.max(6,innerWidth-mw-6);
+          menu.style.top=top+'px'; menu.style.left=left+'px';
+          var closeMenu=function(){ try{menu.remove();}catch(_){} document.removeEventListener('mousedown',onDoc,true); };
+          var onDoc=function(ev){ if(!menu.contains(ev.target))closeMenu(); };
+          setTimeout(function(){ document.addEventListener('mousedown',onDoc,true); },0);
+          menu.querySelectorAll('.smp-actopt').forEach(function(op){ op.onclick=function(){ var next=op.dataset.v; closeMenu();
+            shipPost('/api/product/request/'+rid,{action_owner:next},function(j){ if(j&&j.error){alert(j.error);return;} r.action_owner=next||null; draw(); }); }; }); }; });
         g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
           var ex=g.querySelector('tr.smp-tlexp'); if(ex){ var same=ex.getAttribute('data-ref')===ref; ex.remove(); if(same)return; }
           var exp=document.createElement('tr'); exp.className='smp-tlexp'; exp.setAttribute('data-ref',ref);
@@ -14045,7 +14067,7 @@
     }).catch(function(e){ c.querySelector('#smp-grid').innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProductBatchReview(c){
     c.innerHTML='<div class="sect-h">Sample batch review <span class="mut tiny">— pick a sample shipment; every development sample on it with feedback, tags, reasons and sign-off in one place</span></div>'
-      +'<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny" style="color:var(--blue);font-weight:700">Sample shipment</label><span style="position:relative;display:inline-block;width:340px;max-width:100%"><input class="fci pbr-srbox" id="pbr-sr" autocomplete="off" placeholder="search SR / supplier / recipient / tracking / QR code…" style="width:100%;box-sizing:border-box;text-align:left;background:#eaf2fb;border-color:#9ec5ec;color:var(--blue-ink);font-weight:600"><div id="pbr-menu" style="display:none;position:absolute;top:100%;left:0;z-index:80;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto;width:100%;box-shadow:0 10px 26px rgba(15,23,42,.16)"></div></span><span id="pbr-meta" style="font-size:12px"></span><label class="tiny mut" style="margin-left:6px">Filter</label><input class="fci" id="pbr-fq" autocomplete="off" placeholder="product type / reference / colour way…" style="width:260px;max-width:100%;box-sizing:border-box;text-align:left"><span id="pbr-fqn" class="mut tiny"></span></div><div id="pbr-body"></div>';
+      +'<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny" style="color:var(--blue);font-weight:700">Sample shipment</label><span style="position:relative;display:inline-block;width:340px;max-width:100%"><input class="fci pbr-srbox" id="pbr-sr" autocomplete="off" placeholder="search SR / supplier / recipient / tracking / QR code…" style="width:100%;box-sizing:border-box;text-align:left;padding-right:36px;background:#eaf2fb;border-color:#9ec5ec;color:var(--blue-ink);font-weight:600"><button id="pbr-scan" type="button" title="Scan a sample-card QR / barcode to jump to its batch" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;cursor:pointer;padding:3px 5px;line-height:0;color:var(--blue-ink);display:inline-flex;align-items:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5V5.5A1.5 1.5 0 0 1 5.5 4H7.5"/><path d="M16.5 4h2A1.5 1.5 0 0 1 20 5.5v2"/><path d="M20 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-2"/><path d="M7.5 20h-2A1.5 1.5 0 0 1 4 18.5v-2"/><path d="M7.5 8.5v7M10.5 8.5v7M13.5 8.5v7M16.5 8.5v7" stroke-width="1.5"/></svg></button><div id="pbr-menu" style="display:none;position:absolute;top:100%;left:0;z-index:80;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto;width:100%;box-shadow:0 10px 26px rgba(15,23,42,.16)"></div></span><span id="pbr-meta" style="font-size:12px"></span><label class="tiny mut" style="margin-left:6px">Filter</label><input class="fci" id="pbr-fq" autocomplete="off" placeholder="product type / reference / colour way…" style="width:260px;max-width:100%;box-sizing:border-box;text-align:left"><span id="pbr-fqn" class="mut tiny"></span></div><div id="pbr-body"></div>';
     var sel=c.querySelector('#pbr-sr'), menu=c.querySelector('#pbr-menu'), body=c.querySelector('#pbr-body'), meta=c.querySelector('#pbr-meta'), fq=c.querySelector('#pbr-fq'), fqn=c.querySelector('#pbr-fqn'), LIST=[], _pi=-1, _cur=null, _last=null, _fqT=null;
     fq.oninput=function(){ clearTimeout(_fqT); _fqT=setTimeout(function(){ if(_last)paint(_last[0],_last[1],_last[2]); },160); };   // v27.568: client-side filter over the loaded shipment
     _pbrRefresh=function(){ if(!document.body.contains(body)){ _pbrRefresh=null; return; } if(_batchSR)load(_batchSR,true); };   // v27.568: drawer close → re-pull (edits in the drawer's Samples tab land here)
@@ -14061,6 +14083,13 @@
     sel.onfocus=function(){ if(_cur)sel.select(); draw(); }; sel.oninput=function(){ _pi=0; draw(); };
     sel.onkeydown=function(e){ var rows=menu._rows||[]; if(e.key==='ArrowDown'){ e.preventDefault(); _pi=Math.min(rows.length-1,_pi+1); draw(); } else if(e.key==='ArrowUp'){ e.preventDefault(); _pi=Math.max(0,_pi-1); draw(); } else if(e.key==='Enter'){ e.preventDefault(); if(rows[_pi])pick(rows[_pi]); } else if(e.key==='Escape'){ menu.style.display='none'; if(_cur)sel.value=lab(_cur); } };
     sel.onblur=function(){ setTimeout(function(){ menu.style.display='none'; if(_cur)sel.value=lab(_cur); else sel.value=''; },160); };
+    // v27.842 (Ben): scan a sample-card QR / barcode → jump straight to the batch (sample shipment) that sample is on.
+    var _pbrScan=c.querySelector('#pbr-scan'); if(_pbrScan)_pbrScan.onclick=function(){ if(typeof openBarcodeScanner!=='function'){ alert('Scanner unavailable in this view'); return; }
+      openBarcodeScanner({onCode:function(code){ var sc=String(code||'').trim().toUpperCase(); if(!sc)return;
+        var hit=LIST.filter(function(x){ return (' '+String(x.codes||'').toUpperCase()+' ').indexOf(' '+sc+' ')>=0; })[0];
+        if(hit){ pick(hit); if(meta)meta.innerHTML='<span style="color:var(--pos);font-weight:700;margin-left:6px">✓ '+esc(sc)+' → '+esc(hit.ref)+'</span>'; }
+        else { sel.value=sc; try{sel.focus();}catch(e){} draw(); if(meta)meta.innerHTML='<span style="color:var(--amber);font-weight:700;margin-left:6px">'+esc(sc)+' isn’t on a sample shipment carrying development samples.</span>'; }
+      }}); };
     fetch('/api/product/batch-review-list').then(function(r){return r.json();}).then(function(list){ LIST=(Array.isArray(list)?list:[]).slice().sort(function(a,b){ return (Number(b.id)||0)-(Number(a.id)||0); });   // v27.557: only shipments carrying development samples
       var want=_batchSR||(function(){ try{ return localStorage.getItem('hzBatchSR'); }catch(e){ return null; } })(); var hit=want?LIST.filter(function(x){ return String(x.id)===String(want); })[0]:null; if(hit)pick(hit);
     }).catch(function(){ sel.placeholder='could not load shipments'; });
@@ -14811,7 +14840,7 @@
           : '<div class="count" style="padding:20px 2px;color:var(--muted)">Nothing in the waiting room yet. Push a size’s working SKU from a product’s <b>Sizes</b> grid.</div>');
       c.querySelectorAll('.pim-inpim').forEach(function(b){ b.onclick=function(){ shipPost('/api/product/pim-waiting-room/'+b.dataset.id+'/status',{status:'in_pim'},function(j){ if(j&&j.error){alert(j.error);return;} renderPimWaitingRoom(c); }); }; });
       c.querySelectorAll('.pim-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this from the waiting room?'))return; shipPost('/api/product/pim-waiting-room/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} renderPimWaitingRoom(c); }); }; });
-      c.querySelectorAll('.pim-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); var ref=a.dataset.ref; if(ref)location.hash='#/product/'+encodeURIComponent(ref); }; });   // v27.812 (Ben): open the product detail
+      c.querySelectorAll('.pim-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); var ref=a.dataset.ref; if(ref)location.hash='#/product/products/'+encodeURIComponent(ref); }; });   // v27.812 (Ben): open the product detail
     }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+(e&&e.message||e)+'</div>'; });
   }
   function renderProductReports(c){ c.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>';
@@ -14898,7 +14927,7 @@
       function selCount(){ return host.querySelectorAll('.pwb-ck:checked').length; }
       function sync(){ var n=selCount(); dlBtn.disabled=!n; dlBtn.textContent='⬇ Download selected'+(n?(' ('+n+')'):''); }
       grid.addEventListener('change',function(e){ if(e.target&&e.target.classList.contains('pwb-ck')){ var cell=e.target.closest('.pwb-cell'); if(cell)cell.style.borderColor=e.target.checked?'var(--blue)':'var(--line)'; sync(); } });
-      grid.querySelectorAll('.pwb-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); e.stopPropagation(); var ref=a.dataset.ref; if(ref)location.hash='#/product/'+encodeURIComponent(ref); }; });   // v27.809 (Ben): open the assigned product (its detail drawer)
+      grid.querySelectorAll('.pwb-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); e.stopPropagation(); var ref=a.dataset.ref; if(ref)location.hash='#/product/products/'+encodeURIComponent(ref); }; });   // v27.809 (Ben): open the assigned product (its detail drawer)
       grid.querySelectorAll('.pwb-use').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); e.stopPropagation(); var bc=a.dataset.bc, used=a.dataset.used==='1'; a.textContent='…';   // v27.837 (Ben): mark a free barcode used / release a used one
         shipPost('/api/product/workshop-barcode/'+encodeURIComponent(bc)+'/used',{used:used},function(j){ if(j&&j.error)alert(j.error); renderWorkshopBarcodes(b); }); }; });
       function applyPwbHide(){ host.querySelectorAll('.pwb-cell').forEach(function(c){ c.style.display=(_pwbHideUsed && c.dataset.status!=='free')?'none':''; }); }   // v27.837 (Ben): Hide used → only free barcodes
@@ -15052,11 +15081,16 @@
       _prodRows=rows;
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       var cats=[]; rows.forEach(function(r){ if(r.category&&cats.indexOf(r.category)<0)cats.push(r.category); }); cats.sort();
-      var sups=[]; rows.forEach(function(r){ (r.requests||[]).forEach(function(q){ if(q.supplier_name&&sups.indexOf(q.supplier_name)<0)sups.push(q.supplier_name); }); if(r.supplier&&sups.indexOf(r.supplier)<0)sups.push(r.supplier); }); sups.sort();   // v27.703: suppliers come from the development REQUESTS (legacy item supplier kept for old rows)
+      // v27.842 (Ben): dropdown lists ONLY the individual suppliers actually linked to a product for SAMPLING (from the
+      // development requests). The legacy per-item r.supplier is no longer added — that field carried merged/combined
+      // values that polluted the list. Filtering (below) still shows every product linked to the chosen supplier.
+      var sups=[]; rows.forEach(function(r){ (r.requests||[]).forEach(function(q){ if(q.supplier_name&&sups.indexOf(q.supplier_name)<0)sups.push(q.supplier_name); }); }); sups.sort();
       if(_prodFilt.supplier && sups.indexOf(_prodFilt.supplier)<0)_prodFilt.supplier='';   // clear a stale supplier filter if it no longer has any products
       var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
+      var _grpNav=(_smpGroupMode==='tabs'||_smpGroupMode==='tree');   // v27.842 (Ben): season-tab / season-type-tree layouts pick the type via the tabs/tree nav, so drop the Category dropdown
+      if(_grpNav)_prodFilt.category='';   // clear any stale category filter so it can't silently over-filter the tabs/tree view
       fb.innerHTML='<button class="save-btn" id="pg-new" style="font-weight:700;background:var(--blue);color:#fff;border-color:var(--blue)">+ NEW</button>'   // v27.805 (Ben): always-visible, first, out of the collapsible Filters panel; v27.830: blue fill like the SAMPLING "New" button
         +'<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="🔍 search ref / colour / supplier…" style="width:190px;text-align:left">'
         +'<button class="save-btn pg-filt-toggle" id="pg-filt-toggle" type="button">⚙ Filters</button>'   // phone only (v27.488): the selects collapse behind this
@@ -15064,7 +15098,7 @@
         +hzProdViewSel('plan')   // v27.703: Grid / Range plan / Dashboard are one page (Ben)
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Type</span><select class="fci" id="pg-type" style="'+selDark(_prodFilt.type)+'"><option value="Product Development"'+(_prodFilt.type==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_prodFilt.type==='Custom Order'?' selected':'')+'>Custom Order</option><option value=""'+(_prodFilt.type===''?' selected':'')+'>All</option></select></span>'
         /* v27.775 (Ben): Season filter removed — the season tabs / grouping cover it */
-        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>'
+        +(_grpNav?'':'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>')
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Supplier</span><select class="fci" id="pg-supplier" style="'+selDark(_prodFilt.supplier)+'"><option value="">All</option>'+sups.map(function(sp){return '<option value="'+esc(sp)+'"'+(sp===_prodFilt.supplier?' selected':'')+'>'+esc(sp)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Status</span><select class="fci" id="pg-status" style="'+selDark(_prodFilt.status)+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
         +'<span id="pg-count" style="color:var(--faint);font-size:11px"></span>'
@@ -15092,7 +15126,7 @@
           if(_prodFilt.type && (r.type||'Product Development')!==_prodFilt.type)return false;
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
           if(_prodFilt.category && r.category!==_prodFilt.category)return false;
-          if(_prodFilt.supplier && r.supplier!==_prodFilt.supplier && !(r.requests||[]).some(function(x){return x.supplier_name===_prodFilt.supplier;}))return false;   // v27.703 requests carry the suppliers
+          if(_prodFilt.supplier && !(r.requests||[]).some(function(x){return x.supplier_name===_prodFilt.supplier;}))return false;   // v27.842 (Ben): match products LINKED to this supplier for sampling (via a development request), not the legacy per-item supplier
           if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.requests||[]).map(function(x){return x.supplier_name+' '+x.supplier_code+' '+x.ref;}).join(' ')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
           return true; };
         var base=rows.filter(_passBase);
@@ -15275,7 +15309,7 @@
       var _pgDark=function(el){ el.setAttribute('style','text-align:left'+(el.value?';background:var(--nav);color:#fff;font-weight:600':'')); };
       document.getElementById('pg-type').onchange=function(){ _prodFilt.type=this.value; _pgDark(this); draw(); };
       _prodFilt.season='';   // v27.775 (Ben): Season filter removed — the season tabs / grouping cover it
-      document.getElementById('pg-cat').onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };
+      var _pgCat=document.getElementById('pg-cat'); if(_pgCat)_pgCat.onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };   // v27.842 (Ben): null-guard — Category dropdown is absent in tabs/tree layout
       var _pgSup=document.getElementById('pg-supplier'); if(_pgSup)_pgSup.onchange=function(){ _prodFilt.supplier=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _prodFilt.stage=''; _pgDark(this); draw(); };   // choosing a Status clears any active stage pill
       document.getElementById('pg-q').oninput=debounce(function(){ _prodFilt.q=this.value; draw(); },250);   // debounce: don't re-filter+re-render the whole grid on every keystroke
@@ -15314,7 +15348,7 @@
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
   function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box; _prodSeed=seed||null;
-    try{ if(!_prodDrawerOpen) writeHash(_prodDetailTab&&_prodDetailTab!=='master'?['product',ref,_prodDetailTab]:['product',ref]); }catch(e){}   // drawer keeps the current (range/dashboard) hash
+    try{ if(!_prodDrawerOpen) writeHash(_prodDetailTab&&_prodDetailTab!=='master'?['product','products',ref,_prodDetailTab]:['product','products',ref]); }catch(e){}   // v27.842 (Ben): canonical deep link is /product/products/<ref>. drawer keeps the current (range/dashboard) hash
     try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // warm suppliers + config
     var cached=prodItemCached(ref);
     if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached,seed); return; }   // instant re-open from cache
@@ -15454,7 +15488,7 @@
     // repeating it here is pure duplication (Ben). The drawer supplies its own head; the full page keeps its header.
     c.innerHTML=header+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
     if(!inline){ var bk=c.querySelector('#pd-back'); if(bk)bk.onclick=function(){ selectProductSub('plan'); }; }
-    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; try{ if(it&&it.ref)writeHash(_prodDetailTab==='master'?['product',it.ref]:['product',it.ref,_prodDetailTab]); }catch(e){} renderProdDetailShell(c,_prodDetail,_prodSeed); }; });
+    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; try{ if(it&&it.ref)writeHash(_prodDetailTab==='master'?['product','products',it.ref]:['product','products',it.ref,_prodDetailTab]); }catch(e){} renderProdDetailShell(c,_prodDetail,_prodSeed); }; });   // v27.842 (Ben): canonical /product/products/<ref>
     var body=c.querySelector('.pd-body');
     if(_prodDetailTab==='timeline')return renderProdTimeline(body,it.ref);
     if(_prodDetailTab==='documents')return renderProdDocs(body,it.ref);
@@ -15473,7 +15507,7 @@
       function byId(id){ return comps.filter(function(x){return String(x.id)===String(id);})[0]||{}; }
       function supSel(id,cur){ return '<select class="pc2-sup" data-id="'+id+'" style="font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card)"><option value=""'+(!cur?' selected':'')+'>— choose supplier —</option>'+sups.map(function(s){return '<option'+(s===cur?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'; }   // v27.712: no "product supplier" any more — each component names its own
       function modeSel(id,cur){ return '<select class="pc2-mode" data-id="'+id+'" style="font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card)"><option value="sampled"'+(cur!=='spec_linked'?' selected':'')+'>Sampled</option><option value="spec_linked"'+(cur==='spec_linked'?' selected':'')+'>Spec-linked</option></select>'; }
-      function specLink(c){ var spec=c.sampling_mode==='spec_linked'; if(!spec)return '<span class="mut tiny">—</span>'; return c.spec_id?'<a href="#/product/'+encodeURIComponent(ref)+'/specifications" style="color:var(--blue);text-decoration:underline;font-weight:600">→ Spec #'+esc(c.spec_id)+' ↗</a>':'<a class="pc2-spec" data-id="'+c.id+'" style="color:var(--blue);cursor:pointer;text-decoration:underline">link a spec</a>'; }
+      function specLink(c){ var spec=c.sampling_mode==='spec_linked'; if(!spec)return '<span class="mut tiny">—</span>'; return c.spec_id?'<a href="#/product/products/'+encodeURIComponent(ref)+'/specifications" style="color:var(--blue);text-decoration:underline;font-weight:600">→ Spec #'+esc(c.spec_id)+' ↗</a>':'<a class="pc2-spec" data-id="'+c.id+'" style="color:var(--blue);cursor:pointer;text-decoration:underline">link a spec</a>'; }
       var rows=comps.map(function(c){ var spec=c.sampling_mode==='spec_linked';
         // v27.713 (Ben): no supplier on the component list (several suppliers can sample one component via requests); sampled vs
         // spec-linked and the spec link live per size × component in the grid below — here only the default for new sizes.
@@ -15859,7 +15893,7 @@
       if(isSpec){   // spec-linked size×component: no sampling/approval — link (or upload) the Specification, in the Files column
         var _sid=sd.spec_id||compSpecId(dim);
         var _lnk='<a class="pm-comp-speclink" data-id="'+s.id+'" data-dim="'+dim+'" style="color:var(--blue);cursor:pointer;text-decoration:underline;font-size:11px">'+(_sid?'change':'link a spec')+'</a> · <a class="pm-comp-specup" data-id="'+s.id+'" data-dim="'+dim+'" style="color:var(--blue);cursor:pointer;text-decoration:underline;font-size:11px" title="upload a new specification file and link it here">upload a spec</a>';
-        var _specCell=_sid?('<a href="#/product/'+encodeURIComponent(it.ref)+'/specifications" style="color:var(--blue);text-decoration:underline;font-weight:600">→ Spec #'+esc(_sid)+' ↗</a> <span class="mut tiny">'+_lnk+' · <a class="pm-comp-specunlink" data-id="'+s.id+'" data-dim="'+dim+'" style="color:var(--neg);cursor:pointer;text-decoration:underline;font-size:11px">unlink</a></span>')
+        var _specCell=_sid?('<a href="#/product/products/'+encodeURIComponent(it.ref)+'/specifications" style="color:var(--blue);text-decoration:underline;font-weight:600">→ Spec #'+esc(_sid)+' ↗</a> <span class="mut tiny">'+_lnk+' · <a class="pm-comp-specunlink" data-id="'+s.id+'" data-dim="'+dim+'" style="color:var(--neg);cursor:pointer;text-decoration:underline;font-size:11px">unlink</a></span>')
           :('<span style="color:var(--amber);font-size:11px;font-weight:700">no spec linked</span> <span class="mut tiny">'+_lnk+'</span>');
         return '<tr class="pm-comprow" style="background:var(--card)">'
           +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:var(--ink-soft);white-space:nowrap"><span style="font-size:11px;color:var(--muted);margin-right:5px" title="spec-linked, no sampling">◈</span>'+compLbl(dim)+compModeSel(s,dim,true)+'</td>'
