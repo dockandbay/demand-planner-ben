@@ -1794,7 +1794,7 @@
       return row(lbl,'<input type="date" class="fci" data-ep="'+shipEp+'" data-field="'+f+'" value="'+esc(ov)+'" style="width:150px"> <span class="mut tiny" style="margin-left:8px">final: <b>'+(eff?esc(fd(eff)):'—')+'</b>'+(ov?'':' (calc)')+'</span>'); }
     var shipBlock;
     if(otherMaster){
-      shipBlock=row('Shipment','<button class="ship-open" data-ref="'+esc(r.shipment)+'">🚢 '+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾ change</button> <span class="mut tiny">mode &amp; dates inherit from this shipment</span>')
+      shipBlock=row('Shipment','<button class="ship-open" data-ref="'+esc(r.shipment)+'">🚢 '+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾ change</button> <button class="po-ship-rename" data-ref="'+esc(r.shipment)+'" title="Rename this master shipment reference — e.g. to match the Fulfil internal shipment. Applies to every PO on it.">✎ rename</button> <span class="mut tiny">mode &amp; dates inherit from this shipment</span>')
         +row('Mode','<span style="color:var(--ink-soft);font-weight:600">'+esc((sh.mode||'—').toUpperCase())+'</span>')
         +((sh.carrier&&sh.carrier_ref)?row('Carrier / tracking',esc(sh.carrier)+' · '+carrierTrackLinkInj(sh.carrier,sh.carrier_ref)+((/dhl/i.test(sh.carrier||'')&&sh.carrier_ref)?' <span class="hz-trkpill" data-trk="'+esc(sh.carrier_ref)+'"></span>':'')):'')
         +(curMode==='fob'?'':shViewDate('Departure','departure_date','eff_departure')+shViewDate('Landing','landing_date','eff_landing')+shViewDate('Arrival','arrival_date','eff_arrival')+shViewDate('Completion','delivery_date','eff_completion'));
@@ -1804,7 +1804,7 @@
       var modeOpts=_modeList.map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
       var _actR=PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):'';
       var _rightSide=selfShip
-        ? '<span class="mut tiny">🚢 <button class="ship-open" data-ref="'+esc(po)+'" title="open this shipment">'+esc(po)+' ↗</button> · <button class="po-ship-remove" data-po="'+esc(po)+'" style="border:none;background:none;color:var(--neg);cursor:pointer;text-decoration:underline;font-size:11px;padding:0">remove</button></span>'
+        ? '<span class="mut tiny">🚢 <button class="ship-open" data-ref="'+esc(po)+'" title="open this shipment">'+esc(po)+' ↗</button> · <button class="po-ship-rename" data-ref="'+esc(po)+'" style="border:none;background:none;color:var(--blue);cursor:pointer;text-decoration:underline;font-size:11px;padding:0" title="Rename this shipment reference — e.g. to match the Fulfil internal shipment">✎ rename</button> · <button class="po-ship-remove" data-po="'+esc(po)+'" style="border:none;background:none;color:var(--neg);cursor:pointer;text-decoration:underline;font-size:11px;padding:0">remove</button></span>'
         : '<span class="mut tiny">— or</span> <button class="ship-pick" data-po="'+esc(po)+'">assign an existing shipment ▾</button>';
       var modeRow=row('Shipment mode'+(isMfg?' <span class="mut tiny">(Manufacturing → FOB)</span>':''),
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
@@ -1939,7 +1939,11 @@
         .catch(function(e){ if(pd&&d){ d.ship=prevShip; if(poBy[po])poBy[po].shipment=prevPoShip; paint(); } alert('Could not set shipment mode: '+(e.message||e)); });
     }
     document.querySelectorAll('#supply-root .po-shipmode').forEach(function(sel){ if(sel._b)return; sel._b=1; sel.onchange=function(){ apply(sel.dataset.po, sel.value, sel); }; });
-    document.querySelectorAll('#supply-root .po-ship-remove').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ if(!confirm('Remove '+b.dataset.po+' as a shipment? Its mode & shipment details will be cleared.'))return; apply(b.dataset.po, '', b); }; }); }
+    document.querySelectorAll('#supply-root .po-ship-remove').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ if(!confirm('Remove '+b.dataset.po+' as a shipment? Its mode & shipment details will be cleared.'))return; apply(b.dataset.po, '', b); }; });
+    // v27.858 (Ben): rename a master shipment reference (e.g. to match the Fulfil internal shipment). Cascades across every PO on it.
+    document.querySelectorAll('#supply-root .po-ship-rename').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); var oldref=b.dataset.ref||''; var nv=prompt('Rename master shipment "'+oldref+'" to (e.g. the Fulfil internal shipment IS number):', oldref); if(nv==null)return; nv=String(nv).trim(); if(!nv||nv===oldref)return;
+      b.disabled=true; var _t=b.textContent; b.textContent='…';
+      shipPost('/api/supply/shipment/'+encodeURIComponent(oldref)+'/rename',{new_ref:nv},function(j){ b.disabled=false; b.textContent=_t; if(j&&j.error){ alert('Rename failed: '+j.error); return; } try{ invalidateDerived(); delete cache['purchase-orders']; delete cache['shipments']; }catch(_){} alert('Renamed to "'+nv+'" — '+(j.pos||0)+' PO(s) updated.'); try{ view(); }catch(_){ location.reload(); } }); }; }); }
   // open a shipment from elsewhere: right-side drawer popout (stays on the current page). "Full page ↗" in the
   // drawer jumps to the full Shipments tab via gotoShipmentPage.
   function gotoShipment(ref){ openShipDrawer(ref); }

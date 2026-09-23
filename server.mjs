@@ -13442,6 +13442,31 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
   } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+// v27.858 (Ben): rename a master shipment's reference (e.g. to match the Fulfil internal shipment IS124). Cascades the
+// ref across the POs on the shipment, the shipment row, change log, notes, submissions and plan locks. The master PO
+// (purchase_orders.master_po / shipments.master_po) is the PO number and is left untouched.
+app.post('/api/supply/shipment/:ref/rename', async (req, res) => {
+  const oldref = decodeURIComponent(req.params.ref || '').trim(), newref = String((req.body || {}).new_ref || '').trim();
+  if (!oldref) return res.status(400).json({ error: 'shipment ref required' });
+  if (!newref) return res.status(400).json({ error: 'new reference required' });
+  if (newref === oldref) return res.json({ ok: true });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const clash = await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1 UNION SELECT 1 FROM planner.purchase_orders WHERE po=$1 LIMIT 1`, [newref]);
+    if (clash.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: '"' + newref + '" is already a shipment or PO reference' }); }
+    const s = await client.query('UPDATE planner.shipments SET shipment_ref=$1, updated_at=now() WHERE shipment_ref=$2', [newref, oldref]);
+    const p = await client.query('UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]);
+    if (!s.rowCount && !p.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'no shipment "' + oldref + '"' }); }
+    await client.query('UPDATE planner.shipment_change_log SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
+    await client.query('UPDATE planner.shipment_notes SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
+    await client.query('UPDATE planner.supplier_submissions SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
+    await client.query('UPDATE planner.ship_plan_locks SET ref=$1 WHERE ref=$2', [newref, oldref]).catch(() => {});
+    await client.query('COMMIT');
+    res.json({ ok: true, shipments: s.rowCount, pos: p.rowCount, new_ref: newref });
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
 app.post('/api/supply/po/:po', async (req, res) => {
   const body = req.body || {};
