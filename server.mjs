@@ -8033,6 +8033,7 @@ async function productSampleList(itemRef, opts) {
       FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND (n.sample_id=ps.id OR n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %')),'[]'::json) feedback_notes`;
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
+    coalesce(ps.short_code,'') short_code, ps.item_ref,
     coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),'') supplier,   -- v27.845 (Ben): the ONE supplier that submitted this sample (via its request). A sample belongs to exactly one supplier — never the product's whole supplier list.
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,
     coalesce(ps.supplier_status,'in_development') supplier_status, coalesce(ps.not_shipped,false) not_shipped,
