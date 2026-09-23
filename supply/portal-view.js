@@ -3163,7 +3163,13 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   ppNotice('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; if(!_ppData)body.innerHTML='<div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';   // v27.879: a re-load keeps the current view on screen until the fresh payload lands (no skeleton flash after a save)
-      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
+      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP();
+        // v27.880: the server handed us its last payload because an admin edit moved on since it was built (d.__stale) → pull the fresh
+        // one in the background and repaint in place, unless the supplier is typing or has a PO / product / sample detail open.
+        if(d&&d.__stale&&typeof opts.getData==='function'){ opts.getData({fresh:true}).then(function(d2){ if(!d2||d2.error)return; if(d2.notesByPo)Object.keys(d2.notesByPo).forEach(function(k){ shortNotes(d2.notesByPo[k]); }); _ppData=d2;
+          var a=document.activeElement, pb=document.getElementById('pp-body'); var typing=!!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&pb&&pb.contains(a)); var detail=/^#\/(pos|products?|samples?|shipments?|productions?)\/[^/]+/.test(location.hash||'');
+          if(!typing&&!detail)renderPP(); }).catch(function(){}); }
+      }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();
     loadPreview();

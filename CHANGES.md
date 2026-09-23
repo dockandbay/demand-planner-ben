@@ -1,3 +1,33 @@
+## v27.880 deploy note (Ben): SUPPLIER PORTAL Phase 2 — admin edits no longer make suppliers wait; + a spec for the admin PO-build cost (yours, Diviyaj)
+
+**No migrations, no new env vars** (one optional knob: `PORTAL_PREWARM=0`). Files: `server.mjs`, `supply/portal.html`, `supply/portal-view.js`.
+
+### What changed
+- **Portal cache entries carry the supply epoch.** `invalidateSupplyCaches()` (20 admin write paths) and the 4 product-module clears no longer DELETE the cached portal payloads; they mark them stale (`portalCacheMarkStale()`, or simply the epoch moving on). A bootstrap request that hits a stale entry is answered **immediately** with that payload plus `X-HZ-Stale: 1`; the portal page then fetches `?fresh=1` in the background (single-flight build, ~1.5s) and repaints in place, unless the supplier is typing or has a PO / product / sample detail open. Verified in Chrome: admin edit → reload → page painted at 327ms from the last payload → fresh payload applied at 2.4s, no flash.
+- **Vercel guard on the post-write prewarm** I added in v27.879: `portalBootstrapPrewarm` is a no-op when `process.env.VERCEL` is set (a timer firing after the response in a possibly-frozen container is exactly the stranded-connection pattern you traced on 01-Sep). On prod the writer's next load builds inline (~1.5s); set `PORTAL_PREWARM=0` to disable it anywhere else. `_portalInflight` now holds the build promise, so concurrent cold requests for the same supplier await one build.
+- The supplier's own write still drops their key (so their next load never shows pre-write data).
+
+### Measured (sandbox)
+| step | time | header |
+|---|---|---|
+| cold build | 2.5s | |
+| warm | 12ms | |
+| admin edit, then bootstrap | **0.58s** (was a full rebuild, 9.5s before v27.879 / 1.5s after) | `X-HZ-Stale: 1` |
+| `?fresh=1` | 1.9s | |
+| warm again | 3ms | |
+
+### The admin-side cost, and what I propose you do with it (not started; it is your prod divergence)
+Evidence from prod `pg_stat_statements` (since 20-Aug) and a read-only `EXPLAIN ANALYZE` I ran on prod:
+- The full PO rows build (`v_po_finance`-based, your restructured `PO_ROWS_SQL`) ran **15,161 times, mean 2.67s, 11.2 DB-hours**. That is ~430 full builds a day: every one of the 20 `invalidateSupplyCaches()` call sites bumps the epoch, and `makeCache.get()` then rebuilds on the next request of **every** instance. Its per-PO variant (`WHERE calc4.po=$1`) ran 15,048 times at 0.29s.
+- The portal deposits query shows mean 854ms over 4,257 calls, but `EXPLAIN ANALYZE` on prod executes it in **1.9ms**. The 850ms is queueing behind the rebuilds on a `max: 4` pool, not the query. Same story for most of the 0.3s "floor" the portal pays.
+- `SELECT … FROM planner.v_product_inventory` (kpiBase, 30s TTL) ran 16,885 times returning 25k rows each; the exceptions builder (`WITH pod AS …`) 18,113 times at 0.28s, also refreshed by every invalidation.
+
+Proposal (Phase 2b, your call on sequencing):
+1. **Incremental patch instead of full rebuild.** Give `poRowsCache` a `patchPo(po)` that runs `PO_ROWS_SQL WHERE calc4.po=$1` (0.29s) and replaces that row in the cached array; have the PO-scoped write paths (`patch()` on purchase_orders / lines, po-line, likely-date, deposit apply, master-po ops) call `patchPo` + a **row-level epoch entry** (`app_settings.supply_cache_delta = {epoch, pos:[…]}`) so other instances patch the same rows instead of rebuilding. Full rebuild only for imports (`po-bulk`, `po-import-fulfil`, `buyplan-pos`) and the manual invalidate. Expected: 11 DB-hours → well under 1, and the 0.3s pooler floor drops for everything else.
+2. **Actions / exceptions cache**: same treatment (patch the affected PO's rows) or at least debounce `refreshActionsCache()` to one run per 2s burst.
+3. `kpiBase`: raise `BI_TTL_MS` from 30s to 5 minutes and invalidate on ETL, not on time; the inventory view only changes when n8n runs.
+I have deliberately not touched `PO_ROWS_SQL`, `ORDER_PLAN_SELECT`, `makeCache` or `invalidateSupplyCaches` internals beyond the portal line. If you want, I can draft (1) as a PR against your rehost branch so it lands on your restructured SQL rather than mine.
+
 ## v27.879 deploy note (Ben): SUPPLIER PORTAL performance (Phase 0 + Phase 1 of the perf review) + migration 300 (indexes)
 
 **One migration: `migrations/300_perf_indexes.sql`** (idempotent, guarded, no data change): covering indexes for the 14 unindexed foreign keys the Supabase performance advisor flagged, and drops 4 exact-duplicate indexes (`dtc_so_lines_soid_idx`, `po_lines_po_idx`, `tpl_cin7_orders_con_idx`, `tpl_cin7_orders_ref_idx`; the descriptively named twin is kept). Applied to sandbox. The ~20 `*_bak_*` tables the advisor lists are NOT dropped: your call which are dead. **No new env vars.** Files: `server.mjs`, `supply/portal.html`, `supply/portal-view.js`, `supply/inject.html` (one log-level tweak).

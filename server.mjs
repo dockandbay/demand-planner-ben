@@ -4620,14 +4620,25 @@ const _sectionInflight = {};    // section -> bool (a recompute is running; othe
 // with no cache (POS_SQL_PORTAL live + 8 follow-on queries every load → ~8s on the sandbox pooler). Keyed, 10-min
 // TTL, single-flight; cleared by invalidateSupplyCaches (admin edits) and after any portal POST (the supplier's own
 // write — so their next load reflects it).
-const _portalCache = new Map();      // key -> { v, at }
-const _portalInflight = new Map();   // key -> bool
+const _portalCache = new Map();      // key -> { v, at, epoch }
+const _portalInflight = new Map();   // key -> in-flight build promise (single-flight)
+// v27.880 (Ben, portal perf phase 2): admin edits no longer DELETE the cached portal payloads. Each entry remembers the
+// supply epoch it was built at; a bootstrap request whose entry is behind the epoch (or past TTL) is answered with that
+// stale payload at once + an `X-HZ-Stale: 1` header, and the portal page re-fetches `?fresh=1` and repaints in place.
+// Product-module writes don't bump the epoch, so they mark every entry stale explicitly (portalCacheMarkStale).
+// Net effect: a supplier never waits for a build that an admin's edit triggered; the fresh data lands ~1.5s later.
+function portalCacheMarkStale() { for (const e of _portalCache.values()) e.epoch = -1; }
+function portalBootstrapRun(key, builder, ep) {   // single-flight build → cache (concurrent callers await the same build)
+  const inflight = _portalInflight.get(key); if (inflight) return inflight;
+  const p = Promise.resolve().then(builder).then((v) => { _portalCache.set(key, { v, at: Date.now(), epoch: ep }); return v; }).finally(() => { _portalInflight.delete(key); });
+  _portalInflight.set(key, p); return p;
+}
 function invalidateSupplyCaches() {
   bumpSupplyEpoch();                                             // shared epoch → every OTHER instance rebuilds too (cross-instance)
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
   _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
   for (const k of Object.keys(_sectionResp)) delete _sectionResp[k];   // drop cached section responses too
-  _portalCache.clear(); _portalInflight.clear();                       // and cached portal bootstraps
+  portalCacheMarkStale();                                              // portal bootstraps: served stale once + revalidated by the page (v27.880), not dropped
 }
 
 
@@ -6778,7 +6789,7 @@ app.post('/api/product/request', async (req, res) => {
     await recomputeProductStatus(client, it.id);
     await client.query('COMMIT');
     try { await logProductChange(it.ref, 'Development request ' + ins.rows[0].ref + ' → ' + sup + ' (' + names.join(', ') + ')', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
-    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
+    try { portalCacheMarkStale(); } catch (e) {}
     res.json({ ok: true, id: rid, ref: ins.rows[0].ref });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -6812,7 +6823,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     const stage = await recomputeProductStatus(client, rq.item_id);
     await client.query('COMMIT');
     for (const l of log) { try { await logProductChange(rq.item_ref, l, null, authUser(req) || 'Dock & Bay'); } catch (e) {} }
-    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
+    try { portalCacheMarkStale(); } catch (e) {}
     res.json({ ok: true, product_stage: stage });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -6823,7 +6834,7 @@ app.post('/api/product/request/:id/delete', async (req, res) => {
     if (!rq) return res.status(404).json({ error: 'not found' }); if (rq.n > 0 && !(req.body || {}).force) return res.status(400).json({ error: 'this request has ' + rq.n + ' sample version' + (rq.n === 1 ? '' : 's') + ' — remove them first or pass force' });
     await pool.query(`DELETE FROM planner.product_dev_requests WHERE id=$1`, [id]); await recomputeProductStatus(null, rq.item_id);
     try { await logProductChange(rq.item_ref, 'Development request ' + rq.ref + ' (' + rq.supplier_name + ') deleted', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
-    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
+    try { portalCacheMarkStale(); } catch (e) {}
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── v27.704 SAMPLING page (P2) — every development request with its sample versions, shipment + timeline counters ──
@@ -7122,7 +7133,7 @@ app.post('/api/product/item', async (req, res) => {
     await client.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
       [ref, (b.created_by || '').trim() || null, who + ' created a new product development item']);
     await client.query('COMMIT');
-    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}   // a new product must appear in the supplier portal at once — drop the cached portal bootstrap (else it lags a whole TTL)
+    try { portalCacheMarkStale(); } catch (e) {}   // a new product must appear in the supplier portal at once — drop the cached portal bootstrap (else it lags a whole TTL)
     res.json({ ok: true, ref, id });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -18133,13 +18144,13 @@ app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
 // one round after the PO rows land. 3 round trips end to end, same payload.
 const _pbKey = (names, inclArch) => names.slice().sort().join('|') + '|' + (inclArch ? '1' : '0');
 function portalBootstrapPrewarm(names, ids, inclArch) {
+  // NOT on Vercel: a timer that fires after the response has gone out runs in a container that may already be frozen
+  // (stranded pooled connections — Diviyaj 01-Sep). There the writer's next load builds inline (~1.5s) instead.
+  if (process.env.VERCEL || process.env.PORTAL_PREWARM === '0') return;
   try {
     const key = _pbKey(names, inclArch);
     if (_portalInflight.get(key)) return;
-    _portalInflight.set(key, true);
-    setTimeout(() => { portalBootstrapBuild(names, ids, inclArch)
-      .then((p) => { if (p && !p.error) _portalCache.set(key, { v: p, at: Date.now() }); })
-      .catch(() => {}).finally(() => { _portalInflight.delete(key); }); }, 250);   // small debounce: a burst of ticks → one rebuild
+    setTimeout(() => { currentSupplyEpoch().then((ep) => portalBootstrapRun(key, () => portalBootstrapBuild(names, ids, inclArch), ep)).catch(() => {}); }, 250);   // small debounce: a burst of ticks → one rebuild
   } catch (e) { /* best-effort */ }
 }
 // specSupplierSet per spec is a products scan; the portal build asks it for every non-directed active spec. Memoised for
@@ -18158,14 +18169,13 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const _inclArch = String(req.query.includeArchived || '') === '1';
     // Per-supplier-set bootstrap cache: serve fresh (or serve stale while one request rebuilds). Cleared on admin edits
     // (invalidateSupplyCaches); after the supplier's own portal POST only THEIR key is dropped and rebuilt (middleware above).
-    const _pkey = _pbKey(names, _inclArch);
+    const _pkey = _pbKey(names, _inclArch), _fresh = String(req.query.fresh || '') === '1';
+    const _ep = await currentSupplyEpoch();   // ~free: polled at most every 5s per instance
     const _phit = _portalCache.get(_pkey);
-    if (_phit && (Date.now() - _phit.at < SUPPLY_CACHE_TTL_MS || _portalInflight.get(_pkey))) return res.json(_phit.v);
-    _portalInflight.set(_pkey, true);
-    let p;
-    try { p = await portalBootstrapBuild(names, ids, _inclArch); } finally { _portalInflight.delete(_pkey); }
-    _portalCache.set(_pkey, { v: p, at: Date.now() });
-    res.json(p);
+    const _ok = !!(_phit && _phit.epoch === _ep && Date.now() - _phit.at < SUPPLY_CACHE_TTL_MS);
+    if (_phit && (_ok || (!_fresh && _portalInflight.get(_pkey)))) return res.json(_phit.v);   // fresh, or a rebuild is already running → last payload
+    if (_phit && !_fresh) { res.set('X-HZ-Stale', '1'); return res.json(_phit.v); }   // v27.880: stale → instant paint; the page re-fetches ?fresh=1 and repaints in place
+    res.json(await portalBootstrapRun(_pkey, () => portalBootstrapBuild(names, ids, _inclArch), _ep));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function portalBootstrapBuild(names, ids, _inclArch) {

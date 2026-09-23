@@ -120,7 +120,11 @@
   // three start now, in parallel: the script tag goes in straight away (version-stamped so the browser can cache it),
   // and the bootstrap is fetched alongside /me; mount() consumes the prefetched promise on its first getData().
   try{ window.__PV_STANDALONE=true; }catch(e){}   // this IS the real supplier portal (portal-view.js reads it for its global tracking-pill handler)
-  var _bootP=fetch('/api/portal/bootstrap').then(function(r){ if(r.status===401)throw {auth:true}; return r.json(); }).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; });
+  // v27.880: the server answers with its last payload + `X-HZ-Stale: 1` when an admin edit has moved on since it was built;
+  // the flag rides along as j.__stale and portal-view.js re-fetches ?fresh=1 in the background, repainting in place.
+  function bootFetch(fresh){ var u='/api/portal/bootstrap'+(window.__ppInclArch?'?includeArchived=1':'')+(fresh?((window.__ppInclArch?'&':'?')+'fresh=1'):'');
+    return fetch(u).then(function(r){ if(r.status===401)throw {auth:true}; var st=r.headers.get('X-HZ-Stale')==='1'; return r.json().then(function(j){ if(j&&j.error)throw new Error(j.error); if(st&&j&&typeof j==='object')j.__stale=true; return j; }); }); }
+  var _bootP=bootFetch(false);
   _bootP.catch(function(){});   // consumed (or discarded) inside showPortal; never an unhandled rejection
   var _jsP=new Promise(function(res,rej){ var s=document.createElement('script'); s.src='/portal-view.js?v=__APP_VERSION__'; s.onload=function(){ res(); }; s.onerror=function(){ rej(new Error('portal-view.js failed to load')); }; document.head.appendChild(s); });
   _jsP.catch(function(){});
@@ -139,8 +143,8 @@
         root: document.getElementById('pv'),
         ep: EP, by: me.email, sid: null, supplierName: realSup,
         anon: ANON_NAME ? {name:ANON_NAME, realNames:(me.suppliers||[])} : null,
-        getData: function(){ var fresh=function(){ return fetch('/api/portal/bootstrap'+(window.__ppInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); };
-          var pre=_bootP; _bootP=null; return (pre&&!window.__ppInclArch)?pre.catch(fresh):fresh(); }   // first call: the payload prefetched at page start (live fetch if that failed); later calls: live
+        getData: function(o){ var fresh=!!(o&&o.fresh); var pre=_bootP; _bootP=null;
+          return (pre&&!fresh&&!window.__ppInclArch)?pre.catch(function(){ return bootFetch(false); }):bootFetch(fresh); }   // first call: the payload prefetched at page start (live fetch if that failed); later calls: live; {fresh:true} forces a rebuild
       });
       // Price List = a real FINANCE tab: register AFTER the portal script has loaded and mounted (v27.504; v27.503 ran too early).
       if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
