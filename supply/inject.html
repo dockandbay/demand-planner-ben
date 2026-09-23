@@ -1014,9 +1014,11 @@
     var M={ 'delivered':['#e6f7ec','#1a7f37','Delivered'], 'transit':['#e7effc','#1d4ed8','In transit'], 'pre-transit':['#fff6e6','#b8860b','Pre-transit'], 'failure':['#fdeaea','#c02626','Exception'], 'unknown':['#f0f0f2','#6b7280','Unknown'] };
     var m=M[code]||M['unknown']; var mark=code==='failure'?'▲':'●';
     var datePart=code==='delivered'?(t.delivered_at?' '+hzTrkDate(t.delivered_at):''):(t.eta?' · ETA '+hzTrkDate(t.eta):'');
-    var when=compact?'':datePart;   // v27.775 (Ben): compact = status word only, date + detail on hover
     var title=(t.status_text||m[2])+(datePart?' ·'+datePart:'')+(t.last_event?' · '+t.last_event:'');
-    return '<span title="'+esc(title)+'" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap;background:'+m[0]+';color:'+m[1]+'">'+mark+' '+esc(m[2])+esc(when)+'</span>'; }
+    // v27.867 (Ben): compact = a single-letter badge for narrow columns (D delivered/green · T transit/orange). Full status + date on hover.
+    if(compact){ var LC={ 'delivered':['D','#e6f7ec','#1a7f37'], 'transit':['T','#ffedd5','#c2410c'], 'pre-transit':['P','#fff6e6','#b8860b'], 'failure':['!','#fdeaea','#c02626'], 'unknown':['?','#f0f0f2','#6b7280'] }; var c=LC[code]||LC['unknown'];
+      return '<span title="'+esc(title)+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;font-size:10px;font-weight:800;background:'+c[1]+';color:'+c[2]+';border:1px solid '+c[2]+'44;vertical-align:middle">'+c[0]+'</span>'; }
+    return '<span title="'+esc(title)+'" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap;background:'+m[0]+';color:'+m[1]+'">'+mark+' '+esc(m[2])+esc(datePart)+'</span>'; }
   function hzFillTrackPills(root){ root=root||document; var ph=[].slice.call(root.querySelectorAll('.hz-trkpill[data-trk]')); if(!ph.length)return;
     var seen={}; ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); if(n)seen[n]=1; }); var list=Object.keys(seen); if(!list.length)return;
     fetch('/api/tracking/status?numbers='+encodeURIComponent(list.join(','))).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
@@ -13867,7 +13869,7 @@
               // v27.775 (Ben): SR + a compact "● Delivered" badge on ONE line (date on hover); tracking number ↗ on the next line (opens DHL detail)
               +(function(){ var sh=s.shipment; if(!sh||!sh.ref)return '';
                 var badge=(sh.tracking&&/dhl/i.test(sh.carrier||''))?' <span class="hz-trkpill" data-trk="'+esc(sh.tracking)+'" data-compact="1"></span>'
-                  :(sh.received_at?' <span class="smp-celldel" title="Delivered '+esc(fd(sh.received_at))+'">● Delivered</span>':'');
+                  :(sh.received_at?' <span class="smp-celldel" title="Delivered '+esc(fd(sh.received_at))+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;font-size:10px;font-weight:800;background:#e6f7ec;color:#1a7f37;border:1px solid #1a7f3744;vertical-align:middle">D</span>':'');   // v27.867 (Ben): compact D badge (was "● Delivered", cut off in the narrow column)
                 return '<div class="smp-cellship"><span class="smp-cellship-top"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment">📦 '+esc(sh.ref)+'</a>'+badge+'</span>'
                   +(sh.tracking?'<span class="smp-celltrk">'+carrierTrackLinkInj(sh.carrier,sh.tracking)+'</span>':'')+'</div>'; })()+'</td>'; }
           cells+='<td class="l"><a class="smp-tl" data-ref="'+esc(r.item_ref)+'" style="cursor:pointer;color:var(--blue);font-weight:600;text-decoration:underline">'+(r.notes||0)+'</a>'+(r.unread_supplier?' <span class="ex-badge" title="unread supplier messages">'+r.unread_supplier+'</span>':'')+'</td>';   // v27.770: Shipment column removed — per-sample SR/tracking now sits under each tick
