@@ -6435,10 +6435,18 @@
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
     applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.ref);
-    if(typeof writeHash==='function')writeHash(['supply','purchase-orders','shipments']);   // shipments now lives under PURCHASE ORDERS
+    if(typeof writeHash==='function')writeHash(open?['supply','purchase-orders','shipments']:['supply','purchase-orders','shipments',b.dataset.ref]);   // v27.868 (Ben): deep-link the expanded shipment (collapse → back to the grid URL)
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; shipExpand(b.dataset.ref, i); } }; }); }
   // Expand: editable shipment header + date overrides, plus the POs aboard with master / unassign.
   function shipExpand(ref,i,afterRender){ var s=shipBy[ref]||{}, ep='/api/supply/shipment/'+encodeURIComponent(ref);
+    // v27.868 (Ben): inline rename of the shipment reference on Dates & tracking (cascades to every PO on it).
+    function _bindShipRef(scope){ if(!scope)return; var sv=scope.querySelector('.sh-ref-save'), inp=scope.querySelector('.sh-ref-edit'), msg=scope.querySelector('.sh-ref-msg'); if(!sv||sv._b)return; sv._b=1;
+      sv.onclick=function(){ var oldref=sv.dataset.old||ref, nv=String(inp.value||'').trim(); if(!nv){ if(msg){msg.style.color='var(--amber)';msg.textContent='enter a reference';} return; } if(nv===oldref){ if(msg){msg.style.color='var(--muted)';msg.textContent='unchanged';} return; }
+        sv.disabled=true; var _t=sv.textContent; sv.textContent='…'; if(msg){msg.style.color='var(--muted)';msg.textContent='renaming…';}
+        shipPost('/api/supply/shipment/'+encodeURIComponent(oldref)+'/rename',{new_ref:nv},function(j){ sv.disabled=false; sv.textContent=_t; if(j&&j.error){ if(msg){msg.style.color='var(--neg)';msg.textContent=j.error;} return; }
+          try{ invalidateDerived(); delete cache['purchase-orders']; delete cache['shipments']; }catch(_){}
+          if(msg){msg.style.color='var(--pos)';msg.textContent='✓ renamed · '+(j.pos||0)+' PO(s)';}
+          _pendingShip=nv; setTimeout(function(){ try{ view(); }catch(_){ location.reload(); } },500); }); }; }
     var fld=function(lbl,inp){ return '<div style="margin-right:16px"><div class="mut tiny">'+lbl+'</div>'+inp+'</div>'; };
     var locked=!!s.flex_matched;   // linked to Flexport → dates are authoritative, not overridable here
     // a date field: override input (or "from Flexport" when locked) + the FINAL effective date and its source
@@ -6465,6 +6473,10 @@
     function flexUrl(fid){ var m=String(fid||'').match(/(\d{4,})/); return m?'https://app.flexport.com/shipments/'+m[1]:null; }
     function flexRef(fid){ var u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue-ink);font-weight:700;text-decoration:underline">'+esc(fid)+' ↗</a>':esc(fid); }
     var head='<div class="sect-h">Shipment details</div>'
+      // v27.868 (Ben): rename the shipment reference here on Dates & tracking. Defaults to the master PO; editable/overridable (e.g. to match the Fulfil internal shipment). Cascades to every PO on this shipment.
+      +'<div style="display:flex;align-items:flex-start;gap:8px;margin:0 0 12px;flex-wrap:wrap"><div><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em">Shipment reference</div>'
+      +'<div style="display:flex;gap:6px;align-items:center;margin-top:3px"><input class="fci txt sh-ref-edit" value="'+esc(ref)+'" spellcheck="false" style="min-width:180px;font-weight:700;font-family:ui-monospace,Menlo,monospace" title="Defaults to the master PO; override it (e.g. to match the Fulfil internal shipment IS number). Applies to every PO on this shipment."><button class="save-btn light sh-ref-save" data-old="'+esc(ref)+'">Rename</button><span class="sh-ref-msg mut tiny"></span></div>'
+      +'<div class="mut tiny" style="margin-top:2px">Defaults to the master PO — editable; the new reference cascades to every PO on this shipment.</div></div></div>'
       +(locked
         ? '<div class="tiny" style="margin-bottom:8px;color:var(--blue-ink)">🔗 Linked to Flexport ('+flexRef(s.flex_id)+') — departure / landing / arrival come from the Flexport feed. The <b>completion</b> date (goods received) isn’t a Flexport field, so it stays overridable below (blank = arrival + 7 days).</div>'
         : '<div class="mut tiny" style="margin-bottom:8px">Overrides take precedence over the POs aboard. <b>final</b> shows the date used and its source — <span class="src m">S</span> shipment override, <span class="src fx">FLEX</span> Flexport.</div>')
@@ -6512,7 +6524,7 @@
         _b0.querySelectorAll('.shipdest').forEach(function(el){ el.onchange=function(){ var body={}; body[el.dataset.field]=el.value; el.classList.add('saved');
           fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
             .then(function(j){ if(j&&j.error)throw new Error(j.error); if(_shipPatchRow)_shipPatchRow(ref); else shipReload(); })
-            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; }); }
+            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; }); _bindShipRef(_b0); }
     }catch(e){}
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
@@ -6575,6 +6587,7 @@
           fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
             .then(function(j){ if(j&&j.error)throw new Error(j.error); shipRefresh(); })
             .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; });
+        _bindShipRef(box);
         if(typeof afterRender==='function')afterRender(box); })
       .catch(function(e){ document.getElementById('shipdet-'+i).innerHTML=head+'<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); }
   // Drawers/sheets stack in the order they're opened: each newly opened one gets a z-index above the last, so a
@@ -11088,7 +11101,7 @@
       else if(sec==='config'){ if(seg[2]==='portal'&&seg[3])_pendingPortalSup=decodeURIComponent(seg[3]); enterSupplyConfig(seg[2]); }   // #/supply/config/<item> — SUPPLY ▸ CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // LEGACY deep-link: .../<slug>/<PO>
-        else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
+        else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ if(_s2==='shipments' && _s3)_pendingShip=_s3; showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab; .../shipments/<ref> deep-links + expands that shipment (v27.868)
         else if(_s2 && PAY_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // legacy /supply/purchase-orders/<deposits|other|paydue|payreport> → PAYMENTS umbrella
         else if(_s2==='edi-labels'){ showPoSub('edi-labels'); }   // hidden EDI LABELS page (Dillards via EZY COM)
         else if(_s2){ _pendingPO=_s2; if(_s3 && POTAB_FROM_SLUG[_s3])_pendingPOTab=POTAB_FROM_SLUG[_s3]; showPoSub('plan'); }   // NEW: .../<PO>/<tab-slug> (or just .../<PO>)
