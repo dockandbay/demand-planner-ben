@@ -946,6 +946,9 @@
   // Render a note body, bolding any @handle that resolved to a tagged teammate (mentions = full emails).
   function noteBodyHtml(n){ var b=esc(n&&n.body||''); var hs=((n&&n.mentions)||[]).map(function(e){return String(e).split('@')[0].toLowerCase();});
     if(!hs.length)return b; return b.replace(/@([a-z0-9._-]+)/gi,function(m,h){ return hs.indexOf(h.toLowerCase())>=0?'<b style="color:var(--violet)">@'+esc(h)+'</b>':m; }); }
+  // v27.865 (Ben): render the COLOUR COMMENTS / QUALITY COMMENTS headings inside D&B feedback bodies as badges (matches the portal). Operates on already-escaped text.
+  function _cqBadge(colour){ var st=colour?'color:#3730a3;background:#eef2ff;border-color:#c7d2fe':'color:#92400e;background:#fffbeb;border-color:#fde68a'; return '<span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid;border-radius:8px;padding:1px 8px;margin:3px 0 1px;'+st+'">'+(colour?'🎨 Colour':'✓ Quality')+'</span>'; }
+  function _fbBadgeify(html){ if(!/(^|\n)(COLOUR|QUALITY) COMMENTS(?=\n|$)/.test(html))return html; return html.replace(/(^|\n)(COLOUR|QUALITY) COMMENTS(?=\n|$)/g,function(m,pre,kind){ return pre+_cqBadge(kind==='COLOUR'); }); }
   // Preview the mention email exactly as a tagged teammate receives it (used on post; on sandbox nothing is actually sent).
   function showMentionEmail(p){ if(!p)return; var ex=document.getElementById('hz-mailprev'); if(ex)ex.remove();
     var sentTxt=p.sent?('<span style="color:var(--pos)">✓ Sent to '+p.to.map(function(e){return esc(shortUser(e));}).join(', ')+'</span>')
@@ -16262,7 +16265,7 @@
         var tg=(_tgBadges||_smpBadge||_retag)?'<div class="pt-tagline" style="margin-top:4px">'+_tgBadges+_smpBadge+_retag+'</div>':'';
         // Pantone: render the reference INLINE inside the note text where its "🎨 <code>" token sits; any card
         // not matched to a token in the body (legacy/back-compat) falls back to a swatch card below.
-        var bodyH=esc(n.body||''), _left=[];
+        var bodyH=_fbBadgeify(esc(n.body||'')), _left=[];   // v27.865 (Ben): COLOUR/QUALITY headings → badges
         (n.pantone||[]).forEach(function(p){ var tok=esc('🎨 '+p.code); if(bodyH.indexOf(tok)>=0){ bodyH=bodyH.split(tok).join(panInlineChip(p)); } else { _left.push(p); } });
         var pc=_left.map(panCard).join('');
         return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'var(--hover)':'var(--amber-bg)'):'var(--violet-bg)')+';border:1px solid '+(isNew?'var(--amber)':'var(--line)')+';border-radius:var(--r-sm);display:flex;gap:10px;align-items:flex-start">'

@@ -5,6 +5,9 @@
 // PDF subsystem; the live host's default bc renders via the /api/portal asset + label-data endpoints.
 (function(){
   var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+  // v27.865 (Ben): render the COLOUR COMMENTS / QUALITY COMMENTS headings inside D&B feedback as badges (not plain caps text).
+  function ppCqBadge(colour){ var st=colour?'color:#3730a3;background:#eef2ff;border-color:#c7d2fe':'color:#92400e;background:#fffbeb;border-color:#fde68a'; return '<span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid;border-radius:8px;padding:1px 8px;margin:3px 0 1px;'+st+'">'+(colour?'🎨 Colour':'✓ Quality')+'</span>'; }
+  function ppFmtFb(raw){ raw=String(raw==null?'':raw); if(!/(^|\n)(COLOUR|QUALITY) COMMENTS(\n|$)/.test(raw))return esc(raw); return raw.split('\n').map(function(ln){ var t=ln.trim(); if(t==='COLOUR COMMENTS')return ppCqBadge(true); if(t==='QUALITY COMMENTS')return ppCqBadge(false); return esc(ln); }).join('\n'); }
   // In-page notice (replaces window.alert, v27.507): a toast pill at the bottom of the screen. kind = 'err' (default, red) | 'ok' (navy).
   var _toastT=null;
   function ppNotice(msg,kind){ try{ var el=document.getElementById('pv-toast'); if(!el){ el=document.createElement('div'); el.id='pv-toast'; el.setAttribute('role','status'); document.body.appendChild(el); }
@@ -845,7 +848,7 @@
         var review=aspects.map(function(ap){ var af=afMap[ap.key]; if(!af||(!af.decision&&!af.feedback))return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:11px;margin-top:8px"><b>'+esc(ap.label)+'</b><div style="color:#9ca3af;font-size:12px;margin-top:3px"><span class="pp-i18n">No review yet</span></div></div>';
           return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:11px;margin-top:8px"><b>'+esc(ap.label)+'</b>'
             +(af.decision?'<div style="margin-top:4px"><span style="font-size:12px;font-weight:700;background:#eef2ff;color:#4338ca;border-radius:8px;padding:2px 8px">'+esc(DEC[af.decision]||af.decision)+'</span></div>':'')
-            +(af.feedback?'<div style="font-size:13px;margin-top:6px;white-space:pre-wrap">'+esc(af.feedback)+'</div>':'')
+            +(af.feedback?'<div style="font-size:13px;margin-top:6px;white-space:pre-wrap">'+ppFmtFb(af.feedback)+'</div>':'')
             +(af.awc_comment?'<div style="font-size:13px;margin-top:4px;color:#6b7280;white-space:pre-wrap">'+esc(af.awc_comment)+'</div>':'')+'</div>';
         }).join('');
         var photos=(s.photos||[]).length?'<div style="margin-top:16px"><div style="font-weight:700;margin-bottom:8px"><span class="pp-i18n">Photos</span></div><div style="display:flex;gap:8px;flex-wrap:wrap">'+(s.photos||[]).map(function(p){return '<img src="'+esc(p.url)+'" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">';}).join('')+'</div></div>':'';
@@ -2317,7 +2320,7 @@
                       var decLbl=function(d){ return {approved:'Approved',approved_with_comments:'Approved with comments',rejected_new_sample:'New sample needed',stop_development:'Development stopped',rejected:'Rejected'}[d]||''; };
                       var rows=af.map(function(x){ var dl=decLbl(x.decision);
                         return '<div style="margin-bottom:6px"><div style="font-size:11.5px;font-weight:700;color:#78350f">'+esc(x.component||ASP_LBL[x.aspect]||x.aspect)+(dl?' <span style="font-weight:600;color:#92400e">— '+esc(dl)+'</span>':'')+'</div>'
-                          +(x.feedback?'<div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+esc(x.feedback)+'</div>':'')
+                          +(x.feedback?'<div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+ppFmtFb(x.feedback)+'</div>':'')
                           +(x.awc_comment?'<div style="font-size:11.5px;color:#92400e;white-space:pre-wrap;margin-top:1px">'+esc(x.awc_comment)+'</div>':'')+'</div>'; }).join('');
                       if(s.admin_feedback){ rows+='<div style="font-size:12px;color:#78350f;white-space:pre-wrap'+(af.length?';margin-top:2px':'')+'">'+esc(s.admin_feedback)+'</div>'; }
                       return '<div style="margin:6px 0;padding:8px 11px;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:7px"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:4px">💬 Feedback from Dock &amp; Bay</div>'+rows+'</div>';
