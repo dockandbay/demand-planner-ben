@@ -6764,7 +6764,7 @@ app.post('/api/product/request', async (req, res) => {
     await client.query(`UPDATE planner.product_dev_components SET supplier=$2 WHERE id = ANY($1) AND coalesce(supplier,'')=''`, [owned, sup]);
     const names = (await client.query(`SELECT name FROM planner.product_dev_components WHERE id = ANY($1) ORDER BY sort, id`, [owned])).rows.map(r => r.name);
     const who = shortUser(authUser(req) || b.created_by || '') || 'A user';
-    await client.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [it.ref, authUser(req) || null, who + ' created development request ' + ins.rows[0].ref + ' for ' + sup + ' — ' + names.join(', ')]);
+    await client.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'internal',$4)`, [it.ref, sc.id || null, authUser(req) || null, who + ' created development request ' + ins.rows[0].ref + ' for ' + sup + ' — ' + names.join(', ')]);   // v27.857 (Ben): request creation is per-supplier — scope it
     await recomputeProductStatus(client, it.id);
     await client.query('COMMIT');
     try { await logProductChange(it.ref, 'Development request ' + ins.rows[0].ref + ' → ' + sup + ' (' + names.join(', ') + ')', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
@@ -7575,12 +7575,18 @@ app.get('/api/product/spec-file/:id', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/notes/:ref', async (req, res) => {
-  try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
+  try {
+    // v27.857 (Ben): timeline is per-SUPPLIER (a development request belongs to one supplier; the product item does not).
+    // When ?supplier=<name> is given, return that supplier's notes PLUS product-wide notes (supplier_id IS NULL); no
+    // filter = the full merged product view. supplier_id -1 = an unknown supplier → only the product-wide notes.
+    let supId = null; const supName = String(req.query.supplier || '').trim();
+    if (supName) { const s = (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=lower($1) LIMIT 1`, [supName])).rows[0]; supId = s ? s.id : -1; }
+    const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
     n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(a.mime,'') attachment_mime, coalesce(n.tags,'[]'::jsonb) tags, coalesce(n.pantone,'[]'::jsonb) pantone,
     n.sample_id, (SELECT ps.version FROM planner.product_dev_samples ps WHERE ps.id=n.sample_id) sample_version
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
-    WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
+    WHERE n.po=$1 AND ($2::bigint IS NULL OR n.supplier_id=$2 OR n.supplier_id IS NULL) ORDER BY n.created_at`, [req.params.ref, supName ? supId : null]);
     res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Sanitise Pantone reference cards attached to a message → array of {code,name,hex,book}
@@ -7612,14 +7618,17 @@ app.post('/api/product/note/upsert-feedback', async (req, res) => {
   const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   const pantone = cleanPantone(b.pantone);
   const att = (b.attachment_id != null && String(b.attachment_id).trim() !== '') ? Number(b.attachment_id) : null;   // v27.556: optional file on the note (portal_attachments id)
+  // v27.857 (Ben): scope this feedback to the supplier whose sample it is — the caller (MANAGE / scan review) knows it.
+  let supId = null; const fbSup = String(b.supplier || '').trim();
+  if (fbSup) { const s = (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=lower($1) LIMIT 1`, [fbSup])).rows[0]; supId = s ? s.id : null; }
   try {
     const like = prefix.replace(/[\\%_]/g, m => '\\' + m) + '%';
-    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6, attachment_id=coalesce($7::bigint, attachment_id)
+    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6, attachment_id=coalesce($7::bigint, attachment_id), supplier_id=coalesce($8::bigint, supplier_id)
       WHERE id=(SELECT id FROM planner.supplier_notes WHERE po=$1 AND author_kind='internal' AND body LIKE $2 ORDER BY created_at DESC LIMIT 1) RETURNING id, to_char(now(),'DD-Mon-YY HH24:MI') at`,
-      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email), att]);
+      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email), att, supId]);
     if (up.rows.length) return res.json({ ok: true, id: up.rows[0].id, updated: true, at: up.rows[0].at });
-    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone, attachment_id) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb,$6) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
-      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att]);
+    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, tags, pantone, attachment_id) VALUES ($1,$7,$2,'internal',$3,$4::jsonb,$5::jsonb,$6) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
+      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att, supId]);
     res.json({ ok: true, id: r.rows[0].id, updated: false, at: r.rows[0].at });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -8092,7 +8101,7 @@ async function createProductSample(b, by) {
   // optional shipment assignment at creation (assign to an SR, or leave for later)
   if (b.sample_request_id || b.not_shipped) await assignSampleToShipment(r.rows[0].id, b.sample_request_id || null, !!b.not_shipped, by);
   // supplier note → shows on the product timeline + the admin ✉ bell
-  await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
+  await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,(SELECT supplier_id FROM planner.product_dev_requests WHERE id=$4),$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)', requestId]);   // v27.857 (Ben): scope to the submitting supplier's request
   await prodStageAdvance(itemRef, 'sample_in_review', requestId ? { requestId } : (Array.isArray(b.supplier_names) ? { supplierNames: b.supplier_names } : {}));   // supplier submitted a sample → that REQUEST is now with D&B
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
 }
@@ -18338,10 +18347,10 @@ app.post('/api/portal/product-accept', portalAuth, async (req, res) => { const r
         SET supplier_accepted_at=now(), supplier_accepted_by=$3, updated_at=now()
         FROM planner.product_dev_items i
         WHERE r.item_id=i.id AND i.ref=$1 AND r.supplier_name = ANY($2) AND r.supplier_accepted_at IS NULL
-        RETURNING r.id, r.supplier_name`, [ref, req.portal.suppliers, by]);
+        RETURNING r.id, r.supplier_name, r.supplier_id`, [ref, req.portal.suppliers, by]);
     if (!upd.rowCount) return res.json({ ok: true, already: true });   // idempotent: nothing left to accept
     const supName = upd.rows[0].supplier_name || (req.portal.suppliers[0] || 'Supplier');
-    try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [ref, by, 'Accepted the development request']); } catch (e) { /* timeline best-effort */ }
+    try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [ref, upd.rows[0].supplier_id || null, by, 'Accepted the development request']); } catch (e) { /* timeline best-effort */ }   // v27.857 (Ben): scope this note to the accepting supplier
     try { await logProductChange(ref, 'Development request accepted by ' + supName, null, by); } catch (e) { /* change-log best-effort */ }
     res.json({ ok: true, accepted: upd.rowCount, accepted_at: new Date().toISOString().slice(0, 10) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
