@@ -14371,8 +14371,9 @@ app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
         (po.po = coalesce((SELECT master_po FROM planner.shipments WHERE shipment_ref=$1), $1)) is_master,
         coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)::int units,
         round(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)) value
-      FROM planner.purchase_orders po WHERE po.shipment_ref=$1
-      ORDER BY is_master DESC, po.po`, [req.params.ref]);
+      FROM planner.purchase_orders po
+      WHERE po.shipment_ref=$1 OR po.po = coalesce((SELECT master_po FROM planner.shipments WHERE shipment_ref=$1), $1)
+      ORDER BY is_master DESC, po.po`, [req.params.ref]);   // v27.869 (Ben): also include the master PO via shipments.master_po — a master's own shipment_ref may be NULL (or, after a rename, differ from the shipment ref), so filtering on shipment_ref alone dropped it from "POs aboard"
     res.json(rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
