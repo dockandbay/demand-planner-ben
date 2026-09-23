@@ -8070,6 +8070,17 @@ async function productSampleList(itemRef, opts) {
     const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename, mime: p.mime, uploader_kind: p.uploader_kind, aspect: p.aspect || null }); });
     rows.forEach(r => { r.photos = byKey['PSAMPLE-' + r.id] || []; });
   }
+  // v27.866 (Ben): attach resolved Pantone swatches to each aspect's feedback so the read-only view (portal + admin)
+  // renders the colour chip, not a bare "🎨 <code>". Codes + hexes come from THIS product's own feedback notes
+  // (supplier_notes.pantone, stored at save), matched by the exact "🎨 <code>" token — same basis as the admin timeline.
+  try {
+    const pn = (await pool.query(`SELECT pantone FROM planner.supplier_notes WHERE po=$1 AND pantone IS NOT NULL AND pantone <> '[]'::jsonb`, [itemRef])).rows;
+    const panByCode = {}; pn.forEach(row => { (Array.isArray(row.pantone) ? row.pantone : []).forEach(p => { if (p && p.code && !panByCode[p.code]) panByCode[p.code] = p; }); });
+    const allP = Object.values(panByCode);
+    if (allP.length) rows.forEach(r => (r.aspect_feedback || []).forEach(af => {
+      const t = String(af.feedback || ''); const hit = allP.filter(p => t.indexOf('🎨 ' + p.code) >= 0); if (hit.length) af.pantone = hit;
+    }));
+  } catch (e) { /* best-effort Pantone resolution */ }
   return rows;
 }
 // v27.533: a sample "aspect" is a legacy fixed key OR a component key 'c<id>' (planner.product_dev_components, per supplier).
@@ -18361,9 +18372,12 @@ app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { cons
     // (a development request belongs to one supplier). Scope by the caller's supplier(s); supplier_id NULL = product-wide.
     const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase().trim());
     const ids = (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=ANY($1)`, [sups.length ? sups : ['']])).rows.map(r => r.id);
-    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes
-    WHERE po=$1 AND (supplier_id IS NULL OR supplier_id = ANY($2::bigint[])) ORDER BY created_at`, [ref, ids.length ? ids : [-1]])).rows); }
+    res.json((await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
+    to_char(n.created_at,'YYYY-MM-DD HH24:MI') created_at, n.read_at IS NOT NULL read,
+    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(a.mime,'') attachment_mime, coalesce(n.pantone,'[]'::jsonb) pantone,
+    n.sample_id, (SELECT ps.version FROM planner.product_dev_samples ps WHERE ps.id=n.sample_id) sample_version
+    FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
+    WHERE n.po=$1 AND (n.supplier_id IS NULL OR n.supplier_id = ANY($2::bigint[])) ORDER BY n.created_at`, [ref, ids.length ? ids : [-1]])).rows); }   // v27.866 (Ben): pantone + attachment + sample fields so the portal timeline styles like the admin
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });

@@ -7,7 +7,18 @@
   var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
   // v27.865 (Ben): render the COLOUR COMMENTS / QUALITY COMMENTS headings inside D&B feedback as badges (not plain caps text).
   function ppCqBadge(colour){ var st=colour?'color:#3730a3;background:#eef2ff;border-color:#c7d2fe':'color:#92400e;background:#fffbeb;border-color:#fde68a'; return '<span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid;border-radius:8px;padding:1px 8px;margin:3px 0 1px;'+st+'">'+(colour?'🎨 Colour':'✓ Quality')+'</span>'; }
-  function ppFmtFb(raw){ raw=String(raw==null?'':raw); if(!/(^|\n)(COLOUR|QUALITY) COMMENTS(\n|$)/.test(raw))return esc(raw); return raw.split('\n').map(function(ln){ var t=ln.trim(); if(t==='COLOUR COMMENTS')return ppCqBadge(true); if(t==='QUALITY COMMENTS')return ppCqBadge(false); return esc(ln); }).join('\n'); }
+  // v27.866 (Ben): resolve "🎨 <code>" tokens to a styled Pantone swatch chip (matches the admin), and render note attachments as images.
+  function ppPanChip(p){ return '<span style="display:inline-flex;align-items:center;gap:4px;background:var(--hover,#f1f5f9);border:1px solid var(--line,#e2e8f0);border-radius:5px;padding:0 6px;font-weight:700;font-size:10px;line-height:16px;vertical-align:middle;white-space:nowrap"><span style="width:11px;height:11px;border-radius:2px;border:1px solid rgba(0,0,0,.18);background:'+esc(p.hex||'#ccc')+';flex:0 0 auto"></span>PANTONE '+esc(p.code||'')+(p.name?' <span style="font-weight:400;color:var(--muted,#64748b)">'+esc(p.name)+'</span>':'')+'</span>'; }
+  function ppFmtFb(raw,pans){ raw=String(raw==null?'':raw);
+    var h=/(^|\n)(COLOUR|QUALITY) COMMENTS(\n|$)/.test(raw)
+      ? raw.split('\n').map(function(ln){ var t=ln.trim(); if(t==='COLOUR COMMENTS')return ppCqBadge(true); if(t==='QUALITY COMMENTS')return ppCqBadge(false); return esc(ln); }).join('\n')
+      : esc(raw);
+    (pans||[]).forEach(function(p){ if(!p||!p.code)return; var tok=esc('🎨 '+p.code); if(h.indexOf(tok)>=0)h=h.split(tok).join(ppPanChip(p)); });
+    return h; }
+  function ppNoteAtt(n){ if(!n||!n.attachment_id)return ''; var u=(EP.attachImgBase||'/api/supply/portal-attachment/')+encodeURIComponent(n.attachment_id), nm=n.attachment_name||'attachment', img=/^image\//i.test(String(n.attachment_mime||''));
+    return img?'<div style="margin-top:5px"><a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" title="'+esc(nm)+'" style="max-width:200px;max-height:200px;border-radius:6px;border:1px solid var(--line)"></a></div>'
+              :'<div style="margin-top:4px"><a href="'+u+'" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue,#2563eb);text-decoration:underline">📎 '+esc(nm)+'</a></div>'; }
+  function ppSmpChip(v){ return (v==null||v==='')?'':'<span style="display:inline-block;font-size:9.5px;font-weight:800;border-radius:8px;padding:1px 7px;margin-left:5px;background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe">🧪 v'+esc(v)+'</span>'; }
   // In-page notice (replaces window.alert, v27.507): a toast pill at the bottom of the screen. kind = 'err' (default, red) | 'ok' (navy).
   var _toastT=null;
   function ppNotice(msg,kind){ try{ var el=document.getElementById('pv-toast'); if(!el){ el=document.createElement('div'); el.id='pv-toast'; el.setAttribute('role','status'); document.body.appendChild(el); }
@@ -848,7 +859,7 @@
         var review=aspects.map(function(ap){ var af=afMap[ap.key]; if(!af||(!af.decision&&!af.feedback))return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:11px;margin-top:8px"><b>'+esc(ap.label)+'</b><div style="color:#9ca3af;font-size:12px;margin-top:3px"><span class="pp-i18n">No review yet</span></div></div>';
           return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:11px;margin-top:8px"><b>'+esc(ap.label)+'</b>'
             +(af.decision?'<div style="margin-top:4px"><span style="font-size:12px;font-weight:700;background:#eef2ff;color:#4338ca;border-radius:8px;padding:2px 8px">'+esc(DEC[af.decision]||af.decision)+'</span></div>':'')
-            +(af.feedback?'<div style="font-size:13px;margin-top:6px;white-space:pre-wrap">'+ppFmtFb(af.feedback)+'</div>':'')
+            +(af.feedback?'<div style="font-size:13px;margin-top:6px;white-space:pre-wrap">'+ppFmtFb(af.feedback,af.pantone)+'</div>':'')
             +(af.awc_comment?'<div style="font-size:13px;margin-top:4px;color:#6b7280;white-space:pre-wrap">'+esc(af.awc_comment)+'</div>':'')+'</div>';
         }).join('');
         var photos=(s.photos||[]).length?'<div style="margin-top:16px"><div style="font-weight:700;margin-bottom:8px"><span class="pp-i18n">Photos</span></div><div style="display:flex;gap:8px;flex-wrap:wrap">'+(s.photos||[]).map(function(p){return '<img src="'+esc(p.url)+'" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">';}).join('')+'</div></div>':'';
@@ -2320,7 +2331,7 @@
                       var decLbl=function(d){ return {approved:'Approved',approved_with_comments:'Approved with comments',rejected_new_sample:'New sample needed',stop_development:'Development stopped',rejected:'Rejected'}[d]||''; };
                       var rows=af.map(function(x){ var dl=decLbl(x.decision);
                         return '<div style="margin-bottom:6px"><div style="font-size:11.5px;font-weight:700;color:#78350f">'+esc(x.component||ASP_LBL[x.aspect]||x.aspect)+(dl?' <span style="font-weight:600;color:#92400e">— '+esc(dl)+'</span>':'')+'</div>'
-                          +(x.feedback?'<div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+ppFmtFb(x.feedback)+'</div>':'')
+                          +(x.feedback?'<div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+ppFmtFb(x.feedback,x.pantone)+'</div>':'')
                           +(x.awc_comment?'<div style="font-size:11.5px;color:#92400e;white-space:pre-wrap;margin-top:1px">'+esc(x.awc_comment)+'</div>':'')+'</div>'; }).join('');
                       if(s.admin_feedback){ rows+='<div style="font-size:12px;color:#78350f;white-space:pre-wrap'+(af.length?';margin-top:2px':'')+'">'+esc(s.admin_feedback)+'</div>'; }
                       return '<div style="margin:6px 0;padding:8px 11px;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:7px"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:4px">💬 Feedback from Dock &amp; Bay</div>'+rows+'</div>';
@@ -2437,7 +2448,7 @@
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
               var unread=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
               var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); var isNew=(!sup&&!n.read);
-                return '<div style="padding:7px 0;border-bottom:1px solid var(--line2);text-align:left'+(isNew?';background:var(--amber-bg)':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:var(--faint)">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
+                return '<div style="padding:7px 0;border-bottom:1px solid var(--line2);text-align:left'+(isNew?';background:var(--amber-bg)':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+ppSmpChip(n.sample_version)+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:var(--faint)">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+ppFmtFb(n.body||'',n.pantone)+'</div>'+ppNoteAtt(n)+'</div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
               box.innerHTML='<div style="max-width:640px;text-align:left">'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div>'
                 +'<div style="font-weight:700;font-size:12.5px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
