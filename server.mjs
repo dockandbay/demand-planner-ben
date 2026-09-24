@@ -2953,7 +2953,9 @@ app.get('/api/supply/fulfil/drift', async (req, res) => {
 // v27.740: per-PO ERP status for the grid — in Fulfil (mirror) + line match + the cin7_not_required flag. Client merges by po.
 app.get('/api/supply/fulfil/grid-status', async (req, res) => {
   try {
-    const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required,
+    const _gsCfg = fulfilConfigFor(await activeFulfilEnv());   // v27.888 (Ben): deep link per PO to its Fulfil record
+    const _gsUrl = (fid) => (fid && _gsCfg.subdomain) ? ('https://' + _gsCfg.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fid + '?window_name=default') : null;
+    const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required, m.fulfil_id,
         (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, coalesce(m.line_count,0) fulfil_lines,
         to_char(m.requested_delivery_date,'YYYY-MM-DD') fulfil_req_delivery,
         -- v27.836 (Ben): the EXACT date the push writes (est_delivery, same calc as fulfilPushLines), so the drift flag + date-sync
@@ -2971,7 +2973,7 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
       LEFT JOIN planner.branches b ON b.name=po.branch
       LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
-    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
+    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_id: r.fulfil_id, fulfil_url: _gsUrl(r.fulfil_id), fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -3067,6 +3069,8 @@ async function fulfilShipmentRecs(idList) {   // idList = PO numbers OR shipment
     const hzDate = c.landing || null;
     out[id] = {
       configured: true, linked: true, ship_ref: c.ship_ref, is_number: hit.number, is_id: hit.id, state: hit.state,
+      // v27.888 (Ben): deep link to the Fulfil internal-shipment record (…/v2/erp/model/internal_shipment/<id>).
+      is_url: (hit.id && cfg.subdomain) ? ('https://' + cfg.subdomain + '.fulfil.io/v2/erp/model/internal_shipment/' + hit.id + '?window_name=default') : null,
       planned_date: hit.planned_date, horizon_date: hzDate,
       ref_mismatch: String(c.ship_ref) !== String(hit.number),
       date_mismatch: !!(hzDate && hit.planned_date && hzDate !== hit.planned_date),

@@ -3091,6 +3091,8 @@
         else if(s.in_fulfil) el.innerHTML='<span class="tool-badge bg-green" title="order-plan lines &amp; delivery date match Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'">✓ in sync</span>';
         else el.innerHTML='<button class="po-fpush tool-badge bg-blue" data-po="'+esc(po)+'" data-fup="lines" style="'+estyle+'" title="'+lineTip+'">Update lines</button>'; });
       document.querySelectorAll('#sup-grid .po-cin7[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; if(s&&s.cin7_not_required)el.innerHTML='<span class="mut tiny" title="marked not required in Cin7 (order plan)">n/a</span>'; });
+      // v27.888 (Ben): under the PLAN button — a link straight to this PO's record in Fulfil (only once the PO exists there).
+      document.querySelectorAll('#sup-grid .po-fulfil-link[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; el.innerHTML=(s&&s.fulfil_url)?'<a href="'+esc(s.fulfil_url)+'" target="_blank" rel="noopener" title="Open this PO in Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'" style="font-size:9px;font-weight:700;color:var(--blue);text-decoration:underline;letter-spacing:.03em">Fulfil ↗</a>':''; });
       document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ erpUploadInert(b.dataset.po, false, 'fulfil'); }; });   // v27.840 (Ben): open the same confirm/preview popup as the Order Plan tab instead of pushing straight away
     }).catch(function(){}); }
   function fulfilPushPO(po, btn){ var t=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
@@ -3222,7 +3224,7 @@
     else if(linesPending) erpCell='<button class="erp-up tool-badge bg-blue" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="'+((r.erp_total>0&&!(r.erp_in>0))?r.erp_total+' line(s) not yet in the ERP (never pushed)':r.erp_pending+' order-plan line(s) differ from the ERP')+'">Update lines</button>';
     else if(datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+'">Update date</button>';
     else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
-    return '<tr'+ga+'><td class="l" style="white-space:nowrap"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button>'+noteFlag+'</td>'+pocell
+    return '<tr'+ga+'><td class="l" style="white-space:nowrap"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button>'+noteFlag+'<div class="po-fulfil-link" data-po="'+esc(r.po)+'" style="line-height:1;margin-top:2px"></div></td>'+pocell
       +'<td class="l po-cin7" data-po="'+esc(r.po)+'">'+erpCell+'</td>'
       +'<td class="l"><span class="po-fulfil" data-po="'+esc(r.po)+'"><span class="mut tiny">…</span></span></td>'
       +'<td class="l po-supcell">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
@@ -6450,6 +6452,8 @@
     if(rec.ref_mismatch) out.push('<button class="hz-fulfil-chgref" data-is="'+esc(rec.is_number)+'" title="Fulfil internal shipment is '+esc(rec.is_number)+' — rename this Horizon shipment to match" style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">⇄ '+(compact?'':'Change to ')+esc(rec.is_number)+'</button>');
     if(rec.date_mismatch) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">📅'+(compact?'':' Update dates → '+esc(rec.horizon_date||''))+'</button>');
     return out.join(' '); }
+  // v27.888 (Ben): link to the Fulfil internal-shipment record itself (shipment record + PO ▸ Shipments tab; not the compact grid cell).
+  function hzFulfilIsLink(rec){ if(!rec||!rec.linked||!rec.is_url)return ''; return '<a href="'+esc(rec.is_url)+'" target="_blank" rel="noopener" title="Open '+esc(rec.is_number)+' in Fulfil" style="color:var(--blue);font-weight:700;text-decoration:underline;font-size:11px;white-space:nowrap">Fulfil '+esc(rec.is_number)+' ↗</a>'; }
   // PO grid: after a render, batch-lookup the Fulfil IS for each row's assigned shipment (distinct refs, cached) and paint
   // compact badges into the .po-fulfil placeholder in the shipment column. One Fulfil call per grid, not per row.
   function _poGridFulfilPaint(){
@@ -6460,12 +6464,22 @@
       // v27.887 (Ben): data-full hosts (PO record ▸ Shipments ▸ "Shipment mode" row, placed before "✎ rename") get the
       // full-label buttons ("⇄ Change to IS134", "📅 Update dates → …") plus a trailing separator; grid cells stay compact.
       var ok=(rec&&rec.configured&&rec.linked), bhC=ok?hzFulfilBadges(rec,true):'', bhF=ok?hzFulfilBadges(rec,false):'';
-      hs.forEach(function(h){ var full=!!h.dataset.full, bh=full?bhF:bhC; h.innerHTML=bh?(full?bh+' · ':bh):''; if(bh)hzWireFulfil(h, ref); }); }); }); }
+      var lk=ok?hzFulfilIsLink(rec):'';   // v27.888: PO ▸ Shipments tab also gets the "Fulfil IS134 ↗" link (before the action buttons)
+      hs.forEach(function(h){ var full=!!h.dataset.full, bh=full?bhF:bhC; var parts=full?[lk,bh].filter(Boolean):[bh].filter(Boolean); h.innerHTML=parts.length?(full?parts.join(' · ')+' · ':parts.join(' ')):''; if(bh)hzWireFulfil(h, ref); }); }); }); }
   function hzWireFulfil(scope, ref){ if(!scope)return;
     scope.querySelectorAll('.hz-fulfil-chgref').forEach(function(b){ if(b._w)return; b._w=1; b.onclick=function(e){ e.stopPropagation(); var is=b.dataset.is;
       var inp=scope.querySelector('.sh-ref-edit'), sv=scope.querySelector('.sh-ref-save');
       if(inp&&sv){ inp.value=is; sv.click(); }   // reuse the rename cascade (master data / shipment record)
-      else { shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/rename',{new_ref:is},function(j){ if(j&&j.error){alert(j.error);return;} _hzFulfilBust(ref); try{ if(typeof view==='function')view(); }catch(_){ location.reload(); } }); } }; });
+      else { b.disabled=true; var _t=b.textContent; b.textContent='…';
+        shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/rename',{new_ref:is},function(j){ b.disabled=false; b.textContent=_t; if(j&&j.error){alert(j.error);return;}
+          // v27.888 (Ben, live report): the rename landed but the screen didn't change. Cause: `view()` is a function
+          // nested inside each section renderer, NOT in this shared scope — so `typeof view==='function'` was false and
+          // nothing re-rendered (silently). Fix: drop the derived + section caches (they still held the old ref), show
+          // the result on the button, remember which PO to re-open, then re-render the current section properly.
+          try{ invalidateDerived(); delete cache['purchase-orders']; delete cache['shipments']; }catch(_){}
+          _hzFulfilBust(ref); _hzFulfilBust(is); b.textContent='✓ '+is; b.style.opacity='.7';
+          try{ var box=scope.closest&&scope.closest('[id^="podet-"]'); if(box){ var eb=document.querySelector('#sup-grid .po-exp[data-i="'+box.id.slice(6)+'"][data-po]'); if(eb){ _pendingPO=eb.dataset.po; _pendingPOTab='shipments'; } } else if(String(current||'')==='shipments'||poSub==='shipments'){ _pendingShip=is; } }catch(_){}
+          setTimeout(function(){ try{ if(current&&typeof selectSection==='function')selectSection(current); else location.reload(); }catch(_){ location.reload(); } },400); }); } }; });
     scope.querySelectorAll('.hz-fulfil-dates').forEach(function(b){ if(b._w)return; b._w=1; b.onclick=function(e){ e.stopPropagation(); var d=b.dataset.date, is=b.dataset.is, plan=b.dataset.plan;
       if(!d){ alert('No Horizon (Flexport) date available to push.'); return; }
       if(!confirm('Push Planned Receiving Date to Fulfil '+is+'?\n\nCurrent Fulfil:  '+(plan||'(none)')+'\nNew (Horizon Flexport landing):  '+d+'\n\nThis writes to '+is+' in Fulfil.'))return;
@@ -6479,8 +6493,8 @@
       if(!rec){ host.innerHTML=''; return; }
       if(!rec.configured){ host.innerHTML='<span class="mut tiny">Fulfil not configured in this environment</span>'; return; }
       if(!rec.linked){ host.innerHTML='<span class="mut tiny" title="No Fulfil internal shipment references this shipment yet">no Fulfil IS match yet</span>'; return; }
-      var bh=hzFulfilBadges(rec);
-      host.innerHTML='<span class="mut tiny" style="margin-right:6px">Fulfil '+esc(rec.is_number)+':</span>'+(bh||'<span class="mut tiny" style="color:var(--pos)">✓ in sync</span>');
+      var bh=hzFulfilBadges(rec), lk=hzFulfilIsLink(rec);   // v27.888 (Ben): the "Fulfil IS134" label is now a link to the Fulfil record
+      host.innerHTML='<span class="tiny" style="margin-right:6px">'+(lk||('<span class="mut">Fulfil '+esc(rec.is_number)+'</span>'))+':</span>'+(bh||'<span class="mut tiny" style="color:var(--pos)">✓ in sync</span>');
       hzWireFulfil(scope, ref); }); }
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
