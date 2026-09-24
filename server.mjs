@@ -2976,6 +2976,95 @@ app.post('/api/supply/fulfil/seed-ids', async (req, res) => {
     });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── v27.882 (Ben): Horizon shipment ⇄ Fulfil INTERNAL shipment (IS…) link + two ERP recommendations ──────────────
+//  Fulfil creates an internal transfer (stock.shipment.internal, e.g. IS134) whose `reference` carries the master PO
+//  number (verified live: IS134.reference='PO-57EUXR1'). We surface:
+//   (1) CHANGE REF — the Horizon shipment ref (default = master PO) ≠ the Fulfil IS number → rename to the IS number.
+//   (2) UPDATE DATES — the Fulfil internal shipment's Planned Receiving (planned_date) ≠ Horizon's Flexport landing.
+//  Auto-link is resilient to BOTH eventualities Ben flagged: the reference may live under the ORIGINAL master-PO number
+//  OR the IS number, on either side (Horizon rename / Flexport ref change), in any order — so we match a candidate set
+//  {master PO, current shipment ref, Flexport shipment_name} against the internal shipment's `reference` OR `number`.
+function _fulfilDate(v) {   // Fulfil date value → 'YYYY-MM-DD' | null
+  if (!v) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  if (v.iso_string) return String(v.iso_string).slice(0, 10);
+  if (v.year) return `${v.year}-${String(v.month).padStart(2, '0')}-${String(v.day).padStart(2, '0')}`;
+  return null;
+}
+async function fulfilInternalByCandidates(cands) {
+  const C = [...new Set((cands || []).filter(Boolean).map(String))];
+  if (!C.length) return [];
+  const rows = await fulfilSearchAll('stock.shipment.internal', ['OR', ['reference', 'in', C], ['number', 'in', C]], ['id', 'number', 'reference', 'state', 'planned_date']);
+  return rows.map(r => ({ id: r.id, number: r.number, reference: r.reference, state: r.state, planned_date: _fulfilDate(r.planned_date) }));
+}
+// Compute the two recommendations for a set of master POs. Read-only. Horizon date = Flexport landing (Ben: "based on
+// flexport shipment") coalesced landing ▸ dest-estimated ▸ arrival ▸ dest-planned — the same Flexport row the grid reads.
+async function fulfilShipmentRecs(idList) {   // idList = PO numbers OR shipment refs (may already be an IS number)
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  const out = {};
+  idList = [...new Set((idList || []).filter(Boolean).map(String))];
+  if (!idList.length) return { env: cfg.env, configured: cfg.configured, shipments: out };
+  // Resolve each input id to its Horizon shipment context. An id matches on po number, current shipment_ref, or master_po,
+  // so a shipment renamed to its IS number still resolves. One row per (id, matched PO); we fold to one context per id.
+  const hz = (await pool.query(`
+    SELECT q.id,
+      coalesce(nullif(po.shipment_ref,''), po.po) ship_ref, po.po, coalesce(po.master_po,'') master_po,
+      f.shipment_name flex_name,
+      to_char(coalesce(f.landing_date, f.dest_estimated_arrival, f.arrival_date, f.dest_planned_arrival),'YYYY-MM-DD') landing
+    FROM unnest($1::text[]) q(id)
+    LEFT JOIN planner.purchase_orders po ON po.po=q.id OR nullif(po.shipment_ref,'')=q.id OR nullif(po.master_po,'')=q.id
+    LEFT JOIN planner.flexport_shipments f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po`, [idList])).rows;
+  const ctx = {};   // id → { ship_ref, landing, cands:Set }
+  idList.forEach(id => { ctx[id] = { ship_ref: id, landing: null, cands: new Set([id]) }; });
+  hz.forEach(r => { const c = ctx[r.id]; if (!c) return;
+    if (r.ship_ref) { c.ship_ref = r.ship_ref; c.cands.add(String(r.ship_ref)); }
+    if (r.po) c.cands.add(String(r.po));
+    if (r.master_po) c.cands.add(String(r.master_po));
+    if (r.flex_name) c.cands.add(String(r.flex_name));
+    if (r.landing && !c.landing) c.landing = r.landing;
+  });
+  if (!cfg.configured) { idList.forEach(id => { out[id] = { configured: false, ship_ref: ctx[id].ship_ref }; }); return { env: cfg.env, configured: false, shipments: out }; }
+  const allCands = new Set(); idList.forEach(id => ctx[id].cands.forEach(x => allCands.add(x)));
+  const rows = await fulfilInternalByCandidates([...allCands]);
+  const byKey = {}; rows.forEach(r => { if (r.reference) byKey[String(r.reference)] = r; if (r.number) byKey[String(r.number)] = r; });
+  idList.forEach(id => {
+    const c = ctx[id];
+    let hit = null; for (const k of c.cands) { if (byKey[k]) { hit = byKey[k]; break; } }
+    if (!hit) { out[id] = { configured: true, linked: false, ship_ref: c.ship_ref }; return; }
+    const hzDate = c.landing || null;
+    out[id] = {
+      configured: true, linked: true, ship_ref: c.ship_ref, is_number: hit.number, is_id: hit.id, state: hit.state,
+      planned_date: hit.planned_date, horizon_date: hzDate,
+      ref_mismatch: String(c.ship_ref) !== String(hit.number),
+      date_mismatch: !!(hzDate && hit.planned_date && hzDate !== hit.planned_date),
+    };
+  });
+  return { env: cfg.env, configured: true, shipments: out };
+}
+app.get('/api/supply/fulfil/internal-shipments', async (req, res) => {   // batch read for the grid / shipment record / master data
+  try {
+    const pos = String(req.query.pos || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 300);
+    res.json({ ok: true, ...(await fulfilShipmentRecs(pos)) });
+  } catch (e) { log500(e); res.json({ ok: false, error: String(e.message || e), shipments: {} }); }
+});
+// UPDATE DATES — push the Horizon Flexport landing date onto the Fulfil internal shipment's Planned Receiving date.
+// LIVE-WRITE GATED (same gate as the PO push) + the client shows the exact date in a confirm before calling this.
+app.post('/api/supply/fulfil/shipment-planned-date', async (req, res) => {
+  const b = req.body || {}; const po = String(b.po || '').trim(); const date = String(b.date || '').slice(0, 10);
+  if (!po || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'po and date (YYYY-MM-DD) required' });
+  try {
+    const cfg = fulfilConfigFor(await activeFulfilEnv());
+    if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true')
+      return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: { po, planned_date: date } });
+    const hz = (await pool.query(`SELECT coalesce(nullif(po.shipment_ref,''),po.po) ship_ref, po.po po_num, coalesce(po.master_po,'') master_po, f.shipment_name flex_name FROM planner.purchase_orders po LEFT JOIN planner.flexport_shipments f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po WHERE po.po=$1 OR nullif(po.shipment_ref,'')=$1 OR nullif(po.master_po,'')=$1 LIMIT 1`, [po])).rows[0] || {};
+    const rows = await fulfilInternalByCandidates([po, hz.po_num, hz.ship_ref, hz.master_po, hz.flex_name]);
+    const hit = rows[0];
+    if (!hit) return res.status(404).json({ error: 'No Fulfil internal shipment found for ' + po });
+    await fulfilFetch('PUT', '/model/stock.shipment.internal/' + hit.id, { planned_date: date });
+    res.json({ ok: true, is_number: hit.number, is_id: hit.id, planned_date: date });
+  } catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
+});
 // v27.740: toggle "not required in Cin7" for one PO (order-plan tickbox). Suppresses Cin7 drift/actions; Fulfil unaffected.
 app.post('/api/supply/po/:po/cin7-not-required', async (req, res) => {
   const b = req.body || {};

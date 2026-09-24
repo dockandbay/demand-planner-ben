@@ -6431,6 +6431,45 @@
       if(o.b!==_cur){ _cur=o.b; var g=_BKT[o.b]; h+='<tr class="grp-row"><td colspan="16" style="background:'+g.bg+';color:'+g.c+';font-weight:700;font-size:11px;letter-spacing:.02em;padding:6px 10px;text-align:left;border-top:2px solid var(--line);border-bottom:1px solid var(--line)">'+(g.t?g.t+'. ':'')+g.d+'</td></tr>'; }
       h+=shipRowHtml(s,i)+'<tr class="exp-row" id="shipexp-'+i+'" style="display:none"><td colspan="16"><div id="shipdet-'+i+'" class="count">Loading…</div></td></tr>'; });
     return h+'</tbody></table></div><div class="grid-tailspace"></div>'; }
+  // ── v27.882 (Ben): Fulfil internal-shipment (IS…) recommendations — surfaced on the shipment record's rename section
+  //   and on the PO grid's shipment column. (1) "Change to IS<n>" renames the Horizon shipment to match Fulfil's IS
+  //   number (reuses the rename cascade). (2) "Update dates" pushes Horizon's Flexport landing date onto the internal
+  //   shipment's Planned Receiving (planned_date) — LIVE-write GATED + a confirm showing the exact date first.
+  var _hzFulfilCache={};   // id → {t, rec}
+  function hzFulfilShip(ids, cb){ ids=(ids||[]).filter(Boolean); if(!ids.length){cb({});return;}
+    var need=[], now=Date.now(), out={};
+    ids.forEach(function(id){ var e=_hzFulfilCache[id]; if(e&&now-e.t<60000)out[id]=e.rec; else need.push(id); });
+    if(!need.length){ cb(out); return; }
+    fetch('/api/supply/fulfil/internal-shipments?pos='+encodeURIComponent(need.join(','))).then(function(r){return r.json();}).then(function(j){
+      var sh=(j&&j.shipments)||{}; need.forEach(function(id){ var rec=sh[id]||{configured:!!(j&&j.configured),linked:false}; _hzFulfilCache[id]={t:Date.now(),rec:rec}; out[id]=rec; }); cb(out);
+    }).catch(function(){ need.forEach(function(id){ out[id]=null; }); cb(out); }); }
+  function _hzFulfilBust(id){ delete _hzFulfilCache[id]; }
+  function hzFulfilBadges(rec){ if(!rec||!rec.configured||!rec.linked)return '';
+    var out=[];
+    if(rec.ref_mismatch) out.push('<button class="hz-fulfil-chgref" data-is="'+esc(rec.is_number)+'" title="Fulfil internal shipment is '+esc(rec.is_number)+' — rename this Horizon shipment to match" style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;cursor:pointer">⇄ Change to '+esc(rec.is_number)+'</button>');
+    if(rec.date_mismatch) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;cursor:pointer">📅 Update dates → '+esc(rec.horizon_date||'')+'</button>');
+    return out.join(' '); }
+  function hzWireFulfil(scope, ref){ if(!scope)return;
+    scope.querySelectorAll('.hz-fulfil-chgref').forEach(function(b){ if(b._w)return; b._w=1; b.onclick=function(e){ e.stopPropagation(); var is=b.dataset.is;
+      var inp=scope.querySelector('.sh-ref-edit'), sv=scope.querySelector('.sh-ref-save');
+      if(inp&&sv){ inp.value=is; sv.click(); }   // reuse the rename cascade (master data / shipment record)
+      else { shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/rename',{new_ref:is},function(j){ if(j&&j.error){alert(j.error);return;} _hzFulfilBust(ref); try{ if(typeof view==='function')view(); }catch(_){ location.reload(); } }); } }; });
+    scope.querySelectorAll('.hz-fulfil-dates').forEach(function(b){ if(b._w)return; b._w=1; b.onclick=function(e){ e.stopPropagation(); var d=b.dataset.date, is=b.dataset.is, plan=b.dataset.plan;
+      if(!d){ alert('No Horizon (Flexport) date available to push.'); return; }
+      if(!confirm('Push Planned Receiving Date to Fulfil '+is+'?\n\nCurrent Fulfil:  '+(plan||'(none)')+'\nNew (Horizon Flexport landing):  '+d+'\n\nThis writes to '+is+' in Fulfil.'))return;
+      b.disabled=true; var _t=b.textContent; b.textContent='pushing…';
+      shipPost('/api/supply/fulfil/shipment-planned-date',{po:ref,date:d},function(j){ b.disabled=false; b.textContent=_t;
+        if(j&&j.gated){ alert('LIVE Fulfil writes are OFF (safety gate).\nWould push '+is+' → '+d+'.\nAsk Diviyaj to enable FULFIL_LIVE_WRITES on prod.'); return; }
+        if(j&&j.error){ alert('Fulfil: '+j.error); return; }
+        b.textContent='✓ pushed '+d; b.style.opacity='.7'; _hzFulfilBust(ref); }); }; }); }
+  function _bindShipFulfil(scope, ref){ if(!scope)return; var host=scope.querySelector('.sh-fulfil-rec'); if(!host||host._loading)return; host._loading=1;
+    hzFulfilShip([ref], function(m){ host._loading=0; var rec=m[ref];
+      if(!rec){ host.innerHTML=''; return; }
+      if(!rec.configured){ host.innerHTML='<span class="mut tiny">Fulfil not configured in this environment</span>'; return; }
+      if(!rec.linked){ host.innerHTML='<span class="mut tiny" title="No Fulfil internal shipment references this shipment yet">no Fulfil IS match yet</span>'; return; }
+      var bh=hzFulfilBadges(rec);
+      host.innerHTML='<span class="mut tiny" style="margin-right:6px">Fulfil '+esc(rec.is_number)+':</span>'+(bh||'<span class="mut tiny" style="color:var(--pos)">✓ in sync</span>');
+      hzWireFulfil(scope, ref); }); }
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
@@ -6476,7 +6515,8 @@
       // v27.868 (Ben): rename the shipment reference here on Dates & tracking. Defaults to the master PO; editable/overridable (e.g. to match the Fulfil internal shipment). Cascades to every PO on this shipment.
       +'<div style="display:flex;align-items:flex-start;gap:8px;margin:0 0 12px;flex-wrap:wrap"><div><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em">Shipment reference</div>'
       +'<div style="display:flex;gap:6px;align-items:center;margin-top:3px"><input class="fci txt sh-ref-edit" value="'+esc(ref)+'" spellcheck="false" style="min-width:180px;font-weight:700;font-family:ui-monospace,Menlo,monospace" title="Defaults to the master PO; override it (e.g. to match the Fulfil internal shipment IS number). Applies to every PO on this shipment."><button class="save-btn light sh-ref-save" data-old="'+esc(ref)+'">Rename</button><span class="sh-ref-msg mut tiny"></span></div>'
-      +'<div class="mut tiny" style="margin-top:2px">Defaults to the master PO — editable; the new reference cascades to every PO on this shipment.</div></div></div>'
+      +'<div class="mut tiny" style="margin-top:2px">Defaults to the master PO — editable; the new reference cascades to every PO on this shipment.</div>'
+      +'<div class="sh-fulfil-rec" style="margin-top:5px;min-height:16px"></div></div></div>'   // v27.882: Fulfil IS recommendations (change ref / update dates)
       +(locked
         ? '<div class="tiny" style="margin-bottom:8px;color:var(--blue-ink)">🔗 Linked to Flexport ('+flexRef(s.flex_id)+') — departure / landing / arrival come from the Flexport feed. The <b>completion</b> date (goods received) isn’t a Flexport field, so it stays overridable below (blank = arrival + 7 days).</div>'
         : '<div class="mut tiny" style="margin-bottom:8px">Overrides take precedence over the POs aboard. <b>final</b> shows the date used and its source — <span class="src m">S</span> shipment override, <span class="src fx">FLEX</span> Flexport.</div>')
@@ -6524,7 +6564,7 @@
         _b0.querySelectorAll('.shipdest').forEach(function(el){ el.onchange=function(){ var body={}; body[el.dataset.field]=el.value; el.classList.add('saved');
           fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
             .then(function(j){ if(j&&j.error)throw new Error(j.error); if(_shipPatchRow)_shipPatchRow(ref); else shipReload(); })
-            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; }); _bindShipRef(_b0); }
+            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; }); _bindShipRef(_b0); try{ _bindShipFulfil(_b0, ref); }catch(e){} }
     }catch(e){}
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
@@ -6587,7 +6627,7 @@
           fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
             .then(function(j){ if(j&&j.error)throw new Error(j.error); shipRefresh(); })
             .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; });
-        _bindShipRef(box);
+        _bindShipRef(box); try{ _bindShipFulfil(box, ref); }catch(e){}
         if(typeof afterRender==='function')afterRender(box); })
       .catch(function(e){ document.getElementById('shipdet-'+i).innerHTML=head+'<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); }
   // Drawers/sheets stack in the order they're opened: each newly opened one gets a z-index above the last, so a

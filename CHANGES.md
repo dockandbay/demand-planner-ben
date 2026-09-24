@@ -1,3 +1,29 @@
+## v27.882 deploy note (Ben): Horizon shipment ⇄ Fulfil INTERNAL shipment (IS…) — link + two ERP recommendations
+
+**No migrations. No new required env vars.** Files: `server.mjs` (read/discovery + gated write), `supply/inject.html` (shipment-record badges). Uses the existing `FULFIL_LIVE_*` creds and the `FULFIL_LIVE_WRITES` gate.
+
+### What & why
+When a supplier PO ships, Fulfil creates an internal transfer shipment (e.g. **IS134**) whose `reference` carries the master PO number (verified live: `IS134.reference = "PO-57EUXR1"`). Horizon now surfaces two recommendations on a shipment:
+1. **Change ref** — the Horizon shipment ref (default = master PO) ≠ the Fulfil IS number → a "⇄ Change to IS134" button that renames the Horizon shipment to match (reuses the existing rename cascade).
+2. **Update dates** — the Fulfil internal shipment's Planned Receiving (`planned_date`) ≠ Horizon's Flexport landing date → a "📅 Update dates → <date>" button that pushes Horizon's date to Fulfil.
+
+### Auto-link (both eventualities, per Ben)
+The link is resilient to the reference living under **either** the original master-PO number **or** the IS number, on **either** side (Horizon rename / Flexport ref change), in any order: for each Horizon shipment we match a candidate set `{master PO, current shipment ref, Flexport shipment_name}` against the Fulfil internal shipment's `reference` **or** `number`. So it keeps matching after a rename.
+
+### Server (`server.mjs`)
+- `GET /api/supply/fulfil/internal-shipments?pos=<ids>` — batch, **read-only**. Ids may be PO numbers or shipment refs. Returns per-id `{ linked, is_number, is_id, state, planned_date, horizon_date, ref_mismatch, date_mismatch }`. One Fulfil `search_read` for all ids.
+- `POST /api/supply/fulfil/shipment-planned-date {po,date}` — pushes `planned_date` to the internal shipment. **LIVE-write GATED** (same `FULFIL_LIVE_WRITES` gate as the PO push): when off it returns `423` + `would_write` and performs no write. The client also shows a confirm with the exact before/after dates first.
+- Helpers `fulfilInternalByCandidates`, `fulfilShipmentRecs`. Read uses the active Fulfil env (prod = live).
+
+### Client (`supply/inject.html`)
+- Badges render on the **shipment record → Shipment reference** section (the rename panel under Dates & Tracking). "Change to IS…" drives the rename input+save; "Update dates" confirms then calls the gated write.
+- Verified in the browser against **live Fulfil**: PO-57EUXR1 → linked IS134, "⇄ Change to IS134" + "📅 Update dates → 2026-10-10" (Fulfil planned_date was 2026-10-19).
+
+### For Diviyaj
+- **The `planned_date` write only fires on prod when `FULFIL_LIVE_WRITES=true`** (currently the same gate as PO pushes). Until then the button reports "gated" and writes nothing. Coordinate before enabling; note the open Fulfil 502 incident.
+- **Date choice:** the pushed date is Horizon's **Flexport landing** (`coalesce(landing_date, dest_estimated_arrival, arrival_date, dest_planned_arrival)` from `flexport_shipments`). Heads-up: Horizon's stored `est_delivery` calc (used by the PO date-sync) returns a *different* date for this PO (prod_end + sea = 2026-11-14) because the `shipments` row isn't populated with Flexport dates — the Flexport row itself says 2026-10-10. Ben chose the Flexport landing. If you'd rather the two agree, the fix is to flow Flexport dates into `shipments`/`est_delivery`.
+- **Still to build:** the PO-grid shipment-column badge (batched per distinct shipment so it doesn't per-row-hammer Fulfil) — not in this version.
+
 ## v27.881 deploy note (Ben): ADMIN PO grid — Phase 2b implemented here after all (cache layer only; your PO_ROWS_SQL text is untouched)
 
 **No migrations. One optional env knob: `SUPPLY_REBUILD_MIN_MS` (default 30000).** File: `server.mjs` only.
