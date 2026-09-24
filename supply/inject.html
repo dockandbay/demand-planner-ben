@@ -1553,7 +1553,7 @@
     fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:(ind?7:(days||7)),indefinite:ind})})
       .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw 0;
         r.status=(ns==='open'?'open':ns);
-        if(ns==='snoozed'){ if(ind){ r.snooze_until=null; } else { var d=new Date(); d.setDate(d.getDate()+(parseInt(days,10)||7)); r.snooze_until=d.toISOString().slice(0,10); } r.snoozed_by=(window.ME&&ME.email)||r.snoozed_by; } else r.snooze_until=null;
+        if(ns==='snoozed'){ if(ind){ r.snooze_until=null; } else { var d=new Date(); d.setDate(d.getDate()+(parseInt(days,10)||7)); r.snooze_until=d.toISOString().slice(0,10); } r.snoozed_by=(ME&&ME.email)||r.snoozed_by; } else r.snooze_until=null;
         if(cb)cb(); })
       .catch(function(){ alert('Could not update action state'); }); }
   // Snooze menu popped from the single Actions-page "Snooze ▾" button (1/3/7 days + indefinitely).
@@ -2339,7 +2339,7 @@
   function snzUntil(s){ if(!s||!s.snooze_until)return 'indefinitely'; var p=String(s.snooze_until).slice(0,10).split('-'); if(p.length<3)return String(s.snooze_until); return p[2]+'-'+(_SNZMON[(+p[1])-1]||'?')+'-'+p[0].slice(2); }  // 2026-07-14 → 14-Jul-26
   // "by <user>" suffix for a snooze label. Falls back to the signed-in user (ME.email) when the stored
   // snoozed_by is missing (e.g. rows snoozed before attribution was captured), so it always reads "by ben@".
-  function snzBy(s){ var u=(s&&s.snoozed_by)||(window.ME&&ME.email)||''; return u?' by '+esc(shortUser(u)):''; }
+  function snzBy(s){ var u=(s&&s.snoozed_by)||(ME&&ME.email)||''; return u?' by '+esc(shortUser(u)):''; }
   function poActSnoozed(po,cond){ return snzActive(_poActState[poActKey(po,cond)]); }
   var _cssEsc=function(x){ return (window.CSS&&CSS.escape)?CSS.escape(x):String(x).replace(/["\\]/g,'\\$&'); };
   // Silent in-place refresh after a snooze/wake: re-render the affected markers + recompute the PO-ref badge count.
@@ -2432,7 +2432,7 @@
   // Quick action for "Awaiting supplier confirmation" (Actions tab + Master & Docs): post a reminder to the
   // supplier's portal timeline. Shared by both button locations.
   function sendConfirmReminder(btn){ if(btn._busy)return; btn._busy=true; var o=btn.textContent; btn.disabled=true; btn.textContent='…';
-    fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:btn.dataset.po,body:'Reminder to review and confirm this PO',author_kind:'internal',author_email:(window.ME&&ME.email)||'Dock & Bay'})})
+    fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:btn.dataset.po,body:'Reminder to review and confirm this PO',author_kind:'internal',author_email:(ME&&ME.email)||'Dock & Bay'})})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); btn.textContent='✓ reminder sent'; })
       .catch(function(e){ btn._busy=false; btn.disabled=false; btn.textContent=o; alert('Failed: '+(e.message||e)); }); }
   function actMark(po,code){
@@ -3461,7 +3461,7 @@
       b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
       b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
       b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); var iso=b.dataset.date; if(!confirm('Update PO '+b.dataset.po+' production-end date to '+fd(iso)+' (supplier-submitted)?'))return; var o=b.innerHTML; b.disabled=true; b.textContent='…';
-        fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||'PO GRID'})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
+        fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(ME&&ME.email)||'PO GRID'})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
           return fetch('/api/supply/po-row/'+encodeURIComponent(b.dataset.po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr&&window.__poRowApply)window.__poRowApply(rr); }); })
           .catch(function(er){ b.disabled=false; b.innerHTML=o; alert('Failed: '+(er.message||er)); }); }; });
   }
@@ -4066,7 +4066,7 @@
     var _ownNotes=notes.filter(function(n){return n.author_kind==='internal'&&!n.private;});   // escalate emails the supplier — never offered on a private (team-only) note
     var recentOwnId=_ownNotes.length?_ownNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
     var recentAnyId=notes.length?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))||(Number(b.id)-Number(a.id));})[0].id:null;   // most recent message overall
-    var meEmail=((window.ME&&ME.email)||'').toLowerCase();   // you can only delete YOUR OWN latest message — not a supplier's, not a colleague's
+    var meEmail=((ME&&ME.email)||'').toLowerCase();   // you can only delete YOUR OWN latest message — not a supplier's, not a colleague's
     function renderNote(n){ var sup=(n.author_kind!=='internal'); var priv=!!n.private;
       var ctrl = sup
         ? (n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
@@ -4463,7 +4463,7 @@
         .catch(function(e){ b.disabled=false; b.textContent=t; alert('Escalate failed: '+(e.message||e)); }); }; });
     // Delete the most recent timeline message (small link under Escalate)
     document.querySelectorAll('#podet-'+i+' .po-note-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete the most recent timeline message? This cannot be undone.'))return; b.style.pointerEvents='none'; b.textContent='deleting…';
-      fetch('/api/supply/note-delete/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||''})}).then(function(r){return r.json();})
+      fetch('/api/supply/note-delete/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(ME&&ME.email)||''})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.style.pointerEvents=''; b.textContent='delete'; alert('Could not delete: '+(e.message||e)); }); }; });
     // ORDER PLAN tab — accept a supplier change (per line / all), and jump to the full ORDER PLAN filtered to this PO
@@ -5586,7 +5586,7 @@
     function wireMfgNotes(){ var ta=document.getElementById('mfg-notes-body'); if(!ta)return;
       fetch('/api/supply/manufacturing-notes').then(function(r){return r.json();}).then(function(j){ if(document.activeElement!==ta)ta.value=(j&&j.body)||''; var m=document.getElementById('mfg-notes-meta'); if(m&&j&&j.updated_by)m.textContent='last edited by '+shortUser(j.updated_by)+(j.updated_at?' · '+j.updated_at:''); }).catch(function(){});
       var sv=document.getElementById('mfg-notes-save'); if(sv)sv.onclick=function(){ sv.disabled=true; var st=document.getElementById('mfg-notes-status'); if(st)st.textContent='Saving…';
-        fetch('/api/supply/manufacturing-notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:ta.value})}).then(function(r){return r.json();}).then(function(j){ sv.disabled=false; if(j&&j.error){ if(st)st.textContent='Error: '+j.error; return; } if(st)st.textContent='Saved ✓'; var m=document.getElementById('mfg-notes-meta'); if(m&&window.ME&&ME.email)m.textContent='last edited by '+shortUser(ME.email)+' · just now'; setTimeout(function(){ if(st)st.textContent=''; },1600); }).catch(function(){ sv.disabled=false; if(st)st.textContent='Save failed'; }); }; }
+        fetch('/api/supply/manufacturing-notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:ta.value})}).then(function(r){return r.json();}).then(function(j){ sv.disabled=false; if(j&&j.error){ if(st)st.textContent='Error: '+j.error; return; } if(st)st.textContent='Saved ✓'; var m=document.getElementById('mfg-notes-meta'); if(m&&ME&&ME.email)m.textContent='last edited by '+shortUser(ME.email)+' · just now'; setTimeout(function(){ if(st)st.textContent=''; },1600); }).catch(function(){ sv.disabled=false; if(st)st.textContent='Save failed'; }); }; }
     var mfgNotesHtml='<div id="mfg-notes-wrap" style="margin:2px 0 12px;border:1px solid var(--line);border-radius:8px;background:#fffef7;padding:9px 11px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><b style="font-size:12px">📝 Manufacturing notes</b><span class="mut tiny" id="mfg-notes-meta"></span></div>'
       +'<textarea id="mfg-notes-body" placeholder="Detailed notes — e.g. SKUs remaining somewhere…" style="width:100%;min-height:60px;box-sizing:border-box;border:1px solid #e5d9a8;border-radius:5px;padding:6px;font:12px inherit;resize:vertical"></textarea>'
@@ -5657,7 +5657,7 @@
           if(accCell){ if(diff===0)accCell.innerHTML=''; else if(!accCell.querySelector('.mfg-acc'))accCell.innerHTML='<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(comp)+'"> accept</label>'; }
           tr.style.background=(diff!==0 && !(accCell&&accCell.querySelector('.mfg-acc:checked')))?'#fff7ed':''; }
         var bun=_mfgBun[inp.dataset.bid]; if(bun&&bun.components&&bun.components[inp.dataset.cidx]){ var cc=bun.components[inp.dataset.cidx]; cc.stock=q; cc.supplied=supplied; cc.diff=diff; }
-        fetch('/api/supply/manufacturing-stock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prod_no:inp.dataset.prod,component_sku:inp.dataset.comp,qty:q,updated_by:(window.ME&&ME.email)||null})})
+        fetch('/api/supply/manufacturing-stock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prod_no:inp.dataset.prod,component_sku:inp.dataset.comp,qty:q,updated_by:(ME&&ME.email)||null})})
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete cache['manufacturing']; try{ _navCounts.manufacturing=undefined; prefetchNavCounts(); }catch(e){} inp.style.borderColor='#16a34a'; setTimeout(function(){ inp.style.borderColor='#cbd5e1'; },900); })
           .catch(function(e){ inp.style.borderColor='#dc2626'; alert('Could not save stock: '+(e.message||e)); });
         // re-bind any accept checkbox we just created
@@ -5733,7 +5733,7 @@
     bg.querySelectorAll('.mfg-drw-stock').forEach(function(inp){ inp.onchange=function(){ var ci=+inp.dataset.ci, cc=_mfgBun[bid].components[ci]; if(!cc)return;
       var q=Math.max(0,Math.round(Number(inp.value)||0)), fixed=(Number(cc.inProd)||0)+(Number(cc.completed)||0); cc.stock=q; cc.supplied=fixed+q; cc.diff=cc.supplied-(Number(cc.required)||0);
       _mfgPatchGridRow(bid,ci);
-      fetch('/api/supply/manufacturing-stock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prod_no:_mfgBun[bid].prod,component_sku:cc.comp,qty:q,updated_by:(window.ME&&ME.email)||null})})
+      fetch('/api/supply/manufacturing-stock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prod_no:_mfgBun[bid].prod,component_sku:cc.comp,qty:q,updated_by:(ME&&ME.email)||null})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); try{delete cache['manufacturing'];_navCounts.manufacturing=undefined;prefetchNavCounts();}catch(e){} }).catch(function(e){ alert('Could not save stock: '+(e.message||e)); });
       openMfgBundleDrawer(bid); }; inp.addEventListener('keydown',function(e){ if(e.key==='Enter')inp.blur(); }); });
     // Sign-off — accept a short/over component; bound to the main table's accept checkbox + row highlight.
@@ -7500,7 +7500,7 @@
             +pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px;width:100%;table-layout:fixed"><colgroup><col style="width:8%"><col style="width:40%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:2%"></colgroup><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Stakeholders</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
           b.querySelectorAll('.sug-filt').forEach(function(p){ p.onclick=function(){ stFilt=p.dataset.s; draw(rows); }; });
           b.querySelectorAll('.sug-st').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, ns=sel.value;
-            shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns;
+            shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns;
               var fl=(ns==='complete'&&j&&j.emailed&&r&&r.created_by)?('📧 "This feature is going live" emailed to '+shortUser(r.created_by)+' (cc sarah@, ben@, diviyaj@)'):''; draw(rows,fl); }); }; });
           b.querySelectorAll('.sug-stk').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, v=inp.value.trim(); shipPost('/api/supply/suggestion/'+id+'/stakeholders',{stakeholders:v},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.stakeholders=(j&&j.stakeholders!=null)?j.stakeholders:v; if(j&&j.stakeholders!=null)inp.value=j.stakeholders; }); }; });
           var _sss=document.getElementById('sug-stake-save'); if(_sss)_sss.onclick=function(){ var v=(document.getElementById('sug-stake').value||'').trim(), m=document.getElementById('sug-stake-msg');
@@ -10890,7 +10890,7 @@
         var txt=_smpJoinCQ(cB?cB.value:'', qB?qB.value:'');   // COLOUR + QUALITY combined
         msg.style.color='var(--muted)'; msg.textContent='saving…';
         fetch('/api/product/sample/'+s.id+'/aspect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({aspect:key,feedback:txt,decision:dec,reject_reasons:rs,awc_comment:awc.style.display!=='none'?awc.value:''})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } msg.style.color='var(--pos)'; msg.textContent=(j&&j.flowed)?('✓ saved → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved'; try{ navigator.vibrate&&navigator.vibrate(15); }catch(e){}
-          if(txt && s.item_ref){ var pfx='Feedback on '+s.item_ref+'_v'+s.version+' · '+_apLabel+':'; fetch('/api/product/note/upsert-feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:s.item_ref,prefix:pfx,body:pfx+'\n'+txt,author_email:(window.ME&&ME.email)||'',tags:[],supplier:s.supplier||'',sample_id:s.id})}).catch(function(){}); }   // v27.850 timeline; v27.857 scope to this sample's supplier; v27.863 auto-tag sample version
+          if(txt && s.item_ref){ var pfx='Feedback on '+s.item_ref+'_v'+s.version+' · '+_apLabel+':'; fetch('/api/product/note/upsert-feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:s.item_ref,prefix:pfx,body:pfx+'\n'+txt,author_email:(ME&&ME.email)||'',tags:[],supplier:s.supplier||'',sample_id:s.id})}).catch(function(){}); }   // v27.850 timeline; v27.857 scope to this sample's supplier; v27.863 auto-tag sample version
           setTimeout(function(){ if(String(msg.textContent).charAt(0)==='✓')msg.textContent=''; },2000); }).catch(function(e){ msg.style.color='var(--neg)'; msg.textContent=(e&&e.message||e); }); }
       function saveSoon(){ clearTimeout(_t); _t=setTimeout(doSave,750); }
       sel.onchange=function(){ var v=sel.value; sel.setAttribute('style','width:100%;font-size:14px;padding:8px;text-align:left;'+prodStageStyle(v)); reasons.style.display=(v==='rejected_new_sample'||v==='stop_development')?'':'none'; awc.style.display=(v==='approved_with_comments')?'':'none'; doSave(); };
@@ -10901,7 +10901,7 @@
       var upIn=box.querySelector('.scc-fb-up'), upMsg=box.querySelector('.scc-fb-upmsg'), upList=box.querySelector('.scc-fb-files');
       if(upIn)upIn.onchange=function(){ var files=Array.prototype.slice.call(upIn.files||[]); if(!files.length)return; var i=0,last=null,names=[];
         function one(){ if(i>=files.length){ if(upMsg){ upMsg.style.color=''; upMsg.textContent=names.length+' photo'+(names.length===1?'':'s')+' added'; setTimeout(function(){ upMsg.textContent=''; },2500); }
-            if(last){ var txt=_smpJoinCQ(cB?cB.value:'', qB?qB.value:''); var pfx='Feedback on '+s.item_ref+'_v'+s.version+' · '+_apLabel+':'; fetch('/api/product/note/upsert-feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:s.item_ref,prefix:pfx,body:pfx+(txt?'\n'+txt:' 📎 '+names[names.length-1]),author_email:(window.ME&&ME.email)||'',tags:[],supplier:s.supplier||'',attachment_id:last,sample_id:s.id})}).catch(function(){}); }
+            if(last){ var txt=_smpJoinCQ(cB?cB.value:'', qB?qB.value:''); var pfx='Feedback on '+s.item_ref+'_v'+s.version+' · '+_apLabel+':'; fetch('/api/product/note/upsert-feedback',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:s.item_ref,prefix:pfx,body:pfx+(txt?'\n'+txt:' 📎 '+names[names.length-1]),author_email:(ME&&ME.email)||'',tags:[],supplier:s.supplier||'',attachment_id:last,sample_id:s.id})}).catch(function(){}); }
             upIn.value=''; return; }
           var f=files[i++]; if(f.size>20*1024*1024){ if(upMsg){upMsg.style.color='var(--neg)';upMsg.textContent=f.name+' too large (max 20MB)';} one(); return; } if(upMsg){ upMsg.style.color=''; upMsg.textContent='uploading '+f.name+'…'; }
           var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result||'').split(',')[1]||'';
@@ -11390,18 +11390,18 @@
       +'<div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="save-btn" id="rn-post" style="background:#4f46e5;color:#fff;border-color:#4338ca">Post note</button><span id="rn-msg" class="mut tiny"></span><span id="rn-team" class="mut tiny" style="margin-left:auto"></span></div>'
       +'<div id="rn-list" style="margin-top:12px"></div></div>';
     ensureTeam().then(function(t){ var el=document.getElementById('rn-team'); if(el&&t&&t.length)el.textContent='Tag: '+t.slice(0,8).map(function(x){return '@'+x.handle;}).join(' '); });
-    var meL=((window.ME&&ME.email)||'').toLowerCase();
+    var meL=((ME&&ME.email)||'').toLowerCase();
     function load(){ fetch('/api/supply/report-notes/list?key='+encodeURIComponent(key)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[]; var el=document.getElementById('rn-list'); if(!el)return;
       el.innerHTML=rows.length?rows.map(function(n){ var mine=(n.author_email||'').toLowerCase()===meL;
         return '<div style="border-top:1px solid #f1f5f9;padding:7px 0;font-size:13px"><div class="mut tiny" style="margin-bottom:2px">'+esc(shortUser(n.author_email||'—'))+' · '+esc(n.created_at||'')+(mine?' · <span class="rn-del" data-id="'+n.id+'" style="color:var(--neg);cursor:pointer;text-decoration:underline">delete</span>':'')+'</div><div style="white-space:pre-wrap;line-height:1.5">'+noteBodyHtml({body:n.body,mentions:n.mentions})+'</div></div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>';
-      el.querySelectorAll('.rn-del').forEach(function(d){ d.onclick=function(){ if(!confirm('Delete this note?'))return; fetch('/api/supply/report-note/'+d.dataset.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||''})}).then(function(r){return r.json();}).then(function(){ load(); }).catch(function(){}); }; });
+      el.querySelectorAll('.rn-del').forEach(function(d){ d.onclick=function(){ if(!confirm('Delete this note?'))return; fetch('/api/supply/report-note/'+d.dataset.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(ME&&ME.email)||''})}).then(function(r){return r.json();}).then(function(){ load(); }).catch(function(){}); }; });
     }).catch(function(){}); }
     load();
     var pb=document.getElementById('rn-post'); if(pb)pb.onclick=function(){ var ta=document.getElementById('rn-body'), v=(ta&&ta.value||'').trim(); if(!v)return;
       var handles=(v.match(/@([a-z0-9._-]+)/gi)||[]).map(function(s){return s.slice(1).toLowerCase();});
       var mentions=_team.filter(function(t){return handles.indexOf(t.handle)>=0;}).map(function(t){return t.email;});
       pb.disabled=true; var m=document.getElementById('rn-msg'); if(m){m.style.color='#64748b';m.textContent='Posting…';}
-      fetch('/api/supply/report-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,body:v,mentions:mentions,author_email:(window.ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();}).then(function(j){ pb.disabled=false; if(j&&j.error){ if(m){m.style.color='#b91c1c';m.textContent='Error: '+j.error;} return; } if(m)m.textContent=''; if(ta)ta.value='';
+      fetch('/api/supply/report-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,body:v,mentions:mentions,author_email:(ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();}).then(function(j){ pb.disabled=false; if(j&&j.error){ if(m){m.style.color='#b91c1c';m.textContent='Error: '+j.error;} return; } if(m)m.textContent=''; if(ta)ta.value='';
         if(j&&j.email){ if(j.sandbox) showMentionEmail(j.email); else if(j.email.dropped&&j.email.dropped.length) alert('Note posted. Not emailed (not a Dock & Bay user): '+j.email.dropped.join(', ')); }
         load(); }).catch(function(e){ pb.disabled=false; if(m){m.style.color='#b91c1c';m.textContent='Failed: '+(e.message||e);} }); };
   }
@@ -12066,7 +12066,7 @@
   // v27.691 (Ben): Horizon users for the sample internal-stakeholders picker (cached for the session).
   var _hzUsers=null;
   function loadHzUsers(cb){ if(_hzUsers){cb(_hzUsers);return;} fetch('/api/supply/all-users').then(function(r){return r.json();}).then(function(d){ _hzUsers=Array.isArray(d)?d:[]; cb(_hzUsers); }).catch(function(){ cb([]); }); }
-  function _isMySample(r){ var me=((window.ME&&ME.email)||'').toLowerCase(); if(!me)return false; var a=r&&r.internal_stakeholders; return (Array.isArray(a)?a:[]).some(function(x){return String(x).toLowerCase()===me;}); }
+  function _isMySample(r){ var me=((ME&&ME.email)||'').toLowerCase(); if(!me)return false; var a=r&&r.internal_stakeholders; return (Array.isArray(a)?a:[]).some(function(x){return String(x).toLowerCase()===me;}); }
   // v27.693 (Ben): one-line PO meta for the fulfilment-PO picker — status · supplier · ship · arrival.
   function _poMeta(p){ return [p.status, p.supplier_name, (p.ship_date?'ship '+fd(p.ship_date):''), (p.arrival_date?'arr '+fd(p.arrival_date):'')].filter(Boolean).join(' · '); }
   function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
@@ -12212,7 +12212,7 @@
         var _emails=_notifyRaw.split(/[,;]/).map(function(x){return x.trim();}).filter(Boolean);
         var _bad=_emails.filter(function(e){return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);});
         if(_bad.length){ if(_errEl)_errEl.textContent='Invalid email'+(_bad.length>1?'s':'')+': '+_bad.join(', '); else alert('Invalid email(s): '+_bad.join(', ')); return; }
-        var body={supplier_name:sup, created_by:(window.ME&&ME.email)||'', purpose:purpose, notify_emails:_emails.join(', ')||null,
+        var body={supplier_name:sup, created_by:(ME&&ME.email)||'', purpose:purpose, notify_emails:_emails.join(', ')||null,
           recipient_company:V('recipient_company')||null, first_name:V('first_name')||null, last_name:V('last_name')||null,
           address_line1:V('address_line1')||null, address_line2:V('address_line2')||null, city:V('city')||null, region:V('region')||null,
           postcode:V('postcode')||null, country:(V('country')||'').toUpperCase()||null, phone:V('phone')||null,
@@ -12406,7 +12406,7 @@
         var _ss=box.querySelector('.samp-setship'); if(_ss)_ss.onclick=function(){ _ss.disabled=true; shipPost('/api/supply/sample/'+id,{status:'SHIPPED'},function(j){ if(j&&j.error){alert(j.error);_ss.disabled=false;return;} s.status='SHIPPED'; _sampGridSync('SHIPPED'); loadSampleDetail(id,i); }); };   // re-render THIS card in place (Our status → SHIPPED, button clears) — not _sampleReload, which would collapse the open card
         var _chAdd=box.querySelector('.samp-charge-add'); if(_chAdd)_chAdd.onclick=function(){ var f=box.querySelector('.samp-cf').value, p=box.querySelector('.samp-cp').value, cd=box.querySelector('.samp-cd').value;
           if(!f&&!p){ alert('Enter a freight and/or product cost.'); return; } _chAdd.disabled=true;
-          shipPost('/api/supply/charge-create',{source_type:'sample',source_ref:s.ref,supplier_name:s.supplier_name||null,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:cd||null,created_by:(window.ME&&ME.email)||'admin'},function(j){ if(j&&j.error){alert(j.error);_chAdd.disabled=false;return;} loadSampleDetail(id,i); }); };
+          shipPost('/api/supply/charge-create',{source_type:'sample',source_ref:s.ref,supplier_name:s.supplier_name||null,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:cd||null,created_by:(ME&&ME.email)||'admin'},function(j){ if(j&&j.error){alert(j.error);_chAdd.disabled=false;return;} loadSampleDetail(id,i); }); };
         box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} try{invalidateDerived();}catch(e){} alert('Charge accepted — posted to Other Payments.'); loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-charge-unrej').forEach(function(b){ b.onclick=function(){ shipPost('/api/supply/charge/'+b.dataset.id+'/unreject',{},function(j){ if(j&&j.error){alert(j.error);return;} loadSampleDetail(id,i); }); }; });   // rejected → pending (can then be accepted)
@@ -12717,7 +12717,7 @@
     bg.querySelector('#sug-send').onclick=function(){ var body=ta.value.trim(); var msg=bg.querySelector('#sug-msg');
       if(!body){ msg.style.color='#dc2626'; msg.textContent='Please enter a suggestion.'; ta.focus(); return; }
       var btn=this; btn.disabled=true; msg.style.color='#64748b'; msg.textContent='Submitting…';
-      fetch('/api/supply/suggestion',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:body,area:bg.querySelector('#sug-area').value.trim(),stakeholders:bg.querySelector('#sug-stk').value.trim(),created_by:(window.ME&&ME.email)||''})})
+      fetch('/api/supply/suggestion',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:body,area:bg.querySelector('#sug-area').value.trim(),stakeholders:bg.querySelector('#sug-stk').value.trim(),created_by:(ME&&ME.email)||''})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
           msg.style.color='#16a34a'; msg.innerHTML='Thanks! Logged as <b>'+esc(j.ref)+'</b> — quote that reference to push it forward. Add another below, or Close.';
           ta.value=''; bg.querySelector('#sug-area').value=''; bg.querySelector('#sug-stk').value=''; ta.disabled=false; bg.querySelector('#sug-area').disabled=false; btn.disabled=false; ta.focus(); bg.querySelector('#sug-cancel').textContent='Close'; })   // SUG-0004: reset so another can be added without refreshing
@@ -13736,11 +13736,16 @@
     function run(paint){ var us=urls.map(function(u){return Array.isArray(u)?u[0]:u;});
       var had=us.every(function(u){return hzqPeek(u)!==undefined;}), fresh=had&&us.every(function(u){return hzqFresh(u,ttl);});
       var cur=had?us.map(hzqPeek):null, before=had?cur.map(function(d){return JSON.stringify(d);}):null;
-      var pStale=had?Promise.resolve().then(function(){ try{ console.debug('[hzq] cached paint @'+Math.round(performance.now())+'ms'+(fresh?' (fresh)':' (revalidating)'),us.join(' ')); paint(cur,true); }catch(x){ console.warn('hzq: stale paint failed',x); } }):null;   // instant paint (microtask keeps the caller's ordering)
-      if(fresh&&!opts.force)return pStale.then(function(){ return cur; });
+      // v27.891 (Ben, bug): if the cached paint THROWS (a view reading state that isn't loaded yet on a reload), the view is left
+      // half-built (usually its skeleton). Previously the revalidate then saw "nothing changed" and left the DOM alone → stuck until the
+      // user clicked away and back. Now a failed cached paint forces a full repaint from the network, even when the data is unchanged
+      // or still within TTL.
+      var staleOk=false;
+      var pStale=had?Promise.resolve().then(function(){ try{ console.debug('[hzq] cached paint @'+Math.round(performance.now())+'ms'+(fresh?' (fresh)':' (revalidating)'),us.join(' ')); paint(cur,true); staleOk=true; }catch(x){ console.warn('hzq: stale paint failed — repainting from the network',x); } }):null;   // instant paint (microtask keeps the caller's ordering)
+      if(fresh&&!opts.force)return pStale.then(function(){ if(staleOk)return cur; return Promise.all(urls.map(function(u){ return _hzqOne(u,true); })).then(function(arr){ console.debug('[hzq] repaint after failed cached paint',us.join(' ')); return Promise.resolve(paint(arr,false)).then(function(){ return arr; }); }); });
       var pFresh=Promise.all(urls.map(function(u,i){ return (hzqFresh(us[i],ttl)&&!opts.force)?Promise.resolve(hzqPeek(us[i])):_hzqOne(u,true); })).then(function(arr){
-        if(had&&!arr.some(function(d,i){ return JSON.stringify(d)!==before[i]; })){ us.forEach(function(u,i){ var e=_hzQ[u]; if(e&&e.d!==undefined)e.d=cur[i]; }); return cur; }   // nothing changed → leave the DOM alone; keep the objects the view already holds (rows are patched in place after saves)
-        if(had&&_hzqTyping())return arr;   // user is typing in this view: don't yank the DOM from under them; the next open paints the new data
+        if(had&&staleOk&&!arr.some(function(d,i){ return JSON.stringify(d)!==before[i]; })){ us.forEach(function(u,i){ var e=_hzQ[u]; if(e&&e.d!==undefined)e.d=cur[i]; }); return cur; }   // nothing changed → leave the DOM alone; keep the objects the view already holds (rows are patched in place after saves). v27.891: only when the cached paint actually succeeded
+        if(had&&staleOk&&_hzqTyping())return arr;   // user is typing in this view: don't yank the DOM from under them; the next open paints the new data
         console.debug('[hzq] '+(had?'repaint (changed)':'first paint')+' @'+Math.round(performance.now())+'ms',us.join(' '));
         return Promise.resolve(paint(arr,false)).then(function(){ return arr; }); });
       return had?pFresh.catch(function(e){ console.debug('[hzq] revalidate repaint skipped (view moved on or fetch failed):',e&&e.message||e); return cur; }):pFresh; }   // once painted from cache a failed revalidate is silent — typically the user has already switched view and the paint target is gone
@@ -13924,7 +13929,11 @@
       (function(){ var mo=c.querySelector('#smp-grid tr.smp-mexp'); if(mo&&mo.dataset.rid&&!_smpManagePending)_smpManagePending={rid:mo.dataset.rid, tab:_smpTabSlug(mo._shownT||'master')}; })();   // a revalidate repaint re-opens the MANAGE panel on the same tab
       var _st=_res[1]||{}; _smpGroupMode=(_st.sampling_group_mode==='tabs'||_st.sampling_group_mode==='tree')?_st.sampling_group_mode:'inline';   // v27.763 (Ben): CONFIG-set grouping layout
       var uniq=function(k){ var o={}; rows.forEach(function(r){ if(r[k])o[r[k]]=1; }); return Object.keys(o).sort(); };
-      var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category'); var me=((window.ME&&ME.email)||'').toLowerCase();
+      var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category');
+      // v27.891 (Ben, bug): on a RELOAD the list paints from the sessionStorage cache before /api/me resolves — the closure `ME` is still
+      // null, so `ME.email` threw inside the cached paint, the skeleton never cleared and the deep link was dropped (grid stuck until you
+      // clicked away and back). Guard the closure var, fall back to window.ME, then ''.
+      var me=String(((typeof ME!=='undefined'&&ME)||window.ME||{}).email||'').toLowerCase();
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };
       var fb=c.querySelector('#smp-filters');
       var _grpNav=(_smpGroupMode==='tabs'||_smpGroupMode==='tree');   // v27.842 (Ben): in season-tab / season-type-tree layouts the Season+Category are chosen by the tabs/tree nav, so drop those two dropdowns from the toolbar
@@ -14148,7 +14157,7 @@
             msg.style.color='var(--muted)'; msg.textContent='saving…'; var txt=String(ta.value||'').trim();
             shipPost('/api/product/sample/'+sm.id+'/aspect',{aspect:key,feedback:ta.value,decision:dec,reject_reasons:rs2,awc_comment:aw?aw.value:''},function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } msg.style.color='var(--pos)'; msg.textContent=(j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved'; setTimeout(function(){ msg.textContent=''; },2400);
               var cpName=(comps.filter(function(cp){return _smpAspectKey(cp)===key;})[0]||{}).name||key; var pk=PAN[key]||{}; var pans=Object.keys(pk).filter(function(code){return txt.indexOf('🎨 '+code)>=0;}).map(function(code){return pk[code];});
-              if(txt){ var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+' '+txt,author_email:(window.ME&&ME.email)||'',tags:[],pantone:pans,supplier:r.supplier_name||'',sample_id:sm.id},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }   // v27.863 auto-tag sample version
+              if(txt){ var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+' '+txt,author_email:(ME&&ME.email)||'',tags:[],pantone:pans,supplier:r.supplier_name||'',sample_id:sm.id},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }   // v27.863 auto-tag sample version
               try{ prodItemInvalidate(r.item_ref); }catch(e){} var s0=(r.samples||[]).filter(function(x){return String(x.id)===String(sm.id);})[0]; if(s0){ var dAll=Array.prototype.slice.call(td.querySelectorAll('.smp-dec')).map(function(x){return x.value;}); s0.approved=dAll.filter(function(v){return v==='approved'||v==='approved_with_comments';}).length; s0.rejected=dAll.filter(function(v){return v==='rejected_new_sample'||v==='stop_development';}).length; } }); }
           td.querySelectorAll('.smp-save').forEach(function(b){ b.onclick=function(){ save(b.dataset.key); }; });
         }).catch(function(e){ exp.querySelector('td').innerHTML='<div style="color:var(--neg);padding:6px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
@@ -14185,7 +14194,7 @@
           msg.style.color='var(--muted)'; msg.textContent='saving…';
           shipPost('/api/product/sample/'+sm.id+'/aspect',{aspect:key,feedback:txt,decision:dec,reject_reasons:rs2,awc_comment:aw?aw.value:''},function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } msg.style.color='var(--pos)'; msg.textContent=(j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved'; _cqFlash(key); setTimeout(function(){ msg.textContent=''; },2400);
             var cpName=(comps.filter(function(cp){return _smpAspectKey(cp)===key;})[0]||{}).name||key; var pk=PAN[key]||{}; var pans=Object.keys(pk).filter(function(code){return txt.indexOf('🎨 '+code)>=0;}).map(function(code){return pk[code];});
-            if(txt){ var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+'\n'+txt,author_email:(window.ME&&ME.email)||'',tags:[],pantone:pans,supplier:r.supplier_name||'',sample_id:sm.id},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }   // v27.863 (Ben): stamp the sample version so the timeline auto-tags "v2 sample"
+            if(txt){ var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+'\n'+txt,author_email:(ME&&ME.email)||'',tags:[],pantone:pans,supplier:r.supplier_name||'',sample_id:sm.id},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }   // v27.863 (Ben): stamp the sample version so the timeline auto-tags "v2 sample"
             try{ prodItemInvalidate(r.item_ref); }catch(e){} }); }
         // v27.847 (Ben): no Save button — auto-save. Debounce typing; save at once on decision / reject-reason changes.
         var _saveT={}; function _auto(key){ clearTimeout(_saveT[key]); _saveT[key]=setTimeout(function(){ save(key); },700); }
@@ -14196,10 +14205,10 @@
         function smpUpFiles(key,files){ files=Array.prototype.slice.call(files||[]); if(!files.length)return; var msg=td.querySelector('.smp-fb-upmsg[data-key="'+key+'"]'), lst=td.querySelector('.smp-fb-files[data-key="'+key+'"]'), i=0, names=[], lastId=null;
           var cpName=(comps.filter(function(cp){return _smpAspectKey(cp)===key;})[0]||{}).name||key;
           function one(){ if(i>=files.length){ if(msg){ msg.textContent=names.length+' file'+(names.length===1?'':'s')+' attached'; setTimeout(function(){ msg.textContent=''; },3000); } try{ _prodJsonBust(r.item_ref); prodItemInvalidate(r.item_ref); }catch(e){}
-              if(lastId){ var cB=td.querySelector('.smp-fb-colour[data-key="'+key+'"]'), qB=td.querySelector('.smp-fb-quality[data-key="'+key+'"]'); var _txt=_smpJoinCQ(cB?cB.value:'', qB?qB.value:''); var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+(_txt?'\n'+_txt:' 📎 '+names[names.length-1]),author_email:(window.ME&&ME.email)||'',tags:[],supplier:r.supplier_name||'',attachment_id:lastId,sample_id:sm.id},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }
+              if(lastId){ var cB=td.querySelector('.smp-fb-colour[data-key="'+key+'"]'), qB=td.querySelector('.smp-fb-quality[data-key="'+key+'"]'); var _txt=_smpJoinCQ(cB?cB.value:'', qB?qB.value:''); var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+(_txt?'\n'+_txt:' 📎 '+names[names.length-1]),author_email:(ME&&ME.email)||'',tags:[],supplier:r.supplier_name||'',attachment_id:lastId,sample_id:sm.id},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }
               return; }
             var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-            hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+sm.id+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||'',aspect:key},up),function(jr){ if(jr&&jr.id){ lastId=jr.id; names.push(f.name); if(lst)lst.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
+            hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+sm.id+'/photo',Object.assign({uploaded_by:(ME&&ME.email)||'',aspect:key},up),function(jr){ if(jr&&jr.id){ lastId=jr.id; names.push(f.name); if(lst)lst.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
           one(); }
         td.querySelectorAll('.smp-fb-up').forEach(function(inp){ inp.onchange=function(){ smpUpFiles(inp.dataset.key,inp.files); inp.value=''; }; });
         td.querySelectorAll('.smp-fbcell').forEach(function(cell){ cell.addEventListener('dragover',function(e){ e.preventDefault(); cell.style.outline='2px dashed var(--blue)'; cell.style.outlineOffset='-3px'; }); cell.addEventListener('dragleave',function(){ cell.style.outline=''; }); cell.addEventListener('drop',function(e){ e.preventDefault(); cell.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)smpUpFiles(cell.dataset.key,e.dataTransfer.files); }); });
@@ -14375,13 +14384,13 @@
         var _aw=q('.pbr-awc',sid,asp); shipPost('/api/product/sample/'+sid+'/aspect',{aspect:asp,feedback:fb,decision:dec,reject_reasons:rs,awc_comment:_aw?_aw.value:''},function(jr){ if(msg){ if(jr&&jr.error){ msg.style.color='var(--neg)'; msg.textContent=jr.error; } else { msg.style.color='var(--pos)'; msg.textContent=(flow&&jr&&jr.flowed)?('✓ → '+jr.flowed+' size'+(jr.flowed===1?'':'s')):'✓ saved'; setTimeout(function(){ msg.textContent=''; },2400); } }
           var ref=t?t.dataset.ref:''; try{ prodItemInvalidate(ref); _prodJsonBust(ref); }catch(e){}
           try{ var _txt=String(fb||'').trim(), _k=sid+'|'+asp; if(t&&((_txt&&_txt!==String(t.dataset.last||'').trim())||o.force)){ t.dataset.last=fb; var _pk=_pan[sid]||{}, _pn=Object.keys(_pk).filter(function(code){ return _txt.indexOf('🎨 '+code)>=0; }).map(function(code){ return _pk[code]; }); var _tg=Object.keys(_tags[sid]||{}).filter(function(k){return _tags[sid][k];}).map(Number);
-            var _pfx='Feedback on '+ref+'_v'+(t.dataset.ver||'?')+' · '+lbl(asp)+':'; shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+(_txt||(o.fileName?'📎 '+o.fileName:'')),author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pn,attachment_id:_att[_k]||null,sample_id:sid},function(jn){ _prodJsonBust(ref); var ind=q('.pbr-tl',sid,asp); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); } }catch(e){} }); }   // v27.863 auto-tag sample version
+            var _pfx='Feedback on '+ref+'_v'+(t.dataset.ver||'?')+' · '+lbl(asp)+':'; shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+(_txt||(o.fileName?'📎 '+o.fileName:'')),author_email:(ME&&ME.email)||'',tags:_tg,pantone:_pn,attachment_id:_att[_k]||null,sample_id:sid},function(jn){ _prodJsonBust(ref); var ind=q('.pbr-tl',sid,asp); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); } }catch(e){} }); }   // v27.863 auto-tag sample version
       body.querySelectorAll('.pbr-fb').forEach(function(t){ t.onchange=function(){ save(t.dataset.id,t.dataset.aspect,false); }; });
       // v27.556: photos / documents → stored on the sample (card strip + portal) AND attached to this component's timeline note
       function upFiles(sid,asp,files){ files=Array.prototype.slice.call(files||[]); if(!files.length)return; var t=q('.pbr-fb',sid,asp), msg=q('.pbr-upmsg',sid,asp), ref=t?t.dataset.ref:'', i=0, names=[];
         function one(){ if(i>=files.length){ if(msg){ msg.textContent=names.length+' file'+(names.length===1?'':'s')+' attached'; setTimeout(function(){ msg.textContent=''; },3000); } try{ _prodJsonBust(ref); }catch(e){} save(sid,asp,false,{force:true,fileName:names[names.length-1]||''}); return; }
           var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+sid+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||'',aspect:asp},up),function(jr){ if(jr&&jr.id){ _att[sid+'|'+asp]=jr.id; names.push(f.name); var _fl=q('.pbr-files',sid,asp); if(_fl)_fl.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
+          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+sid+'/photo',Object.assign({uploaded_by:(ME&&ME.email)||'',aspect:asp},up),function(jr){ if(jr&&jr.id){ _att[sid+'|'+asp]=jr.id; names.push(f.name); var _fl=q('.pbr-files',sid,asp); if(_fl)_fl.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
         one(); }
       body.querySelectorAll('.pbr-up').forEach(function(inp){ inp.onchange=function(){ upFiles(inp.dataset.id,inp.dataset.aspect,inp.files); inp.value=''; }; });
       body.querySelectorAll('.pbr-fbcell').forEach(function(cell){ cell.addEventListener('dragover',function(e){ e.preventDefault(); cell.style.outline='2px dashed var(--blue)'; cell.style.outlineOffset='-4px'; }); cell.addEventListener('dragleave',function(){ cell.style.outline=''; }); cell.addEventListener('drop',function(e){ e.preventDefault(); cell.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)upFiles(cell.dataset.id,cell.dataset.aspect,e.dataTransfer.files); }); });
@@ -14848,7 +14857,7 @@
   function _prodSeedSku(d,ref){ try{ var sz=(d&&d.sizes)||[]; for(var i=0;i<sz.length;i++){ if(sz[i]&&sz[i].mapped_sku&&String(sz[i].mapped_sku).trim())return String(sz[i].mapped_sku).trim(); } }catch(e){} return ref; }
   // "Add to new sample request" — create a sample request pre-linked to this product, then open it in SUPPLY ▸ Samples.
   function _newSampleForProduct(sup, sku){ if(!sup){ alert('This product has no development request yet — create one on the Requests tab (that is where the supplier is assigned).'); return; }   // v27.703
-    shipPost('/api/supply/sample-create',{supplier_name:sup, created_by:(window.ME&&ME.email)||'', lines: sku?[{sku:sku, qty:1}]:[]},function(j){ if(j&&j.error){ alert('Failed: '+j.error); return; } if(j&&j.ref&&typeof gotoSample==='function')gotoSample(j.ref); }); }
+    shipPost('/api/supply/sample-create',{supplier_name:sup, created_by:(ME&&ME.email)||'', lines: sku?[{sku:sku, qty:1}]:[]},function(j){ if(j&&j.error){ alert('Failed: '+j.error); return; } if(j&&j.ref&&typeof gotoSample==='function')gotoSample(j.ref); }); }
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:var(--neg-bg);color:var(--neg);font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
   function openProdCellPick(btn,onSaved,onPick){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
@@ -14924,7 +14933,7 @@
         if(!t){ msg.style.color='var(--neg)'; msg.textContent='pick a type'; return; } if(!f){ msg.style.color='var(--neg)'; msg.textContent='choose a file'; return; }
         msg.style.color='var(--muted)'; msg.textContent='uploading…';
         hzUpload(f,{field:'data_base64',category:'product-spec'}).then(function(fields){
-          shipPost('/api/product/specs',Object.assign({spec_type:t,scope_type:'sku',scope_skus:ctx.ref||'',effective_when:'production',uploaded_by:(window.ME&&ME.email)||''},fields),function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } _specList=null; closeShPop(); if(onDone)onDone(j&&j.id); });
+          shipPost('/api/product/specs',Object.assign({spec_type:t,scope_type:'sku',scope_skus:ctx.ref||'',effective_when:'production',uploaded_by:(ME&&ME.email)||''},fields),function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } _specList=null; closeShPop(); if(onDone)onDone(j&&j.id); });
         }).catch(function(e){ msg.style.color='var(--neg)'; msg.textContent=(e&&e.message)||'upload failed'; }); };
     }); }
   function ensureSuppliers(cb){ if(supplierList&&supplierList.length)return cb(); if(typeof fetchLookups==='function')fetchLookups(cb); else cb(); }
@@ -15545,7 +15554,7 @@
       // sequential (not parallel) so the per-(season,category) counter increments cleanly without a race
       (function next(){
         if(i>=colours.length){ if(created.length===1){ _prodDetailTab='master'; selectProductSub('plan'); var _newRef=created[0]; setTimeout(function(){ renderProductDetail(_newRef); },0); } else { selectProductSub('plan'); } return; }   // go to PLAN then open the new item's detail (mirrors the grid/dashboard open pattern; also avoids rendering into the stale new-product form box)
-        shipPost('/api/product/item',{type:type,season:season,category:cat,colour_name:colours[i],description:desc,sizes:sizes,created_by:(window.ME&&ME.email)||''},function(j){
+        shipPost('/api/product/item',{type:type,season:season,category:cat,colour_name:colours[i],description:desc,sizes:sizes,created_by:(ME&&ME.email)||''},function(j){
           if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent='Failed on “'+(colours[i]||'(no colour)')+'”: '+j.error; btn.disabled=false; return; }
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
@@ -15669,7 +15678,7 @@
         +'<span class="mut tiny">Approval</span><span><select class="fci" id="prf-appr" style="width:190px"><option value="samples">Send samples</option><option value="photo">Approval by photo</option></select></span>'
         +'<span class="mut tiny">Recipient country</span><span>'+['UK','US','AU','DIRECT'].map(function(cc){return '<label style="display:inline-flex;align-items:center;gap:3px;margin:0 10px 0 0;cursor:pointer"><input type="checkbox" class="prf-cty" value="'+cc+'"'+(cc==='UK'?' checked':'')+'> '+(cc==='DIRECT'?'Direct to Client':cc)+'</label>';}).join('')+'</span>'
         +'<span class="mut tiny">Development start</span><span><input type="date" class="fci" id="prf-dev" value="'+new Date().toISOString().slice(0,10)+'" style="width:150px"></span>'
-        +'<span class="mut tiny">Stakeholders</span><span><input class="fci" id="prf-stake" list="prf-userlist" value="'+esc((window.ME&&ME.email)||'')+'" placeholder="emails, comma-separated" style="width:100%;max-width:520px"><datalist id="prf-userlist">'+USERS.map(function(u){return '<option value="'+esc(u)+'">';}).join('')+'</datalist></span>'
+        +'<span class="mut tiny">Stakeholders</span><span><input class="fci" id="prf-stake" list="prf-userlist" value="'+esc((ME&&ME.email)||'')+'" placeholder="emails, comma-separated" style="width:100%;max-width:520px"><datalist id="prf-userlist">'+USERS.map(function(u){return '<option value="'+esc(u)+'">';}).join('')+'</datalist></span>'
         +'<span class="mut tiny">Notify emails</span><span><input class="fci" id="prf-notify" placeholder="emails, comma-separated — emailed when samples ship / arrive" style="width:100%;max-width:520px"></span>'
         +'<span class="mut tiny">Notes</span><span><input class="fci" id="prf-notes" placeholder="optional" style="width:100%;max-width:520px"></span>'
         +'</div><div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button class="save-btn" id="prf-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Create request</button><button class="save-btn light" id="prf-cancel">Cancel</button><span id="prf-msg" style="font-size:12px"></span></div></div>';
@@ -15679,7 +15688,7 @@
         if(!sup){ msg.style.color='var(--neg)'; msg.textContent='Pick a supplier.'; return; } if(!cids.length){ msg.style.color='var(--neg)'; msg.textContent='Tick at least one component.'; return; }
         var em=function(v){ return String(v||'').split(/[,;\s]+/).map(function(x){return x.trim();}).filter(Boolean); };
         this.disabled=true;
-        var _payload={item_ref:ref,supplier_name:sup,component_ids:cids,size_ids:(sz.length===all.length?[]:sz),approval_method:ov.querySelector('#prf-appr').value,recipient_countries:cty.join(',')||'UK',dev_start:ov.querySelector('#prf-dev').value||null,internal_stakeholders:em(ov.querySelector('#prf-stake').value),notify_emails:em(ov.querySelector('#prf-notify').value),notes:ov.querySelector('#prf-notes').value,created_by:(window.ME&&ME.email)||''};
+        var _payload={item_ref:ref,supplier_name:sup,component_ids:cids,size_ids:(sz.length===all.length?[]:sz),approval_method:ov.querySelector('#prf-appr').value,recipient_countries:cty.join(',')||'UK',dev_start:ov.querySelector('#prf-dev').value||null,internal_stakeholders:em(ov.querySelector('#prf-stake').value),notify_emails:em(ov.querySelector('#prf-notify').value),notes:ov.querySelector('#prf-notes').value,created_by:(ME&&ME.email)||''};
         close();   // v27.870 (Ben): hide the popup immediately on a valid Create — the request is created in the background; a server error surfaces as an alert
         shipPost('/api/product/request',_payload,function(j){ if(j&&j.error){ alert('Could not create the development request: '+j.error); return; }
           try{ prodItemInvalidate(ref); pgetClear(); }catch(e){} _prodHighlightReq=j.id||null;
@@ -15966,7 +15975,7 @@
               var _pan=Object.keys(_pk).filter(function(code){ return _txt.indexOf('🎨 '+code)>=0; }).map(function(code){ return _pk[code]; });
               var _tgs=_fbTags[String(id)]||{}, _tg=Object.keys(_tgs).filter(function(k){return _tgs[k];}).map(Number);
               var _pfx='Feedback on '+ref+'_v'+(_s.version||'?')+' · '+_aspLbl(aspect)+':';   // v27.550: one note per sample × component, rewritten on each edit
-              shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+_txt,author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pan,supplier:s.supplier||'',sample_id:id},function(jn){ _prodJsonBust(ref); var ind=body.querySelector('.ps-tl-ind[data-id="'+id+'"][data-aspect="'+aspect+'"]'); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); } }catch(e){}   // v27.863 auto-tag sample version
+              shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+_txt,author_email:(ME&&ME.email)||'',tags:_tg,pantone:_pan,supplier:s.supplier||'',sample_id:id},function(jn){ _prodJsonBust(ref); var ind=body.querySelector('.ps-tl-ind[data-id="'+id+'"][data-aspect="'+aspect+'"]'); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); } }catch(e){}   // v27.863 auto-tag sample version
           // Refresh the IN-MEMORY detail so switching to the Size & variants tab shows the flowed approval right away
           // (prodItemInvalidate only clears the cache; the live _prodDetail.sizes the tab renders from was still stale).
           if(flow){ fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(_prodDetail&&sd&&!sd.error){ _prodDetail.sizes=sd.sizes||[]; _prodDetail.samples=sd.samples||[]; _prodDetail._sizesLoaded=true; try{_prodItemCache[ref]={t:Date.now(),d:_prodDetail};}catch(e){}
@@ -16003,10 +16012,10 @@
       function psUpFiles(id,asp,files){ files=Array.prototype.slice.call(files||[]); if(!files.length)return; var msg=body.querySelector('.ps-fb-upmsg[data-id="'+id+'"][data-aspect="'+asp+'"]'), lst=body.querySelector('.ps-fb-files[data-id="'+id+'"][data-aspect="'+asp+'"]'), i=0, names=[], lastId=null;
         function one(){ if(i>=files.length){ if(msg){ msg.textContent=names.length+' file'+(names.length===1?'':'s')+' attached'; setTimeout(function(){ msg.textContent=''; },3000); } try{ _prodJsonBust(ref); prodItemInvalidate(ref); }catch(e){}
             if(lastId){ try{ var _s=list.filter(function(x){return String(x.id)===String(id);})[0]||{}, fbEl=body.querySelector('.ps-aspect-fb[data-id="'+id+'"][data-aspect="'+asp+'"]'), _txt=fbEl?String(fbEl.value||'').trim():''; var _pk=_fbPan[String(id)]||{}; var _pan=Object.keys(_pk).filter(function(code){ return _txt.indexOf('🎨 '+code)>=0; }).map(function(code){ return _pk[code]; }); var _tgs=_fbTags[String(id)]||{}, _tg=Object.keys(_tgs).filter(function(k){return _tgs[k];}).map(Number); var _pfx='Feedback on '+ref+'_v'+(_s.version||'?')+' · '+_aspLbl(asp)+':';
-              shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+(_txt||('📎 '+names[names.length-1])),author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pan,supplier:s.supplier||'',attachment_id:lastId,sample_id:id},function(jn){ var ind=body.querySelector('.ps-tl-ind[data-id="'+id+'"][data-aspect="'+asp+'"]'); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); }catch(e){} }   // v27.863 auto-tag sample version
+              shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+(_txt||('📎 '+names[names.length-1])),author_email:(ME&&ME.email)||'',tags:_tg,pantone:_pan,supplier:s.supplier||'',attachment_id:lastId,sample_id:id},function(jn){ var ind=body.querySelector('.ps-tl-ind[data-id="'+id+'"][data-aspect="'+asp+'"]'); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); }catch(e){} }   // v27.863 auto-tag sample version
             return; }
           var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+id+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||'',aspect:asp},up),function(jr){ if(jr&&jr.id){ lastId=jr.id; names.push(f.name); if(lst)lst.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
+          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+id+'/photo',Object.assign({uploaded_by:(ME&&ME.email)||'',aspect:asp},up),function(jr){ if(jr&&jr.id){ lastId=jr.id; names.push(f.name); if(lst)lst.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
         one(); }
       body.querySelectorAll('.ps-fb-up').forEach(function(inp){ inp.onchange=function(){ psUpFiles(inp.dataset.id,inp.dataset.aspect,inp.files); inp.value=''; }; });
       body.querySelectorAll('.ps-fbcell').forEach(function(cell){ cell.addEventListener('dragover',function(e){ e.preventDefault(); cell.style.outline='2px dashed var(--blue)'; cell.style.outlineOffset='-4px'; }); cell.addEventListener('dragleave',function(){ cell.style.outline=''; }); cell.addEventListener('drop',function(e){ e.preventDefault(); cell.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)psUpFiles(cell.dataset.id,cell.dataset.aspect,e.dataTransfer.files); }); });
@@ -16014,7 +16023,7 @@
       body.querySelectorAll('.ps-up').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, files=Array.prototype.slice.call(inp.files||[]), strip=body.querySelector('.ps-photos[data-id="'+id+'"]'), msg=body.querySelector('.ps-up-msg[data-id="'+id+'"]'); if(!files.length)return; var i=0, done=0;
         function one(){ if(i>=files.length){ if(msg){ msg.textContent=done+' file'+(done===1?'':'s')+' added'; setTimeout(function(){ msg.textContent=''; },2600); } inp.value=''; _prodJsonBust(ref); return; }
           var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+id+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||''},up),function(j){ done++; if(strip&&j&&j.id){ var url='/api/supply/portal-attachment/'+j.id;
+          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+id+'/photo',Object.assign({uploaded_by:(ME&&ME.email)||''},up),function(j){ done++; if(strip&&j&&j.id){ var url='/api/supply/portal-attachment/'+j.id;
               if(/^image\//i.test(f.type||'')){ var im=document.createElement('img'); im.className='psamp-img'; im.dataset.src=url; im.src=url; im.title=f.name; im.style.cssText='width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--line);margin:2px;cursor:zoom-in'; im.onclick=function(){ openImgZoom(url); }; strip.appendChild(im); }
               else { var a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; a.style.cssText='display:inline-block;margin:2px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--blue);text-decoration:underline'; a.textContent='📄 '+f.name; strip.appendChild(a); } }
             one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
@@ -16291,7 +16300,7 @@
       scope.querySelectorAll('.pm-comp-appsamp').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.approved_sample_id=el.value||null;
         shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,approved_sample_id:el.value||''},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} reRender(); }); }; });
       function _uploadCompFiles(id,dim,files,cb){ var list=Array.prototype.slice.call(files||[]).filter(function(f){return f.size<=10*1024*1024;}), i=0;
-        (function up(){ if(i>=list.length){ if(cb)cb(); return; } var f=list[i++]; hzUpload(f,{field:'data_base64',category:'product-dim'}).then(function(fields){ shipPost('/api/product/component-file',Object.assign({size_id:id,dimension:dim,uploaded_by:(window.ME&&ME.email)||''},fields),function(){ up(); }); }).catch(function(){ up(); }); })(); }
+        (function up(){ if(i>=list.length){ if(cb)cb(); return; } var f=list[i++]; hzUpload(f,{field:'data_base64',category:'product-dim'}).then(function(fields){ shipPost('/api/product/component-file',Object.assign({size_id:id,dimension:dim,uploaded_by:(ME&&ME.email)||''},fields),function(){ up(); }); }).catch(function(){ up(); }); })(); }
       scope.querySelectorAll('.pm-comp-file').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){ if(inp.files.length)_uploadCompFiles(inp.dataset.id,inp.dataset.dim,inp.files,reloadSizes); }; });
       // Drag & drop files onto a component's Files cell to attach them (same as the "+ file" picker).
       scope.querySelectorAll('.pm-fcell').forEach(function(cell){ if(cell._b)return; cell._b=1;
@@ -16379,7 +16388,7 @@
       m.style.color='var(--muted)'; m.textContent='uploading '+ok.length+' file'+(ok.length>1?'s':'')+'…'; var i=0;
       (function up(){ if(i>=ok.length){ m.style.color='var(--pos)'; m.textContent='uploaded'+(skipped?' ('+skipped+' skipped — over 10MB)':''); refreshDocs(); return; }
         var f=ok[i++], _th=null; hzDocThumb(f).then(function(th){ _th=th; return hzUpload(f,{field:'data_base64',category:'product-docs'}); }).then(function(fields){ if(_th)fields.thumb_base64=_th;   // v27.708 thumbnail rides along → auto swatch
-          shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(window.ME&&ME.email)||''},fields),function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent=j.error;return;} up(); }); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=(e&&e.message)||'upload failed'; }); })(); }
+          shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(ME&&ME.email)||''},fields),function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent=j.error;return;} up(); }); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=(e&&e.message)||'upload failed'; }); })(); }
     body.querySelector('#pdoc-up').onclick=function(){ uploadDocFiles(body.querySelector('#pdoc-file').files); };
     // Drag & drop multiple files onto the upload box.
     (function(){ var dz=body.querySelector('#pdoc-drop'); if(!dz)return;
@@ -16514,11 +16523,11 @@
       function addFiles(list){ Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>10*1024*1024){ alert(f.name+' is over 10MB'); return; } _files.push(f); }); drawFiles(); }
       var _pf=body.querySelector('#pt-files'); if(_pf)_pf.onchange=function(){ addFiles(_pf.files); _pf.value=''; };
       var _pta=body.querySelector('#pt-in'); if(_pta){ _pta.addEventListener('dragover',function(e){ e.preventDefault(); _pta.style.outline='2px dashed var(--blue)'; }); _pta.addEventListener('dragleave',function(){ _pta.style.outline=''; }); _pta.addEventListener('drop',function(e){ e.preventDefault(); _pta.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files)addFiles(e.dataTransfer.files); }); }
-      function uploadAll(cb){ var ids=[], i=0; (function one(){ if(i>=_files.length){ cb(ids); return; } var f=_files[i++]; hzUpload(f,{field:'data_base64',category:'product-docs'}).then(function(fields){ shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(window.ME&&ME.email)||''},fields),function(jr){ if(jr&&jr.id)ids.push({id:jr.id,name:f.name}); one(); }); }).catch(function(){ one(); }); })(); }
+      function uploadAll(cb){ var ids=[], i=0; (function one(){ if(i>=_files.length){ cb(ids); return; } var f=_files[i++]; hzUpload(f,{field:'data_base64',category:'product-docs'}).then(function(fields){ shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(ME&&ME.email)||''},fields),function(jr){ if(jr&&jr.id)ids.push({id:jr.id,name:f.name}); one(); }); }).catch(function(){ one(); }); })(); }
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t&&!_files.length)return; var tags=Object.keys(_sel).filter(function(id){return _sel[id];}).map(Number);
         var pantone=Object.keys(_panPicked).filter(function(code){ return t.indexOf('🎨 '+code)>=0; }).map(function(code){ return _panPicked[code]; });   // only cards whose token survives in the text
         var pb=body.querySelector('#pt-post'), pm=body.querySelector('#pt-postmsg'); pb.disabled=true; if(pm&&_files.length)pm.textContent='uploading '+_files.length+' file'+(_files.length===1?'':'s')+'…';
-        uploadAll(function(ids){ var first=ids.shift(); var bodyTxt=t||(first?'📎 '+first.name:''); var email=(window.ME&&ME.email)||'';
+        uploadAll(function(ids){ var first=ids.shift(); var bodyTxt=t||(first?'📎 '+first.name:''); var email=(ME&&ME.email)||'';
           var _sampMatch=/🧪 v(\d+)/.exec(bodyTxt), _sampId=_selSample||(_sampMatch?(_smpByVer[_sampMatch[1]]||null):null);   // v27.771: compose Sample chip wins, else the /s token in the body that sample version
           shipPost('/api/product/note',{ref:ref,body:bodyTxt,author_email:email,tags:tags,pantone:pantone,attachment_id:first?first.id:null,sample_id:_sampId},function(){
             (function extra(){ if(!ids.length){ _files=[]; _prodJsonBust(ref); renderProdTimeline(body,ref,{quiet:true}); return; } var x=ids.shift(); shipPost('/api/product/note',{ref:ref,body:'📎 '+x.name,author_email:email,tags:tags,pantone:[],attachment_id:x.id},function(){ extra(); }); })(); }); }); };

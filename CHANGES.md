@@ -1,3 +1,11 @@
+## v27.891 deploy note (Ben): BUG — Sampling page stuck on its skeleton after a reload (affects prod since v27.878)
+
+**File: `supply/inject.html`.** No server change. **Deploy soon:** any reload of PRODUCT ▸ SAMPLING (or opening a `#/product/sampling/<ref>/<tab>` link in a fresh tab) showed the loading skeleton forever and dropped the deep link; clicking another tab and back recovered it.
+
+- **Cause 1:** the list paints instantly from the sessionStorage cache (v27.878) — *before* `/api/me` has resolved — and the paint read `ME.email` guarded by `window.ME&&…`. `window.ME` is the artifact's object; inject's own closure `ME` was still null → TypeError inside the cached paint. The same wrong guard existed at 10 other sites (notes, suggestions, sample-create, docs…): all now `(ME&&ME.email)`.
+- **Cause 2 (hardening in `hzqAll`):** when the cached paint threw, the revalidate saw "data unchanged → leave the DOM alone", so nothing ever repainted. A failed cached paint now forces a full repaint from the network, even if unchanged or within TTL.
+- Verified: reload on `#/product/sampling/SS27-TOWEL-CLASSICBLUE-MQ/S1` now renders the grid and opens the S1 tab.
+
 ## v27.890 deploy note (Ben): sample-card code removed from the MASTER DATA tab (stays on the S-tabs + grid)
 
 **File: `supply/inject.html`.** Ben: the code belongs to the sample, not the product. The v27.889 "Sample card code" line on MASTER DATA is gone; the badge stays in the S-tab review header ("Sample 1 [9A1]") and under the grid tick.
