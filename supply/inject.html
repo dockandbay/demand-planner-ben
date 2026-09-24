@@ -1958,7 +1958,7 @@
   // → SUPPLY ▸ Samples, expand this sample request by ref (used from the PRODUCT grid / detail links + the #/supply/samples/<ref> deep link)
   function gotoSample(ref){ if(!ref)return; _pendingSampleRef=String(ref); if(typeof hideProduct==='function')hideProduct(); if(typeof showSupply==='function')showSupply(true); selectSection('samples'); }
   function gotoOther(){ showPoSub('other'); }   // → PURCHASE ORDERS ▸ Other Payments
-  function bindShipOpen(){ document.querySelectorAll('#supply-root .ship-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); gotoShipment(b.dataset.ref); }; }); }
+  function bindShipOpen(){ document.querySelectorAll('#supply-root .ship-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); gotoShipment(b.dataset.ref); }; }); try{ _poGridFulfilPaint(); }catch(e){} }   // v27.885: paint Fulfil IS badges on the PO grid shipment column
   // after a view renders, expand the pending PO / shipment row (set by gotoPO / gotoShipment)
   function expandPending(sel,want){ if(!want)return false; var btn=null;
     document.querySelectorAll(sel).forEach(function(b){ if((b.dataset.po||b.dataset.ref)===want)btn=b; });
@@ -3189,7 +3189,8 @@
       : (r.shipment
         ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>'))
-      +(_shipBadges?'<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+_shipBadges+'</div>':'');
+      +(_shipBadges?'<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+_shipBadges+'</div>':'')
+      +((r.shipment&&!isMfg)?'<span class="hz-isship" data-ref="'+esc(r.shipment)+'" style="display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle"></span>':'');   // v27.885: Fulfil IS recommendations (painted after a batched lookup). NB distinct class from the ERP .po-fulfil[data-po] cell.
     // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab
     // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
@@ -6444,11 +6445,20 @@
       var sh=(j&&j.shipments)||{}; need.forEach(function(id){ var rec=sh[id]||{configured:!!(j&&j.configured),linked:false}; _hzFulfilCache[id]={t:Date.now(),rec:rec}; out[id]=rec; }); cb(out);
     }).catch(function(){ need.forEach(function(id){ out[id]=null; }); cb(out); }); }
   function _hzFulfilBust(id){ delete _hzFulfilCache[id]; }
-  function hzFulfilBadges(rec){ if(!rec||!rec.configured||!rec.linked)return '';
-    var out=[];
-    if(rec.ref_mismatch) out.push('<button class="hz-fulfil-chgref" data-is="'+esc(rec.is_number)+'" title="Fulfil internal shipment is '+esc(rec.is_number)+' — rename this Horizon shipment to match" style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;cursor:pointer">⇄ Change to '+esc(rec.is_number)+'</button>');
-    if(rec.date_mismatch) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;cursor:pointer">📅 Update dates → '+esc(rec.horizon_date||'')+'</button>');
+  function hzFulfilBadges(rec, compact){ if(!rec||!rec.configured||!rec.linked)return '';
+    var out=[], pad=compact?'0 5px':'1px 7px', fs=compact?'10px':'11px';   // compact = PO grid (icon/short); full = shipment record
+    if(rec.ref_mismatch) out.push('<button class="hz-fulfil-chgref" data-is="'+esc(rec.is_number)+'" title="Fulfil internal shipment is '+esc(rec.is_number)+' — rename this Horizon shipment to match" style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">⇄ '+(compact?'':'Change to ')+esc(rec.is_number)+'</button>');
+    if(rec.date_mismatch) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">📅'+(compact?'':' Update dates → '+esc(rec.horizon_date||''))+'</button>');
     return out.join(' '); }
+  // PO grid: after a render, batch-lookup the Fulfil IS for each row's assigned shipment (distinct refs, cached) and paint
+  // compact badges into the .po-fulfil placeholder in the shipment column. One Fulfil call per grid, not per row.
+  function _poGridFulfilPaint(){
+    var hosts=[].slice.call(document.querySelectorAll('#supply-root .hz-isship')).filter(function(h){ return !h._afDone && h.dataset.ref; });
+    if(!hosts.length)return;
+    var refs=[], byRef={}; hosts.forEach(function(h){ h._afDone=1; var r=h.dataset.ref; (byRef[r]=byRef[r]||[]).push(h); if(refs.indexOf(r)<0)refs.push(r); });
+    hzFulfilShip(refs, function(m){ Object.keys(byRef).forEach(function(ref){ var rec=m[ref], hs=byRef[ref];
+      var bh=(rec&&rec.configured&&rec.linked)?hzFulfilBadges(rec,true):'';
+      hs.forEach(function(h){ h.innerHTML=bh; if(bh)hzWireFulfil(h, ref); }); }); }); }
   function hzWireFulfil(scope, ref){ if(!scope)return;
     scope.querySelectorAll('.hz-fulfil-chgref').forEach(function(b){ if(b._w)return; b._w=1; b.onclick=function(e){ e.stopPropagation(); var is=b.dataset.is;
       var inp=scope.querySelector('.sh-ref-edit'), sv=scope.querySelector('.sh-ref-save');

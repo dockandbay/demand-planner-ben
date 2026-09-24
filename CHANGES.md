@@ -1,3 +1,12 @@
+## v27.885 deploy note (Ben): Fulfil IS recommendations — 3rd surface: the PO grid shipment column
+
+**File: `supply/inject.html`.** Completes v27.882 (the third placement Ben asked for). Adds the Fulfil "Change to IS…" / "Update dates" badges to the **PO grid's Shipment column**, next to each row's assigned shipment.
+
+- **Batched, not per-row:** each row with an assigned shipment gets a `.hz-isship` placeholder; after the grid renders (`bindShipOpen`), `_poGridFulfilPaint()` collects the **distinct** shipment refs and makes **one** `/api/supply/fulfil/internal-shipments` call for all of them (cached 60s), then paints compact badges. Verified: 22 shipments on screen → 1 Fulfil call; 2 linked (PO-57AUXR1→IS128, PO-56EULX1→IS127) rendered "⇄ IS…".
+- **Compact form** on the grid (icon/short: "⇄ IS128", "📅"); the full-label form stays on the shipment record. Same actions/wiring (`hzFulfilBadges(rec, compact)`, `hzWireFulfil`).
+- **Class-collision fix:** the grid already had a `.po-fulfil[data-po]` cell for the ERP PO-date-sync feature; the new placeholder uses a distinct class `.hz-isship[data-ref]` so the two never clash.
+- Same live-write gate applies to "Update dates" from the grid (nothing writes to Fulfil without `FULFIL_LIVE_WRITES` + the confirm).
+
 ## v27.884 deploy note (Ben): Auto Forecast (Supply ▸ Payments) reflects the buy-plan fix + no stale feed cache
 
 **File: `artifact_v16.7.html`.** Follow-up to v27.883. Ben: the Supply ▸ Payments **Auto Forecast** report reads buy-plan logic — it should update with the fix.
