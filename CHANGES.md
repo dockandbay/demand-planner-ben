@@ -1,3 +1,7 @@
+## v27.890 deploy note (Ben): sample-card code removed from the MASTER DATA tab (stays on the S-tabs + grid)
+
+**File: `supply/inject.html`.** Ben: the code belongs to the sample, not the product. The v27.889 "Sample card code" line on MASTER DATA is gone; the badge stays in the S-tab review header ("Sample 1 [9A1]") and under the grid tick.
+
 ## v27.889 deploy note (Ben): sample-card 3-char code shown clearly — black badge, white text
 
 **File: `supply/inject.html`.** No server change, no migrations. Ben (sandbox, `#/product/sampling/<ref>/master-data`): the 3-digit sample-card code wasn't visible on the MASTER DATA tab and should also sit under the S-tick in the grid. Every sample already has a stored `short_code` (generated for the sample card QR); it just wasn't rendered.
