@@ -1,3 +1,12 @@
+## v27.889 deploy note (Ben): sample-card 3-char code shown clearly — black badge, white text
+
+**File: `supply/inject.html`.** No server change, no migrations. Ben (sandbox, `#/product/sampling/<ref>/master-data`): the 3-digit sample-card code wasn't visible on the MASTER DATA tab and should also sit under the S-tick in the grid. Every sample already has a stored `short_code` (generated for the sample card QR); it just wasn't rendered.
+
+- New `.smp-code` badge (black `#111`, white monospace, letter-spaced); `.lg` variant on the MASTER DATA tab.
+- **MASTER DATA tab:** a "Sample card code(s)" line under the header — one badge per sample (`S1 2Q1 · S2 RDN …`), before the master-data grid.
+- **Grid:** the badge sits under the S-tick, below the date (centred, block). Click opens the same S-tab review as the date / note-count badges.
+- **S-tabs:** the badge follows "Sample N" in the review header (both the MANAGE-panel and the inline review variants).
+
 ## v27.888 deploy note (Ben): "⇄ IS…" click now updates the screen + Fulfil deep links (IS record, PO record)
 
 **Files: `supply/inject.html`, `server.mjs`.** No migrations, no env vars. Server changed → restart.
