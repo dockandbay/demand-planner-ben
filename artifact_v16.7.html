@@ -5351,7 +5351,7 @@ function filteredCats(){
 
 function refreshRow(s,co,ch){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // v27.534: an override changed → re-allocate the country pool
   try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
-  try{ BUY_FC_STALE=true; }catch(e){}                   // forecast changed → the buy plan's demand overlay is now stale (rebuilt on the next BP.render)
+  try{ BUY_FC_STALE=true; AF_FEED=null; }catch(e){}     // forecast changed → buy plan's demand overlay is stale (rebuilt next BP.render); v27.884: also drop the Auto-Forecast feed cache so Supply▸Payments rebuilds off the fresh buy plan
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
   const f26u=F26.reduce(function(a,m){return a+(m===CUR_MONTH?curMonthForecast(s,co,ch):(fu[m]||0));},0);
   const f27u=F27.reduce(function(a,m){return a+(fu[m]||0);},0);
@@ -14878,7 +14878,7 @@ function openCellSheet(td){ try{
   if(_q('#hz-cs-note'))_q('#hz-cs-note').onclick=function(){ closeCellSheet(); try{ openFcNotePopup(td); }catch(e){} };   // reuse the proven cell-note popup on the tapped cell
   if(_q('#hz-cs-save'))_q('#hz-cs-save').onclick=function(){ var raw=(_q('#hz-cs-ov')||{}).value, oldU=fc;
     if(isSku){ try{ skuCommitOv(skuOvKey, raw, skuBase); }catch(e){}   // same path as the desktop SKU input (skuCommitOv handles undo/dirty + % vs base)
-      try{ refreshRow(sub,co,ch); }catch(e){} try{ BUY_FC_STALE=true; }catch(e){} }
+      try{ refreshRow(sub,co,ch); }catch(e){} try{ BUY_FC_STALE=true; AF_FEED=null; }catch(e){} }   // v27.884: drop Auto-Forecast feed cache on a forecast edit
     else { try{ if(typeof undoMark==='function')undoMark(); if(typeof markDirty==='function')markDirty(); }catch(e){}
       var v=parseInput(raw); IV[name+'|'+co+'|'+ch+'|'+fym]=(v==null?'':(typeof v==='string'?v:String(v)));
       try{ refreshRow(name,co,ch); }catch(e){}
@@ -14888,7 +14888,7 @@ function openCellSheet(td){ try{
     try{ if(typeof undoMark==='function')undoMark(); if(typeof markDirty==='function')markDirty();
       var vals=computeSmoothAlloc(sub,co,ch,fym,{protectLeaders:(typeof SMOOTH_LEADER!=='undefined'?SMOOTH_LEADER:true)})||{};
       var chg=applySmoothAlloc(co,ch,fym,vals)||[]; if(typeof logChangesBulk==='function'&&chg&&chg.length)logChangesBulk(chg);
-      try{ BUY_FC_STALE=true; }catch(e){} }catch(e){}
+      try{ BUY_FC_STALE=true; AF_FEED=null; }catch(e){} }catch(e){}   // v27.884: drop Auto-Forecast feed cache
     closeCellSheet(); try{ renderMain(); }catch(e){} };
 }catch(e){} }
 if(typeof document!=='undefined'){ document.addEventListener('click',function(ev){ try{

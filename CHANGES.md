@@ -1,3 +1,10 @@
+## v27.884 deploy note (Ben): Auto Forecast (Supply ▸ Payments) reflects the buy-plan fix + no stale feed cache
+
+**File: `artifact_v16.7.html`.** Follow-up to v27.883. Ben: the Supply ▸ Payments **Auto Forecast** report reads buy-plan logic — it should update with the fix.
+
+- **Confirmed it does:** the report's default **"Buy plan" engine** (`AF_ENGINE='bp'`) builds its feed via `afBuildBuyFeed()` → `BP.project(...).bQ` — the *same* buy engine fixed in v27.883. So the payments/cash-flow forecast now uses the corrected (lower) buys automatically on any page load. (The alternate **"Rolling (old)"** engine is an independent legacy JIT model with no cover target — deliberately does not read the buy plan; unchanged.)
+- **Fixed a staleness gap:** `AF_FEED` was built once and **cached for the whole session with no invalidation**, so a live forecast edit didn't refresh the report until a reload. Now `AF_FEED=null` is set alongside every `BUY_FC_STALE=true` (the forecast-changed signal, 3 sites), so the Auto Forecast rebuilds off the current buy plan on its next open. Verified: report loads on the Buy-plan engine, TOTAL UNITS/CASH populate, no errors.
+
 ## v27.883 deploy note (Ben): BUY ENGINE — fix the arrival-month double-count (MOVES BUY QUANTITIES, −55% in sandbox)
 
 **File: `artifact_v16.7.html` (demand planner + buy engine). Loads once at startup → a restart is required to take effect.** No migration, no env vars.
