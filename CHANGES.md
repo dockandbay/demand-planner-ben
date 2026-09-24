@@ -1,3 +1,19 @@
+## v27.883 deploy note (Ben): BUY ENGINE — fix the arrival-month double-count (MOVES BUY QUANTITIES, −55% in sandbox)
+
+**File: `artifact_v16.7.html` (demand planner + buy engine). Loads once at startup → a restart is required to take effect.** No migration, no env vars.
+
+### The bug (completes the v27.862 `_fwdInbCover` work)
+The Buy-3PL sizing compared the cover target `tg3` against `c3` (the **closing** balance), but `tg3 = fwdDemand(t3eff, i)` **includes month i's own demand** (a buy landing in month i must cover month i onward), while `c3` already has month i's DTC+B2B+Zalando **subtracted**. So month i's demand was counted twice. On a big one-off month already served by opening stock or a landed PO (an early-season B2B spike), that phantom gap triggered a large redundant buy. Ben's case: TOWLB-CAB-LG-ORANG-R UK bought ~1,840 in Oct to "cover" a Feb B2B spike (2,110) that the existing PO-58UKXR1 (1,080) + on-hand already covered — leaving 48 weeks of stock in March.
+
+### The fix (one block in the buy pass)
+Size the buy against the **opening-of-month** 3PL balance, on `tg3`'s own basis: `_avail3 = c3 + (dtc+b2b+zaln) * min(1, t3eff/4.33)`, then `gap = tg3 − _avail3 − _fwdInbCover` and the buy condition uses `_avail3` (was `c3`). The real closing `c3` still detects a genuine mid-month stockout in `meaningfulGap`. This is exactly Ben's spec: *"423 units at end-of-Feb already exceeds the March target → the forecast buy isn't required."* For a steady SKU it sets closing cover to exactly t3 forward-weeks (was t3 + ≈one month); it never buys past the target.
+
+### ACTION FOR DIVIYAJ — this MOVES BUY QUANTITIES, validate before deploy
+- **Estate impact (sandbox, 358 SKUs):** total recommended **Buy 3PL 1,140,028 → 508,712 units (−55%)**; the same ~150 SKUs still buy, just right-sized. This is the old engine's systematic **over-hold** (≈one extra month of cover on every SKU + the spike double-counts) being removed — a real working-capital reduction, not a display change.
+- **Verified no under-buy on the worked case:** TOWLB-CAB-LG-ORANG-R UK — Feb closing cover **52w → 8w**, healthy **7–9 weeks throughout the horizon, no stockout**; the Feb spike is ridden by the existing 1,080 PO. Buy 2,240 → 809.
+- **Please spot-check a sample across tiers/markets that projected cover stays healthy (no NEW stockouts) before flipping it live.** The one SKU verified holds cover; validate breadth.
+- **Sandbox caveat:** the sandbox measurement runs with inflated set-explosion demand (the parent bundle SKUs of the worked SKU weren't seeded), so the sandbox residual (809) overstates prod — on prod the spike SKU should fall closer to ~0. The −55% estate figure is directional; re-measure on prod data.
+
 ## v27.882 deploy note (Ben): Horizon shipment ⇄ Fulfil INTERNAL shipment (IS…) — link + two ERP recommendations
 
 **No migrations. No new required env vars.** Files: `server.mjs` (read/discovery + gated write), `supply/inject.html` (shipment-record badges). Uses the existing `FULFIL_LIVE_*` creds and the `FULFIL_LIVE_WRITES` gate.

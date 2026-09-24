@@ -3758,13 +3758,22 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     // B2B spike) that a pending PO will cover from triggering a redundant buy. _fwdInbCover=0 for a SKU with no
     // in-window inbound → gap/meaningfulGap/condition are byte-for-byte the old behaviour (no estate-wide change).
     let _fwdInbCover=0; { let _wl=Math.max(t3eff-4.33,0); for(let _fi=i+1;_fi<PROJ.length&&_wl>0;_fi++){ if(PROJ[_fi].isActual||PROJ[_fi].isForecast)continue; _fwdInbCover+=(ib3[PROJ[_fi].key]||[]).reduce((s,x)=>s+(x.qty||0),0); _wl-=4.33; } }
-    const gap=tg3-c3-_fwdInbCover;
+    // v27.883 (Ben): size the buy against the OPENING-of-month 3PL balance, not the CLOSING balance. tg3 (=fwdDemand from
+    // month i) INCLUDES month i's own demand — stock landing in month i must cover month i onward — but c3 already has
+    // month i's DTC+B2B+Zalando subtracted. Comparing tg3 to c3 double-counts month i, so a big one-off month (an
+    // early-season B2B spike already served by opening stock / a landed PO) triggered a redundant buy. Add back the
+    // fraction of month i's 3PL demand that tg3 actually covers → _avail3 is the opening balance on tg3's own basis.
+    // (Ben: "423 units at end-of-Feb already exceeds the March target → the forecast buy isn't required.") For a steady
+    // SKU this sets cover to exactly t3 forward-weeks at close (was t3 + ~one month); it never buys past the target.
+    const _mCovFrac=Math.min(1,t3eff/4.33);                    // portion of month i that a t3eff-week cover window spans
+    const _avail3=c3+(dtc+b2b+zaln)*_mCovFrac;                 // opening 3PL available (c3 is closing; add back month i's covered demand)
+    const gap=tg3-_avail3-_fwdInbCover;
     // Only buy if the NET shortfall is meaningful (>= case pack). A bare month-i stockout with inbound arriving
     // inside the window is left to the arrival-date-aware Urgent scan; only a genuine no-inbound stockout forces a buy.
-    const meaningfulGap=gap>=cp||(c3<=0&&_fwdInbCover<=0);
+    const meaningfulGap=gap>=cp||(c3<=0&&_fwdInbCover<=0);     // c3 (real closing) still detects a genuine mid-month stockout
     // No Buy-3PL that would LAND in/after the effective discontinue month — a standard-lead order can't be
     // sold once the product is discontinued (a true near-term gap still surfaces in Buy 3PL Urgent).
-    if((c3+_fwdInbCover)<tg3&&(w3next>0||nextZalCover>0)&&meaningfulGap&&!afterDisc){   // ||nextZalCover: a pure-Zalando SKU (no DTC/B2B fwd demand) still needs a Buy 3PL
+    if((_avail3+_fwdInbCover)<tg3&&(w3next>0||nextZalCover>0)&&meaningfulGap&&!afterDisc){   // ||nextZalCover: a pure-Zalando SKU (no DTC/B2B fwd demand) still needs a Buy 3PL
       // Ideal placement = arrival month i minus lead months. Allow placement as early as
       // the current actionable month (index 1 = current-month "Remaining" / "ship today").
       // If the ideal placement is in the past (pi<1) the order is already late: clamp it to
