@@ -1504,6 +1504,33 @@ var PRICE_CHANGES=[];   // DEMAND ▸ Revenue: definitive price changes (server-
 // re-render, which wipes it. calc()'s return is never mutated by callers, so sharing the object is safe.
 var CALC_MEMO={};
 var _VIEW_ONLY_RENDER=false;
+// v27.886 (Ben, perf — item 5, demand grid incremental rows). Sub-category <tr>s are reused across VIEW-ONLY rebuilds
+// when the "row signature" (everything that feeds a row's cells other than its own sku|country|channel) is unchanged.
+// The cached node IS the live node: in-place patches (rails, highlights) travel with it. Cleared on every DATA render
+// (renderMain()/render() without the view-only flag), on refreshRow (an edit can re-allocate the country pool), and
+// whenever the signature changes (country/channel switch, Q/H/FY-collapse columns, variant images, FC-vs-actual,
+// highlight modes, currency, change-key/notes rails, filter rules, BI rules). Kill switch: localStorage hzRowCache='0'.
+var _hzRowCache={sig:null,rows:{},hits:0,miss:0};
+function hzRowCacheClear(){ _hzRowCache={sig:null,rows:{},hits:0,miss:0}; }
+function _hzSz(v){ try{ if(!v)return 0; if(v instanceof Set||v instanceof Map)return v.size; if(Array.isArray(v))return v.length; if(typeof v==='object')return Object.keys(v).length; return String(v); }catch(e){ return -1; } }
+function _hzRowSig(){
+  try{ if(localStorage.getItem('hzRowCache')==='0')return null; }catch(e){}
+  try{
+    return JSON.stringify([ CUR, CF, TIME_COLS, SHOW_VARIANT_IMG, SHOW_FC_ACT, HL_FC_LT_ACT, HL_NOFC_INV, HIDE_PAST_CHANGES, SUMM_CCY,
+      _hzSz(typeof FC_CHANGE_KEYS!=='undefined'?FC_CHANGE_KEYS:null), (typeof FC_NOTES_KEY!=='undefined'?FC_NOTES_KEY:''),
+      (typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE)?JSON.stringify(FR_ACTIVE):'', _hzSz(typeof BI_RULES!=='undefined'?BI_RULES:null), _hzSz(typeof BI_CACHE!=='undefined'?BI_CACHE:null),
+      (typeof SKUM!=='undefined')?_hzSz(SKUM):0, (typeof DATA!=='undefined')?DATA.length:0, (typeof IV!=='undefined')?_hzSz(IV):0,
+      (typeof window._hzRowSigExtra==='function')?window._hzRowSigExtra():'' ]);
+  }catch(e){ return null; }   // anything odd → no caching this render (falls back to a full build)
+}
+function _hzRowCacheGet(rk,x){
+  var sig=_hzRowSig(); if(sig===null){ hzRowCacheClear(); return null; }
+  if(_hzRowCache.sig!==sig){ _hzRowCache={sig:sig,rows:{},hits:0,miss:0}; return null; }
+  var e=_hzRowCache.rows[rk+(x?'|x':'')]; if(!e)return null;
+  if(e.exp!==EXPANDED.has(rk))return null;   // caret was toggled since this node was built → rebuild it (the node's own state may have been flipped by the click)
+  _hzRowCache.hits++; return e;
+}
+function _hzRowCachePut(rk,x,tr){ if(_hzRowCache.sig===null)return; _hzRowCache.miss++; _hzRowCache.rows[rk+(x?'|x':'')]={tr:tr,exp:EXPANDED.has(rk)}; }
 var _hzBuildPending=false,_hzBusyN=0;   // v27.877 (perf UX): one queued grid build per frame + a counted busy spinner over the HORIZON mark
 function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)return; _hzBusyN=Math.max(0,_hzBusyN+(on?1:-1)); b.classList.toggle('hz-busy',_hzBusyN>0); }catch(e){} }   // v27.876 (perf): armed by view-only triggers (country/channel pills, category/filters, display toggles) so render()/renderMain() KEEP the forecast memos instead of recomputing every SKU. Consumed (reset) at the top of render() so it can never leak into a later data-changing render.
 // Buy plan reads its demand from a runtime overlay (buildLiveDemand, off the live forecast). A PLAN forecast edit
@@ -5349,7 +5376,7 @@ function filteredCats(){
   const out={};ks.forEach(function(k){out[k]=m[k];});return out;
 }
 
-function refreshRow(s,co,ch){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // v27.534: an override changed → re-allocate the country pool
+function refreshRow(s,co,ch){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){}   // v27.886: an edit patches THIS row in place but can re-allocate the country pool → drop the reusable-row cache so the next view-only render rebuilds every row (today's behaviour)   // v27.534: an override changed → re-allocate the country pool
   try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
   try{ BUY_FC_STALE=true; AF_FEED=null; }catch(e){}     // forecast changed → buy plan's demand overlay is stale (rebuilt next BP.render); v27.884: also drop the Auto-Forecast feed cache so Supply▸Payments rebuilds off the fresh buy plan
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
@@ -9537,7 +9564,14 @@ function buildBody(){
       frag.appendChild(htr);
     }
     rows.forEach(function(row,ri){
-      var drow=buildDataRow(row.s,CUR,row.ch,row.x,fu_cache);
+      // v27.886 (Ben, perf): REUSE the sub-category <tr> from the previous build when nothing that feeds its cells has
+      // changed (see _hzRowSig). A category-pill click, Active/All/18m, tier / sort pill, run-off toggle, SKU search or
+      // the SKU-view back button only changes WHICH rows show — the rows themselves are identical, and buildDataRow
+      // (calc + ~70 cells) was ~4–5ms each → the whole body in ~2ms instead of ~110–160ms. Data renders, in-place
+      // edits (refreshRow) and any signature change drop the cache and build exactly as before.
+      var _rk=row.s+'|'+CUR+'|'+row.ch, _ce=_hzRowCacheGet(_rk,row.x), drow=_ce?_ce.tr:null;
+      if(drow){ drow.classList.remove('cat-start'); if(fu_cache&&!fu_cache[_rk]){ try{ fu_cache[_rk]=calc(row.s,CUR,row.ch).fu; }catch(e){} } }   // calc is memoised (CALC_MEMO survives view-only renders) → the cat-total row still gets its inputs
+      else { drow=buildDataRow(row.s,CUR,row.ch,row.x,fu_cache); _hzRowCachePut(_rk,row.x,drow); }
       // When the (redundant) category header is skipped, mark the first row so it carries a darker top divider —
       // a full-width horizontal line between one category and the next (e.g. Bag - Beach → Bag - Cooling).
       if(ri===0 && _redundantHdr) drow.classList.add('cat-start');
@@ -9697,7 +9731,7 @@ function remapExpanded(dim,newVal){
 }
 function renderMain(viewOnly){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
-  if(!viewOnly){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; }   // v27.876 (perf): view-only callers pass true and keep the memos; data-changing callers (auto-smooth apply/cancel, undo, scope flags, cell-sheet) leave it unset → clear as before
+  if(!viewOnly){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // v27.876 (perf): view-only callers pass true and keep the memos; data-changing callers (auto-smooth apply/cancel, undo, scope flags, cell-sheet) leave it unset → clear as before
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
@@ -9896,7 +9930,7 @@ function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
   var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
-  if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
+  if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
@@ -10431,7 +10465,7 @@ function renderSummaryReport(body){
 }
 function renderSummaryView(body){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // ensure the EU ZAL channel (av 'z' + synth DATA rows) is wired if the Summary is opened before the plan renders
-  CALC_MEMO={};   // recompute forecast fresh every time the Summary opens so it reflects the latest plan edits (the memo is shared with the plan and can hold stale figures) — Ben "should update as forecasts update"
+  CALC_MEMO={}; try{ hzRowCacheClear(); }catch(e){}   // recompute forecast fresh every time the Summary opens so it reflects the latest plan edits (the memo is shared with the plan and can hold stale figures) — Ben "should update as forecasts update"
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
   var _curCcy='GBP', _symC='£';   // display currency (set once co is known); mf() uses the resolved symbol

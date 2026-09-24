@@ -1,3 +1,17 @@
+## v27.886 deploy note (Ben): performance items 1–5 — cashflow + PO detail in parallel, BI cache 5 min, request timing, demand-grid row reuse
+
+**Files: `server.mjs`, `artifact_v16.7.html`, `package.json`.** No migrations. New OPTIONAL env vars: `HZ_SLOW_MS` (default 750), `BI_TTL_MS` (default 300000, floor 30000). Artifact changed → restart to apply.
+
+| # | change | measured (sandbox, remote pooler ≈300ms/round-trip) |
+|---|---|---|
+| 1 | **Cash Flow** (`cashflowResponse`): today / likely-dates / deposit pools / other payments / shipment freight were awaited one after another → ONE `Promise.all`. Same SQL, same output. | cold build 2.6s → 1.6s (now bounded by the deposit-pools query alone; warm hits stay on the PO-rows cache, ~10ms) |
+| 2 | **BI / KPI cache** (`kpiBase`, `v_product_inventory`): `BI_TTL_MS` 30s → 5 min (env-overridable, floor 30s) and `invalidateBiCache()` now also fires when the data cache refreshes (ETL landing / self-heal rebuild), on top of the existing forecast-save + product-write invalidations. | prod ran the full 25k-row read 16,885× since 20-Aug because 30s expired between BI clicks |
+| 3 | **PO detail** (`/api/supply/po-detail/:po`): the 8-step sequential tail (crossdock, DTC details, shipment, change log, quality docs, children, price-list, barcode projects) → one round. `manufacturing-notes` and `po-import-cin7` were on the list but are **write paths** (4 and 18 INSERT/UPDATEs in order, loops) — left sequential on purpose; parallelising writes changes ordering/failure semantics. | 3.1–3.5s → 1.3s per PO open |
+| 4 | **Measurement:** every `/api` request records ms + DB-query count (pool.query wrapped, per-request via AsyncLocalStorage). ≥ `HZ_SLOW_MS` logs `[slow 1234ms 7q] GET /api/... 200`; **`GET /api/perf/recent`** (`?slow=1`, `?path=substr`) returns the last 300 with avg. Same auth gate as every other /api route. | zero hot-path cost beyond Date.now() |
+| 5 | **Demand grid row reuse** (artifact): sub-category `<tr>`s are cached across VIEW-ONLY rebuilds keyed by row + a signature of everything that feeds a row's cells (country/channel, TIME_COLS, variant images, FC-vs-actual, highlights, currency, change-key/notes rails, filter rules, BI rules, data sizes). Category pills, Active/All/18m, tier/sort pills, run-off toggle, SKU search, SKU-view back all reuse rows. Any data render, in-place edit (`refreshRow`) or signature change drops the cache → identical to today. Kill switch `localStorage.hzRowCache='0'`. | body build 289ms → 46ms; 27/27 reused rows byte-identical to a fresh build |
+
+**Not changed / noted for later:** a full DATA render of the plan (undo, auto-smooth apply/cancel, cell sheet) still costs ~2.4–2.9s on the UK▸DTC view with 357 rows — that is the forecast calc over every row (memos cleared by design), not the DOM; separate item.
+
 ## v27.885 deploy note (Ben): Fulfil IS recommendations — 3rd surface: the PO grid shipment column
 
 **File: `supply/inject.html`.** Completes v27.882 (the third placement Ben asked for). Adds the Fulfil "Change to IS…" / "Update dates" badges to the **PO grid's Shipment column**, next to each row's assigned shipment.

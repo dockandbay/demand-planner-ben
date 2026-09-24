@@ -93,6 +93,10 @@ const pool = new pg.Pool({
 // fatal and exits (the repeated EADDRNOTAVAIL crashes in dev). Log it and let the pool recycle the
 // client — the next query opens a fresh connection.
 pool.on('error', (err) => { console.error('[pg pool] idle client error (ignored):', err && err.message); });
+// v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
+// only read at call time) gets s.q incremented on every pool.query; the finish-hook logs it. Behaviour otherwise identical.
+{ const _origQuery = pool.query.bind(pool);
+  pool.query = function () { try { const s = (typeof _reqStore !== 'undefined') ? _reqStore.getStore() : null; if (s) s.q = (s.q || 0) + 1; } catch (_) {} return _origQuery.apply(pool, arguments); }; }
 // Keep one pooled connection WARM. idleTimeoutMillis (8s) closes idle clients, so a request after any short idle gap
 // otherwise pays the remote Supabase pooler's ~8s cold-connect stall — which is what made SUPPLY (Actions etc.) feel
 // slow on the sandbox even with the response caches (every request still runs one small query). A 5s SELECT 1 keeps a
@@ -728,7 +732,21 @@ const app = express();
 const _reqStore = new AsyncLocalStorage();
 function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
   console.error('[500] ' + ((r && r.method) || '?') + ' ' + ((r && (r.originalUrl || r.url)) || '?') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
-app.use((req, res, next) => _reqStore.run({ req }, next));   // wrap every request so log500 can find it
+// v27.886 (Ben, perf phase 4 — measurement): every request carries a start time + a DB-query counter (pool.query is
+// wrapped below to bump it). On finish, anything slower than HZ_SLOW_MS (default 750ms) is logged as
+// "[slow 1234ms 7q] GET /api/... 200" and the last 300 requests (all, not just slow) sit in a ring buffer behind
+// GET /api/perf/recent so a slow path can be found without tailing logs. Zero cost on the hot path beyond a Date.now().
+const HZ_SLOW_MS = Math.max(0, Number(process.env.HZ_SLOW_MS || 750));
+const _perfRing = []; const PERF_RING_MAX = 300;
+app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
+  res.on('finish', () => { try { const s = _reqStore.getStore(); const ms = Date.now() - ((s && s.t0) || Date.now()); const q = (s && s.q) || 0;
+    const path = String(req.originalUrl || req.url || '').split('?')[0];
+    if (!path.startsWith('/api/')) return;   // page/static loads aren't what we're measuring
+    _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
+    if (ms >= HZ_SLOW_MS) console.log('[slow ' + ms + 'ms ' + q + 'q] ' + req.method + ' ' + path + ' ' + res.statusCode);
+  } catch (_) { /* measurement must never throw */ } });
+  next();
+}));
 app.use(express.json({ limit: '25mb' }));   // 25mb: small document/invoice uploads still arrive as base64 JSON (~33% inflation). Vercel caps the request body at ~4.5MB, so anything over STORAGE_INLINE_MAX goes direct-to-Storage instead (see the Supabase Storage block below); this limit only covers the inline path.
 
 // ── Supabase Storage — large uploads (> STORAGE_INLINE_MAX) go straight to Storage, bypassing Vercel's ~4.5MB body cap ──
@@ -1064,6 +1082,7 @@ function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-f
   if (_dataRefresh) return _dataRefresh;
   _dataRefresh = _buildDataVals()
     .then(async (vals) => { _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
+      try { invalidateBiCache(); } catch (e) { /* v27.886: fresh source data (ETL / self-heal rebuild) → BI/KPI projections recompute on next read */ }
       if (KV_ON) { try { await kvWriteBlob(vals); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })
     .catch((e) => { _dataRefresh = null; throw e; });
   return _dataRefresh;
@@ -1900,13 +1919,14 @@ function shipFreightSrv(s) {
 }
 
 async function cashflowResponse(pos, q) {
-  const today = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
-  // likely-payment-date overrides (manual; may not exist before migration 042)
-  const likely = {};
-  try { (await pool.query(`SELECT line_key, to_char(likely_date,'YYYY-MM-DD') d FROM planner.payment_likely_dates`))
-    .rows.forEach(r => { likely[r.line_key] = r.d; }); } catch (e) { /* table not yet created */ }
-  // referenced-deposit pools (one cash line per reference; replaces the PO's own deposit line)
-  const depPools = await q(`
+  // v27.886 (Ben, perf): the five inputs below are independent of each other — fire them in ONE round trip (was five
+  // sequential, ~1.8s warm on the remote pooler even with the PO rows cached). Same queries, same results.
+  const [_todayR, _likelyR, depPools, otherPays, shipRows] = await Promise.all([
+    pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`),
+    // likely-payment-date overrides (manual; may not exist before migration 042)
+    pool.query(`SELECT line_key, to_char(likely_date,'YYYY-MM-DD') d FROM planner.payment_likely_dates`).catch(() => ({ rows: [] })),
+    // referenced-deposit pools (one cash line per reference; replaces the PO's own deposit line)
+    q(`
     SELECT dep.reference,
       -- BLANK deposit (no entered amount, not NO DEPOSIT) → its cash-flow amount is the ESTIMATED total (Σ start
       -- deposit of its open POs), so the outflow shows even before the deposit is funded (mig 235).
@@ -1922,17 +1942,15 @@ async function cashflowResponse(pos, q) {
     ) dep
     LEFT JOIN (SELECT deposit_ref, round(sum(start_calc),2) est_total FROM planner.v_po_finance
                WHERE coalesce(deposit_ref,'')<>'' AND coalesce(status,'') NOT ILIKE '%complete%' GROUP BY deposit_ref) et
-      ON et.deposit_ref=dep.reference`);
-  // deposit reference → its production number (for the export's "UK Deposit Ref" column).
-  const depProdByRef = {}; depPools.forEach(d => { if (d.reference) depProdByRef[d.reference] = d.prod_no || ''; });
-  // "Other payments" — sundry register rows (is_deposit=false): freight/fees/etc. entered directly.
-  const otherPays = await q(`
+      ON et.deposit_ref=dep.reference`),
+    // "Other payments" — sundry register rows (is_deposit=false): freight/fees/etc. entered directly.
+    q(`
     SELECT id, coalesce(reference,'') reference, coalesce(description,'') description, supplier_name, country,
       round(coalesce(amount,0),2) amount, to_char(date_due,'YYYY-MM-DD') date_due,
       to_char(date_likely_pay,'YYYY-MM-DD') date_likely_pay, to_char(date_paid,'YYYY-MM-DD') date_paid
-    FROM planner.deposits WHERE coalesce(is_deposit,false)=false`);
-  // shipment freight inputs (cost only; dates come from the member POs' eff_delivery which is the shipment date)
-  const shipRows = await q(`
+    FROM planner.deposits WHERE coalesce(is_deposit,false)=false`),
+    // shipment freight inputs (cost only; dates come from the member POs' eff_delivery which is the shipment date)
+    q(`
     WITH agg AS (
       SELECT po.shipment_ref,
         round(sum(coalesce(po.pallets_override, (SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
@@ -1954,7 +1972,12 @@ async function cashflowResponse(pos, q) {
     LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
     LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
       WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
-      ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true`);
+      ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true`),
+  ]);
+  const today = _todayR.rows[0].d;
+  const likely = {}; _likelyR.rows.forEach(r => { likely[r.line_key] = r.d; });
+  // deposit reference → its production number (for the export's "UK Deposit Ref" column).
+  const depProdByRef = {}; depPools.forEach(d => { if (d.reference) depProdByRef[d.reference] = d.prod_no || ''; });
   const shipFreight = {};
   shipRows.forEach(s => { shipFreight[s.shipment_ref] = shipFreightSrv(s); });
 
@@ -2331,6 +2354,16 @@ async function polybagActions() {
 
 // Lightweight, always-fresh version probe — the client polls this to detect a new deploy while a tab is
 // left open (the app is a SPA, so an open tab keeps running its booted version until reloaded).
+// v27.886 (perf measurement): last 300 /api requests with ms + query count. ?slow=1 → only those ≥ HZ_SLOW_MS;
+// ?path=<substring> → filter. Newest first. Same planner-key/cookie gate as every other /api route.
+app.get('/api/perf/recent', (req, res) => {
+  const slow = String(req.query.slow || '') === '1', pf = String(req.query.path || '');
+  let rows = _perfRing.slice().reverse();
+  if (slow) rows = rows.filter(r => r.ms >= HZ_SLOW_MS);
+  if (pf) rows = rows.filter(r => r.path.indexOf(pf) >= 0);
+  const tot = rows.reduce((a, r) => a + r.ms, 0);
+  res.set('Cache-Control', 'no-store').json({ ok: true, slow_ms: HZ_SLOW_MS, n: rows.length, avg_ms: rows.length ? Math.round(tot / rows.length) : 0, rows: rows.slice(0, 300) });
+});
 app.get('/api/version', async (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: await freshnessCached() }); });
 // Weather cache (moved off Airtable → planner.weather_cache). The DEMAND ▸ Actions ▸ Weather panel reads
 // this instead of calling Airtable via the Anthropic MCP. Rows are refreshed by the weather job (see Diviyaj note).
@@ -14338,7 +14371,15 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     ]);
     // Crossdock SKUs across the shipment THIS PO is the master of (every PO on the shipment, incl. this one),
     // with supplier-entered shipped qty -> shown as derived rows in the master PO's ORDER PLAN.
-    const xdMaster = await pool.query(`
+    // v27.886 (Ben, perf): round 2 — these eight lookups were awaited one after another (each ~20–80ms of pooler
+    // round-trip → ~0.4s of pure serial latency on every PO open). Every one depends only on `po` (the price-list
+    // step also reads round-1 `lines`, which is already resolved), so they run as ONE round. Same queries, same
+    // fallbacks, same output shape — only the waiting is collapsed.
+    const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
+    const [xdMaster, _dtcR, ship, changes, qdocs, children, _plR, _pmR, _bcR] = await Promise.all([
+      // Crossdock SKUs across the shipment THIS PO is the master of (every PO on the shipment, incl. this one),
+      // with supplier-entered shipped qty -> shown as derived rows in the master PO's ORDER PLAN.
+      pool.query(`
       SELECT po.po, coalesce(po.supplier_name,'') supplier, coalesce(po.client,'') client,
              coalesce(po.sales_order_ref,'') sales_order_ref, trim(s.sku) sku, coalesce(cs.qty,0)::int qty
       FROM planner.purchase_orders po
@@ -14346,31 +14387,36 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
       WHERE po.shipment_ref IN (SELECT shipment_ref FROM planner.shipments WHERE master_po=$1)
         AND coalesce(po.status,'') NOT ILIKE '%complete%'
-        AND trim(s.sku)<>'' ORDER BY po.po, sku`, [po]).catch(() => ({ rows: [] }));
-    const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
-    const dtc = (await pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions, coalesce(entered_by,'') entered_by,
-      to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.dtc_shipment_details WHERE po=$1`, [po])).rows[0] || null;
-    const ship = await poShipObj(po);
-    // Record-of-change audit trail (migration 158) — shown inline in the timeline, newest first. Defensive: empty if the table isn't there yet.
-    const changes = await pool.query(`SELECT event, detail, coalesce(changed_by,'') changed_by,
-      to_char(changed_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.po_change_log WHERE po=$1 ORDER BY changed_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] }));
-    // Quality-control docs shared across this PO's production / batch (same supplier), + any mapped directly to the PO. Migration 160.
-    const qdocs = await pool.query(`SELECT qd.id, qd.doc_type, qd.filename, coalesce(qd.prod_no,'') prod_no, coalesce(qd.batch_id,'') batch_id,
+        AND trim(s.sku)<>'' ORDER BY po.po, sku`, [po]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions, coalesce(entered_by,'') entered_by,
+      to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.dtc_shipment_details WHERE po=$1`, [po]),
+      poShipObj(po),
+      // Record-of-change audit trail (migration 158) — shown inline in the timeline, newest first. Defensive: empty if the table isn't there yet.
+      pool.query(`SELECT event, detail, coalesce(changed_by,'') changed_by,
+      to_char(changed_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.po_change_log WHERE po=$1 ORDER BY changed_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] })),
+      // Quality-control docs shared across this PO's production / batch (same supplier), + any mapped directly to the PO. Migration 160.
+      pool.query(`SELECT qd.id, qd.doc_type, qd.filename, coalesce(qd.prod_no,'') prod_no, coalesce(qd.batch_id,'') batch_id,
         coalesce(qd.po,'') po, coalesce(qd.uploader_kind,'') uploader_kind, to_char(qd.created_at,'YYYY-MM-DD HH24:MI') created_at
       FROM planner.quality_docs qd JOIN planner.purchase_orders o ON o.po=$1
       WHERE (qd.po=o.po
              OR (coalesce(qd.prod_no,'')<>'' AND qd.prod_no=coalesce(o.prod_no,''))
              OR (coalesce(qd.batch_id,'')<>'' AND qd.batch_id=coalesce(o.batch_id,'')))
         AND (coalesce(qd.supplier_name,'')='' OR lower(qd.supplier_name)=lower(coalesce(o.supplier_name,'')))
-      ORDER BY qd.created_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] }));
-    // Child POs, if this PO is a consolidated master (drives the PO ▸ CHILD PO tab).
-    const children = await pool.query(`SELECT p.po, coalesce(p.branch,'') branch, coalesce(p.client,'') client, coalesce(p.status,'') status,
+      ORDER BY qd.created_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] })),
+      // Child POs, if this PO is a consolidated master (drives the PO ▸ CHILD PO tab).
+      pool.query(`SELECT p.po, coalesce(p.branch,'') branch, coalesce(p.client,'') client, coalesce(p.status,'') status,
         coalesce(f.value_est,0)::numeric value_est FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po
-      WHERE p.master_po=$1 ORDER BY p.po`, [po]).catch(() => ({ rows: [] }));
+      WHERE p.master_po=$1 ORDER BY p.po`, [po]).catch(() => ({ rows: [] })),
+      // Price-list estimate inputs (index is memoised; the PO's supplier / prod_no is one tiny row) — applied below.
+      Promise.resolve().then(() => priceListEstIndex()).catch(() => null),
+      pool.query(`SELECT coalesce(supplier_name,'') supplier_name, coalesce(prod_no,'') prod_no FROM planner.purchase_orders WHERE po=$1`, [po]).catch(() => ({ rows: [] })),
+      // v27.570: Customise-barcode projects linked to this PO → portal "Download custom barcodes" (mig 268 optional → none)
+      pool.query(`SELECT id, name, coalesce(batch,'') batch, (SELECT count(*) FROM jsonb_object_keys(coalesce(overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects WHERE pos @> ARRAY[$1]::text[] ORDER BY name`, [po]).catch(() => ({ rows: [] })),
+    ]);
+    const dtc = _dtcR.rows[0] || null;
     // Price-list estimate → override each line's Est. cost (sku_cost) for this PO's supplier / production / qty
-    try { const pl = await priceListEstIndex(); const _pm = (await pool.query(`SELECT coalesce(supplier_name,'') supplier_name, coalesce(prod_no,'') prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {}; const _pn = plProdNum(_pm.prod_no); lines.rows.forEach((l) => { const est = plEstimate(pl, _pm.supplier_name, l.sku, l.qty, _pn); if (est != null) l.sku_cost = est; }); } catch (e) { /* price list optional */ }
-    let bcProjs = [];   // v27.570: Customise-barcode projects linked to this PO → portal "Download custom barcodes"
-    try { bcProjs = (await pool.query(`SELECT id, name, coalesce(batch,'') batch, (SELECT count(*) FROM jsonb_object_keys(coalesce(overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects WHERE pos @> ARRAY[$1]::text[] ORDER BY name`, [po])).rows; } catch (e) { /* mig 268 not applied yet → none */ }
+    try { if (_plR) { const _pm = _pmR.rows[0] || {}; const _pn = plProdNum(_pm.prod_no); lines.rows.forEach((l) => { const est = plEstimate(_plR, _pm.supplier_name, l.sku, l.qty, _pn); if (est != null) l.sku_cost = est; }); } } catch (e) { /* price list optional */ }
+    const bcProjs = _bcR.rows;
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, barcode_projects: bcProjs, payments: payments.rows, flexport: flexport.rows, dtc,
       children: children.rows,
       changes: changes.rows, quality_docs: qdocs.rows,
@@ -16574,7 +16620,10 @@ const KPI_WH = [['US 3PL', 'US', 'us_3pl', '3PL'], ['UK 3PL', 'UK', 'uk_3pl', '3
 // concurrent calls share ONE computation) with a short TTL, and clear it on forecast saves. Inputs (products /
 // inventory / forecast_outputs / PO lines) change a few times a day, so ≤TTL staleness is fine for a planning
 // view. Returns are treated read-only by all callers (verified — no row/ map mutation), so caching by ref is safe.
-const BI_TTL_MS = 30000;
+// v27.886 (Ben, perf): 30s → 5 min. kpiBase's full v_product_inventory read ran 16,885× on prod since 20-Aug (25k rows each)
+// because 30s expired between every BI click. Its inputs (products / inventory / forecast_outputs / PO lines) only move
+// when the ETL lands or a forecast is saved — both already call invalidateBiCache() — so a longer TTL loses nothing.
+const BI_TTL_MS = Math.max(30000, Number(process.env.BI_TTL_MS || 300000));
 let _kpiBaseCache = null, _biProjCache = null;
 function invalidateBiCache() { _kpiBaseCache = null; _biProjCache = null; }
 async function kpiBase(asof) {
