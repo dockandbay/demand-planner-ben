@@ -1,3 +1,7 @@
+## v27.887 deploy note (Ben): Fulfil "Change to IS…" on the PO record ▸ Shipments ▸ Shipment mode row
+
+**File: `supply/inject.html`.** Ben: put the "Change to IS134" button on the PO grid's Shipments tab in the **Shipment mode** section, before "rename". Both branches of that row (self-shipment: `🚢 PO ↗ · ⇄ Change to IS134 · ✎ rename · remove`; PO aboard another master: after `▾ change`, before `✎ rename`) now carry a `.hz-isship[data-full]` placeholder. `_poGridFulfilPaint()` (already run by `bindShipOpen` after the PO detail renders) paints full-label buttons there ("⇄ Change to IS134", "📅 Update dates → date") with a trailing separator; grid cells stay compact. Same wiring and gates as v27.882/885 (rename = Horizon-only cascade; dates = live-write gated + confirm). No server change, no migrations.
+
 ## v27.886 deploy note (Ben): performance items 1–5 — cashflow + PO detail in parallel, BI cache 5 min, request timing, demand-grid row reuse
 
 **Files: `server.mjs`, `artifact_v16.7.html`, `package.json`.** No migrations. New OPTIONAL env vars: `HZ_SLOW_MS` (default 750), `BI_TTL_MS` (default 300000, floor 30000). Artifact changed → restart to apply.
