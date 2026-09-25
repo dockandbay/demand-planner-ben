@@ -1,3 +1,13 @@
+## v27.906 deploy note (Ben): 3PL invoice analysis flags DUPLICATE CHARGES ACROSS MONTHS (Geneva Jul/Aug credit memo)
+
+**Files: `server.mjs`, `artifact_v16.7.html`.** Geneva's audit found parcels from one day billed in both the July and the August invoice and issued a credit memo. Verified against the files uploaded on LIVE (read-only copies of files 36 and 57): **41 order IDs appear in both the "JULY - Small Parcel" and "AUGUST - Small Parcel" sheets**, carrier amount **$444.19 on the August invoice** (the same refs carried $469.04 in July), ship dates 23–29 Jul 2026.
+
+Every invoice analysis now checks for this. `_tplCrossMonthDupes(tpl, period, {ref: amount})` compares this period's per-order references with the per-order references of every OTHER period's data file for the same 3PL (`tpl_invoice_files`, parsed once per file and memoised by id in `_tplRefCache`; per-3PL parser: Geneva small-parcel sheet, ILG `invoice_0*` shipping detail, generic `_tplOrderRows`). Result `cross_month_duplicates: { orders, amount (this period), by_month: [{period, orders, amount}], refs: [{ref, amount, also_in}] }` is attached to the Map response for all 3PLs (`/api/supply/tpl/map/:id`, incl. the Geneva and ILG allocators). Never throws; no other files → zeros.
+
+UI (`renderMap`): a **bright red ⛔ exception box** above the source chips when `orders > 0`: count, amount on this invoice, the other month(s) with their counts, the first 40 refs, and the instruction to request a credit memo and short-pay. The cost-centre analysis below is unchanged (still includes the duplicated lines; the short-pay is a manual step against the memo).
+
+Sandbox verified: live August workbook uploaded as a 2026-08 file; analysing the July Geneva invoice returned 41 duplicates / $469.04 also in 2026-08. Analysis time unchanged (~5 s, dominated by the Geneva allocation). No migration, no env.
+
 ## v27.905 deploy note (Ben, per Diviyaj's spec 25-Sep-2026): 3PL invoices resolve order refs from Diviyaj's Fulfil shipment table
 
 **Files: `server.mjs`, `artifact_v16.7.html`, `migrations/303_tpl_fulfil_shipments.sql`.** Diviyaj's four asks, all done:

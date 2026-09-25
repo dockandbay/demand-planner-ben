@@ -10690,7 +10690,8 @@ async function _tplGenevaAllocate(period) {
     else add(map, 0, it.amount); });
   const costCenters = Object.keys(acct).map(a => ({ costCenter: a, orders: 0, freight: Math.round(acct[a].freight * 100) / 100, fulfilment: Math.round(acct[a].fulfilment * 100) / 100, total: Math.round((acct[a].freight + acct[a].fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
   const allocated = costCenters.reduce((s, c) => s + c.total, 0);   // unmapped freight is now folded into Geneva Other fees (in costCenters), so don't add it again
-  return { ok: true, geneva: true, costCenters, unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] }, autoOther: { orders: unmappedRefs.length, freight: Math.round(unmappedFreight * 100) / 100, fulfilment: 0, total: Math.round(unmappedFreight * 100) / 100, refs: unmappedRefs }, totals: { orders: refs.length, matched: refs.length - unmappedRefs.length, freight: 0, fulfilment: 0 }, invoiceTotal: Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100, allocated: Math.round(allocated * 100) / 100, faireSharePct: Math.round(faireShare * 1000) / 10 };
+  const cross_month_duplicates = await _tplCrossMonthDupes('us_geneva', period, freight);   // v27.906: parcels billed in two months
+  return { ok: true, geneva: true, cross_month_duplicates, costCenters, unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] }, autoOther: { orders: unmappedRefs.length, freight: Math.round(unmappedFreight * 100) / 100, fulfilment: 0, total: Math.round(unmappedFreight * 100) / 100, refs: unmappedRefs }, totals: { orders: refs.length, matched: refs.length - unmappedRefs.length, freight: 0, fulfilment: 0 }, invoiceTotal: Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100, allocated: Math.round(allocated * 100) / 100, faireSharePct: Math.round(faireShare * 1000) / 10 };
 }
 // ── UK ILG accounting. Charge-code → Xero account (from Ben's ILG.csv mapping); channel delivery/order charges →
 // the DI's channel Freight/Fulfilment; VAT split by whether the line carries 20% VAT. Cin7-independent — the DI
@@ -10756,9 +10757,8 @@ async function _tplIlgAllocate(period) {
     di.items.forEach(it => { const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
   // Shipping detail (invoice_00) → per-order Gross freight → Cin7 cost centre → channel freight (VAT / No-VAT).
   const shipFiles = files.filter(f => /invoice_0/i.test(f.filename || ''));   // ALL per-order freight files (invoice_00…) — combine them
-  let shipUnmapped = 0, shipTotal = 0, shipRefCount = 0; const unmappedRefs = new Set();
+  let shipUnmapped = 0, shipTotal = 0, shipRefCount = 0; const unmappedRefs = new Set(); let ship = [];   // v27.906: hoisted for the duplicate check
   if (shipFiles.length) {
-    let ship = [];
     for (const sf of shipFiles) { const isCsv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, isCsv)); } catch (e) {} }
     const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))]; shipRefCount = refs.length;
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
@@ -10778,7 +10778,9 @@ async function _tplIlgAllocate(period) {
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
   lines.forEach(l => { if (!ccAgg[l.account]) ccAgg[l.account] = { costCenter: l.account, orders: 0, freight: 0, fulfilment: 0 }; if (l.kind === 'freight') ccAgg[l.account].freight += l.amount; else ccAgg[l.account].fulfilment += l.amount; });
   const costCenters = Object.values(ccAgg).map(c => ({ ...c, freight: Math.round(c.freight * 100) / 100, fulfilment: Math.round(c.fulfilment * 100) / 100, total: Math.round((c.freight + c.fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
-  return { ok: true, ilg: true, costCenters, lines, total,
+  const _cur = {}; ship.forEach(s => { if (s.ref) _cur[s.ref] = (_cur[s.ref] || 0) + (s.gross || 0); });
+  const cross_month_duplicates = await _tplCrossMonthDupes('uk_ilg', period, _cur);   // v27.906
+  return { ok: true, ilg: true, cross_month_duplicates, costCenters, lines, total,
     totals: { orders: shipRefCount, matched: Math.max(0, shipRefCount - unmappedRefs.size), freight: 0, fulfilment: 0 },
     unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] },   // freight with no cost centre is auto-booked to Other Fees, not left as a "COST CENTRE MISSING" gap
     autoOther: { orders: unmappedRefs.size, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
@@ -10853,6 +10855,46 @@ async function _tplFulfilChannelCC() {
   const m = {};
   rows.forEach(r => { String(r.fc || '').split(',').map(x => x.trim()).filter(Boolean).forEach(c => { m[c] = r.cc; }); });
   return m;
+}
+// v27.906 (Ben, Geneva credit memo 25-Sep-2026): CROSS-MONTH DUPLICATE CHARGES. Geneva billed one calendar day's parcels in
+// both the July and the August invoice. Every invoice analysis now compares this period's per-order references with the
+// per-order references of every OTHER period's data file for the same 3PL and reports the overlap (count, this period's
+// amount, which months). Other files are parsed once and memoised by file id (files are immutable; a re-upload is a new id).
+const _tplRefCache = new Map();   // file id -> { period, refs: { ref: amount } }
+async function _tplFileRefAmounts(f) {
+  const key = String(f.id);
+  if (_tplRefCache.has(key)) return _tplRefCache.get(key);
+  const isCsv = /\.csv$/i.test(f.filename || '') || /csv/i.test(f.content_type || '');
+  const refs = {};
+  try {
+    if (f.tpl === 'us_geneva') { if (!isCsv) { const g = await _tplGenevaPerOrder(f.content, f.period); Object.keys(g.freight || {}).forEach(r => { refs[r] = (refs[r] || 0) + (g.freight[r] || 0); }); } }
+    else if (f.tpl === 'uk_ilg') { if (/invoice_0/i.test(f.filename || '')) (await _tplIlgShipDetail(f.content, isCsv)).forEach(s => { if (s.ref) refs[s.ref] = (refs[s.ref] || 0) + (s.gross || 0); }); }
+    else { (await _tplOrderRows(f.content, isCsv, f.tpl, f.period)).forEach(o => { if (o.reference) refs[o.reference] = (refs[o.reference] || 0) + (o.shipping || 0) + (o.fulfilment || 0); }); }
+  } catch (e) { /* unreadable file -> contributes nothing */ }
+  const v = { period: f.period, refs };
+  if (_tplRefCache.size > 200) _tplRefCache.clear();
+  _tplRefCache.set(key, v);
+  return v;
+}
+// current = { ref: amount billed THIS period }. Returns the exception payload the UI paints red (null-safe, never throws).
+async function _tplCrossMonthDupes(tpl, period, current) {
+  const out = { orders: 0, amount: 0, by_month: [], refs: [] };
+  try {
+    const refs = Object.keys(current || {}); if (!refs.length || !tpl || !period) return out;
+    const files = (await pool.query(`SELECT id, tpl, period, filename, content_type, content FROM planner.tpl_invoice_files
+      WHERE tpl=$1 AND period IS NOT NULL AND period<>$2 AND (filename ~* '\\.(xlsx|xls|csv)$' OR content_type ~* 'csv|sheet|excel') ORDER BY period`, [tpl, period])).rows;
+    if (!files.length) return out;
+    const seen = {};   // ref -> Set(period)
+    for (const f of files) { const v = await _tplFileRefAmounts(f); Object.keys(v.refs).forEach(r => { if (current[r] == null) return; if (!seen[r]) seen[r] = new Set(); seen[r].add(v.period); }); }
+    const byM = {};
+    Object.keys(seen).forEach(r => { const amt = Number(current[r]) || 0; out.orders++; out.amount += amt; const months = [...seen[r]].sort();
+      months.forEach(m => { if (!byM[m]) byM[m] = { period: m, orders: 0, amount: 0 }; byM[m].orders++; byM[m].amount += amt; });
+      if (out.refs.length < 300) out.refs.push({ ref: r, amount: Math.round(amt * 100) / 100, also_in: months }); });
+    out.amount = Math.round(out.amount * 100) / 100;
+    out.by_month = Object.values(byM).map(m => ({ ...m, amount: Math.round(m.amount * 100) / 100 })).sort((a, b) => a.period < b.period ? -1 : 1);
+    out.refs.sort((a, b) => b.amount - a.amount);
+  } catch (e) { /* analysis must never fail because of the duplicate check */ }
+  return out;
 }
 // v27.905 (Diviyaj spec, 25-Sep-2026): FULFIL CUSTOMER-SHIPMENT lookup for 3PL invoice references. Diviyaj's sync fills
 // planner.tpl_fulfil_shipments (mig 303) from stock.shipment.out; Horizon only reads it. An invoice reference matches
@@ -11012,7 +11054,9 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
       if (inCin7 && fo) { src.contention.orders++; if (src.contention.refs.length < 200) src.contention.refs.push(ref); }
     });
     const summary = _tplAggregateAccounts(orders, refCC);
-    res.json({ ok: true, imported_matched: dbrows.length, fulfil_table_matched: Object.keys(shipByRef).length, fulfil_matched: Object.keys(fulfilByRef).length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, source_analysis: src, ...summary });
+    const _cur = {}; orders.forEach(o => { if (o.reference) _cur[o.reference] = (_cur[o.reference] || 0) + (o.shipping || 0) + (o.fulfilment || 0); });
+    const cross_month_duplicates = await _tplCrossMonthDupes(tpl0, row.period, _cur);   // v27.906
+    res.json({ ok: true, cross_month_duplicates, imported_matched: dbrows.length, fulfil_table_matched: Object.keys(shipByRef).length, fulfil_matched: Object.keys(fulfilByRef).length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, source_analysis: src, ...summary });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
