@@ -6870,21 +6870,37 @@
   // SUG-0007: on LIVE only, silently re-check the session every 4h + hard-expire at 7 days. If /api/me stops
   // returning our email (proxy session gone / Google account revoked), log out via the proxy logout URL (from
   // app_settings.auth_logout_url) — falling back to a reload, which the proxy will bounce to Google sign-in.
+  // v27.892 (Ben): FORCE sign-out the moment the session is found expired — shared by the periodic guard below AND the
+  // global fetch hook (any /api 401). Shows a toast, then goes to the proxy logout URL (app_settings.auth_logout_url,
+  // served on /api/me) which bounces to sign-in; no logout URL configured → reload, which the proxy also bounces.
+  // Before this, an expired sign-in only surfaced as a raw "Failed: unauthorised" popup on the first write (Zera, 25-Sep).
+  function hzForceLogout(reason){ if(window._hzLoggedOut)return; window._hzLoggedOut=1; try{ if(window._hzGuardT)clearInterval(window._hzGuardT); }catch(e){}
+    try{ permToast(reason||'Your sign-in has expired — signing you out…'); }catch(e){}
+    var url=(ME&&ME.logout_url)||'';
+    setTimeout(function(){ try{ if(url){ window.location.href=url; return; } }catch(e){} try{ location.reload(); }catch(e){} }, 900); }   // let the toast paint first
+  try{ window.hzForceLogout=hzForceLogout; }catch(e){}
   function startSessionGuard(){ if(!ME||!ME.live||window._hzGuard)return; window._hzGuard=1;
-    var bootEmail=(ME.email||'').toLowerCase(), bootT=Date.now(), MAX=7*24*3600*1000;
-    function logout(){ if(window._hzLoggedOut)return; window._hzLoggedOut=1; try{ if(window._hzGuardT)clearInterval(window._hzGuardT); }catch(e){}
-      var url=(ME&&ME.logout_url)||''; try{ if(url){ window.location.href=url; return; } }catch(e){} try{ location.reload(); }catch(e){} }
-    function check(){ if(Date.now()-bootT>=MAX){ logout(); return; }   // 7-day hard cap (backstop even if the proxy is lenient)
+    var bootEmail=(ME.email||'').toLowerCase(), bootT=Date.now(), lastT=Date.now(), MAX=7*24*3600*1000;
+    function logout(){ hzForceLogout(); }
+    function check(){ lastT=Date.now(); if(Date.now()-bootT>=MAX){ logout(); return; }   // 7-day hard cap (backstop even if the proxy is lenient)
       fetch('/api/me',{cache:'no-store'}).then(function(r){ if(!r.ok||r.redirected){ logout(); return null; } var ct=r.headers.get('content-type')||''; if(ct.indexOf('json')<0){ logout(); return null; } return r.json(); })
         .then(function(j){ if(!j)return; var e=(j.email||'').toLowerCase(); if(!e || (bootEmail && e!==bootEmail)) logout(); })
         .catch(function(){ /* transient network blip — leave the session alone */ }); }
-    window._hzGuardT=setInterval(check, 4*3600*1000); }   // every 4 hours
+    window._hzGuardT=setInterval(check, 4*3600*1000);   // every 4 hours
+    // v27.892: a tab left open overnight re-checks the moment it's looked at again (if the last check is >30 min old),
+    // so the expiry is caught BEFORE the user's first click, not on it.
+    try{ document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible' && Date.now()-lastT>30*60*1000) check(); }); }catch(e){} }
   // Read-only UX. The server is the hard boundary (403); this surfaces it: a global 403-readonly toast
   // (covers every view incl. DEMAND/FBA) + a banner on SUPPLY/CONFIG when you lack the edit right.
   (function(){ if(window.__permFetchWrapped)return; window.__permFetchWrapped=true; var of=window.fetch;
     window.fetch=function(){ hzActivity(1);
+      var _u=''; try{ var a0=arguments[0]; _u=String((a0&&a0.url)||a0||''); }catch(e){}
       return of.apply(this,arguments).then(function(res){
         if(res&&res.status===403&&res.clone){ res.clone().json().then(function(j){ if(j&&j.code==='readonly')permToast(j.error||'Read-only access — ask an admin.'); }).catch(function(){}); }
+        // v27.892 (Ben): a 401 from OUR api = the sign-in session is gone (the access gate answers 401 "unauthorised" when
+        // the login cookie is missing/expired) → force sign-out right away. Supplier-portal endpoints have their own
+        // session and are excluded (an admin previewing the portal must not be logged out of HORIZON by a portal 401).
+        if(res&&res.status===401&&/^(https?:\/\/[^\/]+)?\/api\//.test(_u)&&!/\/api\/portal\//.test(_u)) hzForceLogout();
         return res; }).finally(function(){ hzActivity(-1); }); }; })();
   // Global loading indicator: a spinner overlaid on the version badge whenever a fetch is in flight. Debounced 160ms
   // so quick requests don't blink the badge. Covers every view (any fetch) — no per-container "Loading…" rows needed.

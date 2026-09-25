@@ -1,3 +1,11 @@
+## v27.892 deploy note (Ben): expired sign-in now forces a sign-out
+
+**File: `supply/inject.html`.** No server change. Ben (25-Sep): Zera got a raw "Failed: unauthorised" popup changing PO-57USLX6 to SHIPPING; her session had expired (permissions were fine; signing out and back in fixed it). Rule: an expired sign-in must force the user out, not fail a click.
+
+- **Any 401 from our `/api/`** (the access gate's "unauthorised" for a missing/expired login cookie) → toast "Your sign-in has expired — signing you out…" then redirect to `app_settings.auth_logout_url` (prod: `/api/auth/logout`, served on `/api/me` as `logout_url`), which bounces to sign-in. No logout URL → reload (the proxy bounces). `/api/portal/*` is excluded (admin portal preview has its own session).
+- **Session guard (SUG-0007)** now also re-checks `/api/me` when a tab becomes visible again after 30+ min idle, so an overnight tab is signed out before the first click rather than on it. The 4-hourly check and 7-day cap are unchanged.
+- Shared `hzForceLogout()` (window-exposed) replaces the guard's private logout.
+
 ## v27.891 deploy note (Ben): BUG — Sampling page stuck on its skeleton after a reload (affects prod since v27.878)
 
 **File: `supply/inject.html`.** No server change. **Deploy soon:** any reload of PRODUCT ▸ SAMPLING (or opening a `#/product/sampling/<ref>/<tab>` link in a fresh tab) showed the loading skeleton forever and dropped the deep link; clicking another tab and back recovered it.
