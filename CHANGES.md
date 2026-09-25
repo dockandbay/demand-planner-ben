@@ -9,7 +9,7 @@
 
 Sandbox verification (AU Coghlans Jul-2026 invoice DOK50360, file 5): three refs' Cin7 rows parked and matching shipment rows seeded → Map resolved 257 via Cin7 + 3 via the table (one by `sale_number`, one from an `'A | B'` order_reference), the unmapped-channel one booked to Other; journal preview dated the two June-shipped refs into a 2026-06 reclass (`fromFulfil: 3`); Xero bill preview carried the AU Amazon and Other Costs lines. Cin7 rows restored and test rows removed afterwards.
 
-Open for Diviyaj: the table's sync cadence ("that morning's sync") and whether rows for warehouses that are not 3PLs (AMZ_FBA_*, Zalando_DE) are intended; Horizon does not filter on `warehouse_code`.
+Diviyaj (25-Sep-2026): the sync runs **daily at 06:00 UK** (15:00 Sydney now, 16:00 from 4-Oct, 17:00 from 25-Oct). FBA and Zalando rows are intended: the table holds every shipped customer shipment; invoice lines match on reference and a 3PL invoice never carries those references, so no warehouse filter is needed. If one is ever added it must be on **warehouse, not channel**, because Coghlans ships some Amazon.com.au orders (51 so far).
 
 ## v27.904 deploy note (Ben): confirmed-PO line push verified on Fulfil sandbox; UPDATE header dates = completion
 
