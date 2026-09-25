@@ -1,3 +1,15 @@
+## v27.901 deploy note (Ben): FBA in-flight from Fulfil internal shipments (quantities were 4× over-counted) + Fulfil INTERNAL SHIPMENT mirror (migration 302)
+
+**Files: `migrations/302_fulfil_internal_shipments_mirror.sql`, `server.mjs`.** Restart. **Migration 302 required** (one new table, additive).
+
+**BUY & MOVE ▸ FBA ▸ "⟳ inbound data updating…" (`/api/supply/fba-transfers/refresh`).** Fulfil is the master source for in-flight FBA / AWD transfers; Cin7 tops up anything Fulfil doesn't have; duplicates collapse on the Amazon FBA shipment id (IS108 = FBA15MGW5FHF exists in both → one row, Fulfil's). Two fixes to the Fulfil half:
+- **Quantities were 4× too high.** An internal shipment carries four legs of stock moves per SKU (storage → output → transit → input → storage) and the refresh summed all of them: IS108 showed 160 per SKU, the truth is 40. It now reads the INCOMING leg only. FBA cover on the buy plan had been over-stated by every Fulfil transfer's quantity ×4 since v27.7xx.
+- **No more 30-day window.** Every OPEN shipment (waiting / assigned / packed / shipped) into an "Amazon FBA …" or AWD location counts, however long it has been waiting. Sandbox after the run: 24 Fulfil shipments + 40 Cin7, 746 lines, 290 pruned as already landed.
+
+**Fulfil internal-shipment mirror, `planner.fulfil_internal_shipments`.** One row per IS: number, reference, state, planned / effective date, from / to location, company, lines (sku, qty from incoming moves), Fulfil created / written, last synced. Imported by the same cron as the PO mirror (`POST /api/supply/fulfil/import-pos` now returns `internal_shipments` too) and kept in step when Horizon writes a planned date (shipment badge, Sync Fulfil Dates dialog). Sandbox: 59 shipments mirrored from live. The PO mirror was refreshed at the same time (90 POs).
+
+**Diviyaj:** apply 302; the existing n8n cron already hits `import-pos`, nothing else to schedule.
+
 ## v27.900 deploy note (Ben): Fulfil dates — ONE target (the COMPLETION date), a date-only push, and the Sync Fulfil Dates review dialog
 
 **Files: `server.mjs`, `supply/inject.html`.** No migrations. Restart.

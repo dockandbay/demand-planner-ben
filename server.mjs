@@ -2927,11 +2927,39 @@ async function fulfilImportPOs() {
   let n = 0; for (const p of list) { if (!p.reference) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
   return { ok: true, imported: n, env: cfg.env };
 }
+// v27.901 (Ben): mirror of Fulfil INTERNAL SHIPMENTS (mig 302) — sister of the PO mirror, refreshed by the same cron.
+// Lines come from the INCOMING moves only (an IS has 4 legs of moves per SKU; summing all of them quadruples qty).
+async function fulfilImportInternalShipments() {
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  const list = await fulfilSearchAll('stock.shipment.internal', [['state', '!=', 'cancel']],
+    ['id', 'number', 'reference', 'state', 'planned_date', 'effective_date', 'from_location.name', 'to_location.name', 'company', 'create_date', 'write_date', 'incoming_moves', 'outgoing_moves', 'moves']);
+  const need = [];
+  list.forEach(s => { s._mv = (Array.isArray(s.incoming_moves) && s.incoming_moves.length) ? s.incoming_moves : ((Array.isArray(s.outgoing_moves) && s.outgoing_moves.length) ? s.outgoing_moves : (Array.isArray(s.moves) ? s.moves : [])); s._mv.forEach(id => need.push(id)); });
+  const moveById = new Map();
+  for (let i = 0; i < need.length; i += 500) { const batch = need.slice(i, i + 500); if (!batch.length) continue;
+    const mv = await fulfilFetch('PUT', '/model/stock.move/search_read', [[['id', 'in', batch]], 0, 500, null, ['id', 'product.code', 'quantity']]);
+    (Array.isArray(mv) ? mv : []).forEach(m => moveById.set(m.id, { sku: m['product.code'], qty: _fulfilNum(m.quantity) || 0 })); }
+  let n = 0;
+  for (const s of list) {
+    const bySku = {}; s._mv.forEach(id => { const m = moveById.get(id); if (!m || !m.sku) return; bySku[m.sku] = (bySku[m.sku] || 0) + m.qty; });
+    const lines = Object.keys(bySku).sort().map(k => ({ sku: k, qty: bySku[k] }));
+    await pool.query(`INSERT INTO planner.fulfil_internal_shipments (fulfil_id, number, reference, state, planned_date, effective_date, from_location, to_location, company, line_count, lines, fulfil_created, fulfil_written, last_synced_at, source, updated_at)
+        VALUES ($1,$2,$3,$4,$5::date,$6::date,$7,$8,$9,$10,$11::jsonb,$12::timestamptz,$13::timestamptz,now(),'cron',now())
+        ON CONFLICT (fulfil_id) DO UPDATE SET number=excluded.number, reference=excluded.reference, state=excluded.state, planned_date=excluded.planned_date, effective_date=excluded.effective_date,
+          from_location=excluded.from_location, to_location=excluded.to_location, company=excluded.company, line_count=excluded.line_count, lines=excluded.lines, fulfil_created=excluded.fulfil_created,
+          fulfil_written=excluded.fulfil_written, last_synced_at=now(), source='cron', updated_at=now()`,
+      [s.id, s.number, s.reference || null, s.state || null, fulfilUnwrap(s.planned_date) || null, fulfilUnwrap(s.effective_date) || null, s['from_location.name'] || null, s['to_location.name'] || null, s.company || null, lines.length, JSON.stringify(lines), fulfilUnwrap(s.create_date) || null, fulfilUnwrap(s.write_date) || null]);
+    n++;
+  }
+  return { ok: true, internal_shipments: n, env: cfg.env };
+}
 // Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
 app.post('/api/supply/fulfil/import-pos', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
   if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(await fulfilImportPOs()); }
+  try { const pos = await fulfilImportPOs(); let is = null; try { is = await fulfilImportInternalShipments(); } catch (e) { is = { ok: false, error: String(e.message || e) }; }   // v27.901: + internal shipments mirror
+    res.json({ ...pos, internal_shipments: is }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
 });
 // Drift: every Horizon PO should be in Fulfil. Compares planner.purchase_orders to the mirror — missing + mismatches.
@@ -3119,7 +3147,7 @@ app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
     for (const it of items) {
       const date = String(it.date || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { results.push({ ref: it.ref, ok: false, error: 'no date' }); continue; }
       try {
-        if (it.kind === 'IS' && it.is_id) { await fulfilFetch('PUT', '/model/stock.shipment.internal/' + Number(it.is_id), { planned_date: date }); results.push({ ref: it.ref, ok: true }); try { logPoChange(it.master_po || it.ref, 'Uploaded to ERP', 'IS ' + it.ref + ' planned receiving → ' + date + ' (Fulfil)', by); } catch (_) {} }
+        if (it.kind === 'IS' && it.is_id) { await fulfilFetch('PUT', '/model/stock.shipment.internal/' + Number(it.is_id), { planned_date: date }); try { await pool.query(`UPDATE planner.fulfil_internal_shipments SET planned_date=$2::date, source='write', updated_at=now() WHERE fulfil_id=$1`, [Number(it.is_id), date]); } catch (_) {} results.push({ ref: it.ref, ok: true }); try { logPoChange(it.master_po || it.ref, 'Uploaded to ERP', 'IS ' + it.ref + ' planned receiving → ' + date + ' (Fulfil)', by); } catch (_) {} }
         else if (it.kind === 'PO' && it.ref) {
           const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', String(it.ref)]], 0, 1, null, ['id']]);
           if (!rows.length) { results.push({ ref: it.ref, ok: false, error: 'not in Fulfil' }); continue; }
@@ -3154,6 +3182,7 @@ app.post('/api/supply/fulfil/shipment-planned-date', async (req, res) => {
     const hit = rows[0];
     if (!hit) return res.status(404).json({ error: 'No Fulfil internal shipment found for ' + po });
     await fulfilFetch('PUT', '/model/stock.shipment.internal/' + hit.id, { planned_date: date });
+    try { await pool.query(`UPDATE planner.fulfil_internal_shipments SET planned_date=$2::date, source='write', updated_at=now() WHERE fulfil_id=$1`, [hit.id, date]); } catch (_) {}   // v27.901: mirror in step
     res.json({ ok: true, is_number: hit.number, is_id: hit.id, planned_date: date });
   } catch (e) { log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
@@ -12402,9 +12431,14 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
     // ── Fulfil internal shipments into Amazon FBA / AWD ────────────────────────────────────
     if (fcfg.configured) {
       // in-flight = not yet received/done and not cancelled/draft
-      const domain = [['create_date', '>=', { __class__: 'datetime', iso_string: since.toISOString().slice(0, 19) }], ['state', 'in', ['waiting', 'assigned', 'packed', 'shipped']],
+      // v27.901 (Ben): Fulfil is the master source for in-flight FBA — EVERY open shipment into an Amazon / AWD location
+      // counts (the 30-day create-date window dropped transfers that had been waiting longer). Quantities come from the
+      // INCOMING leg only: an IS carries 4 legs of moves per SKU (storage→output→transit→input→storage) and summing all
+      // of them quadrupled every quantity (IS108: 160 per SKU instead of 40).
+      const domain = [['state', 'in', ['waiting', 'assigned', 'packed', 'shipped']],
         ['OR', ['to_location.name', 'ilike', 'Amazon FBA%'], ['to_location.name', 'ilike', '%AWD%']]];
-      const ships = await fulfilSearchAll('stock.shipment.internal', domain, ['id', 'number', 'reference', 'state', 'to_location.name', 'planned_date', 'create_date', 'effective_date', 'moves']);
+      const ships = await fulfilSearchAll('stock.shipment.internal', domain, ['id', 'number', 'reference', 'state', 'to_location.name', 'planned_date', 'create_date', 'effective_date', 'moves', 'incoming_moves', 'outgoing_moves']);
+      ships.forEach(s => { s.moves = (Array.isArray(s.incoming_moves) && s.incoming_moves.length) ? s.incoming_moves : ((Array.isArray(s.outgoing_moves) && s.outgoing_moves.length) ? s.outgoing_moves : s.moves); });
       fulfilCalls += Math.max(1, Math.ceil(ships.length / 500));
       // batch-resolve moves → sku+qty
       const allMoveIds = []; ships.forEach(s => (Array.isArray(s.moves) ? s.moves : []).forEach(id => allMoveIds.push(id)));
