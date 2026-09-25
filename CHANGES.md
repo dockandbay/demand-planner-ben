@@ -1,3 +1,11 @@
+## v27.904 deploy note (Ben): confirmed-PO line push verified on Fulfil sandbox; UPDATE header dates = completion
+
+**File: `server.mjs`.** Ben asked whether a CONFIRMED Fulfil PO can take a line push or must be reverted to draft by hand. Verified end to end on the Fulfil sandbox (PO-57EUXR1 = sandbox purchase_order 144, confirmed, 39 lines): Horizon reverts to draft via the API button, replaces the lines (48 lines / 3834 units), re-confirms, and the PO reads back `confirmed`. Idempotent on a second run. No stock moves or supplier shipments were created by the confirm (sandbox PO had none before or after).
+
+**Bug found and fixed:** the UPDATE PUT in `fulfilPushLines` still sent `requested_delivery_date = poRow.est_delivery` (Flexport landing), so the header came back 12-Oct while every line carried the 26-Oct completion date. v27.900 had moved only the CREATE header + the lines to the completion date. The update now writes both `requested_delivery_date` and `delivery_date` from the completion date (v27.903 rule). Re-verified: header 26-Oct / 26-Oct, 48 lines at 26-Oct.
+
+**Caveat (not changed):** `planner.fulfil_purchase_orders` is not scoped by Fulfil env. A push while `app_settings.fulfil_env='sandbox'` overwrote the live mirror row (fulfil_id 144, source push) until the next live import. Harmless on prod (always live); on a dev box, re-run `POST /api/supply/fulfil/import-pos` after sandbox tests.
+
 ## v27.903 deploy note (Ben): ERP date drift compares against FULFIL, not the frozen Cin7 mirror
 
 **Files: `server.mjs`, `supply/inject.html`.** Ben: PO-57EUXR1's Payments tab said "ERP final delivery 12-Oct-26" while Fulfil held 26-Oct (PO header) and 19-Oct (IS134 planned date). Root cause: `erp_date_pending` / `erp_final_delivery` came from `planner.v_po_finance`, which joins the Cin7-era `planner.erp_purchase_orders` row (last synced 26-Jun-2026, frozen since the Fulfil cut-over). Three changes:
