@@ -1,3 +1,9 @@
+## v27.899 deploy note (Ben): PO grid ▸ Shipment column — no 📅 date badge (Fulfil column already has the ERP date update)
+
+**File: `supply/inject.html`.** Ben (live, PO-57EUXR1): the compact 📅 "Update dates" badge under the grid's Shipment column duplicates the ERP date-update button in the Fulfil column. Removed from the grid only (`hzFulfilBadges(rec, compact, {noDates:true})`); the ⇄ IS rename badge stays there. The shipment record and the PO ▸ Shipments ▸ Shipment mode row keep both the "Fulfil IS… ↗" link and "Update dates". Note the two writes differ: the Fulfil column pushes the **PO's requested delivery date**; "Update dates" on the shipment pushes the **internal shipment's planned receiving date**.
+
+**Not a bug, a deploy gap:** live IS134 shows "Update dates" but no Fulfil link because prod is on v27.885; the link arrived in v27.888.
+
 ## v27.898 deploy note (Ben): sample decision "Rejected — new sample" no longer reverts; red; tick updates · pallet fit in onboarding
 
 **Files: `supply/inject.html`, `supply/portal.html`.** No server change.

@@ -6495,10 +6495,10 @@
       var sh=(j&&j.shipments)||{}; need.forEach(function(id){ var rec=sh[id]||{configured:!!(j&&j.configured),linked:false}; _hzFulfilCache[id]={t:Date.now(),rec:rec}; out[id]=rec; }); cb(out);
     }).catch(function(){ need.forEach(function(id){ out[id]=null; }); cb(out); }); }
   function _hzFulfilBust(id){ delete _hzFulfilCache[id]; }
-  function hzFulfilBadges(rec, compact){ if(!rec||!rec.configured||!rec.linked)return '';
+  function hzFulfilBadges(rec, compact, opts){ opts=opts||{}; if(!rec||!rec.configured||!rec.linked)return '';
     var out=[], pad=compact?'0 5px':'1px 7px', fs=compact?'10px':'11px';   // compact = PO grid (icon/short); full = shipment record
     if(rec.ref_mismatch) out.push('<button class="hz-fulfil-chgref" data-is="'+esc(rec.is_number)+'" title="Fulfil internal shipment is '+esc(rec.is_number)+' — rename this Horizon shipment to match" style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">⇄ '+(compact?'':'Change to ')+esc(rec.is_number)+'</button>');
-    if(rec.date_mismatch) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">📅'+(compact?'':' Update dates → '+esc(rec.horizon_date||''))+'</button>');
+    if(rec.date_mismatch&&!opts.noDates) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">📅'+(compact?'':' Update dates → '+esc(rec.horizon_date||''))+'</button>');
     return out.join(' '); }
   // v27.888 (Ben): link to the Fulfil internal-shipment record itself (shipment record + PO ▸ Shipments tab; not the compact grid cell).
   function hzFulfilIsLink(rec){ if(!rec||!rec.linked||!rec.is_url)return ''; return '<a href="'+esc(rec.is_url)+'" target="_blank" rel="noopener" title="Open '+esc(rec.is_number)+' in Fulfil" style="color:var(--blue);font-weight:700;text-decoration:underline;font-size:11px;white-space:nowrap">Fulfil '+esc(rec.is_number)+' ↗</a>'; }
@@ -6511,7 +6511,7 @@
     hzFulfilShip(refs, function(m){ Object.keys(byRef).forEach(function(ref){ var rec=m[ref], hs=byRef[ref];
       // v27.887 (Ben): data-full hosts (PO record ▸ Shipments ▸ "Shipment mode" row, placed before "✎ rename") get the
       // full-label buttons ("⇄ Change to IS134", "📅 Update dates → …") plus a trailing separator; grid cells stay compact.
-      var ok=(rec&&rec.configured&&rec.linked), bhC=ok?hzFulfilBadges(rec,true):'', bhF=ok?hzFulfilBadges(rec,false):'';
+      var ok=(rec&&rec.configured&&rec.linked), bhC=ok?hzFulfilBadges(rec,true,{noDates:true}):'', bhF=ok?hzFulfilBadges(rec,false):'';   // v27.899 (Ben): the grid Shipment column carries only the ⇄ IS rename badge — the Fulfil column already has the ERP date update
       var lk=ok?hzFulfilIsLink(rec):'';   // v27.888: PO ▸ Shipments tab also gets the "Fulfil IS134 ↗" link (before the action buttons)
       hs.forEach(function(h){ var full=!!h.dataset.full, bh=full?bhF:bhC; var parts=full?[lk,bh].filter(Boolean):[bh].filter(Boolean); h.innerHTML=parts.length?(full?parts.join(' · ')+' · ':parts.join(' ')):''; if(bh)hzWireFulfil(h, ref); }); }); }); }
   function hzWireFulfil(scope, ref){ if(!scope)return;
