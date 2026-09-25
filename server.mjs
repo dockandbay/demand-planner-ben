@@ -4770,7 +4770,16 @@ const _portalInflight = new Map();   // key -> in-flight build promise (single-f
 // stale payload at once + an `X-HZ-Stale: 1` header, and the portal page re-fetches `?fresh=1` and repaints in place.
 // Product-module writes don't bump the epoch, so they mark every entry stale explicitly (portalCacheMarkStale).
 // Net effect: a supplier never waits for a build that an admin's edit triggered; the fresh data lands ~1.5s later.
-function portalCacheMarkStale() { for (const e of _portalCache.values()) e.epoch = -1; }
+// v27.894 (Ben, perf item 2): optional supplier scope — a product-module write that belongs to ONE supplier (a development
+// request / its notes) only marks THAT supplier's cached portal payloads stale; every other supplier keeps serving from cache
+// with no revalidate round-trip. No supplier (or unknown) → every entry, as before. Keys are the sorted supplier names
+// joined by '|' plus the archived flag (see _pbKey), so a case-insensitive name match on the key parts is exact.
+function portalCacheMarkStale(supplier) {
+  const s = String(supplier || '').trim().toLowerCase();
+  for (const [k, e] of _portalCache.entries()) {
+    if (!s || String(k).toLowerCase().split('|').slice(0, -1).indexOf(s) >= 0) e.epoch = -1;
+  }
+}
 function portalBootstrapRun(key, builder, ep) {   // single-flight build → cache (concurrent callers await the same build)
   const inflight = _portalInflight.get(key); if (inflight) return inflight;
   const p = Promise.resolve().then(builder).then((v) => { _portalCache.set(key, { v, at: Date.now(), epoch: ep }); return v; }).finally(() => { _portalInflight.delete(key); });
@@ -6934,7 +6943,7 @@ app.post('/api/product/request', async (req, res) => {
     await recomputeProductStatus(client, it.id);
     await client.query('COMMIT');
     try { await logProductChange(it.ref, 'Development request ' + ins.rows[0].ref + ' → ' + sup + ' (' + names.join(', ') + ')', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
-    try { portalCacheMarkStale(); } catch (e) {}
+    try { portalCacheMarkStale(sup); } catch (e) {}
     res.json({ ok: true, id: rid, ref: ins.rows[0].ref });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -6968,7 +6977,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     const stage = await recomputeProductStatus(client, rq.item_id);
     await client.query('COMMIT');
     for (const l of log) { try { await logProductChange(rq.item_ref, l, null, authUser(req) || 'Dock & Bay'); } catch (e) {} }
-    try { portalCacheMarkStale(); } catch (e) {}
+    try { portalCacheMarkStale(rq.supplier_name); } catch (e) {}
     res.json({ ok: true, product_stage: stage });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -8747,13 +8756,23 @@ const SUPER_ADMINS = new Set(
   ['ben@dockandbay.com']
     .concat(String(process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
 );
+// v27.894 (Ben, perf item 3): the app_permissions row is memoised per email for 60s. permsFor runs on EVERY write
+// (the capability gate) and on /api/me — on the remote pooler that was one extra ~300ms round trip per save. Any
+// permissions write (CONFIG ▸ Permissions save/delete, favourites save) drops the memo, so changes still apply at once.
+const _permsMemo = new Map();   // email → { at, row }
+const PERMS_MEMO_MS = 60000;
+function permsMemoDrop(email) { if (email) _permsMemo.delete(String(email).toLowerCase()); else _permsMemo.clear(); }
 async function permsFor(req) {
   const email = authUser(req);
   if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, landing_page: 'supply/purchase-orders', favourites: [] };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
   let row = null;
-  try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
+  const m = _permsMemo.get(e);
+  if (m && Date.now() - m.at < PERMS_MEMO_MS) row = m.row;
+  else {
+    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
+  }
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
   return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
 }
@@ -8765,6 +8784,7 @@ app.post('/api/me/favourites', async (req, res) => {
     .filter(f => f && f.slug).slice(0, 5).map(f => ({ slug: String(f.slug).slice(0, 200), label: String(f.label || '').slice(0, 60) }));
   if (!email) return res.json({ ok: false, reason: 'no-auth', favourites: favs });
   try {
+    permsMemoDrop(email);   // v27.894: favourites live on the memoised row
     await pool.query(`INSERT INTO planner.app_permissions (email, favourites, updated_at, updated_by) VALUES ($1,$2,now(),$1)
       ON CONFLICT (email) DO UPDATE SET favourites=excluded.favourites, updated_at=now()`, [email.toLowerCase(), JSON.stringify(favs)]);
     res.json({ ok: true, favourites: favs });
@@ -9183,6 +9203,7 @@ app.post('/api/config/country', async (req, res) => {
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
+  permsMemoDrop(email);   // v27.894: a permissions change must apply on the user's very next request
   try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, updated_at, updated_by)
       VALUES ($1,$2,$3,$4,$5,$6,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, updated_at=now(), updated_by=excluded.updated_by`,
       [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox']);
@@ -9192,7 +9213,7 @@ app.delete('/api/config/permissions/:email', async (req, res) => { const me = aw
   try { // never let the last admin be removed (lockout guard)
     const isAdminRow = (await pool.query('SELECT is_admin FROM planner.app_permissions WHERE lower(email)=$1', [email])).rows[0];
     if (isAdminRow && isAdminRow.is_admin) { const n = (await pool.query('SELECT count(*)::int n FROM planner.app_permissions WHERE is_admin')).rows[0].n; if (n <= 1) return res.status(400).json({ error: 'cannot remove the last admin' }); }
-    await pool.query('DELETE FROM planner.app_permissions WHERE lower(email)=$1', [email]); res.json({ ok: true }); }
+    permsMemoDrop(email); await pool.query('DELETE FROM planner.app_permissions WHERE lower(email)=$1', [email]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── CONFIG ▸ Consignees ── per-delivery-country consignee + notify-party addresses for the invoice generator.

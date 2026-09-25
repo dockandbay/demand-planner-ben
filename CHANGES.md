@@ -1,3 +1,15 @@
+## v27.894 deploy note (Ben): performance items — demand-plan edits 7× faster, permissions memo, scoped portal invalidation
+
+**Files: `artifact_v16.7.html`, `server.mjs`.** No migrations, no env vars. Artifact changed → restart.
+
+| # | change | measured (sandbox, UK ▸ DTC) |
+|---|---|---|
+| 1 | **Demand plan: a cell edit no longer rebuilds every memo.** `refreshRow` used to wipe RUNOFF_MEMO / SETDEM_MEMO / ASPADJ_MEMO for the whole estate (704 + 298 + 29 keys) and the next read rebuilt them all. New `_memoDropSubcat(s,co)` drops only the SKUs an edit can influence: the sub-category's SKUs, sets containing them and components of sets in it (via `SET_BOM`), and prepack twins. Any doubt → the old wholesale clear. Verified equivalent: after an edit, all 704 run-off allocations, every set-demand memo and the grand-total row are byte-identical to a full rebuild. | per-edit `refreshRow` **570ms → 84ms** |
+| 1b | `aspDiscShare` skips `subcatSkuEffTotals` for sub-categories with no discontinued SKU in that country (`_subcatHasDisc`, memoised; static SKU-master fact). Identical output (their disc totals were 0). | small on UK (28/31 sub-cats have discontinued SKUs); larger elsewhere |
+| 1c | **Not changed:** a full DATA render (undo, auto-smooth apply/cancel, cell sheet) still clears all memos → ~650ms on UK ▸ DTC. Profiled: it is the run-off pool re-allocation, not calc (7ms) or the DOM (88ms). A dirty-set tracked through IV writes would make those scoped too — later. |
+| 2 | **Portal cache invalidation scoped by supplier.** `portalCacheMarkStale(supplier)` marks only that supplier's cached bootstrap payloads stale (keys = sorted supplier names). Used by the new-request and request-update routes (the supplier is known there); product create and supply edits stay global (the supply epoch is global by design). | other suppliers no longer revalidate after a request note |
+| 3 | **`permsFor` memo, 60s per email.** It runs on every write (the capability gate) and on `/api/me` — one pooler round trip per save. Dropped on CONFIG ▸ Permissions save/delete and favourites save so changes apply on the next request. | −1 query (~300ms on the remote pooler) per write |
+
 ## v27.893 deploy note (Ben): ORDER PLAN ▸ product Status column (coloured)
 
 **Files: `server.mjs`, `supply/inject.html`.** No migrations. Ben: BAGF-CAB-MD-POSPIN is CLOSED on live but the Order Plan gave no hint — add a status column with colours.

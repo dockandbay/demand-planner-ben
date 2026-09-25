@@ -5108,8 +5108,17 @@ function getASPraw(co,ch,s,year,mo){
 // Revenue-only (Summary, plan revenue line, money targets, downloads); the buy plan never reads ASP.
 var ASPADJ_MEMO={};
 function aspAdjOf(co,ch){ var o=(ASP_ADJ&&ASP_ADJ[co+'|'+ch])||{}; var c=function(v){ v=Number(v)||0; return Math.max(0,Math.min(95,v)); }; return {red:c(o.red),disc:c(o.disc)}; }
+// v27.894 (Ben, perf): the discontinued share can only be non-zero when the sub-category has at least one SKU with a
+// discontinue date in that country. That is a static SKU-master fact, memoised once per session (_scDiscMemo) — and it
+// lets us skip subcatSkuEffTotals (a full SKU-level forecast build, ~20ms per sub-category) for every sub-category with
+// no discontinued SKUs. Profiled 25-Sep: ASPADJ_MEMO rebuild was ~650ms of a ~730ms data render (undo / smooth apply /
+// cell sheet, and every refreshRow edit) on UK▸DTC. Identical output: those sub-categories had disc totals of 0 anyway.
+var _scDiscMemo={};
+function _subcatHasDisc(s,co){ var k=s+'|'+co, v=_scDiscMemo[k]; if(v!=null)return v; var ctry=String(co).toLowerCase(), has=false;
+  try{ var ks=Object.keys(SKUM); for(var i=0;i<ks.length;i++){ var p=SKUM[ks[i]]; if(p&&p.s===s&&p.disc&&p.disc[ctry]){ has=true; break; } } }catch(e){ has=true; }   // any doubt → compute the real thing
+  _scDiscMemo[k]=has; return has; }
 function aspDiscShare(co,ch,s,k){ var mk=co+'|'+ch+'|'+s, e=ASPADJ_MEMO[mk];
-  if(!e){ try{ var t=subcatSkuEffTotals(s,co,ch); e={tot:(t&&t.totals)||{},disc:(t&&t.discTotals)||{}}; }catch(err){ e={tot:{},disc:{}}; } ASPADJ_MEMO[mk]=e; }
+  if(!e){ if(!_subcatHasDisc(s,co)){ e={tot:{},disc:{}}; } else { try{ var t=subcatSkuEffTotals(s,co,ch); e={tot:(t&&t.totals)||{},disc:(t&&t.discTotals)||{}}; }catch(err){ e={tot:{},disc:{}}; } } ASPADJ_MEMO[mk]=e; }
   var T=e.tot[k]||0; if(!(T>0))return 0; return Math.max(0,Math.min(1,(e.disc[k]||0)/T)); }
 function aspAdjFactor(co,ch,s,year,mo){ var adj=aspAdjOf(co,ch); if(!adj.red&&!adj.disc)return 1; var f=1-adj.red/100; if(adj.disc){ var sh=aspDiscShare(co,ch,s,ym(year,mo)); if(sh>0)f*=(1-(adj.disc/100)*sh); } return f; }
 function getASP(co,ch,s,year,mo){ var v=getASPraw(co,ch,s,year,mo); if(!(v>0))return v; var a=ga(co,ch,s), k=ym(year,mo); if(a[k]&&a[k][0]>0)return v; return v*aspAdjFactor(co,ch,s,year,mo); }
@@ -5376,7 +5385,24 @@ function filteredCats(){
   const out={};ks.forEach(function(k){out[k]=m[k];});return out;
 }
 
-function refreshRow(s,co,ch){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){}   // v27.886: an edit patches THIS row in place but can re-allocate the country pool → drop the reusable-row cache so the next view-only render rebuilds every row (today's behaviour)   // v27.534: an override changed → re-allocate the country pool
+// v27.894 (Ben, perf): an edit to ONE sub-category used to throw away every run-off / set-demand / ASP-share memo for
+// the whole estate (704 + 298 + 29 keys on UK) and rebuild them on the next read — ~570ms per cell edit, measured 25-Sep.
+// The pools are per SKU × country, so only the SKUs an edit can influence need re-allocating: the sub-category's own
+// SKUs, plus (through the BOM) sets that contain them and components of any set in the sub-category, plus prepack
+// twins. Everything else keeps its memo. Any doubt (no BOM tables, an exception) → the old wholesale clear.
+function _memoDropSubcat(s,co){
+  try{ var aff={}, subs={}; subs[s]=1; var ks=Object.keys(SKUM);
+    for(var i=0;i<ks.length;i++){ var p=SKUM[ks[i]]; if(p&&p.s===s)aff[ks[i]]=1; }
+    var addComps=function(setSku){ ((typeof SET_BOM!=='undefined'&&SET_BOM[String(setSku).toUpperCase()])||[]).forEach(function(c){ if(c&&c.sku)aff[c.sku]=1; }); };
+    // sets in the sub-category → their components; sets anywhere with a component in it → the set (and its other components)
+    Object.keys(aff).forEach(function(k){ var p=SKUM[k]; if(p&&p.vt==='SET')addComps(k); });
+    if(typeof SET_BOM!=='undefined'){ Object.keys(SET_BOM).forEach(function(setSku){ var comps=SET_BOM[setSku]||[]; for(var j=0;j<comps.length;j++){ var c=comps[j]; if(c&&c.sku&&SKUM[c.sku]&&SKUM[c.sku].s===s){ aff[setSku]=1; aff[String(setSku)]=1; addComps(setSku); break; } } }); }
+    // prepack twins (PP- on-hand offsets the mapped set's demand)
+    Object.keys(aff).forEach(function(k){ try{ if(typeof PREPACK_MAP!=='undefined'&&PREPACK_MAP[k])aff[PREPACK_MAP[k]]=1; if(typeof PREPACK_BY_SET!=='undefined'&&PREPACK_BY_SET[k])PREPACK_BY_SET[k].forEach(function(pp){ aff[pp]=1; }); }catch(e){} });
+    Object.keys(aff).forEach(function(k){ delete RUNOFF_MEMO[k+'|'+co]; delete RUNOFF_MEMO[k+'|'+co+'|X']; delete SETDEM_MEMO[k+'|'+co]; var p=SKUM[k]; if(p&&p.s)subs[p.s]=1; });
+    Object.keys(ASPADJ_MEMO).forEach(function(mk){ var i1=mk.indexOf('|'), i2=mk.indexOf('|',i1+1); if(i1<0||i2<0)return; if(mk.slice(0,i1)===co && subs[mk.slice(i2+1)])delete ASPADJ_MEMO[mk]; });
+  }catch(e){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; } }
+function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }catch(e){}   // v27.886: an edit patches THIS row in place but can re-allocate the country pool → drop the reusable-row cache so the next view-only render rebuilds every row (today's behaviour)   // v27.534: an override changed → re-allocate the country pool
   try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
   try{ BUY_FC_STALE=true; AF_FEED=null; }catch(e){}     // forecast changed → buy plan's demand overlay is stale (rebuilt next BP.render); v27.884: also drop the Auto-Forecast feed cache so Supply▸Payments rebuilds off the fresh buy plan
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
