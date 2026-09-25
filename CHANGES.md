@@ -1,3 +1,13 @@
+## v27.903 deploy note (Ben): ERP date drift compares against FULFIL, not the frozen Cin7 mirror
+
+**Files: `server.mjs`, `supply/inject.html`.** Ben: PO-57EUXR1's Payments tab said "ERP final delivery 12-Oct-26" while Fulfil held 26-Oct (PO header) and 19-Oct (IS134 planned date). Root cause: `erp_date_pending` / `erp_final_delivery` came from `planner.v_po_finance`, which joins the Cin7-era `planner.erp_purchase_orders` row (last synced 26-Jun-2026, frozen since the Fulfil cut-over). Three changes:
+
+1. **`PO_ROWS_SQL`** (the `mastered` CTE) now LEFT JOINs `planner.fulfil_purchase_orders fm` and exposes `erp_final_delivery_eff = coalesce(fm.requested_delivery_date, fm.delivery_date, v.erp_final_delivery_date)` plus `erp_is_fulfil`. `erp_final_delivery` and the `erp_date_pending` materiality test read the blended date. POs unknown to Fulfil keep the old behaviour. **Diviyaj: prod's restructured PO_ROWS_SQL needs the same join + the two column swaps; the view `v_po_finance` is untouched (no migration).**
+2. **Fulfil PO mirror stores the header `delivery_date`** (column existed since mig 282 but was never imported): fetch field lists, `_fulfilMirrorUpsert` and the import insert all carry it. Re-run `POST /api/supply/fulfil/import-pos` once after deploy to backfill.
+3. **Every Fulfil PO date write sets BOTH header fields** (`requested_delivery_date` and `delivery_date`) and mirrors both: `fulfilSyncDate`, `/api/supply/fulfil-dates-sync`, `/api/supply/fulfil/date-sync-apply`. Until now the single-PO push wrote only `delivery_date`, the bulk push only `requested_delivery_date`, so the two Fulfil fields could disagree.
+
+Payments-tab banner names its source: "Fulfil PO delivery date" vs "ERP final delivery (Cin7 mirror)". `erp_is_fulfil` added to the PO row field whitelist. Sandbox verified: PO-57EUXR1 banner cleared (26-Oct = completion); 34 of 42 open Fulfil-mirrored POs still flag, which is genuine drift for the Sync Fulfil Dates dialog. Not changed: `fulfil_lines_pending` still ignores Fulfil state (Ben to confirm restricting to draft/quotation/confirmed).
+
 ## v27.902 deploy note (Ben): Fulfil mirrors prune what the source no longer has
 
 **File: `server.mjs`.** Ben: "fully update purchase order and internal shipment records from Fulfil." The mirror imports were upsert-only, so rows Fulfil no longer returns lingered (sandbox: 62 UAT-I-… POs from a run against the Fulfil sandbox tenant on 23-Sep). Both imports now delete mirror rows absent from a full fetch, guarded so a failed or partial fetch can never empty the mirror (only when the run imported ≥ 20 rows). The cron response reports `pruned` for each.

@@ -2656,7 +2656,8 @@ async function fulfilSyncDate(po, completion) {
   const iso = String(completion).slice(0, 10);
   const id = await fulfilFindPO(po);
   if (!id) return { ok: false, missing: true, error: 'PO ' + po + ' is not in Fulfil yet — push its lines first (create), then the date.' };
-  await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + id, { [FULFIL_MAP.deliveryDate]: iso });
+  await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + id, { [FULFIL_MAP.deliveryDate]: iso, [FULFIL_MAP.reqDelivDate]: iso });   // v27.903: both header dates
+  try { await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, delivery_date=$2::date, updated_at=now() WHERE po=$1', [po, iso]); } catch (_) {}
   return { ok: true, fulfil_id: id, deliveryDate: iso };
 }
 // ── Read-only resolvers: map planner values → Fulfil object ids (verifiable against the sandbox now) ──
@@ -2893,16 +2894,17 @@ function _fulfilNum(v) { if (v == null) return null; if (typeof v === 'object' &
 function _fulfilLineMap(l) { return { sku: l['product.code'] || null, qty: Number(l.quantity) || 0, unit_price: _fulfilNum(l.unit_price) }; }
 async function _fulfilMirrorUpsert(p, lines, source) {
   const reqDeliv = (p.requested_delivery_date != null && typeof p.requested_delivery_date === 'object') ? fulfilUnwrap(p.requested_delivery_date) : (p.requested_delivery_date || null);
-  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,requested_delivery_date,last_synced_at,source,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::date,now(),$11,now())
+  const hdrDeliv = (p.delivery_date != null && typeof p.delivery_date === 'object') ? fulfilUnwrap(p.delivery_date) : (p.delivery_date || null);   // v27.903: the header delivery_date too
+  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,requested_delivery_date,delivery_date,last_synced_at,source,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::date,$12::date,now(),$11,now())
       ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,
-        warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,requested_delivery_date=excluded.requested_delivery_date,last_synced_at=now(),source=excluded.source,updated_at=now()`,
-    [p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), reqDeliv, source || 'cron']);
+        warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,requested_delivery_date=excluded.requested_delivery_date,delivery_date=excluded.delivery_date,last_synced_at=now(),source=excluded.source,updated_at=now()`,
+    [p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), reqDeliv, source || 'cron', hdrDeliv]);
 }
 // Mirror ONE Fulfil PO by id (used after a push so the drift table is fresh without waiting for the next import).
 async function fulfilMirrorOne(fulfilId, source) {
   if (!fulfilId) return;
-  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date']]);
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date']]);
   const p = Array.isArray(rows) && rows[0]; if (!p || !p.reference) return;
   const lr = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['product.code', 'quantity', 'unit_price']]);   // page size cap 500
   await _fulfilMirrorUpsert(p, (lr || []).map(_fulfilLineMap), source || 'push');
@@ -2916,7 +2918,7 @@ async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil cap
 async function fulfilImportPOs() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date']);
+  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date']);
   const ids = list.map(p => p.id);
   const byPo = {};
   for (let i = 0; i < ids.length; i += 200) {   // lines in batches of 200 POs (each batch paginated at 500 rows)
@@ -3155,8 +3157,8 @@ app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
         else if (it.kind === 'PO' && it.ref) {
           const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', String(it.ref)]], 0, 1, null, ['id']]);
           if (!rows.length) { results.push({ ref: it.ref, ok: false, error: 'not in Fulfil' }); continue; }
-          await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date });
-          await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, updated_at=now() WHERE po=$1', [it.ref, date]);
+          await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date, [FULFIL_MAP.deliveryDate]: date });   // v27.903: both header dates
+          await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, delivery_date=$2::date, updated_at=now() WHERE po=$1', [it.ref, date]);
           results.push({ ref: it.ref, ok: true }); try { logPoChange(it.ref, 'Uploaded to ERP', 'requested delivery → ' + date + ' (Fulfil)', by); } catch (_) {} }
         else results.push({ ref: it.ref, ok: false, error: 'unknown item' });
       } catch (e) { results.push({ ref: it.ref, ok: false, error: String(e.message || e).slice(0, 160) }); }
@@ -13673,8 +13675,8 @@ app.post('/api/supply/fulfil-dates-sync', async (req, res) => {
       let rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', po]], 0, 1, null, ['id']]);
       if (!rows.length) rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', po]], 0, 1, null, ['id']]);
       if (!rows.length) { skipped.push({ po, reason: 'not in Fulfil' }); continue; }
-      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date });
-      await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, updated_at=now() WHERE po=$1', [po, date]);
+      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date, [FULFIL_MAP.deliveryDate]: date });   // v27.903: both header dates
+      await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, delivery_date=$2::date, updated_at=now() WHERE po=$1', [po, date]);
       updated++;
     } catch (e) { skipped.push({ po, reason: String(e.message || e).slice(0, 120) }); }
   }
@@ -17486,10 +17488,16 @@ const PO_ROWS_SQL = `
           -- action-flag columns are added by the final SELECT off the view's base fields.
           WITH mastered AS (
             SELECT v.*, m.eff_delivery m_delivery, m.eff_checkin m_checkin, m.eff_ship m_ship,
-                   coalesce(nullif(sh2.master_po,''), v.shipment_ref) ship_master_po
+                   coalesce(nullif(sh2.master_po,''), v.shipment_ref) ship_master_po,
+                   -- v27.903 (Ben): the ERP date the drift banner compares against. When the PO exists in the Fulfil mirror,
+                   -- Fulfil's header date (requested_delivery_date, else delivery_date) wins; only POs unknown to Fulfil fall
+                   -- back to the view's erp_final_delivery_date (the Cin7-era erp_purchase_orders row, frozen at cut-over).
+                   coalesce(fm.requested_delivery_date, fm.delivery_date, v.erp_final_delivery_date) erp_final_delivery_eff,
+                   (fm.po IS NOT NULL) erp_is_fulfil
             FROM planner.v_po_finance v
             LEFT JOIN planner.shipments sh2 ON sh2.shipment_ref = v.shipment_ref
             LEFT JOIN planner.v_po_finance m ON m.po = coalesce(nullif(sh2.master_po,''), v.shipment_ref) AND m.po <> v.po
+            LEFT JOIN planner.fulfil_purchase_orders fm ON fm.po = v.po
           )
                     SELECT po, supplier_name, status,
             CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 'complete'
@@ -17610,12 +17618,12 @@ const PO_ROWS_SQL = `
             -- ERP's final delivery date. 1 = differs MATERIALLY. Materiality = the day gap as a fraction of how
             -- far away the date is (days from today to eff_checkin): only flag when the gap is >=10% of the
             -- lead time. E.g. 2 days out of ~100 away = 2% → not flagged; 5 days out of 30 away = 17% → flagged.
-            to_char(erp_final_delivery_date,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present,
+            to_char(erp_final_delivery_eff,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present, erp_is_fulfil,
             -- ERP completion-date drift: flag only if the gap (in days) is ≥ 5% of how far out the completion is,
             -- with a hard minimum of 3 days. So a 1–2 day gap on a near-term PO no longer flags. Examples:
             --   100 days out → ceil(5)=5-day threshold; 30 days out → ceil(1.5)=2 → floored to the 3-day minimum.
-            (CASE WHEN erp_final_delivery_date IS NOT NULL AND coalesce(m_checkin, eff_checkin) IS NOT NULL
-                  AND abs(coalesce(m_checkin, eff_checkin) - erp_final_delivery_date)
+            (CASE WHEN erp_final_delivery_eff IS NOT NULL AND coalesce(m_checkin, eff_checkin) IS NOT NULL
+                  AND abs(coalesce(m_checkin, eff_checkin) - erp_final_delivery_eff)
                       >= GREATEST(ceil(0.05 * abs(coalesce(m_checkin, eff_checkin) - CURRENT_DATE)), 3)
                   THEN 1 ELSE 0 END)::int erp_date_pending,
             -- supplier production-confidence: confirmed status + days since last confirmation
@@ -17691,7 +17699,7 @@ const PO_COMPLETE_STRIP = [
   'client_requirements', 'client_po_ref', 'client_deadline', 'asn_numbers', 'dispatch_order_ref',
   'final_delivery_address', 'crossdock_skus', 'dtc_accepted_by',
   'likely_start', 'likely_completion', 'likely_balance_1', 'likely_balance_2',
-  'erp_final_delivery', 'erp_po_id', 'prod_confirmed_age', 'production_status',
+  'erp_final_delivery', 'erp_po_id', 'erp_is_fulfil', 'prod_confirmed_age', 'production_status',
   'end_override', 'ship_override', 'delivery_override', 'ship_carrier', 'ship_carrier_ref',
   'catch_up', 'final_payment_due', 'credit_days', 'credit_type',
 ];
