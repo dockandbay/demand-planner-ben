@@ -15168,6 +15168,9 @@ function renderInventoryMetrics(host){
 // view the region×channel account map. Parse + Cin7 order matching land in a later phase.
 var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iFulfilment'],['au_coghlans','AU Coghlans']];
 var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices',fcgrain:'month'};
+// v27.905 (Diviyaj): Cin7 is the order source up to Sep-2026 (Oct-2026 for UK ILG). From the cut-over month the invoice refs
+// resolve from Diviyaj's Fulfil shipment table instead, so the Import Cin7 orders + Clean-up sweep steps are hidden.
+function tplCin7Era(tpl,period){ var cut=(tpl==='uk_ilg')?'2026-11':'2026-10'; return !period||String(period)<cut; }
 function render3plInvoice(body){
   try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h3[0]==='reports'&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -15189,9 +15192,10 @@ function render3plInvoice(body){
       if(_sa){ var chip=function(lbl,n,bg,fg,ti){ return '<span title="'+e(ti||'')+'" style="display:inline-block;padding:4px 10px;border-radius:999px;background:'+bg+';color:'+fg+';font-size:11px;font-weight:700;margin:0 6px 4px 0">'+lbl+': '+n+'</span>'; };
         saBox='<div style="margin:2px 0 8px">'
           +chip('Shipped from Cin7',(_sa.cin7&&_sa.cin7.orders)||0,'var(--band)','var(--ink)','Resolved from Cin7 — a Cin7 invoice date is the source of truth')
-          +chip('Shipped from Fulfil',(_sa.fulfil&&_sa.fulfil.orders)||0,'var(--blue-soft)','var(--blue-ink)','Resolved from Fulfil'+((_sa.fulfil&&_sa.fulfil.shipped!=null)?(' — '+_sa.fulfil.shipped+' marked shipped'):''))
+          +(((_sa.fulfil_table&&_sa.fulfil_table.orders)||0)>0?chip('Fulfil shipments',_sa.fulfil_table.orders,'var(--blue-soft)','var(--blue-ink)','Resolved from the Fulfil customer-shipment table (synced each morning) — channel → cost centre, ship date → month'):'')
+          +((((_sa.fulfil&&_sa.fulfil.orders)||0)>0||tplCin7Era(TPL3_STATE.tpl,TPL3_STATE.period))?chip('Shipped from Fulfil (live)',(_sa.fulfil&&_sa.fulfil.orders)||0,'var(--blue-soft)','var(--blue-ink)','Looked up live in Fulfil by reference — shipped since the morning sync'+((_sa.fulfil&&_sa.fulfil.shipped!=null)?(' — '+_sa.fulfil.shipped+' marked shipped'):'')):'')
           +(((_sa.contention&&_sa.contention.orders)||0)>0?chip('⚠ Under contention',_sa.contention.orders,'var(--amber-bg)','var(--amber)','In BOTH Cin7 and Fulfil — Cin7 wins, but worth a review'):'')
-          +(((_sa.unresolved&&_sa.unresolved.orders)||0)>0?chip('No source',_sa.unresolved.orders,'var(--neg-bg)','var(--neg)','Not found in Cin7 or Fulfil'):'')
+          +(((_sa.unresolved&&_sa.unresolved.orders)||0)>0?chip('No source',_sa.unresolved.orders,'var(--neg-bg)','var(--neg)','Not found in Cin7, the Fulfil shipment table or live Fulfil'):'')
           +'</div>';
         if(_sa.contention&&_sa.contention.refs&&_sa.contention.refs.length){ saBox+='<div style="font-size:11px;color:var(--amber);margin:-2px 0 8px"><b>Under contention (in both systems):</b> '+_sa.contention.refs.slice(0,40).map(function(x){return e(String(x));}).join(', ')+(_sa.contention.orders>_sa.contention.refs.length?' …':'')+'</div>'; } }
       var html='<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-top:12px;background:var(--card);max-width:820px;text-align:left">'
@@ -15230,7 +15234,7 @@ function render3plInvoice(body){
         +'<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr style="color:var(--muted);text-transform:uppercase;font-size:9px"><th style="'+TD+'">Description</th><th style="'+TD+'">Account</th><th style="'+TD+';text-align:right">Amount</th><th style="'+TD+';text-align:right">Tax</th></tr></thead><tbody>'
         +block('Non-order costs',grp('non-order'))+block('Freight &amp; fulfilment by cost centre',grp('cost-centre'))+block('Unmapped — assign account',grp('unmapped'))
         +'</tbody><tfoot><tr style="border-top:2px solid #7dd3fc;font-weight:700"><td style="'+TD+'">Total</td><td></td><td style="'+TD+';text-align:right">'+fmt(bill.total)+'</td><td></td></tr></tfoot></table>'
-        +'<div style="font-size:10px;color:var(--blue-ink);margin-top:8px">Exactly what the CSV upload will contain. Lines marked <b>set acct</b> need a code — map in Config / Accounts, or Import / Clean-up sweep the Cin7 orders.</div></div>';
+        +'<div style="font-size:10px;color:var(--blue-ink);margin-top:8px">Exactly what the CSV upload will contain. Lines marked <b>set acct</b> need a code — map in Config / Accounts'+(tplCin7Era(TPL3_STATE.tpl,TPL3_STATE.period)?', or Import / Clean-up sweep the Cin7 orders':' (order refs come from the Fulfil shipment table; channels without an account-map row book to Other)')+'.</div></div>';
       cont.innerHTML=html;
     }).catch(function(err){ cont.innerHTML='<div style="color:var(--neg);font-size:12px;padding:8px 0">Preview failed: '+e(err.message||err)+'</div>'; }); }
   // Fast custom tooltips (native title waits ~500ms) — show any [data-tip] element after 120ms. Init once.
@@ -15339,6 +15343,7 @@ function render3plInvoice(body){
     var _cardF='border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card);text-align:left';   // flex-row card (no bottom margin — the row/column gap spaces them)
     function _step(nu,ti,su2){ return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="flex:none;width:22px;height:22px;border-radius:50%;background:var(--nav);color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">'+nu+'</span><span style="font-weight:700;font-size:13px">'+ti+'</span>'+(su2?'<span style="font-size:11px;color:var(--faint);font-weight:400">'+su2+'</span>':'')+'</div>'; }
     var _ilgGuide='';   // the "what to upload each month" box now renders in the shell (under the L3 nav) for every 3PL — see _tplGuide
+    var _cin7=tplCin7Era(TPL3_STATE.tpl,TPL3_STATE.period);   // v27.905: Cin7 steps only in the Cin7 era
     b.innerHTML=_ilgGuide
       +'<div style="'+_card+'">'+_step('1','Upload file',e(_lbl)+' · '+e(TPL3_STATE.period))
         +'<div id="tpl-drop" style="border:2px dashed var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px;background:var(--hover);transition:background .12s,border-color .12s">'
@@ -15349,21 +15354,21 @@ function render3plInvoice(body){
           +['File','Size','By','Uploaded','Status',''].map(function(h){return '<th style="padding:6px 12px;text-align:left;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'</div>'
       +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;margin-bottom:12px">'
-        +'<div style="'+_cardF+';flex:1 1 260px;min-width:240px">'+_step('2','Import Cin7 orders','map each order ref → cost centre')
+        +(_cin7?('<div style="'+_cardF+';flex:1 1 260px;min-width:240px">'+_step('2','Import Cin7 orders','map each order ref → cost centre')
           +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-cin7imp" data-tip="Import new (not-yet-imported) sales orders for this month, by invoice date" style="border:1px solid #0f766e;background:var(--pos-bg);color:var(--pos);border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders</button>'
             +'<span id="tpl-cin7msg" style="font-size:11px;color:var(--faint)"></span></div>'
           +'<div id="tpl-cin7sum" style="font-size:11px;color:var(--muted);margin-top:8px"></div>'
-        +'</div>'
-        +'<div style="'+_cardF+';flex:1 1 260px;min-width:240px">'+_step('3','Analyse','read the invoice + map freight &amp; fees')
+        +'</div>'):'')
+        +'<div style="'+_cardF+';flex:1 1 260px;min-width:240px">'+_step(_cin7?'3':'2','Analyse',_cin7?'read the invoice + map freight &amp; fees':'read the invoice · order refs resolve from Fulfil shipments')
           +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-analyse" data-tip="Parse the uploaded invoice for this month and map it to cost centres / Xero accounts — results appear in step 5" style="border:1px solid var(--blue);background:var(--blue);color:#fff;border-radius:6px;padding:5px 16px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">▶ Analyse</button>'
             +'<span id="tpl-analyse-msg" style="font-size:11px;color:var(--faint)"></span></div>'
         +'</div>'
-        +'<div style="'+_cardF+';flex:1 1 260px;min-width:240px">'+_step('4','Clean-up sweep','fetch still-unmapped refs → auto re-analyse')
+        +(_cin7?('<div style="'+_cardF+';flex:1 1 260px;min-width:240px">'+_step('4','Clean-up sweep','fetch still-unmapped refs → auto re-analyse')
           +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-cin7sweep" data-tip="Fetch this invoice&rsquo;s still-unmapped order references directly from Cin7 (any date / branch), then re-analyse" style="border:1px solid var(--violet);background:var(--card);color:var(--violet);border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">🧹 Clean-up sweep</button>'
             +'<span id="tpl-sweep-msg" style="font-size:11px;color:var(--faint)">Analyse first (step 3) to check for unmapped orders.</span></div>'
-        +'</div>'
+        +'</div>'):'')
       +'</div>'
-      +'<div style="'+_card+'">'+_step('5','Review Xero summary &amp; download')
+      +'<div style="'+_card+'">'+_step(_cin7?'5':'3','Review Xero summary &amp; download')
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><button id="tpl-csv" data-tip="Build a Xero bill-import CSV (mapped accounts + tax) ready to upload into Xero" style="border:1px solid #7dd3fc;background:var(--blue-soft);color:var(--blue-ink);border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV for Xero Bill Upload</button>'
           +'<button id="tpl-pushact" data-tip="Push the actual freight + processing costs (ex-tax) from this invoice onto the Fulfil shipment metafields — customer shipments (FULFIL_*_ACT) and internal transfers (TRANSFER_FULFIL_*_ACT)" style="border:1px solid #86efac;background:var(--pos-bg);color:var(--pos);border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬆ Push actuals to Fulfil</button>'
           +'<a id="tpl-clear" data-tip="Clear the current analysis" style="font-size:11px;color:var(--neg);cursor:pointer;font-weight:600">Clear</a>'
@@ -15402,7 +15407,7 @@ function render3plInvoice(body){
       if(TPL3_STATE.tpl==='uk_ilg'){ var ship=data.filter(function(f){return /invoice_0/i.test(f.filename);}); if(ship.length)return ship[0].id; }
       return data.length?data[0].id:null; }
     var anBtn=b.querySelector('#tpl-analyse'), anMsg=b.querySelector('#tpl-analyse-msg');
-    if(anBtn)anBtn.onclick=function(){ var id=pickAnalyseId(); if(!id){ anMsg.style.color='var(--amber)'; anMsg.textContent='Upload a data file (.csv/.xlsx) in step 1 first.'; return; } anMsg.style.color='var(--muted)'; anMsg.textContent='Analysing… results in step 5 ↓'; renderParse(b.querySelector('#tpl-parse'), id); };
+    if(anBtn)anBtn.onclick=function(){ var id=pickAnalyseId(); if(!id){ anMsg.style.color='var(--amber)'; anMsg.textContent='Upload a data file (.csv/.xlsx) in step 1 first.'; return; } anMsg.style.color='var(--muted)'; anMsg.textContent='Analysing… results in step '+(_cin7?'5':'3')+' ↓'; renderParse(b.querySelector('#tpl-parse'), id); };
     function doImport(sweep){ var btn=sweep?sw:ci; var _dis=function(on){ if(btn){ btn.disabled=on; btn.style.opacity=on?'.5':''; btn.style.cursor=on?'wait':'pointer'; } }; _dis(true); cim.style.color='var(--muted)'; cim.textContent=sweep?'Sweeping the whole month…':'Importing new orders…';
       // Resumable: the server returns done=false + a resume cursor when it hits its time budget; keep re-POSTing until done.
       function step(body){

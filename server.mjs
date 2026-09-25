@@ -10677,7 +10677,8 @@ async function _tplGenevaAllocate(period) {
   const refs = [...new Set([...Object.keys(freight), ...Object.keys(b2bUnits)])];
   const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
   const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
-  const ccOf = ref => { const ov = _tplRefOverride(ref, 'us_geneva'); if (ov) return ov; return (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); };
+  const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'us_geneva')));   // v27.905: Fulfil shipment table after Cin7
+  const ccOf = ref => { const ov = _tplRefOverride(ref, 'us_geneva'); if (ov) return ov; return (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : (shipByRef[ref] ? shipByRef[ref].cc : null)); };
   const acct = {}; const add = (a, f, u) => { if (!a) return; if (!acct[a]) acct[a] = { freight: 0, fulfilment: 0 }; acct[a].freight += (f || 0); acct[a].fulfilment += (u || 0); };
   let unmappedFreight = 0; const unmappedRefs = [];
   Object.keys(freight).forEach(ref => { const cc = ccOf(ref); if (cc) add(cc, freight[ref], 0); else { unmappedFreight += freight[ref]; add('Geneva USA - Other fees', freight[ref], 0); if (unmappedRefs.length < 50) unmappedRefs.push(ref); } });   // no CostCentre → auto-book freight to Geneva Other fees
@@ -10762,7 +10763,8 @@ async function _tplIlgAllocate(period) {
     const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))]; shipRefCount = refs.length;
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
-    ship.forEach(s => { shipTotal += s.gross; const cc = (byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : null);
+    const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'uk_ilg')));   // v27.905: Fulfil shipment table after Cin7
+    ship.forEach(s => { shipTotal += s.gross; const ov = _tplRefOverride(s.ref, 'uk_ilg'); const cc = ov || ((byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : (shipByRef[s.ref] ? shipByRef[s.ref].cc : null)));
       if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt);
       else { shipUnmapped += s.gross; add('Other Fees', 'freight', s.vat, s.gross, s.vatAmt); if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // no Cin7 cost centre → auto-book freight to Other Fees (nothing stranded); track sweepable refs so the Clean-up sweep can still reclassify to the real channel
   }
@@ -10851,6 +10853,34 @@ async function _tplFulfilChannelCC() {
   const m = {};
   rows.forEach(r => { String(r.fc || '').split(',').map(x => x.trim()).filter(Boolean).forEach(c => { m[c] = r.cc; }); });
   return m;
+}
+// v27.905 (Diviyaj spec, 25-Sep-2026): FULFIL CUSTOMER-SHIPMENT lookup for 3PL invoice references. Diviyaj's sync fills
+// planner.tpl_fulfil_shipments (mig 303) from stock.shipment.out; Horizon only reads it. An invoice reference matches
+// order_reference, shipment_number or sale_number (each may hold several values joined by ' | ' when one shipment
+// covers several sales). channel_name -> cost centre via tpl_account_map.fulfil_channel (same map as _tplFulfilChannelCC);
+// ship_date -> the order's accounting month (ym). Resolution order everywhere: standing rules (FBA/TRF) -> Cin7 cache ->
+// THIS table -> live Fulfil by reference (importFulfilOrdersByRefs) only as a last resort for anything shipped since the
+// morning sync. Returns { [ref]: { cc, ym, channel, warehouse, shipment_number, ship_date } } (cc null when the channel
+// has no account-map row, so the caller can still date the order).
+async function _tplFulfilShipLookup(refs) {
+  const uniq = Array.from(new Set((refs || []).map(r => String(r == null ? '' : r).trim()).filter(Boolean)));
+  if (!uniq.length) return {};
+  let rows = [];
+  try {
+    rows = (await pool.query(`SELECT shipment_number, order_reference, sale_number, channel_name, warehouse_code, to_char(ship_date,'YYYY-MM-DD') ship_date, to_char(ship_date,'YYYY-MM') ym
+      FROM planner.tpl_fulfil_shipments
+      WHERE order_reference = ANY($1) OR shipment_number = ANY($1) OR sale_number = ANY($1)
+         OR EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(order_reference,''), ' | ')) x WHERE trim(x) = ANY($1))
+         OR EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(sale_number,''), ' | ')) x WHERE trim(x) = ANY($1))
+      ORDER BY ship_date DESC NULLS LAST, shipment_id DESC`, [uniq])).rows;
+  } catch (e) { return {}; }   // table absent (sandbox before mig 303) -> behave as before
+  if (!rows.length) return {};
+  const chanCC = await _tplFulfilChannelCC();
+  const want = new Set(uniq), out = {};
+  const keys = r => [r.shipment_number, ...String(r.order_reference || '').split(' | '), ...String(r.sale_number || '').split(' | ')].map(x => String(x || '').trim()).filter(Boolean);
+  rows.forEach(r => { const hit = { cc: r.channel_name ? (chanCC[String(r.channel_name).trim().toLowerCase()] || null) : null, ym: r.ym || null, channel: r.channel_name || null, warehouse: r.warehouse_code || null, shipment_number: r.shipment_number || null, ship_date: r.ship_date || null };
+    keys(r).forEach(k => { if (want.has(k) && !out[k]) out[k] = hit; }); });   // newest shipment wins per reference
+  return out;
 }
 // v27.793 (Ben): push ACTUAL 3PL costs (ex-tax) onto Fulfil shipments as numeric metafields. Two shipment kinds:
 //  • CUSTOMER shipment (stock.shipment.out): FULFIL_FREIGHT_ACT / FULFIL_PROCESS_ACT (CS numbers + normal orders).
@@ -10961,24 +10991,28 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
     // v27.788 (Ben): Fulfil fallback + source-of-truth. Refs not resolved by a rule or Cin7 → look them up in Fulfil
     // (imported into tpl_fulfil_orders by reference) and map the CHANNEL → cost centre via tpl_account_map.fulfil_channel.
     const cin7HasRef = ref => (byRef[ref] != null) || (byCon[ref] != null);
-    const needFulfil = refs.filter(ref => !_tplRefOverride(ref, tpl0) && !cin7HasRef(ref));
+    // v27.905: Diviyaj's Fulfil shipment table comes BEFORE the live-Fulfil call; only refs it lacks go to the API.
+    const needTable = refs.filter(ref => !_tplRefOverride(ref, tpl0) && !cin7HasRef(ref));
+    const shipByRef = await _tplFulfilShipLookup(needTable);
+    const needFulfil = needTable.filter(ref => !shipByRef[ref]);
     let fulfilByRef = {}, chanCC = {};
-    try { fulfilByRef = await importFulfilOrdersByRefs(needFulfil, row.period); chanCC = await _tplFulfilChannelCC(); }
+    try { fulfilByRef = needFulfil.length ? await importFulfilOrdersByRefs(needFulfil, row.period) : {}; chanCC = await _tplFulfilChannelCC(); }
     catch (e) { fulfilByRef = {}; chanCC = {}; }
     const refCC = {}, refSrc = {}; let ruleFba = 0, ruleTrf = 0;
-    const src = { cin7: { orders: 0, refs: [] }, fulfil: { orders: 0, shipped: 0, refs: [] }, contention: { orders: 0, refs: [] }, unresolved: { orders: 0, refs: [] } };
+    const src = { cin7: { orders: 0, refs: [] }, fulfil_table: { orders: 0, refs: [] }, fulfil: { orders: 0, shipped: 0, refs: [] }, contention: { orders: 0, refs: [] }, unresolved: { orders: 0, refs: [] } };
     refs.forEach(ref => {
       const ov = _tplRefOverride(ref, tpl0);
-      const inCin7 = cin7HasRef(ref), fo = fulfilByRef[ref] || null;
+      const inCin7 = cin7HasRef(ref), fs0 = shipByRef[ref] || null, fo = fulfilByRef[ref] || null;
       if (ov) { refCC[ref] = ov; refSrc[ref] = 'rule'; if (/^OTHER/.test(ov)) ruleTrf++; else ruleFba++; }
       else if (inCin7) { refCC[ref] = (byRef[ref] != null) ? byRef[ref] : byCon[ref]; refSrc[ref] = 'cin7'; if (src.cin7.refs.length < 200) src.cin7.refs.push(ref); src.cin7.orders++; }
+      else if (fs0) { refCC[ref] = fs0.cc; refSrc[ref] = 'fulfil_table'; src.fulfil_table.orders++; if (src.fulfil_table.refs.length < 200) src.fulfil_table.refs.push(ref); }
       else if (fo) { refCC[ref] = fo.channel ? (chanCC[String(fo.channel).toLowerCase()] || null) : null; refSrc[ref] = 'fulfil'; src.fulfil.orders++; if (fo.shipped) src.fulfil.shipped++; if (src.fulfil.refs.length < 200) src.fulfil.refs.push(ref); }
       else { refCC[ref] = null; refSrc[ref] = 'none'; src.unresolved.orders++; if (src.unresolved.refs.length < 200) src.unresolved.refs.push(ref); }
       // contention = the order exists in BOTH Cin7 (invoiced) AND Fulfil — ambiguous which system shipped it
       if (inCin7 && fo) { src.contention.orders++; if (src.contention.refs.length < 200) src.contention.refs.push(ref); }
     });
     const summary = _tplAggregateAccounts(orders, refCC);
-    res.json({ ok: true, imported_matched: dbrows.length, fulfil_matched: Object.keys(fulfilByRef).length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, source_analysis: src, ...summary });
+    res.json({ ok: true, imported_matched: dbrows.length, fulfil_table_matched: Object.keys(shipByRef).length, fulfil_matched: Object.keys(fulfilByRef).length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, source_analysis: src, ...summary });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
@@ -12102,9 +12136,11 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc, to_char(invoice_date,'YYYY-MM') ym FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const v = { cc: String(r.cc || '').trim(), ym: r.ym }; if (r.reference) byRef[r.reference] = v; if (r.customer_order_no) byCon[r.customer_order_no] = v; });
+    // v27.905: refs Cin7 doesn't know -> Diviyaj's Fulfil shipment table (cost centre from the channel, month from ship_date)
+    const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, tpl0)));
     const amap = {}; (await pool.query(`SELECT label, fulfilment_account FROM planner.tpl_account_map`)).rows.forEach(r => { amap[String(r.label || '').trim().toLowerCase()] = r.fulfilment_account || ''; });
-    const j = {}; let crossTotal = 0, matched = 0, noDate = 0;   // j: ym -> code -> amount
-    orders.forEach(o => { const info = (o.reference != null ? (byRef[o.reference] || byCon[o.reference]) : null); const cost = (o.shipping || 0) + (o.fulfilment || 0); if (!(cost > 0)) return;
+    const j = {}; let crossTotal = 0, matched = 0, noDate = 0, fromFulfil = 0;   // j: ym -> code -> amount
+    orders.forEach(o => { let info = (o.reference != null ? (byRef[o.reference] || byCon[o.reference]) : null); if (!info && o.reference != null && shipByRef[o.reference]) { const f = shipByRef[o.reference]; info = { cc: f.cc || '', ym: f.ym }; fromFulfil++; } const cost = (o.shipping || 0) + (o.fulfilment || 0); if (!(cost > 0)) return;
       const ov = _tplRefOverride(o.reference, tpl0); const cc = ov || (info ? info.cc : ''); const ym = info ? info.ym : null;
       if (!ym) { noDate++; return; } if (ym === period) return;   // same month → no journal
       matched++; crossTotal += cost;
@@ -12119,7 +12155,7 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
         lines.push({ narration: narr, date: dd(endOf(ym)), desc: 'Reclass ' + ym + ' orders out of ' + period, code: (code === '(no account)' ? '' : code), taxRate: 'No VAT', amount: amt });          // DR the order's (prior) month
         lines.push({ narration: narr, date: dd(endOf(period)), desc: 'Reclass ' + ym + ' orders out of ' + period, code: (code === '(no account)' ? '' : code), taxRate: 'No VAT', amount: -amt }); }); // CR the invoice month
       screen.push({ month: ym, amount: Math.round(mtot * 100) / 100 }); });
-    if (req.body && req.body.preview) return res.json({ ok: true, period, region: REG, months: screen, crossTotal: Math.round(crossTotal * 100) / 100, matched, noDate, journals: Object.keys(j).length, lineCount: lines.length });
+    if (req.body && req.body.preview) return res.json({ ok: true, period, region: REG, months: screen, crossTotal: Math.round(crossTotal * 100) / 100, matched, noDate, fromFulfil, journals: Object.keys(j).length, lineCount: lines.length });
     const HDR = '*Narration,*Date,Description,*AccountCode,*TaxRate,*Amount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const csv = HDR + '\n' + lines.map(l => [l.narration, l.date, l.desc, l.code, l.taxRate, l.amount.toFixed(2), '', '', '', ''].map(esc).join(',')).join('\n');
@@ -12150,7 +12186,8 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const orders = await _tplOrderRows(row.content, isCsv, tpl0, period);
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     let refCC = {};
-    if (refs.length) { const needCin7 = refs.filter(r => !_tplRefOverride(r, tpl0)); const dbrows = needCin7.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [needCin7])).rows : []; const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; }); refs.forEach(rf => { const ov = _tplRefOverride(rf, tpl0); refCC[rf] = ov || ((byRef[rf] != null) ? byRef[rf] : (byCon[rf] != null ? byCon[rf] : null)); }); }
+    if (refs.length) { const needCin7 = refs.filter(r => !_tplRefOverride(r, tpl0)); const dbrows = needCin7.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [needCin7])).rows : []; const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; }); const shipByRef = await _tplFulfilShipLookup(needCin7.filter(rf => byRef[rf] == null && byCon[rf] == null));   // v27.905: Fulfil shipment table after Cin7
+      refs.forEach(rf => { const ov = _tplRefOverride(rf, tpl0); refCC[rf] = ov || ((byRef[rf] != null) ? byRef[rf] : (byCon[rf] != null ? byCon[rf] : (shipByRef[rf] ? shipByRef[rf].cc : null))); }); }
     const agg = _tplAggregateAccounts(orders, refCC);
     // non-order sheet totals
     let grids = [];
