@@ -1003,6 +1003,8 @@
     // routable (#/<sec>/<pt>), standard click + active handling. v27.503
     var PP_EXTRA={};
     function ppAddTab(def){ if(!def||!def.pt||PP_EXTRA[def.pt])return; PP_EXTRA[def.pt]=def; if(PP_TABS.indexOf(def.pt)<0)PP_TABS.push(def.pt); var sec=def.sec||PP_SEC[def.pt]||'orders'; PP_SEC[def.pt]=sec;
+      // v27.895 (Ben): a host tab may introduce a NEW level-1 section (PROFILE) — add its pill to the section row if it isn't one of the built-ins
+      try{ if(!PP_SECS.some(function(s){return s[0]===sec;})){ PP_SECS.push([sec,def.secLabel||sec.toUpperCase()]); if(PP_TAB_ORDER.indexOf(def.pt)<0)PP_TAB_ORDER.push(def.pt); var _row=document.getElementById('pp-secs'); if(_row){ var sb=document.createElement('span'); sb.className='pp-sec'; sb.dataset.sec=sec; sb.textContent=def.secLabel||sec.toUpperCase(); _row.appendChild(sb); sb.onclick=function(){ var first=tabsEl.querySelector('.rtab[data-sec="'+sec+'"][data-pt]'); if(first)first.click(); }; } } }catch(e){}
       var t=document.createElement('span'); t.className='rtab'; t.dataset.pt=def.pt; t.dataset.sec=sec; t.textContent=def.label||def.pt;
       var same=tabsEl.querySelectorAll('.rtab[data-sec="'+sec+'"]'), last=same.length?same[same.length-1]:null; if(last&&last.nextSibling)tabsEl.insertBefore(t,last.nextSibling); else tabsEl.appendChild(t);
       t.onclick=function(){ PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec(); ppBilingualApply(document);

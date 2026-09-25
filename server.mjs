@@ -18332,6 +18332,294 @@ app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   } catch (e) { log500(e); res.status(500).send('error'); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v27.895 (Ben): SUPPLIER ONBOARDING + PROFILE CHANGES with an approval gate (migration 301).
+// Portal: the supplier fills / edits their profile (company · contacts · logistics & terms · certificates with files ·
+// warehouse-requirements acknowledgement · products & packaging dims) and submits. Admin (CONFIG ▸ Onboarding): each
+// section is approved or returned with a note; final approval writes planner.suppliers + contacts + certificates,
+// records the warehouse acknowledgement, queues product dims as pending PIM changes, invites portal users, and
+// emails everyone. A supplier always exists first (stub + portal login), so every request carries supplier_id.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const ONB_SECTIONS = ['company', 'contacts', 'logistics', 'certs', 'warehouse', 'products'];
+const ONB_OPEN = ['draft', 'submitted', 'in_review', 'returned'];
+function onbNow() { return new Date().toISOString().slice(0, 16).replace('T', ' '); }
+async function onbSetting(key) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0]; return (r && r.value) || ''; } catch (_) { return ''; } }
+function onbEmails(s) { return String(s || '').split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(x => /.+@.+\..+/.test(x)); }
+async function onbNotifyTeam(subject, html, ref) {
+  const to = onbEmails(await onbSetting('onboarding_notify_to')), cc = onbEmails(await onbSetting('onboarding_notify_cc'));
+  if (!to.length && !cc.length) { console.log('[onboarding] no reviewers configured (app_settings.onboarding_notify_to) — not emailing: ' + subject); return { sent: 0 }; }
+  return sendResendEmail({ to: to.length ? to : cc, cc: to.length ? cc : [], subject, html, kind: 'onboarding', ref });
+}
+async function onbLoadRules() { return (await pool.query(`SELECT id, title, coalesce(detail,'') detail, warehouse, active, sort, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.warehouse_requirements ORDER BY sort, id`)).rows; }
+function onbRulesVersion(rules) { const act = rules.filter(r => r.active); const mx = act.reduce((a, r) => (r.updated_at > a ? r.updated_at : a), ''); return 'v' + act.length + '·' + mx; }
+async function onbSupplierProfile(sid) {
+  const s = (await pool.query(`SELECT id, name, business_name, kind, country, address_1, address_2, city, state, postcode, contact_name, email, phone,
+      registration_no, vat_id, website, trading_since, employees, capabilities, incoterm, export_port, pickup_address, production_days, sample_lead_days, moq,
+      default_currency, payment_terms_text, credit_days, start_deposit_pct, completion_pct, balance_pct, bank_doc_attachment_id,
+      to_char(profile_approved_at,'YYYY-MM-DD') profile_approved_at FROM planner.suppliers WHERE id=$1`, [sid])).rows[0];
+  if (!s) return null;
+  s.contacts = (await pool.query(`SELECT id, name, coalesce(role,'') role, coalesce(email,'') email, coalesce(phone,'') phone, portal_access FROM planner.supplier_contacts WHERE supplier_id=$1 ORDER BY id`, [sid])).rows;
+  s.certificates = (await pool.query(`SELECT c.id, c.kind, coalesce(c.reference,'') reference, to_char(c.valid_to,'YYYY-MM-DD') valid_to, c.attachment_id, a.filename FROM planner.supplier_certificates c LEFT JOIN planner.portal_attachments a ON a.id=c.attachment_id WHERE c.supplier_id=$1 ORDER BY c.id`, [sid])).rows;
+  s.bank_doc = s.bank_doc_attachment_id ? ((await pool.query(`SELECT filename FROM planner.portal_attachments WHERE id=$1`, [s.bank_doc_attachment_id])).rows[0] || {}).filename || null : null;
+  return s;
+}
+// Build the wizard's form from the approved supplier record (used when there is no open request)
+function onbFormFromProfile(s) {
+  const certs = {}; (s.certificates || []).forEach(c => { certs[c.kind] = c.reference; if (c.valid_to) certs[c.kind + 'Exp'] = c.valid_to; if (c.attachment_id) { certs[c.kind + 'DocId'] = c.attachment_id; certs[c.kind + 'Doc'] = c.filename || 'file'; } });
+  return {
+    company: { legal: s.business_name || s.name || '', trading: s.name || '', country: s.country || '', kind: s.kind === 'supplier' ? '' : (s.kind || ''), address: [s.address_1, s.address_2, s.city, s.state, s.postcode].filter(Boolean).join('\n'),
+      reg: s.registration_no || '', vat: s.vat_id || '', website: s.website || '', years: s.trading_since || '', employees: s.employees || '', products: s.capabilities || '' },
+    contacts: (s.contacts && s.contacts.length) ? s.contacts.map(c => ({ name: c.name, role: c.role, email: c.email, phone: c.phone, portal: !!c.portal_access })) : [{ name: s.contact_name || '', role: 'Sales / orders', email: s.email || '', phone: s.phone || '', portal: true }],
+    logistics: { port: s.export_port || '', incoterm: s.incoterm || '', pickup: s.pickup_address || '', leadtime: s.production_days != null ? String(s.production_days) : '', sampleLead: s.sample_lead_days != null ? String(s.sample_lead_days) : '', moq: s.moq || '',
+      currency: s.default_currency || '', terms: s.payment_terms_text || (s.start_deposit_pct != null ? (Number(s.start_deposit_pct) + '% deposit · ' + Number(s.completion_pct || 0) + '% completion · ' + Number(s.balance_pct || 0) + '% balance') : ''), credit: s.credit_days != null ? String(s.credit_days) : '',
+      bankDocId: s.bank_doc_attachment_id || null, bankDocName: s.bank_doc || '', bankCallback: !!s.bank_doc_attachment_id },
+    certs, warehouse: {}, products: [], declared: false,
+  };
+}
+async function onbOpenRequest(sid) { return (await pool.query(`SELECT * FROM planner.supplier_onboarding_requests WHERE supplier_id=$1 AND status = ANY($2::text[]) ORDER BY id DESC LIMIT 1`, [sid, ONB_OPEN])).rows[0] || null; }
+async function onbNextRef() { const r = (await pool.query(`SELECT coalesce(max(id),0)+1 n FROM planner.supplier_onboarding_requests`)).rows[0]; return 'ONB-' + String(r.n).padStart(4, '0'); }
+function onbLogPush(row, m, by) { const log = Array.isArray(row.log) ? row.log : []; log.push({ t: onbNow(), m, by: by || null }); return log; }
+
+// ── PORTAL ──────────────────────────────────────────────────────────────────────────────────────────────────────
+// Everything the wizard needs in one call: the supplier's approved profile, the open request (if any), the warehouse
+// rules + whether the latest acknowledgement matches the current version, and the notification of past decisions.
+app.get('/api/portal/onboarding', portalAuth, async (req, res) => {
+  try {
+    const sid = req.portal.supplierIds[0]; if (!sid) return res.status(403).json({ error: 'no supplier linked' });
+    const profile = await onbSupplierProfile(sid); if (!profile) return res.status(404).json({ error: 'supplier not found' });
+    const rules = (await onbLoadRules()).filter(r => r.active);
+    const version = onbRulesVersion(rules);
+    const ack = (await pool.query(`SELECT rules_version, to_char(acked_at,'YYYY-MM-DD') acked_at, acked_by FROM planner.supplier_warehouse_acks WHERE supplier_id=$1 ORDER BY acked_at DESC LIMIT 1`, [sid])).rows[0] || null;
+    const open = await onbOpenRequest(sid);
+    const last = (await pool.query(`SELECT ref, status, type, to_char(decided_at,'YYYY-MM-DD') decided_at, return_note, log FROM planner.supplier_onboarding_requests WHERE supplier_id=$1 AND status IN ('approved','rejected') ORDER BY id DESC LIMIT 1`, [sid])).rows[0] || null;
+    const form = open ? open.form : onbFormFromProfile(profile);
+    if (!open && ack && ack.rules_version === version) rules.forEach(r => { form.warehouse[String(r.id)] = true; });   // current rules already acknowledged → pre-ticked
+    res.json({ ok: true, supplier: { id: profile.id, name: profile.name, profile_approved_at: profile.profile_approved_at }, form, request: open ? { ref: open.ref, status: open.status, type: open.type, sections: open.sections, return_note: open.return_note, submitted_at: open.submitted_at, log: open.log } : null,
+      last, rules, rules_version: version, ack: ack && ack.rules_version === version ? ack : null, is_new: !profile.profile_approved_at });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Save a draft (autosave from the wizard). Creates the request row on first save.
+app.post('/api/portal/onboarding/draft', portalAuth, async (req, res) => {
+  try {
+    const sid = req.portal.supplierIds[0]; if (!sid) return res.status(403).json({ error: 'no supplier linked' });
+    const form = (req.body && req.body.form) || {}; const open = await onbOpenRequest(sid);
+    if (open && open.status !== 'draft' && open.status !== 'returned') return res.status(409).json({ error: 'A request is already under review (' + open.ref + '). Wait for the decision before editing.' });
+    if (open) { await pool.query(`UPDATE planner.supplier_onboarding_requests SET form=$2::jsonb, updated_at=now() WHERE id=$1`, [open.id, JSON.stringify(form)]); return res.json({ ok: true, ref: open.ref, status: open.status }); }
+    const prof = await onbSupplierProfile(sid); const ref = await onbNextRef();
+    await pool.query(`INSERT INTO planner.supplier_onboarding_requests (ref, supplier_id, supplier_name, type, status, form, sections, log) VALUES ($1,$2,$3,$4,'draft',$5::jsonb,'{}'::jsonb,'[]'::jsonb)`,
+      [ref, sid, req.portal.suppliers[0] || (prof && prof.name) || '', (prof && prof.profile_approved_at) ? 'change' : 'new', JSON.stringify(form)]);
+    res.json({ ok: true, ref, status: 'draft' });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Submit for approval: validates the minimum, marks every section pending (sections already approved on a returned
+// request stay approved), records the warehouse acknowledgement, notifies the reviewers.
+app.post('/api/portal/onboarding/submit', portalAuth, async (req, res) => {
+  try {
+    const sid = req.portal.supplierIds[0]; if (!sid) return res.status(403).json({ error: 'no supplier linked' });
+    const form = (req.body && req.body.form) || {}; const f = form;
+    const problems = [];
+    if (!(f.company && f.company.legal && f.company.country && f.company.address)) problems.push('Company: legal name, country and address');
+    if (!(Array.isArray(f.contacts) && f.contacts.some(c => c && c.name && c.email))) problems.push('Contacts: at least one name + email');
+    if (!(f.logistics && f.logistics.port && f.logistics.incoterm && f.logistics.terms)) problems.push('Logistics: port, incoterm and payment terms');
+    const rules = (await onbLoadRules()).filter(r => r.active); const version = onbRulesVersion(rules);
+    if (!rules.every(r => f.warehouse && f.warehouse[String(r.id)])) problems.push('Warehouse requirements: acknowledge every rule');
+    const certsListed = ['grs', 'bsci', 'oeko', 'iso', 'other'].filter(k => f.certs && f.certs[k]);
+    if (!(f.certs && f.certs.none) && (!certsListed.length || certsListed.some(k => !f.certs[k + 'DocId']))) problems.push('Certificates: each listed certificate needs its file (or tick "no certificates yet")');
+    if (!f.declared) problems.push('Declaration not ticked');
+    if (problems.length) return res.status(400).json({ error: 'Not ready to submit', problems });
+    let open = await onbOpenRequest(sid); const prof = await onbSupplierProfile(sid); const by = req.portal.email;
+    const sections = {}; ONB_SECTIONS.forEach(k => { sections[k] = (open && open.sections && open.sections[k] === 'approved' && open.status === 'returned') ? 'approved' : 'pending'; });
+    if (!open) { const ref = await onbNextRef(); open = (await pool.query(`INSERT INTO planner.supplier_onboarding_requests (ref, supplier_id, supplier_name, type, status, form, sections, log) VALUES ($1,$2,$3,$4,'draft',$5::jsonb,'{}'::jsonb,'[]'::jsonb) RETURNING *`,
+      [ref, sid, req.portal.suppliers[0] || (prof && prof.name) || '', (prof && prof.profile_approved_at) ? 'change' : 'new', JSON.stringify(form)])).rows[0]; }
+    const log = onbLogPush(open, (open.status === 'returned' ? 'Resubmitted' : 'Submitted') + ' by ' + by, by);
+    await pool.query(`UPDATE planner.supplier_onboarding_requests SET form=$2::jsonb, sections=$3::jsonb, status='submitted', submitted_by=$4, submitted_at=now(), return_note=NULL, log=$5::jsonb, updated_at=now() WHERE id=$1`,
+      [open.id, JSON.stringify(form), JSON.stringify(sections), by, JSON.stringify(log)]);
+    await pool.query(`INSERT INTO planner.supplier_warehouse_acks (supplier_id, rules_version, acked_by) VALUES ($1,$2,$3)`, [sid, version, by]);
+    const nProd = Array.isArray(f.products) ? f.products.filter(p => p && p.name).length : 0;
+    const link = PORTAL_URL.replace(/\/portal$/, '') + '/#/supply/config/onboarding/' + open.ref;
+    await onbNotifyTeam('[Horizon] Onboarding request ' + open.ref + ' · ' + escHtml(open.supplier_name) + (open.type === 'change' ? ' (profile change)' : ' (new supplier)'),
+      '<p><b>' + escHtml(open.supplier_name) + '</b> ' + (open.status === 'returned' ? 'resubmitted' : 'submitted') + ' their ' + (open.type === 'change' ? 'profile changes' : 'supplier profile') + (nProd ? ' with ' + nProd + ' product' + (nProd === 1 ? '' : 's') : '') + '. ' + ONB_SECTIONS.filter(k => sections[k] !== 'approved').length + ' section(s) await review.</p><p><a href="' + link + '">Open in Horizon → CONFIG ▸ Onboarding</a></p>', open.ref);
+    try { portalCacheMarkStale(open.supplier_name); } catch (_) {}
+    res.json({ ok: true, ref: open.ref, status: 'submitted' });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Certificate / bank-letter upload. Files land in portal_attachments keyed 'SUP-<supplier id>' so the existing
+// attachment plumbing (inline ≤3MB, Supabase storage above) applies. Bank letters are category onboarding_bank:
+// only admins can open them in Horizon (see the supply route below) and reviewers only see that one exists.
+app.post('/api/portal/onboarding/upload', portalAuth, async (req, res) => {
+  const b = req.body || {}; const kind = String(b.kind || '') === 'bank' ? 'onboarding_bank' : 'onboarding_cert';
+  try {
+    const sid = req.portal.supplierIds[0]; if (!sid) return res.status(403).json({ error: 'no supplier linked' });
+    if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'file required' });
+    let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'supplier') RETURNING id`, ['SUP-' + sid, b.filename || 'file', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email, kind]);
+    res.json({ ok: true, id: r.rows[0].id, filename: b.filename || 'file' });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// The current warehouse requirements as a dated PDF the supplier can keep (pdf-lib, like the PO PDF).
+async function onbRulesPdf(rules, version, supplierName, ackedAt) {
+  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+  const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
+  const W = 595, H = 842, M = 48; let page = doc.addPage([W, H]); let y = H - M;
+  const wrap = (text, font, size, width) => { const words = String(text || '').replace(/\s+/g, ' ').split(' '); const lines = []; let cur = ''; words.forEach(w => { const t = cur ? cur + ' ' + w : w; if (font.widthOfTextAtSize(t, size) > width && cur) { lines.push(cur); cur = w; } else cur = t; }); if (cur) lines.push(cur); return lines; };
+  const line = (text, font, size, color, gap) => { wrap(text, font, size, W - 2 * M).forEach(l => { if (y < M + 40) { page = doc.addPage([W, H]); y = H - M; } page.drawText(l, { x: M, y, size, font, color: color || rgb(0.06, 0.09, 0.16) }); y -= size * 1.35; }); y -= gap || 0; };
+  line('DOCK & BAY · SUPPLIER HANDBOOK', B, 9, rgb(0.36, 0.42, 0.51), 4);
+  line('Warehouse receiving requirements', B, 20, null, 4);
+  line(version + ' · applies to ILG (UK), Geneva (US), Blade (EU), Coghlans (AU)', F, 10, rgb(0.36, 0.42, 0.51), 14);
+  rules.forEach((r, i) => { line((i + 1) + '. ' + r.title + (r.warehouse && r.warehouse !== 'All' ? '  [' + r.warehouse + ' only]' : ''), B, 11.5, null, 2); if (r.detail) line(r.detail, F, 10, rgb(0.36, 0.42, 0.51), 8); });
+  y -= 10; line('Acknowledgement', B, 11.5, null, 2);
+  line((supplierName || 'Supplier') + (ackedAt ? ' · acknowledged all rules in the Horizon supplier portal on ' + ackedAt : ' · acknowledgement pending') + ' · generated ' + new Date().toISOString().slice(0, 10), F, 10, null, 4);
+  line('Goods that do not meet these requirements may be refused, relabelled or repacked at the supplier\'s cost. Questions: supply@dockandbay.com', F, 9, rgb(0.36, 0.42, 0.51), 0);
+  return Buffer.from(await doc.save());
+}
+app.get('/api/portal/warehouse-requirements.pdf', portalAuth, async (req, res) => {
+  try {
+    const sid = req.portal.supplierIds[0]; const rules = (await onbLoadRules()).filter(r => r.active); const version = onbRulesVersion(rules);
+    const ack = sid ? (await pool.query(`SELECT to_char(acked_at,'YYYY-MM-DD') d FROM planner.supplier_warehouse_acks WHERE supplier_id=$1 AND rules_version=$2 ORDER BY acked_at DESC LIMIT 1`, [sid, version])).rows[0] : null;
+    const pdf = await onbRulesPdf(rules, version, req.portal.suppliers[0], ack && ack.d);
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="dock-and-bay-warehouse-requirements.pdf"'); res.send(pdf);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── ADMIN (CONFIG ▸ Onboarding · CONFIG ▸ Warehouse rules) ──────────────────────────────────────────────────────
+app.get('/api/supply/onb/requests', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT id, ref, supplier_id, supplier_name, type, status, sections, submitted_by, to_char(submitted_at,'YYYY-MM-DD HH24:MI') submitted_at, to_char(decided_at,'YYYY-MM-DD HH24:MI') decided_at, decided_by
+      FROM planner.supplier_onboarding_requests WHERE status<>'draft' ORDER BY (status IN ('submitted','in_review','returned')) DESC, submitted_at DESC NULLS LAST, id DESC LIMIT 300`)).rows;
+    res.set('Cache-Control', 'no-store').json({ rows, notify_to: await onbSetting('onboarding_notify_to'), notify_cc: await onbSetting('onboarding_notify_cc') });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/onb/requests/:id', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT r.*, to_char(r.submitted_at,'YYYY-MM-DD HH24:MI') submitted_fmt, to_char(r.decided_at,'YYYY-MM-DD HH24:MI') decided_fmt FROM planner.supplier_onboarding_requests r WHERE r.id::text=$1 OR r.ref=$1`, [String(req.params.id)])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    const current = await onbSupplierProfile(r.supplier_id);   // what is approved today, so the reviewer sees the diff
+    const rules = (await onbLoadRules()).filter(x => x.active);
+    const bankMeta = (r.form && r.form.logistics && r.form.logistics.bankDocId) ? ((await pool.query(`SELECT id, filename, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.portal_attachments WHERE id=$1 AND category='onboarding_bank'`, [r.form.logistics.bankDocId])).rows[0] || null) : null;
+    res.set('Cache-Control', 'no-store').json({ ok: true, request: r, current: current ? onbFormFromProfile(current) : null, rules, bank_doc: bankMeta });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Per-section decision. Returning ANY section returns the whole request to the supplier with the note.
+app.post('/api/supply/onb/requests/:id/section', async (req, res) => {
+  const b = req.body || {}; const sec = String(b.section || ''), decision = String(b.decision || ''); const by = authUser(req) || 'admin';
+  if (!ONB_SECTIONS.includes(sec) || !['approved', 'returned', 'pending'].includes(decision)) return res.status(400).json({ error: 'section + decision (approved|returned|pending) required' });
+  try {
+    const r = (await pool.query(`SELECT * FROM planner.supplier_onboarding_requests WHERE id=$1`, [req.params.id])).rows[0]; if (!r) return res.status(404).json({ error: 'not found' });
+    if (['approved', 'rejected'].includes(r.status)) return res.status(409).json({ error: 'request already ' + r.status });
+    const sections = Object.assign({}, r.sections || {}); sections[sec] = decision;
+    let status = r.status, note = r.return_note; const log = onbLogPush(r, sec + ' ' + decision + ' by ' + by, by);
+    if (decision === 'returned') { status = 'returned'; note = (sec.charAt(0).toUpperCase() + sec.slice(1)) + ': ' + String(b.note || '').trim(); log.push({ t: onbNow(), m: 'Returned to supplier: ' + note, by });
+      const contact = (r.form && r.form.contacts || []).find(c => c && c.email) || {}; const to = r.submitted_by || contact.email;
+      if (to) await sendResendEmail({ to, subject: '[Dock & Bay] Your supplier profile needs a correction (' + r.ref + ')', html: '<p>Hello,</p><p>We reviewed your profile and one section needs a change before we can approve it:</p><p><b>' + escHtml(note) + '</b></p><p>Please sign in to the supplier portal, open PROFILE, fix that section and resubmit. Everything else you entered is kept.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by }); }
+    else if (status === 'submitted') status = 'in_review';
+    await pool.query(`UPDATE planner.supplier_onboarding_requests SET sections=$2::jsonb, status=$3, return_note=$4, log=$5::jsonb, updated_at=now() WHERE id=$1`, [r.id, JSON.stringify(sections), status, note, JSON.stringify(log)]);
+    try { portalCacheMarkStale(r.supplier_name); } catch (_) {}
+    res.json({ ok: true, status, sections });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Final approval: every section must be approved. Writes the supplier, contacts, certificates, product submissions,
+// portal logins (+ invites), marks approved and emails the supplier + reviewers.
+app.post('/api/supply/onb/requests/:id/approve', async (req, res) => {
+  const by = authUser(req) || 'admin';
+  const client = await pool.connect();
+  try {
+    const r = (await client.query(`SELECT * FROM planner.supplier_onboarding_requests WHERE id=$1`, [req.params.id])).rows[0]; if (!r) { client.release(); return res.status(404).json({ error: 'not found' }); }
+    if (['approved', 'rejected'].includes(r.status)) { client.release(); return res.status(409).json({ error: 'request already ' + r.status }); }
+    const notOk = ONB_SECTIONS.filter(k => (r.sections || {})[k] !== 'approved'); if (notOk.length) { client.release(); return res.status(400).json({ error: 'Approve every section first: ' + notOk.join(', ') }); }
+    const f = r.form || {}, sid = r.supplier_id, co = f.company || {}, lg = f.logistics || {}, ce = f.certs || {};
+    const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+    await client.query('BEGIN');
+    // Address: the supplier types one free-text block; Horizon keeps a structured address (address_1/2, city, state,
+    // postcode) for tax invoices. Only when the submitted text differs from the structured address joined back
+    // together does it replace it (into address_1, clearing the parts) — an untouched address stays structured.
+    await client.query(`UPDATE planner.suppliers SET
+        address_2 = CASE WHEN nullif(btrim($4::text),'') IS NOT NULL AND btrim($4::text) <> btrim(concat_ws(E'\n', nullif(address_1,''), nullif(address_2,''), nullif(city,''), nullif(state,''), nullif(postcode,''))) THEN NULL ELSE address_2 END,
+        city      = CASE WHEN nullif(btrim($4::text),'') IS NOT NULL AND btrim($4::text) <> btrim(concat_ws(E'\n', nullif(address_1,''), nullif(address_2,''), nullif(city,''), nullif(state,''), nullif(postcode,''))) THEN NULL ELSE city END,
+        state     = CASE WHEN nullif(btrim($4::text),'') IS NOT NULL AND btrim($4::text) <> btrim(concat_ws(E'\n', nullif(address_1,''), nullif(address_2,''), nullif(city,''), nullif(state,''), nullif(postcode,''))) THEN NULL ELSE state END,
+        postcode  = CASE WHEN nullif(btrim($4::text),'') IS NOT NULL AND btrim($4::text) <> btrim(concat_ws(E'\n', nullif(address_1,''), nullif(address_2,''), nullif(city,''), nullif(state,''), nullif(postcode,''))) THEN NULL ELSE postcode END,
+        address_1 = CASE WHEN nullif(btrim($4::text),'') IS NOT NULL AND btrim($4::text) <> btrim(concat_ws(E'\n', nullif(address_1,''), nullif(address_2,''), nullif(city,''), nullif(state,''), nullif(postcode,''))) THEN $4::text ELSE address_1 END
+      WHERE id=$1 AND $2::text IS NOT DISTINCT FROM $2::text AND $3::text IS NOT DISTINCT FROM $3::text`, [sid, co.legal || null, co.country || '', co.address || null]);
+    await client.query(`UPDATE planner.suppliers SET business_name=$2, country=coalesce(nullif($3,''),country), registration_no=$5, vat_id=$6, website=$7, trading_since=$8, employees=$9, capabilities=$10,
+        incoterm=coalesce(nullif($11,''),incoterm), export_port=$12, pickup_address=$13, production_days=coalesce($14,production_days), sample_lead_days=$15, moq=$16, default_currency=coalesce(nullif($17,''),default_currency),
+        payment_terms_text=$18, credit_days=coalesce($19,credit_days), contact_name=coalesce(nullif($20,''),contact_name), email=coalesce(nullif($21,''),email), phone=coalesce(nullif($22,''),phone),
+        bank_doc_attachment_id=coalesce($23,bank_doc_attachment_id), profile_approved_at=now(), updated_at=now() WHERE id=$1`,
+      [sid, co.legal || null, co.country || '', co.address || null, co.reg || null, co.vat || null, co.website || null, co.years || null, co.employees || null, co.products || null,
+       lg.incoterm || '', lg.port || null, lg.pickup || null, num(lg.leadtime) != null ? Math.round(num(lg.leadtime)) : null, num(lg.sampleLead) != null ? Math.round(num(lg.sampleLead)) : null, lg.moq || null, lg.currency || '',
+       lg.terms || null, num(lg.credit) != null ? Math.round(num(lg.credit)) : null, ((f.contacts || [])[0] || {}).name || '', ((f.contacts || [])[0] || {}).email || '', ((f.contacts || [])[0] || {}).phone || '', lg.bankDocId || null]);
+    await client.query(`DELETE FROM planner.supplier_contacts WHERE supplier_id=$1`, [sid]);
+    for (const c of (f.contacts || [])) { if (!c || !c.name) continue; await client.query(`INSERT INTO planner.supplier_contacts (supplier_id, name, role, email, phone, portal_access) VALUES ($1,$2,$3,$4,$5,$6)`, [sid, c.name, c.role || null, (c.email || '').trim().toLowerCase() || null, c.phone || null, !!c.portal]); }
+    await client.query(`DELETE FROM planner.supplier_certificates WHERE supplier_id=$1`, [sid]);
+    for (const k of ['grs', 'bsci', 'oeko', 'iso', 'other']) { if (!ce[k]) continue; await client.query(`INSERT INTO planner.supplier_certificates (supplier_id, kind, reference, valid_to, attachment_id) VALUES ($1,$2,$3,$4,$5)`, [sid, k, ce[k], ce[k + 'Exp'] || null, ce[k + 'DocId'] || null]); }
+    let nProd = 0;
+    for (const p of (f.products || [])) { if (!p || !p.name) continue; nProd++; await client.query(`INSERT INTO planner.supplier_product_submissions (request_id, supplier_id, sku_name, hs_code, materials, units_per_carton, cartons_per_pallet, dims) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
+      [r.id, sid, p.name, p.hs || null, p.materials || null, num(p.pcs) != null ? Math.round(num(p.pcs)) : null, num(p.ppl) != null ? Math.round(num(p.ppl)) : null, JSON.stringify({ prod: p.prod || {}, pack: p.pack || {}, carton: p.carton || {}, pallet: p.pallet || {} })]); }
+    // portal logins for contacts that need them (new emails only) — invite links go out after commit
+    const invites = [];
+    for (const c of (f.contacts || [])) { const em = (c && c.portal && c.email) ? String(c.email).trim().toLowerCase() : ''; if (!em) continue;
+      const ex = (await client.query(`SELECT id FROM planner.supplier_portal_users WHERE lower(email)=$1`, [em])).rows[0];
+      if (!ex) { await client.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name) VALUES ($1,$2,$3,$4)`, [em, sid, r.supplier_name, c.name || null]); const tok = portalToken(); await client.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [tok, em]); invites.push({ email: em, name: c.name || '', url: PORTAL_URL + '?token=' + tok }); } }
+    const log = onbLogPush(r, 'Approved by ' + by + ' · supplier record updated' + (nProd ? ' · ' + nProd + ' product(s) queued for the PIM' : '') + (invites.length ? ' · ' + invites.length + ' portal invite(s) sent' : ''), by);
+    await client.query(`UPDATE planner.supplier_onboarding_requests SET status='approved', decided_by=$2, decided_at=now(), log=$3::jsonb, updated_at=now() WHERE id=$1`, [r.id, by, JSON.stringify(log)]);
+    await client.query('COMMIT'); client.release();
+    for (const inv of invites) await sendResendEmail({ to: inv.email, subject: 'Your Dock & Bay supplier portal access', html: '<p>Hello ' + escHtml(inv.name) + ',</p><p>You now have access to the Dock & Bay supplier portal for ' + escHtml(r.supplier_name) + '. Use this link to sign in (valid 7 days; you can request a new one from the portal afterwards):</p><p><a href="' + inv.url + '">' + inv.url + '</a></p>', kind: 'portal-invite', ref: r.ref, by });
+    const contact = (f.contacts || []).find(c => c && c.email) || {}; const supTo = r.submitted_by || contact.email;
+    if (supTo) await sendResendEmail({ to: supTo, subject: '[Dock & Bay] Your supplier profile is approved (' + r.ref + ')', html: '<p>Hello,</p><p>Your ' + (r.type === 'change' ? 'profile changes are' : 'supplier profile is') + ' approved and now live in Horizon.' + (nProd ? ' Your ' + nProd + ' product entries are with our product team.' : '') + ' You can update your profile at any time from the portal; changes go through the same review.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by });
+    await onbNotifyTeam('[Horizon] ' + r.ref + ' approved · ' + escHtml(r.supplier_name), '<p>' + escHtml(by) + ' approved ' + r.ref + ' (' + escHtml(r.supplier_name) + '). Supplier record updated' + (nProd ? ', ' + nProd + ' product submission(s) pending in the PIM queue' : '') + '.</p>', r.ref);
+    try { invalidateSupplyCaches(); } catch (_) {}
+    res.json({ ok: true, invites: invites.length, products_queued: nProd });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/onb/requests/:id/reject', async (req, res) => {
+  const by = authUser(req) || 'admin'; const note = String((req.body || {}).note || '').trim();
+  try {
+    const r = (await pool.query(`SELECT * FROM planner.supplier_onboarding_requests WHERE id=$1`, [req.params.id])).rows[0]; if (!r) return res.status(404).json({ error: 'not found' });
+    if (['approved', 'rejected'].includes(r.status)) return res.status(409).json({ error: 'request already ' + r.status });
+    const log = onbLogPush(r, 'Rejected by ' + by + (note ? ': ' + note : ''), by);
+    await pool.query(`UPDATE planner.supplier_onboarding_requests SET status='rejected', return_note=$2, decided_by=$3, decided_at=now(), log=$4::jsonb, updated_at=now() WHERE id=$1`, [r.id, note || null, by, JSON.stringify(log)]);
+    const contact = (r.form && r.form.contacts || []).find(c => c && c.email) || {}; const to = r.submitted_by || contact.email;
+    if (to) await sendResendEmail({ to, subject: '[Dock & Bay] Supplier profile request declined (' + r.ref + ')', html: '<p>Hello,</p><p>Your request ' + r.ref + ' was declined.' + (note ? ' Reason: <b>' + escHtml(note) + '</b>' : '') + '</p><p>You can start a new submission from the portal at any time.</p>', kind: 'onboarding', ref: r.ref, by });
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Bank letters: admins only (Finance). Reviewers see that a file exists; only this route serves it.
+app.get('/api/supply/onb/bank-doc/:id', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).send('Finance / admin only');
+    const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1 AND category='onboarding_bank'`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).send('not found');
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+  } catch (e) { log500(e); res.status(500).send('error'); }
+});
+// Warehouse requirements table (CONFIG ▸ Warehouse rules). POST replaces the whole list (small table; keeps ids where given).
+app.get('/api/supply/onb/rules', async (_req, res) => { try { const rules = await onbLoadRules(); res.set('Cache-Control', 'no-store').json({ rules, version: onbRulesVersion(rules) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/onb/rules', async (req, res) => {
+  const rows = Array.isArray(req.body && req.body.rules) ? req.body.rules : null; if (!rows) return res.status(400).json({ error: 'rules[] required' });
+  const by = authUser(req) || 'admin'; const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const keep = [];
+    for (let i = 0; i < rows.length; i++) { const w = rows[i] || {}; const title = String(w.title || '').trim(); if (!title) continue; const wh = ['All', 'UK', 'US', 'EU', 'AU'].includes(w.warehouse) ? w.warehouse : 'All';
+      if (w.id) { const ex = (await client.query(`SELECT title, coalesce(detail,'') detail, warehouse, active, sort FROM planner.warehouse_requirements WHERE id=$1`, [w.id])).rows[0];
+        if (ex) { const changed = ex.title !== title || ex.detail !== String(w.detail || '') || ex.warehouse !== wh || ex.active !== !!w.active;
+          await client.query(`UPDATE planner.warehouse_requirements SET title=$2, detail=$3, warehouse=$4, active=$5, sort=$6` + (changed ? `, updated_at=now(), updated_by=$7` : ``) + ` WHERE id=$1`, changed ? [w.id, title, w.detail || null, wh, !!w.active, i + 1, by] : [w.id, title, w.detail || null, wh, !!w.active, i + 1]);
+          keep.push(Number(w.id)); continue; } }
+      const ins = await client.query(`INSERT INTO planner.warehouse_requirements (title, detail, warehouse, active, sort, updated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [title, w.detail || null, wh, w.active !== false, i + 1, by]); keep.push(Number(ins.rows[0].id)); }
+    await client.query(`DELETE FROM planner.warehouse_requirements WHERE NOT (id = ANY($1::bigint[]))`, [keep]);
+    await client.query('COMMIT'); client.release();
+    const rules = await onbLoadRules(); try { portalCacheMarkStale(); } catch (_) {}
+    res.json({ ok: true, rules, version: onbRulesVersion(rules) });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/onb/rules.pdf', async (req, res) => {
+  try { const rules = (await onbLoadRules()).filter(r => r.active); const pdf = await onbRulesPdf(rules, onbRulesVersion(rules), String(req.query.supplier || ''), null);
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'inline; filename="warehouse-requirements.pdf"'); res.send(pdf); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Pending PIM product submissions (CONFIG ▸ Onboarding ▸ PIM queue): list + mark applied/rejected
+app.get('/api/supply/onb/products', async (_req, res) => { try { res.set('Cache-Control', 'no-store').json({ rows: (await pool.query(`SELECT s.*, to_char(s.created_at,'YYYY-MM-DD') created_fmt, r.ref FROM planner.supplier_product_submissions s LEFT JOIN planner.supplier_onboarding_requests r ON r.id=s.request_id ORDER BY (s.status='pending') DESC, s.created_at DESC LIMIT 500`)).rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/onb/products/:id/status', async (req, res) => { const st = String((req.body || {}).status || ''); if (!['pending', 'applied', 'rejected'].includes(st)) return res.status(400).json({ error: 'status' }); try { await pool.query(`UPDATE planner.supplier_product_submissions SET status=$2, applied_at=CASE WHEN $2='pending' THEN NULL ELSE now() END, applied_by=$3 WHERE id=$1`, [req.params.id, st, authUser(req) || 'admin']); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+
 // Full _ppData payload in the EXACT shape the shared portal renderer expects, scoped to the session's
 // supplier(s). The PO rows reuse the admin purchase-orders calc verbatim (so figures are identical),
 // with a supplier filter; everything else is filtered to those POs / supplier ids.
