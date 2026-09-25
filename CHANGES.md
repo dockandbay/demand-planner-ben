@@ -1,3 +1,7 @@
+## v28.000 (Ben, 26-Sep-2026): version rebaseline
+
+Prod is live on **v27.905** (Diviyaj deployed the v27.886–905 batch, migrations 301 + 302 applied, 303 already present). Numbering restarts at **v28.000**; this commit is the bump only. **Still pending deploy on top of 905: v27.906** (3PL cross-month duplicate-charge exception box) — it rides in the first v28 batch.
+
 ## v27.906 deploy note (Ben): 3PL invoice analysis flags DUPLICATE CHARGES ACROSS MONTHS (Geneva Jul/Aug credit memo)
 
 **Files: `server.mjs`, `artifact_v16.7.html`.** Geneva's audit found parcels from one day billed in both the July and the August invoice and issued a credit memo. Verified against the files uploaded on LIVE (read-only copies of files 36 and 57): **41 order IDs appear in both the "JULY - Small Parcel" and "AUGUST - Small Parcel" sheets**, carrier amount **$444.19 on the August invoice** (the same refs carried $469.04 in July), ship dates 23–29 Jul 2026.
