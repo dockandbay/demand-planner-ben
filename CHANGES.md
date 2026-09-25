@@ -1,3 +1,7 @@
+## v27.902 deploy note (Ben): Fulfil mirrors prune what the source no longer has
+
+**File: `server.mjs`.** Ben: "fully update purchase order and internal shipment records from Fulfil." The mirror imports were upsert-only, so rows Fulfil no longer returns lingered (sandbox: 62 UAT-I-… POs from a run against the Fulfil sandbox tenant on 23-Sep). Both imports now delete mirror rows absent from a full fetch, guarded so a failed or partial fetch can never empty the mirror (only when the run imported ≥ 20 rows). The cron response reports `pruned` for each.
+
 ## v27.901 deploy note (Ben): FBA in-flight from Fulfil internal shipments (quantities were 4× over-counted) + Fulfil INTERNAL SHIPMENT mirror (migration 302)
 
 **Files: `migrations/302_fulfil_internal_shipments_mirror.sql`, `server.mjs`.** Restart. **Migration 302 required** (one new table, additive).

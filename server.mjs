@@ -2925,7 +2925,10 @@ async function fulfilImportPOs() {
     lr.forEach(l => { (byPo[l.purchase] = byPo[l.purchase] || []).push(_fulfilLineMap(l)); });
   }
   let n = 0; for (const p of list) { if (!p.reference) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
-  return { ok: true, imported: n, env: cfg.env };
+  // v27.902 (Ben): a full refresh also PRUNES rows the source no longer has (cancelled-and-purged POs, or rows imported from
+  // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
+  let pruned = 0; if (n >= 20) { const keep = list.filter(p => p.reference).map(p => String(p.reference)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
+  return { ok: true, imported: n, pruned, env: cfg.env };
 }
 // v27.901 (Ben): mirror of Fulfil INTERNAL SHIPMENTS (mig 302) — sister of the PO mirror, refreshed by the same cron.
 // Lines come from the INCOMING moves only (an IS has 4 legs of moves per SKU; summing all of them quadruples qty).
@@ -2952,7 +2955,8 @@ async function fulfilImportInternalShipments() {
       [s.id, s.number, s.reference || null, s.state || null, fulfilUnwrap(s.planned_date) || null, fulfilUnwrap(s.effective_date) || null, s['from_location.name'] || null, s['to_location.name'] || null, s.company || null, lines.length, JSON.stringify(lines), fulfilUnwrap(s.create_date) || null, fulfilUnwrap(s.write_date) || null]);
     n++;
   }
-  return { ok: true, internal_shipments: n, env: cfg.env };
+  let pruned = 0; if (n >= 20) { pruned = (await pool.query(`DELETE FROM planner.fulfil_internal_shipments WHERE NOT (fulfil_id = ANY($1::bigint[]))`, [list.map(x => Number(x.id))])).rowCount; }   // v27.902: prune rows the source no longer has (guarded)
+  return { ok: true, internal_shipments: n, pruned, env: cfg.env };
 }
 // Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
 app.post('/api/supply/fulfil/import-pos', async (req, res) => {
