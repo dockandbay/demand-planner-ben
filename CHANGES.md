@@ -1,3 +1,9 @@
+## v27.896 deploy note (Ben): spell-check / autocorrect on the PRODUCT sample feedback + timeline boxes
+
+**Files: `supply/inject.html`, `supply/portal-view.js`.** Ben: "on timeline and sample feedback input boxes in product, team explicitly want auto correct on spelling mistakes". The PRODUCT timeline composer (`#pt-in`) already had `spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB"`; the same attributes are now on the sample feedback Colour / Quality boxes (`.smp-fb-*`, both the MANAGE panel and the inline review), the photography-notes boxes, the PO / shipment timeline composers, and the portal's sample / product / timeline comment boxes.
+
+**Browser reality:** Chrome and Edge on desktop underline misspellings and offer corrections on right-click (plus "Enhanced spell check" in Chrome settings for more languages); they do not silently replace words. Automatic replacement while typing only happens on macOS Safari and iOS / Android keyboards, which these attributes now enable. Nothing in-app can force desktop Chrome to auto-replace.
+
 ## v27.895 deploy note (Ben): SUPPLIER ONBOARDING — portal PROFILE with an approval gate (migration 301)
 
 **Files: `migrations/301_supplier_onboarding.sql`, `server.mjs`, `supply/portal.html`, `supply/portal-view.js`, `supply/inject.html`.** Server + artifact-free; restart. **Migration 301 required** (additive: 5 new tables, 12 columns on `planner.suppliers`, seeds 7 warehouse rules). No new env vars; reviewer emails are set in the app (below).
