@@ -1,3 +1,10 @@
+## v27.897 deploy note (Ben): in-app AUTOCORRECT (desktop Chrome) for the timeline + sample feedback boxes
+
+**File: `supply/inject.html`.** Ben: build autocorrect into Chrome usage of the app for the product team. Desktop Chrome never replaces words on its own, so Horizon now does it: a ~440-entry dictionary of common English misspellings plus the team's own vocabulary (sampel → sample, recieved → received, Pantone, microfibre, embroidery, shipment, quantity, packaging, feedback, approved …) is applied the moment a word is finished (space, punctuation or Enter) in every `<textarea autocorrect="on">` — the PRODUCT timeline composer, sample feedback Colour / Quality boxes, photography notes, PO and shipment note composers.
+- Corrections go through `execCommand('insertText')`, so **Cmd/Ctrl+Z reverts** them natively; **Backspace immediately after** a correction also reverts it and leaves that word alone; a small "✓ sampel → sample · undo · turn autocorrect off" hint shows under the box for 3.5s.
+- Skipped on purpose: words after `/`, `#`, `@` (slash phrases, tags), anything with digits or SKU-like all-caps codes, ALL-CAPS words, single letters. First-letter capitalisation is kept. Real words that happen to be in typo lists (tot, cartoon, palette…) were removed from the dictionary.
+- Per-user off switch: the hint's link (localStorage `hzAutocorrect='0'`); `window.hzAutocorrectOn(true)` re-enables. Portal side unchanged (suppliers keep the browser's own behaviour).
+
 ## v27.896 deploy note (Ben): spell-check / autocorrect on the PRODUCT sample feedback + timeline boxes
 
 **Files: `supply/inject.html`, `supply/portal-view.js`.** Ben: "on timeline and sample feedback input boxes in product, team explicitly want auto correct on spelling mistakes". The PRODUCT timeline composer (`#pt-in`) already had `spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB"`; the same attributes are now on the sample feedback Colour / Quality boxes (`.smp-fb-*`, both the MANAGE panel and the inline review), the photography-notes boxes, the PO / shipment timeline composers, and the portal's sample / product / timeline comment boxes.
