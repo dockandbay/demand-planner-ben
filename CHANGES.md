@@ -1,3 +1,11 @@
+## v27.893 deploy note (Ben): ORDER PLAN ▸ product Status column (coloured)
+
+**Files: `server.mjs`, `supply/inject.html`.** No migrations. Ben: BAGF-CAB-MD-POSPIN is CLOSED on live but the Order Plan gave no hint — add a status column with colours.
+
+- `/api/supply/skus` (the Order Plan SKU master feed, `case 'skus'`) now returns `status` = `upper(products.status)`.
+- Order Plan pivot: new frozen **Status** column after Discontinue (66px; frozen width 430 → 496; group rows colspan 5 → 6). Pill colours: **ACTIVE** green · **LAST SEASON** orange · **PHASE OUT** light blue · **CLOSED** red · anything else (NO LISTING / NON STOCKED / blank) grey with the raw value.
+- **Diviyaj:** `ORDER_PLAN_SELECT` is untouched (his prod version stays); only the small `skus` lookup query gained one column.
+
 ## v27.892 deploy note (Ben): expired sign-in now forces a sign-out
 
 **File: `supply/inject.html`.** No server change. Ben (25-Sep): Zera got a raw "Failed: unauthorised" popup changing PO-57USLX6 to SHIPPING; her session had expired (permissions were fine; signing out and back in fixed it). Rule: an expired sign-in must force the user out, not fail a click.

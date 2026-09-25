@@ -4780,7 +4780,7 @@
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
-      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
+      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||'',st:s.status||''};});   // v27.893: st = product lifecycle status
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     // Backfill missing carton qty from the PO lines — the products master (/api/supply/skus) is sparse (~45%) but the
     // order-plan lines carry carton_qty for ~99% of rows, so the "Cartons" view had no divisor for most SKUs and looked
@@ -5138,7 +5138,11 @@
     var pstat={}; pos.forEach(function(po){var u=0,pl=0,ct=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq; var _cq=Number((skuAttr[sku]||{}).cq)||0; if(_cq>0)ct+=cc.q/_cq;}}); pstat[po]={u:u,pl:pl,ct:ct};});
     var POW='112px';
     // frozen label columns after SKU (cumulative left offsets): SKU · Release · Carton · Supplier · Discontinue
-    var FW={sku:200,cq:34,rw:40,sup:86,dis:70}, FL={sku:0,cq:200,rw:234,sup:274,dis:360}, FROZEN=430;   // Carton is column 2 (sticky), right after SKU; Release follows
+    var FW={sku:200,cq:34,rw:40,sup:86,dis:70,st:66}, FL={sku:0,cq:200,rw:234,sup:274,dis:360,st:430}, FROZEN=496;   // Carton is column 2 (sticky), right after SKU; Release follows. v27.893: Status (product lifecycle) after Discontinue
+    // v27.893 (Ben): product lifecycle status pill — Active green · Last season orange · Phase out light blue · Closed red; anything else (No listing / Non stocked / blank) grey.
+    function opStatusPill(st){ st=String(st||'').toUpperCase().trim(); if(!st)return '';
+      var P={'ACTIVE':['#dcfce7','#166534','Active'],'LAST SEASON':['#ffedd5','#9a3412','Last season'],'PHASE OUT':['#dbeafe','#1d4ed8','Phase out'],'CLOSED':['#fee2e2','#b91c1c','Closed']}[st]||['#f3f4f6','#4b5563',st.charAt(0)+st.slice(1).toLowerCase()];
+      return '<span title="Product status: '+esc(st)+'" style="display:inline-block;background:'+P[0]+';color:'+P[1]+';border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap">'+esc(P[2])+'</span>'; }
     function fzc(col,bg,z){ return 'position:sticky;left:'+FL[col]+'px;background:'+bg+';z-index:'+z+';min-width:'+FW[col]+'px;width:'+FW[col]+'px;white-space:nowrap'; }
     var fzh='white-space:normal;line-height:1.05;vertical-align:bottom;padding:4px 4px';   // attribute header: let the label wrap so the column can be narrow
     // column-1 header mirrors the PO-column line structure so the Prod/Ship/Arrive labels sit once
@@ -5153,7 +5157,8 @@
       +'<th class="l" style="'+fzc('cq','#f3f3f1',5)+';'+fzh+';text-align:right">Carton</th>'
       +'<th class="l" style="'+fzc('rw','#f3f3f1',5)+';'+fzh+'">Release</th>'
       +'<th class="l" style="'+fzc('sup','#f3f3f1',5)+';'+fzh+'" title="allowed suppliers for the SKU (supplier_multiple_all)">Suppliers</th>'
-      +'<th class="l" style="'+fzc('dis','#f3f3f1',5)+';'+fzh+'">Discontinue</th>';
+      +'<th class="l" style="'+fzc('dis','#f3f3f1',5)+';'+fzh+'">Discontinue</th>'
+      +'<th class="l" style="'+fzc('st','#f3f3f1',5)+';'+fzh+'" title="product lifecycle status (products.status)">Status</th>';
     pos.forEach(function(po){var m=meta[po],ps=pstat[po];
       h+='<th style="min-width:'+POW+';width:'+POW+'">'+(m&&m.co?mktBadge(m.co)+' ':'')+'<button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open '+esc(po)+' in a drawer"><b style="font-size:10px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
         +(m&&m.st?'<br><span class="tiny mut" style="'+sp+'">'+esc(m.st)+'</span>':'')
@@ -5176,7 +5181,7 @@
     var sorted=skuList.slice().sort(function(a,b){var ca=skuCat[a]||'~~',cb=skuCat[b]||'~~'; return ca<cb?-1:ca>cb?1:(a<b?-1:1);});
     var ncol=pos.length+6, curCat=null;   // 5 frozen label cols + PO cols + SKU TOTAL
     sorted.forEach(function(sku){ var cat=skuCat[sku]||'(uncategorised)';
-      if(cat!==curCat){ curCat=cat; h+='<tr class="cat-hdr"><td colspan="5" style="position:sticky;left:0;z-index:4;min-width:'+FROZEN+'px;background:var(--band)">'+esc(cat)+'</td><td colspan="'+(ncol-5)+'"></td></tr>'; }
+      if(cat!==curCat){ curCat=cat; h+='<tr class="cat-hdr"><td colspan="6" style="position:sticky;left:0;z-index:4;min-width:'+FROZEN+'px;background:var(--band)">'+esc(cat)+'</td><td colspan="'+(ncol-5)+'"></td></tr>'; }
       var a=skuAttr[sku]||{}, tot=0,tds='';
       var discPast=datePast(a.dis), rowBg=discPast?'#fef2f2':'#fff';   // discontinue date already in the past → tint the whole row light red
       pos.forEach(function(po){var cc=cell[po+'|'+sku],q=cc?cc.q:0,eq=cc?cc.eq:0,fcc=cc?cc.fcc:''; tot+=q;
@@ -5210,9 +5215,10 @@
         +'<td class="l" style="'+fzc('rw',rowBg,2)+'"><span class="tiny">'+esc(skuRW[sku]||'')+'</span></td>'
         +'<td class="l" style="'+fzc('sup',rowBg,2)+';overflow:hidden;text-overflow:ellipsis" title="allowed suppliers (supplier_multiple_all): '+esc(a.sm||'—')+(a.sup?' · main: '+esc(a.sup):'')+'"><span class="tiny">'+esc(a.sm||a.sup||'')+'</span></td>'
         +'<td class="l" style="'+fzc('dis',discPast?'#fecaca':rowBg,2)+(discPast?';color:var(--neg);font-weight:700':'')+'" title="'+(discPast?'discontinue date is in the past':'')+'"><span class="tiny'+(discPast?'':' mut')+'">'+(a.dis?fd(a.dis):'')+'</span></td>'
+        +'<td class="l" style="'+fzc('st',rowBg,2)+'">'+opStatusPill(a.st)+'</td>'
         +tds+'<td style="text-align:center'+(discPast?';background:'+rowBg:'')+'"><b>'+(cartons?(function(){var cv=_cartonsOf(tot,a.cq);return cv!=null?cv:units(tot)+'u';})():units(tot))+'</b></td></tr>'; });
     var gu=0,gv=0,gpl=0,gct=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,ct=pstat[po].ct,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl;gct+=ct; ptd+='<td style="text-align:center"><b>'+(cartons?_fC(ct):units(u))+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
-    h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:var(--violet-bg);z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · '+(cartons?'cartons':'units')+' / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+(cartons?_fC(gct):units(gu))+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
+    h+='<tr class="batchrow"><td class="l" colspan="6" style="position:sticky;left:0;background:var(--violet-bg);z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · '+(cartons?'cartons':'units')+' / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+(cartons?_fC(gct):units(gu))+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
     return h+'</tbody></table></div>'
       ; }   // (Load more / Show all live in the top toolbar count line, always visible — not down here off-screen)
 

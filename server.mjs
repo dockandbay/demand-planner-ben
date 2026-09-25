@@ -5111,6 +5111,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           coalesce(p.size_short,'') size, coalesce(p.size_long,'') size_long, coalesce(p.colour_long,'') colour_long,
           p.main_supplier_final supplier, p.supplier_multiple_all,
           nullif(p.carton_qty,'') carton_qty,
+          upper(coalesce(p.status,'')) status,   -- v27.893 (Ben): product lifecycle status → ORDER PLAN "Status" column (ACTIVE / LAST SEASON / PHASE OUT / CLOSED …)
           nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca
           FROM planner.v_sku_attrs s LEFT JOIN planner.products p ON p.sku = s.sku
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
