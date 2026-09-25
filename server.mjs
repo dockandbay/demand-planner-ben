@@ -2807,10 +2807,11 @@ async function fulfilPushLines(po, completion) {
   const missingSkus = lines.map(l => l.sku).filter(s => !(String(s) in prodMap));
 
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
+  const _comp = (await fulfilCompletionMap())[po] || null;   // v27.900 (Ben): completion date is the Fulfil date target
   const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
     country_code: poRow.country_code || null, company_id: fulfilCompanyForCountry(poRow.country_code), company: fulfilCompanyName(fulfilCompanyForCountry(poRow.country_code)),
     branch: finalDestination, final_destination: finalDestination, final_destination_metafield: fdDef ? 'defined' : 'MISSING', final_destination_comment: fulfilFinalDestComment(finalDestination),
-    incoterm: 'FOB', requested_shipping_date: poRow.prod_end || null, requested_delivery_date: poRow.est_delivery || null,
+    incoterm: 'FOB', requested_shipping_date: poRow.prod_end || null, requested_delivery_date: _comp || poRow.est_delivery || null,
     credit_days: (supRow.credit_days == null ? null : Number(supRow.credit_days)), payment_term: paymentTermName, payment_term_id: paymentTermId,   // v27.840 (Ben)
     warehouse_id: warehouseId, warehouse_source: warehouseId ? ('china-port(' + FULFIL_MAP.chinaPortCode + ')') : 'unresolved',
     invoice_address_id: existingAddr, invoice_address_source: existingAddr ? 'fulfil-party' : (partyId ? 'will-create-from-horizon' : 'no-party'),
@@ -2829,7 +2830,7 @@ async function fulfilPushLines(po, completion) {
     [FULFIL_MAP.line.unit]: pm.uom || 1,
     [FULFIL_MAP.line.qty]: Number(l.qty) || 0,
     [FULFIL_MAP.line.price]: l.price == null ? '0' : String(Math.round(Number(l.price) * 10000) / 10000),   // v27.736: unit_price required (0 if none) · v27.764: send as a clean decimal STRING rounded to 4dp — a JSON float (e.g. 3.92) is parsed by Fulfil as full-precision Decimal and rejected (digits limit)
-    [FULFIL_MAP.line.deliveryDate]: poRow.est_delivery || (completion ? String(completion).slice(0, 10) : null),   // v27.764: line delivery = est delivery-to-warehouse
+    [FULFIL_MAP.line.deliveryDate]: _comp || poRow.est_delivery || (completion ? String(completion).slice(0, 10) : null),   // v27.764: line delivery = est delivery-to-warehouse
   }; });
   const headerPayload = {
     [FULFIL_MAP.ref]: po, [FULFIL_MAP.party]: partyId, [FULFIL_MAP.company]: fulfilCompanyForCountry(poRow.country_code),   // v27.778 (Ben): AU ship-to → company 3 (Dock & Bay Pty Ltd), else company 1 (Dock & Bay Ltd). Immutable after create.
@@ -2837,7 +2838,7 @@ async function fulfilPushLines(po, completion) {
     [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination),   // v27.760: final destination in the comment too (metafield stays authoritative)
     [FULFIL_MAP.incoterm]: 'FOB',                                     // v27.764 (Ben): always FOB
     [FULFIL_MAP.reqShipDate]: poRow.prod_end || null,                // v27.764: production end date
-    [FULFIL_MAP.reqDelivDate]: poRow.est_delivery || null,           // v27.764: estimated delivery-to-warehouse (ERP date-sync field)
+    [FULFIL_MAP.reqDelivDate]: _comp || poRow.est_delivery || null,           // v27.764: estimated delivery-to-warehouse (ERP date-sync field)
     [FULFIL_MAP.paymentTerm]: paymentTermId || null,                 // v27.840 (Ben): supplier credit days → Net 90/60/30 else Immediate
     [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
@@ -2973,7 +2974,8 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
       LEFT JOIN planner.branches b ON b.name=po.branch
       LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
-    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_id: r.fulfil_id, fulfil_url: _gsUrl(r.fulfil_id), fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
+    const _chk = await fulfilCompletionMap();   // v27.900 (Ben): the Fulfil date target is the COMPLETION date
+    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_id: r.fulfil_id, fulfil_url: _gsUrl(r.fulfil_id), fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: _chk[r.po] || r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -3049,12 +3051,16 @@ async function fulfilShipmentRecs(idList) {   // idList = PO numbers OR shipment
     FROM unnest($1::text[]) q(id)
     LEFT JOIN planner.purchase_orders po ON po.po=q.id OR nullif(po.shipment_ref,'')=q.id OR nullif(po.master_po,'')=q.id
     LEFT JOIN planner.flexport_shipments f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po`, [idList])).rows;
-  const ctx = {};   // id → { ship_ref, landing, cands:Set }
-  idList.forEach(id => { ctx[id] = { ship_ref: id, landing: null, cands: new Set([id]) }; });
+  const ctx = {};   // id → { ship_ref, landing, completion, cands:Set }
+  idList.forEach(id => { ctx[id] = { ship_ref: id, landing: null, completion: null, cands: new Set([id]) }; });
+  // v27.900 (Ben): the date pushed to the internal shipment's Planned Receiving is Horizon's COMPLETION date (the PO grid's
+  // "Completion" = goods received at the warehouse), not the Flexport landing date. Completion comes from the cached PO
+  // rows (checkin); the master PO of the shipment wins, then any PO aboard; Flexport landing is only the fallback.
+  const _chk = {}; try { (await poRowsCache.get()).forEach(r => { if (r && r.po && r.checkin) _chk[r.po] = String(r.checkin).slice(0, 10); }); } catch (_) {}
   hz.forEach(r => { const c = ctx[r.id]; if (!c) return;
     if (r.ship_ref) { c.ship_ref = r.ship_ref; c.cands.add(String(r.ship_ref)); }
-    if (r.po) c.cands.add(String(r.po));
-    if (r.master_po) c.cands.add(String(r.master_po));
+    if (r.po) { c.cands.add(String(r.po)); if (!c.completion && _chk[r.po]) c.completion = _chk[r.po]; }
+    if (r.master_po) { c.cands.add(String(r.master_po)); if (_chk[r.master_po]) c.completion = _chk[r.master_po]; }
     if (r.flex_name) c.cands.add(String(r.flex_name));
     if (r.landing && !c.landing) c.landing = r.landing;
   });
@@ -3066,7 +3072,7 @@ async function fulfilShipmentRecs(idList) {   // idList = PO numbers OR shipment
     const c = ctx[id];
     let hit = null; for (const k of c.cands) { if (byKey[k]) { hit = byKey[k]; break; } }
     if (!hit) { out[id] = { configured: true, linked: false, ship_ref: c.ship_ref }; return; }
-    const hzDate = c.landing || null;
+    const hzDate = c.completion || c.landing || null;   // v27.900: completion date first (see above)
     out[id] = {
       configured: true, linked: true, ship_ref: c.ship_ref, is_number: hit.number, is_id: hit.id, state: hit.state,
       // v27.888 (Ben): deep link to the Fulfil internal-shipment record (…/v2/erp/model/internal_shipment/<id>).
@@ -3078,6 +3084,55 @@ async function fulfilShipmentRecs(idList) {   // idList = PO numbers OR shipment
   });
   return { env: cfg.env, configured: true, shipments: out };
 }
+// ── v27.900 (Ben): ONE Fulfil date target = Horizon's COMPLETION date (PO grid "Completion" = checkin). Used by the IS
+//    badge, the Fulfil column's date-only push, the lines-push header, the drift check and the Sync Fulfil Dates dialog.
+async function fulfilCompletionMap() { const m = {}; try { (await poRowsCache.get()).forEach(r => { if (r && r.po && r.checkin) m[r.po] = String(r.checkin).slice(0, 10); }); } catch (_) {} return m; }
+// The dialog's rows: every active PO / shipment. A shipment with a Fulfil internal shipment (IS) → one row for the IS
+// (planned receiving date, master PO's completion); a PO with no IS → its own row (requested delivery on the Fulfil PO).
+async function fulfilDateSyncPreview() {
+  const rows = (await poRowsCache.get()).filter(r => ['PRODUCTION', 'READY TO SHIP', 'SHIPPING'].includes(String(r.status || '').toUpperCase()));
+  const chk = {}; rows.forEach(r => { if (r.checkin) chk[r.po] = String(r.checkin).slice(0, 10); });
+  const shipRefs = [...new Set(rows.map(r => r.shipment).filter(Boolean))];
+  const masterOf = {}; rows.forEach(r => { if (!r.shipment) return; if (r.is_master || r.po === r.shipment) masterOf[r.shipment] = r.po; else if (!masterOf[r.shipment] && r.ships_with_master_po) masterOf[r.shipment] = r.ships_with_master_po; });
+  const recs = shipRefs.length ? (await fulfilShipmentRecs(shipRefs)).shipments || {} : {};
+  const mirror = {}; (await pool.query(`SELECT po, to_char(requested_delivery_date,'YYYY-MM-DD') d FROM planner.fulfil_purchase_orders`)).rows.forEach(m => { mirror[m.po] = m; });
+  const items = [], covered = new Set();
+  shipRefs.forEach(ref => { const rec = recs[ref]; if (!rec || !rec.linked) return; const mpo = masterOf[ref] || ref; const next = chk[mpo] || chk[ref] || null;
+    items.push({ kind: 'IS', ref: rec.is_number, is_id: rec.is_id, shipment: ref, master_po: mpo, current: rec.planned_date || null, in_fulfil: true, next, changed: !!(next && next !== rec.planned_date) });
+    rows.forEach(r => { if (r.shipment === ref) covered.add(r.po); }); });
+  rows.forEach(r => { if (covered.has(r.po)) return; const m = mirror[r.po]; const next = chk[r.po] || null;
+    items.push({ kind: 'PO', ref: r.po, master_po: r.master_po || '', current: m ? m.d : null, in_fulfil: !!m, next, changed: !!(m && next && next !== m.d) }); });
+  items.sort((a, b) => (Number(b.changed) - Number(a.changed)) || (a.kind === b.kind ? 0 : (a.kind === 'IS' ? -1 : 1)) || String(a.ref).localeCompare(String(b.ref)));
+  return items;
+}
+app.get('/api/supply/fulfil/date-sync-preview', async (_req, res) => {
+  try { const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, env: cfg.env, live_writes: cfg.env !== 'live' || String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() === 'true', items: await fulfilDateSyncPreview() });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
+  const items = Array.isArray(req.body && req.body.items) ? req.body.items : []; if (!items.length) return res.status(400).json({ error: 'items[] required' });
+  try {
+    const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: items.length });
+    const by = authUser(req) || 'admin'; const results = [];
+    for (const it of items) {
+      const date = String(it.date || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { results.push({ ref: it.ref, ok: false, error: 'no date' }); continue; }
+      try {
+        if (it.kind === 'IS' && it.is_id) { await fulfilFetch('PUT', '/model/stock.shipment.internal/' + Number(it.is_id), { planned_date: date }); results.push({ ref: it.ref, ok: true }); try { logPoChange(it.master_po || it.ref, 'Uploaded to ERP', 'IS ' + it.ref + ' planned receiving → ' + date + ' (Fulfil)', by); } catch (_) {} }
+        else if (it.kind === 'PO' && it.ref) {
+          const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', String(it.ref)]], 0, 1, null, ['id']]);
+          if (!rows.length) { results.push({ ref: it.ref, ok: false, error: 'not in Fulfil' }); continue; }
+          await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date });
+          await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, updated_at=now() WHERE po=$1', [it.ref, date]);
+          results.push({ ref: it.ref, ok: true }); try { logPoChange(it.ref, 'Uploaded to ERP', 'requested delivery → ' + date + ' (Fulfil)', by); } catch (_) {} }
+        else results.push({ ref: it.ref, ok: false, error: 'unknown item' });
+      } catch (e) { results.push({ ref: it.ref, ok: false, error: String(e.message || e).slice(0, 160) }); }
+    }
+    try { invalidateSupplyCaches(); } catch (_) {}
+    res.json({ ok: true, updated: results.filter(r => r.ok).length, results });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/fulfil/internal-shipments', async (req, res) => {   // batch read for the grid / shipment record / master data
   try {
     const pos = String(req.query.pos || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 300);

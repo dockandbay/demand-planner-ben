@@ -2794,23 +2794,26 @@
           invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');
           alert(msg); })
         .catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Cin7 sync failed: '+(e.message||e)); }); };
-    // v27.796 (Ben): Sync Fulfil Dates — the Fulfil equivalent. Every ACTIVE PO whose Fulfil requested-delivery date
-    // differs (≥3 days) from the planner delivery-to-warehouse date → push the planner date to Fulfil. Silent refresh.
-    var fdb=document.getElementById('po-fulfil-dates'); if(fdb)fdb.onclick=function(){ var btn=this; var st=window._erpGridStatus||{};
-      var cand=Object.keys(st).map(function(po){ var s=st[po], r=poBy[po]||{}; if(!s||!s.in_fulfil||!s.fulfil_req_delivery)return null; if(poComplete(r))return null;
-        var hz=s.push_req_delivery||r.delivery||r.checkin||''; if(!hz)return null; var da=Date.parse(String(s.fulfil_req_delivery).slice(0,10)), db=Date.parse(String(hz).slice(0,10));   /* v27.836 (Ben): sync writes the exact push date (est_delivery), so a sync + a push agree — no flip-flop */
-        if(isNaN(da)||isNaN(db)||Math.abs(da-db)/86400000<3)return null; return {po:po, date:String(hz).slice(0,10)}; }).filter(Boolean);
-      if(!cand.length){ alert('No active POs have a Fulfil delivery-date mismatch — nothing to sync.\n\n(If the Fulfil column hasn’t loaded yet, wait a moment and try again.)'); return; }
-      if(!confirm('Update '+cand.length+' Fulfil PO delivery date'+(cand.length>1?'s':'')+' to match the planner delivery-to-warehouse date?\n\n• ACTIVE POs only — complete POs are skipped\n\nThis is a LIVE write to Fulfil.'))return;
-      btn.disabled=true; var orig=btn.textContent; btn.textContent='Syncing… ('+cand.length+')';
-      fetch('/api/supply/fulfil-dates-sync',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pos:cand})})
-        .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; btn.textContent=orig;
-          if(j&&j.error){ alert('Fulfil date sync failed: '+j.error); return; }
-          var msg='✓ Fulfil dates synced: '+(j.updated||0)+' updated'+(j.skipped?', '+j.skipped+' skipped':'')+'.';
-          if(j.skippedDetail&&j.skippedDetail.length) msg+='\n\nSkipped:\n'+j.skippedDetail.map(function(s){return '• '+s.po+' — '+s.reason;}).join('\n');
-          try{ fillErpFulfil(); }catch(e){}   // silent refresh of the Fulfil column (no full re-render)
-          alert(msg); })
-        .catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Fulfil date sync failed: '+(e.message||e)); }); };
+    // v27.900 (Ben): Sync Fulfil Dates = a review dialog. Every active internal shipment (IS) with its master PO, and every
+    // PO that has no IS, with the CURRENT Fulfil date and the Horizon COMPLETION date it would change to (dd-mmm-yy).
+    // Changed rows are pre-ticked; "Update selected" writes IS planned receiving / PO requested delivery in one go.
+    var fdb=document.getElementById('po-fulfil-dates'); if(fdb)fdb.onclick=function(){ var btn=this; btn.disabled=true; var orig=btn.textContent; btn.textContent='Loading…';
+      fetch('/api/supply/fulfil/date-sync-preview').then(function(r){return r.json();}).then(function(j){ btn.disabled=false; btn.textContent=orig; if(!j||j.error){ alert((j&&j.error)||'Could not load'); return; }
+        var items=j.items||[]; var ov=document.createElement('div'); ov.id='fds-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(16,24,40,.45);z-index:200000;display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto';
+        var rows=items.map(function(it,i){ var dis=!it.in_fulfil||!it.next; var chk=it.changed&&!dis; return '<tr'+(dis?' style="opacity:.55"':'')+'><td style="text-align:center"><input type="checkbox" class="fds-chk" data-i="'+i+'"'+(chk?' checked':'')+(dis?' disabled':'')+'></td><td class="l">'+(it.kind==='IS'?'<span class="tool-badge bg-blue" style="border:0">IS</span>':'<span class="tool-badge" style="border:0;background:var(--line2);color:var(--muted)">PO</span>')+'</td><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+(it.kind==='IS'&&it.shipment&&it.shipment!==it.ref?' <span class="mut tiny">('+esc(it.shipment)+')</span>':'')+'</td><td class="l">'+esc(it.master_po||'')+'</td><td class="l">'+(!it.in_fulfil?'<span class="mut tiny">not in Fulfil</span>':esc(fd(it.current)||'—'))+'</td><td class="l"><b>'+esc(fd(it.next)||'—')+'</b></td><td class="l fds-res" data-i="'+i+'">'+(it.changed?'':(it.in_fulfil?'<span class="mut tiny">in sync</span>':''))+'</td></tr>'; }).join('');
+        ov.innerHTML='<div style="background:var(--card,#fff);border-radius:10px;max-width:920px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:16px 18px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div><b style="font-size:15px">📅 Sync Fulfil dates</b><div class="mut tiny" style="margin-top:2px">Horizon <b>completion</b> date → Fulfil. An internal shipment (IS) gets its planned receiving date; a PO with no IS gets its requested delivery date. Rows that differ are pre-ticked. '+(j.env==='live'?'<b style="color:var(--neg)">LIVE Fulfil'+(j.live_writes?'':' — writes are gated off on this server')+'.</b>':'Sandbox Fulfil.')+'</div></div><button class="save-btn light" id="fds-close">Close</button></div>'
+          +'<div style="max-height:60vh;overflow:auto;margin-top:10px"><table class="pay-tbl" style="font-size:12.5px;width:100%;text-align:left"><thead><tr><th style="width:36px"><input type="checkbox" id="fds-all" title="select all that differ"></th><th class="l">Type</th><th class="l">Reference</th><th class="l">Master PO</th><th class="l">Current date</th><th class="l">Change to</th><th class="l">Result</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7" class="mut" style="padding:12px">No active POs or shipments found.</td></tr>')+'</tbody></table></div>'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px;flex-wrap:wrap"><span class="mut tiny" id="fds-msg">'+items.filter(function(x){return x.changed;}).length+' of '+items.length+' differ</span><button class="save-btn" id="fds-go" style="background:var(--pos);color:#fff;border-color:var(--pos)">Update selected</button></div></div>';
+        document.body.appendChild(ov); ov.querySelector('#fds-close').onclick=function(){ ov.remove(); }; ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
+        ov.querySelector('#fds-all').onchange=function(){ var on=this.checked; ov.querySelectorAll('.fds-chk:not(:disabled)').forEach(function(c){ c.checked=on; }); };
+        ov.querySelector('#fds-go').onclick=function(){ var go=this; var sel=[].slice.call(ov.querySelectorAll('.fds-chk:checked')).map(function(c){ var it=items[+c.dataset.i]; return {kind:it.kind,ref:it.ref,is_id:it.is_id||null,master_po:it.master_po||'',date:it.next,i:+c.dataset.i}; }); if(!sel.length){ alert('Nothing selected.'); return; }
+          if(!confirm('Write '+sel.length+' date'+(sel.length>1?'s':'')+' to Fulfil?'+(j.env==='live'?'\n\nThis is a LIVE write.':'')))return; go.disabled=true; go.textContent='Updating…';
+          fetch('/api/supply/fulfil/date-sync-apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:sel})}).then(function(r){return r.json();}).then(function(jj){ go.disabled=false; go.textContent='Update selected';
+            if(jj&&jj.gated){ alert('LIVE Fulfil writes are OFF on this server (safety gate). Nothing was written.'); return; } if(jj&&jj.error){ alert(jj.error); return; }
+            (jj.results||[]).forEach(function(r,k){ var it=sel[k]; var cell=ov.querySelector('.fds-res[data-i="'+it.i+'"]'); if(cell)cell.innerHTML=r.ok?'<span style="color:var(--pos);font-weight:700">✓ updated</span>':'<span style="color:var(--neg)">✗ '+esc(r.error||'failed')+'</span>'; var c=ov.querySelector('.fds-chk[data-i="'+it.i+'"]'); if(c&&r.ok){ c.checked=false; c.disabled=true; } });
+            ov.querySelector('#fds-msg').textContent=(jj.updated||0)+' updated'; try{ _hzFulfilCache={}; }catch(e){} invalidateDerived(); delete cache['purchase-orders']; try{ fillErpFulfil(); document.querySelectorAll('#supply-root .hz-isship').forEach(function(h){h._afDone=0;}); _poGridFulfilPaint(); }catch(e){}
+          }).catch(function(e){ go.disabled=false; go.textContent='Update selected'; alert('Failed: '+(e.message||e)); }); };
+      }).catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Could not load: '+(e.message||e)); }); };
     view(); }
   // Bulk PO upload — paste CSV/TSV (optional header). Recognised cols: PO, Supplier, Ship to, Branch, Status,
   // Start, SKU, Qty. SKU + Qty are optional; repeat the PO on multiple lines to add multiple SKU/qty lines.
@@ -3097,11 +3100,11 @@
       document.querySelectorAll('#sup-grid .po-cin7[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; if(s&&s.cin7_not_required)el.innerHTML='<span class="mut tiny" title="marked not required in Cin7 (order plan)">n/a</span>'; });
       // v27.888 (Ben): under the PLAN button — a link straight to this PO's record in Fulfil (only once the PO exists there).
       document.querySelectorAll('#sup-grid .po-fulfil-link[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; el.innerHTML=(s&&s.fulfil_url)?'<a href="'+esc(s.fulfil_url)+'" target="_blank" rel="noopener" title="Open this PO in Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'" style="font-size:9px;font-weight:700;color:var(--blue);text-decoration:underline;letter-spacing:.03em">Fulfil ↗</a>':''; });
-      document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ erpUploadInert(b.dataset.po, false, 'fulfil'); }; });   // v27.840 (Ben): open the same confirm/preview popup as the Order Plan tab instead of pushing straight away
+      document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ erpUploadInert(b.dataset.po, false, 'fulfil', b.dataset.fup||''); }; });   // v27.840 (Ben): open the same confirm/preview popup; v27.900: the badge's mode (date / lines / both) decides which buttons the popup offers as the Order Plan tab instead of pushing straight away
     }).catch(function(){}); }
   function fulfilPushPO(po, btn){ var t=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
     fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines?erp=fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed: '+j.error); return; } fillErpFulfil(); }).catch(function(){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed'); }); }
-  function erpUploadInert(po,forceFull,erp){ closeShPop&&closeShPop();
+  function erpUploadInert(po,forceFull,erp,fup){ closeShPop&&closeShPop();
     // v27.743: two-button ERP model — `erp` picks the target ('cin7' default, or 'fulfil'). Both fetches force ?erp=<erp>
     // so the push is deterministic regardless of the Active-ERP setting (in sandbox Active-ERP=fulfil, which used to
     // silently redirect this Cin7-labelled pop). EN = display name, _eq = query suffix.
@@ -3113,8 +3116,11 @@
     // the lines button; a date drift shows the date button. Lines drift also surfaces the date button.
     var linesPending=(_r.erp_total>0&&!(_r.erp_in>0))||_r.erp_pending>0;
     // Date drift is computed against Cin7 only — Fulfil has no Horizon date-drift signal, so the Fulfil pop shows lines only.
-    var datePending=(erp!=='fulfil') && _r.erp_date_pending>0 && !poComplete(_r);
-    var showLines=(erp==='fulfil')?true:(linesPending||forceFull), showDate=(erp==='fulfil')?false:(datePending||linesPending);   // forceFull (Push full) always offers the lines override; Fulfil = lines only
+    // v27.900 (Ben): Fulfil DOES have a date-drift signal now (grid-status: requested delivery vs Horizon delivery-to-warehouse). The
+    // badge that opened the popup says what drifted (fup = date | lines | both): a date-only drift shows ONLY the date button.
+    var _gs=(erp==='fulfil'&&window._erpGridStatus&&window._erpGridStatus[po])||null;
+    var datePending=(erp!=='fulfil') ? (_r.erp_date_pending>0 && !poComplete(_r)) : (fup==='date'||fup==='both');
+    var showLines=(erp==='fulfil')?(fup!=='date'||forceFull):(linesPending||forceFull), showDate=(erp==='fulfil')?datePending:(datePending||linesPending);   // forceFull (Push full) always offers the lines override; Fulfil = lines only
     var manualBlk=showLines
       ? '<div class="mut" style="margin-bottom:12px;font-size:13px">Push the revised order plan to '+EN+' (SKUs, quantities &amp; prices — full override), or export it to enter manually:</div>'
         +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:var(--blue);color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>'
@@ -3125,7 +3131,7 @@
       +manualBlk
       +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px;display:flex;flex-direction:column;gap:8px">'
         +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:var(--pos);color:#fff;border-color:#0b6">📅 Update '+EN+' Date</button>'
-            +' <span class="mut tiny">'+EN+' EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':'')
+            +(erp==='fulfil'?' <span class="mut tiny">Fulfil requested delivery: <b>'+(_gs&&_gs.fulfil_req_delivery?fd(_gs.fulfil_req_delivery):'—')+'</b> &rarr; <b>'+(_gs&&_gs.push_req_delivery?fd(_gs.push_req_delivery):(_r.checkin?fd(_r.checkin):'—'))+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':' <span class="mut tiny">'+EN+' EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>'):'')
         +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:var(--pos);color:#fff;border-color:#0a8">📦 Update / Create '+EN+' PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the '+EN+' PO, or creates it if not in '+EN+' — price = approved supplier final cost, else standard (live write)</span></div>':'')
       +'</div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div>'
@@ -3146,7 +3152,17 @@
       var tsv='Code\tQty\n'+rows.map(function(r){return String(r.code)+'\t'+r.qty;}).join('\n');   // TAB-separated → pastes into columns
       navigator.clipboard.writeText(tsv).then(function(){msg.textContent=rows.length+' line(s) copied (Code + Qty).';}).catch(function(){msg.textContent='Copy failed — clipboard blocked.';}); }); };
     // #14 — push this PO's Completion date to Cin7 as EstimatedDeliveryDate (live write, gated server-side on CIN7_AUTH)
-    var _cdBtn=bg.querySelector('#erp-cin7'); if(_cdBtn)_cdBtn.onclick=function(){ var r=poBy[po]||{}; var comp=r.checkin;
+    var _cdBtn=bg.querySelector('#erp-cin7'); if(_cdBtn&&erp==='fulfil')_cdBtn.onclick=function(){ var d=(_gs&&_gs.push_req_delivery)||(poBy[po]||{}).checkin||'';   // v27.900: date-only Fulfil push
+      if(!d){ msg.textContent='No delivery-to-warehouse date on this PO to send to Fulfil.'; return; }
+      if(!confirm('Update the Fulfil PO requested delivery date to '+fd(d)+'?\n\nThis writes to the LIVE Fulfil ERP.'))return;
+      msg.textContent='Updating Fulfil…';
+      fetch('/api/supply/fulfil-dates-sync',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pos:[{po:po,date:d}]})}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ msg.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
+        if(!(j&&j.updated>0)){ var why=(j&&j.skippedDetail&&j.skippedDetail[0]&&j.skippedDetail[0].reason)||'not updated'; msg.innerHTML='<span style="color:var(--neg)">'+esc(why)+'</span>'; return; }
+        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ Fulfil requested delivery updated</span> ('+esc(fd(d))+') · mirror synced';
+        invalidateDerived(); delete cache['purchase-orders']; try{ fillErpFulfil(); }catch(e){}
+      }).catch(function(e){ msg.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; }); };
+    else if(_cdBtn)_cdBtn.onclick=function(){ var r=poBy[po]||{}; var comp=r.checkin;
       if(!comp){ msg.textContent='No Completion date on this PO to send to Cin7.'; return; }
       if(!confirm('Update the '+EN+' PO EstimatedDeliveryDate to this PO\'s Completion date ('+comp+')?\n\nThis writes to the LIVE '+EN+' ERP.'))return;
       msg.textContent='Updating '+EN+'…';
@@ -6498,7 +6514,7 @@
   function hzFulfilBadges(rec, compact, opts){ opts=opts||{}; if(!rec||!rec.configured||!rec.linked)return '';
     var out=[], pad=compact?'0 5px':'1px 7px', fs=compact?'10px':'11px';   // compact = PO grid (icon/short); full = shipment record
     if(rec.ref_mismatch) out.push('<button class="hz-fulfil-chgref" data-is="'+esc(rec.is_number)+'" title="Fulfil internal shipment is '+esc(rec.is_number)+' — rename this Horizon shipment to match" style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">⇄ '+(compact?'':'Change to ')+esc(rec.is_number)+'</button>');
-    if(rec.date_mismatch&&!opts.noDates) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(rec.planned_date||'?')+' ≠ Horizon '+esc(rec.horizon_date||'?')+' — push Horizon date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">📅'+(compact?'':' Update dates → '+esc(rec.horizon_date||''))+'</button>');
+    if(rec.date_mismatch&&!opts.noDates) out.push('<button class="hz-fulfil-dates" data-date="'+esc(rec.horizon_date||'')+'" data-is="'+esc(rec.is_number)+'" data-plan="'+esc(rec.planned_date||'')+'" title="Fulfil Planned Receiving '+esc(fd(rec.planned_date)||'?')+' ≠ Horizon completion '+esc(fd(rec.horizon_date)||'?')+' — push the completion date to Fulfil" style="border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue-ink);border-radius:5px;padding:'+pad+';font-size:'+fs+';font-weight:700;cursor:pointer">📅'+(compact?'':' Update dates → '+esc(fd(rec.horizon_date)))+'</button>');   // v27.900 (Ben): dd-mmm-yy, and it is the COMPLETION date
     return out.join(' '); }
   // v27.888 (Ben): link to the Fulfil internal-shipment record itself (shipment record + PO ▸ Shipments tab; not the compact grid cell).
   function hzFulfilIsLink(rec){ if(!rec||!rec.linked||!rec.is_url)return ''; return '<a href="'+esc(rec.is_url)+'" target="_blank" rel="noopener" title="Open '+esc(rec.is_number)+' in Fulfil" style="color:var(--blue);font-weight:700;text-decoration:underline;font-size:11px;white-space:nowrap">Fulfil '+esc(rec.is_number)+' ↗</a>'; }
@@ -6529,13 +6545,13 @@
           try{ var box=scope.closest&&scope.closest('[id^="podet-"]'); if(box){ var eb=document.querySelector('#sup-grid .po-exp[data-i="'+box.id.slice(6)+'"][data-po]'); if(eb){ _pendingPO=eb.dataset.po; _pendingPOTab='shipments'; } } else if(String(current||'')==='shipments'||poSub==='shipments'){ _pendingShip=is; } }catch(_){}
           setTimeout(function(){ try{ if(current&&typeof selectSection==='function')selectSection(current); else location.reload(); }catch(_){ location.reload(); } },400); }); } }; });
     scope.querySelectorAll('.hz-fulfil-dates').forEach(function(b){ if(b._w)return; b._w=1; b.onclick=function(e){ e.stopPropagation(); var d=b.dataset.date, is=b.dataset.is, plan=b.dataset.plan;
-      if(!d){ alert('No Horizon (Flexport) date available to push.'); return; }
-      if(!confirm('Push Planned Receiving Date to Fulfil '+is+'?\n\nCurrent Fulfil:  '+(plan||'(none)')+'\nNew (Horizon Flexport landing):  '+d+'\n\nThis writes to '+is+' in Fulfil.'))return;
+      if(!d){ alert('No Horizon completion date available to push.'); return; }
+      if(!confirm('Push Planned Receiving Date to Fulfil '+is+'?\n\nCurrent Fulfil:  '+(fd(plan)||'(none)')+'\nNew (Horizon completion date):  '+fd(d)+'\n\nThis writes to '+is+' in Fulfil.'))return;
       b.disabled=true; var _t=b.textContent; b.textContent='pushing…';
       shipPost('/api/supply/fulfil/shipment-planned-date',{po:ref,date:d},function(j){ b.disabled=false; b.textContent=_t;
         if(j&&j.gated){ alert('LIVE Fulfil writes are OFF (safety gate).\nWould push '+is+' → '+d+'.\nAsk Diviyaj to enable FULFIL_LIVE_WRITES on prod.'); return; }
         if(j&&j.error){ alert('Fulfil: '+j.error); return; }
-        b.textContent='✓ pushed '+d; b.style.opacity='.7'; _hzFulfilBust(ref); }); }; }); }
+        b.textContent='✓ pushed '+fd(d); b.style.opacity='.7'; _hzFulfilBust(ref); }); }; }); }
   function _bindShipFulfil(scope, ref){ if(!scope)return; var host=scope.querySelector('.sh-fulfil-rec'); if(!host||host._loading)return; host._loading=1;
     hzFulfilShip([ref], function(m){ host._loading=0; var rec=m[ref];
       if(!rec){ host.innerHTML=''; return; }

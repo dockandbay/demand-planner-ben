@@ -1,3 +1,12 @@
+## v27.900 deploy note (Ben): Fulfil dates — ONE target (the COMPLETION date), a date-only push, and the Sync Fulfil Dates review dialog
+
+**Files: `server.mjs`, `supply/inject.html`.** No migrations. Restart.
+
+- **The Fulfil date target is now Horizon's COMPLETION date everywhere** (PO grid "Completion" = `checkin`, e.g. PO-57EUXR1 26-Oct-26), replacing the Flexport-landing / est-delivery mix: the IS badge ("Update dates → 26-Oct-26"), the Fulfil column's drift check (`grid-status.push_req_delivery`), the lines-push header + line delivery dates (`fulfilPushLines`), and the new dialog. Ben: "EST delivery is completion date from Horizon."
+- **Fulfil column popup, date-only mode.** Clicking "Update date" opened the order-plan popup with only the lines button (a v27.743 assumption from before Fulfil date drift existed). The badge now passes its mode; a date-only drift shows **only** "📅 Update Fulfil Date" (Fulfil requested delivery X → Horizon completion Y), which writes `requested_delivery_date` via the dates-sync route and updates the mirror, so the drift clears at once. Lines drift still shows the lines button; both → both.
+- **📅 Sync Fulfil Dates is now a review dialog:** every active internal shipment (IS number, the Horizon shipment ref, its master PO) and every active PO **without** an IS, with the current Fulfil date and the completion date it would change to, both dd-mmm-yy. Rows that differ are pre-ticked; POs not in Fulfil are listed greyed. "Update selected" writes IS planned receiving dates and PO requested delivery dates in one call and shows ✓ / ✗ per row. Routes: `GET /api/supply/fulfil/date-sync-preview`, `POST /api/supply/fulfil/date-sync-apply` (same `FULFIL_LIVE_WRITES` gate as the other live writes; each write is logged on the PO's change log).
+- All dates on these badges / dialogs now render dd-mmm-yy.
+
 ## v27.899 deploy note (Ben): PO grid ▸ Shipment column — no 📅 date badge (Fulfil column already has the ERP date update)
 
 **File: `supply/inject.html`.** Ben (live, PO-57EUXR1): the compact 📅 "Update dates" badge under the grid's Shipment column duplicates the ERP date-update button in the Fulfil column. Removed from the grid only (`hzFulfilBadges(rec, compact, {noDates:true})`); the ⇄ IS rename badge stays there. The shipment record and the PO ▸ Shipments ▸ Shipment mode row keep both the "Fulfil IS… ↗" link and "Update dates". Note the two writes differ: the Fulfil column pushes the **PO's requested delivery date**; "Update dates" on the shipment pushes the **internal shipment's planned receiving date**.
