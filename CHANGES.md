@@ -1,3 +1,7 @@
+## v28.003 (Ben): SUG-0041 close-out — consignee details on the key-account CARDS
+
+**File: `supply/inject.html`.** Zera's SUG-0041 ("consignee details on key accounts") was already built: `key_accounts.consignee / contact_person / contact_number / freight_forwarder` (migration 272) with the "Consignee & delivery contacts" section in CONFIG ▸ Key accounts ▸ Edit, applied onto the PO's Client/FBA tab (Consignee, Contact person, Contact number, Freight forwarder details; migration 271, v27.672). Two live key accounts already carry them. The one gap: the key-account card list showed only address, requirements and packing chips, so the details were invisible until Edit. Cards now show Consignee, contact person + number (tel link) and forwarder when set. No migration, no server change. SUG-0041 and SUG-0007 (superseded by v27.892's forced sign-out on an expired session) closed on live.
+
 ## v28.002 deploy note (Ben): Auto Forecast export matches the screen — persisted buy-plan feed (migration 304)
 
 **Files: `server.mjs`, `artifact_v16.7.html`, `supply/inject.html`, `migrations/304_auto_forecast_feed.sql`.** Ben: "Proceed to make this happen… an hourly cron to update." The buy plan exists only in the browser (artifact `BP` engine), so no server cron can recompute it; instead the browser persists its feed and the export phases it live.

@@ -7865,6 +7865,9 @@
               +' <button class="ka-del" data-k="'+id+'" data-name="'+esc(r.name||id)+'" style="cursor:pointer;border:1px solid var(--neg-cell);background:var(--neg-bg);color:var(--neg);padding:3px 10px;border-radius:5px;font-size:11px;white-space:nowrap">Delete</button></div>'
               +block('Delivery address', fieldOf(r,'address'))
               +'<div style="margin-top:6px"></div>'+block('Client requirements', fieldOf(r,'client_requirements'))
+              // v28.003 (SUG-0041, Zera): consignee & delivery contacts on the card too (were edit-form only), so the list answers "who receives it?" at a glance
+              +(function(){ var cs=fieldOf(r,'consignee'), cp=fieldOf(r,'contact_person'), cn=fieldOf(r,'contact_number'), ff=fieldOf(r,'freight_forwarder'); if(!cs&&!cp&&!cn&&!ff)return '';
+                  return '<div style="margin-top:6px"></div>'+block('Consignee', cs)+((cp||cn)?('<div class="tiny" style="color:var(--ink-soft);margin-top:2px">'+(cp?esc(cp):'')+(cp&&cn?' · ':'')+(cn?'<a href="tel:'+esc(String(cn).replace(/[^+0-9]/g,''))+'">'+esc(cn)+'</a>':'')+'</div>'):'')+(ff?'<div class="mut tiny" style="margin-top:2px">Forwarder: '+esc(ff)+'</div>':''); })()
               +chips(r)+'</div>'; }
           function listHtml(kq){ var f=kq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(kq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No key accounts'+(kq?' match your search':' yet')+'.</div>';
