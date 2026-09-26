@@ -1,3 +1,18 @@
+## v28.001 deploy note (Ben): Google Sheets / script exports — token-protected CSV endpoints + Apps Script
+
+**Files: `server.mjs`, `supply/inject.html`.** Ben: "get data from Horizon into Google Sheets… the cash flow all transactions report I currently copy to clipboard and paste." Apps Script route chosen.
+
+**Endpoints** (`GET /api/export/csv/<report>`, header `x-export-token: <token>` or `?token=`; `?format=json` for an array of objects; text/csv, no-store):
+- `cashflow-transactions` (PAYMENTS ▸ Cash Flow ▸ All transactions), `cashflow-starting-deposits`, `cashflow-stock-arrivals` — built server-side from `cashflowResponse` with the SAME columns as the on-screen ⧉ copy (`cfTxRows` / `cfArrRows`: Reference, Type, Amount_USD, Date, Paid Status, Market, Production Deposit, Class, Supplier, Direct to Client?, Month, Amount GBP, UK Deposit Ref; arrivals: PO Number, Amount (USD), Delivery Date, Direct to Client?, Amount (GBP)). GBP per line at the FY blended rate from `app_settings.fx_rates`, fallback 1.34, mirroring the client.
+- `auto-forecast-transactions` (PAYMENTS ▸ Auto Forecast ▸ Transactions) — from `computeAutoForecast` (the server engine, same as the emailed CSV). **Caveat:** the on-screen report defaults to the buy-plan engine, which needs the browser's buy feed; the export is the rolling engine until that feed is persisted server-side.
+- `GET /api/export/reports` catalogue (logged-in), `POST /api/export/token` generate/rotate (classified as a CONFIG write).
+
+**Auth:** dedicated read-only token in `app_settings.export_token` (base64url, 32 chars, generated on the config page). Constant-time compare, 30 s memo. **Access gate exempts `/api/export/csv/*`** (token checked in the handler). **Diviyaj: mirror that exemption in the prod login gate**, or every script call gets the login page.
+
+**CONFIG ▸ Exports & uploads** now opens with "Google Sheets & scripts": token (masked, Show/Copy/Rotate), the endpoint table (page link, path, Copy URL, Open), how-to-call notes, curl example, and a **copyable Apps Script** pre-filled with the origin and token: `Horizon` menu → refresh all / one report into `HZ …` tabs, amount columns as numbers, "Refreshed …" stamp, optional hourly trigger install/remove. Generated script is parse-checked.
+
+Sandbox verified: 401 without / with a wrong token; 404 unknown report; four CSVs 200 (2,423 / 857 / 1,265 / 807 rows, 1.8–3.8 s); JSON variant; page renders and the script parses. No migration.
+
 ## v28.000 (Ben, 26-Sep-2026): version rebaseline
 
 Prod is live on **v27.905** (Diviyaj deployed the v27.886–905 batch, migrations 301 + 302 applied, 303 already present). Numbering restarts at **v28.000**; this commit is the bump only. **Still pending deploy on top of 905: v27.906** (3PL cross-month duplicate-charge exception box) — it rides in the first v28 batch.

@@ -882,7 +882,8 @@ app.use((req, res, next) => {
   // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
   if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
-      || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll') return next();   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
+      || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
+      || req.path.startsWith('/api/export/csv/')) return next();   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
@@ -947,6 +948,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
+  if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -18194,6 +18196,103 @@ app.post('/api/export/email-csv', async (req, res) => {
         attachments: [{ filename, content: Buffer.from(csv).toString('base64') }] }) });
     if (!r.ok) return res.json({ ok: false, reason: 'Resend error ' + r.status + ': ' + (await r.text()).slice(0, 200) });
     res.json({ ok: true, sent_to: email });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── v28.001 (Ben): GOOGLE SHEETS / SCRIPT EXPORTS ─────────────────────────────────────────────────────────────────
+// Read-only CSV endpoints for the reports the team used to copy from the clipboard into Google Sheets. Authenticated by
+// a dedicated EXPORT TOKEN (app_settings.export_token — generated in CONFIG ▸ Exports & uploads), never the planner key
+// or a login cookie, so a script can call them: header `x-export-token: <token>` or `?token=<token>`. The access gate
+// lets `/api/export/csv/*` through and the handler checks the token itself. Rows are built server-side to the SAME
+// columns as the on-screen "⧉ copy" / "⬇ CSV" buttons (cfTxRows / cfArrRows / afTxnRows in the client), so a sheet fed
+// by a script matches a sheet fed by paste. Documentation + a copyable Apps Script live on the config page.
+const EXPORT_REPORTS = {
+  'cashflow-transactions':      { title: 'Cash flow — all transactions',  page: '#/supply/payments/cashflow', desc: 'Every cash-flow line (deposits, completions, balances, freight, duty…), one row per payment.' },
+  'cashflow-starting-deposits': { title: 'Cash flow — starting deposits', page: '#/supply/payments/cashflow', desc: 'Every PO\'s start deposit (incl. drawdowns from a referenced pool), same columns as all transactions.' },
+  'cashflow-stock-arrivals':    { title: 'Cash flow — stock arrivals',    page: '#/supply/payments/cashflow', desc: 'Goods + import duty per PO, dated on completion.' },
+  'auto-forecast-transactions': { title: 'Auto Forecast — transactions',  page: '#/supply/payments/af',       desc: 'One row per projected payment leg of the rolling buy plan (server engine = the emailed CSV; the on-screen buy-plan engine needs the browser).' },
+};
+let _exportTokenMemo = { t: 0, v: null };
+async function exportToken() {
+  if (_exportTokenMemo.v != null && Date.now() - _exportTokenMemo.t < 30000) return _exportTokenMemo.v;
+  let v = '';
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='export_token'`)).rows[0]; v = String((r && r.value) || '').trim(); } catch (e) { v = ''; }
+  _exportTokenMemo = { t: Date.now(), v };
+  return v;
+}
+async function exportTokenOk(req) {
+  const want = await exportToken(); if (!want) return false;
+  const got = String(req.get('x-export-token') || req.query.token || '').trim(); if (!got) return false;
+  const a = Buffer.from(want), b = Buffer.from(got);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const _exMON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function _exMonthShort(m) { if (!m || m === '—') return 'Undated'; if (m === 'aged') return 'Aged'; const p = String(m).split('-'); return (_exMON[+p[1] - 1] || '?') + '-' + String(p[0]).slice(2); }
+function _exDtc(b) { return /direct to client|jlew|next/i.test(String(b || '')); }
+// USD → GBP at the line's financial-year blended rate (app_settings.fx_rates, FY starts March), else the latest FY with a
+// rate, else 1.34 — mirrors the client's cfUsdToGbp/fxRate so the GBP column matches the on-screen copy.
+async function _exFxTable() { try { const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; return (fr && fr.value) ? (JSON.parse(fr.value) || {}) : {}; } catch (e) { return {}; } }
+function _exUsdToGbp(fx, usd, dm) {
+  const s = String(dm || ''), mt = s.match(/^(\d{4})[-_](\d{2})/); let r = 0;
+  if (mt) { const y = +mt[1], mo = +mt[2], fy = (mo >= 3 ? y : y - 1); r = (fx[fy] && fx[fy].USD) || 0;
+    if (!(r > 0)) { const ks = Object.keys(fx).filter(k => fx[k] && fx[k].USD > 0).sort(); if (ks.length) r = fx[ks[ks.length - 1]].USD; } }
+  if (!(r > 0)) r = 1.34;
+  return usd / r;
+}
+function _exTxRows(lines, fx) { return (lines || []).map(x => { const usd = Number(x.amount || 0); return {
+  Reference: x.ref || '', Type: x.type, Amount_USD: usd.toFixed(2), Date: x.date || '', 'Paid Status': (x.paid ? 'TRUE' : 'FALSE'),
+  Market: x.country || '', 'Production Deposit': x.deposit_ref || '', Class: (x.estimate ? 'estimate' : 'committed'), Supplier: x.supplier || '',
+  'Direct to Client?': (_exDtc(x.branch) ? 'TRUE' : 'FALSE'), Month: _exMonthShort(x.month), 'Amount GBP': _exUsdToGbp(fx, usd, x.date || x.month).toFixed(2), 'UK Deposit Ref': x.uk_deposit_ref || '' }; }); }
+function _exRowsToCsv(rows) {
+  if (!rows || !rows.length) return '';
+  const cols = Object.keys(rows[0]); const e1 = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  return [cols.map(e1).join(',')].concat(rows.map(r => cols.map(c => e1(r[c])).join(','))).join('\n');
+}
+async function buildExportRows(report) {
+  if (report === 'cashflow-transactions' || report === 'cashflow-starting-deposits' || report === 'cashflow-stock-arrivals') {
+    const d = await cashflowResponse(await poRowsCache.get(), (sql) => pool.query(sql).then(r => r.rows));   // same q helper the /api/supply/cashflow route passes
+    const fx = await _exFxTable();
+    if (report === 'cashflow-transactions') return _exTxRows(d.lines, fx);
+    if (report === 'cashflow-starting-deposits') return _exTxRows(d.startDeposits, fx);
+    return (d.arrivals || []).map(a => { const usd = Number(a.amount_usd || 0); return {
+      'PO Number': a.po || '', 'Amount (USD)': usd.toFixed(2), 'Delivery Date': a.delivery || '',
+      'Direct to Client?': (_exDtc(a.branch) ? 'Direct' : ''), 'Amount (GBP)': _exUsdToGbp(fx, usd, a.delivery).toFixed(2) }; });
+  }
+  if (report === 'auto-forecast-transactions') {
+    const d = await computeAutoForecast(['uk', 'us', 'eu', 'au']);
+    const gbp = await gbpRate();
+    return (d.transactions || []).map(t => { const usd = Math.round((+t.amount_usd || 0) * 100) / 100; return {
+      Reference: t.reference, Type: t.type, 'Amount USD': usd.toFixed(2), Date: t.date, Country: t.country, Supplier: t.supplier,
+      Month: _exMonthShort(t.month), 'Amount GBP': (Math.round(usd / gbp * 100) / 100).toFixed(2) }; });
+  }
+  return null;
+}
+// GET /api/export/csv/<report>            → text/csv (default)   ·   ?format=json → [{col: value}, …]
+// Header x-export-token or ?token=. 401 without a valid token; 404 unknown report. Never cached.
+app.get('/api/export/csv/:report', async (req, res) => {
+  try {
+    if (!(await exportTokenOk(req))) return res.status(401).set('Cache-Control', 'no-store').json({ error: 'invalid or missing export token' });
+    const report = String(req.params.report || '').replace(/\.csv$/i, '');
+    if (!EXPORT_REPORTS[report]) return res.status(404).json({ error: 'unknown report', reports: Object.keys(EXPORT_REPORTS) });
+    const rows = await buildExportRows(report);
+    res.set('Cache-Control', 'no-store');
+    if (String(req.query.format || '').toLowerCase() === 'json') return res.json(rows);
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="' + report + '.csv"');
+    res.send(_exRowsToCsv(rows));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Catalogue for the config page (logged-in users only — goes through the normal gate).
+app.get('/api/export/reports', async (req, res) => {
+  res.set('Cache-Control', 'no-store').json({ reports: Object.entries(EXPORT_REPORTS).map(([k, v]) => ({ key: k, ...v, path: '/api/export/csv/' + k })), token_set: !!(await exportToken()) });
+});
+// Generate / rotate the export token (CONFIG ▸ Exports & uploads). Any script using the old token stops working at once.
+app.post('/api/export/token', async (req, res) => {
+  try {
+    const v = crypto.randomBytes(24).toString('base64url');
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('export_token',$1,$2,now())
+      ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [v, authUser(req) || null]);
+    _exportTokenMemo = { t: 0, v: null };
+    res.json({ ok: true, token: v });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // upload one country's CSV to DriveHQ over WebDAV (HTTP PUT, Basic auth) — gated on WEBDAV_BASE/DRIVEHQ_USER/PASS.

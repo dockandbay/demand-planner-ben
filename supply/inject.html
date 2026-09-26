@@ -8355,7 +8355,9 @@
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       SUBS['export-uploads']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/forecast/export-settings').then(function(r){return r.json();}),
-                     fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var rows=_res[0]||[], _appset=_res[1]||{};
+                     fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};}),
+                     fetch('/api/export/reports').then(function(r){return r.json();}).catch(function(){return {reports:[]};})]).then(function(_res){ var rows=_res[0]||[], _appset=_res[1]||{}, _gsRep=_res[2]||{reports:[]};
+          var gsDocs=hzGsDocsHtml(_appset,_gsRep);   // v28.001: Google Sheets & scripts (token + endpoints + Apps Script) at the top
           var head='<div class="sect-h">Forecast export by country <span class="mut tiny">— per-country CSV (all SKUs × month · DTC / FBA / B2B) for the next 12 months. Email it to the country contact and/or upload to DriveHQ.</span></div>';
           var bulk='<div class="bar" style="gap:8px;margin-bottom:10px"><button class="save-btn" id="fx-email-all" style="background:var(--blue);color:#fff;border-color:var(--blue)">✉ Email all countries</button><button class="save-btn" id="fx-drive-all" style="background:var(--pos);color:#fff;border-color:#0b6">⬆ Upload all to DriveHQ</button></div>';
           var tbl='<div class="tw" style="max-width:860px"><table><thead><tr><th class="l">Country</th><th class="l">Forecast email</th><th class="l">Actions</th></tr></thead><tbody>'
@@ -8378,7 +8380,8 @@
           // Auto Forecast — full email (moved from CONFIG ▸ General): sends the rolling buy plan (payments plan + transactions CSV, all markets) to these recipients now.
           var afHead='<div class="sect-h" style="margin-top:22px">Auto Forecast — full email <span class="mut tiny">— the complete rolling buy plan (payments plan + transactions CSV, all markets) to these recipients. Comma-separate addresses.</span></div>';
           var afBox='<div class="tw" style="max-width:820px"><table><tbody><tr><td class="l" style="padding:8px 10px"><input class="fci txt" id="af-recips" value="'+esc(_appset.af_email_recipients||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:330px"></td><td class="l" style="white-space:nowrap"><button class="save-btn" id="af-email-send" style="background:var(--blue);color:#fff;border-color:var(--blue)">✉ Send Auto Forecast now</button> <span id="af-email-msg" class="mut tiny" style="margin-left:6px"></span></td></tr></tbody></table></div>';
-          b.innerHTML=head+bulk+tbl+rxHead+rxTbl+afHead+afBox+'<div class="mut tiny" id="fx-msg" style="margin-top:10px"></div>';
+          b.innerHTML=gsDocs+'<div style="height:18px"></div>'+head+bulk+tbl+rxHead+rxTbl+afHead+afBox+'<div class="mut tiny" id="fx-msg" style="margin-top:10px"></div>';
+          hzGsDocsWire(b,function(){ SUBS['export-uploads'](); });
           var msg=document.getElementById('fx-msg');
           var afR=b.querySelector('#af-recips'); if(afR)afR.onchange=function(){ afR.style.borderColor='var(--prod)'; fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'af_email_recipients',value:afR.value.trim()})}).then(function(r){return r.json();}).then(function(){ afR.style.borderColor='var(--pos)'; }).catch(function(){ afR.style.borderColor='var(--neg)'; }); };
           var afSend=b.querySelector('#af-email-send'); if(afSend)afSend.onclick=function(){ var m=document.getElementById('af-email-msg'); afSend.disabled=true; if(m){m.style.color='var(--faint)';m.textContent='Sending…';} fetch('/api/auto-forecast/email',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ afSend.disabled=false; if(j&&j.error){ if(m){m.style.color='var(--neg)';m.textContent=j.error;} return; } if(m){ m.style.color='var(--pos)'; m.textContent=j.sandbox?('Sandbox — would send to '+(j.recipients||[]).join(', ')):('Sent ✓ to '+(j.recipients||[]).join(', ')); } }).catch(function(e){ afSend.disabled=false; if(m){m.style.color='var(--neg)';m.textContent=String(e);} }); };
@@ -9028,6 +9031,72 @@
   var CF_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral',Freight:'bg-neutral','Import duty':'bg-red','Import tax':'bg-red'};
   var _cfState={types:null,status:'all',basis:'all',country:'',month:null,q:''};   // month:null = not yet set (defaults to current month)
   function cfMonthLabel(m){ if(m==='—')return 'Undated'; if(m==='aged')return 'Aged (before last month)'; var p=m.split('-'); return MON[+p[1]-1]+' '+p[0]; }
+  // ── v28.001 (Ben): CONFIG ▸ Exports & uploads ▸ "Google Sheets & scripts" — endpoint docs, the export token and a
+  // copyable Apps Script. Endpoints: GET /api/export/csv/<report> with header x-export-token (or ?token=). ──
+  function hzGsScript(origin,token,reports){ var q=function(s){ return '"'+String(s).replace(/"/g,'\\"')+'"'; };
+    var L=[];
+    L.push('// HORIZON → Google Sheets. Paste into Extensions ▸ Apps Script (replace the default Code.gs), save, reload the sheet.');
+    L.push('// A "Horizon" menu appears: refresh every report or one at a time. Each report lands in its own tab (created if missing).');
+    L.push('// Rotating the token in HORIZON ▸ CONFIG ▸ Exports & uploads breaks this script until HORIZON_TOKEN is updated here.');
+    L.push('var HORIZON_URL = '+q(origin)+';');
+    L.push('var HORIZON_TOKEN = '+q(token||'PASTE_TOKEN_FROM_CONFIG')+';');
+    L.push('var REPORTS = [   // [report key, sheet tab]');
+    reports.forEach(function(r,i){ L.push('  ['+q(r.key)+', '+q('HZ '+r.title.replace(/ — /g,' · '))+']'+(i<reports.length-1?',':'')); });
+    L.push('];');
+    L.push('function onOpen() {');
+    L.push('  var m = SpreadsheetApp.getUi().createMenu("Horizon").addItem("Refresh all reports", "horizonRefreshAll").addSeparator();');
+    L.push('  REPORTS.forEach(function (r, i) { m.addItem("Refresh " + r[1].replace(/^HZ /, ""), "horizonRefresh" + i); });');
+    L.push('  m.addSeparator().addItem("Install hourly auto-refresh", "horizonInstallHourlyTrigger").addItem("Remove auto-refresh", "horizonRemoveTriggers").addToUi();');
+    L.push('}');
+    L.push('function horizonRefreshAll() { REPORTS.forEach(function (r) { horizonRefresh(r[0], r[1]); }); SpreadsheetApp.getActive().toast("All Horizon reports refreshed"); }');
+    reports.forEach(function(r,i){ L.push('function horizonRefresh'+i+'() { horizonRefresh(REPORTS['+i+'][0], REPORTS['+i+'][1]); }'); });
+    L.push('function horizonRefresh(report, tab) {');
+    L.push('  var res = UrlFetchApp.fetch(HORIZON_URL + "/api/export/csv/" + report, { headers: { "x-export-token": HORIZON_TOKEN }, muteHttpExceptions: true });');
+    L.push('  if (res.getResponseCode() !== 200) throw new Error(report + ": HTTP " + res.getResponseCode() + " " + res.getContentText().slice(0, 200));');
+    L.push('  var rows = Utilities.parseCsv(res.getContentText());');
+    L.push('  if (!rows.length) return;');
+    L.push('  var hdr = rows[0], numeric = hdr.map(function (h) { return /amount/i.test(h); });   // amount columns → numbers, everything else stays text');
+    L.push('  for (var i = 1; i < rows.length; i++) for (var c = 0; c < hdr.length; c++) if (numeric[c] && rows[i][c] !== "" && !isNaN(rows[i][c])) rows[i][c] = Number(rows[i][c]);');
+    L.push('  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(tab) || ss.insertSheet(tab);');
+    L.push('  sh.clearContents();');
+    L.push('  sh.getRange(1, 1, rows.length, hdr.length).setValues(rows);');
+    L.push('  sh.getRange(1, hdr.length + 2).setValue("Refreshed " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));');
+    L.push('}');
+    L.push('function horizonInstallHourlyTrigger() { horizonRemoveTriggers(); ScriptApp.newTrigger("horizonRefreshAll").timeBased().everyHours(1).create(); SpreadsheetApp.getActive().toast("Hourly refresh installed"); }');
+    L.push('function horizonRemoveTriggers() { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === "horizonRefreshAll") ScriptApp.deleteTrigger(t); }); }');
+    return L.join('\n'); }
+  function hzGsDocsHtml(appset,rep){ var origin=location.origin, token=String((appset&&appset.export_token)||''), reports=(rep&&rep.reports)||[];
+    var mask=token?(token.slice(0,4)+'••••••••••••'+token.slice(-3)):'';
+    var tokRow='<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+      +'<span class="tiny mut" style="min-width:90px">Export token</span>'
+      +(token?('<code id="gs-tok" data-full="'+esc(token)+'" data-mask="'+esc(mask)+'" style="font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:3px 8px;background:var(--band);border-radius:5px">'+esc(mask)+'</code>'
+        +'<button class="save-btn light" id="gs-tok-show">Show</button><button class="save-btn light" id="gs-tok-copy">⧉ Copy</button>'):'<span class="tiny" style="color:var(--amber)">No token yet — generate one to switch the endpoints on.</span>')
+      +'<button class="save-btn" id="gs-tok-rotate" style="background:var(--neg-bg);color:var(--neg);border-color:var(--neg-cell)">'+(token?'↻ Rotate token':'✚ Generate token')+'</button>'
+      +'<span class="tiny mut" id="gs-tok-msg"></span></div>';
+    var tbl='<div class="tw" style="max-width:860px"><table><thead><tr><th class="l">Report</th><th class="l">Endpoint (GET) · columns = the on-screen ⧉ copy</th><th class="l"></th></tr></thead><tbody>'
+      +reports.map(function(r){ var url=origin+r.path; return '<tr><td class="l" style="min-width:260px"><b><a href="'+esc(r.page)+'" style="color:var(--blue);text-decoration:none">'+esc(r.title)+' ↗</a></b><div class="mut tiny" style="white-space:normal">'+esc(r.desc)+'</div></td>'
+        +'<td class="l" style="white-space:nowrap"><code style="font-size:11px">'+esc(r.path)+'</code></td>'
+        +'<td class="l" style="white-space:nowrap"><button class="save-btn light gs-copy-url" data-url="'+esc(url)+'">⧉ URL</button> '
+        +(token?'<a class="save-btn light" target="_blank" rel="noopener" href="'+esc(url+'?token='+encodeURIComponent(token))+'">Open ↗</a>':'')+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+    var how='<div class="tiny" style="max-width:860px;margin:8px 0 6px;line-height:1.6">'
+      +'<b>How to call:</b> <code>GET '+esc(origin)+'/api/export/csv/&lt;report&gt;</code> with header <code>x-export-token: &lt;token&gt;</code> (or <code>?token=&lt;token&gt;</code> for tools that cannot send headers). '
+      +'Returns UTF-8 CSV with a header row; add <code>?format=json</code> for an array of objects. Read-only, never cached, built live from the same data as the page. '
+      +'The token is the only credential a script needs: no login, no planner key. Rotate it here if it leaks; every script using the old one stops at once.</div>'
+      +'<details style="max-width:860px;margin:6px 0"><summary class="tiny" style="cursor:pointer;font-weight:700">curl example</summary><pre style="font-size:11px;background:var(--band);padding:8px 10px;border-radius:6px;overflow:auto">curl -H "x-export-token: '+esc(token||'TOKEN')+'" '+esc(origin)+'/api/export/csv/cashflow-transactions -o cashflow.csv</pre></details>';
+    var gs=hzGsScript(origin,token,reports);
+    var script='<div style="max-width:860px;margin-top:8px"><div class="bar" style="gap:8px;align-items:center;margin-bottom:4px"><b class="tiny">Google Sheets — Apps Script (copy, paste, done)</b><button class="save-btn" id="gs-copy-code">⧉ Copy script</button><span class="tiny mut" id="gs-copy-msg"></span></div>'
+      +'<div class="tiny mut" style="margin-bottom:6px">In the target sheet: Extensions ▸ Apps Script ▸ replace the contents of Code.gs with this ▸ Save ▸ reload the sheet ▸ use the new <b>Horizon</b> menu. Refresh all, or one report; "Install hourly auto-refresh" adds a time trigger. The token is already filled in below.</div>'
+      +'<textarea id="gs-code" readonly spellcheck="false" style="width:100%;height:240px;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--band);color:var(--ink);white-space:pre;overflow:auto;box-sizing:border-box">'+esc(gs)+'</textarea></div>';
+    return '<div class="sect-h">Google Sheets &amp; scripts <span class="mut tiny">— pull any report below into a sheet or a script with one token. Replaces copy-and-paste from the report pages.</span></div>'+tokRow+tbl+how+script; }
+  function hzGsDocsWire(b,reload){ var cp=function(txt,el,ok){ navigator.clipboard.writeText(txt).then(function(){ if(el){ var o=el.textContent; el.textContent=ok||'✓ Copied'; setTimeout(function(){el.textContent=o;},1400); } },function(){ alert('Copy blocked by the browser — select the text and copy it manually.'); }); };
+    var tok=b.querySelector('#gs-tok'), show=b.querySelector('#gs-tok-show'), tc=b.querySelector('#gs-tok-copy'), rot=b.querySelector('#gs-tok-rotate'), msg=b.querySelector('#gs-tok-msg');
+    if(show&&tok)show.onclick=function(){ var on=tok.textContent===tok.dataset.mask; tok.textContent=on?tok.dataset.full:tok.dataset.mask; show.textContent=on?'Hide':'Show'; };
+    if(tc&&tok)tc.onclick=function(){ cp(tok.dataset.full,tc); };
+    if(rot)rot.onclick=function(){ if(!confirm((tok?'Rotate':'Generate')+' the export token?'+(tok?' Every script using the current token stops working until it is updated.':'')))return; rot.disabled=true; if(msg)msg.textContent='…';
+      fetch('/api/export/token',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ rot.disabled=false; if(j&&j.ok){ if(msg)msg.textContent='✓ New token set'; if(reload)reload(); } else { if(msg)msg.textContent=(j&&j.error)||'Failed'; } }).catch(function(e){ rot.disabled=false; if(msg)msg.textContent='Failed: '+(e.message||e); }); };
+    b.querySelectorAll('.gs-copy-url').forEach(function(x){ x.onclick=function(){ cp(x.dataset.url,x); }; });
+    var cc=b.querySelector('#gs-copy-code'), ta=b.querySelector('#gs-code'); if(cc&&ta)cc.onclick=function(){ cp(ta.value,cc,'✓ Script copied'); }; }
   // Cash-flow export row builders (module-level so both the Cash Flow page AND the config email-export use them).
   var CF_GBP=1.34;
   function cfMonthShort(m){ if(!m||m==='—')return 'Undated'; if(m==='aged')return 'Aged'; var p=String(m).split('-'); return (MON[+p[1]-1]||'?')+'-'+String(p[0]).slice(2); }
