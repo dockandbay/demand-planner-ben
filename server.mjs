@@ -18198,6 +18198,36 @@ app.post('/api/export/email-csv', async (req, res) => {
     res.json({ ok: true, sent_to: email });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── v28.002 (Ben): PERSISTED BUY-PLAN FEED for the Auto Forecast engine (migration 304) ─────────────────────────────
+// The buy plan is computed in the browser (artifact BP engine); the Auto Forecast "Buy plan" engine needs its feed. The
+// client posts the feed here whenever it builds one (Auto Forecast report open, and hourly while a tab is open), so the
+// Google Sheets export (v28.001) can phase the SAME buys as the screen instead of falling back to the rolling engine.
+// Cash phasing still happens live at export time (prices, terms, leads, freight tiers), only the buy units are as-of.
+async function afStoreFeed(rows, by, appVersion) {
+  const clean = (Array.isArray(rows) ? rows : []).map(r => ({ subcat: String(r.subcat || ''), mkt: String(r.mkt || '').toLowerCase(), m: String(r.m || ''), units: Math.round(Number(r.units) || 0) }))
+    .filter(r => r.subcat && /^(uk|us|eu|au)$/.test(r.mkt) && /^\d{4}-\d{2}$/.test(r.m) && r.units > 0);
+  const units = clean.reduce((s, r) => s + r.units, 0);
+  const ins = await pool.query(`INSERT INTO planner.auto_forecast_feed (computed_by, app_version, row_count, units_total, rows) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING id, computed_at`,
+    [by || null, appVersion || null, clean.length, units, JSON.stringify(clean)]);
+  await pool.query(`DELETE FROM planner.auto_forecast_feed WHERE id NOT IN (SELECT id FROM planner.auto_forecast_feed ORDER BY computed_at DESC LIMIT 30)`).catch(() => {});
+  return { id: ins.rows[0].id, computed_at: ins.rows[0].computed_at, rows: clean.length, units };
+}
+async function afLatestFeed() {
+  try { const r = (await pool.query(`SELECT id, computed_at, computed_by, app_version, row_count, units_total, rows FROM planner.auto_forecast_feed ORDER BY computed_at DESC LIMIT 1`)).rows[0]; return r || null; }
+  catch (e) { return null; }   // table absent (before mig 304) → no snapshot
+}
+app.post('/api/scenario/auto-forecast/feed', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const rows = Array.isArray(b.buyFeed) ? b.buyFeed : (Array.isArray(b.rows) ? b.rows : []);
+    if (!rows.length) return res.json({ ok: false, reason: 'empty feed (buy plan not loaded in this tab)' });
+    res.json({ ok: true, ...(await afStoreFeed(rows, authUser(req), b.app_version || null)) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/scenario/auto-forecast/feed/status', async (req, res) => {
+  const f = await afLatestFeed();
+  res.set('Cache-Control', 'no-store').json(f ? { ok: true, id: f.id, computed_at: f.computed_at, computed_by: f.computed_by, app_version: f.app_version, rows: f.row_count, units: Number(f.units_total) } : { ok: false, reason: 'no feed snapshot yet — open SUPPLY ▸ PAYMENTS ▸ Auto Forecast once' });
+});
 // ── v28.001 (Ben): GOOGLE SHEETS / SCRIPT EXPORTS ─────────────────────────────────────────────────────────────────
 // Read-only CSV endpoints for the reports the team used to copy from the clipboard into Google Sheets. Authenticated by
 // a dedicated EXPORT TOKEN (app_settings.export_token — generated in CONFIG ▸ Exports & uploads), never the planner key
@@ -18209,7 +18239,7 @@ const EXPORT_REPORTS = {
   'cashflow-transactions':      { title: 'Cash flow — all transactions',  page: '#/supply/payments/cashflow', desc: 'Every cash-flow line (deposits, completions, balances, freight, duty…), one row per payment.' },
   'cashflow-starting-deposits': { title: 'Cash flow — starting deposits', page: '#/supply/payments/cashflow', desc: 'Every PO\'s start deposit (incl. drawdowns from a referenced pool), same columns as all transactions.' },
   'cashflow-stock-arrivals':    { title: 'Cash flow — stock arrivals',    page: '#/supply/payments/cashflow', desc: 'Goods + import duty per PO, dated on completion.' },
-  'auto-forecast-transactions': { title: 'Auto Forecast — transactions',  page: '#/supply/payments/af',       desc: 'One row per projected payment leg of the rolling buy plan (server engine = the emailed CSV; the on-screen buy-plan engine needs the browser).' },
+  'auto-forecast-transactions': { title: 'Auto Forecast — transactions',  page: '#/supply/payments/af',       desc: 'One row per projected payment leg, phased from the newest buy-plan feed snapshot (same engine as the screen: buy plan, gap on, all markets). Falls back to the rolling engine when no snapshot exists.' },
 };
 let _exportTokenMemo = { t: 0, v: null };
 async function exportToken() {
@@ -18258,7 +18288,11 @@ async function buildExportRows(report) {
       'Direct to Client?': (_exDtc(a.branch) ? 'Direct' : ''), 'Amount (GBP)': _exUsdToGbp(fx, usd, a.delivery).toFixed(2) }; });
   }
   if (report === 'auto-forecast-transactions') {
-    const d = await computeAutoForecast(['uk', 'us', 'eu', 'au']);
+    // v28.002: the persisted buy-plan feed (mig 304) makes this match the screen; without a snapshot, the rolling engine.
+    const feed = await afLatestFeed();
+    const d = feed && Array.isArray(feed.rows) && feed.rows.length ? await computeAutoForecastFromFeed(feed.rows, ['uk', 'us', 'eu', 'au'], true) : await computeAutoForecast(['uk', 'us', 'eu', 'au']);
+    d._source = feed && feed.rows && feed.rows.length ? ('buy-plan feed as of ' + new Date(feed.computed_at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC (' + feed.row_count + ' rows)') : 'rolling engine (no buy-plan feed snapshot yet)';
+    buildExportRows._lastSource = d._source;
     const gbp = await gbpRate();
     return (d.transactions || []).map(t => { const usd = Math.round((+t.amount_usd || 0) * 100) / 100; return {
       Reference: t.reference, Type: t.type, 'Amount USD': usd.toFixed(2), Date: t.date, Country: t.country, Supplier: t.supplier,
@@ -18273,8 +18307,10 @@ app.get('/api/export/csv/:report', async (req, res) => {
     if (!(await exportTokenOk(req))) return res.status(401).set('Cache-Control', 'no-store').json({ error: 'invalid or missing export token' });
     const report = String(req.params.report || '').replace(/\.csv$/i, '');
     if (!EXPORT_REPORTS[report]) return res.status(404).json({ error: 'unknown report', reports: Object.keys(EXPORT_REPORTS) });
+    buildExportRows._lastSource = '';
     const rows = await buildExportRows(report);
     res.set('Cache-Control', 'no-store');
+    if (buildExportRows._lastSource) res.setHeader('X-Horizon-Source', buildExportRows._lastSource);   // v28.002: which engine fed the auto-forecast rows
     if (String(req.query.format || '').toLowerCase() === 'json') return res.json(rows);
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'inline; filename="' + report + '.csv"');
@@ -18283,7 +18319,9 @@ app.get('/api/export/csv/:report', async (req, res) => {
 });
 // Catalogue for the config page (logged-in users only — goes through the normal gate).
 app.get('/api/export/reports', async (req, res) => {
-  res.set('Cache-Control', 'no-store').json({ reports: Object.entries(EXPORT_REPORTS).map(([k, v]) => ({ key: k, ...v, path: '/api/export/csv/' + k })), token_set: !!(await exportToken()) });
+  const feed = await afLatestFeed();   // v28.002: surface the buy-plan snapshot age on the config page
+  const note = feed ? ('buy-plan feed as of ' + new Date(feed.computed_at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC · ' + feed.row_count + ' rows · ' + Number(feed.units_total).toLocaleString() + ' units' + (feed.computed_by ? (' · by ' + feed.computed_by) : '')) : 'no buy-plan feed snapshot yet — open PAYMENTS ▸ Auto Forecast once; until then the rolling engine is used';
+  res.set('Cache-Control', 'no-store').json({ reports: Object.entries(EXPORT_REPORTS).map(([k, v]) => ({ key: k, ...v, path: '/api/export/csv/' + k, note: k === 'auto-forecast-transactions' ? note : '' })), token_set: !!(await exportToken()), feed_as_of: feed ? feed.computed_at : null });
 });
 // Generate / rotate the export token (CONFIG ▸ Exports & uploads). Any script using the old token stops working at once.
 app.post('/api/export/token', async (req, res) => {

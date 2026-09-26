@@ -15898,6 +15898,12 @@ var AF_GBP=1.34;   // USD → GBP rate for the payments plan GBP summary
 var AF_ENGINE='bp';   // 'bp' = new buy-plan-driven engine (Option B) · 'old' = legacy rolling subcategory model
 var AF_GAP=true;      // buy-plan engine: also cover the category gap (subcat forecast − known-SKU forecast = future SKUs)
 var AF_FEED=null;     // cached client buy feed (all markets) for the buy-plan engine
+// v28.002 (Ben): persist the buy feed server-side (planner.auto_forecast_feed) so the Google Sheets export phases the SAME
+// buys as this screen. Posted after every fresh build here, and hourly from any open tab that has the buy plan loaded.
+var AF_FEED_PUSHED_SIG='';
+function afPushFeed(feed,force){ try{ if(!feed||!feed.length)return; var sig=feed.length+'|'+feed.reduce(function(s,r){return s+(r.units||0);},0); if(!force&&sig===AF_FEED_PUSHED_SIG)return; AF_FEED_PUSHED_SIG=sig;
+  fetch('/api/scenario/auto-forecast/feed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyFeed:feed,app_version:(typeof VERSION!=='undefined'?VERSION:'')})}).catch(function(){}); }catch(e){} }
+setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(typeof BP==='undefined'||!BP.D)return; AF_FEED=afBuildBuyFeed(); afPushFeed(AF_FEED,true); }catch(e){} },3600000);   // hourly while a tab with the buy plan is open
 // Build the buy feed for the Auto Forecast (Option B): the buy plan's OWN per-SKU × market × arrival-month buys
 // (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
 // phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
@@ -16037,6 +16043,7 @@ function renderAutoForecastReport(body){
     fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(done).catch(fail);
   } else {
     if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
+    afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
     fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail);
   }
 }

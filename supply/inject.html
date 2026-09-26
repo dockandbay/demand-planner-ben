@@ -9074,7 +9074,7 @@
       +'<button class="save-btn" id="gs-tok-rotate" style="background:var(--neg-bg);color:var(--neg);border-color:var(--neg-cell)">'+(token?'↻ Rotate token':'✚ Generate token')+'</button>'
       +'<span class="tiny mut" id="gs-tok-msg"></span></div>';
     var tbl='<div class="tw" style="max-width:860px"><table><thead><tr><th class="l">Report</th><th class="l">Endpoint (GET) · columns = the on-screen ⧉ copy</th><th class="l"></th></tr></thead><tbody>'
-      +reports.map(function(r){ var url=origin+r.path; return '<tr><td class="l" style="min-width:260px"><b><a href="'+esc(r.page)+'" style="color:var(--blue);text-decoration:none">'+esc(r.title)+' ↗</a></b><div class="mut tiny" style="white-space:normal">'+esc(r.desc)+'</div></td>'
+      +reports.map(function(r){ var url=origin+r.path; return '<tr><td class="l" style="min-width:260px"><b><a href="'+esc(r.page)+'" style="color:var(--blue);text-decoration:none">'+esc(r.title)+' ↗</a></b><div class="mut tiny" style="white-space:normal">'+esc(r.desc)+(r.note?'<br><span style="color:var(--blue-ink)">'+esc(r.note)+'</span>':'')+'</div></td>'
         +'<td class="l" style="white-space:nowrap"><code style="font-size:11px">'+esc(r.path)+'</code></td>'
         +'<td class="l" style="white-space:nowrap"><button class="save-btn light gs-copy-url" data-url="'+esc(url)+'">⧉ URL</button> '
         +(token?'<a class="save-btn light" target="_blank" rel="noopener" href="'+esc(url+'?token='+encodeURIComponent(token))+'">Open ↗</a>':'')+'</td></tr>'; }).join('')

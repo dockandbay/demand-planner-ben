@@ -1,3 +1,13 @@
+## v28.002 deploy note (Ben): Auto Forecast export matches the screen — persisted buy-plan feed (migration 304)
+
+**Files: `server.mjs`, `artifact_v16.7.html`, `supply/inject.html`, `migrations/304_auto_forecast_feed.sql`.** Ben: "Proceed to make this happen… an hourly cron to update." The buy plan exists only in the browser (artifact `BP` engine), so no server cron can recompute it; instead the browser persists its feed and the export phases it live.
+
+- **Migration 304** `planner.auto_forecast_feed` (snapshots: computed_at/by, app_version, row_count, units_total, rows jsonb `[{subcat, mkt, m, units}]`). Writer prunes to the newest 30.
+- **Client** (`afPushFeed`): posts the feed to `POST /api/scenario/auto-forecast/feed` after every fresh `afBuildBuyFeed()` on PAYMENTS ▸ Auto Forecast (deduped by a length+units signature), and **hourly from any visible tab that has the buy plan loaded** (`setInterval` 60 min → rebuild + push). `GET /api/scenario/auto-forecast/feed/status` reports the latest snapshot.
+- **Export** `auto-forecast-transactions` now runs `computeAutoForecastFromFeed(latest feed, all markets, gap on)` — the same engine and defaults as the screen — and falls back to the rolling engine only when no snapshot exists. Response header `X-Horizon-Source` names which; the CONFIG ▸ Exports & uploads catalogue shows the snapshot age, rows, units and author under the report.
+
+Sandbox verified: before any snapshot the export reported "rolling engine" with 807 rows; opening Auto Forecast once stored a 399-row / 580,931-unit feed, after which the export returned 1,312 rows totalling **$5,659,365 vs $5,659,368 on screen** (2-dp line rounding), every payment type matching: starting deposits 1,494,179 / 1,494,180, completion 934,669 / 934,671, balance 2,613,645, freight 78,600, duty 538,272. Cash phasing (prices, terms, leads, freight tiers) is still computed live at export time; only the buy units are as-of the snapshot. Apply 304 on prod before deploying.
+
 ## v28.001 deploy note (Ben): Google Sheets / script exports — token-protected CSV endpoints + Apps Script
 
 **Files: `server.mjs`, `supply/inject.html`.** Ben: "get data from Horizon into Google Sheets… the cash flow all transactions report I currently copy to clipboard and paste." Apps Script route chosen.
