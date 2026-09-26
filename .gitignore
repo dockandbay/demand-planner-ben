@@ -1,8 +1,48 @@
 .env
+create_user_readonly.txt
 node_modules
 *.bak
 .vercel
+.DS_Store
+
+# v27.799 (Ben): local-only working bucket — scratch/probes, analysis, business-data dumps, logs. NEVER committed.
+_local/
 
 # Raw production-data dump — local re-seed convenience only; never commit business data.
 planner_seed.sql
 *_seed.sql
+
+# Handoff / data packages (deliverables for Diviyaj — full data dumps; not repo content). v27.799: now under archive/.
+archive/handoff/
+archive/handoff.zip
+archive/final po migration files/
+archive/po-erp-migration-for-diviyaj.zip
+.claude/
+server.log
+/log
+
+# ad-hoc data files / sample exports
+UK - Forecast Analysis*.csv
+
+# one-off live data update — never track
+po_client_master_update_2026-07-01.sql
+backfill_final_payment_due_2026-07-03.sql
+product_dims_load_2026-07-03.sql
+migrations/098_product_inventory_refresh.sql
+migrations/099_product_carton_dims.sql
+
+# Cin7 API call log (sandbox debugging)
+cin7-calls.jsonl
+*Screenshot at*.png
+
+# Large local data & assets — never commit (14GB+ of barcodes/archives/exports lives here;
+# a stray `git add -A` swept these in and >100MB files break the GitHub push). files/ is not
+# repo content — it's local working data.
+files/
+*.mov
+*.dmg
+templates/mockups/
+# v27.799: all scratch/throwaway (harness probes, logs, one-off scripts) now lives under _local/ (ignored above).
+
+# runtime logs (cloudflared tunnel, dev server) — never track
+*.log
