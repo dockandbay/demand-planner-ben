@@ -16788,6 +16788,7 @@ app.post('/api/ai', async (req, res) => {
       'x-api-key': process.env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
     };
+    if (process.env.ANTHROPIC_WORKSPACE_ID) headers['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;   // org-scoped keys need the workspace id
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers, body: JSON.stringify(body),
     });
@@ -16927,7 +16928,9 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     messages.push({ role: 'user', content: newContent });
 
     // 3) call Claude
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }) });
+    const _aiHeaders = { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
+    if (process.env.ANTHROPIC_WORKSPACE_ID) _aiHeaders['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
       if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';

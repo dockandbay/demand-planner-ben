@@ -1,3 +1,9 @@
+## v28.014 (Ben): AI — support org-scoped keys via ANTHROPIC_WORKSPACE_ID
+
+**File: `server.mjs`.** Both the AI proxy (`/api/ai`) and Ask Claude (`/api/assistant/*`) now add the `anthropic-workspace-id` header when the `ANTHROPIC_WORKSPACE_ID` env var is set. This lets an organization-scoped Anthropic API key work (such a key is rejected with "not scoped to a workspace" unless the workspace id is supplied). No change when the var is unset, so a normal workspace-scoped key keeps working as before.
+
+To use an org-scoped key: set `ANTHROPIC_WORKSPACE_ID` alongside `ANTHROPIC_API_KEY`. Simpler alternative: use a workspace-scoped key and leave the new var unset.
+
 ## v28.013 (Ben): Ask Claude + Replacement-forecasts UI polish
 
 **File: `artifact_v16.7.html` (+ `server.mjs` for a clearer AI-key error).**
