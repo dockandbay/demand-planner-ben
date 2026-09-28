@@ -1,3 +1,14 @@
+## v28.007 (Ben): lines drift on a processed Fulfil PO is flagged as an issue, with an "ERP drift approved" sign-off (migration 305)
+
+**Files: `server.mjs`, `supply/inject.html`, `migrations/305_erp_drift_approved.sql`.** Ben (28-Sep): "lines drift for a processed invoice is an issue. Flag it as an issue and then allow a tick box 'ERP drift approved' which removes the action." (Instead of the restriction to draft/quotation/confirmed I had proposed.)
+
+- **Migration 305:** `purchase_orders.erp_drift_approved_at / _by / _sig` (additive).
+- **Signature:** `md5(Horizon lines sku:qty | Fulfil mirror lines sku:qty)`. Approving stores who, when and the signature of the lines as they stood. `grid-status` reports `erp_drift_approved` only while the current signature still matches; if Horizon lines or the Fulfil PO change afterwards it reports `erp_drift_stale` and the drift is flagged again (an old sign-off cannot hide new drift).
+- **Route:** `POST /api/supply/po/:po/erp-drift-approve` `{approved:true|false}` (SUPPLY write; audit rows "ERP drift approved" / "ERP drift approval removed" in `po_change_log`).
+- **PO grid ▸ Fulfil column:** a Fulfil PO in processing / done / received with lines drift shows a red **⚠ ERP drift** badge (tooltip: state, N lines differ, "will not accept a line push"; "(re-check)" when a previous approval lapsed) plus the **ERP drift approved** tick. Draft/confirmed POs keep "Update lines" and also get the tick. Ticking asks for confirmation, then the cell shows **✓ drift approved** (tooltip: by whom, when) with an **undo** link; a date drift still shows its own "Update date" button.
+
+Sandbox verified on PO-57EUXR1 (Fulfil processing, 9 lines differ): approve → approved by ben@ 06:05; signature altered → approved false / stale true; undo → cleared; three audit rows written. Apply 305 on prod before deploying.
+
 ## v28.006 (Ben): iFulfilment Xero bill is TAX INCLUSIVE too, reconciled to the invoice PDF
 
 **Files: `server.mjs`, `artifact_v16.7.html`.** Ben (28-Sep): the iFulfilment workbook amounts are EX VAT and VAT is added at the end of the invoice, i.e. the same shape as Coghlans. So `eu_ifulfilment` now gets the v28.004 treatment: lines grossed up ×1.20, VAT = line/6, import into Xero as **Tax Inclusive**. All three tax-bearing 3PLs (AU, UK, EU) now import with one rule.

@@ -2995,6 +2995,9 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
     const _gsUrl = (fid) => (fid && _gsCfg.subdomain) ? ('https://' + _gsCfg.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fid + '?window_name=default') : null;
     const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required, m.fulfil_id,
         (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, coalesce(m.line_count,0) fulfil_lines,
+        -- v28.007 (Ben): "ERP drift approved" sign-off (mig 305) + the signature of the lines it covered; a later change on either side lapses it
+        to_char(po.erp_drift_approved_at,'YYYY-MM-DD HH24:MI') erp_drift_approved_at, po.erp_drift_approved_by, po.erp_drift_approved_sig,
+        md5(coalesce((SELECT string_agg(l.sku||':'||coalesce(l.qty,0)::text, ',' ORDER BY l.sku) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0),'') || '|' || coalesce((SELECT string_agg((x->>'sku')||':'||coalesce(x->>'qty','0'), ',' ORDER BY x->>'sku') FROM jsonb_array_elements(coalesce(m.lines,'[]'::jsonb)) x),'')) drift_sig,
         to_char(m.requested_delivery_date,'YYYY-MM-DD') fulfil_req_delivery,
         -- v27.836 (Ben): the EXACT date the push writes (est_delivery, same calc as fulfilPushLines), so the drift flag + date-sync
         -- compare the Fulfil mirror against what a push would actually set, not the grid's r.delivery (which diverged → flip-flop).
@@ -3012,8 +3015,31 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
       LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
     const _chk = await fulfilCompletionMap();   // v27.900 (Ben): the Fulfil date target is the COMPLETION date
-    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_id: r.fulfil_id, fulfil_url: _gsUrl(r.fulfil_id), fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: _chk[r.po] || r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
+    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_id: r.fulfil_id, fulfil_url: _gsUrl(r.fulfil_id), fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: _chk[r.po] || r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required,
+      // v28.007: approved = a sign-off exists AND the lines have not changed since (signature match); stale = signed off, but changed since
+      erp_drift_approved: !!(r.erp_drift_approved_at && r.erp_drift_approved_sig && r.erp_drift_approved_sig === r.drift_sig),
+      erp_drift_stale: !!(r.erp_drift_approved_at && r.erp_drift_approved_sig && r.erp_drift_approved_sig !== r.drift_sig),
+      erp_drift_approved_by: r.erp_drift_approved_by || null, erp_drift_approved_at: r.erp_drift_approved_at || null }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.007 (Ben): tick / untick "ERP drift approved" on a PO. Approving stores WHO + WHEN + the signature of the lines as they
+// stand now (Horizon + Fulfil mirror); grid-status only honours it while that signature still matches. Untick clears it.
+app.post('/api/supply/po/:po/erp-drift-approve', async (req, res) => {
+  const po = req.params.po, approved = !!((req.body || {}).approved), by = authUser(req) || ((req.body || {}).by || null);
+  try {
+    if (approved) {
+      const r = await pool.query(`UPDATE planner.purchase_orders po SET erp_drift_approved_at=now(), erp_drift_approved_by=$2,
+          erp_drift_approved_sig=(SELECT md5(coalesce((SELECT string_agg(l.sku||':'||coalesce(l.qty,0)::text, ',' ORDER BY l.sku) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0),'') || '|' || coalesce((SELECT string_agg((x->>'sku')||':'||coalesce(x->>'qty','0'), ',' ORDER BY x->>'sku') FROM jsonb_array_elements(coalesce((SELECT mm.lines FROM planner.fulfil_purchase_orders mm WHERE mm.po=po.po),'[]'::jsonb)) x),'')))
+        WHERE po.po=$1 RETURNING to_char(erp_drift_approved_at,'YYYY-MM-DD HH24:MI') at, erp_drift_approved_by by`, [po, by]);
+      if (!r.rowCount) return res.status(404).json({ error: 'PO not found' });
+      logPoChange(po, 'ERP drift approved', 'lines drift vs Fulfil signed off', by);
+      return res.json({ ok: true, approved: true, by: r.rows[0].by, at: r.rows[0].at });
+    }
+    const r = await pool.query(`UPDATE planner.purchase_orders SET erp_drift_approved_at=NULL, erp_drift_approved_by=NULL, erp_drift_approved_sig=NULL WHERE po=$1`, [po]);
+    if (!r.rowCount) return res.status(404).json({ error: 'PO not found' });
+    logPoChange(po, 'ERP drift approval removed', '', by);
+    res.json({ ok: true, approved: false });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v27.751: seed suppliers.fulfil_id / branches.fulfil_id from the Fulfil tenant, so the PO push uses the stored id
