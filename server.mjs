@@ -18688,7 +18688,7 @@ app.use('/api/client', cpAdminGate);
 app.get('/api/client/lookups', async (req, res) => {
   try {
     const [rg, ka, ch, pl, cnt] = await Promise.all([
-      pool.query(`SELECT id, name, default_rate FROM planner.rep_groups WHERE active ORDER BY name`),
+      pool.query(`SELECT id, name, default_rate, coalesce(xero_contact,'') xero_contact, coalesce(xero_account_code,'') xero_account_code FROM planner.rep_groups WHERE active ORDER BY name`),
       pool.query(`SELECT id, name FROM planner.key_accounts ORDER BY name`),
       pool.query(`SELECT channel, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(channel,'')<>'' GROUP BY 1 ORDER BY 2 DESC`).catch(() => ({ rows: [] })),
       pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus FROM planner.client_price_lists GROUP BY code ORDER BY code`).catch(() => ({ rows: [] })),
@@ -19168,6 +19168,68 @@ app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="commission-' + run.month + '-' + cpSlug(run.group_name) + '.csv"'); res.send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.021 (Ben): historical paid commissions (Paid history tab) — every row from a run marked paid.
+app.get('/api/client/commission/paid', async (req, res) => {
+  try {
+    const gp = req.query.group_id ? ' AND r.rep_group_id=$1' : ''; const params = req.query.group_id ? [req.query.group_id] : [];
+    const rows = (await pool.query(`SELECT r.month, r.id run_id, g.name group_name, r.paid_ref, to_char(r.paid_at,'YYYY-MM-DD') paid_at,
+        cr.order_ref, cr.invoice_ref, cr.customer, to_char(cr.paid_date,'YYYY-MM-DD') paid_date, cr.commissionable, cr.rate, cr.commission, cr.credit_note_ref, cr.credit_adj, cr.net, cr.payment_code
+      FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id
+      JOIN planner.commission_rows cr ON cr.run_id=r.id
+      WHERE r.status='paid'${gp} ORDER BY r.paid_at DESC NULLS LAST, r.month DESC, cr.order_ref`, params)).rows;
+    const runs = (await pool.query(`SELECT r.id, r.month, g.name group_name, r.total, r.paid_ref, to_char(r.paid_at,'YYYY-MM-DD') paid_at,
+        (SELECT count(*) FROM planner.commission_rows cr WHERE cr.run_id=r.id) rows_count
+      FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.status='paid'${gp} ORDER BY r.paid_at DESC NULLS LAST, r.month DESC`, params)).rows;
+    res.set('Cache-Control', 'no-store').json({ rows, runs });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// v28.021: nicely formatted PDF commission statement for a run (pdf-lib).
+app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
+  try {
+    const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.default_rate FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
+    if (!run) return res.status(404).send('not found');
+    const rows = (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'DD Mon YYYY') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [req.params.id])).rows;
+    const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+    const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
+    const ink = rgb(0.09, 0.13, 0.18), mut = rgb(0.42, 0.46, 0.52), line = rgb(0.85, 0.87, 0.9), accent = rgb(1, 0.34, 0.19);
+    const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const W = 595.28, H = 841.89, ML = 40, MR = 40; let page, y;
+    // columns: order/invoice, customer, paid, commissionable, rate, commission, net
+    const cols = [{ x: ML, w: 96, l: 'Order / invoice', a: 'l' }, { x: ML + 96, w: 120, l: 'Customer', a: 'l' }, { x: ML + 216, w: 66, l: 'Paid', a: 'l' }, { x: ML + 282, w: 70, l: 'Commissionable', a: 'r' }, { x: ML + 352, w: 36, l: 'Rate', a: 'r' }, { x: ML + 388, w: 62, l: 'Commission', a: 'r' }, { x: ML + 450, w: 65, l: 'Net', a: 'r' }];
+    const draw = (t, x, yy, f, sz, col, a, w) => { t = String(t == null ? '' : t); const tw = f.widthOfTextAtSize(t, sz); page.drawText(t, { x: a === 'r' ? x + (w || 0) - tw : x, y: yy, size: sz, font: f, color: col || ink }); };
+    function header() {
+      page = doc.addPage([W, H]); y = H - 46;
+      draw('Dock & Bay', ML, y, B, 18, ink); draw('COMMISSION STATEMENT', W - MR - B.widthOfTextAtSize('COMMISSION STATEMENT', 10), y + 3, B, 10, accent);
+      y -= 22; draw(run.group_name + '  ·  ' + run.month, ML, y, F, 11, mut);
+      draw((run.status === 'paid' ? 'PAID' + (run.paid_at ? ' ' + String(run.paid_at).slice(0, 10) : '') : run.status === 'finalised' ? 'FINALISED' : 'OPEN'), W - MR - F.widthOfTextAtSize((run.status || '').toUpperCase(), 9), y, F, 9, mut);
+      y -= 8; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 1, color: accent }); y -= 16;
+      cols.forEach(c => draw(c.l, c.x, y, B, 7.5, mut, c.a, c.w)); y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 13;
+    }
+    header();
+    let totC = 0, totN = 0;
+    for (const r of rows) {
+      if (y < 70) { header(); }
+      const ref = r.order_ref + (r.invoice_ref ? ' / ' + r.invoice_ref : '') + (r.credit_note_ref ? ' (CN ' + r.credit_note_ref + ')' : '');
+      draw(ref.slice(0, 26), cols[0].x, y, F, 7.5, ink, 'l');
+      draw(String(r.customer || '').slice(0, 26), cols[1].x, y, F, 7.5, ink, 'l');
+      draw(r.paid || '', cols[2].x, y, F, 7.5, ink, 'l');
+      draw(money(r.commissionable), cols[3].x, y, F, 7.5, ink, 'r', cols[3].w);
+      draw(r.rate + '%', cols[4].x, y, F, 7.5, ink, 'r', cols[4].w);
+      draw(money(r.commission), cols[5].x, y, F, 7.5, ink, 'r', cols[5].w);
+      draw(money(r.net), cols[6].x, y, B, 7.5, ink, 'r', cols[6].w);
+      totC += Number(r.commission) || 0; totN += Number(r.net) || 0; y -= 14;
+    }
+    y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 15;
+    draw('Total commission owed', cols[3].x - 60, y, B, 9, ink, 'l');
+    draw(money(totN), cols[6].x, y, B, 11, accent, 'r', cols[6].w);
+    y -= 26; draw('Commission is on invoices paid in the month, on the sales value ex tax and ex shipping. Credit notes are commissioned at the original order rate.', ML, y, F, 7, mut, 'l');
+    if (run.xero_contact) { y -= 12; draw('Xero contact: ' + run.xero_contact, ML, y, F, 7, mut, 'l'); }
+    const bytes = await doc.save();
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.pdf"'); res.send(Buffer.from(bytes));
+  } catch (e) { log500(e); res.status(500).send('statement error: ' + e.message); }
+});
+
 app.post('/api/client/commission/runs/:id/push-fulfil', async (req, res) => {
   // Writes the commission back onto each Fulfil sale (metafield). The sale metafield code is not defined on the tenant yet —
   // returns what WOULD be written until Diviyaj confirms the field; nothing is sent.

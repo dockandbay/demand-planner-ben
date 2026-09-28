@@ -1,3 +1,12 @@
+## v28.021 (Ben): CLIENT ▸ Commissions split into L3 tabs; PDF statement; rate & Xero on the account
+
+**Files: `supply/inject.html`, `server.mjs`.**
+
+- **Level-3 tabs** (light-blue pill row): **Commissions report** (rep/agent group list + monthly run build/refresh + run detail table, choose month), **Order overrides** (the per-order rate overrides), **Paid history** (every payment made: a run appears here once marked Paid, with a per-payment PDF and an all-paid-rows table). Routes: new `GET /api/client/commission/paid`.
+- **PDF statement**: `GET /api/client/commission/runs/:id/statement.pdf` (pdf-lib) renders a clean statement (Dock & Bay header, group + month, per-row order/customer/paid/commissionable/rate/commission/net, total owed, Xero contact). A **⬇ Statement PDF** button sits next to the CSV downloads on the run detail and on each Paid-history payment.
+- **Commission rate & Xero contact moved to the agent's account card**: on Clients &amp; agents ▸ edit ▸ Commission, once a rep group is linked you set its **rate**, **Xero contact** and **Xero account** there (saved straight to the group). The Commissions report now shows the rate as "on account" and no longer edits it inline. `/api/client/lookups` returns the group Xero fields for the card.
+
+No migration. Sandbox verified: three L3 tabs render, run detail shows the PDF button, the PDF route returns a valid application/pdf, the paid route returns cleanly, and the account card carries the rate/Xero fields.
 ## v28.020 (Ben): CLIENT tab matched to SUPPLY conventions; CONFIG split into L3 tabs; per-client discontinue market
 
 **Files: `supply/inject.html`, `server.mjs`.**
