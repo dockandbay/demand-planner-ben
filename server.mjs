@@ -440,12 +440,14 @@ async function buildSKURAW() {
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
-                       nullif(trim(p.replacement_sku),'') rep,
+                       case when fi.new_sku is null then nullif(trim(p.replacement_sku),'')   /* v28.012: forecast_inheritance overlays products.replacement_sku (override / ignore) */
+                            when fi.ignore then null
+                            else coalesce(nullif(trim(fi.source_sku),''), nullif(trim(p.replacement_sku),'')) end rep,
                        coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img,   -- variant image, falling back to the colour swatch when blank
                        nullif(trim(p.colour_swatch_url),'') sw,   -- colour swatch URL — client-side fallback when the variant image URL 404s
                        upper(coalesce(nullif(btrim(p.status),''),'')) st,
                        upper(coalesce(nullif(btrim(p.variant_type),''),'MASTER')) vt   -- MASTER | SET (blank ⇒ MASTER); SETS feature identifies build-on-fly set SKUs
-                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku WHERE p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
+                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku LEFT JOIN planner.forecast_inheritance fi ON fi.new_sku=p.sku WHERE p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
     pool.query(`SELECT sku, co, lch, disc FROM (
@@ -16325,6 +16327,39 @@ app.get('/api/demand-actions/state', async (req, res) => {
 
 // ── Forecast cell notes (DEMAND ▸ Plan grid) — per-cell notes keyed level|item|country|channel|month.
 // GET lists all notes for a country+channel (client indexes by cell); POST creates; edit/delete by id.
+// ── v28.012 (Ben): forecast inheritance master table (NEW sku ← OLD sku). Overlays products.replacement_sku:
+// a row here overrides the source, or ignores (suppresses) the product-master value. Feeds buildSKURAW's `rep`.
+app.get('/api/forecast/replacements', async (req, res) => {
+  try {
+    const rows = (await pool.query(`
+      SELECT p.sku new_sku, p.product_name new_name,
+             nullif(trim(p.replacement_sku),'') product_rep,
+             fi.source_sku, coalesce(fi.ignore,false) ignore, fi.note,
+             coalesce(fi.updated_by,'') updated_by, to_char(fi.updated_at,'YYYY-MM-DD') updated_at
+      FROM planner.products p
+      LEFT JOIN planner.forecast_inheritance fi ON fi.new_sku=p.sku
+      WHERE p.in_planning_scope AND (nullif(trim(p.replacement_sku),'') IS NOT NULL OR fi.new_sku IS NOT NULL)
+      ORDER BY p.sku`)).rows;
+    rows.forEach(r => { r.has_override = (r.source_sku != null || r.ignore || r.note != null); r.effective = r.ignore ? null : ((r.source_sku && r.source_sku.trim()) || r.product_rep || null); });
+    res.set('Cache-Control', 'no-store').json({ rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/forecast/replacements', async (req, res) => {
+  const b = req.body || {}; const newSku = String(b.new_sku || '').trim(); if (!newSku) return res.status(400).json({ error: 'new_sku required' });
+  const src = (b.source_sku == null ? null : String(b.source_sku).trim()) || null; const ign = !!b.ignore; const note = (b.note == null ? null : String(b.note).trim()) || null;
+  try { const me = await permsFor(req);
+    if (!src && !ign && !note) { await pool.query(`DELETE FROM planner.forecast_inheritance WHERE new_sku=$1`, [newSku]); }
+    else { await pool.query(`INSERT INTO planner.forecast_inheritance (new_sku, source_sku, ignore, note, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,now())
+             ON CONFLICT (new_sku) DO UPDATE SET source_sku=excluded.source_sku, ignore=excluded.ignore, note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`,
+      [newSku, src, ign, note, me.email || 'sandbox']); }
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/forecast/replacements/:sku/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.forecast_inheritance WHERE new_sku=$1`, [String(req.params.sku)]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/forecast/notes', async (req, res) => {
   const country = (req.query.country || '').toUpperCase(), channel = (req.query.channel || '').toUpperCase();
   try {

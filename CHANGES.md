@@ -1,3 +1,15 @@
+## v28.012 (Ben): Replacement-forecast master table (DEMAND ▸ Inputs, migration 308)
+
+**Files: `artifact_v16.7.html`, `server.mjs`, `migrations/308_forecast_inheritance.sql`.** A new **Replacement forecasts** tab under DEMAND ▸ Inputs: the master list of NEW SKUs that inherit their forecast from an OLD (predecessor) SKU.
+
+- **Baseline shown:** the product master's "receives from replacement" value (`products.replacement_sku`) is displayed per NEW SKU as the starting point.
+- **Override / ignore:** in this table you can override the source with a different OLD SKU, or ignore the inheritance so the NEW SKU builds its own forecast. **Clear** reverts a row to the product-master value. Add a brand-new mapping (NEW inherits from OLD) for a SKU that has no product-master replacement.
+- **Effective value drives the plan:** `buildSKURAW`'s `rep` (which the forecast engine reads as the predecessor whose history a new SKU inherits) now overlays the new `planner.forecast_inheritance` table: a row overrides or (with `ignore`) suppresses the product value; no row leaves the product value unchanged, so behaviour is identical until a mapping is set. Overrides flow into the plan on the next data refresh (the raw SKU map is baked at page-serve / rebuilt by the refresh button and ETL).
+- **Server:** `GET/POST /api/forecast/replacements`, `POST /api/forecast/replacements/:sku/delete` (DEMAND-gated writes). Saving an empty override deletes the row (revert to master).
+- **Migration 308:** `planner.forecast_inheritance (new_sku PK, source_sku, ignore, note, updated_by, updated_at)`, additive.
+
+Sandbox verified: 12 product-master mappings surface; override wins (effective → override source), ignore → own forecast (effective null), clear reverts to master and drops the row; the demand plan still loads (1,974 SKUs, no rows = unchanged). Deploy: apply 308.
+
 ## v28.011 (Ben): "Ask Claude" — global assistant drawer (migration 307)
 
 **Files: `artifact_v16.7.html`, `server.mjs`, `migrations/307_ai_assistant.sql`.** A new orange **Ask Claude** button (robot icon) in the top bar, left of the SA button, opens a right-hand drawer for free-form conversation with Claude about anything.

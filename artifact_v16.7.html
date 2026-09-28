@@ -10029,6 +10029,7 @@ function render(){
     if(DEMAND_VIEW==='summary') renderSummaryReport(body);
     else if(DEMAND_VIEW==='snapshots') renderSnapshotsView(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
+    else if(DEMAND_VIEW==='replacements') renderReplacementsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis'){ try{ location.hash='#/reports/performance/demand-metrics'; }catch(e){} return; }   // KPIs moved to REPORTS ▸ Performance ▸ Demand Metrics — bounce any stale DEMAND_VIEW='kpis' there
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
@@ -10947,6 +10948,49 @@ function renderSummaryView(body){
   else draw();
 }
 var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
+function renderReplacementsView(body){
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function nm(sku){ var p=SKUM[sku]; return p&&p.n?p.n:''; }
+  var allSkus=Object.keys(SKUM).sort();
+  var dl='<datalist id="rep-skus">'+allSkus.map(function(s){return '<option value="'+esc(s)+'">'+esc(nm(s))+'</option>';}).join('')+'</datalist>';
+  body.innerHTML='<div class="count">Loading…</div>';
+  fetch('/api/forecast/replacements').then(function(r){return r.json();}).then(function(j){
+    if(j.error){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(j.error)+'</div>'; return; }
+    var rows=j.rows||[]; var q='';
+    function save(payload,cb){ fetch('/api/forecast/replacements',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error){alert(x.error);return;} if(cb)cb(); }).catch(function(e){alert(e.message);}); }
+    function reload(){ renderReplacementsView(body); }
+    function draw(){
+      var f=rows.filter(function(r){ if(!q)return true; var s=(r.new_sku+' '+(r.new_name||'')+' '+(r.product_rep||'')+' '+(r.source_sku||'')+' '+(r.effective||'')).toLowerCase(); return s.indexOf(q)>=0; });
+      var over=rows.filter(function(r){return r.has_override;}).length, ign=rows.filter(function(r){return r.ignore;}).length;
+      body.innerHTML=dl
+        +'<div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.55;max-width:940px"><b>DEMAND &#9656; Inputs &#9656; Replacement forecasts.</b> The master list of NEW SKUs that inherit their forecast from an OLD (predecessor) SKU. The product master\'s <b>receives from replacement</b> value (<code>products.replacement_sku</code>) is the baseline shown here; you can <b>override</b> it with a different source SKU, or <b>ignore</b> it so the new SKU builds its own forecast instead. Overrides flow into the plan on the next data refresh.</div>'
+        +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">'+[[rows.length,'mappings'],[over,'overridden here'],[ign,'ignored (own forecast)']].map(function(k){return '<div style="border:1px solid var(--line);border-radius:9px;background:var(--card);padding:8px 14px"><b style="font-size:18px">'+k[0]+'</b> <span style="color:var(--muted);font-size:11px">'+k[1]+'</span></div>';}).join('')+'</div>'
+        +'<div style="border:1px solid var(--line);border-radius:10px;background:var(--card);padding:10px 12px;margin-bottom:12px;max-width:940px"><b style="font-size:12px">Add or set a mapping</b><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px"><input id="rep-new" list="rep-skus" placeholder="NEW sku" style="width:220px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px"><span style="color:var(--muted);font-size:12px">inherits from</span><input id="rep-src" list="rep-skus" placeholder="OLD sku" style="width:220px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px"><button id="rep-add" style="background:var(--blue,#2563eb);color:#fff;border:none;border-radius:6px;padding:6px 13px;font-size:12px;cursor:pointer;font-weight:600">Save mapping</button><span id="rep-addmsg" style="font-size:12px"></span></div></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input id="rep-q" placeholder="Search SKU / name / source…" value="'+esc(q)+'" style="width:300px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px"><span style="margin-left:auto;font-size:12px;color:var(--muted)">'+f.length+' of '+rows.length+'</span></div>'
+        +'<div style="overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:12px;max-width:1150px"><thead><tr style="text-transform:uppercase;font-size:9px;color:var(--muted);text-align:left">'
+          +['New SKU','Master receives from','Override source','Ignore','Effective source','Note','Updated',''].map(function(h){return '<th style="padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +(f.map(function(r){ var eff=r.effective; return '<tr data-sku="'+esc(r.new_sku)+'" style="border-bottom:1px solid var(--line2,#eef0f3)">'
+            +'<td style="padding:6px 8px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(r.new_sku)+'</b><div style="color:var(--faint);font-size:11px">'+esc(r.new_name||'')+'</div></td>'
+            +'<td style="padding:6px 8px">'+(r.product_rep?('<span style="font-family:ui-monospace,Menlo,monospace">'+esc(r.product_rep)+'</span><div style="color:var(--faint);font-size:11px">'+esc(nm(r.product_rep))+'</div>'):'<span style="color:var(--faint)">&mdash;</span>')+'</td>'
+            +'<td style="padding:6px 8px"><input class="rep-src-in" list="rep-skus" value="'+esc(r.source_sku||'')+'" placeholder="'+(r.product_rep?'(uses master)':'none')+'" style="width:160px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;font-size:11px;font-family:ui-monospace,Menlo,monospace"></td>'
+            +'<td style="padding:6px 8px;text-align:center"><input type="checkbox" class="rep-ign"'+(r.ignore?' checked':'')+' title="Ignore inheritance — the new SKU builds its own forecast"></td>'
+            +'<td style="padding:6px 8px">'+(eff?('<span style="font-family:ui-monospace,Menlo,monospace">'+esc(eff)+'</span>'):'<span style="color:var(--neg)">none (own forecast)</span>')+'</td>'
+            +'<td style="padding:6px 8px"><input class="rep-note" value="'+esc(r.note||'')+'" placeholder="reason" style="width:150px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;font-size:11px"></td>'
+            +'<td style="padding:6px 8px;white-space:nowrap;color:var(--faint);font-size:11px">'+(r.updated_at?esc(r.updated_at)+(r.updated_by?'<br>'+esc((r.updated_by||'').split('@')[0]):''):'')+'</td>'
+            +'<td style="padding:6px 8px;white-space:nowrap"><button class="rep-save" style="background:var(--blue,#2563eb);color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer">Save</button>'+(r.has_override?' <button class="rep-clear" title="Revert to the product master value" style="background:var(--hover);border:1px solid var(--line);border-radius:5px;padding:4px 8px;font-size:11px;cursor:pointer;color:var(--muted)">Clear</button>':'')+'</td>'
+          +'</tr>';}).join('')||'<tr><td colspan="8" style="padding:14px;color:var(--muted)">No replacement mappings yet. Add one above, or set <code>replacement_sku</code> in the product master.</td></tr>')
+          +'</tbody></table></div>';
+      var qi=document.getElementById('rep-q'); qi.oninput=function(){ q=qi.value.trim().toLowerCase(); var pos=qi.selectionStart; draw(); var n=document.getElementById('rep-q'); if(n){n.focus(); try{n.setSelectionRange(pos,pos);}catch(e){}} };
+      document.getElementById('rep-add').onclick=function(){ var ns=(document.getElementById('rep-new').value||'').trim(), sr=(document.getElementById('rep-src').value||'').trim(); var m=document.getElementById('rep-addmsg'); if(!ns){m.style.color='var(--neg)';m.textContent='Enter a NEW sku';return;} if(!SKUM[ns]){m.style.color='var(--neg)';m.textContent='Unknown sku';return;} m.style.color='var(--muted)';m.textContent='Saving…'; save({new_sku:ns,source_sku:sr,ignore:false},reload); };
+      body.querySelectorAll('tr[data-sku]').forEach(function(tr){ var sku=tr.dataset.sku;
+        tr.querySelector('.rep-save').onclick=function(){ save({new_sku:sku, source_sku:tr.querySelector('.rep-src-in').value.trim(), ignore:tr.querySelector('.rep-ign').checked, note:tr.querySelector('.rep-note').value.trim()}, reload); };
+        var cl=tr.querySelector('.rep-clear'); if(cl)cl.onclick=function(){ if(!confirm('Clear the override and revert '+sku+' to the product master value?'))return; fetch('/api/forecast/replacements/'+encodeURIComponent(sku)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(reload); };
+      });
+    }
+    draw();
+  }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; });
+}
+
 function renderKeyAccountsView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   var CTRY=[['uk_3pl','UK'],['us_3pl','US'],['eu_3pl','EU']];   // pill tabs (per Ben)
@@ -12504,8 +12548,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest';
-  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
+  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
