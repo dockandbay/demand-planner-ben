@@ -1,3 +1,19 @@
+## v28.004 (Ben, Coghlans DOK50366): Xero bills for AU + UK are TAX INCLUSIVE and match the supplier total to the cent
+
+**Files: `server.mjs`, `artifact_v16.7.html`.** Ben: DOK50366 is 7,057.95 incl GST; importing Horizon's CSV as tax-exclusive gave "Adjustments to Tax −58.33" and a total 0.01 off.
+
+**Root cause (verified on the live workbook):** Coghlans' sheets are GST-EXCLUSIVE. Horizon's lines already summed to the Settings sheet's "Total excl GST" 6,416.32 exactly, but the CSV's TaxAmount was `line/11` (an inclusive formula) = 583.29 instead of 10% on top = 641.63. Xero booked the 58.34 difference as a tax adjustment; the 0.01 was Xero rounding 10% per line.
+
+**Change (Ben's call: go tax inclusive):**
+- **Tax mode per 3PL** in `/api/supply/tpl/xero-bill/:id`: `au_coghlans` inclusive (GST 10%, lines grossed up ×1.10, tax = line/11), `uk_ilg` inclusive (VAT 20%, lines are already gross from the DI invoices + shipping detail, tax = the supplier's VAT per line, No VAT lines keep 0), `eu_ifulfilment` unchanged tax-exclusive (Xero adds 20%), `us_geneva` zero-rated.
+- **Exact totals:** the supplier's stated totals are read from the file (Coghlans Settings sheet: Total excl GST / GST / Total incl GST via `_coghlansMeta`; ILG: Σ DI totals + shipping-detail gross and their VAT via `statedTotal`/`statedTax` in `_tplIlgAllocate`). Per-line rounding residue (amount and tax) is placed on the LARGEST line so the bill total and tax equal the supplier's figures; a residue beyond `0.05 + 0.01/line` is not plugged but flagged (`check.warning`).
+- **CSV:** Xero's `Total` column now carries the bill total (Xero validates the lines against it in the chosen mode); filename ends `-TAX-INCLUSIVE` / `-TAX-EXCLUSIVE` / `-NO-TAX` (e.g. `xero-bill-AU-2026-09-04-DOK50366-TAX-INCLUSIVE.csv`); header `X-Horizon-Tax-Mode`.
+- **Preview (step "Review Xero summary"):** banner "AMOUNTS ARE TAX INCLUSIVE (GST 10% inside each line) → import into Xero as Tax Inclusive", then "Bill total 7,057.95 = supplier invoice 7,057.95 ✓ · tax 641.63 = 641.63 ✓" and which line absorbed the rounding; red when it does not reconcile. Footer shows total incl. tax, tax, and net. Download message repeats the import mode.
+
+Sandbox verified: DOK50366 → 9 lines, total **7,057.95 = stated**, GST **641.63 = stated**, net 6,416.32 (−0.01 amount and −0.01 tax placed on "Freight - Fulfilment - Other Costs"). ILG Jul-26 → 19 lines, total 160,408.91 = Σ DI + shipping gross, VAT 26,402.91 = supplier VAT, no residue. iFulfilment left tax-exclusive (its sheets' VAT treatment not reviewed; flagged to Ben). No migration.
+
+**How to import:** Xero ▸ Bills ▸ Import ▸ choose the CSV ▸ at "Amounts are" pick **Tax Inclusive** for AU and UK, **Tax Exclusive** for EU. No tax adjustment should appear.
+
 ## v28.003 (Ben): SUG-0041 close-out — consignee details on the key-account CARDS
 
 **File: `supply/inject.html`.** Zera's SUG-0041 ("consignee details on key accounts") was already built: `key_accounts.consignee / contact_person / contact_number / freight_forwarder` (migration 272) with the "Consignee & delivery contacts" section in CONFIG ▸ Key accounts ▸ Edit, applied onto the PO's Client/FBA tab (Consignee, Contact person, Contact number, Freight forwarder details; migration 271, v27.672). Two live key accounts already carry them. The one gap: the key-account card list showed only address, requirements and packing chips, so the details were invisible until Edit. Cards now show Consignee, contact person + number (tel link) and forwarder when set. No migration, no server change. SUG-0041 and SUG-0007 (superseded by v27.892's forced sign-out on an expired session) closed on live.

@@ -10754,19 +10754,19 @@ async function _tplIlgAllocate(period) {
   const add = (a, k, v, amt, tax) => { const kk = key(a, k, v); if (!bucket[kk]) bucket[kk] = { account: a, kind: k, vat: v, amount: 0, tax: 0 }; bucket[kk].amount += amt; bucket[kk].tax += tax; };
   const seen = [], channels = new Set();
   for (const f of pdfs) { let di; try { di = await _tplIlgDiItems(f.content); } catch (e) { continue; } if (!di.items.length) continue;
-    seen.push({ di: di.diRef, si: di.siRef, channel: di.channel, total: Math.round(di.items.reduce((s, i) => s + i.total, 0) * 100) / 100 });
+    seen.push({ di: di.diRef, si: di.siRef, channel: di.channel, total: Math.round(di.items.reduce((s, i) => s + i.total, 0) * 100) / 100, tax: Math.round(di.items.reduce((s, i) => s + (i.vat || 0), 0) * 100) / 100 });
     if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
     di.items.forEach(it => { const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
   // Shipping detail (invoice_00) → per-order Gross freight → Cin7 cost centre → channel freight (VAT / No-VAT).
   const shipFiles = files.filter(f => /invoice_0/i.test(f.filename || ''));   // ALL per-order freight files (invoice_00…) — combine them
-  let shipUnmapped = 0, shipTotal = 0, shipRefCount = 0; const unmappedRefs = new Set(); let ship = [];   // v27.906: hoisted for the duplicate check
+  let shipUnmapped = 0, shipTotal = 0, shipVat = 0, shipRefCount = 0; const unmappedRefs = new Set(); let ship = [];   // v27.906: hoisted for the duplicate check
   if (shipFiles.length) {
     for (const sf of shipFiles) { const isCsv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, isCsv)); } catch (e) {} }
     const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))]; shipRefCount = refs.length;
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
     const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'uk_ilg')));   // v27.905: Fulfil shipment table after Cin7
-    ship.forEach(s => { shipTotal += s.gross; const ov = _tplRefOverride(s.ref, 'uk_ilg'); const cc = ov || ((byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : (shipByRef[s.ref] ? shipByRef[s.ref].cc : null)));
+    ship.forEach(s => { shipTotal += s.gross; shipVat += (s.vatAmt || 0); const ov = _tplRefOverride(s.ref, 'uk_ilg'); const cc = ov || ((byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : (shipByRef[s.ref] ? shipByRef[s.ref].cc : null)));
       if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt);
       else { shipUnmapped += s.gross; add('Other Fees', 'freight', s.vat, s.gross, s.vatAmt); if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // no Cin7 cost centre → auto-book freight to Other Fees (nothing stranded); track sweepable refs so the Clean-up sweep can still reclassify to the real channel
   }
@@ -10782,7 +10782,8 @@ async function _tplIlgAllocate(period) {
   const costCenters = Object.values(ccAgg).map(c => ({ ...c, freight: Math.round(c.freight * 100) / 100, fulfilment: Math.round(c.fulfilment * 100) / 100, total: Math.round((c.freight + c.fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
   const _cur = {}; ship.forEach(s => { if (s.ref) _cur[s.ref] = (_cur[s.ref] || 0) + (s.gross || 0); });
   const cross_month_duplicates = await _tplCrossMonthDupes('uk_ilg', period, _cur);   // v27.906
-  return { ok: true, ilg: true, cross_month_duplicates, costCenters, lines, total,
+  const statedTotal = Math.round((seen.reduce((s, x) => s + x.total, 0) + shipTotal) * 100) / 100, statedTax = Math.round((seen.reduce((s, x) => s + (x.tax || 0), 0) + shipVat) * 100) / 100;   // v28.004: supplier-stated (gross) totals for the exact-match check
+  return { ok: true, ilg: true, cross_month_duplicates, costCenters, lines, total, statedTotal, statedTax, shipTotal: Math.round(shipTotal * 100) / 100,
     totals: { orders: shipRefCount, matched: Math.max(0, shipRefCount - unmappedRefs.size), freight: 0, fulfilment: 0 },
     unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] },   // freight with no cost centre is auto-booked to Other Fees, not left as a "COST CENTRE MISSING" gap
     autoOther: { orders: unmappedRefs.size, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
@@ -12214,12 +12215,15 @@ function _coghlansMeta(grids) {
   const iso = v => { if (v == null) return null; if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
     const s = String(v).trim(); const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[0];
     const d = new Date(s); return (!isNaN(d.getTime()) && /\d{4}/.test(s)) ? d.toISOString().slice(0, 10) : null; };
-  let periodEnd = null, invoiceNo = null;
+  let periodEnd = null, invoiceNo = null, totalEx = null, gst = null, totalInc = null;
   const g = (grids || []).find(x => /setting/i.test(x.name || ''));
   if (g) for (const row of g.grid) { const a = String(row[0] == null ? '' : row[0]).trim().toLowerCase();
     if (a === 'effective date' || a === 'period end') { const d = iso(row[1]); if (d) periodEnd = d; }
-    if (a === 'invoice number') { const n = String(row[1] == null ? '' : row[1]).trim(); if (n) invoiceNo = n; } }
-  return { periodEnd, invoiceNo };
+    if (a === 'invoice number') { const n = String(row[1] == null ? '' : row[1]).trim(); if (n) invoiceNo = n; }
+    if (a === 'total excl gst') { const v = _tplNum(row[1]); if (v != null) totalEx = v; }      // v28.004: supplier-stated totals → exact-match check
+    if (a === 'gst') { const v = _tplNum(row[1]); if (v != null) gst = v; }
+    if (a === 'total incl gst') { const v = _tplNum(row[1]); if (v != null) totalInc = v; } }
+  return { periodEnd, invoiceNo, totalEx, gst, totalInc };
 }
 app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
   try {
@@ -12260,11 +12264,14 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || meta.currency || 'EUR';
     // Tax is region-specific: EU/UK book 20% VAT (Xero auto-computes the amount → left blank); AU books GST at
     // 10% inclusive so the amount is supplied (= line/11); US is tax-exempt. Default = 20% VAT.
-    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', div: null }, uk_ilg: { type: '20% (VAT on Expenses)', div: null }, us_geneva: { type: 'Zero Rated Expenses', div: null }, au_coghlans: { type: 'GST on Expenses', div: 11 } };
-    const taxCfg = TAX[tpl0] || { type: '20% (VAT on Expenses)', div: null };
+    // v28.004: mode per 3PL. AU (GST 10%) and UK (VAT 20%) go to Xero TAX INCLUSIVE; AU sheets are ex-GST so they are
+    // grossed up; EU stays tax-exclusive (Xero adds 20%); US is zero-rated. See the post-step below for the exact-total rule.
+    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', mode: 'exclusive', rate: 0.20 }, uk_ilg: { type: '20% (VAT on Expenses)', mode: 'inclusive', rate: 0.20 }, us_geneva: { type: 'Zero Rated Expenses', mode: 'none', rate: 0 }, au_coghlans: { type: 'GST on Expenses', mode: 'inclusive', rate: 0.10, grossUp: true } };
+    const taxCfg = TAX[tpl0] || { type: '20% (VAT on Expenses)', mode: 'exclusive', rate: 0.20 };
     const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
     const blines = [];   // structured bill lines — the single source for BOTH the CSV and the preview JSON
-    const push = (desc, amt, code, lineCur, group) => { const a = Number(amt) || 0; blines.push({ desc, amount: a, code: code || '', taxType: taxCfg.type, taxAmount: taxCfg.div ? (Math.round(a / taxCfg.div * 100) / 100) : null, currency: (lineCur || cur), group: group || '' }); };
+    const push = (desc, amt, code, lineCur, group) => { const a = Number(amt) || 0; blines.push({ desc, amount: a, code: code || '', taxType: taxCfg.type, taxAmount: null, currency: (lineCur || cur), group: group || '' }); };
+    let _ilgStated = null;   // v28.004: ILG supplier-stated totals (sum of DI totals + shipping-detail gross)
     const NOD = { inbound: 'Purchase Orders & Rework', returns: 'Returns', storage: 'Storage Fees', other: 'Other Fees (manual adjustment)' };
     if (tpl0 === 'us_geneva') {
       // Geneva books by FEE TYPE (not the generic per-order aggregation): freight per-order→CostCentre, fulfilment by
@@ -12284,6 +12291,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       const gi = await _tplIlgAllocate(period);
       if (!gi.ok) return res.status(400).json({ error: gi.error || 'ILG allocation failed' });
       (gi.lines || []).forEach(l => { const desc = l.kind === 'freight' ? ('Freight - ' + l.account) : (l.kind === 'fulfilment' ? ('Fulfilment - ' + l.account) : l.account); blines.push({ desc, amount: l.amount, code: l.code || '', taxType: l.vat ? '20% (VAT on Expenses)' : 'No VAT', taxAmount: l.vat ? l.tax : 0, currency: cur, group: l.kind }); });
+      _ilgStated = { total: gi.statedTotal, tax: gi.statedTax };
     } else {
     sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });
     // Invoice-recap-only lines (Support / Storage / Returns / Packaging) not present on their own sheet.
@@ -12296,14 +12304,44 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     });
     if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, '', null, 'unmapped'); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, '', null, 'unmapped'); }
     }
+    // ── v28.004 (Ben, DOK50366): TAX MODE + EXACT TOTALS ────────────────────────────────────────────────────────────
+    // Coghlans' sheets are GST-EXCLUSIVE (Σ lines = the Settings sheet's "Total excl GST"); the old TaxAmount (= line/11)
+    // treated them as inclusive, so Xero showed "Adjustments to Tax −58.33". Ben's call: AU + UK bills go to Xero TAX
+    // INCLUSIVE. AU lines are grossed up ×1.10 with GST = line/11; UK (ILG) lines are already gross with the supplier's
+    // own VAT. The bill total must equal the supplier's incl-tax total to the cent, so per-line rounding residue (and the
+    // tax residue) lands on the LARGEST line. A residue beyond tolerance is NOT plugged — it is flagged for review.
+    const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+    let stated = null;   // supplier-stated totals { total (incl tax), tax, net }
+    if (tpl0 === 'au_coghlans') { const cm = _coghlansMeta(grids); if (cm.totalInc != null) stated = { total: r2(cm.totalInc), tax: cm.gst != null ? r2(cm.gst) : null, net: cm.totalEx != null ? r2(cm.totalEx) : null }; }
+    else if (tpl0 === 'uk_ilg' && typeof _ilgStated !== 'undefined' && _ilgStated && _ilgStated.total != null) stated = { total: r2(_ilgStated.total), tax: _ilgStated.tax != null ? r2(_ilgStated.tax) : null, net: null };
+    const check = { mode: taxCfg.mode, rate: taxCfg.rate, import_as: taxCfg.mode === 'inclusive' ? 'Tax Inclusive' : (taxCfg.mode === 'exclusive' ? 'Tax Exclusive' : 'No Tax'), stated, adjusted_line: null, adjusted_amount: 0, adjusted_tax: 0, total_ok: null, tax_ok: null, warning: '' };
+    if (taxCfg.mode === 'inclusive') {
+      blines.forEach(l => {
+        if (taxCfg.grossUp) { l.net = r2(l.amount); l.amount = r2(l.net * (1 + taxCfg.rate)); l.taxAmount = r2(l.amount * taxCfg.rate / (1 + taxCfg.rate)); }
+        else { l.amount = r2(l.amount); l.taxAmount = r2(l.taxAmount || 0); l.net = r2(l.amount - l.taxAmount); }
+      });
+      const big = blines.reduce((m, l) => (!m || Math.abs(l.amount) > Math.abs(m.amount)) ? l : m, null);
+      const tol = 0.05 + 0.01 * blines.length;   // cents of per-line rounding; anything bigger is a real discrepancy
+      if (big && stated) {
+        const dT = r2(stated.total - blines.reduce((s, l) => s + l.amount, 0));
+        if (Math.abs(dT) >= 0.005) { if (Math.abs(dT) <= tol) { big.amount = r2(big.amount + dT); check.adjusted_line = big.desc; check.adjusted_amount = dT; } else check.warning = 'Bill total differs from the supplier\'s stated total by ' + dT.toFixed(2) + ' — beyond rounding; check the invoice sheets before importing.'; }
+        if (stated.tax != null) { const dG = r2(stated.tax - blines.reduce((s, l) => s + (l.taxAmount || 0), 0));
+          if (Math.abs(dG) >= 0.005) { if (Math.abs(dG) <= tol) { big.taxAmount = r2(big.taxAmount + dG); check.adjusted_line = big.desc; check.adjusted_tax = dG; } else check.warning += (check.warning ? ' ' : '') + 'Tax differs from the supplier\'s stated tax by ' + dG.toFixed(2) + '.'; } }
+        big.net = r2(big.amount - (big.taxAmount || 0));
+      }
+    } else { blines.forEach(l => { l.amount = r2(l.amount); if (taxCfg.mode === 'none') l.taxAmount = 0; else l.taxAmount = null; l.net = l.taxAmount == null ? null : r2(l.amount - l.taxAmount); }); }   // exclusive: Xero computes the tax
+    const total = r2(blines.reduce((s, l) => s + l.amount, 0)), taxTotal = r2(blines.reduce((s, l) => s + (l.taxAmount || 0), 0));
+    if (stated) { check.total_ok = Math.abs(total - stated.total) < 0.005; if (stated.tax != null) check.tax_ok = Math.abs(taxTotal - stated.tax) < 0.005; }
     // Preview mode: return the structured bill so the UI can show "what goes to Xero" without downloading.
-    if (req.body && req.body.preview) return res.json({ ok: true, bill: { contact: meta.contact, invNo, date: dd, currency: cur, region: meta.region, taxType: taxCfg.type, total: Math.round(blines.reduce((s, l) => s + l.amount, 0) * 100) / 100, lines: blines } });
+    if (req.body && req.body.preview) return res.json({ ok: true, bill: { contact: meta.contact, invNo, date: dd, currency: cur, region: meta.region, taxType: taxCfg.type, total, tax_total: taxTotal, net_total: r2(total - taxTotal), tax_mode: taxCfg.mode, import_as: check.import_as, rate: taxCfg.rate, check, lines: blines } });
+
     const HDR = 'ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
-    const rows = blines.map(l => [meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, '', '', l.desc, '1', money(l.amount), l.code, l.taxType, (l.taxAmount == null ? '' : money(l.taxAmount)), '', '', '', '', l.currency, money(l.amount)].map(esc).join(','));
+    const rows = blines.map(l => [meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, money(total), '', l.desc, '1', money(l.amount), l.code, l.taxType, (l.taxAmount == null ? '' : money(l.taxAmount)), '', '', '', '', l.currency, money(l.amount)].map(esc).join(','));   // v28.004: Total column = bill total (Xero checks the lines add up to it in the chosen tax mode)
     const csv = HDR + '\n' + rows.join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + meta.region + '-' + endISO + '.csv"');
+    res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + meta.region + '-' + endISO + invSuffix + '-' + (taxCfg.mode === 'inclusive' ? 'TAX-INCLUSIVE' : taxCfg.mode === 'exclusive' ? 'TAX-EXCLUSIVE' : 'NO-TAX') + '.csv"');
+    res.setHeader('X-Horizon-Tax-Mode', check.import_as);
     res.send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
