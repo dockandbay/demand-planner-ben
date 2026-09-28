@@ -1,3 +1,14 @@
+## v28.018 (Diviyaj hardening from the v28.017 prod deploy)
+
+**Files: `server.mjs`, `.gitignore`.** Five items Diviyaj asked to pick up upstream so the next port stays clean (he applied equivalents on prod).
+
+1. **Demand build fails soft without `forecast_inheritance`.** `buildSKURAW` now checks `to_regclass('planner.forecast_inheritance')` once (cached); if the table is missing (code landing before migration 308) it uses the plain `products.replacement_sku` expression and drops the join instead of failing the whole build. Identical output once 308 is applied.
+2. **Seed test data is sandbox-only.** `POST /api/client/seed-test-data` returns 403 when `!IS_SANDBOX`.
+3. **Client sales cron fails closed.** `POST /api/cron/client-sales` now rejects (401) when `N8N_WEBHOOK_SECRET` is unset (was fail-open like the other n8n hooks); with the sales import gated off this only affected the disabled path, but it is now closed regardless.
+4. **Magic-link request is rate-limited.** `POST /api/cp/request-link` is capped per email (5/hour) and per IP (20/hour), returning 429 over the limit; still never reveals whether an email is registered.
+5. **Temp working files untracked.** Removed the two `.xlsx` files under `temp files/` from git and added `temp files/` to `.gitignore`.
+
+Sandbox verified: cron → 401 with no secret; request-link → 429 on the 6th hit; seed still 200 in sandbox (403 on prod); demand plan still serves with the conditional join.
 ## v28.017 (Ben): Ask Claude can read HORIZON's own data (stock / inbound / forecast) via tools
 
 **File: `server.mjs`.** Ben: Ask Claude was asking users to upload stock, inbound and forecast data that HORIZON already holds. It now has live read access through Anthropic tool-use, so it looks the data up itself.

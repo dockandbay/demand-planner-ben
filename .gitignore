@@ -46,3 +46,4 @@ templates/mockups/
 
 # runtime logs (cloudflared tunnel, dev server) — never track
 *.log
+temp files/

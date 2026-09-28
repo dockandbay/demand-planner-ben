@@ -434,20 +434,24 @@ async function buildFC_OUTPUTS() {
 //   i {"sku|warehouse":[{ref,qty,eta,type}]}  - open inbound shipments
 // av (channel-availability string e.g. "dfb") derived from v_product_availability;
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
+let _hasFcInherit = null;   // v28.018: cached existence of planner.forecast_inheritance so the demand build fails soft before mig 308 lands
 async function buildSKURAW() {
+  if (_hasFcInherit === null) { try { _hasFcInherit = (await pool.query(`SELECT to_regclass('planner.forecast_inheritance') t`)).rows[0].t != null; } catch (e) { _hasFcInherit = false; } }
+  const _repExpr = _hasFcInherit
+    ? `case when fi.new_sku is null then nullif(trim(p.replacement_sku),'') when fi.ignore then null else coalesce(nullif(trim(fi.source_sku),''), nullif(trim(p.replacement_sku),'')) end`
+    : `nullif(trim(p.replacement_sku),'')`;
+  const _fiJoin = _hasFcInherit ? 'LEFT JOIN planner.forecast_inheritance fi ON fi.new_sku=p.sku' : '';
   const [prods, pcs, inv, avail, oo, sales, inbound, openpo, lyo] = await Promise.all([
     pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp,   /* v28.005: parent_p1 → searchable + calendar grouping */
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
-                       case when fi.new_sku is null then nullif(trim(p.replacement_sku),'')   /* v28.012: forecast_inheritance overlays products.replacement_sku (override / ignore) */
-                            when fi.ignore then null
-                            else coalesce(nullif(trim(fi.source_sku),''), nullif(trim(p.replacement_sku),'')) end rep,
+                       ${_repExpr} rep,
                        coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img,   -- variant image, falling back to the colour swatch when blank
                        nullif(trim(p.colour_swatch_url),'') sw,   -- colour swatch URL — client-side fallback when the variant image URL 404s
                        upper(coalesce(nullif(btrim(p.status),''),'')) st,
                        upper(coalesce(nullif(btrim(p.variant_type),''),'MASTER')) vt   -- MASTER | SET (blank ⇒ MASTER); SETS feature identifies build-on-fly set SKUs
-                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku LEFT JOIN planner.forecast_inheritance fi ON fi.new_sku=p.sku WHERE p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
+                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku ${_fiJoin} WHERE p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
     pool.query(`SELECT sku, co, lch, disc FROM (
@@ -18862,7 +18866,7 @@ app.post('/api/client/fulfil/import-sales', async (req, res) => {
 });
 // cron entry (webhook-secret gated like import-pos; exempt from the planner key in the gate above)
 app.post('/api/cron/client-sales', async (req, res) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET; if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.018: fail closed — no secret set ⇒ reject
   if (String(await cpSetting('cp_sales_import_enabled', 'false')) !== 'true') return res.status(423).json({ error: 'sales import switched off (cp_sales_import_enabled)', gated: true });
   try { res.json(await fulfilImportSales(req.query.days)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -18873,6 +18877,7 @@ app.post('/api/cron/client-sales', async (req, res) => {
 // orders, a commission run and message threads. Real SKUs from planner.products; every order ref starts with TEST-.
 // Safe to re-run; {reset:true} deletes previous seed rows first. Never touches Fulfil.
 app.post('/api/client/seed-test-data', async (req, res) => {
+  if (!IS_SANDBOX) return res.status(403).json({ error: 'seed test data is disabled on production' });   // v28.018: sandbox only
   const by = (req.me && req.me.email) || 'seed';
   try {
     if ((req.body || {}).reset) {
@@ -19218,8 +19223,12 @@ app.get('/client-view.js', (req, res) => {
   if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.set('Content-Encoding', 'gzip'); return res.end(_cvjs.gz); }
   res.send(_cvjs.src);
 });
+const _cpLinkHits = new Map();   // v28.018: rate-limit magic-link requests
+function _cpRateLimited(key, max, windowMs) { const now = Date.now(); const arr = (_cpLinkHits.get(key) || []).filter(t => now - t < windowMs); arr.push(now); _cpLinkHits.set(key, arr); if (_cpLinkHits.size > 5000) { for (const [k, v] of _cpLinkHits) if (!v.some(t => now - t < windowMs)) _cpLinkHits.delete(k); } return arr.length > max; }
 app.post('/api/cp/request-link', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
+  if (_cpRateLimited('ip:' + ip, 20, 3600000) || (email && _cpRateLimited('em:' + email, 5, 3600000))) return res.status(429).json({ error: 'too many requests — please wait a few minutes and try again' });
   try { if (email) { const u = (await pool.query(`SELECT u.id, c.name FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=$1 AND u.active AND c.active`, [email])).rows[0];
       if (u) { const url = await cpMintLink(u.id, req); await cpSendLink(email, url, u.name); } }
     res.json({ ok: true }); } catch (e) { res.json({ ok: true }); }   // never reveal whether an email is registered
