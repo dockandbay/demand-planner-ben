@@ -436,7 +436,7 @@ async function buildFC_OUTPUTS() {
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
 async function buildSKURAW() {
   const [prods, pcs, inv, avail, oo, sales, inbound, openpo, lyo] = await Promise.all([
-    pool.query(`SELECT p.sku, p.product_name n,
+    pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp,   /* v28.005: parent_p1 → searchable + calendar grouping */
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
@@ -532,7 +532,7 @@ async function buildSKURAW() {
     // LAST-YEAR-ONLY rows (Ben, v27.473): CLOSED / out-of-scope SKUs that still sold in the last 36 months. The plan shows them
     // under their sub-category for context (sub-cat numbers = ALL sales, open or closed) and counts their set explosion.
     // Tagged lyo:true with NO availability, so buy / smoothing / transfer / availability logic never sees them.
-    pool.query(`SELECT p.sku, p.product_name n,
+    pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp,   /* v28.005: parent_p1 → searchable + calendar grouping */
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, upper(coalesce(nullif(btrim(p.status),''),'')) st,
@@ -551,6 +551,7 @@ async function buildSKURAW() {
                  rep: r.rep || '',  // replacement_sku (predecessor) — new SKU inherits its sales history as the forecast basis
                  img: r.img || '',  // variant_image_url_final — DEMAND plan optional variant-image thumbnail
                  sw: r.sw || '',    // colour swatch URL — client falls back to this if the variant image 404s
+                 pp: r.pp || '',    // v28.005: parent_p1 (e.g. TOWLB-DES-HBRTRS) — SKU search + trading-calendar grouping
                  st: r.st || '',    // products.status (ACTIVE/…) — for the Key-Accounts "active only" SKU picker
                  vt: r.vt || 'MASTER',   // MASTER | SET — SETS feature (build-on-fly sets)
                  av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
@@ -560,7 +561,7 @@ async function buildSKURAW() {
   for (const r of oo.rows) if (p[r.sku] && r.oo > 0) p[r.sku].oo[r.wh] = r.oo;
   for (const r of lyo.rows) if (!p[r.sku])   // last-year-only closed SKUs (never overwrite an in-scope entry)
     p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C', csf: r.cs || '', rw: '', rep: '', img: r.img || '', sw: r.sw || '',
-                 st: r.st || '', vt: r.vt || 'MASTER', lyo: true, dsc: r.dsc || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
+                 st: r.st || '', vt: r.vt || 'MASTER', pp: r.pp || '', lyo: true, dsc: r.dsc || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
 
   const s = {};
   for (const r of sales.rows) {

@@ -1,3 +1,14 @@
+## v28.005 (Ben): parent_p1 is searchable on DEMAND plan / BUY plan / FBA transfer / Transfer, and a trading-calendar event can name a parent code
+
+**Files: `server.mjs`, `artifact_v16.7.html`.** Ben: `products.parent_p1` (e.g. `TOWLB-DES-HBRTRS`, the parent of the LG and XL sizes) "should be searchable on demand plan / buy plan / FBA transfer plan, and enterable into the marketing calendar so it relates to all SKUs with that parent".
+
+- **Payload:** both product SELECTs in `buildSKURAW` (in-scope + last-year-only) now carry `nullif(trim(p.parent_p1),'') pp`, stored as `SKUM[sku].pp` on the client. Live: 1,033 of 2,925 products have a parent; sandbox plan: 965 of 1,974.
+- **Search:** `skuMatchQ` (the single matcher behind the DEMAND plan search, and the BUY / FBA transfer / Transfer `#qry` box) also matches a token against the SKU's parent_p1. Typing `TOWLB-DES-HBRTRS` lists exactly TOWLB-DES-LG-HBRTRS and TOWLB-DES-XL-HBRTRS. Placeholders say "/ parent".
+- **Trading calendar (DEMAND ▸ Inputs):** the "+ SKU / parent" picker lists every parent code first ("parent · 2 SKUs: LG-HBRTRS, XL-HBRTRS"), then the SKUs. A parent chip renders violet with the member count and lists its SKUs on hover. `sku_list` stores the code as typed; `calEventSkus(e)` expands parents to their SKUs (`calParentIdx()` built once from SKUM). CSV import/export unchanged (the code sits in the `skus` column).
+- **Demand plan markers:** SKU rows now get their own calendar "C" marker + tip when an event's SKU list (parents expanded) names that SKU, in that month and market (`calTipHtml(..., skuLevel)`); category-level events keep marking the category/sub-category rows as before. Verified on sandbox: event UK 15-Nov-2026 with `TOWLB-DES-HBRTRS` → tips on both sizes for Nov-26 UK only; nothing on Oct, US or other SKUs.
+
+No migration. Note for later: the demand-actions "Event approaching" text still prints the raw `sku_list` (parent code shown as typed), and uplift % is informational on SKU-level events, as it was for SKU lists before.
+
 ## v28.004 (Ben, Coghlans DOK50366): Xero bills for AU + UK are TAX INCLUSIVE and match the supplier total to the cent
 
 **Files: `server.mjs`, `artifact_v16.7.html`.** Ben: DOK50366 is 7,057.95 incl GST; importing Horizon's CSV as tax-exclusive gave "Adjustments to Tax −58.33" and a total 0.01 off.

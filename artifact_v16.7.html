@@ -802,7 +802,7 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
     <input type="date" id="plan-end-date" title="Window end" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:var(--muted)" onchange="setPlanActiveEnd(this.value)">
     <button id="plan-date-reset" title="Reset to today &rarr; today+180 days" onclick="resetPlanActiveDates()" style="font-size:11px;padding:2px 7px;border:1px solid #d0d0d0;border-radius:4px;background:var(--hover);cursor:pointer;color:var(--muted)">&#8634;</button>
     <span style="width:1px;height:18px;background:var(--line);flex-shrink:0"></span>
-    <input type="text" id="plan-sku-qry" placeholder="&#128269; Search SKU / name…" autocomplete="off"
+    <input type="text" id="plan-sku-qry" placeholder="&#128269; Search SKU / name / parent…" autocomplete="off"
       style="font-size:11px;padding:4px 9px;border:1px solid #86efac;background:var(--pos-bg);border-radius:5px;width:210px"
       oninput="setPlanSkuQry(this.value)">
     <span style="position:relative;display:inline-flex;align-items:center">
@@ -2282,8 +2282,9 @@ function skuMatchQ(sku,q){ if(!q)return true; var toks=String(q).toLowerCase().s
       var comps=(typeof SET_BOM!=='undefined'&&SET_BOM[setId.toUpperCase()])||null;
       return !!(comps&&comps.some(function(c){return c.sku&&String(c.sku).toLowerCase()===sl;})); }
     if(sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0))return true;
+    var pl=(m&&m.pp)?String(m.pp).toLowerCase():''; if(pl&&pl.indexOf(t)>=0)return true;   // v28.005 (Ben): parent_p1 (e.g. TOWLB-DES-HBRTRS) finds every size/variant under it
     if(typeof PREPACK_MAP!=='undefined'){var _s=PREPACK_MAP[t.toUpperCase()]; if(_s&&String(_s).toLowerCase()===sl)return true;}
-    return false; }); }   // match SKU code OR product name; "x:SET" explodes to its components; a prepack (PP-) code resolves to its mapped set row
+    return false; }); }   // match SKU code OR product name OR parent_p1; "x:SET" explodes to its components; a prepack (PP-) code resolves to its mapped set row
 try{ window.skuMatchQ=skuMatchQ; }catch(_e){}   // BUGFIX: skuMatchQ is defined INSIDE the BP IIFE; expose it globally so the DEMAND module (filteredSkus / buildPlanDownload) can call it. Without this, any SKU-search in the DEMAND plan threw ReferenceError and aborted the whole grid render → "nothing shows".
 function fbaClearAll(){
   for(const k in FBA_OV)delete FBA_OV[k];
@@ -4573,7 +4574,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
   </div>
   <div style="display:flex;align-items:center;gap:6px">
     <span class="pill-lbl">SKU</span>
-    <input type="text" id="qry" placeholder="Filter by SKU(s) — paste a list, space/comma separated…"
+    <input type="text" id="qry" placeholder="Filter by SKU(s) or parent code — paste a list, space/comma separated…"
       style="font-size:11px;padding:3px 8px;border:1px solid var(--pos-bg);background:var(--pos-bg);border-radius:4px;width:340px"
       oninput="BP.render()">
     <div style="width:1px;height:14px;background:var(--line);margin:0 4px;flex-shrink:0"></div>
@@ -5539,12 +5540,13 @@ function renderBIIcon(rules){
 }
 // "C" marker on a month cell where a trading-calendar event hits that category × market in that month.
 // Tip-only content (shared by the icon + the cell rail's "C" letter).
-function calTipHtml(s,co,fym){
+function calTipHtml(s,co,fym,skuLevel){
   if(!CAL_EVENTS||!CAL_EVENTS.length)return '';
-  var p=fym.split('_'); var fy=+p[0], fmo=+p[1]; var cat=parentCat(s);
+  var p=fym.split('_'); var fy=+p[0], fmo=+p[1]; var cat=skuLevel?null:parentCat(s);
   var ms=CAL_EVENTS.filter(function(e){
     if(!e.event_date)return false; var d=e.event_date.split('-'); if(+d[0]!==fy||+d[1]!==fmo)return false;
     if(e.market && e.market!=='ALL' && e.market!==co)return false;
+    if(skuLevel){ return !!(e.sku_list && calEventSkus(e)[s]); }   // v28.005: SKU row → only events that name this SKU (directly or via its parent_p1)
     return (!e.category || e.category==='ALL' || e.category===cat);
   });
   if(!ms.length)return '';
@@ -7234,7 +7236,7 @@ function cellNoteTitle(nk){ var arr=(typeof FC_NOTES!=='undefined'&&FC_NOTES[nk]
   return arr.map(function(n){ return (n.note||'')+' — '+String(n.created_by||'—').replace(/@dockandbay\.com\b/gi,'@')+' '+_fcDMY(n.created_at); }).join('   •   '); }
 function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[0],item=p[1],co=p[2],ch=p[3],m=p[4]; var isSku=level==='sku';
   var biTip=isSku?'':biTipHtml(getBIForMonth(item,co,ch,m));
-  var calTip=isSku?'':calTipHtml(item,co,m);
+  var calTip=isSku?calTipHtml(item,co,m,true):calTipHtml(item,co,m);   // v28.005: SKU-level events (sku_list / parent_p1) mark the SKU's own cells
   var hasNote=(typeof FC_NOTES!=='undefined'&&FC_NOTES[nk]&&FC_NOTES[nk].length);
   var locked=(isSku&&typeof SMOOTH_LOCKS!=='undefined'&&SMOOTH_LOCKS[nk]);
   var ppc=(isSku&&typeof PREPACK_COVER!=='undefined')?PREPACK_COVER[item+'|'+(co||'').toUpperCase()+'|'+ch+'|'+m]:null;   // prepack cover for this set·country·channel·month
@@ -9960,7 +9962,7 @@ function render(){
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
-  if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
+  if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
   // PLAN shows filters; BUY and REPORT hide the PLAN filter rows (BUY gets its own in a later part).
   var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
@@ -14635,10 +14637,16 @@ function calSearchPopup(anchor,header,items,onPick){
   render(''); var qi=pop.querySelector('.calpop-q'); qi.oninput=function(){ render(this.value); }; qi.focus();
 }
 function calSkuArr(list){ return String(list==null?'':list).split(',').map(function(s){return s.trim();}).filter(Boolean); }
-var _calSkuItems=null;
+var _calSkuItems=null, _calParentIdx=null;
+// v28.005 (Ben): parent_p1 groups. products.parent_p1 (e.g. TOWLB-DES-HBRTRS) is carried on SKUM[sku].pp; an event's SKU list may
+// hold a parent code, which stands for every SKU under it (all sizes / variants). Index built once per load.
+function calParentIdx(){ if(_calParentIdx)return _calParentIdx; var ix={}; Object.keys(SKUM||{}).forEach(function(s){ var p=SKUM[s]&&SKUM[s].pp; if(!p)return; (ix[p]||(ix[p]=[])).push(s); }); Object.keys(ix).forEach(function(k){ ix[k].sort(); }); _calParentIdx=ix; return ix; }
+function calIsParent(tok){ return !!(tok&&calParentIdx()[tok]); }
+function calEventSkus(e){ var out={}; calSkuArr(e&&e.sku_list).forEach(function(t){ var kids=calParentIdx()[t]; if(kids)kids.forEach(function(k){out[k]=1;}); else out[t]=1; }); return out; }   // {sku:1} with parents expanded
 function calSkuItems(){ if(_calSkuItems)return _calSkuItems;
-  _calSkuItems=Object.keys(SKUM||{}).sort().map(function(s){ return {v:s,label:s,sub:(SKUM[s]&&SKUM[s].n)||''}; }); return _calSkuItems; }
-function calSkuChips(arr){ return arr.map(function(s){ return '<span class="cal-chip" data-sku="'+tHesc(s)+'">'+tHesc(s)+' <b data-rm="1" title="remove">✕</b></span>'; }).join('')+'<button class="cal-addsku">+ SKU</button>'; }
+  var ix=calParentIdx(); var parents=Object.keys(ix).sort().map(function(p){ return {v:p,label:p,sub:'parent · '+ix[p].length+' SKU'+(ix[p].length===1?'':'s')+': '+ix[p].map(function(k){return k.replace(p.split('-').slice(0,2).join('-')+'-','');}).slice(0,6).join(', ')+(ix[p].length>6?'…':'')}; });
+  _calSkuItems=parents.concat(Object.keys(SKUM||{}).sort().map(function(s){ return {v:s,label:s,sub:(SKUM[s]&&SKUM[s].n)||''}; })); return _calSkuItems; }
+function calSkuChips(arr){ return arr.map(function(s){ var kids=calParentIdx()[s]; return kids?('<span class="cal-chip" data-sku="'+tHesc(s)+'" title="parent of '+kids.length+' SKUs: '+tHesc(kids.join(', '))+'" style="background:var(--violet-bg,#f3e8ff);color:var(--violet,#7e22ce);border-color:#d8b4fe">&#9776; '+tHesc(s)+' <span style="opacity:.7">('+kids.length+')</span> <b data-rm="1" title="remove">✕</b></span>'):('<span class="cal-chip" data-sku="'+tHesc(s)+'">'+tHesc(s)+' <b data-rm="1" title="remove">✕</b></span>'); }).join('')+'<button class="cal-addsku">+ SKU / parent</button>'; }
 // DEMAND ▸ Inputs ▸ Klaviyo BIS — per-market upload boxes (colour-coded via MKT_COLORS). Raw Klaviyo back-in-stock
 // export per market → server sums Queued Subscriptions per SKU (last 6mo). Shared/persistent. Surfaced as a 🔔 on the plan.
 function renderKlaviyoBisView(body){
@@ -14745,7 +14753,7 @@ function renderCalendarView(body){
         +'<td style="padding:3px 6px"><button class="cal-del" data-id="'+r.id+'" title="delete" style="border:none;background:none;color:var(--neg);cursor:pointer;font-size:13px">✕</button></td></tr>'; }).join('');
     body.innerHTML=renderCalTimeline(rows)+head+'<div style="overflow-x:auto"><table class="tw" style="font-size:12px;min-width:940px"><thead><tr><th style="text-align:left;padding:5px 6px">Date</th><th style="text-align:left;padding:5px 6px">Market</th><th style="text-align:left;padding:5px 6px">Category</th><th style="text-align:left;padding:5px 6px">SKUs</th><th style="text-align:left;padding:5px 6px">Type</th><th style="text-align:left;padding:5px 6px">Title</th><th style="text-align:left;padding:5px 6px">Uplift</th><th style="text-align:left;padding:5px 6px">Notes</th><th></th></tr></thead><tbody>'
       +(trs||'<tr><td colspan="9" style="padding:10px;color:var(--faint)">No events yet — add one or upload a CSV.</td></tr>')+'</tbody></table></div>'
-      +'<div style="font-size:11px;color:var(--faint);margin-top:8px">CSV columns: <b>date,market,category,skus,type,title,uplift,notes</b>. <b>Category</b> (or ALL) and/or a specific <b>SKUs</b> list ties the event to the plan; <b>uplift</b> = expected % demand lift. Edits save on change.</div>';
+      +'<div style="font-size:11px;color:var(--faint);margin-top:8px">CSV columns: <b>date,market,category,skus,type,title,uplift,notes</b>. <b>Category</b> (or ALL) and/or a specific <b>SKUs</b> list ties the event to the plan; a <b>parent code</b> (products.parent_p1, e.g. TOWLB-DES-HBRTRS) in the SKU list stands for every SKU under it and marks each of them on the plan; <b>uplift</b> = expected % demand lift. Edits save on change.</div>';
     var tl=document.getElementById('cal-timeline'); if(tl){ var cm=tl.querySelector('[data-mk="'+curCalMonth()+'"]'); if(cm)tl.scrollLeft=Math.max(0,cm.offsetLeft-6); }
     body.querySelectorAll('.cal-in').forEach(function(el){ el.onchange=function(){ var b={}; b[el.dataset.f]=el.value;
       fetch(el.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; el.style.borderColor='var(--pos)'; }).catch(function(){el.style.borderColor='var(--neg)';}); }; });
@@ -14761,7 +14769,7 @@ function renderCalendarView(body){
       cell.addEventListener('click',function(e){
         var rm=e.target.closest('[data-rm]'); if(rm){ var sku=rm.parentNode.dataset.sku; save(cur().filter(function(x){return x!==sku;})); return; }
         if(e.target.closest('.cal-addsku')){ var have=cur();
-          calSearchPopup(e.target.closest('.cal-addsku'),'Add SKU to this event',calSkuItems().filter(function(it){return have.indexOf(it.v)<0;}),function(v){ calClosePop(); save(cur().concat([v])); }); } }); });
+          calSearchPopup(e.target.closest('.cal-addsku'),'Add SKU or parent code to this event',calSkuItems().filter(function(it){return have.indexOf(it.v)<0;}),function(v){ calClosePop(); save(cur().concat([v])); }); } }); });
     body.querySelectorAll('.cal-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete this event?'))return; fetch('/api/trading-calendar/'+btn.dataset.id+'/delete',{method:'POST'}).then(function(){ load(); }); }; });
     document.getElementById('cal-add').onclick=function(){ fetch('/api/trading-calendar',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(){ load(); }); };
     document.getElementById('cal-dl').onclick=function(){ var csv='date,market,category,skus,type,title,uplift,notes\n'+rows.map(function(r){ return [r.event_date,r.market,r.category,r.sku_list,r.event_type,r.title,(r.uplift_pct==null?'':r.uplift_pct),r.notes].map(calCsvCell).join(','); }).join('\n');
