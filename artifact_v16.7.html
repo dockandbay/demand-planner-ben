@@ -1721,19 +1721,21 @@ DATA=(DATA||[]).filter(function(r){
 // was orphaned — never called — so md.pka stayed empty and KA/preorder demand never reached the buy plan.)
 var PKA_MAP=null, _PKA_INFLIGHT=null;
 function _pkaIngest(pk){
-  var map={};
-  function add(sku,co,ymk,q){ if(!sku||!co||!q)return; if(!ymk)ymk=LIVE_FC_MONTHS[0];
-    if(!map[sku])map[sku]={}; if(!map[sku][co])map[sku][co]={}; map[sku][co][ymk]=(map[sku][co][ymk]||0)+q; }
-  function ingest(recs){ (recs||[]).forEach(function(r){ var sku=r.sku, q=Number(r.qty||0), wh=r.wh,
-    co=wh?String(wh).split('_')[0].toUpperCase():null, ymk=r.date?String(r.date).slice(0,7).replace('-','_'):null; add(sku,co,ymk,q); }); }
-  ingest(pk&&pk.preorder); ingest(pk&&pk.ka);
-  return map;
+  // v28.016: build combined ('all', used by the buy logic) + separate preorder / key-account maps (display only)
+  function mk(){ var map={}; return { map:map, add:function(sku,co,ymk,q){ if(!sku||!co||!q)return; if(!ymk)ymk=LIVE_FC_MONTHS[0];
+    if(!map[sku])map[sku]={}; if(!map[sku][co])map[sku][co]={}; map[sku][co][ymk]=(map[sku][co][ymk]||0)+q; } }; }
+  var all=mk(), pre=mk(), ka=mk();
+  function ingest(recs,tgt){ (recs||[]).forEach(function(r){ var sku=r.sku, q=Number(r.qty||0), wh=r.wh,
+    co=wh?String(wh).split('_')[0].toUpperCase():null, ymk=r.date?String(r.date).slice(0,7).replace('-','_'):null; all.add(sku,co,ymk,q); tgt.add(sku,co,ymk,q); }); }
+  ingest(pk&&pk.preorder, pre); ingest(pk&&pk.ka, ka);
+  return { all:all.map, pre:pre.map, ka:ka.map };
 }
 function attachPKA(){ try{ if(!PKA_MAP||!BP_DATA||!BP_DATA.products)return;
   Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
-    Object.keys(mk).forEach(function(co){ if(mk[co].pka)delete mk[co].pka; }); });   // authoritative refresh
-  Object.keys(PKA_MAP).forEach(function(sku){ var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts)return;
-    Object.keys(PKA_MAP[sku]).forEach(function(co){ if(prod.mkts[co])prod.mkts[co].pka=PKA_MAP[sku][co]; }); });
+    Object.keys(mk).forEach(function(co){ delete mk[co].pka; delete mk[co].pre; delete mk[co].ka; }); });   // authoritative refresh
+  [['all','pka'],['pre','pre'],['ka','ka']].forEach(function(kf){ var src=PKA_MAP[kf[0]]||{}, field=kf[1];
+    Object.keys(src).forEach(function(sku){ var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts)return;
+      Object.keys(src[sku]).forEach(function(co){ if(prod.mkts[co])prod.mkts[co][field]=src[sku][co]; }); }); });
 }catch(e){ if(window.console)console.warn('attachPKA',e); } }
 function loadPreorderKA(){ if(_PKA_INFLIGHT)return _PKA_INFLIGHT;
   _PKA_INFLIGHT=fetch('/api/preorders-ka').then(function(r){return r.json();})
@@ -3997,7 +3999,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const mtd=curMtdActuals(skuKey,mkt);
       const mtdDTC=mtd.DTC||0,mtdB2B=mtd.B2B||0,mtdFBA=mtd.FBA||0;
       return{key,lbl,lbl2,now:true,isActual:true,isForecast:false,
-        dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,
+        dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,pre:(md.pre&&md.pre[key])||0,ka:(md.ka&&md.ka[key])||0,
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
         bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
@@ -4020,7 +4022,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const wA2=demAt(1)/4.33,wF2=fbaAt(1)/4.33;
       s3=rc3;sF=rcF; // FIX: carry Remaining-month closing into the forward roll (was dropped — current-month confirmed POs vanished from next month onward)
       return{key,lbl,lbl2,now:false,isActual:false,isForecast:true,
-        dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,
+        dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,pre:(md.pre&&md.pre[key])||0,ka:(md.ka&&md.ka[key])||0,
         a3:remInb3.reduce((s,x)=>s+(x.qty||0),0),aF:remInbF.reduce((s,x)=>s+(x.qty||0),0),
         confQty3:remInb3.reduce((s,x)=>s+(x.qty||0),0),confQtyF:remInbF.reduce((s,x)=>s+(x.qty||0),0),
         assumedQty3:0,assumedLabel:'',trfIn:0,fTx:0,fSh:0,tot3pl:dtc+b2b,c3:rc3,cF:rcF,
@@ -4142,7 +4144,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
 
     const crRule=crMatched.length?crWinRule(i,t3,crMatched):null;   // Complex Rule driving this month's cover target (or null)
     const row={key,lbl,lbl2,now,isActual:false,isForecast:!!isForecast,crRule,
-      dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,a3,aF,confQty3,confQtyF,assumedQty3,
+      dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,pre:(md.pre&&md.pre[key])||0,ka:(md.ka&&md.ka[key])||0,a3,aF,confQty3,confQtyF,assumedQty3,
       assumedLabel:buyFromLbl[i]||lbl,
       fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+zaln+fTx,ng3close:_ng3close,ng3open:nonGrsOf(skuKey,mkt),
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
@@ -4233,8 +4235,11 @@ function buildTable(proj,md,pd,is3,hasFBA){
     if(hasTIK)rows.push(dr('TikTok demand',proj,p=>{var t=(md.demand_tik&&md.demand_tik[p.key])||0;return p.isActual?`<td style="color:var(--muted);font-style:italic">${t?fmt(t):'\u2014'}</td>`:p.isForecast?`<td style="color:var(--faint)">${t?fmt(t):'\u2014'}</td>`:c(t?fmt(t):'\u2014',t?'cv':'cv0');}));
     // B2B
     if(hasB2B)rows.push(dr('B2B demand',proj,p=>p.isActual?`<td style="color:var(--muted);font-style:italic">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:p.isForecast?`<td style="color:var(--faint)">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:c(p.b2b?fmt(p.b2b):'\u2014',p.b2b?'cv':'cv0')));
-    // Preorder & KA (committed B2B demand from Preorder + Key account FC tables; included in B2B demand above)
-    if(proj.some(p=>p.pka>0))rows.push(dr('Preorder & KA',proj,p=>p.pka>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.pka)}</td>`:c('\u2014','cv0')));
+    // Preorder + Key accounts (committed B2B demand from the Preorder + Key account FC tables; both folded into B2B above).
+    // v28.016 (Ben): shown as two separate lines for visibility; the buy logic still uses the combined pka (unchanged).
+    if(proj.some(p=>(p.pre||0)>0))rows.push(dr('Preorder',proj,p=>(p.pre||0)>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.pre)}</td>`:c('\u2014','cv0')));
+    if(proj.some(p=>(p.ka||0)>0))rows.push(dr('Key accounts',proj,p=>(p.ka||0)>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.ka)}</td>`:c('\u2014','cv0')));
+    if(proj.some(p=>(p.pka||0)>0 && !((p.pre||0)>0||(p.ka||0)>0)))rows.push(dr('Preorder & KA',proj,p=>(p.pka||0)>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.pka)}</td>`:c('\u2014','cv0')));
     // FBA Transfer (out from 3PL)
     rows.push(dr('FBA Transfer',proj,p=>
       p.fTx>0?`<td style="color:#a78bfa;font-weight:500">${fmt(p.fTx)}</td>`:c('\u2014','cv0')
@@ -16630,14 +16635,10 @@ async function refreshBuyData(){
     if(!_resp.ok)throw new Error('HTTP '+_resp.status);
     var _pk=await _resp.json();
     if(_pk&&_pk.error)throw new Error(_pk.error);
-    var map={};
-    function add(sku,co,ym,q){if(!sku||!co||!q)return;if(!ym)ym=LIVE_FC_MONTHS[0];if(!map[sku])map[sku]={};if(!map[sku][co])map[sku][co]={};map[sku][co][ym]=(map[sku][co][ym]||0)+q;}
-    function ingest(recs){(recs||[]).forEach(function(r){var sku=r.sku;var q=Number(r.qty||0);var wh=r.wh;var co=wh?String(wh).split('_')[0].toUpperCase():null;var ym=r.date?String(r.date).slice(0,7).replace('-','_'):null;add(sku,co,ym,q);});}
-    ingest(_pk.preorder);ingest(_pk.ka);
-    // Clear existing pka everywhere, then write the freshly fetched set (refresh is authoritative)
-    Object.keys(BP_DATA.products).forEach(function(sku){var mk=BP_DATA.products[sku].mkts;if(!mk)return;Object.keys(mk).forEach(function(co){if(mk[co].pka)delete mk[co].pka;});});
+    PKA_MAP=_pkaIngest(_pk); attachPKA();   // v28.016: rebuild combined + preorder + key-account maps and attach (refresh is authoritative)
+    var map=PKA_MAP.all||{};
     var matched=0,unmatched=[];
-    Object.keys(map).forEach(function(sku){var prod=BP_DATA.products[sku];if(!prod||!prod.mkts){unmatched.push(sku);return;}var any=false;Object.keys(map[sku]).forEach(function(co){if(prod.mkts[co]){prod.mkts[co].pka=map[sku][co];any=true;}});if(any)matched++;else unmatched.push(sku);});
+    Object.keys(map).forEach(function(sku){var prod=BP_DATA.products[sku];if(!prod||!prod.mkts){unmatched.push(sku);return;}var any=Object.keys(map[sku]).some(function(co){return !!prod.mkts[co];});if(any)matched++;else unmatched.push(sku);});
     BP_DATA.preorder_ka_refreshed=new Date().toISOString();
     renderBuyView();
     var stEl2=document.getElementById('bpst');

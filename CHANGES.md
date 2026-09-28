@@ -1,3 +1,12 @@
+## v28.016 (Ben): Buy plan shows Preorder and Key accounts as two separate lines
+
+**File: `artifact_v16.7.html`.** The buy-plan SKU detail (3PL Stock) previously showed one combined **Preorder & KA** demand line. It now shows **Preorder** and **Key accounts** on two separate lines.
+
+- **Display only — buy logic unchanged (Ben).** The committed Preorder + Key-account demand is still folded into B2B as the single combined `pka` value that drives the buy calculation; only the presentation is split. `_pkaIngest` now returns a combined map plus separate preorder / key-account maps; `attachPKA` attaches all three (`pka`, `pre`, `ka`) to each market; the projection carries `p.pre` and `p.ka` alongside `p.pka`; the detail renders a **Preorder** row (`p.pre`) and a **Key accounts** row (`p.ka`). A safety fallback still shows the combined **Preorder & KA** row if only the combined figure is present. The manual "Refresh Preorder & KA" button uses the same shared ingest so it rebuilds all three.
+- **Data:** reads the existing `/api/preorders-ka` feed (Supabase `planner.preorders` + `planner.key_account_forecasts`). Any further preorder-data import is the Diviyaj piece; the split works with whatever the feed returns.
+
+Sandbox verified: TOWLB-CAB-LG-ORANG-R (US) shows a standalone **Preorder** row of 11 in Sep, no combined row; data confirmed attached per market (e.g. BAGDRY-MD-NAVY UK preorder + US key-account, combined `pka` intact). No migration.
+
 ## v28.015 (Ben): Replacement forecasts table fully left-aligned
 
 **File: `artifact_v16.7.html`.** The app's global table CSS was right-aligning the SKU columns; added a scoped `#demand-body .rep-tbl th/td/input { text-align:left !important }` rule so every header, cell and input in the Replacement forecasts table is left-aligned.
