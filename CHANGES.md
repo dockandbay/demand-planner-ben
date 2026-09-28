@@ -1,3 +1,18 @@
+## v28.013 (Ben): Ask Claude + Replacement-forecasts UI polish
+
+**File: `artifact_v16.7.html` (+ `server.mjs` for a clearer AI-key error).**
+
+**Ask Claude:**
+- Top-bar button relabelled **Ask** (was "Ask Claude") and moved to sit immediately right of the **SA** button.
+- Drawer is now **50% of screen width on desktop, full screen on mobile** (was a fixed 440px).
+- **Drag and drop** files anywhere onto the drawer to attach them (drops in the list view start a new chat first); an orange "Drop files to attach" overlay shows while dragging.
+- The Conversations button now reads **☰ Conversations** (icon + word), not just the icon.
+- Clearer error when the environment's `ANTHROPIC_API_KEY` is invalid/expired: the drawer says the key needs refreshing (and that it works on production) instead of the raw "API key is invalid". Note: the sandbox key is currently invalid, so live replies only work where a valid key is set (prod); the existing AI insights share the same key.
+
+**Replacement forecasts (DEMAND ▸ Inputs):** left-aligned the whole view, removed the product-name subtext under each SKU, and dropped the max-width caps so the table uses the full page width and the SKU columns are no longer squashed or cut off.
+
+Sandbox verified: button/label/position, drawer width (864 of 1728 = 50%), Conversations label, drop zone present; replacements table full-width (1708px), left-aligned, SKU codes on single lines.
+
 ## v28.012 (Ben): Replacement-forecast master table (DEMAND ▸ Inputs, migration 308)
 
 **Files: `artifact_v16.7.html`, `server.mjs`, `migrations/308_forecast_inheritance.sql`.** A new **Replacement forecasts** tab under DEMAND ▸ Inputs: the master list of NEW SKUs that inherit their forecast from an OLD (predecessor) SKU.

@@ -16929,7 +16929,9 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     // 3) call Claude
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { const msg = (j && j.error && j.error.message) || ('AI error ' + r.status); return res.status(502).json({ error: msg, title }); }
+    if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
+      if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';
+      return res.status(502).json({ error: msg, title }); }
     let reply = ((j.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n')).trim() || '(no reply)';
 
     // 4) extract any <file name="…">…</file> blocks Claude returned → store as downloadable 'out' files
