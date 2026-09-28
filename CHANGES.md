@@ -1,3 +1,9 @@
+## v28.010 (Ben): CLIENT polish — Edit button moved to the left of the account; level-2 menu matched to SUPPLY / SCENARIO
+
+**File: `supply/inject.html`.** Two small consistency fixes on the CLIENT tab, both from Ben.
+- **Clients & agents:** the row **Edit** button is now the first (left-most) column, before the client name, instead of the far right.
+- **Level-2 menu:** the CLIENT sub-nav (Clients & agents / Orders / Commissions / Messages / Config) now uses HORIZON's standard `.stab` underline row — ink active colour, `6px 13px` padding, `2px 0 4px` margin — identical to SUPPLY and SCENARIO (it had been using the PRODUCT blue variant).
+
 ## v28.009 (Ben): CLIENT ▸ Config "View portal as" (read-only portal preview in a frame) + hardened sub-tab deep links
 
 **Files: `server.mjs`, `supply/inject.html`, `supply/client-view.js`.** No migration.
