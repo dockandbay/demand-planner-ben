@@ -1,3 +1,6 @@
+## v28.015 (Ben): Replacement forecasts table fully left-aligned
+
+**File: `artifact_v16.7.html`.** The app's global table CSS was right-aligning the SKU columns; added a scoped `#demand-body .rep-tbl th/td/input { text-align:left !important }` rule so every header, cell and input in the Replacement forecasts table is left-aligned.
 ## v28.014 (Ben): AI — support org-scoped keys via ANTHROPIC_WORKSPACE_ID
 
 **File: `server.mjs`.** Both the AI proxy (`/api/ai`) and Ask Claude (`/api/assistant/*`) now add the `anthropic-workspace-id` header when the `ANTHROPIC_WORKSPACE_ID` env var is set. This lets an organization-scoped Anthropic API key work (such a key is rejected with "not scoped to a workspace" unless the workspace id is supplied). No change when the var is unset, so a normal workspace-scoped key keeps working as before.
