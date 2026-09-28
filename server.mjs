@@ -16763,6 +16763,154 @@ app.post('/api/ai', async (req, res) => {
   }
 });
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// v28.011 (Ben): "ASK CLAUDE" — a global conversational assistant drawer.
+// Per-user conversations (keyed by the signed-in email), file upload + analysis,
+// and files Claude returns for download. A user only ever sees their own threads.
+// Storage: planner.ai_conversations / ai_messages / ai_files (migration 307).
+// ════════════════════════════════════════════════════════════════════════════
+function aiUser(req) { const e = (req && req.__aiEmail) || ''; return e || 'sandbox@local'; }
+async function aiGate(req, res, next) { try { const me = await permsFor(req); req.__aiEmail = me.email || ''; req.me = me; next(); } catch (e) { res.status(500).json({ error: e.message }); } }
+app.use('/api/assistant', aiGate);
+
+const AI_ASSIST_MODEL = 'claude-sonnet-4-6';
+const AI_TEXT_MIMES = /^(text\/|application\/(json|csv|xml|x-ndjson|x-yaml|yaml))/i;
+const AI_TEXT_EXT = /\.(csv|tsv|txt|json|md|markdown|log|xml|yaml|yml|html?|js|ts|sql|py)$/i;
+const AI_MAX_FILE_TEXT = 200000;   // chars of a text/xlsx file passed to the model (keeps token cost sane)
+const AI_MAX_UPLOAD_BYTES = 12 * 1024 * 1024;   // per message, across all attachments
+
+const AI_SYSTEM = `You are "Ask Claude", the in-app assistant inside HORIZON — Dock & Bay's demand & supply planning tool (used by the Dock & Bay team: buying, ops, finance, product). Be concise, practical and numerate; show your working when it matters. You can analyse files the user uploads (CSV, spreadsheets converted to CSV, PDFs, images, text).
+
+When the user asks you to PRODUCE a file for them to download (a cleaned CSV, a summary table, a generated document, etc.), output the file's full contents wrapped exactly like this, on its own lines:
+<file name="descriptive-name.csv">
+...the complete file contents...
+</file>
+Use a sensible extension (.csv, .txt, .md, .json). You may include a short explanation before or after the block. Only use <file> when the user actually wants a downloadable file; normal answers are plain text. Never invent Dock & Bay figures you were not given — if you need data, ask for it or ask the user to upload it.`;
+
+// Decode a base64 attachment into a content block for the Anthropic Messages API.
+async function aiFileBlock(att) {
+  try {
+    const name = String(att.filename || 'file');
+    const mime = String(att.mime || '').toLowerCase();
+    const buf = Buffer.from(String(att.data_base64 || ''), 'base64');
+    if (!buf.length) return { block: null, note: name + ' (empty)' };
+    if (/^image\//.test(mime)) return { block: { type: 'image', source: { type: 'base64', media_type: mime, data: buf.toString('base64') } }, note: name };
+    if (mime === 'application/pdf' || /\.pdf$/i.test(name)) return { block: { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') } }, note: name };
+    if (/\.(xlsx|xlsm)$/i.test(name) || /spreadsheetml/i.test(mime)) {
+      try {
+        const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+        let out = '';
+        wb.eachSheet(ws => { out += '# Sheet: ' + ws.name + '\n'; ws.eachRow(row => { const vals = (row.values || []).slice(1).map(v => v == null ? '' : (typeof v === 'object' ? (v.text || v.result || v.hyperlink || JSON.stringify(v)) : v)); out += vals.join(',') + '\n'; }); out += '\n'; });
+        return { block: { type: 'text', text: 'File "' + name + '" (spreadsheet, converted to CSV):\n```\n' + out.slice(0, AI_MAX_FILE_TEXT) + '\n```' }, note: name };
+      } catch (e) { return { block: { type: 'text', text: 'File "' + name + '" could not be parsed as a spreadsheet: ' + e.message }, note: name }; }
+    }
+    if (AI_TEXT_MIMES.test(mime) || AI_TEXT_EXT.test(name)) {
+      return { block: { type: 'text', text: 'File "' + name + '":\n```\n' + buf.toString('utf8').slice(0, AI_MAX_FILE_TEXT) + '\n```' }, note: name };
+    }
+    return { block: { type: 'text', text: 'File "' + name + '" (' + (mime || 'unknown type') + ', ' + buf.length + ' bytes) was uploaded but its type is not readable here. Ask the user to convert it to CSV, PDF or an image.' }, note: name };
+  } catch (e) { return { block: null, note: (att && att.filename) || 'file' }; }
+}
+
+async function aiOwnConversation(req, id) {
+  const r = (await pool.query(`SELECT * FROM planner.ai_conversations WHERE id=$1 AND user_email=$2`, [id, aiUser(req)])).rows[0];
+  return r || null;
+}
+
+// list the caller's conversations (newest first)
+app.get('/api/assistant/conversations', async (req, res) => {
+  try { const r = await pool.query(`SELECT c.id, c.title, c.created_at, c.updated_at,
+      (SELECT count(*) FROM planner.ai_messages m WHERE m.conversation_id=c.id) msgs
+      FROM planner.ai_conversations c WHERE c.user_email=$1 ORDER BY c.updated_at DESC LIMIT 300`, [aiUser(req)]);
+    res.set('Cache-Control', 'no-store').json({ conversations: r.rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// create an empty conversation
+app.post('/api/assistant/conversations', async (req, res) => {
+  try { const r = await pool.query(`INSERT INTO planner.ai_conversations (user_email, title) VALUES ($1,$2) RETURNING id, title, created_at, updated_at`, [aiUser(req), (req.body && req.body.title) ? String(req.body.title).slice(0, 120) : null]);
+    res.json({ ok: true, conversation: r.rows[0] });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// read one conversation with its messages + file refs
+app.get('/api/assistant/conversations/:id', async (req, res) => {
+  try { const c = await aiOwnConversation(req, req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+    const msgs = (await pool.query(`SELECT id, role, content, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.ai_messages WHERE conversation_id=$1 ORDER BY id`, [c.id])).rows;
+    const files = (await pool.query(`SELECT id, message_id, direction, filename, mime, size FROM planner.ai_files WHERE conversation_id=$1 ORDER BY id`, [c.id])).rows;
+    const byMsg = {}; files.forEach(f => { (byMsg[f.message_id] = byMsg[f.message_id] || []).push(f); });
+    msgs.forEach(m => { m.files = byMsg[m.id] || []; });
+    res.set('Cache-Control', 'no-store').json({ conversation: { id: c.id, title: c.title, created_at: c.created_at, updated_at: c.updated_at }, messages: msgs });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// rename
+app.post('/api/assistant/conversations/:id', async (req, res) => {
+  try { const c = await aiOwnConversation(req, req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+    await pool.query(`UPDATE planner.ai_conversations SET title=$1, updated_at=now() WHERE id=$2`, [String((req.body && req.body.title) || '').slice(0, 120) || null, c.id]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// delete
+app.post('/api/assistant/conversations/:id/delete', async (req, res) => {
+  try { const c = await aiOwnConversation(req, req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+    await pool.query(`DELETE FROM planner.ai_conversations WHERE id=$1`, [c.id]); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// download a stored file (upload or returned), scoped to the caller
+app.get('/api/assistant/file/:id', async (req, res) => {
+  try { const f = (await pool.query(`SELECT f.filename, f.mime, f.content FROM planner.ai_files f JOIN planner.ai_conversations c ON c.id=f.conversation_id WHERE f.id=$1 AND c.user_email=$2`, [req.params.id, aiUser(req)])).rows[0];
+    if (!f) return res.status(404).send('not found');
+    res.set('content-type', f.mime || 'application/octet-stream');
+    res.set('content-disposition', 'attachment; filename="' + String(f.filename || 'file').replace(/["\r\n]/g, '') + '"');
+    res.send(f.content);
+  } catch (e) { log500(e); res.status(500).send('error'); }
+});
+// send a message → store it (+ uploads), call Claude with the thread history, store the reply (+ returned files)
+app.post('/api/assistant/conversations/:id/message', async (req, res) => {
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'AI is not configured on this environment (no API key).' });
+  try {
+    const c = await aiOwnConversation(req, req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+    const b = req.body || {}; const text = String(b.text || '').trim();
+    const atts = Array.isArray(b.attachments) ? b.attachments.slice(0, 6) : [];
+    if (!text && !atts.length) return res.status(400).json({ error: 'nothing to send' });
+    let totalBytes = 0; atts.forEach(a => { totalBytes += Buffer.byteLength(String(a.data_base64 || ''), 'utf8'); });
+    if (totalBytes > AI_MAX_UPLOAD_BYTES * 1.4) return res.status(413).json({ error: 'attachments are too large (12 MB total max)' });
+
+    // 1) store the user message + uploaded files
+    const um = (await pool.query(`INSERT INTO planner.ai_messages (conversation_id, role, content) VALUES ($1,'user',$2) RETURNING id`, [c.id, text])).rows[0];
+    const inFileRefs = [];
+    for (const a of atts) { const buf = Buffer.from(String(a.data_base64 || ''), 'base64'); const fr = (await pool.query(`INSERT INTO planner.ai_files (conversation_id, message_id, direction, filename, mime, size, content) VALUES ($1,$2,'in',$3,$4,$5,$6) RETURNING id, filename, mime, size`, [c.id, um.id, String(a.filename || 'file').slice(0, 200), String(a.mime || '').slice(0, 120), buf.length, buf])).rows[0]; inFileRefs.push(fr); }
+    // title from the first user message right away (so even a failed AI call leaves a titled thread), bump updated_at
+    let title = c.title; if (!title) { title = (text || (atts[0] && atts[0].filename) || 'New chat').replace(/\s+/g, ' ').slice(0, 60); }
+    await pool.query(`UPDATE planner.ai_conversations SET title=$1, updated_at=now() WHERE id=$2`, [title, c.id]);
+
+    // 2) build the Anthropic request from the whole thread (prior turns as plain text; new turn carries the file blocks)
+    const prior = (await pool.query(`SELECT role, content FROM planner.ai_messages WHERE conversation_id=$1 AND id<$2 ORDER BY id`, [c.id, um.id])).rows;
+    const messages = prior.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content || '(no text)' }));
+    const newContent = [];
+    if (text) newContent.push({ type: 'text', text });
+    for (const a of atts) { const fb = await aiFileBlock(a); if (fb.block) newContent.push(fb.block); }
+    if (!newContent.length) newContent.push({ type: 'text', text: '(uploaded a file)' });
+    messages.push({ role: 'user', content: newContent });
+
+    // 3) call Claude
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const msg = (j && j.error && j.error.message) || ('AI error ' + r.status); return res.status(502).json({ error: msg, title }); }
+    let reply = ((j.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n')).trim() || '(no reply)';
+
+    // 4) extract any <file name="…">…</file> blocks Claude returned → store as downloadable 'out' files
+    const outFiles = []; const fileRe = /<file\s+name="([^"]+)">\n?([\s\S]*?)\n?<\/file>/g; let mm;
+    const am = (await pool.query(`INSERT INTO planner.ai_messages (conversation_id, role, content) VALUES ($1,'assistant','') RETURNING id`, [c.id])).rows[0];
+    while ((mm = fileRe.exec(reply))) { const fn = mm[1].slice(0, 200); const body = mm[2]; const mime = /\.csv$/i.test(fn) ? 'text/csv' : /\.json$/i.test(fn) ? 'application/json' : /\.md$/i.test(fn) ? 'text/markdown' : 'text/plain'; const buf = Buffer.from(body, 'utf8'); const fr = (await pool.query(`INSERT INTO planner.ai_files (conversation_id, message_id, direction, filename, mime, size, content) VALUES ($1,$2,'out',$3,$4,$5,$6) RETURNING id, filename, mime, size`, [c.id, am.id, fn, mime, buf.length, buf])).rows[0]; outFiles.push(fr); }
+    const displayReply = reply.replace(fileRe, (all, fn) => '📎 ' + fn + ' (ready to download below)').trim() || '(file ready below)';
+    await pool.query(`UPDATE planner.ai_messages SET content=$1 WHERE id=$2`, [displayReply, am.id]);
+
+    // 5) bump updated_at now the reply has landed
+    await pool.query(`UPDATE planner.ai_conversations SET updated_at=now() WHERE id=$1`, [c.id]);
+
+    res.json({ ok: true, title, user_message: { id: um.id, files: inFileRefs }, reply: { id: am.id, content: displayReply, files: outFiles } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // SUPPLIER PORTAL — real magic-link login + single-page supplier view.
 // Two surfaces: GET /portal (login page, or the portal app once authed). Auth is a

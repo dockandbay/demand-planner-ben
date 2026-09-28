@@ -1,3 +1,15 @@
+## v28.011 (Ben): "Ask Claude" — global assistant drawer (migration 307)
+
+**Files: `artifact_v16.7.html`, `server.mjs`, `migrations/307_ai_assistant.sql`.** A new orange **Ask Claude** button (robot icon) in the top bar, left of the SA button, opens a right-hand drawer for free-form conversation with Claude about anything.
+
+- **Drawer:** ask questions and make conversational requests; **attach files** (CSV, spreadsheets — parsed to CSV via ExcelJS, PDF, images, text) for Claude to analyse; Claude can **hand back a downloadable file** (it wraps file output in `<file name="…">…</file>`, which the server stores and the drawer shows as a download button). Basic markdown in replies (code blocks, bold).
+- **History:** every conversation is saved and listed in the drawer, **grouped by date** (Today / Yesterday / weekday / month), newest first; click one to recall the full thread with its uploads and returned files. New chat, rename-on-first-message, delete.
+- **Privacy:** conversations are keyed by the signed-in email; the API only ever reads/writes the caller's own rows, so **no user sees another user's chats**. Sandbox (no auth proxy) uses a single `sandbox@local` bucket.
+- **Server:** `/api/assistant/*` (own gate, any signed-in user — no special grant; writes fall through the edit guard as fail-open). The message route stores the user turn + uploads first, calls Anthropic server-side (key never reaches the browser, model `claude-sonnet-4-6`, 4096 max tokens), then stores the reply and any returned files. Caps: 6 files and 12 MB per message, 200k chars of text/spreadsheet content per file.
+- **Migration 307:** `ai_conversations`, `ai_messages`, `ai_files` (all additive; files stored as bytea).
+
+Sandbox verified: drawer opens, new chat, send, history grouped by date, per-user list, file upload persists and downloads, returned-file extraction, graceful AI-error bubble. The live model reply could not be exercised locally because this environment's `ANTHROPIC_API_KEY` is invalid (same key the existing AI insights use); it will work on prod where the key is valid. Deploy: apply 307; ensure `ANTHROPIC_API_KEY` is set (already required by `/api/ai`).
+
 ## v28.010 (Ben): CLIENT polish — Edit button moved to the left of the account; level-2 menu matched to SUPPLY / SCENARIO
 
 **File: `supply/inject.html`.** Two small consistency fixes on the CLIENT tab, both from Ben.

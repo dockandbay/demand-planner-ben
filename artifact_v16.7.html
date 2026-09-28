@@ -774,6 +774,7 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
     <button class="view-toggle" data-view="actions" data-group="buymove">BUY &amp; MOVE</button>
     <button class="view-toggle" data-view="exec">REPORTS</button>
     <div style="flex:1"></div>
+    <button id="ask-claude-btn" title="Ask Claude — questions, analysis, upload files" onclick="openAskClaude()" style="display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,#ff8a1a,#ff5630);color:#fff;border:none;border-radius:7px;padding:5px 11px;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(255,86,48,.45);letter-spacing:.01em"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="2.5"></rect><line x1="12" y1="4" x2="12" y2="8"></line><circle cx="12" cy="3" r="1.2" fill="currentColor"></circle><circle cx="9" cy="13.5" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15" cy="13.5" r="1.1" fill="currentColor" stroke="none"></circle><line x1="2" y1="12" x2="2" y2="15"></line><line x1="22" y1="12" x2="22" y2="15"></line></svg>Ask Claude</button>
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()">SA</button>
     <button id="hz-refresh-btn" class="tip120 hz-ico" data-tip="Refresh this tab's data from the database (rebuilds the server cache — DEMAND, SUPPLY or BUY, whichever you're on)" onclick="hzRefreshCache(this)" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
     <button id="hz-theme-btn" class="hz-ico" title="Toggle dark mode" onclick="hzToggleTheme()" aria-label="Toggle dark mode" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg></button>
@@ -18867,6 +18868,110 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     var s=document.getElementById('sup-search');
     if(s){ s.value=box.value; s.dispatchEvent(new Event('input',{bubbles:true})); }
   }); }
+})();
+</script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   v28.011 (Ben): "Ask Claude" — global assistant drawer. Per-user conversations, file upload +
+   analysis, files Claude returns for download. Data via /api/assistant/* (server holds the key).
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+(function(){
+  if(window.__askClaudeInit) return; window.__askClaudeInit = true;
+  var ST = { open:false, view:'list', conv:null, msgs:[], sending:false, atts:[] };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function api(path, opts){ opts=opts||{}; var o={method:opts.method||'GET',headers:{}}; if(opts.body){o.headers['content-type']='application/json';o.body=JSON.stringify(opts.body);} return fetch('/api/assistant'+path,o).then(function(r){ return r.json().then(function(j){ if(!r.ok||(j&&j.error)) throw new Error((j&&j.error)||('HTTP '+r.status)); return j; }); }); }
+  function css(){ if(document.getElementById('ask-claude-css')) return; var st=document.createElement('style'); st.id='ask-claude-css'; st.textContent=
+    '#ask-bg{position:fixed;inset:0;z-index:100050;background:rgba(15,23,42,0);transition:background .2s;pointer-events:none}'
+   +'#ask-bg.on{background:rgba(15,23,42,.34);pointer-events:auto}'
+   +'#ask-dw{position:fixed;top:0;right:0;height:100%;width:440px;max-width:100vw;background:var(--card,#fff);z-index:100051;box-shadow:-8px 0 30px rgba(15,23,42,.22);transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column;font-size:13px;color:var(--ink,#0f172a)}'
+   +'#ask-dw.on{transform:none}'
+   +'@media(max-width:520px){#ask-dw{width:100vw}}'
+   +'.ask-hd{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line,#e6e9ef);flex:0 0 auto}'
+   +'.ask-hd .lg{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#ff8a1a,#ff5630);color:#fff}'
+   +'.ask-hd b{font-size:14px}.ask-hd .sp{flex:1}'
+   +'.ask-ico{background:none;border:1px solid var(--line,#e6e9ef);border-radius:7px;width:30px;height:30px;cursor:pointer;color:var(--muted,#64748b);font-size:15px;display:inline-flex;align-items:center;justify-content:center}'
+   +'.ask-ico:hover{background:var(--hover,#f1f5f9);color:var(--ink,#0f172a)}'
+   +'.ask-new{background:linear-gradient(135deg,#ff8a1a,#ff5630);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-weight:700;font-size:12px;cursor:pointer}'
+   +'.ask-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 12px}'
+   +'.ask-dgrp{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint,#94a3b8);font-weight:700;margin:12px 2px 4px}'
+   +'.ask-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line,#e6e9ef);border-radius:9px;margin-bottom:6px;cursor:pointer;background:var(--card,#fff)}'
+   +'.ask-row:hover{background:var(--hover,#f1f5f9)}'
+   +'.ask-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}'
+   +'.ask-row .x{color:var(--neg,#dc2626);opacity:.5;font-size:15px;padding:0 4px}.ask-row .x:hover{opacity:1}'
+   +'.ask-empty{color:var(--muted,#64748b);text-align:center;padding:40px 20px;line-height:1.6}'
+   +'.ask-msg{max-width:88%;padding:9px 12px;border-radius:12px;margin-bottom:9px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}'
+   +'.ask-msg.me{margin-left:auto;background:#fff2ec;border:1px solid #ffd9c7}'
+   +'.ask-msg.ai{background:var(--band,#f6f7f9);border:1px solid var(--line,#e6e9ef)}'
+   +'.ask-msg code{background:rgba(15,23,42,.07);padding:1px 4px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:12px}'
+   +'.ask-msg pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;overflow:auto;margin:6px 0;font-size:12px;white-space:pre}'
+   +'.ask-file{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line,#e6e9ef);background:var(--card,#fff);border-radius:7px;padding:4px 9px;margin:4px 4px 0 0;font-size:12px;text-decoration:none;color:var(--blue-ink,#1d4ed8)}'
+   +'.ask-file:hover{background:var(--hover,#f1f5f9)}'
+   +'.ask-foot{flex:0 0 auto;border-top:1px solid var(--line,#e6e9ef);padding:10px 12px}'
+   +'.ask-atts{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}'
+   +'.ask-chip{display:inline-flex;align-items:center;gap:5px;background:var(--band,#f6f7f9);border:1px solid var(--line,#e6e9ef);border-radius:6px;padding:2px 7px;font-size:11px}'
+   +'.ask-chip .x{cursor:pointer;color:var(--neg,#dc2626)}'
+   +'.ask-inrow{display:flex;align-items:flex-end;gap:7px}'
+   +'.ask-ta{flex:1;border:1px solid var(--line,#e6e9ef);border-radius:10px;padding:9px 11px;font-family:inherit;font-size:13px;resize:none;max-height:140px;min-height:38px;color:var(--ink,#0f172a);background:var(--card,#fff)}'
+   +'.ask-send{background:linear-gradient(135deg,#ff8a1a,#ff5630);color:#fff;border:none;border-radius:10px;width:40px;height:38px;cursor:pointer;font-size:16px;flex:0 0 auto}'
+   +'.ask-send:disabled{opacity:.5;cursor:default}'
+   +'.ask-clip{border:1px solid var(--line,#e6e9ef);background:var(--card,#fff);border-radius:10px;width:40px;height:38px;cursor:pointer;color:var(--muted,#64748b);font-size:16px;flex:0 0 auto}'
+   +'.ask-typing{color:var(--muted,#64748b);font-style:italic;padding:2px 4px 8px}'
+   +'.ask-hint{color:var(--faint,#94a3b8);font-size:11px;margin-top:6px;text-align:center}';
+    document.head.appendChild(st); }
+  function build(){ css(); if(document.getElementById('ask-dw')) return;
+    var bg=document.createElement('div'); bg.id='ask-bg'; bg.onclick=closeAsk; document.body.appendChild(bg);
+    var dw=document.createElement('div'); dw.id='ask-dw';
+    dw.innerHTML='<div class="ask-hd"><span class="lg"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2.5"></rect><line x1="12" y1="4" x2="12" y2="8"></line><circle cx="12" cy="3" r="1.2" fill="currentColor"></circle><circle cx="9" cy="13.5" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15" cy="13.5" r="1.1" fill="currentColor" stroke="none"></circle></svg></span><b>Ask Claude</b><span class="sp"></span><button class="ask-ico" id="ask-list-btn" title="Conversations">&#9776;</button><button class="ask-new" id="ask-new-btn">+ New</button><button class="ask-ico" id="ask-close-btn" title="Close">&times;</button></div><div class="ask-body" id="ask-body"></div><div class="ask-foot" id="ask-foot" style="display:none"></div>';
+    document.body.appendChild(dw);
+    document.getElementById('ask-close-btn').onclick=closeAsk;
+    document.getElementById('ask-new-btn').onclick=newChat;
+    document.getElementById('ask-list-btn').onclick=showList;
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&ST.open)closeAsk(); }); }
+  window.openAskClaude=function(){ build(); ST.open=true; document.getElementById('ask-bg').classList.add('on'); document.getElementById('ask-dw').classList.add('on'); if(ST.conv) openConv(ST.conv.id); else showList(); };
+  function closeAsk(){ ST.open=false; var bg=document.getElementById('ask-bg'),dw=document.getElementById('ask-dw'); if(bg)bg.classList.remove('on'); if(dw)dw.classList.remove('on'); }
+  function foot(show){ var f=document.getElementById('ask-foot'); if(f)f.style.display=show?'block':'none'; }
+  function dayLabel(iso){ var d=new Date(iso); if(isNaN(d))return 'Earlier'; var now=new Date(); var sd=new Date(now.getFullYear(),now.getMonth(),now.getDate()); var td=new Date(d.getFullYear(),d.getMonth(),d.getDate()); var diff=Math.round((sd-td)/86400000); if(diff<=0)return 'Today'; if(diff===1)return 'Yesterday'; if(diff<7)return d.toLocaleDateString(undefined,{weekday:'long'}); if(diff<30)return 'Earlier this month'; return d.toLocaleDateString(undefined,{month:'long',year:'numeric'}); }
+  function showList(){ ST.view='list'; ST.conv=null; foot(false); var b=document.getElementById('ask-body'); b.innerHTML='<div class="ask-empty">Loading…</div>';
+    api('/conversations').then(function(j){ var cs=j.conversations||[]; if(!cs.length){ b.innerHTML='<div class="ask-empty"><b>Ask me anything.</b><br>Questions, analysis, or upload a file (CSV, spreadsheet, PDF, image) and I will work with it. I can hand back a file too.<br><br>Your chats are private to you and saved here.<br><br><button class="ask-new" id="ask-new2">+ New chat</button></div>'; var n=document.getElementById('ask-new2'); if(n)n.onclick=newChat; return; }
+      var groups={},order=[]; cs.forEach(function(c){ var g=dayLabel(c.updated_at); if(!groups[g]){groups[g]=[];order.push(g);} groups[g].push(c); });
+      b.innerHTML=order.map(function(g){ return '<div class="ask-dgrp">'+esc(g)+'</div>'+groups[g].map(function(c){ return '<div class="ask-row" data-id="'+c.id+'"><span class="t">'+esc(c.title||'New chat')+'</span><span class="x" data-del="'+c.id+'" title="Delete">&times;</span></div>'; }).join(''); }).join('');
+      b.querySelectorAll('.ask-row').forEach(function(r){ r.onclick=function(e){ if(e.target.dataset.del)return; openConv(r.dataset.id); }; });
+      b.querySelectorAll('.x[data-del]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); if(!confirm('Delete this conversation?'))return; api('/conversations/'+x.dataset.del+'/delete',{method:'POST'}).then(showList); }; });
+    }).catch(function(e){ b.innerHTML='<div class="ask-empty" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
+  function newChat(){ api('/conversations',{method:'POST'}).then(function(j){ ST.atts=[]; openConv(j.conversation.id, j.conversation); }).catch(function(e){ alert(e.message); }); }
+  function openConv(id, seed){ ST.view='chat'; foot(true); renderComposer();
+    if(seed){ ST.conv=seed; ST.msgs=[]; paint(); }
+    api('/conversations/'+id).then(function(j){ ST.conv=j.conversation; ST.msgs=j.messages||[]; paint(); }).catch(function(e){ var b=document.getElementById('ask-body'); b.innerHTML='<div class="ask-empty" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
+  function fileHtml(files){ if(!files||!files.length)return ''; return '<div>'+files.map(function(f){ return '<a class="ask-file" href="/api/assistant/file/'+f.id+'" target="_blank" rel="noopener">'+(f.direction==='out'?'&#11015; ':'&#128206; ')+esc(f.filename)+'</a>'; }).join('')+'</div>'; }
+  function mdlite(t){ t=esc(t);
+    t=t.replace(/```([\s\S]*?)```/g,function(m,code){ return '<pre>'+code.replace(/^\n/,'')+'</pre>'; });
+    t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
+    t=t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+    return t; }
+  function paint(){ var b=document.getElementById('ask-body'); if(!b)return;
+    b.innerHTML=(ST.msgs.length?ST.msgs.map(function(m){ var cls=m.role==='assistant'?'ai':'me'; return '<div class="ask-msg '+cls+'">'+(m.role==='assistant'?mdlite(m.content):esc(m.content))+fileHtml(m.files)+'</div>'; }).join(''):'<div class="ask-empty">New chat. Type a question or attach a file to begin.</div>')+(ST.sending?'<div class="ask-typing" id="ask-typing">Claude is thinking…</div>':'');
+    b.scrollTop=b.scrollHeight; }
+  function renderComposer(){ var f=document.getElementById('ask-foot'); if(!f)return;
+    f.innerHTML='<div class="ask-atts" id="ask-atts"></div><div class="ask-inrow"><button class="ask-clip" id="ask-clip" title="Attach a file">&#128206;</button><input type="file" id="ask-file" multiple style="display:none"><textarea class="ask-ta" id="ask-ta" rows="1" placeholder="Ask anything, or attach a file…"></textarea><button class="ask-send" id="ask-send" title="Send">&#10148;</button></div><div class="ask-hint">Private to you. Claude can read CSV, spreadsheets, PDF, images and text.</div>';
+    var ta=document.getElementById('ask-ta'); ta.oninput=function(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,140)+'px'; };
+    ta.onkeydown=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } };
+    document.getElementById('ask-send').onclick=send;
+    document.getElementById('ask-clip').onclick=function(){ document.getElementById('ask-file').click(); };
+    document.getElementById('ask-file').onchange=function(e){ pickFiles(e.target.files); e.target.value=''; };
+    renderAtts(); }
+  function renderAtts(){ var a=document.getElementById('ask-atts'); if(!a)return; a.innerHTML=ST.atts.map(function(f,i){ return '<span class="ask-chip">'+esc(f.filename)+' <span class="x" data-i="'+i+'">&times;</span></span>'; }).join(''); a.querySelectorAll('.x').forEach(function(x){ x.onclick=function(){ ST.atts.splice(+x.dataset.i,1); renderAtts(); }; }); }
+  function pickFiles(list){ var arr=Array.prototype.slice.call(list||[]).slice(0,6); arr.forEach(function(file){ if(file.size>12*1024*1024){ alert(file.name+' is over 12 MB'); return; } var r=new FileReader(); r.onload=function(){ ST.atts.push({filename:file.name,mime:file.type||'application/octet-stream',data_base64:String(r.result).split(',')[1]}); if(ST.atts.length>6)ST.atts=ST.atts.slice(0,6); renderAtts(); }; r.readAsDataURL(file); }); }
+  function send(){ if(ST.sending||!ST.conv)return; var ta=document.getElementById('ask-ta'); var text=(ta.value||'').trim(); if(!text&&!ST.atts.length)return;
+    var atts=ST.atts.slice(); ST.atts=[]; renderAtts();
+    ST.msgs.push({role:'user',content:text,files:atts.map(function(a){return {filename:a.filename,direction:'in',id:null};})});
+    ST.sending=true; ta.value=''; ta.style.height='auto'; paint();
+    api('/conversations/'+ST.conv.id+'/message',{method:'POST',body:{text:text,attachments:atts}}).then(function(j){ ST.sending=false;
+      // attach real ids to the just-sent user files
+      if(j.user_message&&j.user_message.files&&ST.msgs.length){ ST.msgs[ST.msgs.length-1].files=j.user_message.files.map(function(f){return {id:f.id,filename:f.filename,direction:'in'};}); }
+      ST.msgs.push({role:'assistant',content:j.reply.content,files:j.reply.files||[]});
+      if(j.title&&ST.conv)ST.conv.title=j.title; paint();
+    }).catch(function(e){ ST.sending=false; ST.msgs.push({role:'assistant',content:'⚠ '+e.message,files:[]}); paint(); }); }
 })();
 </script>
 
