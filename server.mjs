@@ -884,7 +884,8 @@ app.use((req, res, next) => {
   if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
-      || req.path.startsWith('/api/export/csv/')) return next();   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
+      || req.path.startsWith('/api/export/csv/')
+      || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
@@ -8883,17 +8884,17 @@ const PERMS_MEMO_MS = 60000;
 function permsMemoDrop(email) { if (email) _permsMemo.delete(String(email).toLowerCase()); else _permsMemo.clear(); }
 async function permsFor(req) {
   const email = authUser(req);
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, landing_page: 'supply/purchase-orders', favourites: [] };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, landing_page: 'supply/purchase-orders', favourites: [] };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
   let row = null;
   const m = _permsMemo.get(e);
   if (m && Date.now() - m.at < PERMS_MEMO_MS) row = m.row;
   else {
-    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
+    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
   }
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
-  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
+  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
 }
 // Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
 // No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
@@ -8916,7 +8917,7 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // ── Coghlans SFTP browser (Ben, 2026-09-08): read-only folder/file listing over the Webshare static-IP HTTP proxy. ──
 // Config-level access (supply OR demand edit, or admin). Connection params come from env (see coghlans_sftp.mjs); the
@@ -9323,9 +9324,9 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
   permsMemoDrop(email);   // v27.894: a permissions change must apply on the user's very next request
-  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, updated_at, updated_by)
-      VALUES ($1,$2,$3,$4,$5,$6,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, updated_at=now(), updated_by=excluded.updated_by`,
-      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox']);
+  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, client_access, commissions, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$8,$9,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, client_access=excluded.client_access, commissions=excluded.commissions, updated_at=now(), updated_by=excluded.updated_by`,
+      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox', !!b.client_access, !!b.commissions]);
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
@@ -18314,6 +18315,731 @@ app.get('/api/scenario/auto-forecast/feed/status', async (req, res) => {
   const f = await afLatestFeed();
   res.set('Cache-Control', 'no-store').json(f ? { ok: true, id: f.id, computed_at: f.computed_at, computed_by: f.computed_by, app_version: f.app_version, rows: f.row_count, units: Number(f.units_total) } : { ok: false, reason: 'no feed snapshot yet — open SUPPLY ▸ PAYMENTS ▸ Auto Forecast once' });
 });
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ── v28.008 (Ben): CLIENT PORTAL — Horizon CLIENT tab (admin) + client-facing portal at /client (migration 306) ──
+// Spec: "Dock & Bay Client Portal — Build Spec" (28-Sep-2026). One portal shell for key accounts, distributors, agents and
+// direct wholesale, differentiated by config: what they can SEE (visibility modes) and what they can DO (feature toggles).
+// Admin surface = the CLIENT top tab (grant: app_permissions.client_access; commissions need app_permissions.commissions).
+// Portal auth = magic link → httpOnly cookie `csid` (same mechanism as the supplier portal, separate tables).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const CP_TYPES = ['key_account', 'distributor', 'agent', 'direct_wholesale'];
+const CP_FEATURE_DEFAULTS = { order_placement: true, sample_requests: true, view_stock: true, view_line_sheet: true, view_commission: false, messaging: true };
+const CP_WAREHOUSES = { uk_3pl: 'UK ILG', us_3pl: 'US Geneva', eu_3pl: 'EU iFulfilment (Bocholt)', au_3pl: 'AU Coghlans', uk_fba: 'UK Amazon FBA', us_fba: 'US Amazon FBA', eu_fba: 'EU Amazon FBA', au_fba: 'AU Amazon FBA', ca_fba: 'CA Amazon FBA' };
+const CP_MARKETS = { UK: { currency: 'GBP', wh: 'uk_3pl', dims: 'uk', hs: 'hscode_uk' }, US: { currency: 'USD', wh: 'us_3pl', dims: 'us', hs: 'hscode_us' }, EU: { currency: 'EUR', wh: 'eu_3pl', dims: 'uk', hs: 'hscode_eu' }, AU: { currency: 'AUD', wh: 'au_3pl', dims: 'uk', hs: 'hscode_au' }, CA: { currency: 'CAD', wh: 'ca_fba', dims: 'us', hs: 'hscode_ca' } };
+const CP_FULFIL_WH = { uk_3pl: 'ILG', eu_3pl: 'EUIFUL', us_3pl: 'USGENEVA_STD', au_3pl: 'AUCOGHLANS' };   // Horizon warehouse code → Fulfil stock.location code
+const CP_CHANNEL_ALIAS = { UKWS: 'dockandbay-uk-ws', USWS: 'dockandbay-us-ws', EUWS: 'dockandbay-eu-ws', AUWS: 'dockandbay-au-ws', UK: 'dockandbay-uk', US: 'dockandbay-us', EU: 'dockandbay-eu', AU: 'dockandbay-au' };
+function cpBand(n) { n = Number(n) || 0; if (n < 20) return '<20'; if (n < 100) return '20+'; if (n < 300) return '100+'; if (n < 500) return '300+'; if (n < 1000) return '500+'; return '1000+'; }
+function cpSlug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); }
+function cpJson(v, def) { if (v == null) return def; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch (e) { return def; } }
+async function cpAudit(clientId, event, detail, by) { try { await pool.query(`INSERT INTO planner.client_audit (client_id,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [clientId, event, detail || null, by || null]); } catch (e) {} }
+async function cpSetting(key, def) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0]; return (r && r.value != null && r.value !== '') ? r.value : def; } catch (e) { return def; } }
+async function cpClientById(id) {
+  const r = (await pool.query(`SELECT c.*, rg.name rep_group_name, rg.default_rate rep_default_rate FROM planner.clients c LEFT JOIN planner.rep_groups rg ON rg.id=c.rep_group_id WHERE c.id=$1`, [id])).rows[0];
+  if (!r) return null;
+  r.visibility = cpJson(r.visibility, {}); r.stock_scope = cpJson(r.stock_scope, { mode: 'default' }); r.features = Object.assign({}, CP_FEATURE_DEFAULTS, cpJson(r.features, {}));
+  return r;
+}
+// order_origin: before the Cin7 cut-off → cin7 · from the Fulfil start → fulfil · in between → the imported Cin7 list decides.
+async function cpOriginRule() {
+  return { cin7Until: await cpSetting('cp_cutover_cin7_until', '2026-09-06'), fulfilFrom: await cpSetting('cp_cutover_fulfil_from', '2026-10-01') };
+}
+
+// ── admin gate: every /api/client/* needs CLIENT access (sandbox = open); /api/client/commission* needs COMMISSIONS ──
+async function cpAdminGate(req, res, next) {
+  try {
+    const me = await permsFor(req);
+    if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required — ask an admin (CONFIG ▸ Admin ▸ Permissions)', code: 'no_client_access' });
+    if (/^\/commission/.test(req.path) && me.live && !(me.is_admin || me.commissions)) return res.status(403).json({ error: 'COMMISSIONS access required', code: 'no_commissions' });
+    req.me = me; next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+app.use('/api/client', cpAdminGate);
+
+// ── lookups for the admin forms ──
+app.get('/api/client/lookups', async (req, res) => {
+  try {
+    const [rg, ka, ch, pl, cnt] = await Promise.all([
+      pool.query(`SELECT id, name, default_rate FROM planner.rep_groups WHERE active ORDER BY name`),
+      pool.query(`SELECT id, name FROM planner.key_accounts ORDER BY name`),
+      pool.query(`SELECT channel, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(channel,'')<>'' GROUP BY 1 ORDER BY 2 DESC`).catch(() => ({ rows: [] })),
+      pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus FROM planner.client_price_lists GROUP BY code ORDER BY code`).catch(() => ({ rows: [] })),
+      pool.query(`SELECT country_code, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(country_code,'')<>'' GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).catch(() => ({ rows: [] })),
+    ]);
+    res.set('Cache-Control', 'no-store').json({ types: CP_TYPES, warehouses: CP_WAREHOUSES, markets: Object.keys(CP_MARKETS), feature_defaults: CP_FEATURE_DEFAULTS,
+      rep_groups: rg.rows, key_accounts: ka.rows, channels: ch.rows, countries: cnt.rows, price_lists: pl.rows, channel_alias: CP_CHANNEL_ALIAS,
+      me: { email: req.me.email, commissions: !!(req.me.is_admin || req.me.commissions || !req.me.live) } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── clients ──
+app.get('/api/client/clients', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT c.id, c.name, c.code, c.type, c.owner_email, c.market, c.currency, c.price_list, c.warehouse_code, c.visibility, c.stock_scope, c.features, c.rep_group_id, rg.name rep_group_name, c.key_account_id, c.active, c.fulfil_party_id, c.fulfil_channel,
+        to_char(c.updated_at,'YYYY-MM-DD') updated_at, c.updated_by,
+        (SELECT count(*)::int FROM planner.client_users u WHERE u.client_id=c.id AND u.active) users,
+        (SELECT count(*)::int FROM planner.client_users u WHERE u.client_id=c.id AND u.active AND u.last_login_at IS NULL) invited,
+        (SELECT count(*)::int FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=c.id AND m.sender_kind='client' AND m.read_by_ops_at IS NULL) unread
+      FROM planner.clients c LEFT JOIN planner.rep_groups rg ON rg.id=c.rep_group_id ORDER BY c.active DESC, c.name`)).rows;
+    rows.forEach(r => { r.visibility = cpJson(r.visibility, {}); r.stock_scope = cpJson(r.stock_scope, {}); r.features = Object.assign({}, CP_FEATURE_DEFAULTS, cpJson(r.features, {})); });
+    res.set('Cache-Control', 'no-store').json({ clients: rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/clients', async (req, res) => {
+  const b = req.body || {}; const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const type = CP_TYPES.includes(b.type) ? b.type : 'key_account';
+  const market = CP_MARKETS[b.market] ? b.market : 'UK';
+  const feats = Object.assign({}, CP_FEATURE_DEFAULTS, type === 'agent' ? { view_commission: true } : {}, type === 'distributor' ? { view_stock: false } : {});
+  try {
+    let code = cpSlug(name) || ('client-' + Date.now()); const dup = (await pool.query(`SELECT 1 FROM planner.clients WHERE code=$1`, [code])).rowCount; if (dup) code = code + '-' + Date.now().toString(36).slice(-4);
+    const r = await pool.query(`INSERT INTO planner.clients (name, code, type, owner_email, market, currency, warehouse_code, features, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$9) RETURNING id`,
+      [name, code, type, b.owner_email || req.me.email || null, market, CP_MARKETS[market].currency, CP_MARKETS[market].wh, JSON.stringify(feats), req.me.email || 'sandbox']);
+    await cpAudit(r.rows[0].id, 'Client created', type + ' · ' + market, req.me.email);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/clients/:id', async (req, res) => {
+  try {
+    const c = await cpClientById(req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+    const [users, audit, orders, ka] = await Promise.all([
+      pool.query(`SELECT id, name, email, scope, active, to_char(invited_at,'YYYY-MM-DD') invited_at, to_char(last_login_at,'YYYY-MM-DD HH24:MI') last_login_at FROM planner.client_users WHERE client_id=$1 ORDER BY active DESC, name, email`, [c.id]),
+      pool.query(`SELECT to_char(changed_at,'YYYY-MM-DD HH24:MI') at, changed_by, event, detail FROM planner.client_audit WHERE client_id=$1 ORDER BY changed_at DESC LIMIT 60`, [c.id]),
+      pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, error, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, submitted_by FROM planner.client_orders WHERE client_id=$1 ORDER BY created_at DESC LIMIT 30`, [c.id]),
+      c.key_account_id ? pool.query(`SELECT id, name, consignee, contact_person, contact_number, address FROM planner.key_accounts WHERE id=$1`, [c.key_account_id]) : Promise.resolve({ rows: [] }),
+    ]);
+    res.set('Cache-Control', 'no-store').json({ client: c, users: users.rows, audit: audit.rows, portal_orders: orders.rows, key_account: ka.rows[0] || null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool' };
+app.post('/api/client/clients/:id', async (req, res) => {
+  const b = req.body || {}; const sets = [], vals = [], changed = [];
+  const before = await cpClientById(req.params.id); if (!before) return res.status(404).json({ error: 'not found' });
+  for (const [k, t] of Object.entries(CP_CLIENT_FIELDS)) {
+    if (!(k in b)) continue; let v = b[k];
+    if (t === 'json') v = JSON.stringify(v == null ? {} : v); else if (t === 'int') v = (v === '' || v == null) ? null : parseInt(v, 10); else if (t === 'bool') v = !!v; else v = (v == null) ? null : String(v);
+    if (k === 'type' && !CP_TYPES.includes(v)) continue; if (k === 'market' && !CP_MARKETS[v]) continue;
+    vals.push(v); sets.push(k + '=$' + vals.length + (t === 'json' ? '::jsonb' : '')); changed.push(k);
+  }
+  if (!sets.length) return res.json({ ok: true, unchanged: true });
+  vals.push(req.me.email || 'sandbox'); sets.push('updated_by=$' + vals.length); sets.push('updated_at=now()'); vals.push(req.params.id);
+  try {
+    await pool.query(`UPDATE planner.clients SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
+    const detail = changed.map(k => { const nv = b[k]; const ov = before[k]; const s = v => (v && typeof v === 'object') ? JSON.stringify(v) : String(v == null ? '' : v); return k + ': ' + s(ov).slice(0, 60) + ' → ' + s(nv).slice(0, 60); }).join(' · ');
+    await cpAudit(req.params.id, 'Client updated', detail, req.me.email);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/clients/:id/delete', async (req, res) => {
+  try { const c = await cpClientById(req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+    await pool.query(`DELETE FROM planner.clients WHERE id=$1`, [req.params.id]); await cpAudit(null, 'Client deleted', c.name + ' (#' + c.id + ')', req.me.email); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── users + magic links ──
+const cpToken = () => crypto.randomBytes(24).toString('hex');
+function cpBase(req) { return (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host); }
+async function cpMintLink(userId, req) {
+  const tok = cpToken();
+  await pool.query(`INSERT INTO planner.client_magic_tokens (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, userId]);
+  await pool.query(`UPDATE planner.client_users SET invited_at=now() WHERE id=$1`, [userId]);
+  return cpBase(req) + '/client?token=' + tok;
+}
+app.post('/api/client/clients/:id/users', async (req, res) => {
+  const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
+  if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
+  try {
+    const r = await pool.query(`INSERT INTO planner.client_users (client_id, name, email, scope) VALUES ($1,$2,$3,$4) RETURNING id`, [req.params.id, (b.name || '').trim() || null, email, b.scope === 'self' ? 'self' : 'client']);
+    await cpAudit(req.params.id, 'User added', email + (b.scope === 'self' ? ' · own customers only' : ''), req.me.email);
+    let url = null; if (b.invite) { url = await cpMintLink(r.rows[0].id, req); const c = await cpClientById(req.params.id); await cpSendLink(email, url, c ? c.name : ''); }
+    res.json({ ok: true, id: r.rows[0].id, invite_url: url });
+  } catch (e) { if (/client_users_email_idx/.test(e.message)) return res.status(409).json({ error: 'that email already has a portal login (one client per email)' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/users/:uid', async (req, res) => {
+  const b = req.body || {}; const sets = [], vals = [];
+  if ('name' in b) { vals.push(String(b.name || '').trim() || null); sets.push('name=$' + vals.length); }
+  if ('scope' in b) { vals.push(b.scope === 'self' ? 'self' : 'client'); sets.push('scope=$' + vals.length); }
+  if ('active' in b) { vals.push(!!b.active); sets.push('active=$' + vals.length); }
+  if (!sets.length) return res.json({ ok: true });
+  vals.push(req.params.uid);
+  try { const u = (await pool.query(`UPDATE planner.client_users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING client_id, email`, vals)).rows[0]; if (!u) return res.status(404).json({ error: 'not found' });
+    await cpAudit(u.client_id, 'User updated', u.email + ' · ' + Object.keys(b).join(', '), req.me.email); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/users/:uid/delete', async (req, res) => {
+  try { const u = (await pool.query(`DELETE FROM planner.client_users WHERE id=$1 RETURNING client_id, email`, [req.params.uid])).rows[0]; if (u) await cpAudit(u.client_id, 'User removed', u.email, req.me.email); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+async function cpSendLink(email, url, clientName) {
+  await sendResendEmail({ kind: 'client-magic-link', ref: email, to: email, subject: 'Your Dock & Bay client portal link',
+    html: `<p>Hi,</p><p>Here is your link to the Dock &amp; Bay client portal${clientName ? ' for <b>' + clientName + '</b>' : ''} (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
+}
+app.post('/api/client/users/:uid/invite', async (req, res) => {
+  try { const u = (await pool.query(`SELECT u.id, u.email, u.client_id, c.name client_name FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE u.id=$1`, [req.params.uid])).rows[0]; if (!u) return res.status(404).json({ error: 'not found' });
+    const url = await cpMintLink(u.id, req); const r = await cpSendLink(u.email, url, u.client_name);
+    await cpAudit(u.client_id, 'Magic link sent', u.email, req.me.email);
+    res.json({ ok: true, url, emailed: !(r && r.sandbox) });   // the URL is returned so an admin can hand it over directly (sandbox has no Resend key)
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── config (portal-wide settings live in app_settings under cp_*) ──
+const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to'];
+app.get('/api/client/config', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key = ANY($1)`, [CP_SETTINGS])).rows; const s = {}; rows.forEach(r => { s[r.key] = r.value; });
+    const [cin7, pl, sales] = await Promise.all([
+      pool.query(`SELECT count(*)::int n, min(order_ref) mn, max(order_ref) mx FROM planner.client_cin7_refs`),
+      pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus, to_char(max(updated_at),'YYYY-MM-DD') updated FROM planner.client_price_lists GROUP BY code ORDER BY code`),
+      pool.query(`SELECT count(*)::int n, to_char(max(last_synced_at),'YYYY-MM-DD HH24:MI') synced, min(sale_date) mn, max(sale_date) mx FROM planner.fulfil_sales`),
+    ]);
+    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: '<20,20+,100+,300+,500+,1000+', cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/config', async (req, res) => {
+  const b = req.body || {}; const key = String(b.key || ''); if (!CP_SETTINGS.includes(key)) return res.status(400).json({ error: 'unknown setting' });
+  try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, String(b.value == null ? '' : b.value), req.me.email || null]);
+    await cpAudit(null, 'Portal setting', key + ' = ' + String(b.value == null ? '' : b.value).slice(0, 80), req.me.email); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/cin7-refs/import', async (req, res) => {
+  const b = req.body || {}; const refs = Array.from(new Set((Array.isArray(b.refs) ? b.refs : String(b.text || '').split(/[\s,;]+/)).map(x => String(x || '').trim()).filter(Boolean)));
+  try { if (b.replace) await pool.query(`DELETE FROM planner.client_cin7_refs`);
+    let n = 0; for (let i = 0; i < refs.length; i += 500) { const chunk = refs.slice(i, i + 500); await pool.query(`INSERT INTO planner.client_cin7_refs (order_ref) SELECT unnest($1::text[]) ON CONFLICT (order_ref) DO NOTHING`, [chunk]); n += chunk.length; }
+    await cpAudit(null, 'Cin7 grey-window list imported', n + ' refs' + (b.replace ? ' (replaced)' : ''), req.me.email); res.json({ ok: true, imported: n });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/price-lists/import', async (req, res) => {
+  const b = req.body || {}; const code = String(b.code || '').trim().toUpperCase(); if (!code) return res.status(400).json({ error: 'price list code required' });
+  const rows = (Array.isArray(b.rows) ? b.rows : []).map(r => ({ sku: String(r.sku || '').trim().toUpperCase(), price: Number(String(r.price == null ? '' : r.price).replace(/[^0-9.\-]/g, '')) })).filter(r => r.sku && isFinite(r.price));
+  if (!rows.length) return res.status(400).json({ error: 'no sku,price rows' });
+  try { if (b.replace) await pool.query(`DELETE FROM planner.client_price_lists WHERE code=$1`, [code]);
+    for (let i = 0; i < rows.length; i += 300) { const chunk = rows.slice(i, i + 300); const vals = chunk.map((_, j) => `($1,$2,$3,$4,$${5 + j * 2},$${6 + j * 2},now())`).join(','); const params = [code, b.label || code, b.market || null, b.currency || null]; chunk.forEach(r => { params.push(r.sku, r.price); });
+      await pool.query(`INSERT INTO planner.client_price_lists (code,label,market,currency,sku,price,updated_at) VALUES ${vals} ON CONFLICT (code, sku) DO UPDATE SET price=excluded.price, label=excluded.label, market=excluded.market, currency=excluded.currency, updated_at=now()`, params); }
+    await cpAudit(null, 'Price list imported', code + ' · ' + rows.length + ' SKUs', req.me.email); res.json({ ok: true, imported: rows.length });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/price-lists/:code/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.client_price_lists WHERE code=$1`, [String(req.params.code).toUpperCase()]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+
+// ── Fulfil SALES mirror import (cron-able like import-pos: x-webhook-secret, or an admin session) ──
+function cpTagsFromMeta(meta) {
+  const out = new Set(); if (!meta || typeof meta !== 'object') return [];
+  const walk = (v) => { if (v == null) return; if (typeof v === 'string') { v.split(/[,;]+/).map(x => x.trim()).forEach(t => { if (/^(agent|rep|tag)[_:-]/i.test(t)) out.add(t.toLowerCase()); }); } else if (Array.isArray(v)) v.forEach(walk); else if (typeof v === 'object') Object.entries(v).forEach(([k, x]) => { if (/tag/i.test(k) && typeof x === 'string') x.split(/[,;]+/).forEach(t => { if (t.trim()) out.add(t.trim().toLowerCase()); }); else walk(x); }); };
+  walk(meta); return [...out];
+}
+async function fulfilImportSales(days) {
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  const since = new Date(Date.now() - (Number(days) || 120) * 86400000).toISOString().slice(0, 10);
+  const F = ['id', 'number', 'reference', 'state', 'party.name', 'party.email', 'shipment_address.name', 'invoice_address.name', 'channel.name', 'channel.source', 'warehouse.code', 'shipment_address.country.code', 'currency.code', 'total_amount', 'untaxed_amount', 'invoice_state', 'shipment_state', 'sale_date', 'create_date', 'carrier.rec_name', 'metadata', 'shipments', 'lines', 'comment'];
+  const sales = await fulfilSearchAll('sale.sale', ['OR', ['sale_date', '>=', since], ['state', 'in', ['draft', 'quotation', 'confirmed', 'processing']]], F);
+  const lineIds = [], shipIds = []; sales.forEach(s => { (s.lines || []).forEach(i => lineIds.push(i)); (s.shipments || []).forEach(i => shipIds.push(i)); });
+  const linesById = {}, shipsById = {};
+  for (let i = 0; i < lineIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['id', 'in', lineIds.slice(i, i + 400)]], 0, 500, null, ['id', 'sale', 'product.code', 'quantity', 'unit_price', 'amount']]); (rows || []).forEach(l => { linesById[l.id] = l; }); }
+  for (let i = 0; i < shipIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/stock.shipment.out/search_read', [[['id', 'in', shipIds.slice(i, i + 400)]], 0, 500, null, ['id', 'number', 'state', 'tracking_number', 'carrier.rec_name', 'effective_date', 'planned_date']]); (rows || []).forEach(s => { shipsById[s.id] = s; }); }
+  // v28.008: multi-row upsert in chunks (one round trip per 150 sales instead of one per sale)
+  const COLS = ['fulfil_id','number','reference','state','party_name','party_email','ship_name','invoice_name','channel','channel_source','warehouse_code','country_code','currency','total','untaxed','invoice_state','shipment_state','sale_date','fulfil_created','carrier','shipments','lines','metadata','tags','comment'];
+  const CAST = { shipments: '::jsonb', lines: '::jsonb', metadata: '::jsonb', tags: '::text[]', sale_date: '::date', fulfil_created: '::timestamptz', total: '::numeric', untaxed: '::numeric', fulfil_id: '::bigint' };
+  const rowOf = (s) => {
+    const lines = (s.lines || []).map(i => linesById[i]).filter(Boolean).map(l => ({ sku: l['product.code'] || null, qty: Number(l.quantity) || 0, price: _fulfilNum(l.unit_price), amount: _fulfilNum(l.amount) }));
+    const ships = (s.shipments || []).map(i => shipsById[i]).filter(Boolean).map(x => ({ number: x.number, state: x.state, tracking: x.tracking_number || null, carrier: x['carrier.rec_name'] || null, date: fulfilUnwrap(x.effective_date) || fulfilUnwrap(x.planned_date) || null }));
+    const meta = (s.metadata && typeof s.metadata === 'object') ? s.metadata : null;
+    return [s.id, s.number || null, s.reference || null, s.state || null, s['party.name'] || null, s['party.email'] || null, s['shipment_address.name'] || null, s['invoice_address.name'] || null, s['channel.name'] || null, s['channel.source'] || null, s['warehouse.code'] || null, s['shipment_address.country.code'] || null, s['currency.code'] || null, _fulfilNum(s.total_amount), _fulfilNum(s.untaxed_amount), s.invoice_state || null, s.shipment_state || null, fulfilUnwrap(s.sale_date) || null, fulfilUnwrap(s.create_date) || null, s['carrier.rec_name'] || null, JSON.stringify(ships), JSON.stringify(lines), meta ? JSON.stringify(meta) : null, cpTagsFromMeta(meta), s.comment || null];
+  };
+  let n = 0;
+  for (let i = 0; i < sales.length; i += 150) {
+    const chunk = sales.slice(i, i + 150); const params = [];
+    const tuples = chunk.map(s => { const r = rowOf(s); return '(' + r.map((v, k) => { params.push(v); return '$' + params.length + (CAST[COLS[k]] || ''); }).join(',') + ",now(),'cron')"; });
+    await pool.query(`INSERT INTO planner.fulfil_sales (${COLS.join(',')}, last_synced_at, source) VALUES ${tuples.join(',')}
+      ON CONFLICT (fulfil_id) DO UPDATE SET ${COLS.filter(c => c !== 'fulfil_id').map(c => c + '=excluded.' + c).join(', ')}, last_synced_at=now(), source='cron'`, params);
+    n += chunk.length;
+  }
+  return { ok: true, env: cfg.env, since, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length };
+}
+app.post('/api/client/fulfil/import-sales', async (req, res) => {
+  // v28.008 (Ben, 28-Sep): REAL order data is NOT imported until the import parameters are defined — the route is held behind
+  // app_settings.cp_sales_import_enabled='true' (CLIENT ▸ Config). Test data comes from /api/client/seed-test-data instead.
+  if (String(await cpSetting('cp_sales_import_enabled', 'false')) !== 'true') return res.status(423).json({ error: 'Fulfil sales import is switched off until the order-import parameters are agreed (CLIENT ▸ Config ▸ Order import).', gated: true });
+  try { res.json(await fulfilImportSales(req.query.days || (req.body && req.body.days))); } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
+});
+// cron entry (webhook-secret gated like import-pos; exempt from the planner key in the gate above)
+app.post('/api/cron/client-sales', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  if (String(await cpSetting('cp_sales_import_enabled', 'false')) !== 'true') return res.status(423).json({ error: 'sales import switched off (cp_sales_import_enabled)', gated: true });
+  try { res.json(await fulfilImportSales(req.query.days)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── v28.008: TEST DATA seed (Ben, 28-Sep: "build the infrastructure and populate with test data") ──────────────────────
+// POST /api/client/seed-test-data {reset:true} — creates three demo clients (Ideco agent group, Dillard's key account,
+// Nordic Living distributor) with users, a price list, rep groups, ~40 synthetic sales in the mirror (source='seed'), portal
+// orders, a commission run and message threads. Real SKUs from planner.products; every order ref starts with TEST-.
+// Safe to re-run; {reset:true} deletes previous seed rows first. Never touches Fulfil.
+app.post('/api/client/seed-test-data', async (req, res) => {
+  const by = (req.me && req.me.email) || 'seed';
+  try {
+    if ((req.body || {}).reset) {
+      await pool.query(`DELETE FROM planner.fulfil_sales WHERE source='seed'`);
+      await pool.query(`DELETE FROM planner.clients WHERE code LIKE 'test-%'`);
+      await pool.query(`DELETE FROM planner.rep_groups WHERE name LIKE 'TEST %'`);
+      await pool.query(`DELETE FROM planner.client_price_lists WHERE code LIKE 'TEST-%'`);
+      await pool.query(`DELETE FROM planner.client_cin7_refs WHERE note='seed'`);
+    }
+    const skus = (await pool.query(`SELECT sku, carton_qty FROM planner.products WHERE coalesce(in_planning_scope,false) AND upper(coalesce(status,''))='ACTIVE' AND sku NOT IN (${NON_SKU_LIST}) ORDER BY random() LIMIT 40`)).rows;
+    if (skus.length < 8) return res.status(400).json({ error: 'not enough active products to seed' });
+    const pick = (n) => skus.slice(0, skus.length).sort(() => Math.random() - 0.5).slice(0, n);
+    // price lists
+    for (const pl of [['TEST-EU-WS', 'EU', 'EUR'], ['TEST-US-WS', 'US', 'USD'], ['TEST-DIST-FOB', 'EU', 'EUR']]) for (const p of skus) await pool.query(`INSERT INTO planner.client_price_lists (code,label,market,currency,sku,price) VALUES ($1,$1,$2,$3,$4,$5) ON CONFLICT (code,sku) DO UPDATE SET price=excluded.price`, [pl[0], pl[1], pl[2], p.sku, Math.round((pl[0].endsWith('FOB') ? 6 : 9) * 100 + Math.random() * 1200) / 100]);
+    // rep groups
+    const g1 = (await pool.query(`INSERT INTO planner.rep_groups (name, default_rate, xero_contact, xero_account_code) VALUES ('TEST Agent - Ideco', 12.5, 'Ideco SARL', '6200') ON CONFLICT (name) DO UPDATE SET default_rate=12.5 RETURNING id`)).rows[0].id;
+    await pool.query(`INSERT INTO planner.rep_groups (name, default_rate, xero_contact, xero_account_code) VALUES ('TEST Agent - Schauben', 15, 'Schauben Inc', '6200') ON CONFLICT (name) DO NOTHING`);
+    // clients
+    const mk = async (name, code, type, market, extra) => (await pool.query(`INSERT INTO planner.clients (name, code, type, owner_email, market, currency, price_list, warehouse_code, visibility, stock_scope, features, rep_group_id, fulfil_channel, notes, created_by, updated_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,'seeded test client',$14,$14) ON CONFLICT (code) DO UPDATE SET visibility=excluded.visibility, stock_scope=excluded.stock_scope, features=excluded.features, price_list=excluded.price_list RETURNING id`,
+      [name, code, type, extra.owner || 'sarah@dockandbay.com', market, CP_MARKETS[market].currency, extra.price_list, extra.wh || CP_MARKETS[market].wh, JSON.stringify(extra.visibility), JSON.stringify(extra.stock || { mode: 'default' }), JSON.stringify(Object.assign({}, CP_FEATURE_DEFAULTS, extra.features || {})), extra.rep || null, extra.channel || null, by])).rows[0].id;
+    const ideco = await mk('Ideco (TEST)', 'test-ideco', 'agent', 'EU', { price_list: 'TEST-EU-WS', visibility: { modes: ['tag', 'channel_region'], tag: 'agent_ideco', channels: [{ channel: 'EUWS', country: 'FR' }], companies: [], emails: [] }, features: { view_commission: true }, rep: g1, channel: 'dockandbay-eu-ws' });
+    const dill = await mk("Dillard's (TEST)", 'test-dillards', 'key_account', 'US', { price_list: 'TEST-US-WS', visibility: { modes: ['company_email'], companies: ["Dillard's"], emails: [] }, stock: { mode: 'custom', region: 'us_all', sku_list: pick(12).map(p => p.sku), exact: true }, channel: 'dockandbay-us-ws' });
+    const nordic = await mk('Nordic Living ApS (TEST)', 'test-nordic', 'distributor', 'EU', { price_list: 'TEST-DIST-FOB', visibility: { modes: ['company_email'], companies: ['Nordic Living'], emails: [] }, features: { view_stock: false, view_commission: false }, channel: 'dockandbay-eu-ws', owner: 'ben@dockandbay.com' });
+    // users
+    const users = [[ideco, 'Marie Lefèvre', 'marie@test-ideco.example', 'client'], [ideco, 'Paul Girard', 'paul@test-ideco.example', 'self'], [dill, 'Ashley Morgan', 'ashley@test-dillards.example', 'client'], [nordic, 'Lars Holm', 'lars@test-nordic.example', 'client']];
+    const uid = {}; for (const u of users) { const r = await pool.query(`INSERT INTO planner.client_users (client_id, name, email, scope) VALUES ($1,$2,$3,$4) ON CONFLICT (lower(email)) DO UPDATE SET name=excluded.name RETURNING id`, u); uid[u[2]] = r.rows[0].id; }
+    // synthetic sales (source='seed'): 14 Ideco (EUWS/FR, some tagged), 12 Dillard's, 10 Nordic, 6 unrelated
+    const today = new Date(); const d = (n) => new Date(today.getTime() - n * 86400000).toISOString().slice(0, 10);
+    const sales = []; let fid = 900000000;
+    const push = (o) => sales.push(Object.assign({ fulfil_id: ++fid, state: 'done', currency: 'EUR', warehouse_code: 'EUIFUL', invoice_state: 'paid', shipment_state: 'sent' }, o));
+    const line = (n) => pick(n).map(p => { const q = (Number(p.carton_qty) || 10) * (1 + Math.floor(Math.random() * 3)); const pr = Math.round((9 + Math.random() * 12) * 100) / 100; return { sku: p.sku, qty: q, price: pr, amount: Math.round(q * pr * 100) / 100 }; });
+    const tot = (ls) => Math.round(ls.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+    const cust = { fr: [['Maison Plage', 'nice@maisonplage.example', 'FR'], ['Le Comptoir', 'paris@lecomptoir.example', 'FR'], ['Plage Sud', 'marseille@plagesud.example', 'FR']], us: [["Dillard's Little Rock", 'buyer@dillards.example', 'US'], ["Dillard's Dallas", 'buyer@dillards.example', 'US']], dk: [['Nordic Living ApS', 'lars@test-nordic.example', 'DK']] };
+    for (let i = 0; i < 14; i++) { const c = cust.fr[i % 3]; const ls = line(2 + (i % 3)); const age = 2 + i * 6; const open = age < 10; push({ number: 'TEST-SO' + (53000 + i), reference: 'TEST-EUWS-' + (19300 + i), state: open ? (i % 2 ? 'processing' : 'confirmed') : 'done', party_name: c[0], party_email: c[1], ship_name: c[0], channel: 'dockandbay-eu-ws', country_code: c[2], total: tot(ls) * 1.2, untaxed: tot(ls), invoice_state: open ? 'none' : (i % 4 === 1 ? 'waiting' : 'paid'), shipment_state: open ? 'waiting' : 'sent', sale_date: d(age), lines: ls, shipments: open ? [] : [{ number: 'TEST-CS' + (46000 + i), state: 'done', tracking: 'JD0146' + (100 + i), carrier: 'DHL', date: d(age - 2) }], tags: i % 3 === 0 ? ['agent_ideco'] : [], metadata: i % 3 === 0 ? { tags: 'agent_ideco' } : null }); }
+    for (let i = 0; i < 12; i++) { const c = cust.us[i % 2]; const ls = line(3 + (i % 3)); const age = 1 + i * 7; const open = age < 8; push({ number: 'TEST-SO' + (53100 + i), reference: 'TEST-USWS-' + (19100 + i), state: open ? 'processing' : 'done', party_name: c[0], party_email: c[1], ship_name: c[0], channel: 'dockandbay-us-ws', country_code: 'US', currency: 'USD', warehouse_code: 'USGENEVA_STD', total: tot(ls), untaxed: tot(ls), invoice_state: open ? 'none' : (i % 5 === 2 ? 'waiting' : 'paid'), shipment_state: open ? 'waiting' : 'sent', sale_date: d(age), lines: ls, shipments: open ? [] : [{ number: 'TEST-CS' + (46100 + i), state: 'done', tracking: '1Z999AA1' + (1000 + i), carrier: 'UPS', date: d(age - 2) }], tags: [] }); }
+    for (let i = 0; i < 10; i++) { const c = cust.dk[0]; const ls = line(5 + (i % 4)); const age = 3 + i * 9; const open = age < 12; push({ number: 'TEST-SO' + (53200 + i), reference: 'TEST-EUWS-' + (19200 + i), state: open ? 'confirmed' : 'done', party_name: c[0], party_email: c[1], ship_name: c[0], channel: 'dockandbay-eu-ws', country_code: 'DK', total: tot(ls) * 1.25, untaxed: tot(ls), invoice_state: open ? 'none' : 'paid', shipment_state: open ? 'waiting' : 'sent', sale_date: d(age), lines: ls, shipments: open ? [] : [{ number: 'TEST-CS' + (46200 + i), state: 'done', tracking: 'JD0147' + (200 + i), carrier: 'DHL', date: d(age - 3) }], tags: [] }); }
+    for (let i = 0; i < 6; i++) { const ls = line(1); push({ number: 'TEST-SO' + (53300 + i), reference: 'TEST-EU-' + (50800 + i), party_name: 'Private customer ' + i, party_email: 'p' + i + '@example.com', ship_name: 'Private customer ' + i, channel: 'dockandbay-eu', country_code: ['DE', 'NL', 'FR'][i % 3], total: tot(ls) * 1.2, untaxed: tot(ls), sale_date: d(4 + i * 5), lines: ls, shipments: [{ number: 'TEST-CS' + (46300 + i), state: 'done', tracking: 'JD0148' + i, carrier: 'DHL', date: d(2 + i * 5) }], tags: [] }); }
+    for (const s of sales) await pool.query(`INSERT INTO planner.fulfil_sales (fulfil_id, number, reference, state, party_name, party_email, ship_name, invoice_name, channel, channel_source, warehouse_code, country_code, currency, total, untaxed, invoice_state, shipment_state, sale_date, fulfil_created, carrier, shipments, lines, metadata, tags, comment, source)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,'cms_shopify',$9,$10,$11,$12,$13,$14,$15,$16::date,$16::date,$17,$18::jsonb,$19::jsonb,$20::jsonb,$21::text[],'seeded test order','seed') ON CONFLICT (fulfil_id) DO UPDATE SET lines=excluded.lines, state=excluded.state, invoice_state=excluded.invoice_state, shipment_state=excluded.shipment_state, sale_date=excluded.sale_date, shipments=excluded.shipments, tags=excluded.tags, source='seed'`,
+      [s.fulfil_id, s.number, s.reference, s.state, s.party_name, s.party_email, s.ship_name, s.channel, s.warehouse_code, s.country_code, s.currency, Math.round(s.total * 100) / 100, s.untaxed, s.invoice_state, s.shipment_state, s.sale_date, s.shipments[0] ? s.shipments[0].carrier : null, JSON.stringify(s.shipments), JSON.stringify(s.lines), s.metadata ? JSON.stringify(s.metadata) : null, s.tags]);
+    // grey-window list sample + a portal order + a commission run + threads
+    await pool.query(`INSERT INTO planner.client_cin7_refs (order_ref, note) VALUES ('TEST-EUWS-19301','seed'),('TEST-EUWS-19302','seed') ON CONFLICT DO NOTHING`);
+    const ls = line(3); await pool.query(`INSERT INTO planner.client_orders (client_id, user_id, order_type, status, customer_po, ship_to, requested_date, ship_from, method, lines, units, total, currency, submitted_by, error) VALUES ($1,$2,'standard','submitted','NL-2026-091',$3::jsonb, current_date + 14, 'eu_3pl', 'Pallet · DHL', $4::jsonb, $5, $6, 'EUR', 'lars@test-nordic.example', 'seed: no Fulfil draft (test data)')`, [nordic, uid['lars@test-nordic.example'], JSON.stringify({ company: 'Nordic Living ApS', contact: 'Lars Holm', address: 'Havnegade 12, Aarhus' }), JSON.stringify(ls.map(l => ({ sku: l.sku, qty: l.qty, cartons: null, price: l.price, amount: l.amount, flags: [] }))), ls.reduce((s, l) => s + l.qty, 0), tot(ls)]);
+    const m = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().slice(0, 7);
+    const run = (await pool.query(`INSERT INTO planner.commission_runs (month, rep_group_id, status, finalised_at, finalised_by) VALUES ($1,$2,'finalised',now(),$3) ON CONFLICT (month, rep_group_id) DO UPDATE SET status='finalised' RETURNING id`, [m, g1, by])).rows[0].id;
+    await pool.query(`DELETE FROM planner.commission_rows WHERE run_id=$1`, [run]);
+    for (let i = 0; i < 4; i++) { const amt = 1800 + i * 640; const rate = i === 2 ? 15 : 12.5; await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, source) VALUES ($1,$2,$3,$4,$5::date,$6,$7,$8,$8,$9,'pending','xero_csv')`, [run, 'TEST-EUWS-' + (19210 + i), 'INV-' + (8700 + i), cust.fr[i % 3][0], m + '-' + String(4 + i * 6).padStart(2, '0'), amt, rate, Math.round(amt * rate) / 100, m + ' TEST Agent - Ideco']); }
+    await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, source) VALUES ($1,'TEST-EUWS-18871','CN-0398','Plage Sud',$2::date,-650,5,0,'CN-0398',-32.5,-32.5,$3,'pending','xero_csv')`, [run, m + '-22', m + ' TEST Agent - Ideco']);
+    await cpRunSummary(run);
+    const t1 = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,'Line sheet · XL colour','TOWLB-DES-XL-HBRTRS','marie@test-ideco.example','client') RETURNING id`, [ideco])).rows[0].id;
+    await cpPostMessage(t1, 'client', 'Marie Lefèvre', 'The colour shown for the XL on the line sheet is the LG colourway. Can you check?', []);
+    const t2 = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,'CSV partial cartons','NL-2026-091','lars@test-nordic.example','ops') RETURNING id`, [nordic])).rows[0].id;
+    await cpPostMessage(t2, 'client', 'Lars Holm', 'Uploaded NL-2026-091 as CSV, let me know if anything needs fixing.', []); await cpPostMessage(t2, 'ops', 'sarah@dockandbay.com', 'Two lines were partial cartons (7 and 12). Rounded up and submitted as a draft, please check.', []);
+    await cpAudit(ideco, 'Test data seeded', sales.length + ' synthetic orders, 3 clients, price lists, a finalised commission run', by);
+    res.json({ ok: true, clients: { ideco, dillards: dill, nordic }, users: uid, sales: sales.length, commission_run: run, note: 'all order refs start with TEST-; fulfil_sales.source=seed' });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── orders: the merged, scoped list (admin sees all or one client; the portal sees its own scope) ──
+function cpVisibilitySql(client, user, params) {
+  // returns a SQL boolean over alias s (planner.fulfil_sales) implementing the client's visibility modes, combined with OR
+  const v = client.visibility || {}; const modes = Array.isArray(v.modes) ? v.modes : [];
+  const ors = [];
+  if (modes.includes('tag') && v.tag) { params.push(String(v.tag).toLowerCase()); ors.push(`(s.tags @> ARRAY[$${params.length}]::text[] OR lower(coalesce(s.metadata::text,'')) LIKE '%' || $${params.length} || '%')`); }
+  if (modes.includes('channel_region') && Array.isArray(v.channels)) v.channels.forEach(ch => { const name = CP_CHANNEL_ALIAS[String(ch.channel || '').toUpperCase()] || ch.channel; if (!name) return;
+    params.push(String(name).toLowerCase()); const ci = params.length;
+    if (ch.country) { params.push(String(ch.country).toUpperCase()); ors.push(`(lower(s.channel)=$${ci} AND upper(s.country_code)=$${params.length})`); } else ors.push(`lower(s.channel)=$${ci}`); });
+  if (modes.includes('company_email')) {
+    const comps = (Array.isArray(v.companies) ? v.companies : []).map(x => String(x).trim()).filter(Boolean);
+    const emails = (Array.isArray(v.emails) ? v.emails : []).map(x => String(x).trim().toLowerCase()).filter(Boolean);
+    comps.forEach(cn => { params.push('%' + cn.toLowerCase() + '%'); ors.push(`(lower(coalesce(s.party_name,'')) LIKE $${params.length} OR lower(coalesce(s.ship_name,'')) LIKE $${params.length} OR lower(coalesce(s.invoice_name,'')) LIKE $${params.length})`); });
+    if (emails.length) { params.push(emails); ors.push(`lower(coalesce(s.party_email,'')) = ANY($${params.length}::text[])`); }
+    if (user && user.scope === 'self' && user.email) { params.push(String(user.email).toLowerCase()); ors.push(`lower(coalesce(s.party_email,''))=$${params.length}`); }
+  }
+  if (user && user.scope === 'self' && user.email && !modes.includes('company_email')) { params.push(String(user.email).toLowerCase()); ors.push(`lower(coalesce(s.party_email,''))=$${params.length}`); }   // rep narrowing without the company mode
+  return ors.length ? '(' + ors.join(' OR ') + ')' : 'false';
+}
+async function cpOrders(opts) {
+  const { client, user, q, from, to, status } = opts || {};
+  const rule = await cpOriginRule(); const params = []; const where = [];
+  if (client) where.push(cpVisibilitySql(client, user, params));
+  if (from) { params.push(from); where.push(`s.sale_date >= $${params.length}::date`); }
+  if (to) { params.push(to); where.push(`s.sale_date <= $${params.length}::date`); }
+  if (q) { params.push('%' + String(q).toLowerCase() + '%'); where.push(`(lower(coalesce(s.reference,'')) LIKE $${params.length} OR lower(coalesce(s.number,'')) LIKE $${params.length} OR lower(coalesce(s.party_name,'')) LIKE $${params.length} OR lower(coalesce(s.ship_name,'')) LIKE $${params.length})`); }
+  where.push(`coalesce(s.state,'') <> 'cancel'`);
+  const rows = (await pool.query(`SELECT s.fulfil_id, s.number, s.reference, s.state, s.party_name, s.party_email, s.ship_name, s.channel, s.country_code, s.currency, s.total, s.untaxed, s.invoice_state, s.shipment_state, to_char(s.sale_date,'YYYY-MM-DD') sale_date, to_char(s.fulfil_created,'YYYY-MM-DD') created, s.carrier, s.shipments, s.lines,
+      (SELECT 1 FROM planner.client_cin7_refs r WHERE r.order_ref = s.reference OR r.order_ref = s.number LIMIT 1) on_cin7_list
+    FROM planner.fulfil_sales s WHERE ${where.join(' AND ')} ORDER BY s.sale_date DESC NULLS LAST, s.fulfil_id DESC LIMIT 2000`, params)).rows;
+  const today = new Date().toISOString().slice(0, 10);
+  const out = rows.map(r => {
+    const d = r.sale_date || r.created || ''; let origin = 'fulfil';
+    if (d && d <= rule.cin7Until) origin = 'cin7'; else if (d && d < rule.fulfilFrom) origin = r.on_cin7_list ? 'cin7' : 'fulfil';
+    const ships = cpJson(r.shipments, []); const done = ships.filter(x => x.state === 'done'); const last = done[done.length - 1] || ships[ships.length - 1] || null;
+    const fulfilled = r.shipment_state === 'sent' || (done.length && done.length === ships.length);
+    const days = d ? Math.round((Date.parse(today) - Date.parse(d)) / 86400000) : null;
+    let bucket = 'open'; if (fulfilled) bucket = 'fulfilled'; if (r.state === 'draft' || r.state === 'quotation') bucket = 'draft';
+    const unpaid = fulfilled && r.invoice_state && r.invoice_state !== 'paid' && r.invoice_state !== 'none';
+    return { id: r.fulfil_id, ref: r.reference || r.number, number: r.number, origin, state: r.state, bucket, unpaid: !!unpaid, company: r.party_name, customer: r.ship_name || r.party_name, email: r.party_email, channel: r.channel, country: r.country_code, currency: r.currency, amount: Number(r.total) || 0, net: Number(r.untaxed) || 0,
+      created: d, days, fulfilled_date: last ? last.date : null, tracking: last ? last.tracking : null, carrier: last ? (last.carrier || r.carrier) : r.carrier, shipment: last ? last.number : null, invoice_state: r.invoice_state, shipment_state: r.shipment_state,
+      document: origin === 'cin7' ? { kind: 'xero', label: 'Xero invoice', url: null, note: 'Xero link: pending the Xero mirror (Diviyaj)' } : { kind: 'fulfil', label: 'Fulfil document', url: null },
+      lines: cpJson(r.lines, []) };
+  });
+  // portal-submitted orders not yet in the mirror (drafts waiting on Ops) — shown at the top
+  if (client) { const subs = (await pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, requested_date, to_char(created_at,'YYYY-MM-DD') created, ship_to, lines FROM planner.client_orders WHERE client_id=$1 AND created_at > now() - interval '120 days' ORDER BY created_at DESC`, [client.id])).rows;
+    const known = new Set(out.map(o => o.number).filter(Boolean));
+    subs.forEach(o => { if (o.fulfil_number && known.has(o.fulfil_number)) return; const st = cpJson(o.ship_to, {});
+      out.unshift({ id: 'cp-' + o.id, ref: o.fulfil_number || ('CP-' + o.id), number: o.fulfil_number, origin: 'fulfil', state: o.status === 'fulfil_draft' ? 'draft' : 'submitted', bucket: 'draft', unpaid: false, company: st.company || client.name, customer: st.contact || st.company || client.name, channel: client.fulfil_channel, country: null, currency: o.currency, amount: Number(o.total) || 0, net: Number(o.total) || 0,
+        created: o.created, days: Math.round((Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(o.created)) / 86400000), requested: o.requested_date ? String(o.requested_date).slice(0, 10) : null, sample: o.order_type === 'sample', customer_po: o.customer_po, portal_order_id: o.id, document: { kind: 'fulfil', label: o.status === 'fulfil_draft' ? 'Draft in Fulfil' : 'Submitted · awaiting Ops', url: null }, lines: cpJson(o.lines, []) }); }); }
+  return status ? out.filter(o => status === 'unpaid' ? o.unpaid : o.bucket === status) : out;
+}
+app.get('/api/client/orders', async (req, res) => {
+  try { const client = req.query.client_id ? await cpClientById(req.query.client_id) : null; if (req.query.client_id && !client) return res.status(404).json({ error: 'client not found' });
+    const rows = await cpOrders({ client, q: req.query.q, from: req.query.from, to: req.query.to, status: req.query.status });
+    res.set('Cache-Control', 'no-store').json({ orders: rows, rule: await cpOriginRule(), scoped: !!client });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/portal-orders', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ orders: (await pool.query(`SELECT o.id, o.client_id, c.name client, o.order_type, o.status, o.customer_po, o.units, o.total, o.currency, o.fulfil_number, o.error, to_char(o.requested_date,'YYYY-MM-DD') requested_date, to_char(o.created_at,'YYYY-MM-DD HH24:MI') created_at, o.submitted_by, o.ship_to, o.lines FROM planner.client_orders o JOIN planner.clients c ON c.id=o.client_id ORDER BY o.created_at DESC LIMIT 300`)).rows }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── commission engine ──
+app.get('/api/client/commission/groups', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ groups: (await pool.query(`SELECT g.*, (SELECT count(*)::int FROM planner.commission_overrides o WHERE o.rep_group_id=g.id) overrides, (SELECT string_agg(c.name, ', ') FROM planner.clients c WHERE c.rep_group_id=g.id) clients,
+      (SELECT r.month FROM planner.commission_runs r WHERE r.rep_group_id=g.id ORDER BY r.month DESC LIMIT 1) last_month, (SELECT r.status FROM planner.commission_runs r WHERE r.rep_group_id=g.id ORDER BY r.month DESC LIMIT 1) last_status, (SELECT r.total FROM planner.commission_runs r WHERE r.rep_group_id=g.id ORDER BY r.month DESC LIMIT 1) last_total
+      FROM planner.rep_groups g ORDER BY g.active DESC, g.name`)).rows, overrides: (await pool.query(`SELECT o.*, g.name group_name FROM planner.commission_overrides o LEFT JOIN planner.rep_groups g ON g.id=o.rep_group_id ORDER BY o.created_at DESC LIMIT 200`)).rows }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/groups', async (req, res) => {
+  const b = req.body || {};
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.rep_groups SET name=coalesce($2,name), default_rate=coalesce($3,default_rate), xero_contact=coalesce($4,xero_contact), xero_account_code=coalesce($5,xero_account_code), active=coalesce($6,active) WHERE id=$1`, [b.id, b.name || null, b.default_rate == null || b.default_rate === '' ? null : Number(b.default_rate), b.xero_contact ?? null, b.xero_account_code ?? null, typeof b.active === 'boolean' ? b.active : null]); await cpAudit(null, 'Rep group updated', String(b.name || b.id), req.me.email); return res.json({ ok: true, id: b.id }); }
+    const name = String(b.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
+    const r = await pool.query(`INSERT INTO planner.rep_groups (name, default_rate, xero_contact, xero_account_code) VALUES ($1,$2,$3,$4) RETURNING id`, [name, Number(b.default_rate) || 0, b.xero_contact || null, b.xero_account_code || null]);
+    await cpAudit(null, 'Rep group created', name + ' @ ' + (Number(b.default_rate) || 0) + '%', req.me.email); res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/overrides', async (req, res) => {
+  const b = req.body || {}; const ref = String(b.order_ref || '').trim(); if (!ref || !b.rep_group_id) return res.status(400).json({ error: 'order_ref and rep_group_id required' });
+  try { await pool.query(`INSERT INTO planner.commission_overrides (order_ref, rep_group_id, rate, reason, created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (order_ref, rep_group_id) DO UPDATE SET rate=excluded.rate, reason=excluded.reason, created_by=excluded.created_by, created_at=now()`, [ref, b.rep_group_id, Number(b.rate) || 0, b.reason || null, req.me.email || null]);
+    await cpAudit(null, 'Commission override', ref + ' @ ' + (Number(b.rate) || 0) + '%', req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/overrides/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_overrides WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+async function cpRunSummary(runId) {
+  const t = (await pool.query(`SELECT coalesce(sum(net),0) total, count(*)::int rows, count(*) FILTER (WHERE status='exception')::int exceptions FROM planner.commission_rows WHERE run_id=$1`, [runId])).rows[0];
+  await pool.query(`UPDATE planner.commission_runs SET total=$2 WHERE id=$1`, [runId, t.total]); return t;
+}
+app.get('/api/client/commission/runs', async (req, res) => {
+  try { const month = String(req.query.month || '').trim(); const params = []; let w = '1=1'; if (/^\d{4}-\d{2}$/.test(month)) { params.push(month); w = 'r.month=$1'; }
+    const runs = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id) rows, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id AND x.status='exception') exceptions FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE ${w} ORDER BY r.month DESC, g.name`, params)).rows;
+    const months = (await pool.query(`SELECT DISTINCT month FROM planner.commission_runs ORDER BY month DESC LIMIT 24`)).rows.map(x => x.month);
+    res.set('Cache-Control', 'no-store').json({ runs, months }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/commission/runs/:id', async (req, res) => {
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
+    const rows = (await pool.query(`SELECT *, to_char(paid_date,'YYYY-MM-DD') paid FROM planner.commission_rows WHERE run_id=$1 ORDER BY status='exception' DESC, paid_date, order_ref`, [req.params.id])).rows;
+    res.set('Cache-Control', 'no-store').json({ run, rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Build / refresh a run. Scope = PAYMENT date in the month. Sources: (a) rows imported from the Xero paid-invoice export
+// (the current monthly process; columns: invoice, customer, po, payment_date, amount, credit_note, order_ref) via
+// /import-paid; (b) provisional rows from the Fulfil sales mirror for done orders in the month (invoice_state paid when
+// Fulfil invoicing lands) — flagged 'fulfil'. Rate = order override else the group default. Credit notes at the original rate.
+async function cpRateFor(groupId, orderRef, def) { const o = (await pool.query(`SELECT rate FROM planner.commission_overrides WHERE rep_group_id=$1 AND order_ref=$2`, [groupId, orderRef])).rows[0]; return o ? Number(o.rate) : Number(def) || 0; }
+app.post('/api/client/commission/runs/build', async (req, res) => {
+  const b = req.body || {}; const month = String(b.month || '').trim(); const gid = parseInt(b.rep_group_id, 10);
+  if (!/^\d{4}-\d{2}$/.test(month) || !gid) return res.status(400).json({ error: 'month (YYYY-MM) and rep_group_id required' });
+  try {
+    const g = (await pool.query(`SELECT * FROM planner.rep_groups WHERE id=$1`, [gid])).rows[0]; if (!g) return res.status(404).json({ error: 'rep group not found' });
+    const run = (await pool.query(`INSERT INTO planner.commission_runs (month, rep_group_id) VALUES ($1,$2) ON CONFLICT (month, rep_group_id) DO UPDATE SET month=excluded.month RETURNING *`, [month, gid])).rows[0];
+    if (run.status !== 'open') return res.status(409).json({ error: 'run is ' + run.status + ' — reopen it first' });
+    // provisional Fulfil rows: done orders in scope for this group's clients, dated in the month (paid date unknown until Fulfil invoicing is mirrored)
+    const clients = (await pool.query(`SELECT * FROM planner.clients WHERE rep_group_id=$1 AND active`, [gid])).rows;
+    let added = 0;
+    for (const c0 of clients) { const c = await cpClientById(c0.id); const params = [month]; const vis = cpVisibilitySql(c, null, params);
+      const rows = (await pool.query(`SELECT s.reference, s.number, s.party_name, s.untaxed, s.total, to_char(s.sale_date,'YYYY-MM-DD') d, s.invoice_state FROM planner.fulfil_sales s WHERE to_char(s.sale_date,'YYYY-MM')=$1 AND s.state IN ('done','processing') AND ${vis}`, params)).rows;
+      for (const r of rows) { const ref = r.reference || r.number; const exists = (await pool.query(`SELECT 1 FROM planner.commission_rows WHERE run_id=$1 AND order_ref=$2`, [run.id, ref])).rowCount; if (exists) continue;
+        const rate = await cpRateFor(gid, ref, g.default_rate); const amt = Number(r.untaxed) || 0; const com = Math.round(amt * rate) / 100;
+        await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11,'fulfil')`,
+          [run.id, ref, r.number, r.party_name, r.invoice_state === 'paid' ? r.d : null, amt, rate, com, month + ' ' + g.name, r.invoice_state === 'paid' ? 'pending' : 'exception', r.invoice_state === 'paid' ? null : 'paid date unknown — Fulfil invoice not paid/mirrored; confirm from Xero or mark manually']); added++; } }
+    const sum = await cpRunSummary(run.id);
+    await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · +' + added + ' rows', req.me.email);
+    res.json({ ok: true, run_id: run.id, added, ...sum });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/runs/:id/import-paid', async (req, res) => {
+  const rows = Array.isArray((req.body || {}).rows) ? req.body.rows : [];
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' }); if (run.status !== 'open') return res.status(409).json({ error: 'run is ' + run.status });
+    let n = 0; for (const x of rows) { const ref = String(x.order_ref || x.po || x.invoice || '').trim(); if (!ref) continue; const amt = Number(String(x.amount == null ? '' : x.amount).replace(/[^0-9.\-]/g, '')) || 0; const cn = String(x.credit_note || '').trim(); const rate = x.rate != null && x.rate !== '' ? Number(x.rate) : await cpRateFor(run.rep_group_id, ref, run.default_rate);
+      const com = cn ? 0 : Math.round(amt * rate) / 100; const adj = cn ? Math.round(amt * rate) / 100 : 0;
+      await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,'xero_csv')`,
+        [run.id, ref, x.invoice || null, x.customer || null, x.payment_date || null, amt, rate, com, cn || null, adj, com + adj, run.month + ' ' + run.group_name, x.note || null]); n++; }
+    const sum = await cpRunSummary(run.id); await cpAudit(null, 'Commission paid-invoices imported', run.month + ' · ' + n + ' rows', req.me.email); res.json({ ok: true, imported: n, ...sum });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/rows/:id', async (req, res) => {
+  const b = req.body || {}; const sets = [], vals = [];
+  for (const k of ['status', 'note', 'paid_date', 'rate', 'commissionable', 'credit_adj', 'customer', 'invoice_ref']) if (k in b) { vals.push(b[k] === '' ? null : b[k]); sets.push(k + '=$' + vals.length); }
+  if (!sets.length) return res.json({ ok: true }); vals.push(req.params.id);
+  try { await pool.query(`UPDATE planner.commission_rows SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
+    await pool.query(`UPDATE planner.commission_rows SET commission = round(commissionable * rate) / 100, net = round(commissionable * rate) / 100 + credit_adj WHERE id=$1 AND credit_note_ref IS NULL`, [req.params.id]);
+    const r = (await pool.query(`SELECT run_id FROM planner.commission_rows WHERE id=$1`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/rows/:id/delete', async (req, res) => { try { const r = (await pool.query(`DELETE FROM planner.commission_rows WHERE id=$1 RETURNING run_id`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/commission/runs/:id/status', async (req, res) => {
+  const st = String((req.body || {}).status || ''); if (!['open', 'finalised', 'paid'].includes(st)) return res.status(400).json({ error: 'status open|finalised|paid' });
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
+    if (st === 'finalised') { const ex = (await pool.query(`SELECT count(*)::int n FROM planner.commission_rows WHERE run_id=$1 AND status='exception'`, [req.params.id])).rows[0].n; if (ex && !(req.body || {}).force) return res.status(409).json({ error: ex + ' exception row(s) still open — resolve them or finalise with force' });
+      await pool.query(`UPDATE planner.commission_runs SET status='finalised', finalised_at=now(), finalised_by=$2 WHERE id=$1`, [req.params.id, req.me.email || null]); }
+    else if (st === 'paid') { await pool.query(`UPDATE planner.commission_runs SET status='paid', paid_at=now(), paid_ref=$2 WHERE id=$1`, [req.params.id, (req.body || {}).paid_ref || null]); await pool.query(`UPDATE planner.commission_rows SET status='paid' WHERE run_id=$1 AND status<>'exception'`, [req.params.id]); }
+    else await pool.query(`UPDATE planner.commission_runs SET status='open', finalised_at=NULL, finalised_by=NULL WHERE id=$1`, [req.params.id]);
+    await cpAudit(null, 'Commission run ' + st, run.month + ' · ' + run.group_name, req.me.email); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
+    const rows = (await pool.query(`SELECT order_ref, customer, net FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [req.params.id])).rows;
+    const [y, m] = run.month.split('-').map(Number); const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); const dd = end.slice(8, 10) + '/' + end.slice(5, 7) + '/' + end.slice(0, 4);
+    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }; const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+    const HDR = 'ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
+    const inv = 'COMMISSION-' + run.month + '-' + cpSlug(run.group_name).toUpperCase(); const total = money(run.total);
+    const lines = [HDR, [run.xero_contact || run.group_name, '', '', '', '', '', '', '', '', '', inv, dd, dd, total, '', 'Commission ' + run.month + ' — ' + rows.length + ' orders (see statement)', '1', total, run.xero_account_code || '', 'No VAT', '', '', '', '', '', '', total].map(esc).join(',')];
+    await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2 WHERE id=$1`, [req.params.id, inv]);
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + inv + '.csv"'); res.send(lines.join('\n'));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
+    const rows = (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [req.params.id])).rows;
+    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+    const csv = ['Month,Rep group,Order,Invoice,Customer,Paid date,Commissionable,Rate %,Commission,Credit note,Credit adj,Net,Payment code,Status'].concat(rows.map(r => [run.month, run.group_name, r.order_ref, r.invoice_ref, r.customer, r.paid, r.commissionable, r.rate, r.commission, r.credit_note_ref, r.credit_adj, r.net, r.payment_code, r.status].map(esc).join(','))).join('\n');
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="commission-' + run.month + '-' + cpSlug(run.group_name) + '.csv"'); res.send(csv);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/runs/:id/push-fulfil', async (req, res) => {
+  // Writes the commission back onto each Fulfil sale (metafield). The sale metafield code is not defined on the tenant yet —
+  // returns what WOULD be written until Diviyaj confirms the field; nothing is sent.
+  try { const rows = (await pool.query(`SELECT order_ref, net FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception'`, [req.params.id])).rows;
+    await pool.query(`UPDATE planner.commission_runs SET fulfil_push_status=$2 WHERE id=$1`, [req.params.id, 'pending: sale metafield not defined']);
+    res.json({ ok: false, reason: 'Fulfil sale commission metafield not defined yet (Diviyaj) — nothing written', would_write: rows.length }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── messaging (admin side) ──
+async function cpThreadList(clientId) {
+  const params = []; let w = ''; if (clientId) { params.push(clientId); w = 'WHERE t.client_id=$1'; }
+  return (await pool.query(`SELECT t.id, t.client_id, c.name client, c.type client_type, t.subject, t.context, to_char(t.last_at,'YYYY-MM-DD HH24:MI') last_at, t.last_sender,
+      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id AND m.sender_kind='client' AND m.read_by_ops_at IS NULL) unread_ops,
+      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id AND m.sender_kind='ops' AND m.read_by_client_at IS NULL) unread_client,
+      (SELECT left(m.body,140) FROM planner.client_messages m WHERE m.thread_id=t.id ORDER BY m.created_at DESC LIMIT 1) preview,
+      (SELECT m.sender FROM planner.client_messages m WHERE m.thread_id=t.id ORDER BY m.created_at DESC LIMIT 1) preview_by
+    FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id ${w} ORDER BY t.last_at DESC LIMIT 300`, params)).rows;
+}
+async function cpThreadMessages(threadId) {
+  const msgs = (await pool.query(`SELECT m.id, m.sender_kind, m.sender, m.body, to_char(m.created_at,'YYYY-MM-DD HH24:MI') at, m.read_by_ops_at IS NOT NULL read_ops, m.read_by_client_at IS NOT NULL read_client FROM planner.client_messages m WHERE m.thread_id=$1 ORDER BY m.created_at`, [threadId])).rows;
+  const files = (await pool.query(`SELECT f.id, f.message_id, f.filename, f.mime, f.byte_size FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id WHERE m.thread_id=$1`, [threadId])).rows;
+  msgs.forEach(m => { m.files = files.filter(f => f.message_id === m.id); }); return msgs;
+}
+async function cpPostMessage(threadId, senderKind, sender, body, atts) {
+  const m = (await pool.query(`INSERT INTO planner.client_messages (thread_id, sender_kind, sender, body) VALUES ($1,$2,$3,$4) RETURNING id`, [threadId, senderKind, sender || null, String(body || '').trim() || null])).rows[0];
+  for (const a of (Array.isArray(atts) ? atts : []).slice(0, 6)) { try { const up = resolveUpload(a, { maxInline: 8 * 1024 * 1024 }); const buf = up.storagePath ? null : up.buf; if (!buf && !up.storagePath) continue;
+      await pool.query(`INSERT INTO planner.client_message_files (message_id, filename, mime, byte_size, data, storage_path) VALUES ($1,$2,$3,$4,$5,$6)`, [m.id, String(a.filename || 'file').slice(0, 200), a.mime || 'application/octet-stream', up.storagePath ? up.byteSize : buf.length, buf, up.storagePath || null]); } catch (e) {} }
+  await pool.query(`UPDATE planner.client_threads SET last_at=now(), last_sender=$2 WHERE id=$1`, [threadId, senderKind]);
+  return m.id;
+}
+app.get('/api/client/threads', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.query.client_id || null) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/client/threads/:id', async (req, res) => {
+  try { const t = (await pool.query(`SELECT t.*, c.name client, c.owner_email FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [req.params.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
+    await pool.query(`UPDATE planner.client_messages SET read_by_ops_at=now() WHERE thread_id=$1 AND sender_kind='client' AND read_by_ops_at IS NULL`, [req.params.id]);
+    res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(req.params.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/threads', async (req, res) => {
+  const b = req.body || {}; if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
+  try { const t = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,$2,$3,$4,'ops') RETURNING id`, [b.client_id, String(b.subject || 'Message from Dock & Bay').slice(0, 200), b.context || null, req.me.email || null])).rows[0];
+    if (b.body) await cpPostMessage(t.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments); await cpNotifyClientMessage(t.id, req);
+    res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/threads/:id/reply', async (req, res) => {
+  const b = req.body || {}; if (!String(b.body || '').trim() && !(Array.isArray(b.attachments) && b.attachments.length)) return res.status(400).json({ error: 'empty message' });
+  try { const id = await cpPostMessage(req.params.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments); await cpNotifyClientMessage(req.params.id, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/attachment/:id', async (req, res) => {
+  try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.client_message_files WHERE id=$1`, [req.params.id])).rows[0]; if (!r) return res.status(404).send('not found');
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path)); res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+async function cpNotifyClientMessage(threadId, req) {   // email the client's active users that Dock & Bay replied (best-effort)
+  try { const t = (await pool.query(`SELECT t.subject, t.client_id, c.name FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [threadId])).rows[0]; if (!t) return;
+    const users = (await pool.query(`SELECT email FROM planner.client_users WHERE client_id=$1 AND active`, [t.client_id])).rows.map(u => u.email); if (!users.length) return;
+    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to: users, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${t.subject || 'your message'}</b> in the client portal.</p><p><a href="${cpBase(req)}/client#/messages/${threadId}">Open the conversation</a></p>` }); } catch (e) {}
+}
+async function cpNotifyOpsMessage(threadId, client, req) {
+  try { const to = String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean); if (client.owner_email && !to.includes(client.owner_email)) to.push(client.owner_email); if (!to.length) { console.log('[client portal] message from ' + client.name + ' — no cp_message_default_to / owner set, not emailed'); return; }
+    const t = (await pool.query(`SELECT subject FROM planner.client_threads WHERE id=$1`, [threadId])).rows[0];
+    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Client message — ' + client.name + ': ' + ((t && t.subject) || ''), html: `<p><b>${client.name}</b> sent a message in the client portal: <b>${(t && t.subject) || ''}</b>.</p><p><a href="${cpBase(req)}/#/client/messages/${threadId}">Open in HORIZON ▸ CLIENT ▸ Messages</a></p>` }); } catch (e) {}
+}
+
+// ═════════════════════════════════════ PORTAL (client-facing) ═════════════════════════════════════
+const _cpAuthMemo = new Map(); const CP_AUTH_TTL_MS = 60000;
+async function cpAuth(req, res, next) {
+  try {
+    const csid = cookieVal(req, 'csid'); if (!csid) return res.status(401).json({ error: 'not signed in' });
+    const hit = _cpAuthMemo.get(csid); if (hit && Date.now() - hit.t < CP_AUTH_TTL_MS) { req.cp = hit.v; return next(); }
+    const s = (await pool.query(`SELECT s.user_id, u.email, u.name, u.scope, u.client_id, u.active FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>now()`, [csid])).rows[0];
+    if (!s) { _cpAuthMemo.delete(csid); return res.status(401).json({ error: 'session expired' }); }
+    if (!s.active) return res.status(403).json({ error: 'this login has been deactivated' });
+    const client = await cpClientById(s.client_id); if (!client || !client.active) return res.status(403).json({ error: 'client account inactive' });
+    req.cp = { user: { id: s.user_id, email: s.email, name: s.name, scope: s.scope }, client };
+    _cpAuthMemo.set(csid, { t: Date.now(), v: req.cp }); if (_cpAuthMemo.size > 2000) { for (const [k, e] of _cpAuthMemo) if (Date.now() - e.t > CP_AUTH_TTL_MS) _cpAuthMemo.delete(k); }
+    next();
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+}
+function loadClientPage() { try { return readFileSync(new URL('./supply/client.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>client portal page missing'; } }
+const CLIENT_PAGE = DEV ? null : loadClientPage();
+app.get('/client', async (req, res) => {
+  try {
+    if (req.query.token) {
+      const t = (await pool.query(`SELECT user_id FROM planner.client_magic_tokens WHERE token=$1 AND expires_at>now() AND used_at IS NULL`, [String(req.query.token)])).rows[0];
+      if (t) {
+        await pool.query(`UPDATE planner.client_magic_tokens SET used_at=now() WHERE token=$1`, [String(req.query.token)]);
+        const csid = cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [csid, t.user_id]);
+        await pool.query(`UPDATE planner.client_users SET last_login_at=now() WHERE id=$1`, [t.user_id]);
+        const secure = req.headers['x-forwarded-proto'] === 'https';
+        res.setHeader('Set-Cookie', `csid=${csid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${secure ? '; Secure' : ''}`);
+        return res.redirect('/client');
+      }
+      return res.redirect('/client?e=expired');
+    }
+    let pg = (DEV ? loadClientPage() : CLIENT_PAGE).split('__APP_VERSION__').join(APP_VERSION);
+    pg = pg.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());
+    if (IS_SANDBOX) pg = pg.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);
+    res.set('content-type', 'text/html').set('Cache-Control', 'no-store');
+    if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.set('Content-Encoding', 'gzip').set('Vary', 'Accept-Encoding'); return res.end(zlib.gzipSync(Buffer.from(pg, 'utf8'))); }
+    res.send(pg);
+  } catch (e) { log500(e); res.status(500).send('client portal error'); }
+});
+let CLIENT_VIEW_JS = DEV ? null : (() => { try { return readFileSync(new URL('./supply/client-view.js', import.meta.url), 'utf8'); } catch { return '/* client-view.js missing */'; } })();
+const _cvjs = { src: null, gz: null, etag: null };
+app.get('/client-view.js', (req, res) => {
+  const src = DEV ? (() => { try { return readFileSync(new URL('./supply/client-view.js', import.meta.url), 'utf8'); } catch { return '/* missing */'; } })() : CLIENT_VIEW_JS;
+  if (_cvjs.src !== src) { _cvjs.src = src; _cvjs.gz = zlib.gzipSync(Buffer.from(src, 'utf8')); _cvjs.etag = '"' + crypto.createHash('sha1').update(src).digest('hex').slice(0, 20) + '"'; }
+  res.set('content-type', 'application/javascript; charset=utf-8'); res.set('ETag', _cvjs.etag); res.set('Vary', 'Accept-Encoding');
+  res.set('Cache-Control', String(req.query.v || '') === String(APP_VERSION) ? 'public, max-age=31536000, immutable' : 'no-cache, must-revalidate');
+  if (req.headers['if-none-match'] === _cvjs.etag) return res.status(304).end();
+  if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.set('Content-Encoding', 'gzip'); return res.end(_cvjs.gz); }
+  res.send(_cvjs.src);
+});
+app.post('/api/cp/request-link', async (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  try { if (email) { const u = (await pool.query(`SELECT u.id, c.name FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=$1 AND u.active AND c.active`, [email])).rows[0];
+      if (u) { const url = await cpMintLink(u.id, req); await cpSendLink(email, url, u.name); } }
+    res.json({ ok: true }); } catch (e) { res.json({ ok: true }); }   // never reveal whether an email is registered
+});
+app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cookieVal(req, 'csid'); if (csid) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]); } } catch {} res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true }); });
+app.get('/api/cp/me', cpAuth, async (req, res) => {
+  try { const c = req.cp.client; const unread = (await pool.query(`SELECT count(*)::int n FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=$1 AND m.sender_kind='ops' AND m.read_by_client_at IS NULL`, [c.id])).rows[0].n;
+    const stockScope = c.stock_scope || { mode: 'default' }; const wh = c.warehouse_code || CP_MARKETS[c.market].wh;
+    res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSetting('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSetting('cp_default_method', 'Pallet · DHL'), version: APP_VERSION });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Line sheet + stock: one product layer, two views. Market drives dims / HS / currency; stock is banded (default scope) or
+// exact (custom scope, key accounts) — never shown to distributors in order entry.
+async function cpProducts(client, opts) {
+  const mk = CP_MARKETS[client.market] || CP_MARKETS.UK; const d = mk.dims; const hs = mk.hs;
+  const rows = (await pool.query(`SELECT p.sku, coalesce(nullif(p.product_name_final,''), p.product_name) name, coalesce(nullif(p.category_name_final,''), p.category) category, coalesce(nullif(p.subcategory_name_final,''), p.subcategory) subcategory,
+      p.colour_long colour, coalesce(nullif(p.size_short,''), p.size) size, p.size_long, p.release_window season, upper(coalesce(p.status,'')) status, p.discontinue_date_final disc_us, p.discontinue_date_au_final disc_au, p.product_ean ean, p.asin, p.carton_qty, p.case_pack_size inner_qty, p.sku_barcode, p.carton_barcode,
+      p.${hs} hs, p.${d}_prod_length pl, p.${d}_prod_width pw, p.${d}_prod_height ph, p.${d}_prod_weight pwt, p.${d}_carton_length cl, p.${d}_carton_width cw, p.${d}_carton_height chh, p.${d}_carton_weight cwt, p.grs_material_product material,
+      coalesce(nullif(p.variant_image_url_final,''), nullif(p.colour_swatch_url,'')) image, p.parent_p1 parent, p.marketing_category_final mcat, p.launch_date_ws, p.polybags, p.clearance
+    FROM planner.products p WHERE coalesce(p.in_planning_scope,false) AND upper(coalesce(p.status,'')) NOT IN ('CLOSED') AND p.sku NOT IN (${NON_SKU_LIST}) ORDER BY category, subcategory, p.sku`)).rows;
+  const scope = client.stock_scope || { mode: 'default' }; const wh = client.warehouse_code || mk.wh;
+  let stock = {}; const exact = scope.mode === 'custom' && scope.exact !== false; const skuLimit = scope.mode === 'custom' && Array.isArray(scope.sku_list) && scope.sku_list.length ? new Set(scope.sku_list.map(s => String(s).toUpperCase())) : null;
+  if (client.features.view_stock || opts.forOrder) {
+    const whs = scope.mode === 'custom' && scope.region === 'us_all' ? ['us_3pl', 'us_fba'] : scope.mode === 'custom' && scope.region === 'market_all' ? [mk.wh, mk.wh.replace('_3pl', '_fba')] : [wh];
+    (await pool.query(`SELECT sku, warehouse, available::int qty FROM planner.v_product_inventory WHERE warehouse = ANY($1)`, [whs])).rows.forEach(r => { stock[r.sku] = (stock[r.sku] || 0) + (Number(r.qty) || 0); });
+  }
+  const out = rows.filter(p => !skuLimit || skuLimit.has(String(p.sku).toUpperCase()) || !opts.stockOnly).map(p => {
+    const until = /until/i.test(String(p.disc_us || '')) || /until/i.test(String(p.status || '')); const disc = until ? p.disc_au : p.disc_us;
+    const num = v => v == null || v === '' ? null : Number(v);
+    const o = { sku: p.sku, name: p.name, category: p.category, subcategory: p.subcategory, colour: p.colour, size: p.size, size_long: p.size_long, season: p.season, status: p.status, discontinued: p.status === 'PHASE OUT' || p.status === 'LAST SEASON' || !!disc, disc_date: disc ? String(disc).slice(0, 10) : null, disc_basis: until ? 'AU' : 'US', ean: p.ean, asin: p.asin, carton_qty: num(p.carton_qty), inner_qty: num(p.inner_qty), carton_barcode: p.carton_barcode, hs: p.hs, material: p.material, image: p.image, parent: p.parent, mcat: p.mcat, launch: p.launch_date_ws,
+      dims: { unit: d === 'us' ? 'in' : 'cm', wunit: d === 'us' ? 'lb' : 'kg', product: [num(p.pl), num(p.pw), num(p.ph)], product_weight: num(p.pwt), carton: [num(p.cl), num(p.cw), num(p.chh)], carton_weight: num(p.cwt) } };
+    if (client.features.view_stock && !(client.type === 'distributor' && opts.forOrder)) { const q = stock[p.sku]; if (q != null) o.stock = exact ? q : cpBand(q); o.stock_exact = exact; }
+    return o;
+  });
+  return { products: out, market: client.market, currency: client.currency, warehouse: wh, warehouse_label: scope.mode === 'custom' ? (scope.region === 'us_all' ? 'All US warehouses' : scope.region === 'market_all' ? 'All ' + client.market + ' warehouses' : (CP_WAREHOUSES[wh] || wh)) + ' · custom report' : (CP_WAREHOUSES[wh] || wh), stock_exact: exact, custom_sku_count: skuLimit ? skuLimit.size : null };
+}
+app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_line_sheet) return res.status(403).json({ error: 'line sheet not enabled for this account' }); res.set('Cache-Control', 'no-store').json(await cpProducts(req.cp.client, {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_stock) return res.status(403).json({ error: 'stock availability not enabled for this account' }); const r = await cpProducts(req.cp.client, { stockOnly: true }); r.products = r.products.filter(p => p.stock != null); res.set('Cache-Control', 'no-store').json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/cp/prices', cpAuth, async (req, res) => {
+  try { const c = req.cp.client; if (!c.price_list) return res.json({ code: null, prices: {}, currency: c.currency });
+    const rows = (await pool.query(`SELECT sku, price, currency FROM planner.client_price_lists WHERE code=$1`, [c.price_list])).rows; const m = {}; rows.forEach(r => { m[r.sku] = Number(r.price); });
+    res.set('Cache-Control', 'no-store').json({ code: c.price_list, prices: m, currency: (rows[0] && rows[0].currency) || c.currency }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/cp/orders', cpAuth, async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ orders: await cpOrders({ client: req.cp.client, user: req.cp.user, q: req.query.q, from: req.query.from, to: req.query.to, status: req.query.status }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// Order submission: validate (unknown / closed SKUs, partial cartons) → record → Fulfil draft (gated) → two emails.
+async function cpCreateFulfilDraft(client, order, lines) {
+  const env = await activeFulfilEnv(); const cfg = fulfilConfigFor(env); if (!cfg.configured) return { ok: false, reason: 'Fulfil not configured' };
+  if (env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return { ok: false, reason: 'live Fulfil writes are disabled (FULFIL_LIVE_WRITES)' };
+  if (!client.fulfil_party_id) return { ok: false, reason: 'client has no Fulfil party id (set it on the client record)' };
+  const chName = client.fulfil_channel || CP_CHANNEL_ALIAS[client.market + 'WS']; const ch = (await fulfilFetch('PUT', '/model/sale.channel/search_read', [[['name', '=', chName]], 0, 1, null, ['id']]))[0]; if (!ch) return { ok: false, reason: 'Fulfil channel "' + chName + '" not found' };
+  const whCode = CP_FULFIL_WH[order.ship_from] || CP_FULFIL_WH[client.warehouse_code] || FULFIL_MAP.defaultWarehouseCode; const wh = (await fulfilFetch('PUT', '/model/' + FULFIL_MAP.whModel + '/search_read', [[['code', '=', whCode]], 0, 1, null, ['id']]))[0]; if (!wh) return { ok: false, reason: 'Fulfil warehouse "' + whCode + '" not found' };
+  const cur = (await fulfilFetch('PUT', '/model/' + FULFIL_MAP.currencyModel + '/search_read', [[['code', '=', client.currency]], 0, 1, null, ['id']]))[0]; if (!cur) return { ok: false, reason: 'currency ' + client.currency + ' not in Fulfil' };
+  const addr = await fulfilFindPartyAddress(client.fulfil_party_id); if (!addr) return { ok: false, reason: 'Fulfil party has no address' };
+  const prods = await fulfilResolveProducts(lines.map(l => l.sku)); const missing = lines.filter(l => !prods[l.sku]).map(l => l.sku); if (missing.length) return { ok: false, reason: 'not in Fulfil: ' + missing.join(', ') };
+  const payload = { party: client.fulfil_party_id, invoice_address: addr, shipment_address: addr, currency: cur.id, channel: ch.id, warehouse: wh.id, reference: order.customer_po || ('CP-' + order.id), comment: 'Client portal ' + (order.order_type === 'sample' ? 'SAMPLE REQUEST' : 'order') + ' #' + order.id + (order.notes ? ' — ' + order.notes : ''),
+    lines: [['create', lines.map(l => ({ product: prods[l.sku].id, quantity: l.qty, unit: prods[l.sku].uom, unit_price: order.order_type === 'sample' ? 0 : (l.price || 0), description: l.sku }))]] };
+  const created = await fulfilFetch('POST', '/model/sale.sale', [payload]); const id = Array.isArray(created) ? created[0] : (created && created.id);
+  if (!id) return { ok: false, reason: 'Fulfil did not return an id' };
+  const row = (await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['id', '=', id]], 0, 1, null, ['id', 'number']]))[0];
+  return { ok: true, fulfil_id: id, number: row ? row.number : null, env };
+}
+app.post('/api/cp/order', cpAuth, async (req, res) => {
+  const b = req.body || {}; const c = req.cp.client; const type = b.order_type === 'sample' ? 'sample' : 'standard';
+  if (type === 'standard' && !c.features.order_placement) return res.status(403).json({ error: 'order placement is not enabled for this account' });
+  if (type === 'sample' && !c.features.sample_requests) return res.status(403).json({ error: 'sample requests are not enabled for this account' });
+  const inLines = (Array.isArray(b.lines) ? b.lines : []).map(l => ({ sku: String(l.sku || '').trim().toUpperCase(), qty: Math.round(Number(l.qty) || 0) })).filter(l => l.sku && l.qty > 0);
+  if (!inLines.length) return res.status(400).json({ error: 'no lines' });
+  try {
+    const prods = (await pool.query(`SELECT sku, upper(coalesce(status,'')) status, carton_qty, discontinue_date_final disc FROM planner.products WHERE sku = ANY($1)`, [inLines.map(l => l.sku)])).rows; const pm = {}; prods.forEach(p => { pm[p.sku] = p; });
+    const prices = c.price_list ? (await pool.query(`SELECT sku, price FROM planner.client_price_lists WHERE code=$1 AND sku = ANY($2)`, [c.price_list, inLines.map(l => l.sku)])).rows.reduce((m, r) => { m[r.sku] = Number(r.price); return m; }, {}) : {};
+    const problems = []; const lines = inLines.map(l => { const p = pm[l.sku]; const flags = [];
+      if (!p) flags.push('unknown SKU'); else { if (p.status === 'CLOSED') flags.push('closed'); if (p.status === 'PHASE OUT' || p.status === 'LAST SEASON') flags.push('discontinuing');
+        const cq = Number(p.carton_qty) || 0; if (cq > 0 && l.qty % cq !== 0 && type === 'standard') flags.push('partial carton (' + cq + '/ctn)'); }
+      const price = prices[l.sku] != null ? prices[l.sku] : null; if (flags.some(f => /unknown|closed/.test(f))) problems.push(l.sku + ': ' + flags.join(', '));
+      return { sku: l.sku, qty: l.qty, cartons: p && Number(p.carton_qty) ? Math.round(l.qty / Number(p.carton_qty) * 100) / 100 : null, price, amount: price != null ? Math.round(price * l.qty * 100) / 100 : null, flags }; });
+    if (problems.length && !b.force) return res.status(422).json({ error: 'fix these lines first', problems, lines });
+    const partial = lines.filter(l => l.flags.some(f => /partial/.test(f))); if (partial.length && !b.accept_partial) return res.status(422).json({ error: partial.length + ' line(s) are not whole cartons', partial: partial.map(l => l.sku), lines });
+    const units = lines.reduce((s, l) => s + l.qty, 0); const total = type === 'sample' ? 0 : lines.reduce((s, l) => s + (l.amount || 0), 0);
+    const o = (await pool.query(`INSERT INTO planner.client_orders (client_id, user_id, order_type, customer_po, ship_to, requested_date, ship_from, method, notes, lines, units, total, currency, submitted_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14) RETURNING id, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`,
+      [c.id, req.cp.user.id, type, (b.customer_po || '').trim() || null, JSON.stringify(b.ship_to || {}), b.requested_date || null, b.ship_from || c.warehouse_code || CP_MARKETS[c.market].wh, b.method || null, (b.notes || '').trim() || null, JSON.stringify(lines), units, total, c.currency, req.cp.user.email])).rows[0];
+    let fulfil = { ok: false, reason: 'not attempted' }; try { fulfil = await cpCreateFulfilDraft(c, { id: o.id, customer_po: b.customer_po, order_type: type, notes: b.notes, ship_from: b.ship_from }, lines); } catch (e) { fulfil = { ok: false, reason: e.message }; }
+    await pool.query(`UPDATE planner.client_orders SET status=$2, fulfil_id=$3, fulfil_number=$4, error=$5 WHERE id=$1`, [o.id, fulfil.ok ? 'fulfil_draft' : 'submitted', fulfil.ok ? fulfil.fulfil_id : null, fulfil.ok ? fulfil.number : null, fulfil.ok ? null : fulfil.reason]);
+    await cpAudit(c.id, (type === 'sample' ? 'Sample request' : 'Order') + ' submitted', '#' + o.id + ' · ' + units + ' units' + (fulfil.ok ? ' · Fulfil ' + fulfil.number : ' · ' + fulfil.reason), req.cp.user.email);
+    // notifications: Ops (draft waiting) + the client (their record)
+    const base = cpBase(req); const ops = String(await cpSetting('cp_ops_emails', '')).split(/[,;\s]+/).filter(Boolean); if (c.owner_email && !ops.includes(c.owner_email)) ops.push(c.owner_email);
+    const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${l.sku}</td><td align="right">${l.qty}</td><td align="right">${l.cartons == null ? '' : l.cartons}</td><td align="right">${l.price == null ? '' : l.price.toFixed(2)}</td><td>${l.flags.join(', ')}</td></tr>`).join('') + '</table>';
+    if (ops.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: ops, subject: (type === 'sample' ? 'Sample request' : 'Client order') + ' from ' + c.name + (fulfil.ok ? ' — draft ' + fulfil.number + ' waiting in Fulfil' : ' — needs keying (no Fulfil draft)'), html: `<p><b>${c.name}</b> (${req.cp.user.email}) submitted a ${type === 'sample' ? 'sample request' : 'order'} in the client portal.</p><p>${units} units · ${c.currency} ${total.toFixed(2)} · PO ${b.customer_po || '—'} · requested ${b.requested_date || '—'} · ship from ${b.ship_from || c.warehouse_code || ''}</p>${lineHtml}<p>${fulfil.ok ? 'Draft <b>' + fulfil.number + '</b> is waiting in Fulfil (' + fulfil.env + ') for confirmation.' : '<b>No Fulfil draft was created:</b> ' + fulfil.reason + '. Key it in Fulfil from this email.'}</p><p><a href="${base}/#/client/orders">Open in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
+    if (String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false') await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to: req.cp.user.email, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id, html: `<p>Hi ${req.cp.user.name || ''},</p><p>Thanks — we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + b.customer_po + ')' : ''}. Our team will confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + c.currency + ' ' + total.toFixed(2) + ' ex shipping'}</p>${lineHtml}<p><a href="${base}/client#/orders">View your orders</a></p>` });
+    res.json({ ok: true, id: o.id, status: fulfil.ok ? 'fulfil_draft' : 'submitted', fulfil, units, total, lines });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/cp/commission', cpAuth, async (req, res) => {
+  try { const c = req.cp.client; if (!c.features.view_commission) return res.status(403).json({ error: 'commission report not enabled for this account' }); if (!c.rep_group_id) return res.json({ runs: [], rows: [], note: 'no rep group assigned to this account' });
+    const runs = (await pool.query(`SELECT id, month, status, total, to_char(finalised_at,'YYYY-MM-DD') finalised_at, to_char(paid_at,'YYYY-MM-DD') paid_at FROM planner.commission_runs WHERE rep_group_id=$1 AND status IN ('finalised','paid') ORDER BY month DESC LIMIT 24`, [c.rep_group_id])).rows;
+    const month = req.query.month || (runs[0] && runs[0].month); const run = runs.find(r => r.month === month);
+    const rows = run ? (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, status FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [run.id])).rows : [];
+    res.set('Cache-Control', 'no-store').json({ group: c.rep_group_name, runs, month, run, rows, currency: c.currency }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/cp/threads', cpAuth, async (req, res) => { try { if (!req.cp.client.features.messaging) return res.status(403).json({ error: 'messaging not enabled' }); res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.cp.client.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/cp/threads/:id', cpAuth, async (req, res) => {
+  try { const t = (await pool.query(`SELECT * FROM planner.client_threads WHERE id=$1 AND client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
+    await pool.query(`UPDATE planner.client_messages SET read_by_client_at=now() WHERE thread_id=$1 AND sender_kind='ops' AND read_by_client_at IS NULL`, [t.id]);
+    res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(t.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cp/threads', cpAuth, async (req, res) => {
+  const b = req.body || {}; if (!req.cp.client.features.messaging) return res.status(403).json({ error: 'messaging not enabled' }); if (!String(b.body || '').trim()) return res.status(400).json({ error: 'message required' });
+  try { const t = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,$2,$3,$4,'client') RETURNING id`, [req.cp.client.id, String(b.subject || 'Question').slice(0, 200), b.context || null, req.cp.user.email])).rows[0];
+    await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cp/threads/:id/reply', cpAuth, async (req, res) => {
+  const b = req.body || {}; try { const t = (await pool.query(`SELECT id FROM planner.client_threads WHERE id=$1 AND client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
+    if (!String(b.body || '').trim() && !(Array.isArray(b.attachments) && b.attachments.length)) return res.status(400).json({ error: 'empty message' });
+    const id = await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/cp/attachment/:id', cpAuth, async (req, res) => {
+  try { const r = (await pool.query(`SELECT f.filename, f.mime, f.data, f.storage_path FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id JOIN planner.client_threads t ON t.id=m.thread_id WHERE f.id=$1 AND t.client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!r) return res.status(404).send('not found');
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path)); res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══════════════════════════════════════════ end CLIENT PORTAL ═══════════════════════════════════════════
 // ── v28.001 (Ben): GOOGLE SHEETS / SCRIPT EXPORTS ─────────────────────────────────────────────────────────────────
 // Read-only CSV endpoints for the reports the team used to copy from the clipboard into Google Sheets. Authenticated by
 // a dedicated EXPORT TOKEN (app_settings.export_token — generated in CONFIG ▸ Exports & uploads), never the planner key
