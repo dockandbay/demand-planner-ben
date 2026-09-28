@@ -18481,6 +18481,38 @@ app.post('/api/client/users/:uid/invite', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
+// ── v28.009 (Ben): "View portal as" — an admin opens the exact client portal in an iframe as a chosen client user / rep.
+// Preview sessions carry a cppv_ token prefix, expire in 2h, do NOT touch last_login_at, and are read-only
+// (cpAuth.preview → the cp write routes return 423; the portal shows a banner and disables ordering / messaging).
+app.get('/api/client/preview-targets', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT c.id, c.name, c.type, c.market, c.active,
+        coalesce(json_agg(json_build_object('id',u.id,'name',u.name,'email',u.email,'scope',u.scope) ORDER BY u.scope DESC, lower(u.email)) FILTER (WHERE u.id IS NOT NULL AND u.active), '[]') users
+      FROM planner.clients c LEFT JOIN planner.client_users u ON u.client_id=c.id
+      GROUP BY c.id ORDER BY c.active DESC, lower(c.name)`);
+    res.json({ clients: r.rows.map(x => ({ id: x.id, name: x.name, type: x.type, market: x.market, active: x.active, users: x.users || [] })) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/preview/:uid', async (req, res) => {
+  try {
+    const u = (await pool.query(`SELECT u.id, u.email, u.name, u.scope, u.active, c.id client_id, c.name client_name, c.active c_active FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE u.id=$1`, [req.params.uid])).rows[0];
+    if (!u) return res.status(404).json({ error: 'that portal user was not found' });
+    if (!u.active) return res.status(400).json({ error: 'that portal login is deactivated — activate it first' });
+    if (!u.c_active) return res.status(400).json({ error: 'that client account is inactive' });
+    const tok = 'cppv_' + cpToken();
+    await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '2 hours')`, [tok, u.id]);
+    const secure = req.headers['x-forwarded-proto'] === 'https';
+    res.setHeader('Set-Cookie', `csid=${tok}; HttpOnly; Path=/; Max-Age=7200; SameSite=Lax${secure ? '; Secure' : ''}`);
+    await cpAudit(u.client_id, 'Portal previewed', 'as ' + u.email + (u.scope === 'self' ? ' (rep · own customers)' : ''), req.me.email);
+    res.json({ ok: true, url: '/client', user: { id: u.id, email: u.email, name: u.name, scope: u.scope }, client: { id: u.client_id, name: u.client_name } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// stop the preview: clear the cppv_ session + cookie (never touches a real client's csid)
+app.post('/api/client/preview-stop', async (req, res) => {
+  try { const csid = cookieVal(req, 'csid'); if (csid && /^cppv_/.test(csid)) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]); } } catch (e) {}
+  res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true });
+});
+
 // ── config (portal-wide settings live in app_settings under cp_*) ──
 const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to'];
 app.get('/api/client/config', async (req, res) => {
@@ -18878,7 +18910,7 @@ async function cpAuth(req, res, next) {
     if (!s) { _cpAuthMemo.delete(csid); return res.status(401).json({ error: 'session expired' }); }
     if (!s.active) return res.status(403).json({ error: 'this login has been deactivated' });
     const client = await cpClientById(s.client_id); if (!client || !client.active) return res.status(403).json({ error: 'client account inactive' });
-    req.cp = { user: { id: s.user_id, email: s.email, name: s.name, scope: s.scope }, client };
+    req.cp = { user: { id: s.user_id, email: s.email, name: s.name, scope: s.scope }, client, preview: /^cppv_/.test(csid) };
     _cpAuthMemo.set(csid, { t: Date.now(), v: req.cp }); if (_cpAuthMemo.size > 2000) { for (const [k, e] of _cpAuthMemo) if (Date.now() - e.t > CP_AUTH_TTL_MS) _cpAuthMemo.delete(k); }
     next();
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -18928,7 +18960,7 @@ app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cook
 app.get('/api/cp/me', cpAuth, async (req, res) => {
   try { const c = req.cp.client; const unread = (await pool.query(`SELECT count(*)::int n FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=$1 AND m.sender_kind='ops' AND m.read_by_client_at IS NULL`, [c.id])).rows[0].n;
     const stockScope = c.stock_scope || { mode: 'default' }; const wh = c.warehouse_code || CP_MARKETS[c.market].wh;
-    res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSetting('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSetting('cp_default_method', 'Pallet · DHL'), version: APP_VERSION });
+    res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSetting('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSetting('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Line sheet + stock: one product layer, two views. Market drives dims / HS / currency; stock is banded (default scope) or
@@ -18982,6 +19014,7 @@ async function cpCreateFulfilDraft(client, order, lines) {
   return { ok: true, fulfil_id: id, number: row ? row.number : null, env };
 }
 app.post('/api/cp/order', cpAuth, async (req, res) => {
+  if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — ordering is disabled while an admin is viewing as the client.', preview: true });
   const b = req.body || {}; const c = req.cp.client; const type = b.order_type === 'sample' ? 'sample' : 'standard';
   if (type === 'standard' && !c.features.order_placement) return res.status(403).json({ error: 'order placement is not enabled for this account' });
   if (type === 'sample' && !c.features.sample_requests) return res.status(403).json({ error: 'sample requests are not enabled for this account' });
@@ -19025,11 +19058,13 @@ app.get('/api/cp/threads/:id', cpAuth, async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(t.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cp/threads', cpAuth, async (req, res) => {
+  if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — messaging is disabled while an admin is viewing as the client.', preview: true });
   const b = req.body || {}; if (!req.cp.client.features.messaging) return res.status(403).json({ error: 'messaging not enabled' }); if (!String(b.body || '').trim()) return res.status(400).json({ error: 'message required' });
   try { const t = (await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender) VALUES ($1,$2,$3,$4,'client') RETURNING id`, [req.cp.client.id, String(b.subject || 'Question').slice(0, 200), b.context || null, req.cp.user.email])).rows[0];
     await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id: t.id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cp/threads/:id/reply', cpAuth, async (req, res) => {
+  if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — messaging is disabled while an admin is viewing as the client.', preview: true });
   const b = req.body || {}; try { const t = (await pool.query(`SELECT id FROM planner.client_threads WHERE id=$1 AND client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
     if (!String(b.body || '').trim() && !(Array.isArray(b.attachments) && b.attachments.length)) return res.status(400).json({ error: 'empty message' });
     const id = await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
