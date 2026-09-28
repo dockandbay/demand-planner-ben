@@ -16822,7 +16822,12 @@ When the user asks you to PRODUCE a file for them to download (a cleaned CSV, a 
 <file name="descriptive-name.csv">
 ...the complete file contents...
 </file>
-Use a sensible extension (.csv, .txt, .md, .json). You may include a short explanation before or after the block. Only use <file> when the user actually wants a downloadable file; normal answers are plain text. Never invent Dock & Bay figures you were not given — if you need data, ask for it or ask the user to upload it.`;
+Use a sensible extension (.csv, .txt, .md, .json). You may include a short explanation before or after the block. Only use <file> when the user actually wants a downloadable file; normal answers are plain text.
+
+You have LIVE ACCESS to HORIZON's own data through tools — use them instead of asking the user to upload stock, inbound or forecast data:
+- resolve_skus(query): find SKU codes by SKU, product name, or parent code. Use it when the user names products in words, gives partial codes, or you are unsure of exact SKUs.
+- sku_availability(skus, market?): for the given SKUs returns, per market (UK/US/EU/AU/CA), the current stock on hand (3PL + Amazon FBA), open inbound shipments (quantity + ETA), and the forecast demand for the next 6 months. This is exactly the data needed for stock-availability, cover, and "can we fulfil this order?" questions.
+When a user gives you a purchase order or a SKU list, resolve the SKUs if needed and then call sku_availability yourself — do NOT ask them to paste stock, inbound or forecast numbers; HORIZON already has them. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON (for example a brand-new customer PO they have not uploaded). Never invent Dock & Bay figures — if a tool returns nothing for a SKU, say so.`;
 
 // Decode a base64 attachment into a content block for the Anthropic Messages API.
 async function aiFileBlock(att) {
@@ -16851,6 +16856,70 @@ async function aiFileBlock(att) {
 async function aiOwnConversation(req, id) {
   const r = (await pool.query(`SELECT * FROM planner.ai_conversations WHERE id=$1 AND user_email=$2`, [id, aiUser(req)])).rows[0];
   return r || null;
+}
+
+// ── Ask Claude's live-data tools: let the assistant read HORIZON's own stock / inbound / forecast ──
+const AI_MARKETS = ['UK', 'US', 'EU', 'AU', 'CA'];
+const AI_TOOLS = [
+  { name: 'resolve_skus', description: 'Find Dock & Bay SKU codes by SKU code, product name, or parent code. Use when the user names products in words, gives a partial code, or you are unsure of the exact SKUs.',
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'search text: a SKU, partial code, product name, or parent code' } }, required: ['query'] } },
+  { name: 'sku_availability', description: "Live HORIZON stock availability for the given SKUs: current stock on hand (3PL + Amazon FBA), open inbound shipments (qty + ETA per warehouse), and forecast demand for the next 6 months, per market. Use for any stock / cover / fulfilment question instead of asking the user to upload stock or forecast data.",
+    input_schema: { type: 'object', properties: { skus: { type: 'array', items: { type: 'string' }, description: 'exact SKU codes' }, market: { type: 'string', enum: AI_MARKETS, description: 'optional: limit to one market; omit for all markets' } }, required: ['skus'] } },
+];
+async function aiResolveSkus(query) {
+  const q = String(query || '').trim(); if (!q) return { matches: [] };
+  const r = await pool.query(`SELECT sku, product_name, nullif(trim(parent_p1),'') parent, upper(coalesce(nullif(btrim(status),''),'')) status
+    FROM planner.products WHERE in_planning_scope AND (sku ILIKE $1 OR product_name ILIKE $1 OR parent_p1 ILIKE $1) ORDER BY sku LIMIT 50`, ['%' + q + '%']);
+  return { matches: r.rows, note: r.rows.length >= 50 ? 'showing first 50 — refine the query' : undefined };
+}
+async function aiSkuAvailability(skus, market) {
+  skus = (Array.isArray(skus) ? skus : []).map(s => String(s || '').trim().toUpperCase()).filter(Boolean).slice(0, 60);
+  if (!skus.length) return { error: 'no SKUs given' };
+  const markets = market ? [String(market).toUpperCase()].filter(m => AI_MARKETS.includes(m)) : AI_MARKETS;
+  const soh = (await pool.query(`SELECT sku, product_name,
+      inventory_uk_3pl, inventory_uk_fba, inventory_us_3pl, inventory_us_fba, inventory_us_awd,
+      inventory_eu_3pl, inventory_eu_fba, inventory_au_3pl, inventory_au_fba, inventory_ca_fba
+    FROM planner.products WHERE sku = ANY($1)`, [skus])).rows;
+  const sohBy = {}; soh.forEach(r => { sohBy[r.sku] = r; });
+  const inb = (await pool.query(`SELECT sku, destination_warehouse wh, sum(quantity-received_quantity)::int open,
+      json_agg(json_build_object('ref',reference,'qty',(quantity-received_quantity),'eta',to_char(estimated_delivery_date,'YYYY-MM-DD'),'status',status) ORDER BY estimated_delivery_date) legs
+    FROM planner.inbound_shipments WHERE sku = ANY($1) AND (quantity-received_quantity)>0 GROUP BY sku, destination_warehouse`, [skus])).rows;
+  const fc = (await pool.query(`WITH lr AS (SELECT max(run_id) rid FROM planner.forecasts WHERE level='sku')
+    SELECT f.sku, split_part(f.warehouse,'_',1) mkt, to_char(f.month,'YYYY-MM') ym, sum(f.units)::int units
+    FROM planner.forecasts f, lr WHERE f.run_id=lr.rid AND f.level='sku' AND f.sku=ANY($1)
+      AND f.month >= date_trunc('month', now()) AND f.month < date_trunc('month', now()) + interval '6 months'
+    GROUP BY f.sku, split_part(f.warehouse,'_',1), f.month ORDER BY f.month`, [skus])).rows;
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const out = skus.map(sku => {
+    const p = sohBy[sku];
+    const rec = { sku, name: p ? p.product_name : null, in_master: !!p, markets: {} };
+    if (!p) { rec.note = 'not found in the product master'; return rec; }
+    markets.forEach(M => {
+      const m = M.toLowerCase();
+      const soh3 = num(p['inventory_' + m + '_3pl']), sohF = num(p['inventory_' + m + '_fba']), awd = m === 'us' ? num(p['inventory_us_awd']) : 0;
+      const inbLegs = inb.filter(x => x.sku === sku && String(x.wh).split('_')[0] === m);
+      const inbTotal = inbLegs.reduce((a, x) => a + (x.open || 0), 0);
+      const fcRows = fc.filter(x => x.sku === sku && x.mkt === m);
+      const byMonth = {}; fcRows.forEach(x => { byMonth[x.ym] = (byMonth[x.ym] || 0) + x.units; });
+      const fcTotal = Object.values(byMonth).reduce((a, b) => a + b, 0);
+      // only include a market if it has any signal (stock, inbound or forecast) to keep the payload tight
+      if (soh3 || sohF || awd || inbTotal || fcTotal) {
+        rec.markets[M] = { stock_on_hand: { '3pl': soh3, fba: sohF, ...(m === 'us' ? { awd } : {}), total: soh3 + sohF + awd },
+          inbound: { total: inbTotal, shipments: inbLegs.flatMap(x => x.legs || []) },
+          forecast_next_6mo: { by_month: byMonth, total: fcTotal } };
+      }
+    });
+    if (!Object.keys(rec.markets).length) rec.note = 'no stock, inbound or forecast on record for the requested market(s)';
+    return rec;
+  });
+  return { as_of: new Date().toISOString().slice(0, 10), forecast_source: 'HORIZON latest forecast run', skus: out };
+}
+async function aiRunTool(name, input) {
+  try {
+    if (name === 'resolve_skus') return await aiResolveSkus(input && input.query);
+    if (name === 'sku_availability') return await aiSkuAvailability(input && input.skus, input && input.market);
+    return { error: 'unknown tool ' + name };
+  } catch (e) { return { error: e.message }; }
 }
 
 // list the caller's conversations (newest first)
@@ -16927,15 +16996,26 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     if (!newContent.length) newContent.push({ type: 'text', text: '(uploaded a file)' });
     messages.push({ role: 'user', content: newContent });
 
-    // 3) call Claude
+    // 3) call Claude, running a tool-use loop so it can read HORIZON's own data (stock / inbound / forecast)
     const _aiHeaders = { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
     if (process.env.ANTHROPIC_WORKSPACE_ID) _aiHeaders['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
-      if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';
-      return res.status(502).json({ error: msg, title }); }
-    let reply = ((j.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n')).trim() || '(no reply)';
+    let reply = '', toolsUsed = [];
+    for (let hop = 0; hop < 6; hop++) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, tools: AI_TOOLS, messages }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
+        if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';
+        return res.status(502).json({ error: msg, title }); }
+      const content = j.content || [];
+      reply = content.filter(x => x.type === 'text').map(x => x.text).join('\n').trim();
+      const toolUses = content.filter(x => x.type === 'tool_use');
+      if (j.stop_reason !== 'tool_use' || !toolUses.length) break;   // final answer
+      messages.push({ role: 'assistant', content });                 // the assistant's tool_use turn
+      const results = [];
+      for (const tu of toolUses) { toolsUsed.push(tu.name); const data = await aiRunTool(tu.name, tu.input || {}); results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(data).slice(0, 60000) }); }
+      messages.push({ role: 'user', content: results });             // feed the tool results back
+    }
+    if (!reply) reply = '(no reply)';
 
     // 4) extract any <file name="…">…</file> blocks Claude returned → store as downloadable 'out' files
     const outFiles = []; const fileRe = /<file\s+name="([^"]+)">\n?([\s\S]*?)\n?<\/file>/g; let mm;

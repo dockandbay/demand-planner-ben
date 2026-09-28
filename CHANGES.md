@@ -1,3 +1,12 @@
+## v28.017 (Ben): Ask Claude can read HORIZON's own data (stock / inbound / forecast) via tools
+
+**File: `server.mjs`.** Ben: Ask Claude was asking users to upload stock, inbound and forecast data that HORIZON already holds. It now has live read access through Anthropic tool-use, so it looks the data up itself.
+
+- **Tools:** `resolve_skus(query)` (find SKU codes by SKU / product name / parent) and `sku_availability(skus, market?)` — per market, current **stock on hand** (3PL + Amazon FBA, + US AWD), **open inbound shipments** (qty + ETA per warehouse, from `inbound_shipments`), and **forecast demand for the next 6 months** (latest forecast run, `forecasts`). Data is read-only from Supabase; only markets with a signal are returned to keep the payload tight.
+- **Tool-use loop:** the assistant message route now sends the tools and runs up to 6 hops, executing each tool server-side and feeding results back, until Claude returns its final answer. Prior conversation turns are still stored as plain text, so history/reopen is unaffected.
+- **System prompt** updated to tell Claude it has this live access and to use it (resolve SKUs, then call `sku_availability`) instead of asking the user to paste stock/forecast numbers; still never invents figures.
+
+Sandbox verified end to end: asking "stock availability for TOWLB-CAB-LG-ORANG-R in AU" made Claude call the tool and return the real numbers — 274 on hand (269 AU 3PL + 5 FBA), 320 inbound (PO-57AULX1 240, PO-57AUXR1 80), 316 forecast over 6 months, with a cover conclusion. No migration. Needs a credited ANTHROPIC key (same as the rest of the AI).
 ## v28.016 (Ben): Buy plan shows Preorder and Key accounts as two separate lines
 
 **File: `artifact_v16.7.html`.** The buy-plan SKU detail (3PL Stock) previously showed one combined **Preorder & KA** demand line. It now shows **Preorder** and **Key accounts** on two separate lines.
