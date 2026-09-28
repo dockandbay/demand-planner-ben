@@ -1,3 +1,11 @@
+## v28.006 (Ben): iFulfilment Xero bill is TAX INCLUSIVE too, reconciled to the invoice PDF
+
+**Files: `server.mjs`, `artifact_v16.7.html`.** Ben (28-Sep): the iFulfilment workbook amounts are EX VAT and VAT is added at the end of the invoice, i.e. the same shape as Coghlans. So `eu_ifulfilment` now gets the v28.004 treatment: lines grossed up ×1.20, VAT = line/6, import into Xero as **Tax Inclusive**. All three tax-bearing 3PLs (AU, UK, EU) now import with one rule.
+
+**Stated totals:** the workbook has no recap sheet, so `_tplIfulPdfTotals(period)` reads the iFulfilment invoice PDF(s) uploaded for the month: `Subtotal` (net), `TOTAL VAT 20%*` and `Amount Due` (incl); several PDFs are summed. Rounding residue → largest line as before; without a PDF the bill is still inclusive but the preview says to upload the PDF to reconcile.
+
+Sandbox verified: Jul-26 (DOC-31May26 workbook + INV-191666 PDF) → 19 lines, total **44,347.03 = Amount Due**, VAT **7,391.17**, net **36,955.86 = Subtotal** (0.02 residue on "Freight - Fulfilment - EU - Shopify"). Aug-26 (workbook only) → inclusive 55,428.73 / VAT 9,238.14, no stated check. Download filename `-TAX-INCLUSIVE` and the download message now cover EU. Also recorded: IS134's planned-date push is manual on Ben's side (dropped from the open list).
+
 ## v28.005 (Ben): parent_p1 is searchable on DEMAND plan / BUY plan / FBA transfer / Transfer, and a trading-calendar event can name a parent code
 
 **Files: `server.mjs`, `artifact_v16.7.html`.** Ben: `products.parent_p1` (e.g. `TOWLB-DES-HBRTRS`, the parent of the LG and XL sizes) "should be searchable on demand plan / buy plan / FBA transfer plan, and enterable into the marketing calendar so it relates to all SKUs with that parent".

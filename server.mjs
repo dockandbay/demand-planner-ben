@@ -12226,6 +12226,26 @@ function _coghlansMeta(grids) {
     if (a === 'total incl gst') { const v = _tplNum(row[1]); if (v != null) totalInc = v; } }
   return { periodEnd, invoiceNo, totalEx, gst, totalInc };
 }
+// v28.006 (Ben): iFulfilment's workbook has no recap sheet; the invoice PDF uploaded for the period carries the stated totals:
+//   "Subtotal 36,955.86" (net, ex VAT) · "TOTAL VAT 20%* 7,391.17" · "Amount Due 44,347.03" (incl). Several PDFs in one period are summed.
+async function _tplIfulPdfTotals(period) {
+  try {
+    const pdfs = (await pool.query(`SELECT content FROM planner.tpl_invoice_files WHERE tpl='eu_ifulfilment' AND period=$1 AND (filename ~* '\\.pdf$' OR content_type ~* 'pdf')`, [period])).rows;
+    if (!pdfs.length) return null;
+    const { PDFParse } = await import('pdf-parse');
+    const num = m => m ? (parseFloat(String(m[1]).replace(/[,\s]/g, '')) || 0) : null;
+    let net = 0, tax = 0, total = 0, seen = 0;
+    for (const f of pdfs) {
+      const t = (await new PDFParse({ data: new Uint8Array(f.content) }).getText()).text || '';
+      const sub = num(/Subtotal\s+([\d,]+\.\d{2})/i.exec(t)), vat = num(/TOTAL\s+VAT[^\n]*?([\d,]+\.\d{2})/i.exec(t)), due = num(/Amount\s+Due\s+([\d,]+\.\d{2})/i.exec(t));
+      if (due == null && sub == null) continue;
+      seen++; net += sub || 0; tax += vat || 0; total += due != null ? due : ((sub || 0) + (vat || 0));
+    }
+    if (!seen) return null;
+    const r = x => Math.round(x * 100) / 100;
+    return { total: r(total), tax: r(tax), net: r(net), pdfs: seen };
+  } catch (e) { return null; }
+}
 app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
   try {
     const period = String((req.body && req.body.period) || req.query.period || '').trim();
@@ -12265,9 +12285,9 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || meta.currency || 'EUR';
     // Tax is region-specific: EU/UK book 20% VAT (Xero auto-computes the amount → left blank); AU books GST at
     // 10% inclusive so the amount is supplied (= line/11); US is tax-exempt. Default = 20% VAT.
-    // v28.004: mode per 3PL. AU (GST 10%) and UK (VAT 20%) go to Xero TAX INCLUSIVE; AU sheets are ex-GST so they are
-    // grossed up; EU stays tax-exclusive (Xero adds 20%); US is zero-rated. See the post-step below for the exact-total rule.
-    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', mode: 'exclusive', rate: 0.20 }, uk_ilg: { type: '20% (VAT on Expenses)', mode: 'inclusive', rate: 0.20 }, us_geneva: { type: 'Zero Rated Expenses', mode: 'none', rate: 0 }, au_coghlans: { type: 'GST on Expenses', mode: 'inclusive', rate: 0.10, grossUp: true } };
+    // v28.004: mode per 3PL. AU (GST 10%), UK (VAT 20%) and — v28.006 — EU iFulfilment (VAT 20%) go to Xero TAX INCLUSIVE;
+    // AU + EU sheets are ex-tax so they are grossed up; US is zero-rated. See the post-step below for the exact-total rule.
+    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', mode: 'inclusive', rate: 0.20, grossUp: true }, uk_ilg: { type: '20% (VAT on Expenses)', mode: 'inclusive', rate: 0.20 }, us_geneva: { type: 'Zero Rated Expenses', mode: 'none', rate: 0 }, au_coghlans: { type: 'GST on Expenses', mode: 'inclusive', rate: 0.10, grossUp: true } };
     const taxCfg = TAX[tpl0] || { type: '20% (VAT on Expenses)', mode: 'exclusive', rate: 0.20 };
     const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
     const blines = [];   // structured bill lines — the single source for BOTH the CSV and the preview JSON
@@ -12315,6 +12335,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     let stated = null;   // supplier-stated totals { total (incl tax), tax, net }
     if (tpl0 === 'au_coghlans') { const cm = _coghlansMeta(grids); if (cm.totalInc != null) stated = { total: r2(cm.totalInc), tax: cm.gst != null ? r2(cm.gst) : null, net: cm.totalEx != null ? r2(cm.totalEx) : null }; }
     else if (tpl0 === 'uk_ilg' && typeof _ilgStated !== 'undefined' && _ilgStated && _ilgStated.total != null) stated = { total: r2(_ilgStated.total), tax: _ilgStated.tax != null ? r2(_ilgStated.tax) : null, net: null };
+    else if (tpl0 === 'eu_ifulfilment') { const st = await _tplIfulPdfTotals(period); if (st && st.total != null) stated = st; }   // v28.006: from the uploaded invoice PDF
     const check = { mode: taxCfg.mode, rate: taxCfg.rate, import_as: taxCfg.mode === 'inclusive' ? 'Tax Inclusive' : (taxCfg.mode === 'exclusive' ? 'Tax Exclusive' : 'No Tax'), stated, adjusted_line: null, adjusted_amount: 0, adjusted_tax: 0, total_ok: null, tax_ok: null, warning: '' };
     if (taxCfg.mode === 'inclusive') {
       blines.forEach(l => {
