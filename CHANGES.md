@@ -1,3 +1,13 @@
+## v28.019 (Ben): Ask Claude can read ALL of HORIZON's data (planner schema)
+
+**File: `server.mjs`.** Ben: "all data in HORIZON should be accessible from Claude." Added two tools to the Ask Claude tool set, on top of the existing `resolve_skus` and `sku_availability`:
+
+- **`describe_data(table?)`**: with no argument, lists every table/view in the `planner` schema (name, approx row count, column count); with a table name, returns its columns and a few sample rows. Claude uses this to discover the right table and columns.
+- **`query_horizon(sql)`**: runs a **read-only** SELECT against the `planner` schema and returns the rows. This reaches all of HORIZON's data (products, sales, forecasts, purchase orders, shipments, payments, key accounts, preorders, clients, the persisted auto-forecast feed, and more).
+
+**Safety (read-only, fenced):** every query runs in a `BEGIN; SET TRANSACTION READ ONLY` transaction (Postgres rejects any write, DDL or data-modifying CTE at the DB level), with `statement_timeout 8s`, `search_path=planner`, and a 500-row cap. Text guards reject anything not starting with SELECT/WITH, multi-statement queries, references to other schemas (auth, vault, storage, realtime, pg_catalog, information_schema), file/network functions (pg_read_file, dblink, lo_import, etc.), and the auth token/session tables. bytea and very long values are stripped from results. The system prompt tells Claude to discover with `describe_data` then `query_horizon`, and to look data up itself rather than ask the user.
+
+Model: Ask Claude runs on `claude-sonnet-4-6` (unchanged). Sandbox verified end to end: "how many purchase orders by status?" made Claude run the query and return real counts (1,378 POs); read-only transaction confirmed to reject writes. No migration.
 ## v28.018 (Diviyaj hardening from the v28.017 prod deploy)
 
 **Files: `server.mjs`, `.gitignore`.** Five items Diviyaj asked to pick up upstream so the next port stays clean (he applied equivalents on prod).

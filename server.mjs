@@ -16828,10 +16828,12 @@ When the user asks you to PRODUCE a file for them to download (a cleaned CSV, a 
 </file>
 Use a sensible extension (.csv, .txt, .md, .json). You may include a short explanation before or after the block. Only use <file> when the user actually wants a downloadable file; normal answers are plain text.
 
-You have LIVE ACCESS to HORIZON's own data through tools — use them instead of asking the user to upload stock, inbound or forecast data:
-- resolve_skus(query): find SKU codes by SKU, product name, or parent code. Use it when the user names products in words, gives partial codes, or you are unsure of exact SKUs.
-- sku_availability(skus, market?): for the given SKUs returns, per market (UK/US/EU/AU/CA), the current stock on hand (3PL + Amazon FBA), open inbound shipments (quantity + ETA), and the forecast demand for the next 6 months. This is exactly the data needed for stock-availability, cover, and "can we fulfil this order?" questions.
-When a user gives you a purchase order or a SKU list, resolve the SKUs if needed and then call sku_availability yourself — do NOT ask them to paste stock, inbound or forecast numbers; HORIZON already has them. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON (for example a brand-new customer PO they have not uploaded). Never invent Dock & Bay figures — if a tool returns nothing for a SKU, say so.`;
+You have LIVE ACCESS to HORIZON's own data through tools. Use them instead of asking the user to upload data that HORIZON already holds:
+- resolve_skus(query): find SKU codes by SKU, product name, or parent code.
+- sku_availability(skus, market?): per market (UK/US/EU/AU/CA), current stock on hand (3PL + Amazon FBA), open inbound shipments (quantity + ETA), and forecast demand for the next 6 months. Use it for stock, cover and "can we fulfil this order?" questions.
+- describe_data(table?): discover the data. With no argument it lists the planner tables; with a table name it returns that table's columns and a few sample rows.
+- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows.
+Essentially all of HORIZON's data is queryable. For anything the two SKU tools do not cover, call describe_data to find the right table and columns, then query_horizon, rather than asking the user. When a user gives you a purchase order or SKU list, resolve the SKUs if needed and look the data up yourself. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON, for example a brand-new customer PO they have not uploaded. Never invent Dock & Bay figures; if a tool returns nothing, say so.`;
 
 // Decode a base64 attachment into a content block for the Anthropic Messages API.
 async function aiFileBlock(att) {
@@ -16869,6 +16871,10 @@ const AI_TOOLS = [
     input_schema: { type: 'object', properties: { query: { type: 'string', description: 'search text: a SKU, partial code, product name, or parent code' } }, required: ['query'] } },
   { name: 'sku_availability', description: "Live HORIZON stock availability for the given SKUs: current stock on hand (3PL + Amazon FBA), open inbound shipments (qty + ETA per warehouse), and forecast demand for the next 6 months, per market. Use for any stock / cover / fulfilment question instead of asking the user to upload stock or forecast data.",
     input_schema: { type: 'object', properties: { skus: { type: 'array', items: { type: 'string' }, description: 'exact SKU codes' }, market: { type: 'string', enum: AI_MARKETS, description: 'optional: limit to one market; omit for all markets' } }, required: ['skus'] } },
+  { name: 'describe_data', description: "Discover HORIZON's data. With no argument, lists the tables in the planner schema (name, approx row count, column count). With a table name, returns that table's columns (name + type) and a few sample rows. Use this first to find the right table and columns before query_horizon.",
+    input_schema: { type: 'object', properties: { table: { type: 'string', description: 'optional: a planner table or view name (e.g. products, sales_actuals, purchase_orders, inbound_shipments, forecasts)' } } } },
+  { name: 'query_horizon', description: "Run a READ-ONLY SQL SELECT against HORIZON's planner schema and get the rows back. This reaches ALL of HORIZON's data (products, sales, forecasts, purchase orders, shipments, payments, key accounts, preorders, clients, buy plan, and more). SELECT or WITH only; a single statement; capped at 500 rows. Unqualified table names resolve to the planner schema. Call describe_data first if unsure of table or column names.",
+    input_schema: { type: 'object', properties: { sql: { type: 'string', description: 'a single read-only SELECT (or WITH ... SELECT) against planner tables' } }, required: ['sql'] } },
 ];
 async function aiResolveSkus(query) {
   const q = String(query || '').trim(); if (!q) return { matches: [] };
@@ -16918,10 +16924,54 @@ async function aiSkuAvailability(skus, market) {
   });
   return { as_of: new Date().toISOString().slice(0, 10), forecast_source: 'HORIZON latest forecast run', skus: out };
 }
+const AI_BLOCK_REL = /\b(client_magic_tokens|portal_magic_tokens|client_sessions|portal_sessions)\b/i;
+function aiCleanRow(row) { const o = {}; for (const k in row) { let v = row[k]; if (Buffer.isBuffer(v)) v = '[binary ' + v.length + 'B]'; else if (typeof v === 'string' && v.length > 1500) v = v.slice(0, 1500) + '\u2026'; o[k] = v; } return o; }
+async function aiDescribeData(table) {
+  try {
+    const t = String(table || '').trim().replace(/^planner\./i, '');
+    if (!t) {
+      const r = await pool.query(`SELECT c.relname AS "table", c.reltuples::bigint AS approx_rows,
+          (SELECT count(*) FROM information_schema.columns col WHERE col.table_schema='planner' AND col.table_name=c.relname) AS columns
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='planner' AND c.relkind IN ('r','v','m') ORDER BY c.relname`);
+      return { schema: 'planner', table_count: r.rows.length, tables: r.rows };
+    }
+    if (!/^[a-z0-9_]+$/i.test(t)) return { error: 'invalid table name' };
+    const cols = (await pool.query(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='planner' AND table_name=$1 ORDER BY ordinal_position`, [t])).rows;
+    if (!cols.length) return { error: 'no such table in the planner schema: ' + t };
+    let sample = [];
+    if (!AI_BLOCK_REL.test(t)) { try { const sm = await pool.query('SELECT * FROM planner.' + t + ' LIMIT 3'); sample = sm.rows.map(aiCleanRow); } catch (e) {} }
+    return { table: 'planner.' + t, columns: cols, sample_rows: sample };
+  } catch (e) { return { error: e.message }; }
+}
+async function aiQueryHorizon(sql) {
+  let q = String(sql || '').trim().replace(/;+\s*$/, '');
+  if (!q) return { error: 'empty query' };
+  if (!/^(select|with)\b/i.test(q)) return { error: 'only SELECT / WITH queries are allowed' };
+  if (q.includes(';')) return { error: 'only a single statement is allowed' };
+  if (/\b(auth|vault|storage|realtime|extensions|pg_catalog|pg_temp|information_schema)\s*\./i.test(q)) return { error: 'only the planner schema is queryable via Ask Claude' };
+  if (/\b(pg_read_file|pg_ls_dir|pg_ls_|lo_import|lo_export|dblink|pg_sleep|current_setting|set_config)\s*\(/i.test(q)) return { error: 'that function is not permitted' };
+  if (AI_BLOCK_REL.test(q)) return { error: 'auth token / session tables are not queryable via Ask Claude' };
+  const capped = /\blimit\s+\d+/i.test(q) ? q : (q + ' LIMIT 500');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET TRANSACTION READ ONLY');   // DB-level guard: any write / DDL / data-modifying CTE errors out
+    await client.query("SET LOCAL statement_timeout = '8s'");
+    await client.query('SET LOCAL search_path = planner');
+    const r = await client.query(capped);
+    await client.query('ROLLBACK');
+    const rows = r.rows.map(aiCleanRow);
+    return { columns: (r.fields || []).map(f => f.name), row_count: rows.length, rows, truncated: rows.length >= 500 };
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} return { error: e.message }; }
+  finally { client.release(); }
+}
 async function aiRunTool(name, input) {
   try {
     if (name === 'resolve_skus') return await aiResolveSkus(input && input.query);
     if (name === 'sku_availability') return await aiSkuAvailability(input && input.skus, input && input.market);
+    if (name === 'describe_data') return await aiDescribeData(input && input.table);
+    if (name === 'query_horizon') return await aiQueryHorizon(input && input.sql);
     return { error: 'unknown tool ' + name };
   } catch (e) { return { error: e.message }; }
 }
