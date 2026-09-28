@@ -18650,7 +18650,14 @@ const CP_WAREHOUSES = { uk_3pl: 'UK ILG', us_3pl: 'US Geneva', eu_3pl: 'EU iFulf
 const CP_MARKETS = { UK: { currency: 'GBP', wh: 'uk_3pl', dims: 'uk', hs: 'hscode_uk' }, US: { currency: 'USD', wh: 'us_3pl', dims: 'us', hs: 'hscode_us' }, EU: { currency: 'EUR', wh: 'eu_3pl', dims: 'uk', hs: 'hscode_eu' }, AU: { currency: 'AUD', wh: 'au_3pl', dims: 'uk', hs: 'hscode_au' }, CA: { currency: 'CAD', wh: 'ca_fba', dims: 'us', hs: 'hscode_ca' } };
 const CP_FULFIL_WH = { uk_3pl: 'ILG', eu_3pl: 'EUIFUL', us_3pl: 'USGENEVA_STD', au_3pl: 'AUCOGHLANS' };   // Horizon warehouse code → Fulfil stock.location code
 const CP_CHANNEL_ALIAS = { UKWS: 'dockandbay-uk-ws', USWS: 'dockandbay-us-ws', EUWS: 'dockandbay-eu-ws', AUWS: 'dockandbay-au-ws', UK: 'dockandbay-uk', US: 'dockandbay-us', EU: 'dockandbay-eu', AU: 'dockandbay-au' };
-function cpBand(n) { n = Number(n) || 0; if (n < 20) return '<20'; if (n < 100) return '20+'; if (n < 300) return '100+'; if (n < 500) return '300+'; if (n < 1000) return '500+'; return '1000+'; }
+const CP_BANDS_DEFAULT = [{ upto: 20, label: '<20' }, { upto: 100, label: '20+' }, { upto: 300, label: '100+' }, { upto: 500, label: '300+' }, { upto: 1000, label: '500+' }, { upto: null, label: '1000+' }];
+function cpParseBands(v) {
+  if (Array.isArray(v)) return v.length ? v : CP_BANDS_DEFAULT;
+  if (typeof v === 'string' && v.trim()) { try { const j = JSON.parse(v); if (Array.isArray(j) && j.length) return j; } catch (e) {} }
+  return CP_BANDS_DEFAULT;
+}
+async function cpStockBands() { return cpParseBands(await cpSetting('cp_stock_bands', '')); }
+function cpBand(n, bands) { n = Number(n) || 0; const B = (bands && bands.length) ? bands : CP_BANDS_DEFAULT; for (const b of B) { if (b.upto == null || b.upto === '' || n < Number(b.upto)) return b.label; } return B[B.length - 1].label; }
 function cpSlug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); }
 function cpJson(v, def) { if (v == null) return def; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch (e) { return def; } }
 async function cpAudit(clientId, event, detail, by) { try { await pool.query(`INSERT INTO planner.client_audit (client_id,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [clientId, event, detail || null, by || null]); } catch (e) {} }
@@ -18845,7 +18852,7 @@ app.get('/api/client/config', async (req, res) => {
       pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus, to_char(max(updated_at),'YYYY-MM-DD') updated FROM planner.client_price_lists GROUP BY code ORDER BY code`),
       pool.query(`SELECT count(*)::int n, to_char(max(last_synced_at),'YYYY-MM-DD HH24:MI') synced, min(sale_date) mn, max(sale_date) mx FROM planner.fulfil_sales`),
     ]);
-    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: '<20,20+,100+,300+,500+,1000+', cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
+    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/config', async (req, res) => {
@@ -19295,7 +19302,7 @@ app.get('/api/cp/me', cpAuth, async (req, res) => {
 async function cpProducts(client, opts) {
   const mk = CP_MARKETS[client.market] || CP_MARKETS.UK; const d = mk.dims; const hs = mk.hs;
   const rows = (await pool.query(`SELECT p.sku, coalesce(nullif(p.product_name_final,''), p.product_name) name, coalesce(nullif(p.category_name_final,''), p.category) category, coalesce(nullif(p.subcategory_name_final,''), p.subcategory) subcategory,
-      p.colour_long colour, coalesce(nullif(p.size_short,''), p.size) size, p.size_long, p.release_window season, upper(coalesce(p.status,'')) status, p.discontinue_date_final disc_us, p.discontinue_date_au_final disc_au, p.product_ean ean, p.asin, p.carton_qty, p.case_pack_size inner_qty, p.sku_barcode, p.carton_barcode,
+      p.colour_long colour, coalesce(nullif(p.size_short,''), p.size) size, p.size_long, p.release_window season, upper(coalesce(p.status,'')) status, p.discontinue_date_final disc_us, p.discontinue_date_au_final disc_au, p.discontinue_date_ca disc_ca, p.product_ean ean, p.asin, p.carton_qty, p.case_pack_size inner_qty, p.sku_barcode, p.carton_barcode,
       p.${hs} hs, p.${d}_prod_length pl, p.${d}_prod_width pw, p.${d}_prod_height ph, p.${d}_prod_weight pwt, p.${d}_carton_length cl, p.${d}_carton_width cw, p.${d}_carton_height chh, p.${d}_carton_weight cwt, p.grs_material_product material,
       coalesce(nullif(p.variant_image_url_final,''), nullif(p.colour_swatch_url,'')) image, p.parent_p1 parent, p.marketing_category_final mcat, p.launch_date_ws, p.polybags, p.clearance
     FROM planner.products p WHERE coalesce(p.in_planning_scope,false) AND upper(coalesce(p.status,'')) NOT IN ('CLOSED') AND p.sku NOT IN (${NON_SKU_LIST}) ORDER BY category, subcategory, p.sku`)).rows;
@@ -19305,12 +19312,14 @@ async function cpProducts(client, opts) {
     const whs = scope.mode === 'custom' && scope.region === 'us_all' ? ['us_3pl', 'us_fba'] : scope.mode === 'custom' && scope.region === 'market_all' ? [mk.wh, mk.wh.replace('_3pl', '_fba')] : [wh];
     (await pool.query(`SELECT sku, warehouse, available::int qty FROM planner.v_product_inventory WHERE warehouse = ANY($1)`, [whs])).rows.forEach(r => { stock[r.sku] = (stock[r.sku] || 0) + (Number(r.qty) || 0); });
   }
+  const bands = await cpStockBands();
+  const discMkt = String((client.stock_scope && client.stock_scope.disc_market) || client.market || 'UK').toUpperCase();
   const out = rows.filter(p => !skuLimit || skuLimit.has(String(p.sku).toUpperCase()) || !opts.stockOnly).map(p => {
-    const until = /until/i.test(String(p.disc_us || '')) || /until/i.test(String(p.status || '')); const disc = until ? p.disc_au : p.disc_us;
+    const disc = discMkt === 'AU' ? p.disc_au : discMkt === 'CA' ? p.disc_ca : p.disc_us;   // v28.020: per the client account's discontinue-date market (default = client market)
     const num = v => v == null || v === '' ? null : Number(v);
-    const o = { sku: p.sku, name: p.name, category: p.category, subcategory: p.subcategory, colour: p.colour, size: p.size, size_long: p.size_long, season: p.season, status: p.status, discontinued: p.status === 'PHASE OUT' || p.status === 'LAST SEASON' || !!disc, disc_date: disc ? String(disc).slice(0, 10) : null, disc_basis: until ? 'AU' : 'US', ean: p.ean, asin: p.asin, carton_qty: num(p.carton_qty), inner_qty: num(p.inner_qty), carton_barcode: p.carton_barcode, hs: p.hs, material: p.material, image: p.image, parent: p.parent, mcat: p.mcat, launch: p.launch_date_ws,
+    const o = { sku: p.sku, name: p.name, category: p.category, subcategory: p.subcategory, colour: p.colour, size: p.size, size_long: p.size_long, season: p.season, status: p.status, discontinued: p.status === 'PHASE OUT' || p.status === 'LAST SEASON' || !!disc, disc_date: disc ? String(disc).slice(0, 10) : null, disc_basis: discMkt, ean: p.ean, asin: p.asin, carton_qty: num(p.carton_qty), inner_qty: num(p.inner_qty), carton_barcode: p.carton_barcode, hs: p.hs, material: p.material, image: p.image, parent: p.parent, mcat: p.mcat, launch: p.launch_date_ws,
       dims: { unit: d === 'us' ? 'in' : 'cm', wunit: d === 'us' ? 'lb' : 'kg', product: [num(p.pl), num(p.pw), num(p.ph)], product_weight: num(p.pwt), carton: [num(p.cl), num(p.cw), num(p.chh)], carton_weight: num(p.cwt) } };
-    if (client.features.view_stock && !(client.type === 'distributor' && opts.forOrder)) { const q = stock[p.sku]; if (q != null) o.stock = exact ? q : cpBand(q); o.stock_exact = exact; }
+    if (client.features.view_stock && !(client.type === 'distributor' && opts.forOrder)) { const q = stock[p.sku]; if (q != null) o.stock = exact ? q : cpBand(q, bands); o.stock_exact = exact; }
     return o;
   });
   return { products: out, market: client.market, currency: client.currency, warehouse: wh, warehouse_label: scope.mode === 'custom' ? (scope.region === 'us_all' ? 'All US warehouses' : scope.region === 'market_all' ? 'All ' + client.market + ' warehouses' : (CP_WAREHOUSES[wh] || wh)) + ' · custom report' : (CP_WAREHOUSES[wh] || wh), stock_exact: exact, custom_sku_count: skuLimit ? skuLimit.size : null };

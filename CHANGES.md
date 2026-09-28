@@ -1,3 +1,20 @@
+## v28.020 (Ben): CLIENT tab matched to SUPPLY conventions; CONFIG split into L3 tabs; per-client discontinue market
+
+**Files: `supply/inject.html`, `server.mjs`.**
+
+**Level-2 menu now matches SUPPLY/SCENARIO:** the CLIENT sub-nav sits on a white card, carries the amber HORIZON version badge (same style as SUPPLY), and the notification counts (Messages unread, CLIENT tab badge) are red circles with white text (`.ex-badge`) instead of pill badges.
+
+**CLIENT > Config split into level-3 tabs** (light-blue L3 pill row, same as SUPPLY > Config):
+- **Settings**: order entry & notifications, line sheet & stock, and a **customisable stock-bands table** (edit the "up to" thresholds and the label shown to clients; saved as JSON to `cp_stock_bands`, applied by `cpBand`). The discontinue-date help text was corrected (see below).
+- **Order import**: the Fulfil sales import switch, cut-over dates, grey-window Cin7 list.
+- **Price lists**: the sell-price list table + CSV import.
+- **Portal preview**: the "View portal as" iframe on its own tab.
+
+**Discontinue date is now per client account.** Each client has a **Discontinue date shown** setting on its Stock scope card (Client market default, or US/UK/EU, AU, CA). `cpProducts` picks the discontinue date column from the client's market/override (`discontinue_date_final` for US/UK/EU, `discontinue_date_au_final` for AU, `discontinue_date_ca` for CA), replacing the old global "status contains until" rule. The Config text was corrected to describe this.
+
+**Stock scope warehouse options simplified** to the four 3PLs only: `uk_3pl`, `us_3pl`, `eu_3pl`, `au_3pl` (Ben).
+
+No migration (per-client discontinue market stored in the client's `stock_scope` JSON). Sandbox verified: amber version badge, red count badges, four L3 config tabs, editable stock bands, the discontinue dropdown and the 4-warehouse list on the client editor.
 ## v28.019 (Ben): Ask Claude can read ALL of HORIZON's data (planner schema)
 
 **File: `server.mjs`.** Ben: "all data in HORIZON should be accessible from Claude." Added two tools to the Ask Claude tool set, on top of the existing `resolve_skus` and `sku_availability`:
