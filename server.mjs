@@ -4724,7 +4724,7 @@ app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
     if (row.kind === 'bill') {
       const pl = row.payload || {}; const lines = Array.isArray(pl.lines) ? pl.lines : [];
       for (const l of lines) { if (l.tracking_option) await _ensureProductionOption(region, l.tracking_option); }
-      const body = { Type: 'ACCPAY', Contact: { Name: row.supplier || 'Supplier' }, Date: today, Reference: row.reference || '', CurrencyCode: row.currency || 'USD', Status: 'DRAFT',
+      const body = { Type: 'ACCPAY', Contact: { Name: row.supplier || 'Supplier' }, Date: today, InvoiceNumber: row.reference || '', Reference: row.reference || '', CurrencyCode: row.currency || 'USD', Status: 'DRAFT',
         LineItems: lines.map(l => ({ Description: l.description || (l.type + ' ' + l.po), Quantity: 1, UnitAmount: Number(l.amount) || 0, AccountCode: l.account_code || '', Tracking: l.tracking_option ? [{ Name: 'Production', Option: l.tracking_option }] : [] })) };
       const r = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
       const inv = r && r.Invoices && r.Invoices[0]; xeroId = inv && inv.InvoiceID; xeroRef = inv && inv.InvoiceNumber;
@@ -4736,7 +4736,7 @@ app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
       const pay = r && r.Payments && r.Payments[0]; xeroId = pay && pay.PaymentID;
     } else if (row.kind === 'credit_note') {
       if (row.tracking_option) await _ensureProductionOption(region, row.tracking_option);
-      const cnBody = { Type: 'ACCPAYCREDIT', Contact: { Name: row.supplier || 'Supplier' }, Date: today, CurrencyCode: row.currency || 'USD', Status: 'AUTHORISED',
+      const cnBody = { Type: 'ACCPAYCREDIT', Contact: { Name: row.supplier || 'Supplier' }, Date: today, CreditNoteNumber: row.reference || undefined, Reference: row.reference || undefined, CurrencyCode: row.currency || 'USD', Status: 'AUTHORISED',
         LineItems: [{ Description: 'Starting-deposit draw-down ' + (row.po || ''), Quantity: 1, UnitAmount: Number(row.amount) || 0, AccountCode: row.account_code || '602', Tracking: row.tracking_option ? [{ Name: 'Production', Option: row.tracking_option }] : [] }] };
       const r = await xeroFetch(region, '/api.xro/2.0/CreditNotes', { method: 'POST', body: { CreditNotes: [cnBody] } });
       const cn = r && r.CreditNotes && r.CreditNotes[0]; xeroId = cn && cn.CreditNoteID; xeroRef = cn && cn.CreditNoteNumber;
