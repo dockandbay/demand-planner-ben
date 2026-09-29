@@ -4176,14 +4176,32 @@ async function xeroExchange(region, params) {
 async function xeroToken(region) {
   region = xeroRegion(region); const cfg = xeroConfig(region); if (!cfg.present) return null;
   const now = Date.now(); const cache = _xeroTok[region]; if (cache.token && now < cache.exp - 60000) return cache.token;
-  const store = await xeroGetStore(region); if (!store || !store.refresh_token) return null;
-  if (store.access_token && store.expires_at && now < store.expires_at - 60000) { _xeroTok[region] = { token: store.access_token, exp: store.expires_at }; return store.access_token; }
-  const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: store.refresh_token });   // Xero rotates the refresh token
-  const upd = Object.assign({}, store, { access_token: j.access_token, refresh_token: j.refresh_token || store.refresh_token, expires_at: now + (Number(j.expires_in) || 1800) * 1000 });
-  await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
+  const store = await xeroGetStore(region);
+  if (store && store.refresh_token) {   // AUTH-CODE (Web app) connection
+    if (store.access_token && store.expires_at && now < store.expires_at - 60000) { _xeroTok[region] = { token: store.access_token, exp: store.expires_at }; return store.access_token; }
+    try {
+      const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: store.refresh_token });   // Xero rotates the refresh token
+      const upd = Object.assign({}, store, { access_token: j.access_token, refresh_token: j.refresh_token || store.refresh_token, expires_at: now + (Number(j.expires_in) || 1800) * 1000 });
+      await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
+      return j.access_token;
+    } catch (e) { if (e.code === 400 || e.code === 401) { await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]).catch(() => {}); } else throw e; }   // stale (e.g. switched to a Custom Connection) → drop it and try client_credentials
+  }
+  // CUSTOM CONNECTION (client_credentials) — no consent flow, one org, no refresh token
+  const scope = cfg.scopes.split(/\s+/).filter(s => s && s !== 'offline_access').join(' ');
+  const j = await xeroExchange(region, { grant_type: 'client_credentials', scope });
+  _xeroTok[region] = { token: j.access_token, exp: now + (Number(j.expires_in) || 1800) * 1000 };
   return j.access_token;
 }
-async function xeroTenant(region) { const s = await xeroGetStore(region); return s ? { id: s.tenant_id, name: s.tenant_name } : { id: null, name: null }; }
+async function xeroTenant(region) {
+  region = xeroRegion(region); const s = await xeroGetStore(region);
+  if (s && s.tenant_id) return { id: s.tenant_id, name: s.tenant_name };
+  const token = await xeroToken(region); if (!token) return { id: null, name: null };   // Custom Connection: discover the single org and cache it
+  const r = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
+  const conns = await r.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || (Array.isArray(conns) ? conns[0] : null);
+  if (!c || !c.tenantId) return { id: null, name: null };
+  await xeroPutStore(region, { tenant_id: c.tenantId, tenant_name: c.tenantName || '', mode: 'custom', connected_at: new Date().toISOString() });
+  return { id: c.tenantId, name: c.tenantName };
+}
 async function xeroFetch(region, path, opts) {
   region = xeroRegion(region); opts = opts || {}; const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
   const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }

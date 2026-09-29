@@ -1,3 +1,12 @@
+## v28.027 (Ben): Xero connection also supports Custom Connections (client_credentials), per region
+
+**File: `server.mjs`.** Ben deleted the auth-code app and is moving to Xero **Custom Connections** (machine-to-machine, one per org, no consent flow, avoids the org-connection limit).
+
+- `xeroToken(region)` now: if an auth-code refresh token is stored, use it (as before); otherwise use **client_credentials** (Custom Connection), stripping `offline_access` from the scope. A stored auth-code token that fails to refresh (e.g. after switching apps) is dropped automatically and the region falls back to client_credentials — the switch self-heals.
+- `xeroTenant(region)` discovers and caches the single organisation from `/connections` for a Custom Connection (auth-code keeps its stored tenant).
+- Two Custom Connections (one per org) via `XERO_UK_CLIENT_ID/SECRET` and `XERO_AU_CLIENT_ID/SECRET`; no redirect URI needed for this mode. The dead token from the deleted app was cleared.
+
+No migration.
 ## v28.026 (Ben): live Xero AU reading real bills; Ask Claude tool-loop no longer stalls
 
 **File: `server.mjs`.**
