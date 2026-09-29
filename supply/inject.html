@@ -3131,29 +3131,35 @@
     bg.onclick=function(e){ if(e.target===bg)close(); };
     document.getElementById('fxb-cancel').onclick=close;
     function kv(l,v){ return '<div style="display:flex;gap:8px;padding:2px 0"><div style="min-width:130px;color:var(--muted)">'+l+'</div><div style="font-weight:600">'+(v||'<span class="mut">—</span>')+'</div></div>'; }
-    fetch('/api/supply/flexport/booking-preview/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){
+    var curCargo='';   // '' = server default (recommended)
+    function load(cargoKey){ box.innerHTML='Loading preview…'; goBtn.style.display='none';
+      fetch('/api/supply/flexport/booking-preview/'+encodeURIComponent(po)+(cargoKey?('?cargo='+encodeURIComponent(cargoKey)):'')).then(function(r){return r.json();}).then(function(j){
       if(j&&j.error){ box.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
-      var inf=j.info||{};
+      var inf=j.info||{}; curCargo=j.cargo_choice||'';
       var crB=''; if(inf.cargo_ready){ var _cd=Math.round((Date.parse(inf.cargo_ready)-Date.parse(new Date().toISOString().slice(0,10)))/86400000);
         crB=' <span style="background:#fde68a;color:#92400e;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">'+(_cd<=0?'ready now':'ready in '+_cd+' day'+(_cd>1?'s':''))+'</span>'; }
+      var cargoSel=(j.cargo_options&&j.cargo_options.length)?('<div style="display:flex;gap:8px;padding:2px 0;align-items:center"><div style="min-width:130px;color:var(--muted)">Cargo size</div><select id="fxb-cargo" style="font-size:12px;padding:3px 6px;border:1px solid #d0d0d0;border-radius:6px">'+j.cargo_options.map(function(o){return '<option value="'+esc(o.key)+'"'+(o.key===curCargo?' selected':'')+'>'+esc(o.label)+'</option>';}).join('')+'</select>'+(inf.pallets?' <span class="mut tiny">('+inf.pallets+' pallet est)</span>':'')+'</div>'):'';
       var html=kv('Supplier',esc(inf.supplier||''))+kv('Market',esc(inf.market||''))+kv('Mode',esc((inf.mode||'').toUpperCase()))
         +kv('Cargo ready',(inf.cargo_ready?esc(fd(inf.cargo_ready)):'')+crB)+kv('Delivery date',inf.delivery_date?esc(fd(inf.delivery_date)):'')
         +kv('Shipper (Flexport)',inf.shipper?esc(inf.shipper.name)+' <span class="mut tiny">'+esc(inf.shipper.ref)+'</span>':'')
-        +kv('Consignee (Flexport)',inf.consignee?esc(inf.consignee.name)+' <span class="mut tiny">'+esc(inf.consignee.ref)+'</span>':'');
+        +kv('Consignee (Flexport)',inf.consignee?esc(inf.consignee.name)+' <span class="mut tiny">'+esc(inf.consignee.ref)+'</span>':'')
+        +cargoSel;
       if((j.missing||[]).length) html+='<div style="margin-top:10px;padding:8px 10px;border:1px solid var(--neg);border-radius:6px;background:var(--neg-bg,#fef2f2)"><b style="color:var(--neg)">Can’t submit yet:</b><ul style="margin:4px 0 0 16px;padding:0">'+j.missing.map(function(m){return '<li>'+esc(m)+'</li>';}).join('')+'</ul></div>';
       if((j.assumed||[]).length) html+='<div style="margin-top:8px" class="mut tiny"><b>Assumed / left to Flexport:</b><ul style="margin:3px 0 0 16px;padding:0">'+j.assumed.map(function(a){return '<li>'+esc(a)+'</li>';}).join('')+'</ul></div>';
       html+='<details style="margin-top:8px"><summary class="mut tiny" style="cursor:pointer">Request body sent to Flexport</summary><pre style="font-size:11px;background:var(--hover);border:1px solid var(--line);border-radius:6px;padding:8px;overflow:auto;max-height:200px">'+esc(JSON.stringify(j.body,null,2))+'</pre></details>';
       box.innerHTML=html;
+      var csel=document.getElementById('fxb-cargo'); if(csel)csel.onchange=function(){ load(csel.value); };
       if(j.can_submit){ goBtn.style.display=''; }
       goBtn.onclick=function(){ if(!confirm('Lodge a live booking request with Flexport for '+po+'? Flexport will quote it; you accept the quote in Flexport.'))return;
         goBtn.disabled=true; goBtn.textContent='Lodging…';
-        fetch('/api/supply/flexport/booking-submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true})}).then(function(r){return r.json();}).then(function(res){
+        fetch('/api/supply/flexport/booking-submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true,cargo:curCargo})}).then(function(r){return r.json();}).then(function(res){
           if(res&&res.error){ box.innerHTML='<div style="color:var(--neg)">'+esc(res.error)+'</div>'+box.innerHTML; goBtn.disabled=false; goBtn.textContent='Lodge booking request'; return; }
           var b=res.booking||{};
           box.innerHTML='<div style="padding:10px 12px;border:1px solid var(--pos,#16a34a);border-radius:6px;background:var(--pos-bg,#f0fdf4)"><b style="color:var(--pos,#16a34a)">✓ Booking request lodged</b><div style="margin-top:4px">'+esc(b.name||po)+' · status <b>'+esc(b.status||'submitted')+'</b>'+(b.flex_id?' · '+esc(b.flex_id):'')+'</div><div class="mut tiny" style="margin-top:4px">Review &amp; accept the quote in the Flexport app. Run “Import from Flexport” to pull the dates back once it’s live.</div></div>';
           goBtn.style.display='none'; document.getElementById('fxb-cancel').textContent='Done';
         }).catch(function(e){ box.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'+box.innerHTML; goBtn.disabled=false; goBtn.textContent='Lodge booking request'; }); };
-    }).catch(function(e){ box.innerHTML='<span style="color:var(--neg)">Failed to load preview: '+esc(e.message||e)+'</span>'; });
+    }).catch(function(e){ box.innerHTML='<span style="color:var(--neg)">Failed to load preview: '+esc(e.message||e)+'</span>'; }); }
+    load('');
   }
   // ORDER PLAN paste: paste a 2-column SKU / qty block from Excel or Sheets. SKUs not in our list are skipped;
   // a SKU already on the PO has its qty overridden; new valid SKUs are added (proposed). Validation is server-side.

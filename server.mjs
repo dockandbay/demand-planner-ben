@@ -5191,7 +5191,8 @@ app.get('/api/supply/flexport/booking-registry', async (req, res) => {
 // Assemble the /bookings request body HORIZON would lodge for a PO, from PO data + the harvested entity registry.
 // Returns { body, info, missing, assumed } — `missing` = required-ish fields we can't fill (Ben sees them before submit);
 // `assumed` = values we defaulted. The server ALWAYS rebuilds this at submit time (never trusts a client-supplied body).
-async function buildFlexportBookingBody(po) {
+async function buildFlexportBookingBody(po, opts) {
+  opts = opts || {};
   const row = (await pool.query(`
     SELECT p.po, p.supplier_id, coalesce(p.supplier_name,'') supplier_name,
       upper(coalesce(nullif(p.country_code,''), b.country_code, '')) market,
@@ -5199,7 +5200,9 @@ async function buildFlexportBookingBody(po) {
       to_char(coalesce(p.end_production_overide,
         (p.start_production + (coalesce(p.days_production_overide, s.production_days, 0)||' days')::interval)::date),'YYYY-MM-DD') cargo_ready,
       to_char(coalesce(p.delivery_date_overide, p.landing_date_overide),'YYYY-MM-DD') delivery_date,
-      p.pallets_override,
+      ceil(coalesce(p.pallets_override,
+        (SELECT sum(l.qty::numeric/NULLIF(sa.pallet_qty,0)) FROM planner.purchase_order_lines l
+           LEFT JOIN planner.v_sku_attrs sa ON sa.sku=l.sku WHERE l.po=p.po), 0))::int pallets,
       coalesce(lower(sh.mode),'') ship_mode
     FROM planner.purchase_orders p
     LEFT JOIN planner.branches b ON b.name=p.branch
@@ -5237,22 +5240,48 @@ async function buildFlexportBookingBody(po) {
   };
   if (shipper) body.shipper_entity_ref = shipper.ref;
   if (consignee) body.consignee_entity_ref = consignee.ref;
-  // mode-specific block: we don't hold ports/service level in Horizon, so lodge an empty block and let Flexport ops set
-  // routing on the quote (the booking is a REQUEST). freight_type from the linked Flexport shipment if we have it.
-  const fx = (await pool.query(`SELECT freight_type FROM planner.flexport_shipments_effective WHERE flex_id=$1 OR shipment_name=$2 OR shipment_name=$3 LIMIT 1`, [row.flex_ref, row.shipment_ref || row.po, row.po])).rows[0];
-  const svc = (fx && fx.freight_type) || null; if (!svc) assumed.push('Freight service level not known — Flexport ops will set port-to-door / door-to-door on the quote.');
-  const blockKey = mode === 'air' ? 'air_booking' : mode === 'truck_intl' ? 'trucking_booking' : 'ocean_booking';
-  body[blockKey] = svc ? { service: svc } : {};
-  assumed.push('Ports/routing and cargo dimensions are left for Flexport to quote (this lodges a booking REQUEST; you accept the quote in Flexport).');
+  // ── Cargo size (v28.068, Ben): seed FCL/LCL from the PO's pallet estimate to a best-value default; selectable at
+  // booking time. Real Flexport schema: ocean_booking.container_counts {twenty_ft, forty_ft, forty_ft_hc} for FCL, or
+  // ocean_booking.is_lcl=true + cargo.shipping_units for LCL. House rule: ~20 pallets/40′HC, ~10/20′ (matches the grid's
+  // pallets÷20 = containers). Ports/routing still left for Flexport to quote. ──
+  const pallets = Number(row.pallets) || 0;
+  const CBM_PER_PALLET = 2.4;   // ~1.0×1.2×2.0m usable; a rough seed Flexport refines on the quote
+  const ccLabel = cc => { const p = []; if (cc.forty_ft_hc) p.push(cc.forty_ft_hc + " × 40′HC"); if (cc.forty_ft) p.push(cc.forty_ft + " × 40′"); if (cc.twenty_ft) p.push(cc.twenty_ft + " × 20′"); return p.join(' + ') || 'FCL'; };
+  const volEst = pallets ? Math.round(pallets * CBM_PER_PALLET * 10) / 10 : null;
+  // recommended container mix for the pallet count (best value = fill 40′HCs; a small tail goes to a 20′)
+  let recCC = null, recLcl = false, recKey;
+  if (mode === 'air' || mode === 'truck_intl') { recKey = 'none'; }
+  else if (pallets > 0 && pallets <= 6) { recLcl = true; recKey = 'lcl'; }
+  else if (pallets > 0) { const n40 = Math.floor(pallets / 20), rem = pallets - n40 * 20; recCC = {}; if (n40) recCC.forty_ft_hc = n40; if (rem) { if (rem <= 10) recCC.twenty_ft = 1; else recCC.forty_ft_hc = (recCC.forty_ft_hc || 0) + 1; } recKey = 'auto'; }
+  else recKey = 'none';
+  const cargoOpts = [];
+  if (mode === 'ocean') {
+    cargoOpts.push({ key: 'auto', label: 'Recommended — ' + (recCC ? ccLabel(recCC) : recLcl ? ('LCL ' + pallets + ' pallets') : 'Flexport to decide'), container_counts: recCC, is_lcl: recLcl });
+    cargoOpts.push({ key: 'lcl', label: 'LCL — ' + (pallets || '?') + ' pallet(s)' + (volEst ? ' / ~' + volEst + ' cbm' : ''), is_lcl: true });
+    cargoOpts.push({ key: '20', label: "FCL — 1 × 20′", container_counts: { twenty_ft: 1 } });
+    cargoOpts.push({ key: '40hc', label: "FCL — 1 × 40′HC", container_counts: { forty_ft_hc: 1 } });
+    cargoOpts.push({ key: '2x40hc', label: "FCL — 2 × 40′HC", container_counts: { forty_ft_hc: 2 } });
+    cargoOpts.push({ key: 'none', label: 'Let Flexport decide', none: true });
+  } else { cargoOpts.push({ key: 'none', label: (mode === 'air' ? 'Air' : 'Truck') + ' — Flexport to size', none: true }); }
+  const choiceKey = opts.cargo && cargoOpts.some(o => o.key === opts.cargo) ? opts.cargo : recKey;
+  const chosen = cargoOpts.find(o => o.key === choiceKey) || cargoOpts[0];
+  if (mode === 'ocean') {
+    if (chosen.none || (!chosen.container_counts && !chosen.is_lcl)) { body.ocean_booking = {}; assumed.push('Cargo size left to Flexport.'); }
+    else if (chosen.is_lcl) { body.ocean_booking = { is_lcl: true }; body.cargo = { shipping_units: [{ count: pallets || null, unit_type: 'pallet' }] }; if (volEst) body.cargo.volume = { value: volEst, unit: 'cbm' }; }
+    else { body.ocean_booking = { is_lcl: false, container_counts: chosen.container_counts }; }
+  } else if (mode === 'air') { body.air_booking = {}; if (volEst) body.cargo = { volume: { value: volEst, unit: 'cbm' } }; }
+  else { body.trucking_booking = {}; }
+  assumed.push('Ports/routing are left for Flexport to quote (this lodges a booking REQUEST; you accept the quote in Flexport).');
   return {
     body,
-    info: { po: row.po, supplier: row.supplier_name, market: row.market, branch: row.branch, mode, cargo_ready: row.cargo_ready, delivery_date: row.delivery_date,
+    info: { po: row.po, supplier: row.supplier_name, market: row.market, branch: row.branch, mode, cargo_ready: row.cargo_ready, delivery_date: row.delivery_date, pallets,
       shipper: shipper ? { ref: shipper.ref, name: shipper.name } : null, consignee: consignee ? { ref: consignee.ref, name: consignee.name } : null },
+    cargo_options: cargoOpts.map(o => ({ key: o.key, label: o.label })), cargo_choice: choiceKey,
     missing, assumed, can_submit: missing.length === 0,
   };
 }
 app.get('/api/supply/flexport/booking-preview/:po', async (req, res) => {
-  try { res.json(await buildFlexportBookingBody(decodeURIComponent(req.params.po))); }
+  try { res.json(await buildFlexportBookingBody(decodeURIComponent(req.params.po), { cargo: req.query.cargo })); }
   catch (e) { log500(e); res.status(e.code === 404 ? 404 : e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 // LIVE WRITE — lodge the booking request with Flexport. Admin + explicit confirm. Rebuilds the body server-side; refuses
@@ -5263,7 +5292,7 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     const b = req.body || {}; const po = String(b.po || '').trim();
     if (!po) return res.status(400).json({ error: 'po required' });
     if (!b.confirm) return res.status(400).json({ error: 'confirm required — this lodges a live booking request with Flexport' });
-    const built = await buildFlexportBookingBody(po);
+    const built = await buildFlexportBookingBody(po, { cargo: b.cargo });
     if (!built.can_submit) return res.status(400).json({ error: 'Cannot submit — unresolved fields: ' + built.missing.join(' | '), missing: built.missing });
     const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
     const r = await fetch('https://api.flexport.com/bookings', {
