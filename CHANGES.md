@@ -1,3 +1,12 @@
+## v28.023 (Ben): Auto-Forecast computed & persisted server-side, queryable by SQL + Ask Claude (migration 310)
+
+**Files: `server.mjs`, `migrations/310_auto_forecast_result.sql`.** The Auto-Forecast report (SUPPLY ▸ Payments ▸ AF) previously computed live in the browser. Ben: make it server-side and open to Ask Claude and SQL.
+
+- **How:** when the browser posts the demand feed (`afStoreFeed`, already persisted to `auto_forecast_feed` since v28.002), the server now also runs `computeAutoForecastFromFeed` and stores the full result in `planner.auto_forecast_result` (migration 310), pruned to the last 10. Wrapped in try/catch so an AF-compute error can never break the feed store. It is the demand feed that drives this, not the per-SKU buy-plan snapshot (that is a different, purchasing-side dataset).
+- **Queryable:** the view `planner.auto_forecast_latest` exposes the newest result as one row per phased payment (`month`, `payment_type` = deposit/completion/balance/freight/duty, `reference`, `market`, `supplier`, `amount_usd`). `query_horizon` / Ask Claude read it directly; the system prompt points at it. Status: `GET /api/scenario/auto-forecast/result/status`.
+- **Cost:** the AF compute (~7s: it loads supplier terms, costs, freight, duty) runs on the debounced/hourly demand-feed push, off the interactive path (the browser fire-and-forgets), so it does not slow the app.
+
+Sandbox verified: posting the demand feed persisted an AF result; `auto_forecast_latest` returned the phased payments (Balance $2.59M, deposits $2.41M, duty $533k, freight $79k; monthly Oct→Feb), and Ask Claude answered the cash-out-by-type breakdown ($5.61M) from it. Deploy: apply migration 310.
 ## v28.022 (Ben): the per-SKU buy plan is persisted to the database and queryable (migration 309)
 
 **Files: `artifact_v16.7.html`, `server.mjs`, `migrations/309_buy_plan_snapshot.sql`.** Ben: the buy plan is computed in the browser; persist it so it can be queried and read by Ask Claude.

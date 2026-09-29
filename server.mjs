@@ -16832,7 +16832,7 @@ You have LIVE ACCESS to HORIZON's own data through tools. Use them instead of as
 - resolve_skus(query): find SKU codes by SKU, product name, or parent code.
 - sku_availability(skus, market?): per market (UK/US/EU/AU/CA), current stock on hand (3PL + Amazon FBA), open inbound shipments (quantity + ETA), and forecast demand for the next 6 months. Use it for stock, cover and "can we fulfil this order?" questions.
 - describe_data(table?): discover the data. With no argument it lists the planner tables; with a table name it returns that table's columns and a few sample rows.
-- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows. The latest computed buy plan is the view buy_plan_latest (one row per SKU x market: buy_3pl, buy_3pl_urgent, buy_fba, transfer, soh_3pl, soh_fba, on_order, inbound).
+- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows. The latest computed buy plan is the view buy_plan_latest (one row per SKU x market: buy_3pl, buy_3pl_urgent, buy_fba, transfer, soh_3pl, soh_fba, on_order, inbound). The latest Auto-Forecast (cash-out phasing) is the view auto_forecast_latest (one row per phased payment: month, payment_type deposit/completion/balance/freight/duty, reference, market, supplier, amount_usd).
 Essentially all of HORIZON's data is queryable. For anything the two SKU tools do not cover, call describe_data to find the right table and columns, then query_horizon, rather than asking the user. When a user gives you a purchase order or SKU list, resolve the SKUs if needed and look the data up yourself. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON, for example a brand-new customer PO they have not uploaded. Never invent Dock & Bay figures; if a tool returns nothing, say so.`;
 
 // Decode a base64 attachment into a content block for the Anthropic Messages API.
@@ -18619,6 +18619,14 @@ async function afStoreFeed(rows, by, appVersion) {
   const ins = await pool.query(`INSERT INTO planner.auto_forecast_feed (computed_by, app_version, row_count, units_total, rows) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING id, computed_at`,
     [by || null, appVersion || null, clean.length, units, JSON.stringify(clean)]);
   await pool.query(`DELETE FROM planner.auto_forecast_feed WHERE id NOT IN (SELECT id FROM planner.auto_forecast_feed ORDER BY computed_at DESC LIMIT 30)`).catch(() => {});
+  // v28.023 (Ben): also compute + persist the Auto-Forecast RESULT so it is queryable server-side (SQL + Ask Claude).
+  try {
+    const af = await computeAutoForecastFromFeed(clean, ['uk', 'us', 'eu', 'au'], true);
+    const txns = (af && af.transactions) || []; const total = ((af && af.payments && af.payments.total) || []).reduce((s, v) => s + (Number(v) || 0), 0);
+    await pool.query(`INSERT INTO planner.auto_forecast_result (computed_by, app_version, txn_count, total_usd, result) VALUES ($1,$2,$3,$4,$5::jsonb)`,
+      [by || null, appVersion || null, txns.length, Math.round(total), JSON.stringify(af)]);
+    await pool.query(`DELETE FROM planner.auto_forecast_result WHERE id NOT IN (SELECT id FROM planner.auto_forecast_result ORDER BY computed_at DESC LIMIT 10)`).catch(() => {});
+  } catch (e) { try { log500(e); } catch (_) {} }   // never let AF-result compute break the feed store
   return { id: ins.rows[0].id, computed_at: ins.rows[0].computed_at, rows: clean.length, units };
 }
 async function afLatestFeed() {
@@ -18657,6 +18665,11 @@ app.post('/api/scenario/buy-plan/feed', async (req, res) => {
     if (!rows.length) return res.json({ ok: false, reason: 'empty buy feed (buy plan not loaded in this tab)' });
     res.json({ ok: true, ...(await bpStoreFeed(rows, authUser(req), b.app_version || null)) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/scenario/auto-forecast/result/status', async (req, res) => {
+  try { const f = (await pool.query(`SELECT id, computed_at, computed_by, app_version, txn_count, total_usd FROM planner.auto_forecast_result ORDER BY computed_at DESC LIMIT 1`)).rows[0];
+    res.set('Cache-Control', 'no-store').json(f ? { ok: true, id: f.id, computed_at: f.computed_at, app_version: f.app_version, transactions: f.txn_count, total_usd: Number(f.total_usd) } : { ok: false, reason: 'no auto-forecast result yet — open the Auto Forecast or buy plan once' });
+  } catch (e) { res.json({ ok: false, reason: 'auto_forecast_result table absent (mig 310 not applied)' }); }
 });
 app.get('/api/scenario/buy-plan/feed/status', async (req, res) => {
   try { const f = (await pool.query(`SELECT id, computed_at, computed_by, app_version, row_count, units_total FROM planner.buy_plan_snapshot ORDER BY computed_at DESC LIMIT 1`)).rows[0];
