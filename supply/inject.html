@@ -1827,24 +1827,26 @@
     if(!d||d.error){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load linkages'+(d&&d.error?': '+esc(d.error):'')+'</div>'; return; }
     var po=d.po;
     var acts=(d.actions||[]).map(function(a){ return '<div style="background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);border-radius:6px;padding:7px 9px;margin-bottom:8px;font-weight:600">⚠ '+esc(a.msg)+'</div>'; }).join('');
+    var hasData=(d.systems||[]).some(function(s){return s.status&&s.status!=='none';});
     var rows=(d.systems||[]).map(function(s){
       var m=PO_LINK_META[s.system]||{label:s.system,hint:''};
       var linked=s.status==='linked';
       var badge=linked?'<span class="tool-badge bg-green">✓ linked</span>':(s.status==='action'?'<span class="tool-badge bg-red">⚠ action</span>':'<span class="tool-badge bg-amber">—</span>');
-      var link=(linked&&s.url)?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600">open '+esc(m.label)+' ↗</a>':'<span class="mut tiny">'+esc(s.note||'not found')+'</span>';
+      var link=(linked&&s.url)?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600;white-space:nowrap">open '+esc(m.label)+' ↗</a>':'<span class="mut tiny">'+esc(s.note||'not found')+'</span>';
       var idTxt=s.external_ref||s.external_id||'';
       var manual=(s.found_by==='manual')?' <span class="mut tiny">(manual)</span>':'';
-      var add=linked?'':'<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);margin-left:8px">＋ add link</button>';
+      var add=linked?'':'<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">＋ add link</button>';
       return '<tr style="border-top:1px solid #eef2f7">'
-        +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
-        +'<td style="padding:6px 10px;white-space:nowrap">'+badge+'</td>'
-        +'<td style="padding:6px 10px;font-variant-numeric:tabular-nums">'+esc(idTxt)+manual+'</td>'
-        +'<td style="padding:6px 0 6px 10px">'+link+add+'</td></tr>';
+        +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
+        +'<td style="padding:6px 10px;white-space:nowrap;vertical-align:top">'+badge+'</td>'
+        +'<td style="padding:6px 10px;font-variant-numeric:tabular-nums;word-break:break-word;vertical-align:top">'+esc(idTxt)+manual+'</td>'
+        +'<td style="padding:6px 0 6px 10px;vertical-align:top;white-space:nowrap">'+link+(add?'<div style="margin-top:'+(link?'3px':'0')+'">'+add+'</div>':'')+'</td></tr>';
     }).join('');
     el.innerHTML=acts
-      +'<table style="border-collapse:collapse;font-size:12.5px;width:100%;max-width:680px"><tbody>'+rows+'</tbody></table>'
+      +(!hasData&&!d.resolved?'<div class="mut tiny" style="margin-bottom:6px">Not resolved yet — click <b>Find / refresh links</b> to look this PO up in Xero / Fulfil / Flexport / DHL.</div>':'')
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12.5px;width:100%;max-width:760px;table-layout:auto"><tbody>'+rows+'</tbody></table></div>'
       +'<div style="margin-top:10px"><button class="save-btn poln-refresh" data-po="'+esc(po)+'" title="re-resolve links from Xero / Fulfil / Flexport / DHL">↻ Find / refresh links</button> '
-      +(d.resolved?'<span class="mut tiny">resolved live just now</span>':'<span class="mut tiny">from saved linkages — click to refresh</span>')+'</div>';
+      +(d.resolved?'<span class="mut tiny">resolved live just now</span>':(hasData?'<span class="mut tiny">from saved linkages — click to refresh</span>':''))+'</div>';
   }
   function loadPoLinks(el,refresh){ var p=el.dataset.po;
     if(el._loading)return; if(el._loaded && !refresh)return; el._loading=1;

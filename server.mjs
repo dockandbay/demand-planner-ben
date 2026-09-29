@@ -4314,19 +4314,21 @@ async function resolvePoLinks(po, poRow) {
   try {
     const mkt = String(poRow.country_code || '').toUpperCase() || (/coghlan/i.test(poRow.branch || '') ? 'AU' : '');
     const region = xeroMarketRegion(mkt);
-    const where = encodeURIComponent('Type=="ACCPAY" AND Reference!=null AND Reference.Contains("' + String(po).replace(/"/g, '') + '")');
+    const poEsc = String(po).replace(/"/g, '');
+    // Match the PO in EITHER the bill Reference OR its InvoiceNumber (some bills carry the PO as the invoice number).
+    const where = encodeURIComponent('Type=="ACCPAY" AND ((Reference!=null AND Reference.Contains("' + poEsc + '")) OR (InvoiceNumber!=null AND InvoiceNumber.Contains("' + poEsc + '")))');
     const j = await xeroFetch(region, '/api.xro/2.0/Invoices?where=' + where + '&order=Date%20DESC&page=1');
     const poStr = String(po);
-    const inv = ((j && j.Invoices) || []).filter(v => {
-      // Reference may be "PO-x", "PO-x/2", "PO-x, PO-y", or "PO-x1"/"PO-x2" (deposit/balance sequence). Split on
-      // separators, then match a token that IS the PO or is the PO + a purely-numeric suffix — so a dash-variant
-      // like PO-54UKXR3-FBA is NOT matched to PO-54UKXR3's bill (its suffix "-FBA" is not all digits).
-      return String(v.Reference || '').split(/[\/,;\s]+/).map(s => s.trim()).some(tok =>
-        tok === poStr || (tok.startsWith(poStr) && /^\d+$/.test(tok.slice(poStr.length))));
-    });
+    const tokMatch = (str) => String(str || '').split(/[\/,;\s]+/).map(s => s.trim()).some(tok =>
+      tok === poStr || (tok.startsWith(poStr) && /^\d+$/.test(tok.slice(poStr.length))));
+    const inv = ((j && j.Invoices) || []).filter(v => tokMatch(v.Reference) || tokMatch(v.InvoiceNumber));
+    // ref/InvoiceNumber may be "PO-x", "PO-x/2", "PO-x, PO-y", or "PO-x1"/"PO-x2" (deposit/balance sequence);
+    // match a token that IS the PO or the PO + a purely-numeric suffix — so a dash-variant like PO-54UKXR3-FBA is
+    // NOT matched to PO-54UKXR3's bill (its suffix "-FBA" is not all digits).
     if (inv.length) {
       const primary = inv[0];
-      out.xero = { external_id: primary.InvoiceID, external_ref: [...new Set(inv.map(v => v.InvoiceNumber).filter(Boolean))].join(', '),
+      const pref = primary.InvoiceNumber || primary.Reference || primary.InvoiceID;
+      out.xero = { external_id: primary.InvoiceID, external_ref: String(pref) + (inv.length > 1 ? ' +' + (inv.length - 1) + ' more' : ''),
         url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + primary.InvoiceID,
         status: 'linked', note: (inv.length > 1 ? inv.length + ' bills (' + region.toUpperCase() + ')' : region.toUpperCase()) };
     } else {
@@ -4343,7 +4345,7 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
     const poRow = (await pool.query(`SELECT po, status, production_status, country_code, branch, flexport_reference, shipment_ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO not found' });
     let cached = (await pool.query(`SELECT system, external_id, external_ref, url, status, note, found_by, found_at, updated_at FROM planner.po_links WHERE po=$1`, [po])).rows;
-    const doResolve = String(req.query.refresh || '') === '1' || cached.length === 0;
+    const doResolve = String(req.query.refresh || '') === '1';   // read from the DB by default (fast); only hit the live APIs on an explicit refresh
     if (doResolve) {
       const r = await resolvePoLinks(po, poRow);
       for (const sys of PO_LINK_SYSTEMS) {
@@ -13106,6 +13108,14 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       const li = blines.filter(l => Math.abs(Number(l.amount) || 0) > 0.005).map(l => { const it = { Description: String(l.desc || '').slice(0, 3900), Quantity: 1, UnitAmount: r2(l.amount) }; if (l.code) it.AccountCode = String(l.code); it.TaxType = (latMode === 'NoTax') ? (xregion === 'au' ? 'EXEMPTEXPENSES' : 'NONE') : ttCode(l.taxType); return it; });
       if (!li.length) return res.status(400).json({ error: 'no bill lines to create' });
       const missingAcct = li.filter(x => !x.AccountCode).length;
+      // Validate the mapped account codes against the org's live chart of accounts — a code that doesn't exist in
+      // Xero would be silently dropped, leaving the line uncoded. Fail early with the exact offending codes.
+      try {
+        const ac = await xeroFetch(xregion, '/api.xro/2.0/Accounts');
+        const valid = new Set(((ac && ac.Accounts) || []).map(a => String(a.Code || '')).filter(Boolean));
+        const bad = [...new Set(li.map(x => x.AccountCode).filter(c => c && !valid.has(String(c))))];
+        if (bad.length) return res.status(400).json({ error: 'Account code(s) not in Xero ' + xregion.toUpperCase() + ': ' + bad.join(', ') + '. Fix them in 3PL invoicing ▸ Config / Accounts (or create the account in Xero).', invalid_codes: bad });
+      } catch (e) { /* if the accounts lookup fails, fall through and let Xero validate on create */ }
       const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: latMode, LineItems: li };
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
