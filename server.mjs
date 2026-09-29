@@ -19570,6 +19570,10 @@ const PO_ROWS_SQL = `
             (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) master_po,                        -- master-PO grouping: a CHILD carries its master's po (filtered out of the grid in poRowsCache)
             (SELECT coalesce(po3.is_master,false) FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) is_master,        -- true on the consolidated MASTER row (shows the 'master' badge)
             (SELECT count(*) FROM planner.purchase_orders pc WHERE pc.master_po=calc4.po)::int master_child_count,           -- how many children a master still has (delete is blocked until 0)
+            -- v28.085 (Ben): does this PO have a LINKED Xero bill? (planner.po_links, the same source as Linked Records +
+            -- Xero payments Exceptions). Drives the PO-grid "Shipped · no Xero invoice" exception filter. Resolved by the
+            -- resolve-po-links cron / the Linked-Records "find"; a PO with no linked bill row is unmatched.
+            (EXISTS (SELECT 1 FROM planner.po_links xl WHERE xl.po=calc4.po AND xl.system='xero' AND xl.status='linked' AND coalesce(xl.external_id,'')<>'')) xero_linked,
             -- Pending supplier-submitted completion (production-end) date → inline "set to …" quick-apply on the grid END cell
             (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
             (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_id,
