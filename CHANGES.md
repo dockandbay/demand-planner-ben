@@ -1,3 +1,11 @@
+## v28.026 (Ben): live Xero AU reading real bills; Ask Claude tool-loop no longer stalls
+
+**File: `server.mjs`.**
+
+- **Xero live read:** `GET /api/supply/xero/bills?region=au|uk&since=&limit=` returns the org's purchase bills (ACCPAY) from Xero (invoice number, reference, contact, date, due date, status, currency, total, amount due/paid). Verified against the live **Dock & Bay (AU)** org — real bills came back, including one matching a Horizon 3PL reference (`FULFILLMENT-AU-...-DOK50366`, Coghlan Sydney). This is the foundation for PO/payment reconciliation. (AU is connected; UK hit an org-connection limit and will connect later — the code is ready.)
+- **Ask Claude loop fix (prod bug):** the tool-use loop capped at 6 hops and, when a multi-step investigation exceeded that, returned the last interstitial line ("Let me now pull AU availability…") with no answer — exactly the live symptom Ben reported. Now: up to **14 hops**, a nudge folded into the last tool-results turn, and a **final hop with tools removed** so the model must produce an answer instead of looping. Verified: "highest priority items to order for AU right now?" now returns a ranked table from `buy_plan_latest` with no stall. (On prod this also becomes a one-query answer once the v28.019/022 tools deploy.)
+
+No migration.
 ## v28.025 (Ben): Xero connection is OAuth Authorization Code + TWO organisations (UK + AU)
 
 **File: `server.mjs`.** Replaces the v28.024 client-credentials stub. Ben's app is a standard Web (Auth Code) app, and Dock & Bay runs two Xero orgs: **UK** (UK/US/EU/…) and **AU** (Australia, mirrors Fulfil, used for AU bills + payments).

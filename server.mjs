@@ -4235,6 +4235,19 @@ app.get('/api/supply/xero/status', async (req, res) => {
   res.set('Cache-Control', 'no-store').json(out);
 });
 app.post('/api/supply/xero/disconnect', async (req, res) => { try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Live read of Xero PURCHASE bills (ACCPAY) for a region — the foundation for PO/payment reconciliation.
+app.get('/api/supply/xero/bills', async (req, res) => {
+  try {
+    const region = xeroRegion(req.query.region);
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || '')) ? String(req.query.since) : null;
+    const where = encodeURIComponent('Type=="ACCPAY"' + (since ? ' AND Date>=DateTime(' + since.replace(/-/g, ',') + ')' : ''));
+    const j = await xeroFetch(region, '/api.xro/2.0/Invoices?where=' + where + '&order=Date%20DESC&page=1', { headers: { 'If-Modified-Since': '' } });
+    const inv = (j && j.Invoices) || [];
+    const xd = s => { const m = /\/Date\((\d+)/.exec(String(s || '')); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : (String(s || '').slice(0, 10) || null); };
+    const rows = inv.slice(0, Number(req.query.limit) || 50).map(v => ({ invoice_number: v.InvoiceNumber, reference: v.Reference || '', contact: v.Contact && v.Contact.Name, date: xd(v.DateString || v.Date), due_date: xd(v.DueDateString || v.DueDate), status: v.Status, currency: v.CurrencyCode, total: v.Total, amount_due: v.AmountDue, amount_paid: v.AmountPaid, xero_id: v.InvoiceID }));
+    res.set('Cache-Control', 'no-store').json({ region, org: (await xeroTenant(region)).name, count: rows.length, bills: rows });
+  } catch (e) { res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
 
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
@@ -17149,19 +17162,23 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     const _aiHeaders = { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
     if (process.env.ANTHROPIC_WORKSPACE_ID) _aiHeaders['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;
     let reply = '', toolsUsed = [];
-    for (let hop = 0; hop < 6; hop++) {
-      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, tools: AI_TOOLS, messages }) });
+    const AI_MAX_HOPS = 14;
+    for (let hop = 0; hop < AI_MAX_HOPS; hop++) {
+      const lastHop = hop === AI_MAX_HOPS - 1;   // final hop: drop tools so the model MUST give an answer instead of looping
+      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify(Object.assign({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }, lastHop ? {} : { tools: AI_TOOLS })) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
         if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';
         return res.status(502).json({ error: msg, title }); }
       const content = j.content || [];
-      reply = content.filter(x => x.type === 'text').map(x => x.text).join('\n').trim();
+      const text = content.filter(x => x.type === 'text').map(x => x.text).join('\n').trim();
+      if (text) reply = text;                                        // keep the latest real text (don't let a bare tool_use turn blank it)
       const toolUses = content.filter(x => x.type === 'tool_use');
-      if (j.stop_reason !== 'tool_use' || !toolUses.length) break;   // final answer
+      if (lastHop || j.stop_reason !== 'tool_use' || !toolUses.length) break;   // final answer, natural stop, or forced-answer hop
       messages.push({ role: 'assistant', content });                 // the assistant's tool_use turn
       const results = [];
       for (const tu of toolUses) { toolsUsed.push(tu.name); const data = await aiRunTool(tu.name, tu.input || {}); results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(data).slice(0, 60000) }); }
+      if (hop === AI_MAX_HOPS - 2) results.push({ type: 'text', text: 'That is enough tool use. Give your best final answer now from what you have gathered; do not call any more tools.' });   // nudge folded into the tool-results turn before the final (no-tools) hop
       messages.push({ role: 'user', content: results });             // feed the tool results back
     }
     if (!reply) reply = '(no reply)';
