@@ -534,6 +534,8 @@
 #supply-root .lnk-btn{background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;font-family:inherit;text-decoration:underline;padding:0}#supply-root .lnk-btn:hover{color:var(--neg)}
 #supply-root .ship-pick{background:none;border:none;color:var(--blue);cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap}#supply-root .ship-pick:hover{text-decoration:underline}
 #supply-root .ship-open{background:none;border:none;color:var(--blue);cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap;text-decoration:underline;font-weight:600}#supply-root .ship-open:hover{color:var(--neg)}
+/* v28.065: PO-grid STATUS dropdown was dominating — smaller font/padding, fit-to-content width */
+#supply-root .po-status-sel{font-size:10px;padding:1px 4px;font-weight:700;width:auto;min-width:0;max-width:120px;height:auto}
 #supply-root .dep-pick{background:none;border:none;color:var(--blue);cursor:pointer;font:inherit;font-size:11px;padding:1px 4px;white-space:nowrap;border-radius:3px}#supply-root .dep-pick:hover{text-decoration:underline}
 #supply-root .cell-pick{background:none;border:1px solid transparent;color:var(--ink);cursor:pointer;font:inherit;font-size:11px;padding:2px 5px;white-space:nowrap;border-radius:4px;text-align:left;max-width:150px;overflow:hidden;text-overflow:ellipsis}#supply-root .cell-pick:hover{border-color:var(--line);background:var(--hover)}
 #supply-root .dep-pick.needdep{background:var(--neg-bg);color:var(--neg);font-weight:600;text-decoration:none}
@@ -1218,7 +1220,7 @@
     'SHIPPING':['#50C878','#0f3d22'],'DELIVERED':['#2E8B57','#ffffff'],'COMPLETE':['#305CDE','#ffffff']};
   function statusSel(ep,val){ var opts=PO_STATUSES.slice(); if(val&&opts.indexOf(val)<0)opts.unshift(val);
     var bg=PO_STATUS_BG[String(val||'').toUpperCase()]||STBG[statusBg(val)]||STBG['bg-blue'];
-    return '<select class="fci" style="background:'+bg[0]+';color:'+bg[1]+';border-color:'+bg[0]+'" data-ep="'+esc(ep)+'" data-field="status">'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
+    return '<select class="fci po-status-sel" style="background:'+bg[0]+';color:'+bg[1]+';border-color:'+bg[0]+'" data-ep="'+esc(ep)+'" data-field="status">'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
   // needed = supplier terms require a start deposit; empty + needed → light red; not needed → "no deposit" default
   var PO_COUNTRIES=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct to Client']];
   // (Removed dead depSel + clabel — unused. v25.652)
@@ -3437,7 +3439,7 @@
         ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>'))
       +(_shipBadges?'<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+_shipBadges+'</div>':'')
-      +((r.shipment&&!isMfg)?'<span class="hz-isship" data-ref="'+esc(r.shipment)+'" style="display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle"></span>':'');   // v27.885: Fulfil IS recommendations (painted after a batched lookup). NB distinct class from the ERP .po-fulfil[data-po] cell.
+      +((r.shipment&&!isMfg)?'<span class="hz-isship" data-ref="'+esc(r.shipment)+'" style="display:flex;gap:3px;margin-top:2px;flex-wrap:wrap;align-items:center"></span>':'');   // v27.885: Fulfil IS recommendations (painted after a batched lookup). v28.065: always on its OWN row UNDER the shipment name (was inline-right, wrapped unpredictably). NB distinct class from the ERP .po-fulfil[data-po] cell.
     // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab
     // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
@@ -4907,10 +4909,13 @@
           return '<div style="font-size:12px;padding:3px 0;'+((n.author_kind==='supplier'&&!n.read)?'font-weight:600':'')+'"><span class="mut tiny">'+esc(who)+' · '+esc(n.created_at||'')+'</span><br>'+esc(body)+'</div>'; }).join('')
         +'</div>'; }
     if(!total && !notes.length) return '';
-    var head=total?('<div style="font-weight:700;font-size:12px;margin-bottom:6px">⚠ '+total+' open action'+(total>1?'s':'')+'</div>'
-        +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">'+chips+'</div>'
-        +'<div>'+lines+'</div>'):'';
-    return '<div class="po-actions-banner" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-left:3px solid '+(total?'var(--neg)':'var(--blue)')+';border-radius:8px;background:var(--hover)">'+head+msg+'</div>'; }
+    // Collapsible (default collapsed, Ben) — a compact count line that expands on click; CSP-safe <details>, no extra JS.
+    var sumBits=[]; if(total)sumBits.push('⚠ '+total+' open action'+(total>1?'s':''));
+    if(notes.length)sumBits.push('💬 '+notes.length+' message'+(notes.length>1?'s':'')+(unread?' <span class="ex-badge">'+unread+' unread</span>':''));
+    var body=(total?('<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px">'+chips+'</div><div>'+lines+'</div>'):'')+msg;
+    return '<details class="po-actions-banner" style="margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);border-left:3px solid '+(total?'var(--neg)':'var(--blue)')+';border-radius:8px;background:var(--hover)">'
+      +'<summary style="cursor:pointer;font-weight:700;font-size:12px;list-style:revert">'+sumBits.join(' <span class="mut">·</span> ')+'</summary>'
+      +body+'</details>'; }
   function poDetailHTML(po,d,i){
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
