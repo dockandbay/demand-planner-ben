@@ -303,6 +303,13 @@
    JS (bindPoScrollPin): a passive scroll listener translateX()es it by the grid's scrollLeft. CSS sticky can't
    do it — the colspan cell fills the full table width, so sticky has no containing-block slack to slide in. */
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
+/* PO ▸ Open actions & messages banner (v28.063) — chips jump to the sub-tab, lines list the individual actions */
+#supply-root .poact-chip{appearance:none;font-family:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card,#fff);color:var(--ink);border-radius:999px;padding:2px 10px;font-size:12px;line-height:1.6;white-space:nowrap}
+#supply-root .poact-chip:hover{border-color:var(--blue);color:var(--blue)}
+#supply-root .poact-chip b{color:var(--neg)}
+#supply-root .poact-line{appearance:none;font-family:inherit;cursor:pointer;text-align:left;border:none;background:none;color:var(--blue-ink);font-size:12px;padding:1px 0;display:block}
+#supply-root .poact-line:hover{text-decoration:underline}
+#supply-root .poact-line:before{content:"• ";color:var(--neg)}
 /* PRODUCT module lives under #product-root (not #supply-root) — mirror the red notification badge so grid-row + timeline-tab counts render as a badge, not a bare "1" */
 #product-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #client-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
@@ -1886,6 +1893,29 @@
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); el._loaded=0; loadPoLinks(el,false); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
   }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
+  // Richer Flexport shipment detail (from the Flexport API import, v28.063): MBL/HAWB, containers, planned→actual
+  // dates, transit days, quoted/freight cost. Rendered inside the SHIPMENTS tab under the Flexport reference link.
+  function flexTrackingBlock(d,ref){
+    var arr=(d&&d.flexport)||[]; if(!arr.length)return '';
+    var fx=(ref&&arr.filter(function(x){return x.flex_id===ref;})[0])||arr[0]; if(!fx)return '';
+    function frow(l,v){ if(v==null||v===''||v==='<span class="mut">—</span>')return ''; return '<div style="display:flex;gap:8px;font-size:12px;padding:2px 0"><div style="min-width:130px;color:var(--muted)">'+l+'</div><div style="font-weight:600">'+v+'</div></div>'; }
+    function dpair(est,act){ var e=est?esc(fd(est)):'', a=act?esc(fd(act)):''; if(a&&e&&a!==e)return a+' <span class="mut tiny">(est '+e+')</span>'; if(a)return a+' <span class="mut tiny">actual</span>'; if(e)return e+' <span class="mut tiny">est</span>'; return ''; }
+    function money(v){ var n=Number(v); return (v!=null&&isFinite(n)&&n>0)?('$'+n.toLocaleString(undefined,{maximumFractionDigits:0})):''; }
+    var head=[(fx.mode||'').toUpperCase(),(fx.status||'').replace(/_/g,' '),(fx.incoterm||''),(fx.freight_type||'').replace(/_/g,' ')].filter(Boolean).join(' · ');
+    var transit=''; if(fx.planned_transit_time!=null)transit=fx.planned_transit_time+'d planned'; if(fx.actual_transit_time!=null)transit+=(transit?' · ':'')+fx.actual_transit_time+'d actual';
+    var freight=money(fx.total_freight_cost), quoted=money(fx.total_quoted_amount);
+    var cost=freight?(freight+' <span class="mut tiny">freight</span>'):(quoted?(quoted+' <span class="mut tiny">quoted</span>'):'');
+    var body=frow('Status',head?esc(head):'')
+      +frow((fx.mode==='air'?'HAWB / MAWB':'Master B/L'),fx.mbl_number?esc(fx.mbl_number):'')
+      +frow('Containers',fx.container_numbers?esc(fx.container_numbers):'')
+      +frow('Departure',dpair(fx.est_departure||fx.departure,fx.act_departure))
+      +frow('Arrival',dpair(fx.est_arrival||fx.arrival,fx.act_arrival))
+      +frow('Transit',transit?esc(transit):'')
+      +frow('Shipment cost',cost);
+    if(!body)return '';
+    return '<div style="margin:6px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--hover)">'
+      +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">🚢 Flexport tracking <span class="mut tiny">— live from the Flexport API</span></div>'
+      +body+'</div>'; }
   function poShipPanel(po,d){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var today=new Date().toISOString().slice(0,10);   // used by the pre-shipment-doc overdue checks below
     var isCogh=/coghlans/i.test(r.branch||'');   // ASN pallet labels apply to AU Coghlans only
@@ -1963,6 +1993,7 @@
           : txtIn(ep,'branch_delivery_notes',r.branch_delivery_notes,440,true))
       +(PO_ACTCOND.preship(r)?row('Pre-shipment docs',actMark(po,'preship')):'')
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
+      +flexTrackingBlock(d,r.flex_id||r.flexport_reference)
       +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:var(--neg);font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
       +(isFbaAwd?docBlock('carton_barcode','Carton barcodes <span class="mut tiny">(upload — supplier downloads on the portal)</span>')+docBlock('pallet_barcode','Pallet barcodes <span class="mut tiny">(upload)</span>'):'')
       +(isEU?docBlock('idn_pallet_label','IDN pallet labels <span class="mut tiny">(upload — supplier downloads on the portal)</span>'):'')
@@ -4766,6 +4797,8 @@
       var pd=document.getElementById('podet-'+i);
       if(pt==='masterdata'){ root.querySelectorAll('.potab-panel[data-pt="masterdata"] .po-links-ctx').forEach(function(el){ loadPoLinks(el,false); }); }   // Linked records: lazy-load on first open (live Xero lookup)
       if(pd && pd.dataset.calcStale==='1' && (pt==='pay'||pt==='landed')){ pd.dataset.calcStale=''; poRefetchPanel(po,i); } }; });   // deep-link the open sub-tab into the URL
+    // Open-actions banner: a chip / line jumps to its sub-tab (clicks the matching .potab).
+    if(root) root.querySelectorAll('.poact-chip,.poact-line').forEach(function(b){ b.onclick=function(){ var t=root.querySelector('.potab[data-pt="'+b.dataset.pt+'"]'); if(t)t.click(); }; });
     setupMobSubnav(root); bindDatePickers(); }
   // PO ▸ DOCUMENTS tab: every file held for this PO (all categories) — list + download + delete + upload.
   function docsPanel(po,d){ var docs=(d&&d.all_docs)||[];
@@ -4814,6 +4847,31 @@
     if(!confirm('Remove '+r.dataset.po+' from '+r.dataset.mp+'? It converts back to a normal PO and returns to the grid; the master re-sums its lines.'))return;
     fetch('/api/supply/master-po/'+encodeURIComponent(r.dataset.mp)+'/remove-child',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:r.dataset.po})}).then(function(x){return x.json();}).then(function(res){ if(res.error){alert(res.error);return;}
       cache['purchase-orders']=null; try{ if(window.__poPanelRefresh)window.__poPanelRefresh(r.dataset.mp); }catch(_){} }); }); }
+  // PO ▸ "Open actions & messages" banner (v28.063, Ben) — at the top of every PO detail: the open actions grouped
+  // by sub-tab (each chip / line jumps to its tab) + the most recent supplier/internal messages. Works with the fast
+  // (grid-only) detail too; the message bodies fill in once the full po-detail loads and the panel re-renders.
+  function poOpenActionsPanel(po,d){
+    var r=poBy[po]||{}; var ex=poExceptions(r,d);
+    var cats=[['pay','Payments','pay','landed'],['dates','Dates','dates'],['oplan','Order plan','oplan'],['shipments','Shipments','ship'],['client','Client/FBA','client'],['masterdata','Master data','master']];
+    var chips='', lines='', total=0;
+    cats.forEach(function(c){ var arr=(ex[c[2]]||[]).concat(c[3]?(ex[c[3]]||[]):[]); if(!arr.length)return; total+=arr.length;
+      chips+='<button type="button" class="poact-chip" data-pt="'+c[0]+'" title="jump to '+esc(c[1])+'">'+esc(c[1])+' <b>'+arr.length+'</b></button>';
+      arr.forEach(function(t){ lines+='<button type="button" class="poact-line" data-pt="'+c[0]+'">'+esc(t)+'</button>'; }); });
+    var notes=(d&&d.notes)||[];
+    var unread=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
+    var recent=notes.slice().reverse().slice(0,2);
+    var msg='';
+    if(notes.length){
+      msg='<div style="margin-top:'+(total?'10px':'0')+'"><div style="font-weight:700;font-size:12px;margin-bottom:4px">💬 Messages'+(unread?' <span class="ex-badge">'+unread+' unread</span>':'')+' <button type="button" class="poact-chip" data-pt="timeline">open timeline →</button></div>'
+        +recent.map(function(n){ var who=n.supplier_name||shortUser(n.author_email||'')||(n.author_kind==='supplier'?'supplier':'internal');
+          var body=String(n.body||'').replace(/\s+/g,' ').trim(); if(body.length>140)body=body.slice(0,140)+'…';
+          return '<div style="font-size:12px;padding:3px 0;'+((n.author_kind==='supplier'&&!n.read)?'font-weight:600':'')+'"><span class="mut tiny">'+esc(who)+' · '+esc(n.created_at||'')+'</span><br>'+esc(body)+'</div>'; }).join('')
+        +'</div>'; }
+    if(!total && !notes.length) return '';
+    var head=total?('<div style="font-weight:700;font-size:12px;margin-bottom:6px">⚠ '+total+' open action'+(total>1?'s':'')+'</div>'
+        +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">'+chips+'</div>'
+        +'<div>'+lines+'</div>'):'';
+    return '<div class="po-actions-banner" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-left:3px solid '+(total?'var(--neg)':'var(--blue)')+';border-radius:8px;background:var(--hover)">'+head+msg+'</div>'; }
   function poDetailHTML(po,d,i){
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
@@ -4835,7 +4893,7 @@
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')
       +'</div>'+((d&&d.__fast)?'<div class="po-fastbar" role="progressbar" aria-label="loading full detail" title="loading full detail…"></div>':'');   // v27.543: progress shimmer UNDER the menu, not inside it (Ben)
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-    return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
+    return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+poOpenActionsPanel(po,d)+bar+panels+'</div>'; }
 
   // ---- ORDER PLAN (side-by-side: SKU rows × PO columns; status/country pills, production default) ----
   // Minimal client-side XLSX writer (OOXML zipped with STORE + CRC32 — CSP-safe, no library). grid = array of rows.

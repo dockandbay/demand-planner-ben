@@ -15638,13 +15638,19 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                   FROM planner.payment_transactions
                   WHERE po_completion=$1 OR po_balance_1=$1 OR po_balance_2=$1 OR po_balance_3=$1
                   ORDER BY payment_date`, [po]),
-      pool.query(`SELECT flex_id,mode,status_description status,
+      pool.query(`SELECT flex_id,mode,status_description status,incoterm,freight_type,mbl_number,container_numbers,
+                    total_freight_cost,total_quoted_amount,estimated_shipment_cost,planned_transit_time,actual_transit_time,
                     to_char(departure_date,'YYYY-MM-DD') departure,
                     to_char(landing_date,'YYYY-MM-DD') landing,
-                    to_char(arrival_date,'YYYY-MM-DD') arrival,container_numbers,total_freight_cost
+                    to_char(arrival_date,'YYYY-MM-DD') arrival,
+                    to_char(origin_estimated_departure,'YYYY-MM-DD') est_departure,
+                    to_char(origin_actual_departure,'YYYY-MM-DD') act_departure,
+                    to_char(dest_estimated_arrival,'YYYY-MM-DD') est_arrival,
+                    to_char(dest_actual_arrival,'YYYY-MM-DD') act_arrival
                   FROM planner.flexport_shipments_effective
                   WHERE shipment_name=$1
-                     OR shipment_name=(SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1)`, [po]),
+                     OR shipment_name=(SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1)
+                     OR flex_id=(SELECT nullif(flexport_reference,'') FROM planner.purchase_orders WHERE po=$1)`, [po]),
       // supplier-portal: latest submitted invoice value (+ id, status, doc) and all uploaded invoice docs
       pool.query(`SELECT id, value, status, submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 1`, [po]).catch(() => ({ rows: [] })),
