@@ -1114,7 +1114,7 @@ async function getDataVals() {
 }
 // Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
 // background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
-function invalidateDataCache() { _dataCache = null; refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
+function invalidateDataCache() { _dataCache = null; try { shellMemoDrop(); } catch (_) {} refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
 (async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
@@ -1637,15 +1637,54 @@ async function buildCountries() {
   try { return (await pool.query(`SELECT code,label,sort,active FROM planner.countries ORDER BY sort,code`)).rows; }
   catch (e) { return []; }
 }
+// v28.081 (Ben, perf audit): memo for the shell's user-independent "fresh" builders. Before, every GET / re-ran the 8
+// builders, the 7 allSettled ones, ~12 app_settings reads, a products scan and permsFor in series — 7.1s TTFB measured.
+// Now one wave (parallel) feeds a 60s stale-while-revalidate memo. "An edit shows on the next load" is kept: any
+// successful non-GET /api/* request drops the memo (middleware below), as do invalidateDataCache / invalidateSupplyCaches,
+// so the load right after an edit rebuilds (blocks once, ~1.5s) and every other load is served from memory.
+const SHELL_MEMO_MS = 60 * 1000;
+let _shellMemo = { v: null, at: 0, inflight: null };
+function shellMemoDrop() { _shellMemo = { v: null, at: 0, inflight: null }; }
+async function _shellFreshBuild(asKeys) {
+  const fresh7 = Promise.allSettled([buildPriceChanges(), buildChinaStock(), buildZalStock(), buildZalSkus(), buildChannels(), buildCountries(), buildComplexRules()]);
+  const eight = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar(), buildStockoutHistory(), buildTierRecommendations(),
+    pool.query(`SELECT key, value FROM planner.app_settings WHERE key = ANY($1)`, [asKeys]).then(r => r.rows).catch(() => []),
+    pool.query(`SELECT subcategory, uk_rt, eu_rt, au_rt, us_rt, ca_rt FROM planner.products WHERE coalesce(subcategory,'')<>''`).then(r => r.rows).catch(() => null)]);
+  return { eight, R: await fresh7 };
+}
+async function shellFresh(asKeys) {
+  const m = _shellMemo;
+  if (m.v && Date.now() - m.at < SHELL_MEMO_MS) return m.v;
+  if (!m.inflight) m.inflight = _shellFreshBuild(asKeys).then((v) => { if (_shellMemo === m) { m.v = v; m.at = Date.now(); } m.inflight = null; return v; }).catch((e) => { m.inflight = null; throw e; });
+  if (m.v) { m.inflight.catch(() => {}); return m.v; }   // stale → serve now, rebuild behind
+  return m.inflight;                                     // cold (or just dropped by a write) → build once
+}
+app.use((req, res, next) => { if (req.method !== 'GET' && req.method !== 'HEAD' && String(req.path || '').startsWith('/api/')) res.on('finish', () => { if (res.statusCode < 400) shellMemoDrop(); }); next(); });
 app.get('/', async (req, res) => {
   try {
-    const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
+    // v28.081 (Ben, perf audit): SKU-data lazy-load is now the DEFAULT (opt out with ?lazysku=0). Inline SKU_RAW/FC_OUTPUTS
+    // (~3.4 MB) held the load event at ~15s (DOM interactive 3.5s → load 15s, measured); lazy: HTML 9.0 → 5.6 MB, load ~4s,
+    // the client fetches /api/demand/sku-data (180 ms) right after first paint. Same data, same client path as before.
+    const _lazy = !(req.query && (req.query.lazysku === '0' || req.query.lazysku === 'false'));
     // Serve the cached build; refresh in the background once past TTL (stale-while-revalidate). Only the very
     // first load (or the load right after a save-invalidation) waits on a synchronous build.
+    const _T0 = Date.now(), _tm = {}; const _mark = (k) => { _tm[k] = Date.now() - _T0; };   // v28.081 perf: stage timings (logged in DEV / HZ_PROFILE=1)
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
+    _mark('data');
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     // Fetched fresh (not in the data cache); independent of each other, so run concurrently.
-    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR, INV_STOCKOUTS, TIER_RECS] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar(), buildStockoutHistory(), buildTierRecommendations()]);   // …; LEADTIME_VAR lead-time variability (weeks); INV_STOCKOUTS {sku:{MKT:[months]}} OOS from snapshots; TIER_RECS ABC re-tier recommendations (Exceptions ▸ Recommendations)
+    // v28.081 perf audit: the ~11 per-key app_settings reads below used to run one after another AFTER these builders
+    // (12 sequential round trips), plus the products retail scan and permsFor. All three are independent of the builders,
+    // so they join this same wave: one `key = ANY($1)` read feeds `_AS[key]` (same row shape the per-key reads returned).
+    const _AS_KEYS = ['asp_adjust', 'smooth_disregard_disc', 'smooth_auto', 'smooth_locks', 'buy_logic', 'ssm_params', 'ssm_enabled', 'contrib_model', 'runoff_hidden_subs', 'fx_rates', 'bis_take_rate'];
+    // The whole user-independent "fresh" wave (8 builders + the 7 allSettled ones + settings + products scan) is memoised
+    // by shellFresh() (60s SWR, dropped by any successful /api write and by the cache invalidations), so a plain reload
+    // no longer re-runs ~20 queries (measured 1.3–3.0s of the TTFB). Only permsFor stays per user.
+    const [_sf, _perms] = await Promise.all([shellFresh(_AS_KEYS), permsFor(req).catch(() => null)]);
+    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR, INV_STOCKOUTS, TIER_RECS, _asRows, _prRows] = _sf.eight;   // …; LEADTIME_VAR lead-time variability (weeks); INV_STOCKOUTS {sku:{MKT:[months]}} OOS from snapshots; TIER_RECS ABC re-tier recommendations (Exceptions ▸ Recommendations)
+    const _fresh7 = _sf.R;
+    const _AS = {}; (_asRows || []).forEach(r => { _AS[r.key] = r; });
+    _mark('builders');
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -1677,43 +1716,44 @@ app.get('/', async (req, res) => {
     // replaced First Buy). Run concurrently, then inject in order. allSettled preserves the original semantics:
     // inject on success (even a null value), leave the baked default on throw.
     {
-      const _R = await Promise.allSettled([buildPriceChanges(), buildChinaStock(), buildZalStock(), buildZalSkus(), buildChannels(), buildCountries(), buildComplexRules()]);
+      const _R = _fresh7;   // settled results from the memoised shell wave (v28.081)
       const _inj = (i, name) => { if (_R[i].status === 'fulfilled') html = replaceGlobal(html, name, JSON.stringify(_R[i].value)); };
       _inj(0, 'PRICE_CHANGES'); _inj(1, 'CHINA_STOCK'); _inj(2, 'ZAL_STOCK'); _inj(3, 'ZAL_SKUS'); _inj(4, 'CHANNELS'); _inj(5, 'COUNTRIES'); _inj(6, 'COMPLEX_RULES');
     }
     // v27.577 DEMAND ▸ Config ▸ More settings: per country|channel ASP reduction % + discontinued-items ASP discount % (app_settings.asp_adjust, JSON {"UK|DTC":{"red":9,"disc":10}}).
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='asp_adjust'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'ASP_ADJ', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { html = replaceGlobal(html, 'ASP_ADJ', '{}'); }
+    _mark('fresh7');
+    try { const r = _AS['asp_adjust']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'ASP_ADJ', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { html = replaceGlobal(html, 'ASP_ADJ', '{}'); }
     // DEMAND ▸ smoothing "disregard discontinued" flags per co|ch|subcat (app_settings.smooth_disregard_disc, JSON). Fresh so a toggle shows next load.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_disregard_disc'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['smooth_disregard_disc']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // DEMAND ▸ auto-smooth config (app_settings.smooth_auto = {flags:{'CO|CH|subcat':true}, threshold, mode}). One-click sweep smooths flagged subcats over the threshold.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_auto'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
+    try { const r = _AS['smooth_auto']; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
     // DEMAND ▸ do-not-smooth locks (app_settings.smooth_locks = {'sku|CO|CH|YYYY_MM':true}). SKU-cell forecasts smoothing must leave fixed. Fresh so a toggle shows next load.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_locks'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_LOCKS', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['smooth_locks']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_LOCKS', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // BUY ▸ buy-plan logic switch (app_settings.buy_logic): 'cover_weeks' (default, today's flat cover) | 'ssm' (service-level safety stock). CONFIG ▸ Admin ▸ General.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='buy_logic'`)).rows[0]; const v = (r && r.value === 'ssm') ? 'ssm' : 'cover_weeks'; html = html.replace("var BUY_LOGIC='cover_weeks';", "var BUY_LOGIC='" + v + "';"); } catch (e) { /* default cover_weeks — BUY_LOGIC is a scalar so replaceGlobal (object/array only) can't be used */ }
+    try { const r = _AS['buy_logic']; const v = (r && r.value === 'ssm') ? 'ssm' : 'cover_weeks'; html = html.replace("var BUY_LOGIC='cover_weeks';", "var BUY_LOGIC='" + v + "';"); } catch (e) { /* default cover_weeks — BUY_LOGIC is a scalar so replaceGlobal (object/array only) can't be used */ }
     // SSM tunable parameters (app_settings.ssm_params JSON) — service level by tier, seasonal floor, review cycle, FBA cover cap. Editable at CONFIG ▸ Demand ▸ Buy plan logic.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_params'`)).rows[0]; let o = {}; try { o = r && r.value ? JSON.parse(r.value) : {}; } catch (_) { o = {}; } const sl = o.sl || {}; const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
+    try { const r = _AS['ssm_params']; let o = {}; try { o = r && r.value ? JSON.parse(r.value) : {}; } catch (_) { o = {}; } const sl = o.sl || {}; const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
       const one = (x) => { x = x || {}; const s = x.sl || {}; const e = { sl: { A: num(s.A, 99), B: num(s.B, 97), C: num(s.C, 93), def: num(s.def, 90) }, seasonalFloor: num(x.seasonalFloor, 97), cycleWk: num(x.cycleWk, 4) }; if (x.fbaCapWk != null) e.fbaCapWk = num(x.fbaCapWk, 8); if (x.seasonMaxWk != null) e.seasonMaxWk = num(x.seasonMaxWk, 30); return e; };
       const byMkt = {}; if (o.byMkt && typeof o.byMkt === 'object') for (const k of Object.keys(o.byMkt)) byMkt[k] = one(o.byMkt[k]);   // per market|pool overrides (all params)
       const m = { sl: { A: num(sl.A, 99), B: num(sl.B, 97), C: num(sl.C, 93), def: num(sl.def, 90) }, seasonalFloor: num(o.seasonalFloor, 97), cycleWk: num(o.cycleWk, 4), fbaCapWk: num(o.fbaCapWk, 8), seasonMaxWk: num(o.seasonMaxWk, 30), byMkt };
       html = replaceGlobal(html, 'SSM_PARAMS', JSON.stringify(m)); } catch (e) { /* defaults in the artefact */ }
     // SSM opt-in per market×pool (app_settings.ssm_enabled JSON {"CO|POOL":true}). Default {} = weeks-cover everywhere (byte-identical).
     // Back-compat: legacy global buy_logic='ssm' with no per-market map → treat as all markets/pools on.
-    try { const re = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_enabled'`)).rows[0]; let en = {}; try { en = re && re.value ? JSON.parse(re.value) : {}; } catch (_) { en = {}; }
+    try { const re = _AS['ssm_enabled']; let en = {}; try { en = re && re.value ? JSON.parse(re.value) : {}; } catch (_) { en = {}; }
       const clean = {}; for (const k of Object.keys(en)) if (en[k] === true) clean[k] = true;
-      if (!Object.keys(clean).length) { const bl = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='buy_logic'`)).rows[0]; if (bl && bl.value === 'ssm') { for (const co of ['UK', 'US', 'EU', 'AU']) { clean[co + '|3PL'] = true; clean[co + '|FBA'] = true; } clean['CA|FBA'] = true; } }
+      if (!Object.keys(clean).length) { const bl = _AS['buy_logic']; if (bl && bl.value === 'ssm') { for (const co of ['UK', 'US', 'EU', 'AU']) { clean[co + '|3PL'] = true; clean[co + '|FBA'] = true; } clean['CA|FBA'] = true; } }
       html = replaceGlobal(html, 'SSM_ENABLED', JSON.stringify(clean)); } catch (e) { /* default {} in the artefact */ }
     // CONFIG ▸ Demand ▸ Contribution model (app_settings.contrib_model, JSON keyed "CO|CH|subcat" with '*' wildcards).
     // Drives the Leader-mode smoothing tier mix (SETS feature P3b). Empty {} => tierMix falls back to CONTRIB_TARGETS/default.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='contrib_model'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'CONTRIB_MODEL', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['contrib_model']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'CONTRIB_MODEL', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // CONFIG ▸ Demand ▸ Discontinued sub-categories: which inactive subcats to HIDE TOTALLY (vs show as run-off).
     // app_settings.runoff_hidden_subs = JSON array of subcat names. Empty [] => all inactive subcats show as run-off.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='runoff_hidden_subs'`)).rows[0]; const a = (r && r.value) ? JSON.parse(r.value) : []; html = replaceGlobal(html, 'HIDE_TOTALLY_SUBS', JSON.stringify(Array.isArray(a) ? a : [])); } catch (e) { /* leave the [] default */ }
+    try { const r = _AS['runoff_hidden_subs']; const a = (r && r.value) ? JSON.parse(r.value) : []; html = replaceGlobal(html, 'HIDE_TOTALLY_SUBS', JSON.stringify(Array.isArray(a) ? a : [])); } catch (e) { /* leave the [] default */ }
     // DEMAND Set-targets £→units: average EX-TAX retail price per market × subcategory from planner.products.
     // Ben's formula: UK/EU ÷1.2 (VAT), AU ÷1.1 (GST), US/CA already ex-tax. Client applies the channel factor
     // (B2B ×0.5, DTC/FBA ×0.95) to get net £/unit, then units = £target ÷ net price.
     try {
-      const pr = (await pool.query(`SELECT subcategory, uk_rt, eu_rt, au_rt, us_rt, ca_rt FROM planner.products WHERE coalesce(subcategory,'')<>''`)).rows;
+      const pr = _prRows; if (!pr) throw new Error('products scan unavailable');   // fetched in the parallel wave above (v28.081)
       const DIV = { UK: 1.2, EU: 1.2, AU: 1.1, US: 1.0, CA: 1.0 }, COL = { UK: 'uk_rt', EU: 'eu_rt', AU: 'au_rt', US: 'us_rt', CA: 'ca_rt' };
       const acc = { UK: {}, US: {}, EU: {}, AU: {}, CA: {} };
       for (const p of pr) { const sc = p.subcategory; for (const mk of Object.keys(COL)) { const rt = Number(p[COL[mk]]); if (rt > 0) { const ex = rt / DIV[mk]; const a = acc[mk][sc] || (acc[mk][sc] = { s: 0, n: 0 }); a.s += ex; a.n++; } } }
@@ -1722,9 +1762,9 @@ app.get('/', async (req, res) => {
       html = replaceGlobal(html, 'SUBCAT_RT', JSON.stringify(SUBCAT_RT));
     } catch (e) { /* leave the {} default */ }
     // DEMAND multi-currency: blended GBP→local rates per FY (app_settings.fx_rates = {"<fyStart>":{USD,EUR,AUD}}). Local = GBP × rate.
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'FX_RATES', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['fx_rates']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'FX_RATES', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // SUG-0018 P2: Klaviyo BIS take-rate (% of waiting subscribers → suggested forecast uplift; app_settings.bis_take_rate, default 35).
-    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='bis_take_rate'`)).rows[0]; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; html = replaceGlobal(html, 'BIS_CFG', JSON.stringify({ take_rate: (isFinite(tr) && tr > 0 ? tr : 35) })); } catch (e) { /* leave the default */ }
+    try { const r = _AS['bis_take_rate']; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; html = replaceGlobal(html, 'BIS_CFG', JSON.stringify({ take_rate: (isFinite(tr) && tr > 0 ? tr : 35) })); } catch (e) { /* leave the default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
     // (FC_SEED already seeds IV from live FC_CURRENT.)
     html = replaceGlobal(html, 'SAVED_INPUTS', '{}');
@@ -1750,7 +1790,8 @@ app.get('/', async (req, res) => {
     const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
     // Per-user landing slug + hide #app until the router lands, so a plain load goes straight to the user's page
     // (default SUPPLY ▸ Purchase Orders) with no DEMAND→SUPPLY flash. inject.html reveals #app once routed.
-    let _land = 'supply/purchase-orders'; try { _land = (await permsFor(req)).landing_page || _land; } catch (_) {}
+    let _land = 'supply/purchase-orders'; try { _land = (_perms && _perms.landing_page) || _land; } catch (_) {}   // permsFor ran in the parallel wave (v28.081)
+    _mark('settings');
     // 3s failsafe reveal (belt-and-suspenders — the harness removes hz-hide-app once routed). The actual flash
     // prevention is HEAD_NOFLASH below: it must run in <head>, BEFORE the browser paints the static DEMAND filter
     // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
@@ -1774,6 +1815,8 @@ app.get('/', async (req, res) => {
     }
     // gzip the (large, live-data-injected) HTML over the wire — ~6.3MB → ~1MB. The JSON middleware only wraps
     // res.json, so the main page was going out uncompressed. Prod/Vercel may also compress at the edge; harmless.
+    _mark('inject');
+    if (DEV || process.env.HZ_PROFILE) console.log('[perf /] ' + JSON.stringify(_tm) + ' ms cumulative');
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').set('Vary', 'Accept-Encoding');
     if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
       zlib.gzip(html, (err, buf) => {
@@ -4859,10 +4902,14 @@ async function _computeXeroExceptions() {
 app.get('/api/supply/xero/exceptions', async (req, res) => {
   try {
     const fresh = String(req.query.refresh || '') === '1';
-    if (!fresh && _xeroExcCache.data && (Date.now() - _xeroExcCache.at) < 180000) return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, _xeroExcCache.data));
-    const data = await _computeXeroExceptions();
-    _xeroExcCache = { at: Date.now(), data };
-    res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data));
+    // v28.081: was a 3-min cache that BLOCKED on expiry (a 22s live Xero sweep on page load for a badge). Now SWR: within
+    // 15 min serve cached; past that serve the last sweep at once and re-sweep behind; ?refresh=1 (the Exceptions tab's
+    // "re-check" button) still forces a live sweep and waits for it.
+    if (fresh) { const data = await _computeXeroExceptions(); _xeroExcCache = { at: Date.now(), data }; swrDrop('xero:exc'); return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data)); }
+    const _seed = _xeroExcCache.data ? _xeroExcCache : null; _xeroExcCache = { at: 0, data: null };   // migrate the old cache slot into swr once
+    if (_seed) { const e = { v: _seed.data, at: _seed.at, inflight: null }; if (!_swr.has('xero:exc')) _swr.set('xero:exc', e); }
+    const data = await swrGet('xero:exc', 15 * 60 * 1000, _computeXeroExceptions);
+    res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, data));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Bulk RESOLVE ALL po_links — one Xero bill sweep per org (paginated) + local Fulfil/Flexport/DHL joins, so the whole
@@ -6038,6 +6085,22 @@ async function queryCapped(sql, params, _ms) {
 // lag up to that window is a cross-row effect of somebody else's edit (e.g. a shared deposit's remaining balance).
 // Cold (no build yet) still blocks once. TTL expiry keeps its request-driven SWR. No timers: request-driven only (Vercel).
 const SUPPLY_REBUILD_MIN_MS = Math.max(0, Number(process.env.SUPPLY_REBUILD_MIN_MS || 30000));
+// v28.081 (Ben, perf audit): tiny stale-while-revalidate memo for small, user-independent payloads that were computed live on
+// every call — the nav BADGE counts (dtc/mismatch 9s, bi/reallocations 7s, product/unread 2.8s, Xero exceptions 22s live Xero)
+// all fired during page load and held pooler slots while the grid was still loading. swrGet: fresh → return; stale → return
+// the last value at once and refresh behind (single-flight); cold → build once (block). swrStale(prefix) marks entries stale
+// (they still serve once, then refresh) — used by invalidateSupplyCaches for the 'sup:' keys. Request-driven only (Vercel-safe).
+const _swr = new Map();   // key -> { v, at, inflight }
+async function swrGet(key, ttlMs, builder) {
+  let e = _swr.get(key); if (!e) { e = { v: undefined, at: 0, inflight: null }; _swr.set(key, e); }
+  const hit = e.at > 0;
+  if (hit && Date.now() - e.at < ttlMs) return e.v;
+  if (!e.inflight) e.inflight = Promise.resolve().then(builder).then((v) => { e.v = v; e.at = Date.now(); e.inflight = null; return v; }).catch((err) => { e.inflight = null; throw err; });
+  if (hit) { e.inflight.catch(() => {}); return e.v; }   // stale → serve now, refresh behind
+  return e.inflight;                                       // cold → block once
+}
+function swrStale(prefix) { for (const [k, e] of _swr) if (!prefix || k.startsWith(prefix)) { if (e.at > 0) e.at = 1; } }
+function swrDrop(prefix) { for (const k of Array.from(_swr.keys())) if (!prefix || k.startsWith(prefix)) _swr.delete(k); }
 function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   let entry = null, inflight = null, lastStart = 0;
   function refresh(ep) {
@@ -6077,8 +6140,36 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
 // both a long-lived server and Vercel serverless (no background/self-fetch needed). Dropped by invalidateSupplyCaches
 // on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
 const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS, deposits: SUPPLY_CACHE_TTL_MS };   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
-const _sectionResp = {};        // section -> { v, at }
-const _sectionInflight = {};    // section -> bool (a recompute is running; others serve stale)
+const _sectionResp = {};        // section -> { v, at, epoch }
+const _sectionInflight = {};    // section -> Promise (a recompute is running; others serve stale or await it)
+// v28.081 (Ben, perf audit): the section cache used to BLOCK the first request after TTL expiry or after any edit (the
+// epoch bump dropped the entry), so the first person to open PAYMENTS / CASH FLOW / SHIPMENTS each cycle paid the full
+// rebuild (payments-report 3.7s, shipments 1.5s, cashflow 1.3s measured). Now:
+//  • TTL-stale + same epoch → serve the cached JSON at once and recompute in the background (stale-while-revalidate).
+//  • edit (epoch bump) → the entry is KEPT and a background recompute starts immediately from invalidateSupplyCaches,
+//    so by the time the user navigates it is usually done; a request that arrives mid-rebuild awaits it (never stale
+//    after an edit, same correctness as before, just a shorter wait).
+//  • long-lived server: the whitelisted sections are warmed once at boot (staggered) so the first user never builds.
+// The recompute drives the real route handler with a minimal req/res, so the cached output stays byte-identical.
+let supplySectionHandler = null;   // assigned where the route is defined (below)
+function _sectionRecompute(sec) {
+  if (_sectionInflight[sec] || !supplySectionHandler) return _sectionInflight[sec] || null;
+  const p = (async () => {
+    const ep = await currentSupplyEpoch();
+    const fakeReq = { _hzRecompute: true, params: { section: sec }, query: {}, headers: {}, get() { return ''; }, _parsedUrl: { search: '' } };
+    let out = null;
+    const fakeRes = { _s: 200, status(c) { this._s = c; return this; }, set() { return this; }, setHeader() { return this; }, type() { return this; },
+      json(v) { if (this._s < 400 && !(v && v.error)) { out = v; _sectionResp[sec] = { v, at: Date.now(), epoch: ep }; } return this; }, send() { return this; }, end() { return this; } };
+    await supplySectionHandler(fakeReq, fakeRes, () => {});
+    return out;
+  })().catch((e) => { console.warn('[section-cache] recompute ' + sec + ' failed: ' + (e && e.message || e)); return null; })
+    .finally(() => { if (_sectionInflight[sec] === p) delete _sectionInflight[sec]; });
+  _sectionInflight[sec] = p;
+  return p;
+}
+if (!process.env.VERCEL) {   // boot warm (long-lived server only — on Vercel a frozen container must never open a backend with no request in flight)
+  setTimeout(() => { Object.keys(SECTION_CACHE_TTL_MAP).forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 1500).unref?.()); }, 4000).unref?.();
+}
 // Supplier-portal bootstrap cache — per supplier-set + includeArchived. The portal is the one heavy PO-calc path
 // with no cache (POS_SQL_PORTAL live + 8 follow-on queries every load → ~8s on the sandbox pooler). Keyed, 10-min
 // TTL, single-flight; cleared by invalidateSupplyCaches (admin edits) and after any portal POST (the supplier's own
@@ -6106,10 +6197,16 @@ function portalBootstrapRun(key, builder, ep) {   // single-flight build → cac
   _portalInflight.set(key, p); return p;
 }
 function invalidateSupplyCaches() {
-  bumpSupplyEpoch();                                             // shared epoch → every OTHER instance rebuilds too (cross-instance)
+  const _epochBump = bumpSupplyEpoch();                          // shared epoch → every OTHER instance rebuilds too (cross-instance)
+  try { shellMemoDrop(); } catch (_) {}                          // v28.081: the shell's fresh-builder memo too
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
   _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
-  for (const k of Object.keys(_sectionResp)) delete _sectionResp[k];   // drop cached section responses too
+  // v28.081: cached section responses are no longer dropped (that made the next PAYMENTS / CASH FLOW open block on a full
+  // rebuild). They stay epoch-stale (never served after this edit) and rebuild NOW in the background, one after the epoch
+  // bump lands so the new entries carry the new epoch; a request that lands mid-rebuild awaits it.
+  const _secs = Object.keys(_sectionResp);
+  if (_secs.length) Promise.resolve(_epochBump).then(() => { _secs.forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 400).unref?.()); }).catch(() => {});
+  swrStale('sup:');                                                    // badge counts (dtc / reallocations / product unread): serve stale once, refresh behind
   portalCacheMarkStale();                                              // portal bootstraps: served stale once + revalidated by the page (v27.880), not dropped
 }
 
@@ -6218,19 +6315,27 @@ app.get('/api/supply/open-pos', async (_req, res) => {   // ③ Add-to-existing 
       ORDER BY prod_no DESC NULLS LAST, po`); res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/supply/:section', async (req, res, next) => {
+supplySectionHandler = async (req, res, next) => {
   if (req.params.section === 'po-delays') return next();   // handled by its own route below (has bespoke logic)
   const q = (sql) => pool.query(sql).then(r => r.rows);
   // Phase-2 section response-cache: serve fresh (or serve stale while one request refreshes); otherwise fall through
   // to the switch and capture whatever it returns. Only the param-free variant is eligible.
   const _sec = req.params.section;
-  if (SECTION_CACHE_TTL_MAP[_sec] && Object.keys(req.query || {}).length === 0) {
+  const _isFake = req._hzRecompute === true;   // driven by _sectionRecompute → always compute, never consult the cache
+  if (SECTION_CACHE_TTL_MAP[_sec] && Object.keys(req.query || {}).length === 0 && !_isFake) {
     const _ep = await currentSupplyEpoch();                        // epoch-gated: a cached response is only valid while the epoch is unchanged
     const _c = _sectionResp[_sec];
-    if (_c && _c.epoch === _ep && (Date.now() - _c.at < SECTION_CACHE_TTL_MAP[_sec] || _sectionInflight[_sec])) return res.json(_c.v);
-    _sectionInflight[_sec] = true;                                  // this request recomputes; concurrent ones serve stale above
-    const _origJson = res.json.bind(res);
-    res.json = (p) => { if (!(p && p.error)) _sectionResp[_sec] = { v: p, at: Date.now(), epoch: _ep }; _sectionInflight[_sec] = false; return _origJson(p); };
+    if (_c && _c.epoch === _ep) {                                   // fresh, or TTL-stale at the same epoch → serve now (SWR: recompute behind)
+      if (Date.now() - _c.at >= SECTION_CACHE_TTL_MAP[_sec]) _sectionRecompute(_sec);
+      return res.json(_c.v);
+    }
+    if (_sectionInflight[_sec]) {                                   // epoch moved on / cold, and a rebuild is already running → wait for it (no stale after an edit)
+      try { const v = await _sectionInflight[_sec]; if (v) return res.json(v); } catch (_) { /* fall through to a live compute */ }
+    }
+    const _origJson = res.json.bind(res);                           // cold → this request computes and captures; concurrent ones await the same in-flight promise
+    let _resolve; _sectionInflight[_sec] = new Promise((r) => { _resolve = r; });
+    res.json = (p) => { if (!(p && p.error)) _sectionResp[_sec] = { v: p, at: Date.now(), epoch: _ep }; delete _sectionInflight[_sec]; _resolve((p && p.error) ? null : p); return _origJson(p); };
+    res.on('close', () => { if (_sectionInflight[_sec]) { delete _sectionInflight[_sec]; _resolve(null); } });   // aborted before json() → release the waiters
   }
   try {
     switch (req.params.section) {
@@ -6290,28 +6395,29 @@ app.get('/api/supply/:section', async (req, res, next) => {
         // message source yet. Each item is tagged with its type + a per-source snooze key (supply_action_state 'tlnote|…').
         const _me = await permsFor(req);
         const _types = Array.isArray(_me.inbox_types) ? _me.inbox_types : INBOX_TYPES_ALL;
-        const _out = [];
+        const _out = [], _jobs = [];   // v28.081: the three sources run in parallel (were sequential, ~1.1s per poll)
         if (_types.includes('purchase_order')) {
-          (await q(`SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body, to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
+          _jobs.push(q(`SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body, to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
             FROM planner.supplier_notes sn LEFT JOIN planner.purchase_orders po ON po.po = sn.po
             LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|'||sn.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
-            WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system')) AND sn.read_at IS NULL AND s.action_key IS NULL`))
-            .forEach(r => _out.push({ id: 'po:' + r.id, rid: r.id, src: 'po', type: 'purchase_order', type_label: 'Purchase order', po: r.po, ref: r.po, supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|' + r.id, open: 'po' }));
+            WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system')) AND sn.read_at IS NULL AND s.action_key IS NULL`).then(rows => rows
+            .forEach(r => _out.push({ id: 'po:' + r.id, rid: r.id, src: 'po', type: 'purchase_order', type_label: 'Purchase order', po: r.po, ref: r.po, supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|' + r.id, open: 'po' }))));
         }
         if (_types.includes('samples')) {
-          (await q(`SELECT n.id, coalesce(sr.ref,'') ref, coalesce(sr.supplier_name,'') supplier_name, n.body, to_char(n.created_at,'YYYY-MM-DD HH24:MI') created_at
+          _jobs.push(q(`SELECT n.id, coalesce(sr.ref,'') ref, coalesce(sr.supplier_name,'') supplier_name, n.body, to_char(n.created_at,'YYYY-MM-DD HH24:MI') created_at
             FROM planner.sample_notes n LEFT JOIN planner.sample_requests sr ON sr.id = n.sample_id
             LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|smp:'||n.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
-            WHERE n.author_kind='supplier' AND n.read_at IS NULL AND s.action_key IS NULL`))
-            .forEach(r => _out.push({ id: 'smp:' + r.id, rid: r.id, src: 'smp', type: 'samples', type_label: 'Sample', ref: r.ref || ('sample ' + r.id), supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|smp:' + r.id, open: 'sample' }));
+            WHERE n.author_kind='supplier' AND n.read_at IS NULL AND s.action_key IS NULL`).then(rows => rows
+            .forEach(r => _out.push({ id: 'smp:' + r.id, rid: r.id, src: 'smp', type: 'samples', type_label: 'Sample', ref: r.ref || ('sample ' + r.id), supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|smp:' + r.id, open: 'sample' }))));
         }
         if (_types.includes('client')) {
-          (await q(`SELECT m.id, coalesce(ct.subject,'') subject, coalesce(m.sender,'') sender, ct.id thread_id, m.body, to_char(m.created_at,'YYYY-MM-DD HH24:MI') created_at
+          _jobs.push(q(`SELECT m.id, coalesce(ct.subject,'') subject, coalesce(m.sender,'') sender, ct.id thread_id, m.body, to_char(m.created_at,'YYYY-MM-DD HH24:MI') created_at
             FROM planner.client_messages m LEFT JOIN planner.client_threads ct ON ct.id = m.thread_id
             LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|cli:'||m.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
-            WHERE m.sender_kind='client' AND m.read_by_ops_at IS NULL AND s.action_key IS NULL`))
-            .forEach(r => _out.push({ id: 'cli:' + r.id, rid: r.id, src: 'cli', type: 'client', type_label: 'Client', ref: r.subject || ('thread ' + r.thread_id), supplier_name: r.sender, thread_id: r.thread_id, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|cli:' + r.id, open: 'client' }));
+            WHERE m.sender_kind='client' AND m.read_by_ops_at IS NULL AND s.action_key IS NULL`).then(rows => rows
+            .forEach(r => _out.push({ id: 'cli:' + r.id, rid: r.id, src: 'cli', type: 'client', type_label: 'Client', ref: r.subject || ('thread ' + r.thread_id), supplier_name: r.sender, thread_id: r.thread_id, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|cli:' + r.id, open: 'client' }))));
         }
+        await Promise.all(_jobs);
         _out.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));   // created_at is 'YYYY-MM-DD HH24:MI' → lexical = chronological
         return res.json(_out.slice(0, 100));
       }
@@ -7173,7 +7279,8 @@ app.get('/api/supply/:section', async (req, res, next) => {
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }
   } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
-});
+};
+app.get('/api/supply/:section', supplySectionHandler);
 
 // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
 // (Ben's sandbox). Whitelisted fields only, parameterised. Production writes stay Diviyaj's/gated.
@@ -8175,9 +8282,10 @@ app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
 const _prodCatCode = (name, code) => { code = (code || '').trim(); if (code) return code.toUpperCase();
   return String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'PROD'; };
 app.get('/api/product/unread', async (_req, res) => {   // total unread supplier notes across all product-dev items → PRODUCT top-menu badge
-  try { const r = await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes n
-    WHERE n.author_kind='supplier' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=n.po)`);
-    res.json({ count: r.rows[0].n }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await swrGet('sup:product-unread', 60 * 1000, async () => {   // v28.081: 60s SWR memo (polled every 4 min per tab; 2.8s measured live)
+    const r = await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes n
+      WHERE n.author_kind='supplier' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=n.po)`);
+    return { count: r.rows[0].n }; })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PRODUCT ▸ STAGE state machine (v27.395). One stored field on product_dev_items drives everything;
 // APPROVAL (.status, read by PIM/Buy Plan/POs) derives from the terminal stage.
@@ -9305,7 +9413,7 @@ app.post('/api/supply/sample/:id/received', async (req, res) => {
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
-  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
+  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]); swrDrop('sup:product-unread'); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/escalate', async (req, res) => {
@@ -13186,12 +13294,18 @@ function _dtcParseRefs(s) { return String(s == null ? '' : s).split(/\s*[,;\/]\s
 // SO SKU/qty vs grouped PO SKU/qty. Issue 1 = a group with SOs but no PO; Issue 2 = grouped SKU/qty mismatch.
 app.get('/api/supply/dtc/mismatch', async (req, res) => {
   const countOnly = !!(req.query && req.query.count);
-  try {
+  // v28.081: the badge (?count=1) is served from a 10-min SWR memo (was a full 9s reconciliation on every page load); the
+  // full report still runs live. Any supply edit marks the memo stale (invalidateSupplyCaches → swrStale('sup:')).
+  if (countOnly) { try { return res.json(await swrGet('sup:dtc-count', 10 * 60 * 1000, () => _dtcMismatchCompute(true))); } catch (e) { log500(e); return res.status(500).json({ error: e.message }); } }
+  try { return res.json(await _dtcMismatchCompute(false)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+async function _dtcMismatchCompute(countOnly) {
+  {
     const sos = (await pool.query(`SELECT s.cin7_id, s.reference, s.customer_order_no, s.branch_name, s.company, to_char(s.created_date,'DD-Mon-YY') created_date,
         coalesce(r.note,'') note, coalesce(r.accepted,false) accepted, coalesce(r.accepted_by,'') accepted_by
       FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id
       WHERE NOT s.is_void AND s.dispatched_date IS NULL ORDER BY s.created_date DESC NULLS LAST`)).rows;
-    if (!sos.length) return res.json({ groups: [], unmapped_pos: [], counts: { issues: 0, accepted: 0, ok: 0, unmapped_pos: 0 } });
+    if (!sos.length) return { groups: [], unmapped_pos: [], counts: { issues: 0, accepted: 0, ok: 0, unmapped_pos: 0 } };
     const soByRef = {};   // normalised SO ref -> the open SO row
     sos.forEach(s => { const k = _dtcNorm(s.reference); if (k) soByRef[k] = s; });
     const ids = sos.map(s => s.cin7_id);
@@ -13287,12 +13401,12 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
       ORDER BY coalesce(r.accepted,false), p.po`, [DTC_BRANCH_NAMES])).rows
       .filter(u => !mappedPoSet.has(u.po));
     const unmappedOpen = unmapped.filter(u => !u.accepted).length;
-    if (countOnly) return res.json({ groups: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
+    if (countOnly) return { groups: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } };
     const unmappedSet = new Set(unmapped.map(u => u.po));
     const all_pos = candPos.map(p => ({ po: p.po, supplier: p.supplier, unmapped: unmappedSet.has(p.po) }));   // every open DTC PO — lets "Map PO" attach an already-mapped PO to another SO (multi-SO grouping)
-    res.json({ groups, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen }, all_pos });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
+    return { groups, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen }, all_pos };
+  }
+}
 // In-app PO<->SO mapping (mig 254). link=true adds an edge, link=false suppresses a wrong Cin7 edge. Both persist in
 // HORIZON only (never written to Cin7) and survive n8n resyncs. Reconciliation reads them in /api/supply/dtc/mismatch.
 app.post('/api/supply/dtc/map', async (req, res) => {
@@ -13996,6 +14110,7 @@ app.get('/api/supply/actions/state', async (req, res) => {
 app.post('/api/supply/actions/state', async (req, res) => {
   const b = req.body || {}, key = (b.key || '').trim();
   if (!key) return res.status(400).json({ error: 'key required' });
+  res.on('finish', () => { swrStale('sup:realloc'); swrStale('sup:dtc-count'); });   // v28.081: badge memos re-count after a dismiss / snooze / restore
   try {
     if (b.status === 'open' || b.restore) { await pool.query(`DELETE FROM planner.supply_action_state WHERE action_key=$1`, [key]); return res.json({ ok: true }); }
     const indef = !!b.indefinite;   // snooze indefinitely = snoozed with no expiry (snooze_until NULL)
@@ -18748,15 +18863,19 @@ async function biReallocations() {
 }
 app.get('/api/supply/bi/reallocations', async (req, res) => {
   try {
-    const recs = await biReallocations();
-    const st = {}; (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).rows
-      .forEach(s => { st[s.action_key] = s; });
-    const today = kpiToday();
-    const open = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
-      if (s.status === 'dismissed' || s.status === 'applied') return false;
-      if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
-    open.sort((a, b) => (a.to_urgency === 'critical' ? 0 : 1) - (b.to_urgency === 'critical' ? 0 : 1) || b.qty - a.qty);
-    res.json({ ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open });
+    // v28.081: 10-min SWR memo (was a 7s live build on every SUPPLY mount for the REALLOCATE badge). Supply edits and the
+    // action-state writes mark it stale → served once more, then rebuilt behind. Payload unchanged.
+    res.json(await swrGet('sup:realloc', 10 * 60 * 1000, async () => {
+      const recs = await biReallocations();
+      const st = {}; (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).rows
+        .forEach(s => { st[s.action_key] = s; });
+      const today = kpiToday();
+      const open = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
+        if (s.status === 'dismissed' || s.status === 'applied') return false;
+        if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
+      open.sort((a, b) => (a.to_urgency === 'critical' ? 0 : 1) - (b.to_urgency === 'critical' ? 0 : 1) || b.qty - a.qty);
+      return { ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open };
+    }));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Apply a reallocation: zero-sum move of `qty` of `sku` from from_po → to_po (transactional), then mark applied.

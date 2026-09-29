@@ -970,6 +970,27 @@
 </style>
 <script src="/portal-view.js?v=__APP_VERSION__"></script>
 <script>
+// ── v28.081 perf (Ben's audit): same-origin GET coalescing ──────────────────────────────────────────────────────────
+// The audit found the PO grid (2.95 MB) requested FOUR times on load, portal-line-costs ×4, dtc/mismatch ×2 and lookups on
+// every sub-tab switch: many call sites, each doing its own fetch(). This wraps window.fetch for GET /api/… only:
+//  • in-flight sharing: a URL already being fetched hands every concurrent caller a clone of the same response;
+//  • a 20s memory for small REFERENCE payloads (lookups / skus / productions / likely-dates / portal-line-costs) so a
+//    sub-tab switch doesn't re-download what the tab fetched moments ago. Any non-GET /api call, or invalidateDerived,
+//    forgets it (window.__hzFetchBust). Nothing else changes: same URLs, same JSON, writes untouched.
+(function(){ if(window.__hzFetchWrapped)return; window.__hzFetchWrapped=1;
+  var _f=window.fetch.bind(window), inflight={}, memo={}, MEMO_MS=20000;
+  var MEMO_RE=[/^\/api\/supply\/lookups(\?|$)/,/^\/api\/supply\/skus(\?|$)/,/^\/api\/supply\/productions(\?|$)/,/^\/api\/supply\/likely-dates\/all(\?|$)/,/^\/api\/supply\/portal-line-costs(\?|$)/];
+  function memoable(u){ for(var i=0;i<MEMO_RE.length;i++)if(MEMO_RE[i].test(u))return true; return false; }
+  window.__hzFetchBust=function(){ memo={}; };
+  window.fetch=function(input,init){
+    var url=(typeof input==='string')?input:((input&&input.url)||''); var m=((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
+    if(url.indexOf('/api/')!==0||m!=='GET'||(init&&init.body)){ var w=_f(input,init); if(m!=='GET'&&url.indexOf('/api/')===0)w.then(function(){memo={};},function(){}); return w; }
+    var now=Date.now(), h=memo[url]; if(h&&now-h.at<MEMO_MS){ try{ return Promise.resolve(h.res.clone()); }catch(e){ delete memo[url]; } }
+    if(inflight[url]) return inflight[url].then(function(r){ return r.clone(); });
+    var p=_f(input,init).then(function(r){ delete inflight[url]; if(r.ok&&memoable(url)){ try{ memo[url]={at:Date.now(),res:r.clone()}; }catch(e){} } return r; },function(e){ delete inflight[url]; throw e; });
+    inflight[url]=p; return p.then(function(r){ return r.clone(); });
+  };
+})();
 (function(){
   var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['reports','BI & REPORTS'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // Ben: Actions/Recommendations/ERP Compare folded into BI & REPORTS (first 3 L3 tabs) — no standalone ACTIONS section   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
@@ -1023,7 +1044,10 @@
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
   var _opExcTimer=null;   // debounce the exception-count refetch so rapid grid edits don't fire it per keystroke
   var _actInvTimer=null;  // debounce the server Actions-cache invalidation after edits
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
+  // v28.081: hzLate(fn) — badge/count fetches that are NOT needed for first paint run ~3s after page start (or at once later
+  // in the page's life), so they stop competing with the grid for the browser's 6 connections and the DB pooler on load.
+  function hzLate(fn){ var age=(window.performance&&performance.now)?performance.now():99999; var wait=age<8000?Math.max(0,3200-age):0; if(wait>0)setTimeout(fn,wait); else fn(); }
+  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
     clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
@@ -5671,7 +5695,7 @@
         (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;})),
         fetch('/api/supply/deposits').then(function(r){return r.json();})])
       .then(function(res){ _navCounts.paydue=paymentsDueOverdueCount(res[0]||[], res[1]||[]); updateNavBadges(); }).catch(function(){}); }
-    if(_navCounts.xeropayments===undefined){ _navCounts.xeropayments=0; fetch('/api/supply/xero/exceptions').then(function(r){return r.json();}).then(function(d){ _navCounts.xeropayments=(d&&d.count)||0; updateNavBadges(); }).catch(function(){}); }   // Xero reconciliation exception count → action badge on Xero payments + PAYMENTS
+    if(_navCounts.xeropayments===undefined){ _navCounts.xeropayments=0; hzLate(function(){ fetch('/api/supply/xero/exceptions').then(function(r){return r.json();}).then(function(d){ _navCounts.xeropayments=(d&&d.count)||0; updateNavBadges(); }).catch(function(){}); }); }   // Xero reconciliation exception count → action badge on Xero payments + PAYMENTS
     // PLAN action-item count → rolls up to the top-level PURCHASE ORDERS tab (so it shows before the grid is opened)
     if(_navCounts.plan===undefined){ (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;}))
       .then(function(rows){ rows=Array.isArray(rows)?rows:[]; var go=function(){ _navCounts.plan=rows.reduce(function(a,r){return a+poActions(r).length;},0); updateNavBadges(); }; if(!_poActStateLoaded)loadPoActState(go); else go();
@@ -5680,7 +5704,7 @@
           var _dcS=0,_coS=0; rows.forEach(function(r){ if(/complete/i.test(r.status||''))return; var n=poTabActs(r).length; if(!n)return; if(_isDC(r.branch))_dcS+=n; if(r.dtc_custom)_coS+=n; });
           _setPoSubActBadge('directclient',_dcS); _setPoSubActBadge('customorders',_coS); }catch(e){} }).catch(function(){}); }
     if(_navCounts.pricelists===undefined){ fetch('/api/supply/price-list/pending-count').then(function(r){return r.json();}).then(function(j){ _navCounts.pricelists=(j&&j.count)||0; updateNavBadges(); }).catch(function(){}); }
-    if(!_dtcPrefetched){ _dtcPrefetched=true; try{ refreshDtcBadge(); }catch(e){} }   // DTC-mismatch issue count on the BI & REPORTS menu — populate on load, not only after opening the report
+    if(!_dtcPrefetched){ _dtcPrefetched=true; hzLate(function(){ try{ refreshDtcBadge(); }catch(e){} }); }   // DTC-mismatch issue count on the BI & REPORTS menu — populate on load, not only after opening the report
   }
   var _dtcPrefetched=false;
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
@@ -13408,9 +13432,9 @@
     select:function(k){ if(k==='admin')k='admin-general'; if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },
     current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
-    try{ refreshDtcBadge(); }catch(e){}   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions)
+    hzLate(function(){ try{ refreshDtcBadge(); }catch(e){} });   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions) — off the first-paint path (v28.081)
     try{ refreshErpcBadge(); }catch(e){}
-    try{ refreshReallocBadge(); }catch(e){}
+    hzLate(function(){ try{ refreshReallocBadge(); }catch(e){} });
     try{ if(typeof prewarmActions==='function')prewarmActions(); }catch(e){}
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
