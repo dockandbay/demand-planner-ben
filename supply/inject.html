@@ -281,6 +281,22 @@
 #hz-leftrail .rl-foot .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(140deg,#5aa6ea,#2361d8);display:grid;place-items:center;color:#fff;font-size:10.5px;font-weight:800;flex:0 0 auto}
 #hz-leftrail .rl-foot .rl-who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c9d3e2;font-weight:600}
 #hz-leftrail .rl-ver{position:relative;margin-left:auto;background:rgba(245,184,61,.16);color:#f5b83d;font-size:9px;font-weight:800;letter-spacing:.03em;padding:3px 7px;border-radius:6px;white-space:nowrap;flex:0 0 auto}
+#hz-leftrail .rl-min{margin-left:auto;background:none;border:0;color:var(--nav-dim,#93a1b8);font-size:15px;line-height:1;cursor:pointer;width:28px;height:28px;border-radius:7px;flex:0 0 auto;display:grid;place-items:center}
+#hz-leftrail .rl-min:hover{color:#fff;background:rgba(255,255,255,.08)}
+/* collapsed rail (hamburger) — icon over tiny label, L2/L3 hidden */
+@media(min-width:900px){
+ body.hz-rail-min #hz-leftrail{width:76px}
+ body.hz-rail-min .wrap#app{margin-left:76px}
+ body.hz-rail-min #hz-leftrail .rl-brand{padding:0 8px;gap:4px;justify-content:center}
+ body.hz-rail-min #hz-leftrail .rl-brand .nm{display:none}
+ body.hz-rail-min #hz-leftrail .rl-min{margin-left:0}
+ body.hz-rail-min #hz-leftrail .rl2wrap{display:none}
+ body.hz-rail-min #hz-leftrail .rl1{flex-direction:column;gap:3px;padding:9px 2px;letter-spacing:.02em;border-radius:9px;margin:2px 4px}
+ body.hz-rail-min #hz-leftrail .rl1 .lab{flex:0 0 auto;font-size:9px;font-weight:700;line-height:1.05;text-align:center}
+ body.hz-rail-min #hz-leftrail .rl1.on:before{left:-4px;top:7px;bottom:7px}
+ body.hz-rail-min #hz-leftrail .rl-foot{justify-content:center;padding:11px 6px}
+ body.hz-rail-min #hz-leftrail .rl-foot .rl-who,body.hz-rail-min #hz-leftrail .rl-ver{display:none}
+}
 @media(min-width:900px){
  body.hz-rail #hz-leftrail{display:flex}
  body.hz-rail .wrap#app{margin-left:212px}
@@ -289,6 +305,9 @@
  body.hz-rail #view-tabs-row #config-btn,
  body.hz-rail #view-tabs-row .hz-brand{display:none!important}
  body.hz-rail #supply-subnav,
+ body.hz-rail #demand-tabs,
+ body.hz-rail #buymove-tabs,
+ body.hz-rail #report-tabs,
  body.hz-rail #product-subnav,
  body.hz-rail #client-subnav,
  body.hz-rail #config-subs{display:none!important}
@@ -957,7 +976,7 @@
   var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['reports','BI & REPORTS'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // Ben: Actions/Recommendations/ERP Compare folded into BI & REPORTS (first 3 L3 tabs) — no standalone ACTIONS section   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','💡 RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
+  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Actions/Recommendations/ERP Compare folded in as the first 3 (Ben). Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs.
   var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','reallocate','urgent-buy','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];   // 'metrics' moved to top-level REPORTS ▸ Performance ▸ Supply metrics
   var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
@@ -1432,7 +1451,7 @@
     c.innerHTML=(_actHost?'':annot('actions')
       +'<div class="po-subnav" id="act-subnav">'
         +'<span class="rtab act-subtab active" data-as="actions">ACTIONS</span>'
-        +'<span class="rtab act-subtab" data-as="recommendations">💡 RECOMMENDATIONS</span>'
+        +'<span class="rtab act-subtab" data-as="recommendations">RECOMMENDATIONS</span>'
         +'<span class="rtab act-subtab" data-as="erp-compare">⬆ ERP COMPARE</span>'
       +'</div>')
       +'<div id="act-sub"><div class="count" style="opacity:.7;padding:16px 2px">⏳ Loading priority actions…</div></div>'; }
@@ -1506,7 +1525,7 @@
     function pool(){ return _acts.filter(inStat).filter(function(r){ return !st.hideNoise || ACT_NOISE.indexOf(r.type)<0; }); }
     function actSubNav(){ function tab(k,lbl,n,red){ return '<span class="rtab act-subtab'+(actSub===k?' active':'')+'" data-as="'+k+'">'+lbl+(n>0?' <span class="ex-badge"'+(red?' style="background:var(--neg);color:#fff"':'')+'>'+n+'</span>':'')+'</span>'; }
       var _hi=_acts.filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length;   // high-priority open actions → red counter on the ACTIONS sub-tab
-      return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',_hi,true)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
+      return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',_hi,true)+tab('recommendations','RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
     c.innerHTML=(_actHost?'':annot('actions')+_partBanner)+lookupDatalists()+(_actHost?'':actSubNav())+'<div id="act-sub"></div>';   // in BI & Reports the L3 tabs replace the act-subnav
     if(!_actHost)document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; if(typeof writeHash==='function')writeHash(['supply','reports',actSub]);   // deep-link #/supply/reports/<actions|recommendations|erp-compare>
       document.querySelectorAll('#act-subnav .act-subtab').forEach(function(x){x.classList.toggle('active',x===t);}); renderActSub(); }; });
@@ -17773,17 +17792,17 @@
   // L2 sections mirrored into the rail from each module's live sub-nav (stage 2). Clicking a rail L2 item clicks the
   // original (hidden) tab, so all selection logic is reused. Modules whose sub-nav is base-app-rendered (demand/buy/
   // reports) keep their sub-nav in content for now.
-  var RAIL_L2={ supply:{sel:'#supply-subnav',item:'.stab'}, product:{sel:'#product-subnav',item:'.stab'}, client:{sel:'#client-subnav',item:'.stab'}, config:{sel:'#config-subs',item:'.rtab'} };
-  // L3 tabs mirrored under the active L2, when the active module renders an L3 nav in the DOM.
-  var RAIL_L3=[ '#prod-subtabs', '#rep-subnav', '#config-subs-l3' ];
+  var RAIL_L2={ supply:{sel:'#supply-subnav',item:'.stab'}, demand:{sel:'#demand-tabs',item:'.dnav'}, buy:{sel:'#buymove-tabs',item:'.dnav'}, reports:{sel:'#report-tabs',item:'.dnav'}, product:{sel:'#product-subnav',item:'.stab'}, client:{sel:'#client-subnav',item:'.stab'}, config:{sel:'#config-subs',item:'.rtab'} };
+  // L3 tabs mirrored under the active L2 — per-module list of the L3 nav containers a module renders in the DOM.
+  // (Supply for now; demand/buy/reports keep their L3 in content until their L3 mirror is verified.)
+  var RAIL_L3MAP={ supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3'] };
   function _railText(el){ try{ var c=el.cloneNode(true); c.querySelectorAll('.ex-badge,.rtab-count,.count,.nav-badge,.pilln,.stab-count,.tl-count').forEach(function(x){x.remove();}); return (c.textContent||'').replace(/\s+/g,' ').trim(); }catch(e){ return (el.textContent||'').replace(/\s+/g,' ').trim(); } }
   function _railL2items(mod){ var cfg=RAIL_L2[mod]; if(!cfg)return null; var cont=document.querySelector(cfg.sel); if(!cont)return null;
     var els=cont.querySelectorAll(cfg.item); if(!els.length)return null; var out=[];
     Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); return out.length?out:null; }
-  function _railL3items(mod){ if(mod!=='supply')return null;   // stage 2: supply L3 mirrored; other modules keep L3 in content for now
-    var root=document.getElementById('supply-root'); if(!root)return null;
-    for(var i=0;i<RAIL_L3.length;i++){ var cont=root.querySelector(RAIL_L3[i]); if(!cont)continue;   // scoped to the supply root (works even when the content L3 is CSS-hidden)
-      var els=cont.querySelectorAll('.rtab,.stab,.d3tab'); if(!els.length)continue; var out=[];
+  function _railL3items(mod){ var sels=RAIL_L3MAP[mod]; if(!sels)return null;
+    for(var i=0;i<sels.length;i++){ var cont=document.querySelector(sels[i]); if(!cont)continue;   // selectors are scoped (e.g. #supply-root …) so they read even when the content L3 is CSS-hidden
+      var els=cont.querySelectorAll('.rtab,.stab,.d3tab,.dnav3'); if(!els.length)continue; var out=[];
       Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); if(out.length)return out; } return null; }
   window._railL2c=[]; window._railL3c=[];
   function renderRailList(){ var list=document.getElementById('hz-rl-list'); if(!list)return; var ak=railActiveKey(); var html='';
@@ -17806,9 +17825,11 @@
     document.body.classList.add('hz-rail');
     var r=document.getElementById('hz-leftrail');
     if(!r){ r=document.createElement('div'); r.id='hz-leftrail';
-      r.innerHTML='<div class="rl-brand">'+HZ_MARK+'<span class="nm">HORIZON</span></div><div class="rl-list" id="hz-rl-list"></div>'
+      r.innerHTML='<div class="rl-brand">'+HZ_MARK+'<span class="nm">HORIZON</span><button class="rl-min" id="hz-rl-min" title="Collapse / expand menu" aria-label="Collapse menu">☰</button></div><div class="rl-list" id="hz-rl-list"></div>'
         +'<div class="rl-foot"><span class="av">'+esc((_railInitials()||'DB').toUpperCase())+'</span><span class="rl-who">'+esc(((typeof ME!=='undefined'&&ME&&ME.email)||'').split('@')[0]||'')+'</span><span class="ver rl-ver">HORIZON __APP_VERSION__</span></div>';
       document.body.appendChild(r);
+      try{ if(localStorage.getItem('hzRailMin')==='1')document.body.classList.add('hz-rail-min'); }catch(e){}   // restore collapsed state
+      var mb=document.getElementById('hz-rl-min'); if(mb)mb.onclick=function(e){ e.stopPropagation(); var on=document.body.classList.toggle('hz-rail-min'); try{localStorage.setItem('hzRailMin',on?'1':'');}catch(_){} };
       window.addEventListener('hashchange',function(){ try{railSync();_railSoon();}catch(e){} });
       // keep the rail's L2/L3 in sync as each module renders its sub-nav async (debounced; renderRailList is cheap)
       if(!window._railMO){ window._railMO=new MutationObserver(function(){ clearTimeout(window._railMOT); window._railMOT=setTimeout(function(){ try{renderRailList();}catch(e){} },260); }); try{ window._railMO.observe(document.body,{childList:true,subtree:true}); }catch(e){} }
