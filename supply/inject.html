@@ -10308,9 +10308,9 @@
       var trk=l.tracking?('Production='+esc(l.tracking.option)+(l.tracking.exists?'':' <span style="color:var(--amber)" title="will be auto-created on posting">(new)</span>')):'<span class="mut tiny">—</span>';
       var bill=l.linked_bill?('<a href="'+esc(l.linked_bill.url||'#')+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(l.linked_bill.number||l.linked_bill.id||'bill')+' ↗</a>'):'<span class="mut tiny">none</span>';
       var isDep=/deposit/i.test(l.type||'');
-      var payChk=isDep?'<span class="mut tiny">credit note</span>'
+      var payChk=(isDep&&!l.legacy)?'<span class="mut tiny">credit note (P58+)</span>'
         :(!l.linked_bill?'<span class="mut tiny">no bill</span>'
-        :(l.pay_ok===true?'<span style="color:var(--pos);font-weight:700" title="bill amount due covers this payment">✓ due '+money(l.bill_due)+'</span>'
+        :(l.pay_ok===true?'<span style="color:var(--pos);font-weight:700" title="bill amount due covers this payment">✓ due '+money(l.bill_due)+'</span>'+((isDep&&l.legacy)?' <span class="mut tiny">@ deposit rate</span>':'')
         :(l.pay_ok===false?'<span style="color:var(--neg);font-weight:700" title="payment exceeds the bill’s amount due — Xero would reject">✕ over (due '+money(l.bill_due)+')</span>'
         :'<span class="mut tiny">due n/a</span>')));
       return '<tr style="border-top:1px solid var(--line)"><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(l.reference||'')+'</td><td class="l">'+esc(l.type||'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td class="l">'+acct+'</td><td class="l">'+trk+'</td><td class="l">'+bill+'</td><td class="l">'+payChk+'</td></tr>'; }).join('');

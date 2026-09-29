@@ -4571,22 +4571,31 @@ async function computeXeroRunPlan(run) {
       const code = (l.account_code || '').trim() || (lp && lp.code) || '';
       acct = code ? { code: code, name: (lp && lp.name) || 'production account (pre-P58)', id: null } : null;
     }
-    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '', legacy: !useNew,
+    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '', deposit_ref: l.deposit_ref || '', legacy: !useNew,
       account: acct, account_role: acctRole,
       tracking: trackOption ? { category: 'Production', option: trackOption, exists: trackOpts.has(trackOption.toUpperCase()) } : null,
       linked_bill: link ? { id: link.external_id, number: link.external_ref, url: link.url } : null };
   });
   const total = outLines.reduce((s, l) => s + l.amount, 0);
   const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
-  // Validate each payment against its linked bill's live AmountDue — Xero rejects a payment that exceeds what's owed.
-  const payBillIds = [...new Set(outLines.filter(l => !/deposit/i.test(String(l.type || '')) && l.linked_bill && l.linked_bill.id).map(l => l.linked_bill.id))];
+  // A line posts a PAYMENT against the PO bill when it's completion/balance, OR a pre-P58 deposit (pre-P58 deposits pay
+  // the bill at the DEPOSIT REFERENCE'S exchange rate; P58+ deposits draw down via a credit note instead → no payment).
+  const willPay = l => !!(l.linked_bill && l.linked_bill.id) && (!/deposit/i.test(String(l.type || '')) || l.legacy);
+  outLines.forEach(l => { l.will_pay = willPay(l); });
+  // deposit-reference exchange rates (pre-P58 deposit payments post at these)
+  const depRefs = [...new Set(outLines.filter(l => l.legacy && /deposit/i.test(String(l.type || '')) && l.deposit_ref).map(l => l.deposit_ref))];
+  const depRate = {};
+  if (depRefs.length) { try { (await pool.query(`SELECT reference, xero_fx FROM planner.deposits WHERE reference = ANY($1::text[])`, [depRefs])).rows.forEach(r => { depRate[r.reference] = (r.xero_fx != null ? Number(r.xero_fx) : null); }); } catch (e) {} }
+  outLines.forEach(l => { if (l.legacy && /deposit/i.test(String(l.type || ''))) l.deposit_rate = depRate[l.deposit_ref] != null ? depRate[l.deposit_ref] : null; });
+  // Validate each PAYMENT against its linked bill's live AmountDue — Xero rejects a payment that exceeds what's owed.
+  const payBillIds = [...new Set(outLines.filter(l => l.will_pay).map(l => l.linked_bill.id))];
   const dueById = {};
   for (let i = 0; i < payBillIds.length; i += 40) {
     const chunk = payBillIds.slice(i, i + 40);
     try { const jb = await xeroFetch(region, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
   }
   outLines.forEach(l => {
-    if (!/deposit/i.test(String(l.type || '')) && l.linked_bill && l.linked_bill.id) {
+    if (l.will_pay) {
       const b = dueById[l.linked_bill.id];
       if (b) { l.bill_due = b.due; l.bill_status = b.status; l.bill_ccy = b.ccy; l.bill_rate = b.rate; l.pay_ok = (Number(l.amount) || 0) <= b.due + 0.01; }
       else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted) → can't validate
@@ -4640,15 +4649,18 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     // the created USD bill's CurrencyRate (its daily rate); read it back and apply it to every payment.
     const runRate = (binv && binv.CurrencyRate != null) ? Number(binv.CurrencyRate) : null;
     out.rate = runRate;
-    // 2) a payment against each linked PO bill (completion/balance lines; deposits draw down via a credit note instead)
+    // 2) a payment against each linked PO bill. Completion/balance → at the supplier-payment bill's rate. A PRE-P58
+    //    starting deposit → a payment at the DEPOSIT REFERENCE'S rate. A P58+ deposit → NO payment (credit-note draw-down).
     for (const l of plan.lines) {
-      if (/deposit/i.test(String(l.type || ''))) { out.skipped.push({ po: l.reference, reason: 'deposit → use a credit note' }); continue; }
+      const isDep = /deposit/i.test(String(l.type || ''));
+      if (isDep && !l.legacy) { out.skipped.push({ po: l.reference, reason: 'P58+ deposit → create a credit note' }); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
+      const rate = (isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate;
       try {
         const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: plan.bank.account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
-        if (runRate != null && runRate > 0) payObj.CurrencyRate = runRate;   // = the supplier-payment bill's rate
+        if (rate != null && rate > 0) payObj.CurrencyRate = rate;
         const pr = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
-        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, rate: runRate });
+        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, rate: rate, rate_src: (isDep && l.legacy) ? 'deposit-ref' : 'bill' });
       } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
     }
     res.json(Object.assign({ ok: true }, out));
