@@ -4773,17 +4773,17 @@ const _fxDate = v => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v == null ? 
 const _fxPick = (o, keys) => { for (const k of keys) { if (o && o[k] != null && o[k] !== '') return o[k]; } return null; };
 app.get('/api/supply/flexport/status', async (req, res) => {
   const cfg = flexportConfig();
-  if (!cfg.present) return res.json({ connected: false, configured: false, reason: 'Set FLEXPORT_API_TOKEN (Flexport API key) to connect.' });
-  try { const j = await flexportFetch('/shipments?per=1&page=1'); const d = j && j.data; const total = d && (d.total != null ? d.total : (Array.isArray(d.data) ? d.data.length : null)); res.json({ connected: true, configured: true, sample_total: total }); }
-  catch (e) { res.json({ connected: false, configured: true, reason: e.message }); }
+  let lastSync = null; try { lastSync = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='flexport_last_sync'`)).rows[0]; lastSync = lastSync ? lastSync.value : null; } catch (e) {}
+  if (!cfg.present) return res.json({ connected: false, configured: false, last_sync: lastSync, reason: 'Set FLEXPORT_API_TOKEN (Flexport API key) to connect.' });
+  try { const j = await flexportFetch('/shipments?per=1&page=1'); const d = j && j.data; const total = d && (d.total != null ? d.total : (Array.isArray(d.data) ? d.data.length : null)); res.json({ connected: true, configured: true, last_sync: lastSync, sample_total: total }); }
+  catch (e) { res.json({ connected: false, configured: true, last_sync: lastSync, reason: e.message }); }
 });
-app.post('/api/supply/flexport/import', async (req, res) => {
-  try {
-    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to import from Flexport' }); } catch (e) {}
-    const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
-    const b = req.body || {};
-    const per = Math.min(Math.max(parseInt(b.per) || 100, 1), 200);
-    const maxPages = Math.min(Math.max(parseInt(b.max_pages) || 30, 1), 200);
+async function runFlexportImport(opts) {
+  opts = opts || {};
+  const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Set FLEXPORT_API_TOKEN first'); e.code = 503; throw e; }
+  const per = Math.min(Math.max(parseInt(opts.per) || 100, 1), 200);
+  const maxPages = Math.min(Math.max(parseInt(opts.max_pages) || 30, 1), 200);
+  {
     let page = 1, imported = 0, seen = 0; const samples = [];
     while (page <= maxPages) {
       const j = await flexportFetch('/shipments?per=' + per + '&page=' + page + '&sort=updated_at&direction=desc');
@@ -4829,8 +4829,21 @@ app.post('/api/supply/flexport/import', async (req, res) => {
     }
     const apiCount = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments`)).rows[0].n;
     const matched = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments f WHERE EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR p.shipment_ref=f.shipment_name OR p.po=f.shipment_name)`)).rows[0].n;
-    res.json({ ok: true, pages: page, seen, imported, api_table_rows: Number(apiCount), po_matched: Number(matched), samples });
-  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+    const at = new Date().toISOString();
+    await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ('flexport_last_sync',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [at]);
+    return { ok: true, pages: page, seen, imported, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
+  }
+}
+app.post('/api/supply/flexport/import', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to import from Flexport' }); } catch (e) {}
+  try { res.json(await runFlexportImport(req.body || {})); }
+  catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+// 4-hourly cloud cron (Diviyaj wires the schedule in prod) — secret-gated, fails closed like the other crons.
+app.post('/api/cron/flexport-import', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await runFlexportImport({ per: 100, max_pages: 50 })); }
+  catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
