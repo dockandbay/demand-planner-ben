@@ -1,3 +1,13 @@
+## v28.025 (Ben): Xero connection is OAuth Authorization Code + TWO organisations (UK + AU)
+
+**File: `server.mjs`.** Replaces the v28.024 client-credentials stub. Ben's app is a standard Web (Auth Code) app, and Dock & Bay runs two Xero orgs: **UK** (UK/US/EU/…) and **AU** (Australia, mirrors Fulfil, used for AU bills + payments).
+
+- **Region-aware, two independent connections** (`uk`, `au`): each stored separately in `planner.app_settings` (`xero_oauth_uk` / `xero_oauth_au`) with its own consent and rotating refresh token. One Web app can authorise both orgs, or use a separate app per region via `XERO_AU_CLIENT_ID/SECRET` / `XERO_UK_CLIENT_ID/SECRET` overriding the shared `XERO_CLIENT_ID/SECRET`.
+- **Flow:** `GET /api/supply/xero/connect?region=uk|au` → Xero consent → `GET /api/supply/xero/callback` exchanges the code, records the organisation, stores tokens. `xeroToken(region)` refreshes automatically (saving Xero's rotated refresh token). `xeroFetch(region, path, opts)` is the core call; `xeroMarketRegion(mkt)` maps AU→au, everything else→uk.
+- **Status/disconnect:** `GET /api/supply/xero/status` reports both regions; `POST /api/supply/xero/disconnect {region}`. Access gated to SUPPLY-edit/admin. INERT without credentials.
+- Env: `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_REDIRECT_URI` (must be a registered redirect URI), optional per-region `XERO_UK_*` / `XERO_AU_*`, optional `XERO_SCOPES` (default includes `offline_access`).
+
+Sandbox verified inert: status returns both regions with setup guidance. Next (once connected): reconcile POs/payments vs Xero + wrong-due-date flags (replacing the Xero Compare upload), and create bills directly (routing AU→AU org, else UK). No migration.
 ## v28.024 (Ben): live Xero connection — foundation (OAuth client_credentials, inert without credentials)
 
 **File: `server.mjs`.** First step of the Xero integration Ben asked for (align POs/payments with Xero and surface exceptions; create bills directly; retire the manual Xero Compare upload; flag wrong PO bill due dates).

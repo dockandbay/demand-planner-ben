@@ -4142,42 +4142,51 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// v28.024 (Ben): LIVE XERO connection. OAuth 2.0 client_credentials (Xero "Custom Connection", one Dock & Bay org).
-// INERT without XERO_CLIENT_ID + XERO_CLIENT_SECRET (mirrors the FedEx pattern). Read = reconcile POs/payments against
-// Xero (replaces the manual Xero Compare upload) + flag wrong bill due dates. Write = create bills in Xero directly
-// (3PL invoices, commissions, payments report) instead of the CSV download. Tokens + tenant id are cached in-process.
+// v28.025 (Ben): LIVE XERO connection — OAuth 2.0 AUTHORIZATION CODE flow, TWO organisations. Dock & Bay runs two Xero
+// orgs: 'uk' (UK/US/EU/…) and 'au' (Australia, mirrors Fulfil). Each is connected + stored independently (app_settings
+// keys xero_oauth_uk / xero_oauth_au) with its own consent + rotating refresh token. One Xero Web app can authorise both
+// orgs, OR use a separate app per region (XERO_AU_CLIENT_ID / XERO_UK_CLIENT_ID override the shared XERO_CLIENT_ID).
+// INERT without credentials. Read = reconcile POs/payments vs Xero (replaces the Xero Compare upload) + flag wrong bill
+// due dates. Write = create bills in Xero directly (3PL, commissions, payments report) instead of the CSV download.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-function xeroConfig() {
-  const id = (process.env.XERO_CLIENT_ID || '').trim(), secret = (process.env.XERO_CLIENT_SECRET || '').trim();
-  const scopes = (process.env.XERO_SCOPES || 'accounting.transactions accounting.contacts accounting.settings.read').trim();
-  return { id, secret, scopes, present: !!(id && secret) };
+const XERO_REGIONS = ['uk', 'au'];
+function xeroRegion(r) { r = String(r || 'uk').toLowerCase(); return r === 'au' ? 'au' : 'uk'; }   // any non-AU market → the UK org
+function xeroMarketRegion(mkt) { return String(mkt || '').toUpperCase() === 'AU' ? 'au' : 'uk'; }
+function xeroConfig(region) {
+  region = xeroRegion(region); const pref = region === 'au' ? 'XERO_AU_' : 'XERO_UK_';
+  const id = (process.env[pref + 'CLIENT_ID'] || process.env.XERO_CLIENT_ID || '').trim();
+  const secret = (process.env[pref + 'CLIENT_SECRET'] || process.env.XERO_CLIENT_SECRET || '').trim();
+  const redirect = (process.env.XERO_REDIRECT_URI || 'http://localhost:8124/api/supply/xero/callback').trim();
+  const scopes = (process.env.XERO_SCOPES || 'offline_access accounting.transactions accounting.contacts accounting.settings.read').trim();
+  return { region, id, secret, redirect, scopes, present: !!(id && secret) };
 }
-let _xeroTok = { token: null, exp: 0 }, _xeroTenant = { id: null, name: null, at: 0 };
-async function xeroToken() {
-  const cfg = xeroConfig(); if (!cfg.present) return null;
-  const now = Date.now();
-  if (_xeroTok.token && now < _xeroTok.exp - 60000) return _xeroTok.token;
+const _xeroHe = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function xeroGetStore(region) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + xeroRegion(region)])).rows[0]; return (r && r.value) ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+async function xeroPutStore(region, store) { await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_oauth_' + xeroRegion(region), JSON.stringify(store)]); _xeroTok[xeroRegion(region)] = { token: null, exp: 0 }; }
+const _xeroTok = { uk: { token: null, exp: 0 }, au: { token: null, exp: 0 } };
+async function xeroExchange(region, params) {
+  const cfg = xeroConfig(region);
   const r = await fetch('https://identity.xero.com/connect/token', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Basic ' + Buffer.from(cfg.id + ':' + cfg.secret).toString('base64') },
-    body: new URLSearchParams({ grant_type: 'client_credentials', scope: cfg.scopes }) });
-  if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error('Xero OAuth ' + r.status + ': ' + String(t).slice(0, 200)); e.code = r.status; throw e; }
-  const j = await r.json();
-  _xeroTok = { token: j.access_token, exp: now + (Number(j.expires_in) || 1800) * 1000 };
-  return _xeroTok.token;
+    body: new URLSearchParams(params) });
+  const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) {}
+  if (!r.ok) { const e = new Error('Xero token ' + r.status + ': ' + String((j && (j.error_description || j.error)) || t).slice(0, 200)); e.code = r.status; throw e; }
+  return j;
 }
-async function xeroTenantId(token) {
-  const now = Date.now(); if (_xeroTenant.id && now - _xeroTenant.at < 3600000) return _xeroTenant;   // 1h cache
-  token = token || await xeroToken(); if (!token) return { id: null, name: null };
-  const r = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
-  if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error('Xero /connections ' + r.status + ': ' + String(t).slice(0, 200)); }
-  const conns = await r.json(); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || conns[0] || {};
-  _xeroTenant = { id: c.tenantId || null, name: c.tenantName || null, at: now };
-  return _xeroTenant;
+async function xeroToken(region) {
+  region = xeroRegion(region); const cfg = xeroConfig(region); if (!cfg.present) return null;
+  const now = Date.now(); const cache = _xeroTok[region]; if (cache.token && now < cache.exp - 60000) return cache.token;
+  const store = await xeroGetStore(region); if (!store || !store.refresh_token) return null;
+  if (store.access_token && store.expires_at && now < store.expires_at - 60000) { _xeroTok[region] = { token: store.access_token, exp: store.expires_at }; return store.access_token; }
+  const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: store.refresh_token });   // Xero rotates the refresh token
+  const upd = Object.assign({}, store, { access_token: j.access_token, refresh_token: j.refresh_token || store.refresh_token, expires_at: now + (Number(j.expires_in) || 1800) * 1000 });
+  await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
+  return j.access_token;
 }
-// Core call: xeroFetch('/api.xro/2.0/Invoices?where=...') → parsed JSON. Adds bearer + tenant + Accept.
-async function xeroFetch(path, opts) {
-  opts = opts || {}; const token = await xeroToken(); if (!token) { const e = new Error('Xero not connected (set XERO_CLIENT_ID / XERO_CLIENT_SECRET)'); e.code = 503; throw e; }
-  const tenant = await xeroTenantId(token); if (!tenant.id) { const e = new Error('Xero connected but no organisation is authorised on this app'); e.code = 502; throw e; }
+async function xeroTenant(region) { const s = await xeroGetStore(region); return s ? { id: s.tenant_id, name: s.tenant_name } : { id: null, name: null }; }
+async function xeroFetch(region, path, opts) {
+  region = xeroRegion(region); opts = opts || {}; const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
+  const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }
   const headers = Object.assign({ 'Authorization': 'Bearer ' + token, 'Xero-Tenant-Id': tenant.id, 'Accept': 'application/json' }, opts.headers || {});
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
@@ -4185,17 +4194,47 @@ async function xeroFetch(path, opts) {
   if (!r.ok) { const msg = (j && (j.Detail || j.Message || (j.Elements && j.Elements[0] && j.Elements[0].ValidationErrors && j.Elements[0].ValidationErrors.map(v => v.Message).join('; ')))) || ('Xero ' + r.status); const e = new Error(String(msg).slice(0, 400)); e.code = r.status; e.body = j; throw e; }
   return j;
 }
-// Connection status for the UI + a quick sanity probe.
-app.get('/api/supply/xero/status', async (req, res) => {
-  const cfg = xeroConfig();
-  if (!cfg.present) return res.json({ connected: false, configured: false, reason: 'Set XERO_CLIENT_ID and XERO_CLIENT_SECRET (Xero Custom Connection) to connect.' });
-  try {
-    const tenant = await xeroTenantId();
-    if (!tenant.id) return res.json({ connected: false, configured: true, reason: 'App credentials work, but no organisation is authorised. In the Xero developer portal, connect the Custom Connection to the Dock & Bay organisation.' });
-    let org = null; try { const o = await xeroFetch('/api.xro/2.0/Organisation'); org = o && o.Organisations && o.Organisations[0]; } catch (e) {}
-    res.json({ connected: true, configured: true, tenant_id: tenant.id, org_name: (org && org.Name) || tenant.name, base_currency: org && org.BaseCurrency, scopes: cfg.scopes });
-  } catch (e) { res.json({ connected: false, configured: true, reason: e.message }); }
+const _xeroStates = new Map();   // CSRF state → { region, exp }
+app.get('/api/supply/xero/connect', async (req, res) => {
+  const region = xeroRegion(req.query.region); const cfg = xeroConfig(region);
+  if (!cfg.present) return res.status(503).send('Set XERO_CLIENT_ID / XERO_CLIENT_SECRET (or XERO_' + region.toUpperCase() + '_*) first.');
+  try { const me = await permsFor(req); if (me.live && !(me.is_admin || me.supply_edit)) return res.status(403).send('SUPPLY edit or admin required to connect Xero.'); } catch (e) {}
+  const state = crypto.randomBytes(16).toString('hex'); _xeroStates.set(state, { region, exp: Date.now() + 600000 });
+  for (const [k, v] of _xeroStates) if (v.exp < Date.now()) _xeroStates.delete(k);
+  res.redirect('https://login.xero.com/identity/connect/authorize?' + new URLSearchParams({ response_type: 'code', client_id: cfg.id, redirect_uri: cfg.redirect, scope: cfg.scopes, state }));
 });
+app.get('/api/supply/xero/callback', async (req, res) => {
+  const done = (msg, ok) => res.set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
+  try {
+    if (req.query.error) return done('Xero said: ' + _xeroHe(String(req.query.error_description || req.query.error)), false);
+    const code = String(req.query.code || ''), state = String(req.query.state || '');
+    const st = _xeroStates.get(state); if (!code) return done('No authorization code returned.', false);
+    if (!st) return done('State mismatch or expired — start again from Connect to Xero.', false);
+    _xeroStates.delete(state); const region = xeroRegion(st.region); const cfg = xeroConfig(region);
+    const j = await xeroExchange(region, { grant_type: 'authorization_code', code, redirect_uri: cfg.redirect });
+    const cr = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + j.access_token, 'Accept': 'application/json' } });
+    const conns = await cr.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || conns[0];
+    if (!c || !c.tenantId) return done('Connected, but no organisation was authorised. Try again and pick the Dock & Bay ' + region.toUpperCase() + ' organisation.', false);
+    let by = ''; try { by = (await permsFor(req)).email || ''; } catch (e) {}
+    await xeroPutStore(region, { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + (Number(j.expires_in) || 1800) * 1000, tenant_id: c.tenantId, tenant_name: c.tenantName || '', connected_by: by, connected_at: new Date().toISOString() });
+    done('Connected the <b>' + region.toUpperCase() + '</b> region to <b>' + _xeroHe(c.tenantName || 'your organisation') + '</b>. You can close this tab.', true);
+  } catch (e) { log500(e); done(_xeroHe(e.message), false); }
+});
+app.get('/api/supply/xero/status', async (req, res) => {
+  const out = { regions: {} };
+  for (const region of XERO_REGIONS) {
+    const cfg = xeroConfig(region); const row = { region, configured: cfg.present, redirect_uri: cfg.redirect };
+    if (!cfg.present) { row.connected = false; row.reason = 'Set XERO_CLIENT_ID / XERO_CLIENT_SECRET (register ' + cfg.redirect + ' as a redirect URI), then Connect.'; out.regions[region] = row; continue; }
+    const store = await xeroGetStore(region);
+    if (!store || !store.refresh_token) { row.connected = false; row.reason = 'Credentials set. Click Connect to authorise the ' + region.toUpperCase() + ' organisation.'; out.regions[region] = row; continue; }
+    try { let org = null; try { const o = await xeroFetch(region, '/api.xro/2.0/Organisation'); org = o && o.Organisations && o.Organisations[0]; } catch (e) { row.connected = false; row.reason = 'Stored connection failed to refresh: ' + e.message + ' — reconnect.'; out.regions[region] = row; continue; }
+      row.connected = true; row.org_name = (org && org.Name) || store.tenant_name; row.base_currency = org && org.BaseCurrency; row.tenant_id = store.tenant_id; row.connected_by = store.connected_by; row.connected_at = store.connected_at;
+    } catch (e) { row.connected = false; row.reason = e.message; }
+    out.regions[region] = row;
+  }
+  res.set('Cache-Control', 'no-store').json(out);
+});
+app.post('/api/supply/xero/disconnect', async (req, res) => { try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
