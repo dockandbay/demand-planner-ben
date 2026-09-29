@@ -9470,31 +9470,43 @@
   function hzGsScript(origin,token,reports){ var q=function(s){ return '"'+String(s).replace(/"/g,'\\"')+'"'; };
     var L=[];
     L.push('// HORIZON → Google Sheets. Paste into Extensions ▸ Apps Script (replace the default Code.gs), save, reload the sheet.');
-    L.push('// A "Horizon" menu appears: refresh every report or one at a time. Each report lands in its own tab (created if missing).');
+    L.push('// A "Horizon" menu appears: refresh every report, or one at a time.');
+    L.push('//');
+    L.push('// Edit the REPORTS list to control WHERE and HOW each report lands. Per report:');
+    L.push('//   tab        : the sheet/tab name to write into (created if missing)');
+    L.push('//   startCell  : top-left cell for the data, e.g. "A1" or "B5" (headers go in this row)');
+    L.push('//   clear      : true = wipe first, false = write over whatever is there (leaves extra old rows)');
+    L.push('//   clearRange : what to wipe when clear=true. "" = just the block being written; "A:F" = whole columns;');
+    L.push('//                "A2:F" = columns from row 2 down (keep a header/title row); "A1:H500" = a fixed block.');
+    L.push('//');
     L.push('// Rotating the token in HORIZON ▸ CONFIG ▸ Exports & uploads breaks this script until HORIZON_TOKEN is updated here.');
     L.push('var HORIZON_URL = '+q(origin)+';');
     L.push('var HORIZON_TOKEN = '+q(token||'PASTE_TOKEN_FROM_CONFIG')+';');
-    L.push('var REPORTS = [   // [report key, sheet tab]');
-    reports.forEach(function(r,i){ L.push('  ['+q(r.key)+', '+q('HZ '+r.title.replace(/ — /g,' · '))+']'+(i<reports.length-1?',':'')); });
+    L.push('var REPORTS = [');
+    reports.forEach(function(r,i){ L.push('  { key: '+q(r.key)+', tab: '+q('HZ '+r.title.replace(/ — /g,' · '))+', startCell: "A1", clear: true, clearRange: "" }'+(i<reports.length-1?',':'')); });
     L.push('];');
     L.push('function onOpen() {');
     L.push('  var m = SpreadsheetApp.getUi().createMenu("Horizon").addItem("Refresh all reports", "horizonRefreshAll").addSeparator();');
-    L.push('  REPORTS.forEach(function (r, i) { m.addItem("Refresh " + r[1].replace(/^HZ /, ""), "horizonRefresh" + i); });');
+    L.push('  REPORTS.forEach(function (r, i) { m.addItem("Refresh " + r.tab.replace(/^HZ /, ""), "horizonRefresh" + i); });');
     L.push('  m.addSeparator().addItem("Install hourly auto-refresh", "horizonInstallHourlyTrigger").addItem("Remove auto-refresh", "horizonRemoveTriggers").addToUi();');
     L.push('}');
-    L.push('function horizonRefreshAll() { REPORTS.forEach(function (r) { horizonRefresh(r[0], r[1]); }); SpreadsheetApp.getActive().toast("All Horizon reports refreshed"); }');
-    reports.forEach(function(r,i){ L.push('function horizonRefresh'+i+'() { horizonRefresh(REPORTS['+i+'][0], REPORTS['+i+'][1]); }'); });
-    L.push('function horizonRefresh(report, tab) {');
-    L.push('  var res = UrlFetchApp.fetch(HORIZON_URL + "/api/export/csv/" + report, { headers: { "x-export-token": HORIZON_TOKEN }, muteHttpExceptions: true });');
-    L.push('  if (res.getResponseCode() !== 200) throw new Error(report + ": HTTP " + res.getResponseCode() + " " + res.getContentText().slice(0, 200));');
+    L.push('function horizonRefreshAll() { REPORTS.forEach(function (r) { horizonRefresh(r); }); SpreadsheetApp.getActive().toast("All Horizon reports refreshed"); }');
+    reports.forEach(function(r,i){ L.push('function horizonRefresh'+i+'() { horizonRefresh(REPORTS['+i+']); }'); });
+    L.push('function horizonRefresh(cfg) {');
+    L.push('  var res = UrlFetchApp.fetch(HORIZON_URL + "/api/export/csv/" + cfg.key, { headers: { "x-export-token": HORIZON_TOKEN }, muteHttpExceptions: true });');
+    L.push('  if (res.getResponseCode() !== 200) throw new Error(cfg.key + ": HTTP " + res.getResponseCode() + " " + res.getContentText().slice(0, 200));');
     L.push('  var rows = Utilities.parseCsv(res.getContentText());');
     L.push('  if (!rows.length) return;');
     L.push('  var hdr = rows[0], numeric = hdr.map(function (h) { return /amount/i.test(h); });   // amount columns → numbers, everything else stays text');
     L.push('  for (var i = 1; i < rows.length; i++) for (var c = 0; c < hdr.length; c++) if (numeric[c] && rows[i][c] !== "" && !isNaN(rows[i][c])) rows[i][c] = Number(rows[i][c]);');
-    L.push('  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(tab) || ss.insertSheet(tab);');
-    L.push('  sh.clearContents();');
-    L.push('  sh.getRange(1, 1, rows.length, hdr.length).setValues(rows);');
-    L.push('  sh.getRange(1, hdr.length + 2).setValue("Refreshed " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));');
+    L.push('  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(cfg.tab) || ss.insertSheet(cfg.tab);');
+    L.push('  var anchor = sh.getRange(cfg.startCell || "A1"), sr = anchor.getRow(), sc = anchor.getColumn();   // where the top-left of the data goes');
+    L.push('  if (cfg.clear !== false) {');
+    L.push('    if (cfg.clearRange) sh.getRange(cfg.clearRange).clearContent();                                 // exactly the range you specified');
+    L.push('    else { var h = sh.getMaxRows() - sr + 1; if (h > 0) sh.getRange(sr, sc, h, hdr.length).clearContent(); }   // from the start cell down, across the data width');
+    L.push('  }');
+    L.push('  sh.getRange(sr, sc, rows.length, hdr.length).setValues(rows);');
+    L.push('  sh.getRange(sr, sc + hdr.length + 1).setValue("Refreshed " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));');
     L.push('}');
     L.push('function horizonInstallHourlyTrigger() { horizonRemoveTriggers(); ScriptApp.newTrigger("horizonRefreshAll").timeBased().everyHours(1).create(); SpreadsheetApp.getActive().toast("Hourly refresh installed"); }');
     L.push('function horizonRemoveTriggers() { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === "horizonRefreshAll") ScriptApp.deleteTrigger(t); }); }');
@@ -9520,7 +9532,7 @@
       +'<details style="max-width:860px;margin:6px 0"><summary class="tiny" style="cursor:pointer;font-weight:700">curl example</summary><pre style="font-size:11px;background:var(--band);padding:8px 10px;border-radius:6px;overflow:auto">curl -H "x-export-token: '+esc(token||'TOKEN')+'" '+esc(origin)+'/api/export/csv/cashflow-transactions -o cashflow.csv</pre></details>';
     var gs=hzGsScript(origin,token,reports);
     var script='<div style="max-width:860px;margin-top:8px"><div class="bar" style="gap:8px;align-items:center;margin-bottom:4px"><b class="tiny">Google Sheets — Apps Script (copy, paste, done)</b><button class="save-btn" id="gs-copy-code">⧉ Copy script</button><span class="tiny mut" id="gs-copy-msg"></span></div>'
-      +'<div class="tiny mut" style="margin-bottom:6px">In the target sheet: Extensions ▸ Apps Script ▸ replace the contents of Code.gs with this ▸ Save ▸ reload the sheet ▸ use the new <b>Horizon</b> menu. Refresh all, or one report; "Install hourly auto-refresh" adds a time trigger. The token is already filled in below.</div>'
+      +'<div class="tiny mut" style="margin-bottom:6px">In the target sheet: Extensions ▸ Apps Script ▸ replace the contents of Code.gs with this ▸ Save ▸ reload the sheet ▸ use the new <b>Horizon</b> menu. Refresh all, or one report; "Install hourly auto-refresh" adds a time trigger. The token is already filled in below. Each report in the <code>REPORTS</code> list takes <b>tab</b> (which sheet), <b>startCell</b> (where the data goes, e.g. <code>B5</code>), <b>clear</b> (wipe first?) and <b>clearRange</b> (exactly what to wipe, e.g. <code>A:F</code> whole columns, <code>A2:F</code> below a header, or blank = just the data block) — edit those to place each report where you want.</div>'
       +'<textarea id="gs-code" readonly spellcheck="false" style="width:100%;height:240px;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--band);color:var(--ink);white-space:pre;overflow:auto;box-sizing:border-box">'+esc(gs)+'</textarea></div>';
     return '<div class="sect-h">Google Sheets &amp; scripts <span class="mut tiny">— pull any report below into a sheet or a script with one token. Replaces copy-and-paste from the report pages.</span></div>'+tokRow+tbl+how+script; }
   function hzGsDocsWire(b,reload){ var cp=function(txt,el,ok){ navigator.clipboard.writeText(txt).then(function(){ if(el){ var o=el.textContent; el.textContent=ok||'✓ Copied'; setTimeout(function(){el.textContent=o;},1400); } },function(){ alert('Copy blocked by the browser — select the text and copy it manually.'); }); };
