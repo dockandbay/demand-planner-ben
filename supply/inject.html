@@ -1816,6 +1816,50 @@
       +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'+(PO_ACTCOND.po_not_approved(r)?actMark(po,'po_not_approved')+' <button class="save-btn po-remind-confirm" data-po="'+esc(po)+'" style="background:var(--violet);color:#fff;border-color:var(--violet)" title="Post &ldquo;Reminder to review and confirm this PO&rdquo; to the supplier&rsquo;s portal timeline">✉ Send timeline message to supplier</button>':'')))
       +row('<span class="po-note-badge" style="cursor:default">N</span> Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'"'+((r.is_master&&Number(r.master_child_count)>0)?' disabled title="Cannot delete a master PO when child POs are assigned — remove them on the Child PO tab" style="color:var(--faint);border-color:var(--line);cursor:not-allowed;opacity:.6"':' title="delete this PO + its lines" style="color:var(--neg);border-color:var(--neg-cell)"')+'>🗑 Delete this PO</button>'+((r.is_master&&Number(r.master_child_count)>0)?' <span class="mut tiny">'+Number(r.master_child_count)+' child PO'+(Number(r.master_child_count)>1?'s':'')+' still assigned</span>':'')+'</div>'; }
+  // v28.029 (Ben): LINKED RECORDS — how this PO maps to Xero (bill), Fulfil (PO), Flexport (shipment), DHL (tracking).
+  // Container only; loaded lazily when the MASTER DATA & DOCS tab is opened (loadPoLinks) — the Xero lookup is live.
+  var PO_LINK_META={xero:{label:'Xero',hint:'bill'},fulfil:{label:'Fulfil',hint:'PO'},flexport:{label:'Flexport',hint:'shipment'},dhl:{label:'DHL',hint:'tracking'}};
+  function linkedRecordsPanel(po){
+    return '<div class="sect-h">Linked records <span class="mut tiny">— how this PO maps to Xero, Fulfil, Flexport &amp; DHL. Any SHIPPED PO must have a Xero bill.</span></div>'
+      +'<div class="po-links-ctx" data-po="'+esc(po)+'"><div class="mut tiny">Open to load linkages…</div></div>';
+  }
+  function renderPoLinks(el,d){
+    if(!d||d.error){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load linkages'+(d&&d.error?': '+esc(d.error):'')+'</div>'; return; }
+    var po=d.po;
+    var acts=(d.actions||[]).map(function(a){ return '<div style="background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);border-radius:6px;padding:7px 9px;margin-bottom:8px;font-weight:600">⚠ '+esc(a.msg)+'</div>'; }).join('');
+    var rows=(d.systems||[]).map(function(s){
+      var m=PO_LINK_META[s.system]||{label:s.system,hint:''};
+      var linked=s.status==='linked';
+      var badge=linked?'<span class="tool-badge bg-green">✓ linked</span>':(s.status==='action'?'<span class="tool-badge bg-red">⚠ action</span>':'<span class="tool-badge bg-amber">—</span>');
+      var link=(linked&&s.url)?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600">open '+esc(m.label)+' ↗</a>':'<span class="mut tiny">'+esc(s.note||'not found')+'</span>';
+      var idTxt=s.external_ref||s.external_id||'';
+      var manual=(s.found_by==='manual')?' <span class="mut tiny">(manual)</span>':'';
+      var add=linked?'':'<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);margin-left:8px">＋ add link</button>';
+      return '<tr style="border-top:1px solid #eef2f7">'
+        +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
+        +'<td style="padding:6px 10px;white-space:nowrap">'+badge+'</td>'
+        +'<td style="padding:6px 10px;font-variant-numeric:tabular-nums">'+esc(idTxt)+manual+'</td>'
+        +'<td style="padding:6px 0 6px 10px">'+link+add+'</td></tr>';
+    }).join('');
+    el.innerHTML=acts
+      +'<table style="border-collapse:collapse;font-size:12.5px;width:100%;max-width:680px"><tbody>'+rows+'</tbody></table>'
+      +'<div style="margin-top:10px"><button class="save-btn poln-refresh" data-po="'+esc(po)+'" title="re-resolve links from Xero / Fulfil / Flexport / DHL">↻ Find / refresh links</button> '
+      +(d.resolved?'<span class="mut tiny">resolved live just now</span>':'<span class="mut tiny">from saved linkages — click to refresh</span>')+'</div>';
+  }
+  function loadPoLinks(el,refresh){ var p=el.dataset.po;
+    if(el._loading)return; if(el._loaded && !refresh)return; el._loading=1;
+    if(refresh||!el._loaded) el.innerHTML='<div class="mut tiny">'+(refresh?'Finding links across Xero / Fulfil / Flexport / DHL…':'Loading linkages…')+'</div>';
+    fetch('/api/supply/po/'+encodeURIComponent(p)+'/links'+(refresh?'?refresh=1':'')).then(function(r){return r.json();}).then(function(d){ el._loading=0; el._loaded=1; renderPoLinks(el,d); wirePoLinks(el); })
+      .catch(function(e){ el._loading=0; el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Failed to load linkages: '+esc(e&&e.message||e)+' <button class="lnk-btn poln-retry" style="color:var(--blue)">retry</button></div>'; var rt=el.querySelector('.poln-retry'); if(rt)rt.onclick=function(){ el._loaded=0; loadPoLinks(el,false); }; });
+  }
+  function wirePoLinks(el){
+    el.querySelectorAll('.poln-refresh').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='↻ Finding…'; loadPoLinks(el,true); }; });
+    el.querySelectorAll('.poln-add').forEach(function(b){ b.onclick=function(){ var sys=b.dataset.sys, p=b.dataset.po;
+      var url=prompt('Paste the '+sys.toUpperCase()+' link (URL) for PO '+p+':'); if(url==null)return; url=(url||'').trim(); if(!url)return;
+      var id=(prompt('Optional — the '+sys.toUpperCase()+' id / reference (leave blank to skip):')||'').trim();
+      fetch('/api/supply/po/'+encodeURIComponent(p)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:sys,url:url,external_id:id,external_ref:id})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); el._loaded=0; loadPoLinks(el,false); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
+  }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
   function poShipPanel(po,d){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var today=new Date().toISOString().slice(0,10);   // used by the pre-shipment-doc overdue checks below
@@ -4649,6 +4693,7 @@
       // an order-plan final-cost edit marks the panel stale → rebuild the value-driven tabs (Payments/Landed)
       // with fresh figures when they're opened (poRefetchPanel keeps the just-activated tab)
       var pd=document.getElementById('podet-'+i);
+      if(pt==='masterdata'){ root.querySelectorAll('.potab-panel[data-pt="masterdata"] .po-links-ctx').forEach(function(el){ loadPoLinks(el,false); }); }   // Linked records: lazy-load on first open (live Xero lookup)
       if(pd && pd.dataset.calcStale==='1' && (pt==='pay'||pt==='landed')){ pd.dataset.calcStale=''; poRefetchPanel(po,i); } }; });   // deep-link the open sub-tab into the URL
     setupMobSubnav(root); bindDatePickers(); }
   // PO ▸ DOCUMENTS tab: every file held for this PO (all categories) — list + download + delete + upload.
@@ -4711,7 +4756,7 @@
     var _sep='<div style="margin-top:20px;border-top:1px solid #e6ebf2;padding-top:12px"></div>';
     var payH2=p.pay+_sep+p.landed;                 // PAYMENTS + landed costs; landed exceptions fold into the PAYMENTS badge
     var masterH2='<div style="margin:2px 0 14px"><button class="save-btn po-pdf-dl" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue);border:1px solid #93c5fd;font-weight:700;font-size:13px;padding:6px 14px">⤓ Download PO details (PDF)</button> <span class="mut tiny">all PO details — header, client/FBA, packing &amp; labelling, order plan (SUG-0034)</span></div>'
-      +masterH+_sep+docsH;               // MASTER DATA + documents + full-PO PDF download (SUG-0034)
+      +masterH+_sep+linkedRecordsPanel(po)+_sep+docsH;               // MASTER DATA + Linked records + documents + full-PO PDF download (SUG-0034)
     var _docsAwaiting=((d&&d.all_docs)||[]).filter(function(x){return (x.approval_status||'')==='submitted';}).length;   // supplier docs awaiting approval → flag the tab
     var tabs=[['pay','PAYMENTS',payH2,(p.ex.pay||0)+(p.ex.landed||0)],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['masterdata','MASTER DATA & DOCS',masterH2,(p.ex.master||0)+_docsAwaiting],['timeline','TIMELINE',timelineH,p.ex.timeline]];
     if(poBy[po]&&poBy[po].is_master){ tabs.push(['childpo','CHILD PO',childPoPanel(po,d),0]); }   // masters only — final tab after Timeline (no count badge)

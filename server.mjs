@@ -4268,6 +4268,125 @@ app.get('/api/supply/xero/bills', async (req, res) => {
   } catch (e) { res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.029 (Ben): LINKED RECORDS — PURCHASE ORDERS ▸ Master Data & Docs. One persisted row per (PO, system) mapping a
+// Horizon PO to Xero (bill), Fulfil (PO), Flexport (shipment) and DHL (tracking): a direct link + the external id.
+// Resolved on demand and cached in planner.po_links (mig 311) so linkages survive + can be listed. Read-only against
+// the source systems (Xero bill lookup by Reference, the Fulfil mirror, the Flexport mirror, the shipment carrier).
+// RULE: any SHIPPED PO must be in Xero — if not, the Xero row is an "action" and it surfaces as an open action.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const PO_SHIPPED_STATUSES = new Set(['SHIPPING', 'DELIVERED', 'COMPLETE']);   // truly in transit / landed / done (SHIPPED TO MASTER is still upstream)
+function _poShipped(po) { return PO_SHIPPED_STATUSES.has(String(po.status || '').toUpperCase()) || String(po.production_status || '') === 'shipped'; }
+const PO_LINK_SYSTEMS = ['xero', 'fulfil', 'flexport', 'dhl'];
+async function resolvePoLinks(po, poRow) {
+  // Returns { xero, fulfil, flexport, dhl } each = { external_id, external_ref, url, status, note } or null when un-resolvable.
+  const out = { xero: null, fulfil: null, flexport: null, dhl: null };
+  // ── Fulfil: the drift mirror carries the Fulfil internal id ──
+  try {
+    const m = (await pool.query(`SELECT fulfil_id FROM planner.fulfil_purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (m && m.fulfil_id) {
+      const fc = fulfilConfigFor(await activeFulfilEnv());
+      const url = fc.subdomain ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + m.fulfil_id + '?window_name=default') : null;
+      out.fulfil = { external_id: String(m.fulfil_id), external_ref: po, url, status: 'linked', note: null };
+    }
+  } catch (e) { out.fulfil = { external_id: null, external_ref: null, url: null, status: 'unknown', note: 'Fulfil lookup failed: ' + e.message }; }
+  // ── Flexport: PO.flexport_reference → the flexport_shipments mirror (flex_id + shipment_name) ──
+  try {
+    if (poRow.flexport_reference || poRow.shipment_ref) {
+      const f = (await pool.query(
+        `SELECT flex_id, shipment_name FROM planner.flexport_shipments
+         WHERE flex_id=$1 OR shipment_name=$2 OR shipment_name=$3 LIMIT 1`,
+        [poRow.flexport_reference || '', poRow.shipment_ref || '', po])).rows[0];
+      const fid = (f && f.flex_id) || poRow.flexport_reference || '';
+      if (fid) out.flexport = { external_id: String(fid), external_ref: (f && f.shipment_name) || '', url: 'https://app.flexport.com/shipments/' + encodeURIComponent(fid), status: 'linked', note: null };
+    }
+  } catch (e) { out.flexport = { external_id: null, external_ref: null, url: null, status: 'unknown', note: 'Flexport lookup failed: ' + e.message }; }
+  // ── DHL: the PO's shipment carrier + tracking ref (only when carrier is DHL) ──
+  try {
+    const shipRef = poRow.shipment_ref || po;
+    const sh = (await pool.query(`SELECT carrier, carrier_ref FROM planner.shipments WHERE shipment_ref=$1 LIMIT 1`, [shipRef])).rows[0];
+    if (sh && /dhl/i.test(sh.carrier || '') && sh.carrier_ref) {
+      const trk = String(sh.carrier_ref).trim();
+      out.dhl = { external_id: trk, external_ref: sh.carrier, url: 'https://www.dhl.com/global-en/home/tracking.html?tracking-id=' + encodeURIComponent(trk) + '&submit=1', status: 'linked', note: null };
+    }
+  } catch (e) { out.dhl = { external_id: null, external_ref: null, url: null, status: 'unknown', note: 'DHL lookup failed: ' + e.message }; }
+  // ── Xero: the live bill(s) whose Reference carries this PO number, in the PO's org (AU market → AU org, else UK) ──
+  try {
+    const mkt = String(poRow.country_code || '').toUpperCase() || (/coghlan/i.test(poRow.branch || '') ? 'AU' : '');
+    const region = xeroMarketRegion(mkt);
+    const where = encodeURIComponent('Type=="ACCPAY" AND Reference!=null AND Reference.Contains("' + String(po).replace(/"/g, '') + '")');
+    const j = await xeroFetch(region, '/api.xro/2.0/Invoices?where=' + where + '&order=Date%20DESC&page=1');
+    const poStr = String(po);
+    const inv = ((j && j.Invoices) || []).filter(v => {
+      // Reference may be "PO-x", "PO-x/2", "PO-x, PO-y", or "PO-x1"/"PO-x2" (deposit/balance sequence). Split on
+      // separators, then match a token that IS the PO or is the PO + a purely-numeric suffix — so a dash-variant
+      // like PO-54UKXR3-FBA is NOT matched to PO-54UKXR3's bill (its suffix "-FBA" is not all digits).
+      return String(v.Reference || '').split(/[\/,;\s]+/).map(s => s.trim()).some(tok =>
+        tok === poStr || (tok.startsWith(poStr) && /^\d+$/.test(tok.slice(poStr.length))));
+    });
+    if (inv.length) {
+      const primary = inv[0];
+      out.xero = { external_id: primary.InvoiceID, external_ref: [...new Set(inv.map(v => v.InvoiceNumber).filter(Boolean))].join(', '),
+        url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + primary.InvoiceID,
+        status: 'linked', note: (inv.length > 1 ? inv.length + ' bills (' + region.toUpperCase() + ')' : region.toUpperCase()) };
+    } else {
+      out.xero = { external_id: null, external_ref: null, url: null, status: 'unknown', note: 'No bill in Xero ' + region.toUpperCase() + ' with Reference ' + po };
+    }
+  } catch (e) {
+    out.xero = { external_id: null, external_ref: null, url: null, status: 'unknown', note: (e.code === 503 ? 'Xero not connected' : ('Xero lookup failed: ' + e.message)) };
+  }
+  return out;
+}
+app.get('/api/supply/po/:po/links', async (req, res) => {
+  try {
+    const po = String(req.params.po || '');
+    const poRow = (await pool.query(`SELECT po, status, production_status, country_code, branch, flexport_reference, shipment_ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!poRow) return res.status(404).json({ error: 'PO not found' });
+    let cached = (await pool.query(`SELECT system, external_id, external_ref, url, status, note, found_by, found_at, updated_at FROM planner.po_links WHERE po=$1`, [po])).rows;
+    const doResolve = String(req.query.refresh || '') === '1' || cached.length === 0;
+    if (doResolve) {
+      const r = await resolvePoLinks(po, poRow);
+      for (const sys of PO_LINK_SYSTEMS) {
+        const v = r[sys]; if (!v) continue;
+        // Don't clobber a manual override with an auto 'unknown'
+        const prev = cached.find(c => c.system === sys);
+        if (prev && prev.found_by === 'manual' && v.status !== 'linked') continue;
+        await pool.query(
+          `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'auto',now(),now())
+           ON CONFLICT (po, system) DO UPDATE SET external_id=$3, external_ref=$4, url=$5, status=$6, note=$7, updated_at=now(),
+             found_by=CASE WHEN planner.po_links.found_by='manual' THEN 'manual' ELSE 'auto' END`,
+          [po, sys, v.external_id, v.external_ref, v.url, v.status, v.note]);
+      }
+      cached = (await pool.query(`SELECT system, external_id, external_ref, url, status, note, found_by, found_at, updated_at FROM planner.po_links WHERE po=$1`, [po])).rows;
+    }
+    const byS = {}; cached.forEach(r => { byS[r.system] = r; });
+    const shipped = _poShipped(poRow);
+    const actions = [];
+    // RULE: a SHIPPED PO with no Xero bill is an open action.
+    const xr = byS.xero;
+    if (shipped && (!xr || xr.status !== 'linked')) actions.push({ system: 'xero', level: 'action', msg: 'PO ' + po + ' is ' + (poRow.status || 'shipped') + ' but has no linked bill in Xero' });
+    const systems = PO_LINK_SYSTEMS.map(sys => Object.assign({ system: sys, external_id: null, external_ref: null, url: null, status: 'none', note: null, found_by: null, found_at: null }, byS[sys] || {}));
+    res.set('Cache-Control', 'no-store').json({ po, status: poRow.status, shipped, resolved: doResolve, systems, actions });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Manual override — paste/clear a link the resolver can't find. { system, external_id?, external_ref?, url? }
+app.post('/api/supply/po/:po/links', async (req, res) => {
+  try {
+    const po = String(req.params.po || ''); const b = req.body || {};
+    const sys = String(b.system || '').toLowerCase();
+    if (!PO_LINK_SYSTEMS.includes(sys)) return res.status(400).json({ error: 'system must be one of ' + PO_LINK_SYSTEMS.join(', ') });
+    const eid = (b.external_id || '').toString().trim() || null, eref = (b.external_ref || '').toString().trim() || null, url = (b.url || '').toString().trim() || null;
+    if (!eid && !url) { await pool.query(`DELETE FROM planner.po_links WHERE po=$1 AND system=$2 AND found_by='manual'`, [po, sys]); return res.json({ ok: true, cleared: true }); }
+    await pool.query(
+      `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,'linked','manual link','manual',now(),now())
+       ON CONFLICT (po, system) DO UPDATE SET external_id=$3, external_ref=$4, url=$5, status='linked', note='manual link', found_by='manual', updated_at=now()`,
+      [po, sys, eid, eref, url]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {
