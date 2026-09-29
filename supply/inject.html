@@ -10321,32 +10321,37 @@
   // ---- PAYMENTS ▸ Xero payments — manual push queue (bills / payments / credit notes) ----
   var XPQ_KIND={bill:{label:'Bill',ico:'🧾'},payment:{label:'Payment',ico:'💸'},credit_note:{label:'Credit note',ico:'↩'}};
   var XPQ_ST={pending:'bg-amber',pushed:'bg-green',error:'bg-red',cancelled:'bg-neutral'};
+  var _xpqTab='bill';   // active inner tab (Bills / Payments / Credit notes)
   function renderXeroPayments(b){ b.innerHTML='<div class="count">Loading…</div>';
     function load(){ fetch('/api/supply/xero/push-queue?status=all').then(function(r){return r.json();}).then(function(j){ draw(j); }).catch(function(e){ b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
     function draw(j){ var items=(j&&j.items)||[], counts=(j&&j.counts)||{};
-      function row(it){ var k=XPQ_KIND[it.kind]||{label:it.kind,ico:'•'};
+      function row(it){
         var det=it.kind==='payment'?('→ bill '+esc(it.reference||it.linked_invoice_id||'')):(it.kind==='credit_note'?('→ '+esc(it.po||'')+' · acct '+esc(it.account_code||'602')+(it.tracking_option?' · '+esc(it.tracking_option):'')):('acct-coded lines'+(it.reference?' · '+esc(it.reference):'')));
         var pushed=it.status==='pushed', cancelled=it.status==='cancelled';
-        var act=pushed?(it.xero_ref?'<span class="mut tiny">'+esc(it.xero_ref)+'</span>':'<span class="mut tiny">pushed</span>')
+        var act=pushed?(it.xero_ref?'<span class="mut tiny">'+esc(it.xero_ref)+'</span>':'<span class="mut tiny">pushed ✓</span>')
           :cancelled?'<span class="mut tiny">cancelled</span>'
           :'<button class="save-btn xpq-push" data-id="'+it.id+'" style="background:var(--blue);color:#fff;border-color:var(--blue)">⬆ Push</button> <button class="lnk-btn xpq-cancel" data-id="'+it.id+'" style="color:var(--neg)">cancel</button>';
-        return '<tr'+(it.status==='error'?' style="background:var(--neg-bg)"':'')+'><td class="l">'+k.ico+' <b>'+esc(k.label)+'</b></td>'
-          +'<td class="l">'+esc(it.supplier||'')+'</td><td class="l"><span class="mut tiny">'+det+'</span>'+(it.error?'<div style="color:var(--neg);font-size:11px">'+esc(it.error)+'</div>':'')+'</td>'
+        return '<tr'+(it.status==='error'?' style="background:var(--neg-bg)"':'')+'><td class="l">'+esc(it.supplier||'')+'</td>'
+          +'<td class="l"><span class="mut tiny">'+det+'</span>'+(it.error?'<div style="color:var(--neg);font-size:11px">'+esc(it.error)+'</div>':'')+'</td>'
           +'<td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(it.amount)+' '+esc(it.currency||'USD')+'</td>'
           +'<td class="l"><span class="tool-badge '+(XPQ_ST[it.status]||'bg-neutral')+'">'+esc(it.status)+'</span> <span class="mut tiny">'+esc((it.region||'').toUpperCase())+'</span></td>'
           +'<td class="l">'+act+'</td></tr>'; }
-      function section(kind){ var list=items.filter(function(x){return x.kind===kind;}); var k=XPQ_KIND[kind];
-        return '<div class="sect-h" style="margin-top:14px">'+k.ico+' '+k.label+'s <span class="mut tiny">('+list.length+')</span></div>'
-          +'<div class="tw" style="max-width:1100px"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Type</th><th class="l">Supplier</th><th class="l">Detail</th><th class="l" style="text-align:right">Amount</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'
-          +(list.length?list.map(row).join(''):'<tr><td colspan="6" class="l mut" style="padding:8px">none</td></tr>')+'</tbody></table></div>'; }
-      var pend=counts.pending||0;
-      b.innerHTML='<div class="annot"><b>PAYMENTS ▸ Xero payments.</b> The manual push queue. Marking a run <b>PAID</b> on the Payments Report enqueues the supplier-payment <b>bill</b> + a <b>payment</b> against each linked PO bill; a starting-deposit <b>credit note</b> is added from the PO. Nothing reaches Xero until you press <b>Push</b> here. '
-        +'<b>'+pend+'</b> pending · '+(counts.pushed||0)+' pushed'+(counts.error?' · <span style="color:var(--neg)">'+counts.error+' error</span>':'')+'. <button class="lnk-btn" id="xpq-refresh" style="color:var(--blue)">↻ refresh</button></div>'
-        +section('bill')+section('payment')+section('credit_note');
+      var KINDS=['bill','payment','credit_note'];
+      if(KINDS.indexOf(_xpqTab)<0)_xpqTab='bill';
+      function pend(kind){ return items.filter(function(x){return x.kind===kind&&x.status==='pending';}).length; }
+      var tabbar=KINDS.map(function(kind){ var k=XPQ_KIND[kind]; var n=items.filter(function(x){return x.kind===kind;}).length; var p=pend(kind); var on=(kind===_xpqTab);
+        return '<button class="rtab xpq-tab'+(on?' active':'')+'" data-kind="'+kind+'" style="background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:'+(on?'600':'500')+';cursor:pointer;color:'+(on?'var(--blue)':'var(--faint)')+';border-bottom:2px solid '+(on?'var(--blue)':'transparent')+'">'+k.ico+' '+k.label+'s <span class="mut tiny">('+n+')</span>'+(p?' <span class="rtab-count">'+p+'</span>':'')+'</button>'; }).join('');
+      var list=items.filter(function(x){return x.kind===_xpqTab;});
+      b.innerHTML='<div class="annot"><b>PAYMENTS ▸ Xero payments.</b> The manual push queue. Marking a run <b>PAID</b> on the Payments Report enqueues the supplier-payment <b>bill</b> + a <b>payment</b> against each linked PO bill; a starting-deposit <b>credit note</b> is added from the PO. Nothing reaches Xero until you press <b>Push</b>. '
+        +'<b>'+(counts.pending||0)+'</b> pending · '+(counts.pushed||0)+' pushed'+(counts.error?' · <span style="color:var(--neg)">'+counts.error+' error</span>':'')+'. <button class="lnk-btn" id="xpq-refresh" style="color:var(--blue)">↻ refresh</button></div>'
+        +'<div style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 10px;flex-wrap:wrap">'+tabbar+'</div>'
+        +'<div class="tw" style="max-width:1100px"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Supplier</th><th class="l">Detail</th><th class="l" style="text-align:right">Amount</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'
+        +(list.length?list.map(row).join(''):'<tr><td colspan="5" class="l mut" style="padding:10px">No '+esc((XPQ_KIND[_xpqTab]||{}).label||_xpqTab).toLowerCase()+'s queued.</td></tr>')+'</tbody></table></div>';
       var rf=document.getElementById('xpq-refresh'); if(rf)rf.onclick=load;
-      b.querySelectorAll('.xpq-cancel').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Cancel this pending Xero item?'))return; fetch('/api/supply/xero/push-queue/'+btn.dataset.id+'/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} load(); }).catch(function(e){alert('Failed: '+(e.message||e));}); }; });
+      b.querySelectorAll('.xpq-tab').forEach(function(t){ t.onclick=function(){ _xpqTab=t.dataset.kind; draw(j); }; });
+      b.querySelectorAll('.xpq-cancel').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Cancel this pending Xero item?'))return; fetch('/api/supply/xero/push-queue/'+btn.dataset.id+'/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error){alert(x.error);return;} load(); }).catch(function(e){alert('Failed: '+(e.message||e));}); }; });
       b.querySelectorAll('.xpq-push').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Push this item to LIVE Xero now?'))return; btn.disabled=true; btn.textContent='Pushing…';
-        fetch('/api/supply/xero/push-queue/'+btn.dataset.id+'/push',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirm:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j.warning)alert('Pushed with warning: '+j.warning); load(); }).catch(function(e){ btn.disabled=false; btn.textContent='⬆ Push'; alert('Push failed: '+(e.message||e)); load(); }); }; });
+        fetch('/api/supply/xero/push-queue/'+btn.dataset.id+'/push',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirm:true})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); if(x.warning)alert('Pushed with warning: '+x.warning); load(); }).catch(function(e){ btn.disabled=false; btn.textContent='⬆ Push'; alert('Push failed: '+(e.message||e)); load(); }); }; });
     }
     load(); }
   // ---- Xero bill export (Payments Report) ----
