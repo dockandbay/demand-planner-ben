@@ -286,7 +286,7 @@
 /* collapsed rail (hamburger) — icon over tiny label, L2/L3 hidden */
 @media(min-width:900px){
  body.hz-rail-min #hz-leftrail{width:76px}
- body.hz-rail-min .wrap#app{margin-left:76px}
+ body.hz-rail-min .wrap#app{margin-left:76px!important}   /* beats the expanded margin-left:212px (same specificity, defined later) */
  body.hz-rail-min #hz-leftrail .rl-brand{padding:0 8px;gap:4px;justify-content:center}
  body.hz-rail-min #hz-leftrail .rl-brand .nm{display:none}
  body.hz-rail-min #hz-leftrail .rl-min{margin-left:0}
