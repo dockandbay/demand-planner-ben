@@ -1,3 +1,12 @@
+## v28.022 (Ben): the per-SKU buy plan is persisted to the database and queryable (migration 309)
+
+**Files: `artifact_v16.7.html`, `server.mjs`, `migrations/309_buy_plan_snapshot.sql`.** Ben: the buy plan is computed in the browser; persist it so it can be queried and read by Ask Claude.
+
+- **How:** after a buy build settles, the browser serialises the per-SKU per-market buy plan (reusing the memoised `BP.getBuyQtys`) and posts it to `POST /api/scenario/buy-plan/feed`, which stores one JSONB snapshot in `planner.buy_plan_snapshot` (migration 309) and prunes to the last 10. The same debounced-by-signature + hourly-from-open-tabs pattern as the demand feed (v28.002).
+- **Performance:** no drag on the interactive buy plan. The build already runs in the browser; the snapshot is built in 150-SKU chunks off the render path (2.5s debounce), the DB side is a single insert, and reads go through a view. Sandbox snapshot: 2,125 rows (SKU x market) in one insert.
+- **Queryable:** the view `planner.buy_plan_latest` exposes the newest snapshot as one row per SKU x market (`buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound`). `query_horizon` / Ask Claude read it directly; the assistant's system prompt points at it.
+
+Sandbox verified: buy build → snapshot of 2,125 rows persisted (UK 60,387 to buy, US 36,030, EU 9,006, AU 3,136, CA 140); Ask Claude answered "top 3 to buy for UK 3PL" from `buy_plan_latest` with real quantities. Deploy: apply migration 309.
 ## v28.021 (Ben): CLIENT ▸ Commissions split into L3 tabs; PDF statement; rate & Xero on the account
 
 **Files: `supply/inject.html`, `server.mjs`.**

@@ -16832,7 +16832,7 @@ You have LIVE ACCESS to HORIZON's own data through tools. Use them instead of as
 - resolve_skus(query): find SKU codes by SKU, product name, or parent code.
 - sku_availability(skus, market?): per market (UK/US/EU/AU/CA), current stock on hand (3PL + Amazon FBA), open inbound shipments (quantity + ETA), and forecast demand for the next 6 months. Use it for stock, cover and "can we fulfil this order?" questions.
 - describe_data(table?): discover the data. With no argument it lists the planner tables; with a table name it returns that table's columns and a few sample rows.
-- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows.
+- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows. The latest computed buy plan is the view buy_plan_latest (one row per SKU x market: buy_3pl, buy_3pl_urgent, buy_fba, transfer, soh_3pl, soh_fba, on_order, inbound).
 Essentially all of HORIZON's data is queryable. For anything the two SKU tools do not cover, call describe_data to find the right table and columns, then query_horizon, rather than asking the user. When a user gives you a purchase order or SKU list, resolve the SKUs if needed and look the data up yourself. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON, for example a brand-new customer PO they have not uploaded. Never invent Dock & Bay figures; if a tool returns nothing, say so.`;
 
 // Decode a base64 attachment into a content block for the Anthropic Messages API.
@@ -18636,6 +18636,32 @@ app.post('/api/scenario/auto-forecast/feed', async (req, res) => {
 app.get('/api/scenario/auto-forecast/feed/status', async (req, res) => {
   const f = await afLatestFeed();
   res.set('Cache-Control', 'no-store').json(f ? { ok: true, id: f.id, computed_at: f.computed_at, computed_by: f.computed_by, app_version: f.app_version, rows: f.row_count, units: Number(f.units_total) } : { ok: false, reason: 'no feed snapshot yet — open SUPPLY ▸ PAYMENTS ▸ Auto Forecast once' });
+});
+// v28.022 (Ben): persist the per-SKU BUY plan (computed in the browser) so it is queryable + Ask Claude can read it.
+async function bpStoreFeed(rows, by, appVersion) {
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? Math.round(n) : 0; };
+  const clean = (Array.isArray(rows) ? rows : []).map(r => ({ sku: String(r.sku || ''), mkt: String(r.mkt || '').toLowerCase(),
+      buy_3pl: num(r.buy_3pl), buy_3pl_urgent: num(r.buy_3pl_urgent), buy_fba: num(r.buy_fba), transfer: num(r.transfer), future_qty: num(r.future_qty),
+      soh_3pl: num(r.soh_3pl), soh_fba: num(r.soh_fba), on_order: num(r.on_order), inbound: num(r.inbound) }))
+    .filter(r => r.sku && /^(uk|us|eu|au|ca)$/.test(r.mkt) && (r.buy_3pl || r.buy_3pl_urgent || r.buy_fba || r.transfer || r.soh_3pl || r.soh_fba || r.on_order || r.inbound));
+  if (!clean.length) return { rows: 0 };
+  const units = clean.reduce((s, r) => s + r.buy_3pl + r.buy_3pl_urgent + r.buy_fba, 0);
+  const ins = await pool.query(`INSERT INTO planner.buy_plan_snapshot (computed_by, app_version, row_count, units_total, rows) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING id, computed_at`,
+    [by || null, appVersion || null, clean.length, units, JSON.stringify(clean)]);
+  await pool.query(`DELETE FROM planner.buy_plan_snapshot WHERE id NOT IN (SELECT id FROM planner.buy_plan_snapshot ORDER BY computed_at DESC LIMIT 10)`).catch(() => {});
+  return { id: ins.rows[0].id, computed_at: ins.rows[0].computed_at, rows: clean.length, units };
+}
+app.post('/api/scenario/buy-plan/feed', async (req, res) => {
+  try {
+    const b = req.body || {}; const rows = Array.isArray(b.rows) ? b.rows : [];
+    if (!rows.length) return res.json({ ok: false, reason: 'empty buy feed (buy plan not loaded in this tab)' });
+    res.json({ ok: true, ...(await bpStoreFeed(rows, authUser(req), b.app_version || null)) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/scenario/buy-plan/feed/status', async (req, res) => {
+  try { const f = (await pool.query(`SELECT id, computed_at, computed_by, app_version, row_count, units_total FROM planner.buy_plan_snapshot ORDER BY computed_at DESC LIMIT 1`)).rows[0];
+    res.set('Cache-Control', 'no-store').json(f ? { ok: true, id: f.id, computed_at: f.computed_at, computed_by: f.computed_by, app_version: f.app_version, rows: f.row_count, units: Number(f.units_total) } : { ok: false, reason: 'no buy-plan snapshot yet — open BUY & MOVE ▸ Buy once' });
+  } catch (e) { res.json({ ok: false, reason: 'buy_plan_snapshot table absent (mig 309 not applied)' }); }
 });
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ── v28.008 (Ben): CLIENT PORTAL — Horizon CLIENT tab (admin) + client-facing portal at /client (migration 306) ──

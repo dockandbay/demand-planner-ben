@@ -15974,6 +15974,27 @@ var AF_FEED_PUSHED_SIG='';
 function afPushFeed(feed,force){ try{ if(!feed||!feed.length)return; var sig=feed.length+'|'+feed.reduce(function(s,r){return s+(r.units||0);},0); if(!force&&sig===AF_FEED_PUSHED_SIG)return; AF_FEED_PUSHED_SIG=sig;
   fetch('/api/scenario/auto-forecast/feed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyFeed:feed,app_version:(typeof VERSION!=='undefined'?VERSION:'')})}).catch(function(){}); }catch(e){} }
 setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(typeof BP==='undefined'||!BP.D)return; AF_FEED=afBuildBuyFeed(); afPushFeed(AF_FEED,true); }catch(e){} },3600000);   // hourly while a tab with the buy plan is open
+
+// v28.022 (Ben): persist the per-SKU BUY plan to planner.buy_plan_snapshot so it is queryable + Ask Claude can read it.
+// Reuses the memoised BP.getBuyQtys; built in chunks off the render path, debounced by signature, pushed hourly.
+var BP_FEED_PUSHED_SIG=null;
+function bpBuildFeedAsync(cb){ try{
+  if(typeof BP==='undefined'||!BP.getBuyQtys||typeof BP_DATA==='undefined'||!BP_DATA.products){ cb&&cb([]); return; }
+  var MK=['UK','US','EU','AU','CA'], skus=Object.keys(BP_DATA.products), out=[], i=0;
+  (function chunk(){ var end=Math.min(i+150, skus.length);
+    for(; i<end; i++){ var sku=skus[i], mk=BP_DATA.products[sku].mkts; if(!mk)continue;
+      MK.forEach(function(co){ var m=mk[co]; if(!m)return; var q; try{ q=BP.getBuyQtys(sku,co); }catch(e){ q=null; } if(!q)return;
+        var soh3=Math.round(Number(m.i3)||0), sohf=Math.round(Number(m.if_)||0), oo=Math.round((Number(m.oo3)||0)+(Number(m.oof)||0)), inb=Math.round(Number(m.inb)||0);
+        var b3=Math.round(q.b3||0), b3u=Math.round(q.b3u||0), bf=Math.round(q.bf||0), tx=Math.round(q.tx||0), fq=Math.round(q.futQty||0);
+        if(b3||b3u||bf||tx||soh3||sohf||oo||inb) out.push({sku:sku,mkt:co,buy_3pl:b3,buy_3pl_urgent:b3u,buy_fba:bf,transfer:tx,future_qty:fq,soh_3pl:soh3,soh_fba:sohf,on_order:oo,inbound:inb});
+      });
+    }
+    if(i<skus.length) setTimeout(chunk,0); else cb&&cb(out);
+  })();
+}catch(e){ cb&&cb([]); } }
+function bpPushFeed(force){ bpBuildFeedAsync(function(feed){ if(!feed.length)return; var sig=feed.length+'|'+feed.reduce(function(s,r){return s+r.buy_3pl+r.buy_3pl_urgent+r.buy_fba;},0); if(!force&&sig===BP_FEED_PUSHED_SIG)return; BP_FEED_PUSHED_SIG=sig;
+  fetch('/api/scenario/buy-plan/feed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:feed,app_version:(typeof VERSION!=='undefined'?VERSION:'')})}).catch(function(){}); }); }
+setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(typeof BP==='undefined'||!BP.getBuyQtys)return; bpPushFeed(true); }catch(e){} },3600000);   // hourly buy-plan snapshot while a tab is open
 // Build the buy feed for the Auto Forecast (Option B): the buy plan's OWN per-SKU × market × arrival-month buys
 // (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
 // phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
@@ -16858,6 +16879,7 @@ function renderBuyView(mode,scaffoldOnly){
   try{ var hdr=document.getElementById('main-hdr');
     if(hdr && window.ResizeObserver){ var setH=function(){ wrap.style.setProperty('--bp-hdr-h', (hdr.offsetHeight||30)+'px'); };
       setH(); new ResizeObserver(setH).observe(hdr); } }catch(e){}
+  if(!scaffoldOnly){ try{ clearTimeout(window.__bpFeedT); window.__bpFeedT=setTimeout(function(){ try{ bpPushFeed(); }catch(e){} }, 2500); }catch(e){} }   // v28.022: persist the buy plan snapshot (debounced, off the render path)
 }
 
 // SUPPLY (ORDER PLAN "PLAN" button, "Create 3PL POs" popup) opens the buy-plan detail via window.open_,
