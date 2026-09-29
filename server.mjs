@@ -13013,7 +13013,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       const li = blines.filter(l => Math.abs(Number(l.amount) || 0) > 0.005).map(l => { const it = { Description: String(l.desc || '').slice(0, 3900), Quantity: 1, UnitAmount: r2(l.amount) }; if (l.code) it.AccountCode = String(l.code); it.TaxType = (latMode === 'NoTax') ? (xregion === 'au' ? 'EXEMPTEXPENSES' : 'NONE') : ttCode(l.taxType); return it; });
       if (!li.length) return res.status(400).json({ error: 'no bill lines to create' });
       const missingAcct = li.filter(x => !x.AccountCode).length;
-      const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: latMode, LineItems: li };
+      const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: latMode, LineItems: li };
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
         const inv = r && r.Invoices && r.Invoices[0];
