@@ -15796,7 +15796,8 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     to_char(origin_estimated_departure,'YYYY-MM-DD') est_departure,
                     to_char(origin_actual_departure,'YYYY-MM-DD') act_departure,
                     to_char(dest_estimated_arrival,'YYYY-MM-DD') est_arrival,
-                    to_char(dest_actual_arrival,'YYYY-MM-DD') act_arrival
+                    to_char(dest_actual_arrival,'YYYY-MM-DD') act_arrival,
+                    left(coalesce(last_modified_time,''),10) last_update
                   FROM planner.flexport_shipments_effective
                   WHERE shipment_name=$1
                      OR shipment_name=(SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1)

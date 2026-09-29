@@ -1913,11 +1913,27 @@
       +frow('Departure',dpair(fx.est_departure||fx.departure,fx.act_departure))
       +frow('Arrival',dpair(fx.est_arrival||fx.arrival,fx.act_arrival))
       +frow('Transit',transit?esc(transit):'')
-      +frow('Shipment cost',cost);
+      +frow('Shipment cost',cost)
+      +frow('Last update',fx.last_update?esc(fd(fx.last_update)):'');
     if(!body)return '';
-    return '<div style="margin:6px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--hover)">'
+    // Flexport open actions — DERIVED from the shipment data (Flexport's API exposes no exceptions/messages feed):
+    // delays vs estimate + overdue milestones. Newest concern first.
+    var acts=flexActions(fx);
+    var actH=acts.length?('<div style="margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)"><div style="font-weight:700;font-size:12px;color:var(--neg);margin-bottom:3px">⚠ Flexport open actions</div>'
+      +acts.map(function(a){return '<div style="font-size:12px;padding:1px 0">• '+esc(a)+'</div>';}).join('')+'</div>'):'';
+    return '<div style="margin:6px 0 4px;padding:10px 12px;border:1px solid var(--line);border-left:3px solid '+(acts.length?'var(--neg)':'var(--line)')+';border-radius:8px;background:var(--hover)">'
       +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">🚢 Flexport tracking <span class="mut tiny">— live from the Flexport API</span></div>'
-      +body+'</div>'; }
+      +body+actH+'</div>'; }
+  // Derive open actions for a Flexport shipment row (client-side; Flexport has no exceptions/messages API).
+  function flexActions(fx){ var out=[]; if(!fx)return out; var today=new Date().toISOString().slice(0,10);
+    function dd(a,b){ var da=Date.parse(a), db=Date.parse(b); if(isNaN(da)||isNaN(db))return null; return Math.round((db-da)/86400000); }
+    var ed=fx.est_departure||fx.departure, ad=fx.act_departure, ea=fx.est_arrival||fx.arrival, aa=fx.act_arrival;
+    if(!ad && ed && ed<today) out.push('Departure overdue — ETD '+fd(ed)+' has passed, not yet departed');
+    if(ad && ed){ var late=dd(ed,ad); if(late&&late>=2) out.push('Departed '+late+' day'+(late>1?'s':'')+' late ('+fd(ad)+' vs ETD '+fd(ed)+')'); }
+    if(ad && !aa && ea && ea<today) out.push('Arrival overdue — past ETA '+fd(ea)+', not yet arrived');
+    if(ad && !aa && ea && ea>=today && dd(today,ea)<=7) out.push('Arriving soon — ETA '+fd(ea));
+    if(aa && ea){ var alate=dd(ea,aa); if(alate&&alate>=2) out.push('Arrived '+alate+' day'+(alate>1?'s':'')+' late ('+fd(aa)+' vs ETA '+fd(ea)+')'); }
+    return out; }
   function poShipPanel(po,d){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var today=new Date().toISOString().slice(0,10);   // used by the pre-shipment-doc overdue checks below
     var isCogh=/coghlans/i.test(r.branch||'');   // ASN pallet labels apply to AU Coghlans only
@@ -3118,8 +3134,10 @@
     fetch('/api/supply/flexport/booking-preview/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){
       if(j&&j.error){ box.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
       var inf=j.info||{};
+      var crB=''; if(inf.cargo_ready){ var _cd=Math.round((Date.parse(inf.cargo_ready)-Date.parse(new Date().toISOString().slice(0,10)))/86400000);
+        crB=' <span style="background:#fde68a;color:#92400e;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">'+(_cd<=0?'ready now':'ready in '+_cd+' day'+(_cd>1?'s':''))+'</span>'; }
       var html=kv('Supplier',esc(inf.supplier||''))+kv('Market',esc(inf.market||''))+kv('Mode',esc((inf.mode||'').toUpperCase()))
-        +kv('Cargo ready',esc(inf.cargo_ready||''))+kv('Delivery date',esc(inf.delivery_date||''))
+        +kv('Cargo ready',(inf.cargo_ready?esc(fd(inf.cargo_ready)):'')+crB)+kv('Delivery date',inf.delivery_date?esc(fd(inf.delivery_date)):'')
         +kv('Shipper (Flexport)',inf.shipper?esc(inf.shipper.name)+' <span class="mut tiny">'+esc(inf.shipper.ref)+'</span>':'')
         +kv('Consignee (Flexport)',inf.consignee?esc(inf.consignee.name)+' <span class="mut tiny">'+esc(inf.consignee.ref)+'</span>':'');
       if((j.missing||[]).length) html+='<div style="margin-top:10px;padding:8px 10px;border:1px solid var(--neg);border-radius:6px;background:var(--neg-bg,#fef2f2)"><b style="color:var(--neg)">Can’t submit yet:</b><ul style="margin:4px 0 0 16px;padding:0">'+j.missing.map(function(m){return '<li>'+esc(m)+'</li>';}).join('')+'</ul></div>';
