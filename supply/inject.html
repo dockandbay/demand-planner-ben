@@ -8760,14 +8760,16 @@
         function connBox(){ var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]||{};
           if(rr.connected) return '<div class="tool-badge bg-green">✓ connected</div> <b>'+esc(rr.org_name||'')+'</b> <span class="mut tiny">base currency '+esc(rr.base_currency||'?')+' · tenant '+esc((rr.tenant_id||'').slice(0,8))+'…</span>';
           return '<div class="tool-badge bg-amber">not connected</div> <span class="mut tiny">'+esc(rr.reason||'Set the XERO_'+REG.toUpperCase()+'_CLIENT_ID / _SECRET custom-connection credentials, then it connects automatically.')+'</span>'; }
-        function bankSel(role){ var cur=(cfgBankSel(REG)[role.key])||{}; var opts='<option value="">— not set —</option>';
-          BANKS.forEach(function(a){ var sel=(cur.account_id===a.id)?' selected':''; opts+='<option value="'+esc(a.id)+'"'+sel+'>'+esc((a.code?a.code+' · ':'')+a.name+(a.currency?' ('+a.currency+')':''))+'</option>'; });
+        // Searchable combobox (many accounts to choose from) — filter-as-you-type over BANKS / ALLACC, click to bind.
+        function comboLabel(kind,a){ return (a.code?a.code+' · ':'')+a.name+(kind==='bank'?(a.currency?' ('+a.currency+')':''):(a.type?' ['+a.type.toLowerCase()+']':'')); }
+        function bankSel(role){ var cur=(cfgBankSel(REG)[role.key])||{};
+          var lbl=cur.name?comboLabel('bank',{code:cur.code,name:cur.name,currency:cur.currency}):'';
           var bound=cur.account_id?('<span class="mut tiny">ID '+esc(cur.account_id)+(cur.currency?' · '+esc(cur.currency):'')+'</span>'):'';
-          return '<select class="fci xcfg-bank" data-role="'+esc(role.key)+'" style="min-width:280px">'+opts+'</select> '+bound; }
-        function acctSel(role){ var cur=(cfgAcctSel(REG)[role.key])||{}; var opts='<option value="">— not set —</option>';
-          ALLACC.forEach(function(a){ var sel=(cur.id===a.id)?' selected':''; opts+='<option value="'+esc(a.id)+'"'+sel+'>'+esc((a.code?a.code+' · ':'')+a.name+(a.type?' ['+a.type.toLowerCase()+']':''))+'</option>'; });
+          return '<div class="xcombo" data-kind="bank" data-role="'+esc(role.key)+'" style="position:relative;display:inline-block;vertical-align:middle;min-width:300px"><input class="fci xcombo-in" autocomplete="off" value="'+esc(lbl)+'" placeholder="— search bank / select —" style="width:300px;text-align:left"><div class="xcombo-list" hidden style="position:absolute;left:0;top:100%;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;max-height:240px;overflow:auto;min-width:340px;box-shadow:0 8px 20px rgba(15,23,42,.15);margin-top:2px"></div></div> '+bound; }
+        function acctSel(role){ var cur=(cfgAcctSel(REG)[role.key])||{};
+          var lbl=cur.name?comboLabel('acct',{code:cur.code,name:cur.name}):'';
           var bound=cur.code?('<span class="mut tiny">code '+esc(cur.code)+'</span>'):(role.code_hint?'<span class="mut tiny">expected code '+esc(role.code_hint)+'</span>':'');
-          return '<select class="fci xcfg-acct" data-role="'+esc(role.key)+'" style="min-width:280px">'+opts+'</select> '+bound; }
+          return '<div class="xcombo" data-kind="acct" data-role="'+esc(role.key)+'" style="position:relative;display:inline-block;vertical-align:middle;min-width:300px"><input class="fci xcombo-in" autocomplete="off" value="'+esc(lbl)+'" placeholder="— search account / select —" style="width:300px;text-align:left"><div class="xcombo-list" hidden style="position:absolute;left:0;top:100%;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;max-height:240px;overflow:auto;min-width:340px;box-shadow:0 8px 20px rgba(15,23,42,.15);margin-top:2px"></div></div> '+bound; }
         function exbFor(){ return EXB.filter(function(rl){ return (rl.regions||['uk','au']).indexOf(REG)>=0; }); }
         function draw(){ var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]||{}; var conn=rr.connected; var EXBR=exbFor();
           var missBanks=EXBR.filter(function(rl){ return !((cfgBankSel(REG)[rl.key]||{}).account_id); });
@@ -8823,10 +8825,23 @@
                 if(st){st.textContent='✓ '+(j.created?'created':'synced')+(j.added&&j.added.length?' (+'+j.added.length+' option'+(j.added.length===1?'':'s')+')':' (no new options)');st.style.color='var(--pos)';}
                 setTimeout(function(){ SUBS['xero'](); },900); })
               .catch(function(e){ tc.disabled=false; if(st){st.textContent='Failed: '+(e.message||e);st.style.color='var(--neg)';} }); };
-          b.querySelectorAll('.xcfg-bank').forEach(function(sel){ sel.onchange=function(){ var reg=cfgBankSel(REG); var role=sel.dataset.role; var a=BANKS.filter(function(x){return x.id===sel.value;})[0];
-            if(a){ reg[role]={account_id:a.id,code:a.code,name:a.name,currency:a.currency}; } else { delete reg[role]; } save(function(){ draw(); }); }; });
-          b.querySelectorAll('.xcfg-acct').forEach(function(sel){ sel.onchange=function(){ var reg=cfgAcctSel(REG); var role=sel.dataset.role; var a=ALLACC.filter(function(x){return x.id===sel.value;})[0];
-            if(a){ reg[role]={id:a.id,code:a.code,name:a.name}; } else { delete reg[role]; } save(function(){ draw(); }); }; });
+          b.querySelectorAll('.xcombo').forEach(function(box){ var kind=box.dataset.kind, role=box.dataset.role;
+            var input=box.querySelector('.xcombo-in'), list=box.querySelector('.xcombo-list'); var src=(kind==='bank')?BANKS:ALLACC;
+            function renderList(q){ q=(q||'').toLowerCase().trim();
+              var ms=src.filter(function(a){ var L=comboLabel(kind,a).toLowerCase(); return !q||L.indexOf(q)>=0||String(a.id||'').toLowerCase().indexOf(q)>=0||String(a.code||'').toLowerCase().indexOf(q)>=0; });
+              var shown=ms.slice(0,60);
+              list.innerHTML='<div class="xcombo-opt" data-id="" style="padding:6px 9px;cursor:pointer;color:var(--muted);border-bottom:1px solid var(--line)">— clear —</div>'
+                +shown.map(function(a){ return '<div class="xcombo-opt" data-id="'+esc(a.id)+'" style="padding:6px 9px;cursor:pointer">'+esc(comboLabel(kind,a))+'</div>'; }).join('')
+                +(ms.length>shown.length?'<div style="padding:5px 9px;color:var(--faint);font-size:11px">'+shown.length+' of '+ms.length+' — keep typing to narrow</div>':(ms.length?'':'<div style="padding:6px 9px;color:var(--faint);font-size:12px">no match</div>'));
+              list.querySelectorAll('.xcombo-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='var(--hover)';}; o.onmouseleave=function(){o.style.background='';};
+                o.onmousedown=function(ev){ ev.preventDefault(); var id=o.dataset.id; var reg=(kind==='bank')?cfgBankSel(REG):cfgAcctSel(REG); var a=src.filter(function(x){return String(x.id)===String(id);})[0];
+                  if(a){ reg[role]=(kind==='bank')?{account_id:a.id,code:a.code,name:a.name,currency:a.currency}:{id:a.id,code:a.code,name:a.name}; } else { delete reg[role]; }
+                  list.hidden=true; save(function(){ draw(); }); }; }); }
+            input.onfocus=function(){ renderList(''); list.hidden=false; };
+            input.oninput=function(){ renderList(input.value); list.hidden=false; };
+            input.onkeydown=function(ev){ if(ev.key==='Escape'){ list.hidden=true; input.blur(); } };
+            input.onblur=function(){ setTimeout(function(){ list.hidden=true; },160); };
+          });
         }
       };
       (SUBS[CONFIG_SUB]||function(){})();
