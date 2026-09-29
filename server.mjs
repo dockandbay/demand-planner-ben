@@ -4506,58 +4506,175 @@ app.post('/api/supply/xero/tracking/ensure', async (req, res) => {
 function _xeroFinanceCfg() {
   return pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XERO_CFG_KEY]).then(r => { try { return (r.rows[0] && r.rows[0].value) ? JSON.parse(r.rows[0].value) : {}; } catch (_) { return {}; } });
 }
+// Shared plan computation for a payment run → the Xero bill + per-line coding + linked bills + checks. Read-only.
+async function computeXeroRunPlan(run) {
+  const lines = Array.isArray(run.lines) ? run.lines : [];
+  const payLines = lines.filter(l => l && /deposit|completion|balance|final/i.test(String(l.type || '')));   // exclude "other"
+  if (!payLines.length) return { ok: false, error: 'No deposit/completion/balance lines in this run to post.' };
+  const poRefs = [...new Set(payLines.map(l => String(l.reference || '')).filter(Boolean))];
+  let region = 'uk';
+  if (poRefs.length) {
+    const pr = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [poRefs])).rows;
+    if (pr.some(p => p.cc === 'AU' || /coghlan/i.test(p.branch))) region = 'au';
+  }
+  const cfg = await _xeroFinanceCfg();
+  const banks = (cfg.banks && cfg.banks[region]) || {};
+  const accts = (cfg.accounts && cfg.accounts[region]) || {};
+  const usdBankRole = region === 'au' ? 'gentium_usd' : 'universal_partners_usd';
+  const bank = banks[usdBankRole] || null;
+  const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
+  const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
+  let trackOpts = new Set(); let trackOk = true;
+  try { const t = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+    const cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
+    if (cat) (cat.Options || []).forEach(o => trackOpts.add(String(o.Name).toUpperCase())); else trackOk = false;
+  } catch (e) { trackOk = null; }
+  const outLines = payLines.map(l => {
+    const isDeposit = /deposit/i.test(String(l.type || ''));
+    const acctRole = isDeposit ? 'stock_deposits' : 'supplier_payments';
+    const acct = accts[acctRole] || null;
+    const prod = String(l.prod_no || '').replace(/^P/i, '').trim();
+    const trackOption = (isDeposit && prod) ? ('P' + prod) : null;
+    const link = linkByPo[String(l.reference || '')] || null;
+    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '',
+      account: acct ? { code: acct.code, name: acct.name, id: acct.id } : null, account_role: acctRole,
+      tracking: trackOption ? { category: 'Production', option: trackOption, exists: trackOpts.has(trackOption.toUpperCase()) } : null,
+      linked_bill: link ? { id: link.external_id, number: link.external_ref, url: link.url } : null };
+  });
+  const total = outLines.reduce((s, l) => s + l.amount, 0);
+  const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
+  const checks = [];
+  checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org' } : { level: 'error', msg: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — bind it in CONFIG ▸ Xero' });
+  ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
+  const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
+  if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
+  const noBill = outLines.filter(l => !l.linked_bill).map(l => l.reference);
+  if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
+  return { ok: true, region, supplier: run.supplier, reference: ref, currency: 'USD', date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, checks };
+}
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
+  try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── PAYMENTS ▸ Xero payments — the manual push queue (mig 312). Enqueue on mark-paid / deposit-assign; push to live
+//    Xero manually per item. Deposits on a run route to the credit-note action, not a bank payment. ──
+async function _pqBy(id) { return (await pool.query(`SELECT * FROM planner.xero_push_queue WHERE id=$1`, [id])).rows[0]; }
+app.get('/api/supply/xero/push-queue', async (req, res) => {
   try {
+    const status = String(req.query.status || '').toLowerCase();
+    const where = ['1=1']; const args = [];
+    if (status && status !== 'all') { args.push(status); where.push('status=$' + args.length); }
+    const rows = (await pool.query(`SELECT id, kind, region, status, supplier, po, reference, amount, currency, account_code, tracking_option, bank_account_id, linked_invoice_id, fx_rate, source, source_key, xero_id, xero_ref, error, created_at, pushed_at FROM planner.xero_push_queue WHERE ${where.join(' AND ')} ORDER BY (status='pending') DESC, created_at DESC LIMIT 500`, args)).rows;
+    const counts = {}; (await pool.query(`SELECT status, count(*) n FROM planner.xero_push_queue GROUP BY status`)).rows.forEach(r => { counts[r.status] = Number(r.n); });
+    res.set('Cache-Control', 'no-store').json({ items: rows, counts });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero/push-queue/enqueue-run', async (req, res) => {
+  try {
+    let by = ''; try { by = (await permsFor(req)).email || ''; } catch (e) {}
     const run = (req.body && req.body.run) || {};
-    const lines = Array.isArray(run.lines) ? run.lines : [];
-    const payLines = lines.filter(l => l && /deposit|completion|balance|final/i.test(String(l.type || '')));   // exclude "other"
-    if (!payLines.length) return res.json({ ok: false, error: 'No deposit/completion/balance lines in this run to post.' });
-    // Region: any AU-market PO on the run → AU org, else UK.
-    const poRefs = [...new Set(payLines.map(l => String(l.reference || '')).filter(Boolean))];
-    let region = 'uk';
-    if (poRefs.length) {
-      const pr = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [poRefs])).rows;
-      if (pr.some(p => p.cc === 'AU' || /coghlan/i.test(p.branch))) region = 'au';
+    const plan = await computeXeroRunPlan(run);
+    if (!plan.ok) return res.status(400).json({ error: plan.error || 'nothing to enqueue' });
+    const srcKey = (run.dt || '') + '|' + (run.supplier || '');
+    // replace any still-pending rows for this run (re-enqueue), keep pushed history
+    await pool.query(`DELETE FROM planner.xero_push_queue WHERE source='payments_report' AND source_key=$1 AND status='pending'`, [srcKey]);
+    const billPayload = { lines: plan.lines.map(l => ({ po: l.reference, type: l.type, amount: l.amount, account_code: l.account && l.account.code, tracking_option: l.tracking && l.tracking.option, description: (l.type || 'Payment') + ' ' + l.reference })) };
+    const ins = [];
+    const bill = (await pool.query(
+      `INSERT INTO planner.xero_push_queue (kind,region,supplier,reference,amount,currency,payload,source,source_key,created_by)
+       VALUES ('bill',$1,$2,$3,$4,'USD',$5,'payments_report',$6,$7) RETURNING id`,
+      [plan.region, plan.supplier, plan.reference, plan.total_usd, JSON.stringify(billPayload), srcKey, by])).rows[0];
+    ins.push({ kind: 'bill', id: bill.id });
+    // one payment per NON-deposit line that has a linked bill (deposits draw down via a credit note instead)
+    const bankId = plan.bank && plan.bank.account_id;
+    for (const l of plan.lines) {
+      if (/deposit/i.test(String(l.type || ''))) continue;
+      if (!l.linked_bill || !l.linked_bill.id) continue;
+      const p = (await pool.query(
+        `INSERT INTO planner.xero_push_queue (kind,region,supplier,po,reference,amount,currency,bank_account_id,linked_invoice_id,fx_rate,source,source_key,created_by)
+         VALUES ('payment',$1,$2,$3,$4,$5,'USD',$6,$7,1,'payments_report',$8,$9) RETURNING id`,
+        [plan.region, plan.supplier, l.reference, l.linked_bill.number || l.reference, l.amount, bankId, l.linked_bill.id, srcKey, by])).rows[0];
+      ins.push({ kind: 'payment', id: p.id });
     }
-    const cfg = await _xeroFinanceCfg();
-    const banks = (cfg.banks && cfg.banks[region]) || {};
-    const accts = (cfg.accounts && cfg.accounts[region]) || {};
-    const usdBankRole = region === 'au' ? 'gentium_usd' : 'universal_partners_usd';
-    const bank = banks[usdBankRole] || null;
-    // linked Xero bills for these POs (persisted po_links)
-    const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
-    const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
-    // existing Production tracking options in this org (to flag which would be auto-created)
-    let trackOpts = new Set(); let trackOk = true;
-    try { const t = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
-      const cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
-      if (cat) (cat.Options || []).forEach(o => trackOpts.add(String(o.Name).toUpperCase())); else trackOk = false;
-    } catch (e) { trackOk = null; }   // null = couldn't check (not connected)
-    const outLines = payLines.map(l => {
-      const isDeposit = /deposit/i.test(String(l.type || ''));
-      const acctRole = isDeposit ? 'stock_deposits' : 'supplier_payments';
-      const acct = accts[acctRole] || null;
-      const prod = String(l.prod_no || '').replace(/^P/i, '').trim();
-      const trackOption = (isDeposit && prod) ? ('P' + prod) : null;
-      const link = linkByPo[String(l.reference || '')] || null;
-      return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '',
-        account: acct ? { code: acct.code, name: acct.name, id: acct.id } : null, account_role: acctRole,
-        tracking: trackOption ? { category: 'Production', option: trackOption, exists: trackOpts.has(trackOption.toUpperCase()) } : null,
-        linked_bill: link ? { id: link.external_id, number: link.external_ref, url: link.url } : null };
-    });
-    const total = outLines.reduce((s, l) => s + l.amount, 0);
-    const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
-    // checks
-    const checks = [];
-    checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org' } : { level: 'error', msg: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — bind it in CONFIG ▸ Xero' });
-    ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
-    const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
-    if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
-    const noBill = outLines.filter(l => !l.linked_bill).map(l => l.reference);
-    if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
-    res.json({ ok: true, region, org: (bank ? null : undefined), supplier: run.supplier, reference: ref, currency: 'USD', date: run.dt,
-      bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, checks });
+    res.json({ ok: true, enqueued: ins.length, items: ins, region: plan.region });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero/push-queue/credit-note', async (req, res) => {
+  try {
+    let by = ''; try { by = (await permsFor(req)).email || ''; } catch (e) {}
+    const b = req.body || {}; const po = String(b.po || ''); const amount = Number(b.amount);
+    if (!po || !(amount > 0)) return res.status(400).json({ error: 'po and a positive amount are required' });
+    const poRow = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(supplier_name,'') supplier, coalesce(prod_no,'') prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!poRow) return res.status(404).json({ error: 'PO not found' });
+    const region = (poRow.cc === 'AU' || /coghlan/i.test(poRow.branch)) ? 'au' : 'uk';
+    const cfg = await _xeroFinanceCfg();
+    const acct = ((cfg.accounts && cfg.accounts[region]) || {}).stock_deposits || null;
+    const link = (await pool.query(`SELECT external_id, external_ref FROM planner.po_links WHERE system='xero' AND status='linked' AND po=$1`, [po])).rows[0];
+    const prod = String(b.prod_no || poRow.prod_no || '').replace(/^P/i, '').trim();
+    const cn = (await pool.query(
+      `INSERT INTO planner.xero_push_queue (kind,region,supplier,po,reference,amount,currency,account_code,tracking_option,linked_invoice_id,source,source_key,created_by,payload)
+       VALUES ('credit_note',$1,$2,$3,$4,$5,'USD',$6,$7,$8,'deposit_assign',$9,$10,$11) RETURNING id`,
+      [region, poRow.supplier, po, (b.deposit_ref || ('DEPOSIT-' + po)), amount, (acct && acct.code) || '602', prod ? ('P' + prod) : null, (link && link.external_id) || null, (b.deposit_ref || po), by,
+       JSON.stringify({ note: 'Starting-deposit draw-down for ' + po, deposit_ref: b.deposit_ref || null })])).rows[0];
+    res.json({ ok: true, id: cn.id, region, allocates_to: (link && link.external_ref) || null, account: (acct && acct.code) || '602' });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero/push-queue/:id/cancel', async (req, res) => {
+  try {
+    const row = await _pqBy(req.params.id); if (!row) return res.status(404).json({ error: 'not found' });
+    if (row.status === 'pushed') return res.status(409).json({ error: 'already pushed to Xero — cannot cancel' });
+    await pool.query(`UPDATE planner.xero_push_queue SET status='cancelled', updated_at=now() WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Ensure a Production tracking option exists (auto-create per Ben's standing permission — used at push time).
+async function _ensureProductionOption(region, option) {
+  if (!option) return;
+  const t = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+  let cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
+  if (!cat) { const cr = await xeroFetch(region, '/api.xro/2.0/TrackingCategories', { method: 'POST', body: { Name: 'Production' } }); cat = cr && cr.TrackingCategories && cr.TrackingCategories[0]; }
+  if (!cat) throw new Error('could not resolve the Production tracking category');
+  const have = new Set(((cat.Options) || []).map(o => String(o.Name).toLowerCase()));
+  if (!have.has(String(option).toLowerCase())) await xeroFetch(region, '/api.xro/2.0/TrackingCategories/' + cat.TrackingCategoryID + '/Options', { method: 'PUT', body: { Name: option } });
+}
+app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
+  try {
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to push to Xero' }); } catch (e) {}
+    if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
+    const row = await _pqBy(req.params.id); if (!row) return res.status(404).json({ error: 'not found' });
+    if (row.status === 'pushed') return res.status(409).json({ error: 'already pushed', xero_id: row.xero_id });
+    const region = xeroRegion(row.region); const today = new Date().toISOString().slice(0, 10);
+    let xeroId = null, xeroRef = null;
+    if (row.kind === 'bill') {
+      const pl = row.payload || {}; const lines = Array.isArray(pl.lines) ? pl.lines : [];
+      for (const l of lines) { if (l.tracking_option) await _ensureProductionOption(region, l.tracking_option); }
+      const body = { Type: 'ACCPAY', Contact: { Name: row.supplier || 'Supplier' }, Date: today, Reference: row.reference || '', CurrencyCode: row.currency || 'USD', Status: 'DRAFT',
+        LineItems: lines.map(l => ({ Description: l.description || (l.type + ' ' + l.po), Quantity: 1, UnitAmount: Number(l.amount) || 0, AccountCode: l.account_code || '', Tracking: l.tracking_option ? [{ Name: 'Production', Option: l.tracking_option }] : [] })) };
+      const r = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
+      const inv = r && r.Invoices && r.Invoices[0]; xeroId = inv && inv.InvoiceID; xeroRef = inv && inv.InvoiceNumber;
+    } else if (row.kind === 'payment') {
+      if (!row.linked_invoice_id) throw new Error('no linked Xero bill to pay');
+      if (!row.bank_account_id) throw new Error('no bank account bound — set it in CONFIG ▸ Xero');
+      const body = { Payments: [{ Invoice: { InvoiceID: row.linked_invoice_id }, Account: { AccountID: row.bank_account_id }, Date: today, Amount: Number(row.amount) || 0, CurrencyRate: Number(row.fx_rate) || 1 }] };
+      const r = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body });
+      const pay = r && r.Payments && r.Payments[0]; xeroId = pay && pay.PaymentID;
+    } else if (row.kind === 'credit_note') {
+      if (row.tracking_option) await _ensureProductionOption(region, row.tracking_option);
+      const cnBody = { Type: 'ACCPAYCREDIT', Contact: { Name: row.supplier || 'Supplier' }, Date: today, CurrencyCode: row.currency || 'USD', Status: 'AUTHORISED',
+        LineItems: [{ Description: 'Starting-deposit draw-down ' + (row.po || ''), Quantity: 1, UnitAmount: Number(row.amount) || 0, AccountCode: row.account_code || '602', Tracking: row.tracking_option ? [{ Name: 'Production', Option: row.tracking_option }] : [] }] };
+      const r = await xeroFetch(region, '/api.xro/2.0/CreditNotes', { method: 'POST', body: { CreditNotes: [cnBody] } });
+      const cn = r && r.CreditNotes && r.CreditNotes[0]; xeroId = cn && cn.CreditNoteID; xeroRef = cn && cn.CreditNoteNumber;
+      if (xeroId && row.linked_invoice_id) {
+        try { await xeroFetch(region, '/api.xro/2.0/CreditNotes/' + xeroId + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: row.linked_invoice_id }, Amount: Number(row.amount) || 0 }] } }); }
+        catch (ae) { await pool.query(`UPDATE planner.xero_push_queue SET status='pushed', xero_id=$2, xero_ref=$3, error=$4, pushed_at=now(), updated_at=now() WHERE id=$1`, [row.id, xeroId, xeroRef, 'Credit note created but allocation failed: ' + ae.message]); return res.json({ ok: true, xero_id: xeroId, warning: 'created but not allocated: ' + ae.message }); }
+      }
+    } else { return res.status(400).json({ error: 'unknown kind ' + row.kind }); }
+    await pool.query(`UPDATE planner.xero_push_queue SET status='pushed', xero_id=$2, xero_ref=$3, error=NULL, pushed_at=now(), updated_at=now() WHERE id=$1`, [row.id, xeroId || null, xeroRef || null]);
+    res.json({ ok: true, kind: row.kind, xero_id: xeroId, xero_ref: xeroRef });
+  } catch (e) {
+    try { await pool.query(`UPDATE planner.xero_push_queue SET status='error', error=$2, updated_at=now() WHERE id=$1`, [req.params.id, String(e.message).slice(0, 400)]); } catch (_) {}
+    log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message });
+  }
 });
 
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
