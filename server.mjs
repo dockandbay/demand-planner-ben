@@ -4549,15 +4549,30 @@ async function computeXeroRunPlan(run) {
     const cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
     if (cat) (cat.Options || []).forEach(o => trackOpts.add(String(o.Name).toUpperCase())); else trackOk = false;
   } catch (e) { trackOk = null; }
+  // Legacy per-production account codes (for productions BEFORE P58 — both deposits and supplier payments book to the
+  // production's own Xero account, per the current prod_numbers mapping; no 602/602.1 split, no Production tracking).
+  const legacyProdAcct = {};
+  try { const prods = [...new Set(payLines.map(l => String(l.prod_no || '').trim()).filter(Boolean))];
+    if (prods.length) (await pool.query(`SELECT prod_no, coalesce(nullif(xero_account_code,''),'') code, coalesce(xero_account_name,'') name FROM planner.prod_numbers WHERE prod_no = ANY($1::text[])`, [prods])).rows.forEach(r => { legacyProdAcct[r.prod_no] = { code: r.code, name: r.name }; });
+  } catch (e) {}
   const outLines = payLines.map(l => {
     const isDeposit = /deposit/i.test(String(l.type || ''));
-    const acctRole = isDeposit ? 'stock_deposits' : 'supplier_payments';
-    const acct = accts[acctRole] || null;
-    const prod = String(l.prod_no || '').replace(/^P/i, '').trim();
-    const trackOption = (isDeposit && prod) ? ('P' + prod) : null;
+    const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
+    const useNew = (prodN != null && prodN >= 58);   // P58+ → new 602/602.1 + tracking; earlier → legacy per-production account
     const link = linkByPo[String(l.reference || '')] || null;
-    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '',
-      account: acct ? { code: acct.code, name: acct.name, id: acct.id } : null, account_role: acctRole,
+    let acct, acctRole, trackOption = null;
+    if (useNew) {
+      acctRole = isDeposit ? 'stock_deposits' : 'supplier_payments';
+      const a = accts[acctRole]; acct = a ? { code: a.code, name: a.name, id: a.id } : null;
+      const prod = prodDigits; trackOption = (isDeposit && prod) ? ('P' + prod) : null;
+    } else {
+      acctRole = 'legacy';   // both deposit + payment → the production's own account (line's report-computed code, else prod_numbers)
+      const lp = legacyProdAcct[String(l.prod_no || '').trim()];
+      const code = (l.account_code || '').trim() || (lp && lp.code) || '';
+      acct = code ? { code: code, name: (lp && lp.name) || 'production account (pre-P58)', id: null } : null;
+    }
+    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '', legacy: !useNew,
+      account: acct, account_role: acctRole,
       tracking: trackOption ? { category: 'Production', option: trackOption, exists: trackOpts.has(trackOption.toUpperCase()) } : null,
       linked_bill: link ? { id: link.external_id, number: link.external_ref, url: link.url } : null };
   });
@@ -4581,7 +4596,14 @@ async function computeXeroRunPlan(run) {
   checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org (not reconciled — only the currency matters)' } : { level: 'error', msg: 'No USD bank account in Xero ' + region.toUpperCase() + ' — add one (any USD bank works; the payment is not reconciled)' });
   const overpay = outLines.filter(l => l.pay_ok === false);
   if (overpay.length) checks.push({ level: 'error', msg: overpay.length + ' payment(s) exceed the bill’s amount due (Xero would reject): ' + overpay.map(l => l.reference).join(', ') });
-  ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
+  ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name + ' (P58+)' } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
+  const legacyLines = outLines.filter(l => l.account_role === 'legacy');
+  if (legacyLines.length) {
+    const un = legacyLines.filter(l => !(l.account && l.account.code));
+    if (un.length) checks.push({ level: 'error', msg: un.length + ' pre-P58 line(s) have no production Xero account: ' + [...new Set(un.map(l => l.reference))].join(', ') });
+    const ok = legacyLines.filter(l => l.account && l.account.code);
+    if (ok.length) checks.push({ level: 'ok', msg: ok.length + ' pre-P58 line(s) → production account (legacy mapping, e.g. ' + ok[0].account.code + ')' });
+  }
   const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
   const noBill = outLines.filter(l => !l.linked_bill).map(l => l.reference);
