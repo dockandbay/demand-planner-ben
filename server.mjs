@@ -4152,6 +4152,9 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
 const XERO_REGIONS = ['uk', 'au'];
 function xeroRegion(r) { r = String(r || 'uk').toLowerCase(); return r === 'au' ? 'au' : 'uk'; }   // any non-AU market → the UK org
 function xeroMarketRegion(mkt) { return String(mkt || '').toUpperCase() === 'AU' ? 'au' : 'uk'; }
+// A PO's Xero org: its accounting MARKET wins (country_code) — a Coghlans WAREHOUSE branch is only a fallback when the
+// PO has no country_code (so a US PO warehoused at AU Coghlans books to the UK org, matching where its bill lives).
+function _poXeroRegion(cc, branch) { const m = String(cc || '').toUpperCase() || (/coghlan/i.test(branch || '') ? 'AU' : ''); return xeroMarketRegion(m); }
 function xeroConfig(region) {
   region = xeroRegion(region); const pref = region === 'au' ? 'XERO_AU_' : 'XERO_UK_';
   const id = (process.env[pref + 'CLIENT_ID'] || process.env.XERO_CLIENT_ID || '').trim();
@@ -4517,7 +4520,7 @@ async function computeXeroRunPlan(run) {
   let region = 'uk';
   if (poRefs.length) {
     const pr = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [poRefs])).rows;
-    if (pr.some(p => p.cc === 'AU' || /coghlan/i.test(p.branch))) region = 'au';
+    if (pr.some(p => _poXeroRegion(p.cc, p.branch) === 'au')) region = 'au';
   }
   const cfg = await _xeroFinanceCfg();
   const banks = (cfg.banks && cfg.banks[region]) || {};
@@ -4608,7 +4611,7 @@ app.post('/api/supply/xero/push-queue/credit-note', async (req, res) => {
     if (!po || !(amount > 0)) return res.status(400).json({ error: 'po and a positive amount are required' });
     const poRow = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(supplier_name,'') supplier, coalesce(prod_no,'') prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO not found' });
-    const region = (poRow.cc === 'AU' || /coghlan/i.test(poRow.branch)) ? 'au' : 'uk';
+    const region = _poXeroRegion(poRow.cc, poRow.branch);
     const cfg = await _xeroFinanceCfg();
     const acct = ((cfg.accounts && cfg.accounts[region]) || {}).stock_deposits || null;
     const link = (await pool.query(`SELECT external_id, external_ref FROM planner.po_links WHERE system='xero' AND status='linked' AND po=$1`, [po])).rows[0];
@@ -4640,7 +4643,7 @@ async function _computeXeroExceptions() {
       WHERE coalesce(p.master_po,'')='' LIMIT 800`)).rows;
   // bulk-fetch bills by id, per region
   const byRegion = { uk: [], au: [] };
-  linked.forEach(r => { const reg = (r.cc === 'AU' || /coghlan/i.test(r.branch)) ? 'au' : 'uk'; r._reg = reg; byRegion[reg].push(r); });
+  linked.forEach(r => { const reg = _poXeroRegion(r.cc, r.branch); r._reg = reg; byRegion[reg].push(r); });
   const billById = {};
   for (const reg of ['uk', 'au']) {
     const ids = byRegion[reg].map(r => r.bill_id).filter(Boolean);
