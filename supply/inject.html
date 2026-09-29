@@ -2630,6 +2630,7 @@
       _poState.q=''; _poState.f=_poState.f||{}; _poState.act=_poState.act||{}; _poState.ctry=_poState.ctry||{}; }   // restore persisted filters (sliding 1h TTL); never restore the free-text search
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
+    _poState.grp='production';   // v28.058: always grouped by production (the Group option was removed)
     if(_poState.focus==null)_poState.focus=false;   // ⭐ Focus filter (starred + active only)
     var state=_poState;
     if(typeof state.f==='string')state.f = state.f && state.f!=='all' ? (function(o){o[state.f]=1;return o;})({}) : {};   // migrate any persisted single-string filter to the multi-select set
@@ -2708,7 +2709,7 @@
           +'<label style="display:block;font-size:12px;cursor:pointer;padding:3px 2px" title="hide payment-due actions (overdue / unpaid / invalid)"><input type="checkbox" id="po-hide-pay"'+(_hidePayDue?' checked':'')+' style="margin-right:6px;vertical-align:middle">payment due</label>'
           +'<label style="display:block;font-size:12px;cursor:pointer;padding:3px 2px" title="hide unread-supplier-note action items"><input type="checkbox" id="po-hide-tl"'+(_hideTimelineUnread?' checked':'')+' style="margin-right:6px;vertical-align:middle">timeline unread</label>'
         +'</div></span>'
-      +'<span class="po-filt-item"><span class="pill-lbl">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></span></div>'
+      +'</div>'
       +poFilterBar()
       +'<div id="sup-grid"></div>';
     bindPoSubNav();
@@ -2882,7 +2883,6 @@
       // narrowed by a status filter (it can surface COMPLETE/SHIPPED POs the default pills would otherwise hide). (Ben)
       if(this.value){ state.f={}; c.querySelectorAll('#po-prog .pill').forEach(function(p){ p.classList.remove('active'); }); }
       if(this.value){ selHi(this,true); } else { this.style.background='#fef2f2'; this.style.color='#991b1b'; this.style.borderColor='#fca5a5'; this.style.fontWeight='700'; } view(); };
-    var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
     var hBtn=document.getElementById('po-hide-btn'), hMenu=document.getElementById('po-hide-menu');
     if(hBtn&&hMenu){
       hBtn.onclick=function(e){ e.stopPropagation(); hMenu.style.display=(hMenu.style.display==='none'?'block':'none'); };
