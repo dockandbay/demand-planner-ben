@@ -4558,7 +4558,7 @@ async function computeXeroRunPlan(run) {
   const outLines = payLines.map(l => {
     const isDeposit = /deposit/i.test(String(l.type || ''));
     const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
-    const useNew = (prodN != null && prodN >= 58);   // P58+ → new 602/602.1 + tracking; earlier → legacy per-production account
+    const useNew = (region === 'au') || (prodN != null && prodN >= 58);   // AU always new (602/602.1 + tracking); UK: P58+ new, earlier legacy per-production account
     const link = linkByPo[String(l.reference || '')] || null;
     let acct, acctRole, trackOption = null;
     if (useNew) {
@@ -4677,10 +4677,10 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     const poRow = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(supplier_name,'') supplier, coalesce(prod_no,'') prod_no, coalesce(pay_start_deposit_assigned,0) dep, coalesce(deposit_ref,'') deposit_ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO not found' });
     const pn = _prodNum(poRow.prod_no);
-    if (pn == null || pn < 58) return res.status(400).json({ error: 'Credit-note draw-down applies from P58 onwards; ' + (poRow.prod_no ? 'P' + pn : 'this PO') + ' draws down the old way.' });
+    const region = _poXeroRegion(poRow.cc, poRow.branch);
+    if (region !== 'au' && (pn == null || pn < 58)) return res.status(400).json({ error: 'Credit-note draw-down applies from P58 onwards (UK); ' + (poRow.prod_no ? 'P' + pn : 'this PO') + ' draws down the old way. (AU always uses credit notes.)' });
     const amount = Math.round((Number(poRow.dep) || 0) * 100) / 100;
     if (!(amount > 0)) return res.status(400).json({ error: 'No starting deposit assigned to this PO to draw down.' });
-    const region = _poXeroRegion(poRow.cc, poRow.branch);
     const cfg = await _xeroFinanceCfg();
     const acct = ((cfg.accounts && cfg.accounts[region]) || {}).stock_deposits;
     if (!acct || !acct.code) return res.status(400).json({ error: 'No Stock Deposits (602) account mapped for ' + region.toUpperCase() + ' — set it in CONFIG ▸ Xero' });
@@ -4690,10 +4690,10 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     let due = null; let billRate = null;
     try { const bi = await xeroFetch(region, '/api.xro/2.0/Invoices/' + link.external_id); const inv = bi && bi.Invoices && bi.Invoices[0]; if (inv) { due = Number(inv.AmountDue) || 0; billRate = (inv.CurrencyRate != null ? Number(inv.CurrencyRate) : null); } } catch (e) {}
     if (due != null && amount > due + 0.01) return res.status(400).json({ error: 'Deposit ' + _usd(amount) + ' exceeds the bill’s amount due ' + _usd(due) + ' — cannot allocate more than is owed.' });
-    const trackOption = 'P' + pn;
-    await _ensureProductionOption(region, trackOption);
+    const trackOption = (pn != null) ? ('P' + pn) : null;
+    if (trackOption) await _ensureProductionOption(region, trackOption);
     const cnBody = { Type: 'ACCPAYCREDIT', Contact: { Name: poRow.supplier || 'Supplier' }, Date: new Date().toISOString().slice(0, 10), CreditNoteNumber: 'DEPOSIT-' + po, Reference: 'DEPOSIT-' + po, CurrencyCode: 'USD', Status: 'AUTHORISED', LineAmountTypes: 'NoTax',
-      LineItems: [{ Description: 'Starting-deposit draw-down ' + po, Quantity: 1, UnitAmount: amount, AccountCode: acct.code, Tracking: [{ Name: 'Production', Option: trackOption }] }] };
+      LineItems: [{ Description: 'Starting-deposit draw-down ' + po, Quantity: 1, UnitAmount: amount, AccountCode: acct.code, Tracking: trackOption ? [{ Name: 'Production', Option: trackOption }] : [] }] };
     const cr = await xeroFetch(region, '/api.xro/2.0/CreditNotes', { method: 'POST', body: { CreditNotes: [cnBody] } });
     const cn = cr && cr.CreditNotes && cr.CreditNotes[0];
     let allocated = false, allocErr = null;
@@ -4701,7 +4701,7 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
       try { await xeroFetch(region, '/api.xro/2.0/CreditNotes/' + cn.CreditNoteID + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: link.external_id }, Amount: amount }] } }); allocated = true; }
       catch (ae) { allocErr = ae.message; }
       // record it so the "uncreated credit note" exception clears for this PO
-      try { await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at) VALUES ($1,'xero_credit_note',$2,$3,$4,'linked',$5,'auto',now(),now()) ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, updated_at=now()`, [po, cn.CreditNoteID, cn.CreditNoteNumber || ('DEPOSIT-' + po), 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID, _usd(amount) + ' ' + trackOption]); } catch (e) {}
+      try { await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at) VALUES ($1,'xero_credit_note',$2,$3,$4,'linked',$5,'auto',now(),now()) ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, updated_at=now()`, [po, cn.CreditNoteID, cn.CreditNoteNumber || ('DEPOSIT-' + po), 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID, _usd(amount) + (trackOption ? ' ' + trackOption : '')]); } catch (e) {}
     }
     res.json({ ok: true, region, po, production: trackOption, amount, account: acct.code, bill: link.external_ref,
       credit_note_id: cn && cn.CreditNoteID, credit_note_number: cn && cn.CreditNoteNumber, allocated, allocation_error: allocErr,
@@ -4843,8 +4843,8 @@ async function _computeXeroExceptions() {
        FROM planner.purchase_orders p
        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked'
       WHERE coalesce(p.pay_start_deposit_assigned,0) > 0.009
-        AND regexp_replace(coalesce(p.prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$'
-        AND regexp_replace(p.prod_no,'[^0-9]','','g')::int >= 58
+        AND ( (upper(coalesce(p.country_code,''))='AU' OR (coalesce(p.country_code,'')='' AND p.branch ILIKE '%coghlan%'))
+              OR (regexp_replace(coalesce(p.prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$' AND regexp_replace(p.prod_no,'[^0-9]','','g')::int >= 58) )
         AND NOT EXISTS (SELECT 1 FROM planner.po_links c WHERE c.po=p.po AND c.system='xero_credit_note' AND c.status='linked')
         AND NOT EXISTS (SELECT 1 FROM planner.xero_push_queue q WHERE q.po=p.po AND q.kind='credit_note' AND q.status <> 'cancelled')
       ORDER BY p.po LIMIT 300`)).rows;
