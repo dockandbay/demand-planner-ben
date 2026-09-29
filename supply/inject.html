@@ -253,6 +253,28 @@
 #hzcmd .ft{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--line,#e5e9f0);color:var(--faint,#8b98ad);font-size:11px}
 #hzcmd .ft b{color:var(--muted,#5b6b83)}
 #hzcmd .empty{padding:26px 14px;text-align:center;color:var(--muted,#5b6b83)}
+/* ── Left rail (v28.073) — replaces the top module nav on desktop; gated on body.hz-rail (kill switch) ── */
+#hz-leftrail{display:none;position:fixed;top:0;left:0;bottom:0;width:212px;background:var(--nav,#0d1626);color:var(--nav-dim,#93a1b8);flex-direction:column;z-index:1000;border-right:1px solid rgba(255,255,255,.08);font-family:inherit}
+#hz-leftrail .rl-brand{display:flex;align-items:center;gap:9px;height:52px;padding:0 16px;flex:0 0 auto;border-bottom:1px solid rgba(255,255,255,.08)}
+#hz-leftrail .rl-brand .nm{font-weight:700;font-size:15px;letter-spacing:.05em;color:#fff}
+#hz-leftrail .rl-list{flex:1;overflow-y:auto;padding:10px 10px}
+#hz-leftrail .rl-list::-webkit-scrollbar{width:8px}#hz-leftrail .rl-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px}
+#hz-leftrail .rl1{display:flex;align-items:center;gap:11px;width:100%;padding:10px 11px;border:0;background:none;color:var(--nav-dim,#93a1b8);font:inherit;font-size:12.5px;font-weight:700;letter-spacing:.05em;border-radius:9px;cursor:pointer;text-align:left;margin-top:2px;position:relative}
+#hz-leftrail .rl1 svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+#hz-leftrail .rl1:hover{color:#fff;background:rgba(255,255,255,.06)}
+#hz-leftrail .rl1.on{color:#fff;background:rgba(255,255,255,.10)}
+#hz-leftrail .rl1.on:before{content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:#5aa6ea}
+#hz-leftrail .rl1 .lab{flex:1}
+#hz-leftrail .rl-foot{flex:0 0 auto;border-top:1px solid rgba(255,255,255,.08);padding:11px 14px;display:flex;align-items:center;gap:9px;color:var(--nav-dim,#93a1b8);font-size:11.5px}
+#hz-leftrail .rl-foot .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(140deg,#5aa6ea,#2361d8);display:grid;place-items:center;color:#fff;font-size:10.5px;font-weight:800;flex:0 0 auto}
+@media(min-width:900px){
+ body.hz-rail #hz-leftrail{display:flex}
+ body.hz-rail .wrap#app{margin-left:212px}
+ body.hz-rail #view-tabs-row .view-toggle,
+ body.hz-rail #view-tabs-row #client-btn,
+ body.hz-rail #view-tabs-row #config-btn,
+ body.hz-rail #view-tabs-row .hz-brand{display:none!important}
+}
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
 #tl-drop .tl-acts{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
@@ -17695,7 +17717,54 @@
     _cmdItems.forEach(function(el,i){ var it=flat[i]; el._go=it.go; el.onclick=function(){ if(it.go)it.go(); }; el.onmouseenter=function(){ if(_cmdItems[_cmdSel])_cmdItems[_cmdSel].classList.remove('sel'); _cmdSel=i; el.classList.add('sel'); }; });
     if(_cmdItems[0])_cmdItems[0].classList.add('sel'); }
   document.addEventListener('keydown',function(e){ if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault(); var sc=document.getElementById('hzcmd-scrim'); if(sc&&sc.classList.contains('open'))closeCmd(); else openCmd(); } },true);
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
+
+  // ── Left rail (v28.073) — the L1 module nav as a fixed left rail. It CLICKS the existing (now CSS-hidden) top-nav
+  // module buttons, so every view-switch reuses the current logic. Kill switch: remove body.hz-rail to restore the top nav.
+  var HZ_MARK='<svg width="27" height="18" viewBox="3 7 54 35" aria-hidden="true"><defs><clipPath id="rlmk"><circle cx="30" cy="27" r="18"></circle></clipPath></defs><g clip-path="url(#rlmk)"><rect x="9" y="9" width="42" height="5.6" fill="#ffd23f"></rect><rect x="9" y="16.4" width="42" height="5.6" fill="#ffb12c"></rect><rect x="9" y="23.8" width="42" height="5.6" fill="#ff8a24"></rect><rect x="9" y="31.2" width="42" height="7" fill="#ff5630"></rect></g><path d="M6 38.5 Q30 32.5 54 38.5" fill="none" stroke="#5aa6ea" stroke-width="4.5" stroke-linecap="round"></path></svg>';
+  var RAIL_IC={
+    chart:'<line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="3" y1="20" x2="21" y2="20"/>',
+    box:'<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/>',
+    truck:'<rect x="1" y="4" width="14" height="12" rx="1.5"/><path d="M15 8h4l4 4v4h-8z"/><circle cx="6" cy="18.5" r="1.6"/><circle cx="18" cy="18.5" r="1.6"/>',
+    doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>',
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/>',
+    gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4 15a2 2 0 0 1 0-4a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 4a2 2 0 0 1 4 0a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 20 11a2 2 0 0 1 0 4z"/>'
+  };
+  function _railSvg(n){ return '<svg viewBox="0 0 24 24">'+(RAIL_IC[n]||'')+'</svg>'; }
+  var RAIL_L1=[
+    {k:'demand',label:'Demand',icon:'chart',go:function(){ _railView('planning'); }},
+    {k:'supply',label:'Supply',icon:'box',go:function(){ _railId('supply-btn'); }},
+    {k:'buy',label:'Buy & Move',icon:'truck',go:function(){ _railView('actions'); }},
+    {k:'reports',label:'Reports',icon:'doc',go:function(){ _railView('exec'); }},
+    {k:'product',label:'Product',icon:'grid',go:function(){ _railId('product-btn'); }},
+    {k:'client',label:'Client',icon:'users',go:function(){ _railId('client-btn'); }},
+    {k:'config',label:'Config',icon:'gear',go:function(){ _railId('config-btn'); }}
+  ];
+  function _railView(v){ var b=document.querySelector('#view-tabs-row .view-toggle[data-view="'+v+'"]'); if(b)b.click(); }
+  function _railId(id){ var b=document.getElementById(id); if(b)b.click(); }
+  function _railInitials(){ try{ var e=(typeof ME!=='undefined'&&ME&&ME.email)||''; var p=e.split('@')[0].split(/[._-]/); return ((p[0]||'')[0]||'')+((p[1]||'')[0]||''); }catch(e){} return 'DB'; }
+  function railActiveKey(){ var h=(location.hash||'').toLowerCase().replace(/^#\/?/,'');
+    if(/^supply/.test(h))return 'supply'; if(/^config/.test(h))return 'config'; if(/^product/.test(h))return 'product';
+    if(/^client/.test(h))return 'client'; if(/^(buy|buy-move)/.test(h))return 'buy'; if(/^(exec|reports)/.test(h))return 'reports';
+    if(/^(demand|planning|scenario|fba)/.test(h))return 'demand';
+    if(document.body.classList.contains('supply-active'))return 'supply'; return 'demand'; }
+  function railSync(){ var k=railActiveKey(); document.querySelectorAll('#hz-leftrail .rl1').forEach(function(b){ b.classList.toggle('on',b.dataset.k===k); }); }
+  function ensureRail(){
+    if(!document.getElementById('view-tabs-row'))return;   // base app not mounted yet
+    document.body.classList.add('hz-rail');
+    var r=document.getElementById('hz-leftrail');
+    if(!r){ r=document.createElement('div'); r.id='hz-leftrail';
+      r.innerHTML='<div class="rl-brand">'+HZ_MARK+'<span class="nm">HORIZON</span></div><div class="rl-list" id="hz-rl-list"></div>'
+        +'<div class="rl-foot"><span class="av">'+esc((_railInitials()||'DB').toUpperCase())+'</span><span class="rl-who">'+esc(((typeof ME!=='undefined'&&ME&&ME.email)||'').split('@')[0]||'')+'</span></div>';
+      document.body.appendChild(r);
+      var list=r.querySelector('#hz-rl-list');
+      list.innerHTML=RAIL_L1.map(function(m){ return '<button class="rl1" data-k="'+m.k+'">'+_railSvg(m.icon)+'<span class="lab">'+m.label+'</span></button>'; }).join('');
+      list.querySelectorAll('.rl1').forEach(function(b){ b.onclick=function(){ var m=RAIL_L1.filter(function(x){return x.k===b.dataset.k;})[0]; if(m){ try{m.go();}catch(e){} } setTimeout(railSync,80); }; });
+      window.addEventListener('hashchange',function(){ try{railSync();}catch(e){} });
+    }
+    railSync(); }
+
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product|client)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
