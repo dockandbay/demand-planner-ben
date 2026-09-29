@@ -353,13 +353,14 @@
 #supply-root .rtab:hover{color:var(--blue)}
 #supply-root .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 /* v28.056: PO grid two-tier tabbed filter bar */
-#supply-root .pog-bar{margin:2px 0 12px}
-#supply-root .pog-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+#supply-root .pog-bar{margin:6px 0 10px}
+#supply-root .pog-row{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:9px}
 #supply-root .pog-row2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#supply-root .pog-tabs{display:inline-flex;gap:3px;background:var(--l3-bg);border:1px solid var(--blue-soft);border-radius:11px;padding:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
-#supply-root .pog-tab{appearance:none;background:transparent;border:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--faint);padding:7px 14px;cursor:pointer;border-radius:8px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+#supply-root .pog-tabs{display:flex;gap:4px;flex-wrap:wrap;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+/* folder-style tabs — match PRODUCT ▸ Sampling (.smp-stab) */
+#supply-root .pog-tab{appearance:none;font-family:inherit;font-size:13px;font-weight:700;color:var(--muted);background:transparent;cursor:pointer;padding:7px 15px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;margin-bottom:-1px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
 #supply-root .pog-tab:hover{color:var(--ink)}
-#supply-root .pog-tab.on{color:var(--blue);background:var(--card);box-shadow:0 1px 3px rgba(15,23,42,.14),0 0 0 1px rgba(37,99,235,.15);font-weight:800}
+#supply-root .pog-tab.on{color:var(--ink);background:var(--card);border-color:var(--line)}
 #supply-root .pog-n{font-size:10px;font-weight:800;background:var(--line2);color:var(--muted);border-radius:9px;padding:1px 6px;font-variant-numeric:tabular-nums}
 #supply-root .pog-tab.on .pog-n{background:var(--blue-soft);color:var(--blue-ink)}
 #supply-root .pog-pill.on .pog-n{background:rgba(255,255,255,.28);color:#fff}
@@ -2614,10 +2615,12 @@
       var regs=RTAB.map(function(t){ var on=(t[0]===rtab); var n=cntRtab(t[0]);
         return '<button class="pog-pill'+(on?' on':'')+'" data-rtab="'+t[0]+'"'+(t[0]==='DIRECT'?' title="Direct to Client — any country"':'')+'>'+(CFLAG[t[0]]?CFLAG[t[0]]+' ':'')+esc(t[1])+'<span class="pog-n">'+n+'</span></button>'; }).join('');
       return '<div class="pog-bar">'
-        +'<div class="pog-row"><div class="pog-tabs">'+tabs+'</div><div class="pog-views">'+views+'<button class="pog-add" id="pog-save" title="Save the current status + market as a reusable custom tab">＋ Save view</button></div></div>'
+        +'<div class="pog-row"><div class="pog-tabs">'+tabs+'</div></div>'
         +'<div class="pog-row2"><div class="pog-pills">'+regs+'</div>'
           +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="Completed shows only the last 12 months when on">📅 Last 12m</span>'
           +'<span class="pill po-arch'+(_poInclArch?' active':'')+'" id="po-arch-toggle" title="Include archived (completed before the production cutoff)">🗄 '+(_poInclArch?'Hide archived':'Show archived')+'</span>'
+          +'<span style="flex:1"></span>'
+          +'<div class="pog-views">'+views+'<button class="pog-add" id="pog-save" title="Save the current status + market as a reusable custom tab">＋ Save view</button></div>'
         +'</div></div>';
     }
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
@@ -2659,7 +2662,6 @@
     var _excOn=Object.keys(state.act||{}).some(function(k){return state.act[k];});
     var _poSkuSet=null;   // SUG-0012: set of PO refs matching the SKU filter (null = no SKU filter active)
     c.innerHTML=annot('purchase-orders')+poSubNav()
-      +poFilterBar()
       +'<div class="bar" id="po-prog">'
       +'<input class="flt" id="sup-search" placeholder="🔍 Filter PO / supplier…" value="'+esc(state.q||'')+'">'
       +'<span id="po-sku-wrap" style="position:relative;display:inline-flex;align-items:center;gap:3px;margin-left:6px"><input class="flt" id="po-sku-search" placeholder="Filter by SKU(s)…" value="'+esc(state.sku||'')+'" title="show only POs whose order plan contains any of these SKUs — comma-separate for an OR search" style="width:160px;background:var(--pos-bg);border-color:var(--pos-bg)">'
@@ -2707,6 +2709,7 @@
           +'<label style="display:block;font-size:12px;cursor:pointer;padding:3px 2px" title="hide unread-supplier-note action items"><input type="checkbox" id="po-hide-tl"'+(_hideTimelineUnread?' checked':'')+' style="margin-right:6px;vertical-align:middle">timeline unread</label>'
         +'</div></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></span></div>'
+      +poFilterBar()
       +'<div id="sup-grid"></div>';
     bindPoSubNav();
     function anyCtry(){ for(var k in state.ctry){ if(state.ctry[k])return true; } return false; }
