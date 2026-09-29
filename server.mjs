@@ -4548,8 +4548,24 @@ async function computeXeroRunPlan(run) {
   });
   const total = outLines.reduce((s, l) => s + l.amount, 0);
   const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
+  // Validate each payment against its linked bill's live AmountDue — Xero rejects a payment that exceeds what's owed.
+  const payBillIds = [...new Set(outLines.filter(l => !/deposit/i.test(String(l.type || '')) && l.linked_bill && l.linked_bill.id).map(l => l.linked_bill.id))];
+  const dueById = {};
+  for (let i = 0; i < payBillIds.length; i += 40) {
+    const chunk = payBillIds.slice(i, i + 40);
+    try { const jb = await xeroFetch(region, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status }; }); } catch (e) {}
+  }
+  outLines.forEach(l => {
+    if (!/deposit/i.test(String(l.type || '')) && l.linked_bill && l.linked_bill.id) {
+      const b = dueById[l.linked_bill.id];
+      if (b) { l.bill_due = b.due; l.bill_status = b.status; l.pay_ok = (Number(l.amount) || 0) <= b.due + 0.01; }
+      else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted) → can't validate
+    }
+  });
   const checks = [];
   checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org' } : { level: 'error', msg: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — bind it in CONFIG ▸ Xero' });
+  const overpay = outLines.filter(l => l.pay_ok === false);
+  if (overpay.length) checks.push({ level: 'error', msg: overpay.length + ' payment(s) exceed the bill’s amount due (Xero would reject): ' + overpay.map(l => l.reference).join(', ') });
   ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
   const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
@@ -4560,6 +4576,40 @@ async function computeXeroRunPlan(run) {
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
   try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Create the supplier-payment BILL and post the PAYMENTS against the linked PO bills in ONE action (from the Payments
+// Report XERO popup). Admin + confirm. Refuses if a payment would exceed the linked bill's amount due.
+app.post('/api/supply/payments/xero-post', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) {}
+  if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
+  try {
+    const plan = await computeXeroRunPlan((req.body && req.body.run) || {});
+    if (!plan.ok) return res.status(400).json({ error: plan.error });
+    const region = plan.region, today = new Date().toISOString().slice(0, 10), date = plan.date || today;
+    if (!plan.bank || !plan.bank.account_id) return res.status(400).json({ error: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — set it in CONFIG ▸ Xero' });
+    const badAcct = plan.lines.filter(l => Math.abs(l.amount) > 0.005 && !(l.account && l.account.code));
+    if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role))].join(', ') + ' — set it in CONFIG ▸ Xero' });
+    const overpay = plan.lines.filter(l => l.pay_ok === false);
+    if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.amount) + ' > ' + _usd(l.bill_due) + ')').join('; ') });
+    const out = { region, supplier: plan.supplier, reference: plan.reference, bill: null, payments: [], skipped: [] };
+    // 1) the supplier-payment bill (DRAFT), coded 602 / 602.1 with Production tracking on deposits
+    for (const l of plan.lines) { if (l.tracking && l.tracking.option && !l.tracking.exists) await _ensureProductionOption(region, l.tracking.option); }
+    const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference, Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
+    const billBody = { Type: 'ACCPAY', Contact: { Name: plan.supplier || 'Supplier' }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: billLines };
+    const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
+    const binv = br && br.Invoices && br.Invoices[0];
+    out.bill = { id: binv && binv.InvoiceID, number: binv && binv.InvoiceNumber, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + binv.InvoiceID) : null };
+    // 2) a payment against each linked PO bill (completion/balance lines; deposits draw down via a credit note instead)
+    for (const l of plan.lines) {
+      if (/deposit/i.test(String(l.type || ''))) { out.skipped.push({ po: l.reference, reason: 'deposit → use a credit note' }); continue; }
+      if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
+      try {
+        const pr = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [{ Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: plan.bank.account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100, CurrencyRate: 1 }] } });
+        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number });
+      } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
+    }
+    res.json(Object.assign({ ok: true }, out));
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 // ── PAYMENTS ▸ Xero payments — the manual push queue (mig 312). Enqueue on mark-paid / deposit-assign; push to live
 //    Xero manually per item. Deposits on a run route to the credit-note action, not a bank payment. ──
