@@ -13001,6 +13001,28 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     if (stated) { check.total_ok = Math.abs(total - stated.total) < 0.005; if (stated.tax != null) check.tax_ok = Math.abs(taxTotal - stated.tax) < 0.005; }
     // Preview mode: return the structured bill so the UI can show "what goes to Xero" without downloading.
     if (req.body && req.body.preview) return res.json({ ok: true, bill: { contact: meta.contact, invNo, date: dd, currency: cur, region: meta.region, taxType: taxCfg.type, total, tax_total: taxTotal, net_total: r2(total - taxTotal), tax_mode: taxCfg.mode, import_as: check.import_as, rate: taxCfg.rate, check, lines: blines } });
+    // v28.038 (Ben): CREATE the 3PL bill directly in Xero (DRAFT), instead of the CSV. Coghlans → AU org, everything
+    // else → the UK org. A test run prefixes the reference with TEST-. Keeps the CSV download alongside.
+    if (req.body && req.body.create) {
+      try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) {}
+      const xregion = meta.region === 'AU' ? 'au' : 'uk';   // Coghlans (AU) → Xero AU; ILG/Geneva/iFulfilment → Xero UK org
+      const isTest = req.body.test !== false;               // default to a TEST- prefixed draft unless explicitly test:false
+      const ref = (isTest ? 'TEST-' : '') + invNo;
+      const latMode = taxCfg.mode === 'inclusive' ? 'Inclusive' : (taxCfg.mode === 'none' ? 'NoTax' : 'Exclusive');
+      const ttCode = (label) => { const t = String(label || '').toLowerCase(); if (/no vat|zero|exempt|none/.test(t)) return xregion === 'au' ? 'EXEMPTEXPENSES' : 'NONE'; if (xregion === 'au' || /gst/.test(t)) return 'INPUT'; return 'INPUT2'; };
+      const li = blines.filter(l => Math.abs(Number(l.amount) || 0) > 0.005).map(l => { const it = { Description: String(l.desc || '').slice(0, 3900), Quantity: 1, UnitAmount: r2(l.amount) }; if (l.code) it.AccountCode = String(l.code); it.TaxType = (latMode === 'NoTax') ? (xregion === 'au' ? 'EXEMPTEXPENSES' : 'NONE') : ttCode(l.taxType); return it; });
+      if (!li.length) return res.status(400).json({ error: 'no bill lines to create' });
+      const missingAcct = li.filter(x => !x.AccountCode).length;
+      const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: latMode, LineItems: li };
+      try {
+        const r = await xeroFetch(xregion, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
+        const inv = r && r.Invoices && r.Invoices[0];
+        return res.json({ ok: true, created: true, test: isTest, region: xregion, contact: meta.contact, currency: cur,
+          xero_id: inv && inv.InvoiceID, invoice_number: inv && inv.InvoiceNumber, reference: ref, status: inv && inv.Status,
+          lines: li.length, missing_account_codes: missingAcct,
+          url: (inv && inv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + inv.InvoiceID) : null });
+      } catch (e) { return res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+    }
 
     const HDR = 'ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
