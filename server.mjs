@@ -4495,6 +4495,71 @@ app.post('/api/supply/xero/tracking/ensure', async (req, res) => {
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.034 (Ben): PAYMENTS REPORT → XERO — PREVIEW (part B, read-only). Given a payment run (supplier + USD lines from
+// the Payments Report), compute exactly the Xero ACCPAY bill HORIZON would create and how each line codes, WITHOUT
+// writing anything to Xero. Deposits → Stock Deposits (602) tagged Production=P<prod_no>; completion/balance →
+// Supplier Payments (602.1). Bill currency USD; paid from the region's USD FX bank (registry). Surfaces every check
+// (registry bindings, tracking options that would be auto-created, linked bills, unlinked POs) so it can be validated
+// before the confirm-gated live write is built. Reads the bank registry + account map from app_settings.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function _xeroFinanceCfg() {
+  return pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XERO_CFG_KEY]).then(r => { try { return (r.rows[0] && r.rows[0].value) ? JSON.parse(r.rows[0].value) : {}; } catch (_) { return {}; } });
+}
+app.post('/api/supply/payments/xero-preview', async (req, res) => {
+  try {
+    const run = (req.body && req.body.run) || {};
+    const lines = Array.isArray(run.lines) ? run.lines : [];
+    const payLines = lines.filter(l => l && /deposit|completion|balance|final/i.test(String(l.type || '')));   // exclude "other"
+    if (!payLines.length) return res.json({ ok: false, error: 'No deposit/completion/balance lines in this run to post.' });
+    // Region: any AU-market PO on the run → AU org, else UK.
+    const poRefs = [...new Set(payLines.map(l => String(l.reference || '')).filter(Boolean))];
+    let region = 'uk';
+    if (poRefs.length) {
+      const pr = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [poRefs])).rows;
+      if (pr.some(p => p.cc === 'AU' || /coghlan/i.test(p.branch))) region = 'au';
+    }
+    const cfg = await _xeroFinanceCfg();
+    const banks = (cfg.banks && cfg.banks[region]) || {};
+    const accts = (cfg.accounts && cfg.accounts[region]) || {};
+    const usdBankRole = region === 'au' ? 'gentium_usd' : 'universal_partners_usd';
+    const bank = banks[usdBankRole] || null;
+    // linked Xero bills for these POs (persisted po_links)
+    const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
+    const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
+    // existing Production tracking options in this org (to flag which would be auto-created)
+    let trackOpts = new Set(); let trackOk = true;
+    try { const t = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+      const cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
+      if (cat) (cat.Options || []).forEach(o => trackOpts.add(String(o.Name).toUpperCase())); else trackOk = false;
+    } catch (e) { trackOk = null; }   // null = couldn't check (not connected)
+    const outLines = payLines.map(l => {
+      const isDeposit = /deposit/i.test(String(l.type || ''));
+      const acctRole = isDeposit ? 'stock_deposits' : 'supplier_payments';
+      const acct = accts[acctRole] || null;
+      const prod = String(l.prod_no || '').replace(/^P/i, '').trim();
+      const trackOption = (isDeposit && prod) ? ('P' + prod) : null;
+      const link = linkByPo[String(l.reference || '')] || null;
+      return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '',
+        account: acct ? { code: acct.code, name: acct.name, id: acct.id } : null, account_role: acctRole,
+        tracking: trackOption ? { category: 'Production', option: trackOption, exists: trackOpts.has(trackOption.toUpperCase()) } : null,
+        linked_bill: link ? { id: link.external_id, number: link.external_ref, url: link.url } : null };
+    });
+    const total = outLines.reduce((s, l) => s + l.amount, 0);
+    const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
+    // checks
+    const checks = [];
+    checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org' } : { level: 'error', msg: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — bind it in CONFIG ▸ Xero' });
+    ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
+    const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
+    if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
+    const noBill = outLines.filter(l => !l.linked_bill).map(l => l.reference);
+    if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
+    res.json({ ok: true, region, org: (bank ? null : undefined), supplier: run.supplier, reference: ref, currency: 'USD', date: run.dt,
+      bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, checks });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {

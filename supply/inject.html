@@ -10256,7 +10256,8 @@
         function liveFx(btn){ var tr=btn.closest('tr,.mob-card'); var a=tr.querySelector('.pfx-amt'), c=tr.querySelector('.pfx-ccy'); return {ccy:c?c.value:'', amt:a?a.value:''}; }
         rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbDownload(f[+btn.dataset.i],fx.ccy,fx.amt); }; });
         rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopy(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
-        rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; }); }
+        rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
+        rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ xbPreview(f[+btn.dataset.i],btn); }; }); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); draw(); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
@@ -10276,6 +10277,42 @@
       fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];}),
       fetch('/api/supply/payments-report').then(function(r){return r.json();}).catch(function(){return null;})   // ALSO re-fetch the report so a just-saved bank amount (Paid USD) isn't wiped by a redraw from stale rows
     ]).then(function(a){ payBuildMaps(a[0],a[1]); if(a[2]!=null)_payRows=Array.isArray(a[2])?a[2]:((a[2]&&(a[2].rows||a[2].payments))||[]); if(_payDraw)_payDraw(); }); }
+  // ---- Xero PREVIEW (Payments Report → part B, read-only): show the bill HORIZON would create + line coding + checks ----
+  function xbPreview(run,btn){
+    if(btn){ btn.disabled=true; btn._t=btn.textContent; btn.textContent='…'; }
+    fetch('/api/supply/payments/xero-preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run:run})})
+      .then(function(r){return r.json();}).then(function(j){ if(btn){btn.disabled=false;btn.textContent=btn._t;}
+        if(j&&j.error){ alert('Preview: '+j.error); return; } if(!j.ok){ alert('Preview: '+(j.error||'nothing to post')); return; }
+        xbShowPreview(j); })
+      .catch(function(e){ if(btn){btn.disabled=false;btn.textContent=btn._t;} alert('Preview failed: '+(e.message||e)); });
+  }
+  function xbShowPreview(j){
+    var chkIco={ok:'✓',warn:'⚠',error:'✕'}, chkCol={ok:'var(--pos)',warn:'var(--amber)',error:'var(--neg)'};
+    var checks=(j.checks||[]).map(function(c){ return '<div style="display:flex;gap:7px;align-items:flex-start;padding:3px 0"><span style="color:'+(chkCol[c.level]||'var(--muted)')+';font-weight:800">'+(chkIco[c.level]||'•')+'</span><span>'+esc(c.msg)+'</span></div>'; }).join('');
+    var rows=(j.lines||[]).map(function(l){
+      var acct=l.account?(esc(l.account.code)+' · '+esc(l.account.name)):'<span style="color:var(--neg)">unmapped</span>';
+      var trk=l.tracking?('Production='+esc(l.tracking.option)+(l.tracking.exists?'':' <span style="color:var(--amber)" title="will be auto-created on posting">(new)</span>')):'<span class="mut tiny">—</span>';
+      var bill=l.linked_bill?('<a href="'+esc(l.linked_bill.url||'#')+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(l.linked_bill.number||l.linked_bill.id||'bill')+' ↗</a>'):'<span class="mut tiny">none</span>';
+      return '<tr style="border-top:1px solid var(--line)"><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(l.reference||'')+'</td><td class="l">'+esc(l.type||'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td class="l">'+acct+'</td><td class="l">'+trk+'</td><td class="l">'+bill+'</td></tr>'; }).join('');
+    var bg=document.createElement('div'); bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
+    bg.innerHTML='<div style="background:var(--card);border-radius:12px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Preview → Xero</b><span class="tool-badge bg-blue">'+esc((j.region||'').toUpperCase())+' org</span><span class="mut tiny" style="margin-left:auto">read-only — nothing is written yet</span><button id="xbp-x" class="save-btn light" style="margin-left:6px">✕</button></div>'
+      +'<div style="padding:16px 18px">'
+      +'<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">'
+        +'<div><div class="mut tiny">Supplier</div><b>'+esc(j.supplier||'')+'</b></div>'
+        +'<div><div class="mut tiny">Bill reference</div><b style="font-family:ui-monospace,Menlo,monospace">'+esc(j.reference||'')+'</b></div>'
+        +'<div><div class="mut tiny">Date</div><b>'+esc(fd(j.date)||j.date||'')+'</b></div>'
+        +'<div><div class="mut tiny">Currency</div><b>'+esc(j.currency||'USD')+'</b></div>'
+        +'<div><div class="mut tiny">Total</div><b>'+money(j.total_usd)+' USD</b></div>'
+        +'<div><div class="mut tiny">Pays from</div><b>'+(j.bank?esc(j.bank.name)+' <span class="mut tiny">('+esc(j.bank.currency)+')</span>':'<span style="color:var(--neg)">no bank bound</span>')+'</b></div>'
+      +'</div>'
+      +'<div class="tw" style="max-height:38vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">PO</th><th class="l">Type</th><th class="l" style="text-align:right">Amount</th><th class="l">Account</th><th class="l">Tracking</th><th class="l">Linked bill</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><div class="mut tiny" style="margin-bottom:4px">Checks</div>'+checks+'</div>'
+      +'<div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button class="save-btn" disabled title="the confirm-gated live write is the next build step" style="opacity:.55">Post to Xero (coming next)</button><span class="mut tiny">Live posting is built after you confirm these mechanics.</span></div>'
+      +'</div></div>';
+    document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
+    var x=document.getElementById('xbp-x'); if(x)x.onclick=function(){ bg.remove(); };
+  }
   // ---- Xero bill export (Payments Report) ----
   function xbDmy(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?(m[3]+'/'+m[2]+'/'+m[1]):(iso||''); }   // YYYY-MM-DD → DD/MM/YYYY
   function xbCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
@@ -10403,6 +10440,7 @@
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details">'+xeroIco+'</button>':'';
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email" style="color:var(--violet);font-weight:700">'+emailIco+'</button>':'');
+      xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-xero-preview" data-i="'+i+'" title="Preview the Xero bill HORIZON would create (no write)" style="color:var(--blue);font-weight:700">⚡Xero</button>':'');
       var amtField='<input class="fci pfx-amt" '+dk+' style="width:140px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'">';
       var ccyField='<select class="fci pfx-ccy" '+dk+' style="width:74px'+((r.bank_ccy&&r.bank_ccy!=='USD')?';background:var(--amber-bg);color:var(--amber);font-weight:700':'')+'">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select>';
       var paidUsdBtn=(((r.other_amount!=null)&&String(r.bank_ccy||'').trim())?'':'<button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD" style="background:var(--pos);color:#fff;border-color:var(--pos)">Paid USD</button>');
@@ -10449,6 +10487,7 @@
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details to the clipboard">'+xeroIco+'</button>':'';
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email (supplier, amount, reference + line table)" style="color:var(--violet);font-weight:700">'+emailIco+'</button>':'');
+      xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-xero-preview" data-i="'+i+'" title="Preview the Xero bill HORIZON would create (no write)" style="color:var(--blue);font-weight:700">⚡Xero</button>':'');
       return '<tr'+(_poHit?' style="background:var(--amber-bg)"':'')+'><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+'</button>'+xbBtns+'</td>'
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l"'+((r.base_ccy&&r.base_ccy!=='USD')?' style="background:var(--amber-bg);color:var(--amber);font-weight:700"':'')+'>'+r.base_ccy+'</td>'
