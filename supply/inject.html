@@ -223,13 +223,14 @@
 #tl-drop .tl-tag-cli{background:#dcfce7;color:#166534}
 #tl-drop .tl-tag-prd{background:#ede9fe;color:#6d28d9}
 /* ── Global command search (⌘K) — v28.072 ── */
-#hzcmd-btn{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;font-weight:600;color:var(--nav-dim,#93a1b8);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:8px;padding:6px 10px;cursor:pointer;height:30px}
-#hzcmd-btn:hover{color:#fff;background:rgba(255,255,255,.12)}
-#hzcmd-btn svg{width:14px;height:14px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
-#hzcmd-btn .kk{font-size:10px;font-weight:700;border:1px solid rgba(255,255,255,.2);border-radius:5px;padding:0 5px;line-height:16px;opacity:.85}
+#hzcmd-btn{display:inline-flex;align-items:center;gap:9px;font:inherit;font-size:13px;font-weight:600;color:var(--nav-dim,#93a1b8);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:8px 13px;cursor:pointer;height:36px;min-width:300px;max-width:440px;justify-content:flex-start}
+#hzcmd-btn:hover{color:#fff;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2)}
+#hzcmd-btn svg{width:16px;height:16px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
+#hzcmd-btn .kk{margin-left:auto;font-size:10.5px;font-weight:700;border:1px solid rgba(255,255,255,.2);border-radius:5px;padding:1px 6px;line-height:16px;opacity:.85}
+@media(max-width:900px){#hzcmd-btn{min-width:0}#hzcmd-btn span:not(.kk){display:none}}
 #hzcmd-scrim{position:fixed;inset:0;background:rgba(13,22,38,.44);z-index:2147483000;display:none;align-items:flex-start;justify-content:center;padding:72px 16px}
 #hzcmd-scrim.open{display:flex}
-#hzcmd{width:640px;max-width:96vw;max-height:74vh;background:var(--card,#fff);border:1px solid var(--line,#e5e9f0);border-radius:14px;box-shadow:0 24px 60px -18px rgba(16,24,40,.4);display:flex;flex-direction:column;overflow:hidden;font-size:13px;color:var(--ink,#101828)}
+#hzcmd{width:720px;max-width:96vw;max-height:78vh;background:var(--card,#fff);border:1px solid var(--line,#e5e9f0);border-radius:14px;box-shadow:0 24px 60px -18px rgba(16,24,40,.4);display:flex;flex-direction:column;overflow:hidden;font-size:13px;color:var(--ink,#101828)}
 #hzcmd .hd{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line,#e5e9f0)}
 #hzcmd .hd svg{width:18px;height:18px;stroke:var(--faint,#8b98ad);stroke-width:2.2;fill:none;stroke-linecap:round;flex:0 0 auto}
 #hzcmd .hd input{flex:1;border:0;outline:0;background:none;font-family:inherit;font-size:15px;color:var(--ink,#101828)}
@@ -265,6 +266,17 @@
 #hz-leftrail .rl1.on{color:#fff;background:rgba(255,255,255,.10)}
 #hz-leftrail .rl1.on:before{content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:#5aa6ea}
 #hz-leftrail .rl1 .lab{flex:1}
+#hz-leftrail .rl2wrap{padding:2px 0 5px 12px;margin:1px 0 3px 16px;position:relative}
+#hz-leftrail .rl2wrap:before{content:"";position:absolute;left:2px;top:0;bottom:6px;width:1px;background:rgba(255,255,255,.10)}
+#hz-leftrail .rl2{display:block;width:100%;text-align:left;border:0;background:none;color:var(--nav-dim,#93a1b8);font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border-radius:7px;cursor:pointer;position:relative}
+#hz-leftrail .rl2:hover{color:#fff;background:rgba(255,255,255,.06)}
+#hz-leftrail .rl2.on{color:#fff;font-weight:700}
+#hz-leftrail .rl2.on:before{content:"";position:absolute;left:-11px;top:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:#5aa6ea}
+#hz-leftrail .rl3wrap{padding:1px 0 3px 13px;margin-left:6px;position:relative}
+#hz-leftrail .rl3wrap:before{content:"";position:absolute;left:2px;top:0;bottom:5px;width:1px;background:rgba(255,255,255,.07)}
+#hz-leftrail .rl3{display:block;width:100%;text-align:left;border:0;background:none;color:#7d8ba3;font:inherit;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer}
+#hz-leftrail .rl3:hover{color:#fff;background:rgba(255,255,255,.06)}
+#hz-leftrail .rl3.on{color:#5aa6ea;font-weight:700}
 #hz-leftrail .rl-foot{flex:0 0 auto;border-top:1px solid rgba(255,255,255,.08);padding:11px 14px;display:flex;align-items:center;gap:9px;color:var(--nav-dim,#93a1b8);font-size:11.5px}
 #hz-leftrail .rl-foot .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(140deg,#5aa6ea,#2361d8);display:grid;place-items:center;color:#fff;font-size:10.5px;font-weight:800;flex:0 0 auto}
 @media(min-width:900px){
@@ -274,6 +286,13 @@
  body.hz-rail #view-tabs-row #client-btn,
  body.hz-rail #view-tabs-row #config-btn,
  body.hz-rail #view-tabs-row .hz-brand{display:none!important}
+ body.hz-rail #supply-subnav,
+ body.hz-rail #product-subnav,
+ body.hz-rail #client-subnav,
+ body.hz-rail #config-subs{display:none!important}
+ body.hz-rail #supply-root #prod-subtabs,
+ body.hz-rail #supply-root #rep-subnav,
+ body.hz-rail #supply-root #config-subs-l3{display:none!important}
 }
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
@@ -17748,7 +17767,37 @@
     if(/^client/.test(h))return 'client'; if(/^(buy|buy-move)/.test(h))return 'buy'; if(/^(exec|reports)/.test(h))return 'reports';
     if(/^(demand|planning|scenario|fba)/.test(h))return 'demand';
     if(document.body.classList.contains('supply-active'))return 'supply'; return 'demand'; }
-  function railSync(){ var k=railActiveKey(); document.querySelectorAll('#hz-leftrail .rl1').forEach(function(b){ b.classList.toggle('on',b.dataset.k===k); }); }
+  // L2 sections mirrored into the rail from each module's live sub-nav (stage 2). Clicking a rail L2 item clicks the
+  // original (hidden) tab, so all selection logic is reused. Modules whose sub-nav is base-app-rendered (demand/buy/
+  // reports) keep their sub-nav in content for now.
+  var RAIL_L2={ supply:{sel:'#supply-subnav',item:'.stab'}, product:{sel:'#product-subnav',item:'.stab'}, client:{sel:'#client-subnav',item:'.stab'}, config:{sel:'#config-subs',item:'.rtab'} };
+  // L3 tabs mirrored under the active L2, when the active module renders an L3 nav in the DOM.
+  var RAIL_L3=[ '#prod-subtabs', '#rep-subnav', '#config-subs-l3' ];
+  function _railText(el){ try{ var c=el.cloneNode(true); c.querySelectorAll('.ex-badge,.rtab-count,.count,.nav-badge,.pilln,.stab-count,.tl-count').forEach(function(x){x.remove();}); return (c.textContent||'').replace(/\s+/g,' ').trim(); }catch(e){ return (el.textContent||'').replace(/\s+/g,' ').trim(); } }
+  function _railL2items(mod){ var cfg=RAIL_L2[mod]; if(!cfg)return null; var cont=document.querySelector(cfg.sel); if(!cont)return null;
+    var els=cont.querySelectorAll(cfg.item); if(!els.length)return null; var out=[];
+    Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); return out.length?out:null; }
+  function _railL3items(mod){ if(mod!=='supply')return null;   // stage 2: supply L3 mirrored; other modules keep L3 in content for now
+    var root=document.getElementById('supply-root'); if(!root)return null;
+    for(var i=0;i<RAIL_L3.length;i++){ var cont=root.querySelector(RAIL_L3[i]); if(!cont)continue;   // scoped to the supply root (works even when the content L3 is CSS-hidden)
+      var els=cont.querySelectorAll('.rtab,.stab,.d3tab'); if(!els.length)continue; var out=[];
+      Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); if(out.length)return out; } return null; }
+  window._railL2c=[]; window._railL3c=[];
+  function renderRailList(){ var list=document.getElementById('hz-rl-list'); if(!list)return; var ak=railActiveKey(); var html='';
+    RAIL_L1.forEach(function(m){
+      html+='<button class="rl1'+(m.k===ak?' on':'')+'" data-k="'+m.k+'">'+_railSvg(m.icon)+'<span class="lab">'+m.label+'</span></button>';
+      if(m.k===ak){ var l2=_railL2items(m.k); if(l2){ window._railL2c=l2;
+        html+='<div class="rl2wrap">'+l2.map(function(it,i){ var sub=(it.active?_railL3items(m.k):null); window._railL3c=(it.active&&sub)?sub:window._railL3c;
+          return '<button class="rl2'+(it.active?' on':'')+'" data-l2="'+i+'">'+esc(it.label)+'</button>'+((it.active&&sub&&sub.length)?('<div class="rl3wrap">'+sub.map(function(s,j){return '<button class="rl3'+(s.active?' on':'')+'" data-l3="'+j+'">'+esc(s.label)+'</button>';}).join('')+'</div>'):''); }).join('')+'</div>';
+      } }
+    });
+    list.innerHTML=html;
+    list.querySelectorAll('.rl1').forEach(function(b){ b.onclick=function(){ var m=RAIL_L1.filter(function(x){return x.k===b.dataset.k;})[0]; if(m){try{m.go();}catch(e){}} _railSoon(); }; });
+    list.querySelectorAll('.rl2').forEach(function(b){ b.onclick=function(){ var it=(window._railL2c||[])[+b.dataset.l2]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
+    list.querySelectorAll('.rl3').forEach(function(b){ b.onclick=function(){ var it=(window._railL3c||[])[+b.dataset.l3]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
+  }
+  function railSync(){ renderRailList(); }
+  function _railSoon(){ [90,300,700,1400].forEach(function(d){ setTimeout(renderRailList,d); }); }   // re-render as the module's L2/L3 render async
   function ensureRail(){
     if(!document.getElementById('view-tabs-row'))return;   // base app not mounted yet
     document.body.classList.add('hz-rail');
@@ -17757,12 +17806,11 @@
       r.innerHTML='<div class="rl-brand">'+HZ_MARK+'<span class="nm">HORIZON</span></div><div class="rl-list" id="hz-rl-list"></div>'
         +'<div class="rl-foot"><span class="av">'+esc((_railInitials()||'DB').toUpperCase())+'</span><span class="rl-who">'+esc(((typeof ME!=='undefined'&&ME&&ME.email)||'').split('@')[0]||'')+'</span></div>';
       document.body.appendChild(r);
-      var list=r.querySelector('#hz-rl-list');
-      list.innerHTML=RAIL_L1.map(function(m){ return '<button class="rl1" data-k="'+m.k+'">'+_railSvg(m.icon)+'<span class="lab">'+m.label+'</span></button>'; }).join('');
-      list.querySelectorAll('.rl1').forEach(function(b){ b.onclick=function(){ var m=RAIL_L1.filter(function(x){return x.k===b.dataset.k;})[0]; if(m){ try{m.go();}catch(e){} } setTimeout(railSync,80); }; });
-      window.addEventListener('hashchange',function(){ try{railSync();}catch(e){} });
+      window.addEventListener('hashchange',function(){ try{railSync();_railSoon();}catch(e){} });
+      // keep the rail's L2/L3 in sync as each module renders its sub-nav async (debounced; renderRailList is cheap)
+      if(!window._railMO){ window._railMO=new MutationObserver(function(){ clearTimeout(window._railMOT); window._railMOT=setTimeout(function(){ try{renderRailList();}catch(e){} },260); }); try{ window._railMO.observe(document.body,{childList:true,subtree:true}); }catch(e){} }
     }
-    railSync(); }
+    railSync(); _railSoon(); }
 
   function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
