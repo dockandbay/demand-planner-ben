@@ -4486,7 +4486,7 @@ app.post('/api/supply/xero/tracking/ensure', async (req, res) => {
     const toAdd = opts.filter(o => !have.has(o.toLowerCase()));
     const added = [];
     for (const o of toAdd) {
-      try { await xeroFetch(region, '/api.xro/2.0/TrackingCategories/' + cat.TrackingCategoryID + '/Options', { method: 'POST', body: { Name: o } }); added.push(o); }
+      try { await xeroFetch(region, '/api.xro/2.0/TrackingCategories/' + cat.TrackingCategoryID + '/Options', { method: 'PUT', body: { Name: o } }); added.push(o); }
       catch (e) { return res.status(500).json({ error: 'Added ' + added.length + ' option(s), then failed on "' + o + '": ' + e.message, category_id: cat.TrackingCategoryID, created, added }); }
     }
     const after = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
