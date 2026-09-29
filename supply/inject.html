@@ -7220,10 +7220,11 @@
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
-    if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; }   // flat (Supply chain group removed); Ben's order + duty/consignees appended
+    if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; if(ME&&ME.is_admin)L2.push(['xero','Xero']); }   // flat (Supply chain group removed); Ben's order + duty/consignees appended; Xero finance config admin-only
     else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
+    if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -8729,6 +8730,75 @@
         b.innerHTML='<div class="count" style="color:var(--neg)">Buy plan settings unavailable — reload the page.</div>'; };
       SUBS['contribmodel']=function(){ hzCfgContribModel(document.getElementById('config-body')); };
       SUBS['runoffsubs']=function(){ hzCfgRunoffSubs(document.getElementById('config-body')); };
+      // SUPPLY ▸ CONFIG ▸ Xero (v28.030) — finance config the payment run needs: bank registry (payment sources bound
+      // to real Xero Bank AccountIDs) + COA account mapping. Accounts pulled live from Xero; config persists per org.
+      SUBS['xero']=function(){ var REG=window._xeroCfgReg||'uk';
+        b.innerHTML='<div class="count">Loading Xero config…</div>';
+        var CFG={}, EXB=[], EXA=[], BANKS=[], ALLACC=[], STATUS=null, accErr='';
+        function cfgBankSel(regKey){ CFG.banks=CFG.banks||{}; return CFG.banks[regKey]=CFG.banks[regKey]||{}; }
+        function cfgAcctSel(regKey){ CFG.accounts=CFG.accounts||{}; return CFG.accounts[regKey]=CFG.accounts[regKey]||{}; }
+        function save(after){ var st=document.getElementById('xcfg-save-st'); if(st){st.textContent='Saving…';st.style.color='var(--muted)';}
+          fetch('/api/supply/xero/finance-config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({config:CFG})})
+            .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(st){st.textContent='✓ saved';st.style.color='var(--pos)';} if(after)after(); })
+            .catch(function(e){ if(st){st.textContent='Save failed: '+(e.message||e);st.style.color='var(--neg)';} }); }
+        Promise.all([
+          fetch('/api/supply/xero/status').then(function(r){return r.json();}).catch(function(){return null;}),
+          fetch('/api/supply/xero/finance-config').then(function(r){return r.json();}).catch(function(){return {config:{}};})
+        ]).then(function(res){ STATUS=res[0]; var fc=res[1]||{}; CFG=fc.config||{}; EXB=fc.expected_banks||[]; EXA=fc.expected_accounts||[];
+          var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]; var conn=rr&&rr.connected;
+          var accP=conn?Promise.all([
+            fetch('/api/supply/xero/accounts?kind=bank&region='+REG).then(function(r){return r.json();}).catch(function(){return {accounts:[]};}),
+            fetch('/api/supply/xero/accounts?kind=all&region='+REG).then(function(r){return r.json();}).catch(function(){return {accounts:[]};})
+          ]):Promise.resolve([{accounts:[]},{accounts:[]}]);
+          accP.then(function(a){ BANKS=(a[0]&&a[0].accounts)||[]; ALLACC=(a[1]&&a[1].accounts)||[]; if(a[0]&&a[0].error)accErr=a[0].error; draw(); });
+        }).catch(function(e){ b.innerHTML='<div style="color:var(--neg);padding:10px">Failed to load Xero config: '+esc(e&&e.message||e)+'</div>'; });
+        function orgPills(){ return ['uk','au'].map(function(rg){ var on=(rg===REG); var nm=(STATUS&&STATUS.regions&&STATUS.regions[rg]&&(STATUS.regions[rg].org_name))||rg.toUpperCase();
+          return '<span class="pill xcfg-org'+(on?' active':'')+'" data-rg="'+rg+'" style="cursor:pointer'+(on?';background:var(--blue);color:#fff;border-color:var(--blue)':'')+'">'+esc(rg.toUpperCase())+' — '+esc(nm)+'</span>'; }).join(' '); }
+        function connBox(){ var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]||{};
+          if(rr.connected) return '<div class="tool-badge bg-green">✓ connected</div> <b>'+esc(rr.org_name||'')+'</b> <span class="mut tiny">base currency '+esc(rr.base_currency||'?')+' · tenant '+esc((rr.tenant_id||'').slice(0,8))+'…</span>';
+          return '<div class="tool-badge bg-amber">not connected</div> <span class="mut tiny">'+esc(rr.reason||'Set the XERO_'+REG.toUpperCase()+'_CLIENT_ID / _SECRET custom-connection credentials, then it connects automatically.')+'</span>'; }
+        function bankSel(role){ var cur=(cfgBankSel(REG)[role.key])||{}; var opts='<option value="">— not set —</option>';
+          BANKS.forEach(function(a){ var sel=(cur.account_id===a.id)?' selected':''; opts+='<option value="'+esc(a.id)+'"'+sel+'>'+esc((a.code?a.code+' · ':'')+a.name+(a.currency?' ('+a.currency+')':''))+'</option>'; });
+          var bound=cur.account_id?('<span class="mut tiny">ID '+esc(cur.account_id)+(cur.currency?' · '+esc(cur.currency):'')+'</span>'):'';
+          return '<select class="fci xcfg-bank" data-role="'+esc(role.key)+'" style="min-width:280px">'+opts+'</select> '+bound; }
+        function acctSel(role){ var cur=(cfgAcctSel(REG)[role.key])||{}; var opts='<option value="">— not set —</option>';
+          ALLACC.forEach(function(a){ var sel=(cur.id===a.id)?' selected':''; opts+='<option value="'+esc(a.id)+'"'+sel+'>'+esc((a.code?a.code+' · ':'')+a.name+(a.type?' ['+a.type.toLowerCase()+']':''))+'</option>'; });
+          var bound=cur.code?('<span class="mut tiny">code '+esc(cur.code)+'</span>'):(role.code_hint?'<span class="mut tiny">expected code '+esc(role.code_hint)+'</span>':'');
+          return '<select class="fci xcfg-acct" data-role="'+esc(role.key)+'" style="min-width:280px">'+opts+'</select> '+bound; }
+        function exbFor(){ return EXB.filter(function(rl){ return (rl.regions||['uk','au']).indexOf(REG)>=0; }); }
+        function draw(){ var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]||{}; var conn=rr.connected; var EXBR=exbFor();
+          var missBanks=EXBR.filter(function(rl){ return !((cfgBankSel(REG)[rl.key]||{}).account_id); });
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Xero.</b> The finance registries the HORIZON payment run needs before it can post to Xero. Pick the org, then bind each <b>payment-source bank</b> to its real Xero Bank Account and map the <b>COA accounts</b> (Stock, Stock Deposits, Supplier Payments, Loan). Read-only from Xero; nothing is written here. <span id="xcfg-save-st" style="margin-left:8px;font-weight:600"></span></div>'
+            +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'+orgPills()+'</div>'
+            +'<div class="sect-h" style="margin-top:14px">Connection</div><div style="margin:0 0 6px">'+connBox()+'</div>'
+            +(!conn?'<div class="annot" style="border-left:3px solid var(--amber);background:var(--amber-bg)">This org isn’t connected, so its live accounts can’t be listed. Connect it first (Custom Connection credentials in the environment), then reload.</div>':'')
+            +'<div class="sect-h" style="margin-top:16px">Bank registry — payment sources</div>'
+            +'<div class="mut tiny" style="max-width:760px;margin:0 0 8px">Each bank HORIZON can pay a supplier from. Bind it to the real Xero bank account so the payment run has its Bank Account ID. '
+              +'<b>Universal Partners FX USD</b> and <b>Gentium FX USD</b> must first be added as real bank accounts in Xero — until then they won’t appear in the dropdown.</div>'
+            +(accErr?'<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Xero accounts error: '+esc(accErr)+'</div>':'')
+            +'<div class="tw" style="max-width:900px"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Payment source</th><th class="l">Xero bank account</th><th class="l">Status</th></tr></thead><tbody>'
+            +EXBR.map(function(rl){ var cur=(cfgBankSel(REG)[rl.key]||{}); var ok=!!cur.account_id;
+              return '<tr><td class="l"><b>'+esc(rl.label)+'</b> <span class="mut tiny">'+esc(rl.currency)+'</span><div class="mut tiny">'+esc(rl.note)+'</div></td>'
+                +'<td class="l">'+(conn?bankSel(rl):'<span class="mut tiny">connect the org to list accounts</span>')+'</td>'
+                +'<td class="l">'+(ok?'<span class="tool-badge bg-green">✓ bound</span>':'<span class="tool-badge bg-amber">not bound</span>')+'</td></tr>'; }).join('')
+            +'</tbody></table></div>'
+            +'<div class="sect-h" style="margin-top:16px">Account mapping — chart of accounts</div>'
+            +'<div class="mut tiny" style="max-width:760px;margin:0 0 8px">Map the restructured accounts to their Xero code so the payment run and deposit draw-downs post to the right place (Stock Deposits is tagged by production #; deposits draw down via credit notes coded here).</div>'
+            +'<div class="tw" style="max-width:900px"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Account</th><th class="l">Xero account</th><th class="l">Status</th></tr></thead><tbody>'
+            +EXA.map(function(rl){ var cur=(cfgAcctSel(REG)[rl.key]||{}); var ok=!!cur.id;
+              return '<tr><td class="l"><b>'+esc(rl.label)+'</b>'+(rl.code_hint?' <span class="mut tiny">code '+esc(rl.code_hint)+'</span>':'')+'<div class="mut tiny">'+esc(rl.note)+'</div></td>'
+                +'<td class="l">'+(conn?acctSel(rl):'<span class="mut tiny">connect the org to list accounts</span>')+'</td>'
+                +'<td class="l">'+(ok?'<span class="tool-badge bg-green">✓ mapped</span>':'<span class="tool-badge bg-amber">not mapped</span>')+'</td></tr>'; }).join('')
+            +'</tbody></table></div>'
+            +'<div style="margin-top:10px" class="mut tiny">'+(missBanks.length?('⚠ '+missBanks.length+' payment source'+(missBanks.length>1?'s':'')+' still unbound for '+REG.toUpperCase()+' — the payment run can’t use '+missBanks.map(function(m){return m.label;}).join(', ')+' yet.'):'✓ all payment sources bound for '+REG.toUpperCase())+'</div>';
+          // bind
+          b.querySelectorAll('.xcfg-org').forEach(function(p){ p.onclick=function(){ window._xeroCfgReg=p.dataset.rg; SUBS['xero'](); }; });
+          b.querySelectorAll('.xcfg-bank').forEach(function(sel){ sel.onchange=function(){ var reg=cfgBankSel(REG); var role=sel.dataset.role; var a=BANKS.filter(function(x){return x.id===sel.value;})[0];
+            if(a){ reg[role]={account_id:a.id,code:a.code,name:a.name,currency:a.currency}; } else { delete reg[role]; } save(function(){ draw(); }); }; });
+          b.querySelectorAll('.xcfg-acct').forEach(function(sel){ sel.onchange=function(){ var reg=cfgAcctSel(REG); var role=sel.dataset.role; var a=ALLACC.filter(function(x){return x.id===sel.value;})[0];
+            if(a){ reg[role]={id:a.id,code:a.code,name:a.name}; } else { delete reg[role]; } save(function(){ draw(); }); }; });
+        }
+      };
       (SUBS[CONFIG_SUB]||function(){})();
     }
     showSub();

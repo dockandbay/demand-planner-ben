@@ -4387,6 +4387,59 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.030 (Ben): XERO FINANCE CONFIG — SUPPLY ▸ CONFIG ▸ Xero. Two config registries the payment run (part B) needs
+// before it can post to Xero: (1) the BANK REGISTRY — each payment-source bank account HORIZON can pay from, bound to
+// its real Xero Bank AccountID per org (Lloyds GBP, Bank of America USD, Universal Partners FX USD, Gentium FX USD);
+// (2) the ACCOUNT MAPPING — the COA-restructure accounts (Stock, Stock Deposits 602, Supplier Payments 602.1, Loan)
+// bound to their Xero account code/id. Accounts are pulled LIVE from Xero /Accounts (read-only); the registry + mapping
+// persist in planner.app_settings.xero_finance_config (JSON, per region). Nothing is written to Xero here.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const XERO_CFG_KEY = 'xero_finance_config';
+// Expected payment-source bank accounts (the "bank registry" from the handover doc). Each must exist as a real bank
+// account in Xero AND be bound here to its Xero Bank AccountID before HORIZON can use it as a payment source.
+const XERO_EXPECTED_BANKS = [
+  { key: 'lloyds_gbp', label: 'Lloyds', currency: 'GBP', regions: ['uk'], note: 'primary GBP operating account' },
+  { key: 'bofa_usd', label: 'Bank of America', currency: 'USD', regions: ['uk'], note: 'USD account' },
+  { key: 'universal_partners_usd', label: 'Universal Partners FX', currency: 'USD', regions: ['uk'], note: 'FX broker — USD payments (UK org)' },
+  { key: 'anz_aud', label: 'ANZ', currency: 'AUD', regions: ['au'], note: 'primary AUD operating account' },
+  { key: 'gentium_usd', label: 'Gentium FX', currency: 'USD', regions: ['au'], note: 'FX broker — USD payments (AU org)' }
+];
+// Expected COA-restructure accounts (code hints from Ben: Stock Deposits 602, Supplier Payments 602.1).
+const XERO_EXPECTED_ACCOUNTS = [
+  { key: 'stock', label: 'Stock', code_hint: '', note: 'genuine COGS per supplier invoice (existing)' },
+  { key: 'stock_deposits', label: 'Stock Deposits', code_hint: '602', note: 'all deposits across productions, tagged by production # (new)' },
+  { key: 'supplier_payments', label: 'Supplier Payments', code_hint: '602.1', note: 'completion + balance payments, untracked (new)' },
+  { key: 'loan', label: 'Loan (intercompany)', code_hint: '', note: 'cross-entity settlement only' }
+];
+app.get('/api/supply/xero/accounts', async (req, res) => {
+  try {
+    const region = xeroRegion(req.query.region);
+    const kind = String(req.query.kind || 'all').toLowerCase();
+    const j = await xeroFetch(region, '/api.xro/2.0/Accounts');
+    let accts = ((j && j.Accounts) || []).map(a => ({ code: a.Code || '', name: a.Name || '', id: a.AccountID, type: a.Type, cls: a.Class, currency: a.CurrencyCode || '', status: a.Status, bank_account_number: a.BankAccountNumber || '' }));
+    if (kind === 'bank') accts = accts.filter(a => a.type === 'BANK');
+    accts.sort((a, b) => String(a.code || 'zzzz').localeCompare(String(b.code || 'zzzz')) || String(a.name).localeCompare(String(b.name)));
+    res.set('Cache-Control', 'no-store').json({ region, org: (await xeroTenant(region)).name, count: accts.length, accounts: accts });
+  } catch (e) { res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+app.get('/api/supply/xero/finance-config', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XERO_CFG_KEY])).rows[0];
+    let cfg = {}; try { cfg = (r && r.value) ? JSON.parse(r.value) : {}; } catch (_) { cfg = {}; }
+    res.set('Cache-Control', 'no-store').json({ config: cfg, expected_banks: XERO_EXPECTED_BANKS, expected_accounts: XERO_EXPECTED_ACCOUNTS, regions: XERO_REGIONS });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero/finance-config', async (req, res) => {
+  try {
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to change Xero finance config' }); } catch (e) {}
+    const cfg = (req.body && req.body.config) || {};
+    if (typeof cfg !== 'object' || Array.isArray(cfg)) return res.status(400).json({ error: 'config must be an object' });
+    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [XERO_CFG_KEY, JSON.stringify(cfg)]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {
