@@ -4511,6 +4511,18 @@ app.post('/api/supply/xero/tracking/ensure', async (req, res) => {
 function _xeroFinanceCfg() {
   return pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XERO_CFG_KEY]).then(r => { try { return (r.rows[0] && r.rows[0].value) ? JSON.parse(r.rows[0].value) : {}; } catch (_) { return {}; } });
 }
+// Payments aren't bank-reconciled, so the exact bank doesn't matter — only the currency. Return a bank AccountID for a
+// currency: a registry bank of that currency if bound, else any live BANK account with that CurrencyCode in the org.
+async function _xeroBankForCurrency(region, ccy) {
+  ccy = String(ccy || 'USD').toUpperCase();
+  const cfg = await _xeroFinanceCfg(); const banks = (cfg.banks && cfg.banks[region]) || {};
+  for (const k of Object.keys(banks)) { const b = banks[k]; if (b && b.account_id && String(b.currency || '').toUpperCase() === ccy) return { account_id: b.account_id, name: b.name, currency: ccy, source: 'registry' }; }
+  try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'));
+    const hit = ((ac && ac.Accounts) || []).find(a => a.Status === 'ACTIVE' && String(a.CurrencyCode || '').toUpperCase() === ccy);
+    if (hit) return { account_id: hit.AccountID, name: hit.Name, currency: ccy, source: 'org' };
+  } catch (e) {}
+  return null;
+}
 // Shared plan computation for a payment run → the Xero bill + per-line coding + linked bills + checks. Read-only.
 async function computeXeroRunPlan(run) {
   const lines = Array.isArray(run.lines) ? run.lines : [];
@@ -4526,7 +4538,10 @@ async function computeXeroRunPlan(run) {
   const banks = (cfg.banks && cfg.banks[region]) || {};
   const accts = (cfg.accounts && cfg.accounts[region]) || {};
   const usdBankRole = region === 'au' ? 'gentium_usd' : 'universal_partners_usd';
-  const bank = banks[usdBankRole] || null;
+  // The payment isn't reconciled, so the exact bank doesn't matter — only the currency. Prefer the registry USD bank,
+  // else fall back to any live USD bank account in the org (currency-matched).
+  let bank = banks[usdBankRole] || null;
+  if (!bank) { try { bank = await _xeroBankForCurrency(region, 'USD'); } catch (e) {} }
   const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
   const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
   let trackOpts = new Set(); let trackOk = true;
@@ -4553,17 +4568,17 @@ async function computeXeroRunPlan(run) {
   const dueById = {};
   for (let i = 0; i < payBillIds.length; i += 40) {
     const chunk = payBillIds.slice(i, i + 40);
-    try { const jb = await xeroFetch(region, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status }; }); } catch (e) {}
+    try { const jb = await xeroFetch(region, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
   }
   outLines.forEach(l => {
     if (!/deposit/i.test(String(l.type || '')) && l.linked_bill && l.linked_bill.id) {
       const b = dueById[l.linked_bill.id];
-      if (b) { l.bill_due = b.due; l.bill_status = b.status; l.pay_ok = (Number(l.amount) || 0) <= b.due + 0.01; }
+      if (b) { l.bill_due = b.due; l.bill_status = b.status; l.bill_ccy = b.ccy; l.bill_rate = b.rate; l.pay_ok = (Number(l.amount) || 0) <= b.due + 0.01; }
       else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted) → can't validate
     }
   });
   const checks = [];
-  checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org' } : { level: 'error', msg: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — bind it in CONFIG ▸ Xero' });
+  checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org (not reconciled — only the currency matters)' } : { level: 'error', msg: 'No USD bank account in Xero ' + region.toUpperCase() + ' — add one (any USD bank works; the payment is not reconciled)' });
   const overpay = outLines.filter(l => l.pay_ok === false);
   if (overpay.length) checks.push({ level: 'error', msg: overpay.length + ' payment(s) exceed the bill’s amount due (Xero would reject): ' + overpay.map(l => l.reference).join(', ') });
   ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
@@ -4586,7 +4601,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {});
     if (!plan.ok) return res.status(400).json({ error: plan.error });
     const region = plan.region, today = new Date().toISOString().slice(0, 10), date = plan.date || today;
-    if (!plan.bank || !plan.bank.account_id) return res.status(400).json({ error: 'No USD payment-source bank bound for ' + region.toUpperCase() + ' — set it in CONFIG ▸ Xero' });
+    if (!plan.bank || !plan.bank.account_id) return res.status(400).json({ error: 'No USD bank account found in Xero ' + region.toUpperCase() + ' to post the payment from (any USD bank works — the payment is not reconciled)' });
     const badAcct = plan.lines.filter(l => Math.abs(l.amount) > 0.005 && !(l.account && l.account.code));
     if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role))].join(', ') + ' — set it in CONFIG ▸ Xero' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
@@ -4604,8 +4619,12 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
       if (/deposit/i.test(String(l.type || ''))) { out.skipped.push({ po: l.reference, reason: 'deposit → use a credit note' }); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
       try {
-        const pr = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [{ Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: plan.bank.account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100, CurrencyRate: 1 }] } });
-        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number });
+        // Post the payment at the BILL'S exchange rate (not 1) so there's no FX gain/loss vs the bill. Omit the rate
+        // if the bill's rate is unknown (Xero then applies its daily rate).
+        const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: plan.bank.account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
+        if (l.bill_rate != null && l.bill_rate > 0) payObj.CurrencyRate = l.bill_rate;
+        const pr = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
+        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, rate: l.bill_rate || null });
       } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
     }
     res.json(Object.assign({ ok: true }, out));
@@ -4786,7 +4805,11 @@ app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
     } else if (row.kind === 'payment') {
       if (!row.linked_invoice_id) throw new Error('no linked Xero bill to pay');
       if (!row.bank_account_id) throw new Error('no bank account bound — set it in CONFIG ▸ Xero');
-      const body = { Payments: [{ Invoice: { InvoiceID: row.linked_invoice_id }, Account: { AccountID: row.bank_account_id }, Date: today, Amount: Number(row.amount) || 0, CurrencyRate: Number(row.fx_rate) || 1 }] };
+      // Pay at the bill's own exchange rate (fetch it live) so there's no FX gain/loss; omit if unknown.
+      let billRate = null; try { const bi = await xeroFetch(region, '/api.xro/2.0/Invoices/' + row.linked_invoice_id); const inv = bi && bi.Invoices && bi.Invoices[0]; if (inv && inv.CurrencyRate != null) billRate = Number(inv.CurrencyRate); } catch (e) {}
+      const payObj = { Invoice: { InvoiceID: row.linked_invoice_id }, Account: { AccountID: row.bank_account_id }, Date: today, Amount: Number(row.amount) || 0 };
+      if (billRate != null && billRate > 0) payObj.CurrencyRate = billRate;
+      const body = { Payments: [payObj] };
       const r = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body });
       const pay = r && r.Payments && r.Payments[0]; xeroId = pay && pay.PaymentID;
     } else if (row.kind === 'credit_note') {
