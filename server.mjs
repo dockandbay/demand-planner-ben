@@ -1659,7 +1659,88 @@ async function shellFresh(asKeys) {
   if (m.v) { m.inflight.catch(() => {}); return m.v; }   // stale → serve now, rebuild behind
   return m.inflight;                                     // cold (or just dropped by a write) → build once
 }
-app.use((req, res, next) => { if (req.method !== 'GET' && req.method !== 'HEAD' && String(req.path || '').startsWith('/api/')) res.on('finish', () => { if (res.statusCode < 400) shellMemoDrop(); }); next(); });
+app.use((req, res, next) => { if (req.method !== 'GET' && req.method !== 'HEAD' && String(req.path || '').startsWith('/api/')) res.on('finish', () => { if (res.statusCode < 400) { if (DEV && _shellMemo.v) console.log('[shell] memo dropped by ' + req.method + ' ' + req.path); shellMemoDrop(); } }); next(); });
+// ── v28.082 (Ben, perf audit Sprint B): static shell split ─────────────────────────────────────────────────────────────
+// Until now GET / shipped one 5.6–9 MB HTML with the artefact's and inject.html's SCRIPT inline and the live data spliced
+// into `var X = {...}` declarations (replaceGlobal), all `Cache-Control: no-store` — so every visit re-downloaded and
+// re-parsed ~4.5 MB of unchanged JS. shellBundle() prepares, once per process (and again in DEV whenever either file
+// changes), a version of both templates where:
+//   • every injected global reads `window.__HZ_G.NAME` when the shell provides it, else its own baked literal
+//     (rewriteGlobal — the same locator replaceGlobal used, so the same declaration is targeted);
+//   • the scalar hooks (LAZY_SKU, EXTRACT_TS, BUY_LOGIC, AF_GBP/CF_GBP) read __HZ_G the same way;
+//   • the version-fixed text edits (VERSION, theme link, /api/ai proxy, model swap, PLAN→DEMAND, __APP_VERSION__) are baked;
+//   • each inline <script> body is moved to /static/<name>.<sha1>.js (gzip pre-computed, served immutable for a year).
+// GET / then serves the small HTML skeleton (markup + CSS, ~250 KB) + one inline `window.__HZ_G = {...}` data script,
+// and the browser fetches the script files from its cache. Same code, same data, same order of execution.
+const HZ_G_NAMES = ['DATA', 'FC_CURRENT', 'FC_OUTPUTS', '_SKU_RAW', '_SA_EXTRA', 'CATS_META', 'SUBS_META', 'BI_RULES', 'PROD_CONST', 'KLAVIYO_BIS', 'SET_BOM', 'PREPACK_MAP', 'PREPACK_STOCK', 'LEADTIME_VAR', 'INV_STOCKOUTS', 'TIER_RECS', 'MKT_COLORS', 'BRANCH_FREIGHT', 'CAT_ASP_GBP', 'LOCKED_FC', 'TRANSFER_LEADS', 'PRICE_CHANGES', 'CHINA_STOCK', 'ZAL_STOCK', 'ZAL_SKUS', 'CHANNELS', 'COUNTRIES', 'COMPLEX_RULES', 'ASP_ADJ', 'SMOOTH_DISREGARD_DISC', 'SMOOTH_AUTO', 'SMOOTH_LOCKS', 'SSM_PARAMS', 'SSM_ENABLED', 'CONTRIB_MODEL', 'HIDE_TOTALLY_SUBS', 'SUBCAT_RT', 'FX_RATES', 'BIS_CFG', 'SAVED_INPUTS'];
+function _globalSpan(html, name) {   // [start, end) of the object/array literal in the FIRST `(const|let|var) NAME = {…}|[…]` — identical to replaceGlobal's locator
+  const m = html.match(new RegExp('(?:const|let|var)\\s+' + name + '\\s*=\\s*([\\[{])'));
+  if (!m) throw new Error(`global ${name} not found`);
+  const start = m.index + m[0].length - 1;
+  const open = html[start], close = open === '[' ? ']' : '}';
+  let depth = 0, i = start, inStr = false, esc = false, q = '';
+  for (; i < html.length; i++) {
+    const ch = html[i];
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === q) inStr = false; }
+    else if (ch === '"' || ch === "'") { inStr = true; q = ch; }
+    else if (ch === open) depth++;
+    else if (ch === close) { depth--; if (depth === 0) { i++; break; } }
+  }
+  return [start, i];
+}
+function rewriteGlobal(html, name) {
+  const [s, e] = _globalSpan(html, name);
+  const k = JSON.stringify(name);
+  return html.slice(0, s) + '((window.__HZ_G&&Object.prototype.hasOwnProperty.call(window.__HZ_G,' + k + '))?window.__HZ_G[' + k + ']:' + html.slice(s, e) + ')' + html.slice(e);
+}
+function _externaliseScripts(html, prefix, files) {
+  let n = 0;
+  return html.replace(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi, (m, attrs, body) => {
+    if (/\ssrc\s*=/.test(attrs || '') || !body.trim()) return m;
+    const hash = crypto.createHash('sha1').update(body).digest('hex').slice(0, 12);
+    const name = prefix + (n++) + '.' + hash + '.js';
+    files[name] = { body: Buffer.from(body, 'utf8'), gz: zlib.gzipSync(body, { level: 9 }) };
+    return '<script' + (attrs || '') + ' src="/static/' + name + '"></script>';
+  });
+}
+let _shellBundle = null, _shellBundlePrev = null;
+function shellBundle() {
+  let html = DEV ? loadHTML() : HTML, inject = DEV ? loadInject() : SUPPLY_INJECT;
+  const sig = DEV ? crypto.createHash('sha1').update(html).update(inject).digest('hex') : 'prod';   // DEV: rebuild when either file changes
+  if (_shellBundle && _shellBundle.sig === sig) return _shellBundle;
+  const t0 = Date.now();
+  // Version-fixed edits (moved here from GET /, text identical).
+  html = html.replace(/const VERSION\s*=\s*'[^']*'/, `const VERSION='${APP_VERSION}'`);   // real app version (the artefact bakes 'v16.7')
+  html = html.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());   // HORIZON theme (tokens + shell) — __HZ_THEME__
+  html = html.split('https://api.anthropic.com/v1/messages').join('/api/ai');   // Claude calls via our key-attached proxy (same-origin)
+  html = html.split('claude-sonnet-4-20250514').join('claude-sonnet-4-6');     // the artefact hardcodes a retired model → 404
+  html = html.replace('data-view="planning">PLAN</button>', 'data-view="planning">DEMAND</button>');   // top-nav PLAN → DEMAND (spec B3.1)
+  for (const name of HZ_G_NAMES) html = rewriteGlobal(html, name);
+  html = html.replace('var LAZY_SKU=false', 'var LAZY_SKU=(!!(window.__HZ_G&&window.__HZ_G.LAZY_SKU===true))');
+  html = html.replace(/EXTRACT_TS\s*=\s*'([^']*)'/, (m, d) => `EXTRACT_TS=((window.__HZ_G&&window.__HZ_G.EXTRACT_TS)||'${d}')`);
+  html = html.replace("var BUY_LOGIC='cover_weeks';", "var BUY_LOGIC=((window.__HZ_G&&window.__HZ_G.BUY_LOGIC)||'cover_weeks');");
+  html = html.replace(/var AF_GBP\s*=\s*([\d.]+)/, (m, d) => `var AF_GBP=((window.__HZ_G&&window.__HZ_G.GBP_RATE)||${d})`);
+  inject = inject.split('__APP_VERSION__').join(APP_VERSION).replace(/var CF_GBP\s*=\s*([\d.]+)/, (m, d) => `var CF_GBP=((window.__HZ_G&&window.__HZ_G.GBP_RATE)||${d})`);
+  const files = {};
+  html = _externaliseScripts(html, 'app', files);
+  inject = _externaliseScripts(inject, 'supply', files);
+  _shellBundlePrev = _shellBundle;   // an open tab may still ask for the previous build's files (DEV edits)
+  _shellBundle = { sig, html, inject, files, at: Date.now() };
+  console.log('[shell] bundle built: ' + Object.keys(files).length + ' script files, ' + Math.round(Object.values(files).reduce((a, f) => a + f.body.length, 0) / 1024) + ' KB, skeleton ' + Math.round((html.length + inject.length) / 1024) + ' KB, ' + (Date.now() - t0) + ' ms');
+  return _shellBundle;
+}
+app.get('/static/:name', (req, res) => {
+  const name = String(req.params.name || '');
+  const b = _shellBundle || shellBundle();
+  const f = (b.files[name]) || (_shellBundlePrev && _shellBundlePrev.files[name]);
+  if (!f) return res.status(404).end();
+  res.setHeader('content-type', 'application/javascript; charset=utf-8');
+  res.setHeader('cache-control', 'private, max-age=31536000, immutable');   // content-hashed name → safe forever; private: behind the app login
+  res.setHeader('vary', 'Accept-Encoding');
+  if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.setHeader('content-encoding', 'gzip'); return res.end(f.gz); }
+  res.end(f.body);
+});
+if (!process.env.VERCEL) setTimeout(() => { try { shellBundle(); } catch (e) { console.warn('[shell] bundle build failed: ' + (e && e.message)); } }, 500).unref?.();   // long-lived server: build at boot (Vercel: first request)
 app.get('/', async (req, res) => {
   try {
     // v28.081 (Ben, perf audit): SKU-data lazy-load is now the DEFAULT (opt out with ?lazysku=0). Inline SKU_RAW/FC_OUTPUTS
@@ -1685,70 +1766,76 @@ app.get('/', async (req, res) => {
     const _fresh7 = _sf.R;
     const _AS = {}; (_asRows || []).forEach(r => { _AS[r.key] = r; });
     _mark('builders');
-    let html = DEV ? loadHTML() : HTML;
-    html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
-    html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
-    html = replaceGlobal(html, 'FC_OUTPUTS', JSON.stringify(_lazy ? {} : FC_OUTPUTS));   // lazy: ship empty; client fetches /api/demand/sku-data after first paint
-    html = replaceGlobal(html, '_SKU_RAW', JSON.stringify(_lazy ? {} : SKU_RAW));
-    if (_lazy) html = html.replace('var LAZY_SKU=false', 'var LAZY_SKU=true');
-    html = replaceGlobal(html, '_SA_EXTRA', JSON.stringify(SA_EXTRA));
-    html = replaceGlobal(html, 'CATS_META', JSON.stringify(CATS));
-    html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
-    html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
-    html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
+    // v28.082 (Ben, perf audit Sprint B): the artefact + inject SCRIPT is now static and content-hashed (shellBundle → /static/*.js,
+    // immutable), and the per-load data rides in ONE inline <script> as window.__HZ_G. Every global the old replaceGlobal()
+    // injected is set on G below with exactly the same conditional logic (baked defaults stay in the static code as the
+    // fallback when a key is absent). The browser keeps the ~4.5 MB of script across visits (and V8 keeps its compiled
+    // code cache), so a repeat load transfers only the shell + data.
+    const B = shellBundle();
+    let html = B.html;
+    const G = { LAZY_SKU: !!_lazy, GBP_RATE };
+    G.DATA = DATA;
+    G.FC_CURRENT = FC_CURRENT;
+    G.FC_OUTPUTS = _lazy ? {} : FC_OUTPUTS;   // lazy: ship empty; client fetches /api/demand/sku-data after first paint
+    G._SKU_RAW = _lazy ? {} : SKU_RAW;
+    G._SA_EXTRA = SA_EXTRA;
+    G.CATS_META = CATS;
+    G.SUBS_META = SUBS;
+    G.BI_RULES = BI;
+    G.PROD_CONST = PROD_CONST;
     // (ZAL_FC/ZAL_MONTHS injection removed v26.758 — the Zalando forecast is read from the DB everywhere now:
     //  the buy feed builds dem.ZAL from the live cascade, and /api/supply/zalando/data serves the send-to-Zalando tab.)
-    html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
-    html = replaceGlobal(html, 'SET_BOM', JSON.stringify(SET_BOM || {}));     // {output_set_sku:[{sku,qty}]} — SETS build-on-fly explosion map
-    html = replaceGlobal(html, 'PREPACK_MAP', JSON.stringify(PREPACK_MAP || {}));   // {prepack_sku:set_sku} — prepack stock offsets mapped set demand; PP- excluded from demand+buy
-    html = replaceGlobal(html, 'PREPACK_STOCK', JSON.stringify(PREPACK_STOCK || {}));   // {prepack_sku:{wh:qty}} — prepack on-hand (out of SKUM scope; feeds buy-plan netting)
-    html = replaceGlobal(html, 'LEADTIME_VAR', JSON.stringify(LEADTIME_VAR || {}));   // lead-time variability (weeks) from PO delivery history — Safety-stock data-driven σ_L
-    html = replaceGlobal(html, 'INV_STOCKOUTS', JSON.stringify(INV_STOCKOUTS || {}));   // {sku:{MKT:[YYYY_MM]}} stockout months from inventory snapshots — Safety-stock demand unconstraining
-    html = replaceGlobal(html, 'TIER_RECS', JSON.stringify(TIER_RECS || {}));   // {core:[],seasonal:[]} ABC re-tier recommendations — DEMAND ▸ Exceptions ▸ Recommendations
-    html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
-    html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
-    html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
-    html = replaceGlobal(html, 'LOCKED_FC', JSON.stringify(LOCKED_FC || { sub: {}, sku: {} }));   // #4 locked-forecast-vs-actual (completed months only)
-    html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
+    G.KLAVIYO_BIS = KLAVIYO_BIS;   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
+    G.SET_BOM = SET_BOM || {};     // {output_set_sku:[{sku,qty}]} — SETS build-on-fly explosion map
+    G.PREPACK_MAP = PREPACK_MAP || {};   // {prepack_sku:set_sku} — prepack stock offsets mapped set demand; PP- excluded from demand+buy
+    G.PREPACK_STOCK = PREPACK_STOCK || {};   // {prepack_sku:{wh:qty}} — prepack on-hand (out of SKUM scope; feeds buy-plan netting)
+    G.LEADTIME_VAR = LEADTIME_VAR || {};   // lead-time variability (weeks) from PO delivery history — Safety-stock data-driven σ_L
+    G.INV_STOCKOUTS = INV_STOCKOUTS || {};   // {sku:{MKT:[YYYY_MM]}} stockout months from inventory snapshots — Safety-stock demand unconstraining
+    G.TIER_RECS = TIER_RECS || {};   // {core:[],seasonal:[]} ABC re-tier recommendations — DEMAND ▸ Exceptions ▸ Recommendations
+    G.MKT_COLORS = MKT_COLORS;     // reusable market colour palette
+    G.BRANCH_FREIGHT = BRANCH_FREIGHT || {};
+    G.CAT_ASP_GBP = CAT_ASP_GBP || {};
+    G.LOCKED_FC = LOCKED_FC || { sub: {}, sku: {} };   // #4 locked-forecast-vs-actual (completed months only)
+    G.TRANSFER_LEADS = TRANSFER_LEADS || {};
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
     // These 7 are all independent fresh fetches (not cached), incl. BUY ▸ Complex Rules (cover-target overrides that
-    // replaced First Buy). Run concurrently, then inject in order. allSettled preserves the original semantics:
-    // inject on success (even a null value), leave the baked default on throw.
+    // replaced First Buy). allSettled preserves the original semantics: inject on success (even a null value), leave
+    // the baked default on throw (key absent from G → the static code's own literal).
     {
       const _R = _fresh7;   // settled results from the memoised shell wave (v28.081)
-      const _inj = (i, name) => { if (_R[i].status === 'fulfilled') html = replaceGlobal(html, name, JSON.stringify(_R[i].value)); };
+      const _inj = (i, name) => { if (_R[i].status === 'fulfilled') G[name] = (_R[i].value === undefined) ? null : _R[i].value; };
       _inj(0, 'PRICE_CHANGES'); _inj(1, 'CHINA_STOCK'); _inj(2, 'ZAL_STOCK'); _inj(3, 'ZAL_SKUS'); _inj(4, 'CHANNELS'); _inj(5, 'COUNTRIES'); _inj(6, 'COMPLEX_RULES');
     }
     // v27.577 DEMAND ▸ Config ▸ More settings: per country|channel ASP reduction % + discontinued-items ASP discount % (app_settings.asp_adjust, JSON {"UK|DTC":{"red":9,"disc":10}}).
     _mark('fresh7');
-    try { const r = _AS['asp_adjust']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'ASP_ADJ', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { html = replaceGlobal(html, 'ASP_ADJ', '{}'); }
+    try { const r = _AS['asp_adjust']; const o = (r && r.value) ? JSON.parse(r.value) : {}; G.ASP_ADJ = (o && typeof o === 'object') ? o : {}; } catch (e) { G.ASP_ADJ = {}; }
     // DEMAND ▸ smoothing "disregard discontinued" flags per co|ch|subcat (app_settings.smooth_disregard_disc, JSON). Fresh so a toggle shows next load.
-    try { const r = _AS['smooth_disregard_disc']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['smooth_disregard_disc']; const o = (r && r.value) ? JSON.parse(r.value) : {}; G.SMOOTH_DISREGARD_DISC = (o && typeof o === 'object') ? o : {}; } catch (e) { /* leave the {} default */ }
     // DEMAND ▸ auto-smooth config (app_settings.smooth_auto = {flags:{'CO|CH|subcat':true}, threshold, mode}). One-click sweep smooths flagged subcats over the threshold.
-    try { const r = _AS['smooth_auto']; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
+    try { const r = _AS['smooth_auto']; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; G.SMOOTH_AUTO = cfg; } catch (e) { /* leave the default */ }
     // DEMAND ▸ do-not-smooth locks (app_settings.smooth_locks = {'sku|CO|CH|YYYY_MM':true}). SKU-cell forecasts smoothing must leave fixed. Fresh so a toggle shows next load.
-    try { const r = _AS['smooth_locks']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_LOCKS', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['smooth_locks']; const o = (r && r.value) ? JSON.parse(r.value) : {}; G.SMOOTH_LOCKS = (o && typeof o === 'object') ? o : {}; } catch (e) { /* leave the {} default */ }
     // BUY ▸ buy-plan logic switch (app_settings.buy_logic): 'cover_weeks' (default, today's flat cover) | 'ssm' (service-level safety stock). CONFIG ▸ Admin ▸ General.
-    try { const r = _AS['buy_logic']; const v = (r && r.value === 'ssm') ? 'ssm' : 'cover_weeks'; html = html.replace("var BUY_LOGIC='cover_weeks';", "var BUY_LOGIC='" + v + "';"); } catch (e) { /* default cover_weeks — BUY_LOGIC is a scalar so replaceGlobal (object/array only) can't be used */ }
+    try { const r = _AS['buy_logic']; G.BUY_LOGIC = (r && r.value === 'ssm') ? 'ssm' : 'cover_weeks'; } catch (e) { /* default cover_weeks (static code fallback) */ }
     // SSM tunable parameters (app_settings.ssm_params JSON) — service level by tier, seasonal floor, review cycle, FBA cover cap. Editable at CONFIG ▸ Demand ▸ Buy plan logic.
     try { const r = _AS['ssm_params']; let o = {}; try { o = r && r.value ? JSON.parse(r.value) : {}; } catch (_) { o = {}; } const sl = o.sl || {}; const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
       const one = (x) => { x = x || {}; const s = x.sl || {}; const e = { sl: { A: num(s.A, 99), B: num(s.B, 97), C: num(s.C, 93), def: num(s.def, 90) }, seasonalFloor: num(x.seasonalFloor, 97), cycleWk: num(x.cycleWk, 4) }; if (x.fbaCapWk != null) e.fbaCapWk = num(x.fbaCapWk, 8); if (x.seasonMaxWk != null) e.seasonMaxWk = num(x.seasonMaxWk, 30); return e; };
       const byMkt = {}; if (o.byMkt && typeof o.byMkt === 'object') for (const k of Object.keys(o.byMkt)) byMkt[k] = one(o.byMkt[k]);   // per market|pool overrides (all params)
       const m = { sl: { A: num(sl.A, 99), B: num(sl.B, 97), C: num(sl.C, 93), def: num(sl.def, 90) }, seasonalFloor: num(o.seasonalFloor, 97), cycleWk: num(o.cycleWk, 4), fbaCapWk: num(o.fbaCapWk, 8), seasonMaxWk: num(o.seasonMaxWk, 30), byMkt };
-      html = replaceGlobal(html, 'SSM_PARAMS', JSON.stringify(m)); } catch (e) { /* defaults in the artefact */ }
+      G.SSM_PARAMS = m; } catch (e) { /* defaults in the artefact */ }
     // SSM opt-in per market×pool (app_settings.ssm_enabled JSON {"CO|POOL":true}). Default {} = weeks-cover everywhere (byte-identical).
     // Back-compat: legacy global buy_logic='ssm' with no per-market map → treat as all markets/pools on.
     try { const re = _AS['ssm_enabled']; let en = {}; try { en = re && re.value ? JSON.parse(re.value) : {}; } catch (_) { en = {}; }
       const clean = {}; for (const k of Object.keys(en)) if (en[k] === true) clean[k] = true;
       if (!Object.keys(clean).length) { const bl = _AS['buy_logic']; if (bl && bl.value === 'ssm') { for (const co of ['UK', 'US', 'EU', 'AU']) { clean[co + '|3PL'] = true; clean[co + '|FBA'] = true; } clean['CA|FBA'] = true; } }
-      html = replaceGlobal(html, 'SSM_ENABLED', JSON.stringify(clean)); } catch (e) { /* default {} in the artefact */ }
+      G.SSM_ENABLED = clean; } catch (e) { /* default {} in the artefact */ }
     // CONFIG ▸ Demand ▸ Contribution model (app_settings.contrib_model, JSON keyed "CO|CH|subcat" with '*' wildcards).
     // Drives the Leader-mode smoothing tier mix (SETS feature P3b). Empty {} => tierMix falls back to CONTRIB_TARGETS/default.
-    try { const r = _AS['contrib_model']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'CONTRIB_MODEL', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['contrib_model']; const o = (r && r.value) ? JSON.parse(r.value) : {}; G.CONTRIB_MODEL = (o && typeof o === 'object') ? o : {}; } catch (e) { /* leave the {} default */ }
     // CONFIG ▸ Demand ▸ Discontinued sub-categories: which inactive subcats to HIDE TOTALLY (vs show as run-off).
     // app_settings.runoff_hidden_subs = JSON array of subcat names. Empty [] => all inactive subcats show as run-off.
-    try { const r = _AS['runoff_hidden_subs']; const a = (r && r.value) ? JSON.parse(r.value) : []; html = replaceGlobal(html, 'HIDE_TOTALLY_SUBS', JSON.stringify(Array.isArray(a) ? a : [])); } catch (e) { /* leave the [] default */ }
+    try { const r = _AS['runoff_hidden_subs']; const a = (r && r.value) ? JSON.parse(r.value) : []; G.HIDE_TOTALLY_SUBS = Array.isArray(a) ? a : []; } catch (e) { /* leave the [] default */ }
     // DEMAND Set-targets £→units: average EX-TAX retail price per market × subcategory from planner.products.
     // Ben's formula: UK/EU ÷1.2 (VAT), AU ÷1.1 (GST), US/CA already ex-tax. Client applies the channel factor
     // (B2B ×0.5, DTC/FBA ×0.95) to get net £/unit, then units = £target ÷ net price.
@@ -1759,26 +1846,21 @@ app.get('/', async (req, res) => {
       for (const p of pr) { const sc = p.subcategory; for (const mk of Object.keys(COL)) { const rt = Number(p[COL[mk]]); if (rt > 0) { const ex = rt / DIV[mk]; const a = acc[mk][sc] || (acc[mk][sc] = { s: 0, n: 0 }); a.s += ex; a.n++; } } }
       const SUBCAT_RT = { UK: {}, US: {}, EU: {}, AU: {}, CA: {} };
       for (const mk of Object.keys(acc)) for (const sc of Object.keys(acc[mk])) SUBCAT_RT[mk][sc] = Math.round(acc[mk][sc].s / acc[mk][sc].n * 100) / 100;
-      html = replaceGlobal(html, 'SUBCAT_RT', JSON.stringify(SUBCAT_RT));
+      G.SUBCAT_RT = SUBCAT_RT;
     } catch (e) { /* leave the {} default */ }
     // DEMAND multi-currency: blended GBP→local rates per FY (app_settings.fx_rates = {"<fyStart>":{USD,EUR,AUD}}). Local = GBP × rate.
-    try { const r = _AS['fx_rates']; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'FX_RATES', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    try { const r = _AS['fx_rates']; const o = (r && r.value) ? JSON.parse(r.value) : {}; G.FX_RATES = (o && typeof o === 'object') ? o : {}; } catch (e) { /* leave the {} default */ }
     // SUG-0018 P2: Klaviyo BIS take-rate (% of waiting subscribers → suggested forecast uplift; app_settings.bis_take_rate, default 35).
-    try { const r = _AS['bis_take_rate']; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; html = replaceGlobal(html, 'BIS_CFG', JSON.stringify({ take_rate: (isFinite(tr) && tr > 0 ? tr : 35) })); } catch (e) { /* leave the default */ }
+    try { const r = _AS['bis_take_rate']; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; G.BIS_CFG = { take_rate: (isFinite(tr) && tr > 0 ? tr : 35) }; } catch (e) { /* leave the default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
     // (FC_SEED already seeds IV from live FC_CURRENT.)
-    html = replaceGlobal(html, 'SAVED_INPUTS', '{}');
-    if (ts) html = html.replace(/EXTRACT_TS\s*=\s*'[^']*'/, `EXTRACT_TS='${ts}'`);
-    // Show the real app version (the artefact bakes its filename version 'v16.7'); only the VERSION const, not data.
-    html = html.replace(/const VERSION\s*=\s*'[^']*'/, `const VERSION='${APP_VERSION}'`);
-    html = html.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());   // HORIZON theme (tokens + shell) — __HZ_THEME__
-    // Route the artefact's Claude calls through our key-attached proxy (same-origin, no CORS).
-    html = html.split('https://api.anthropic.com/v1/messages').join('/api/ai');
-    // The artefact hardcodes a retired Sonnet model (claude-sonnet-4-20250514) -> 404.
-    // Swap to the current Sonnet so the AI features (insights, narrative, BI rules) work.
-    html = html.split('claude-sonnet-4-20250514').join('claude-sonnet-4-6');
-    // Rename top-nav PLAN -> DEMAND (spec B3.1). Artefact untouched; relabelled at serve time.
-    html = html.replace('data-view="planning">PLAN</button>', 'data-view="planning">DEMAND</button>');
+    G.SAVED_INPUTS = {};
+    if (ts) G.EXTRACT_TS = ts;
+    // (VERSION, theme link, /api/ai proxy, model swap, PLAN→DEMAND label, CF_GBP/AF_GBP hooks: applied once in shellBundle.)
+    // Harden the inline data script the same way replaceGlobal did (H2): a DB string containing "</script>" or a raw
+    // U+2028/2029 must not break out of the <script>. JSON only emits these inside string values, so escaping keeps the
+    // decoded value byte-identical.
+    const G_JS = '<script>window.__HZ_G=' + JSON.stringify(G).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') + ';</script>';
     // UI fit (our deployment only — artefact HTML untouched): the baked `.tw` table uses a
     // fixed `max-height: calc(100vh - 184px)`, which leaves a gap on big screens and hides the
     // bottom scrollbar on small ones. Size it dynamically so its bottom sits just off the
@@ -1797,7 +1879,7 @@ app.get('/', async (req, res) => {
     // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
     // Failsafe reveal only un-hides #app; hz-preboot (the demand-pill mask) is managed by hzSyncDemandPills so it persists on non-demand views.
     const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
-    const injectTail = LANDING_JS + FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
+    const injectTail = LANDING_JS + FBADIMS_JS + FIT + B.inject + '</body>';   // B.inject: inject.html with its script externalised + __APP_VERSION__ baked
     html = html.replace('</body>', () => injectTail);
     // Flash prevention — MUST be in <head> so it runs before the body (the static DEMAND filter bar) is painted.
     // If the landing route isn't a demand-native view, hide #app via a CSS class from the very first paint; the
@@ -1806,9 +1888,7 @@ app.get('/', async (req, res) => {
     // never paint before boot — including on buy/fba/exec/reports hashes where #app itself is intentionally left visible.
     // Skipped only for the planning/demand hash (where those rows belong). Removed at boot end, after which the artifact governs them.
     const HEAD_NOFLASH = '<style>html.hz-hide-app #app{visibility:hidden}html.hz-preboot #ctabs-row,html.hz-preboot #filters-row2,html.hz-preboot #catrow1-wrap{display:none!important}</style><script>try{var _h=location.hash||"";if(!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(_h))document.documentElement.classList.add("hz-hide-app");if(!/^#\\/?(planning|demand)(\\/|$)/.test(_h))document.documentElement.classList.add("hz-preboot");if(localStorage.getItem("hz-theme")==="dark")document.documentElement.classList.add("om-dark");}catch(e){}window.hzToggleTheme=function(){var _d=document.documentElement.classList.toggle("om-dark");try{localStorage.setItem("hz-theme",_d?"dark":"light");}catch(_e){}var _b=document.getElementById("hz-theme-btn");if(_b)_b.setAttribute("aria-pressed",_d?"true":"false");var _m=document.getElementById("hz-theme-mob");if(_m)_m.setAttribute("aria-pressed",_d?"true":"false");};</script>';
-    html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH);
-    // Inject the configured USD→GBP rate into both clients (CF_GBP in inject.html, AF_GBP in the artefact).
-    html = html.replace(/var CF_GBP\s*=\s*[\d.]+/, 'var CF_GBP=' + GBP_RATE).replace(/var AF_GBP\s*=\s*[\d.]+/, 'var AF_GBP=' + GBP_RATE);
+    html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH + G_JS);   // G_JS in <head>: the data must exist before the first (static) body script runs
     if (IS_SANDBOX) {
       html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
