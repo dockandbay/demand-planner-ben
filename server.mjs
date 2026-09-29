@@ -4141,6 +4141,62 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.024 (Ben): LIVE XERO connection. OAuth 2.0 client_credentials (Xero "Custom Connection", one Dock & Bay org).
+// INERT without XERO_CLIENT_ID + XERO_CLIENT_SECRET (mirrors the FedEx pattern). Read = reconcile POs/payments against
+// Xero (replaces the manual Xero Compare upload) + flag wrong bill due dates. Write = create bills in Xero directly
+// (3PL invoices, commissions, payments report) instead of the CSV download. Tokens + tenant id are cached in-process.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function xeroConfig() {
+  const id = (process.env.XERO_CLIENT_ID || '').trim(), secret = (process.env.XERO_CLIENT_SECRET || '').trim();
+  const scopes = (process.env.XERO_SCOPES || 'accounting.transactions accounting.contacts accounting.settings.read').trim();
+  return { id, secret, scopes, present: !!(id && secret) };
+}
+let _xeroTok = { token: null, exp: 0 }, _xeroTenant = { id: null, name: null, at: 0 };
+async function xeroToken() {
+  const cfg = xeroConfig(); if (!cfg.present) return null;
+  const now = Date.now();
+  if (_xeroTok.token && now < _xeroTok.exp - 60000) return _xeroTok.token;
+  const r = await fetch('https://identity.xero.com/connect/token', { method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Basic ' + Buffer.from(cfg.id + ':' + cfg.secret).toString('base64') },
+    body: new URLSearchParams({ grant_type: 'client_credentials', scope: cfg.scopes }) });
+  if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error('Xero OAuth ' + r.status + ': ' + String(t).slice(0, 200)); e.code = r.status; throw e; }
+  const j = await r.json();
+  _xeroTok = { token: j.access_token, exp: now + (Number(j.expires_in) || 1800) * 1000 };
+  return _xeroTok.token;
+}
+async function xeroTenantId(token) {
+  const now = Date.now(); if (_xeroTenant.id && now - _xeroTenant.at < 3600000) return _xeroTenant;   // 1h cache
+  token = token || await xeroToken(); if (!token) return { id: null, name: null };
+  const r = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
+  if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error('Xero /connections ' + r.status + ': ' + String(t).slice(0, 200)); }
+  const conns = await r.json(); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || conns[0] || {};
+  _xeroTenant = { id: c.tenantId || null, name: c.tenantName || null, at: now };
+  return _xeroTenant;
+}
+// Core call: xeroFetch('/api.xro/2.0/Invoices?where=...') → parsed JSON. Adds bearer + tenant + Accept.
+async function xeroFetch(path, opts) {
+  opts = opts || {}; const token = await xeroToken(); if (!token) { const e = new Error('Xero not connected (set XERO_CLIENT_ID / XERO_CLIENT_SECRET)'); e.code = 503; throw e; }
+  const tenant = await xeroTenantId(token); if (!tenant.id) { const e = new Error('Xero connected but no organisation is authorised on this app'); e.code = 502; throw e; }
+  const headers = Object.assign({ 'Authorization': 'Bearer ' + token, 'Xero-Tenant-Id': tenant.id, 'Accept': 'application/json' }, opts.headers || {});
+  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
+  const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) { j = { raw: text }; }
+  if (!r.ok) { const msg = (j && (j.Detail || j.Message || (j.Elements && j.Elements[0] && j.Elements[0].ValidationErrors && j.Elements[0].ValidationErrors.map(v => v.Message).join('; ')))) || ('Xero ' + r.status); const e = new Error(String(msg).slice(0, 400)); e.code = r.status; e.body = j; throw e; }
+  return j;
+}
+// Connection status for the UI + a quick sanity probe.
+app.get('/api/supply/xero/status', async (req, res) => {
+  const cfg = xeroConfig();
+  if (!cfg.present) return res.json({ connected: false, configured: false, reason: 'Set XERO_CLIENT_ID and XERO_CLIENT_SECRET (Xero Custom Connection) to connect.' });
+  try {
+    const tenant = await xeroTenantId();
+    if (!tenant.id) return res.json({ connected: false, configured: true, reason: 'App credentials work, but no organisation is authorised. In the Xero developer portal, connect the Custom Connection to the Dock & Bay organisation.' });
+    let org = null; try { const o = await xeroFetch('/api.xro/2.0/Organisation'); org = o && o.Organisations && o.Organisations[0]; } catch (e) {}
+    res.json({ connected: true, configured: true, tenant_id: tenant.id, org_name: (org && org.Name) || tenant.name, base_currency: org && org.BaseCurrency, scopes: cfg.scopes });
+  } catch (e) { res.json({ connected: false, configured: true, reason: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {

@@ -1,3 +1,12 @@
+## v28.024 (Ben): live Xero connection — foundation (OAuth client_credentials, inert without credentials)
+
+**File: `server.mjs`.** First step of the Xero integration Ben asked for (align POs/payments with Xero and surface exceptions; create bills directly; retire the manual Xero Compare upload; flag wrong PO bill due dates).
+
+- **Connection layer:** `xeroToken()` (OAuth 2.0 client_credentials against `identity.xero.com`, cached), `xeroTenantId()` (from `/connections`, 1h cache), `xeroFetch(path, opts)` (adds bearer + `Xero-Tenant-Id`, parses Xero error detail). Designed for a Xero **Custom Connection** (machine-to-machine, one Dock & Bay organisation, no interactive OAuth redirect). INERT without `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` (mirrors the FedEx pattern).
+- **Status probe:** `GET /api/supply/xero/status` returns `{connected, org_name, base_currency, scopes}` or a clear reason when not configured / not authorised. Verified inert with no creds.
+- Env: `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, optional `XERO_SCOPES` (default `accounting.transactions accounting.contacts accounting.settings.read`).
+
+Next (once the connection is live and I can test against real Xero data): PO/payment reconciliation replacing the Xero Compare upload, wrong-due-date flags, and creating bills in Xero directly (3PL, commissions, payments report). No migration.
 ## v28.023 (Ben): Auto-Forecast computed & persisted server-side, queryable by SQL + Ask Claude (migration 310)
 
 **Files: `server.mjs`, `migrations/310_auto_forecast_result.sql`.** The Auto-Forecast report (SUPPLY ▸ Payments ▸ AF) previously computed live in the browser. Ben: make it server-side and open to Ask Claude and SQL.
