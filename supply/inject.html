@@ -352,6 +352,28 @@
 #supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .rtab:hover{color:var(--blue)}
 #supply-root .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+/* v28.056: PO grid two-tier tabbed filter bar */
+#supply-root .pog-bar{margin:2px 0 12px}
+#supply-root .pog-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+#supply-root .pog-row2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#supply-root .pog-tabs{display:inline-flex;gap:3px;background:var(--l3-bg);border:1px solid var(--blue-soft);border-radius:11px;padding:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+#supply-root .pog-tab{appearance:none;background:transparent;border:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--faint);padding:7px 14px;cursor:pointer;border-radius:8px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+#supply-root .pog-tab:hover{color:var(--ink)}
+#supply-root .pog-tab.on{color:var(--blue);background:var(--card);box-shadow:0 1px 3px rgba(15,23,42,.14),0 0 0 1px rgba(37,99,235,.15);font-weight:800}
+#supply-root .pog-n{font-size:10px;font-weight:800;background:var(--line2);color:var(--muted);border-radius:9px;padding:1px 6px;font-variant-numeric:tabular-nums}
+#supply-root .pog-tab.on .pog-n{background:var(--blue-soft);color:var(--blue-ink)}
+#supply-root .pog-pill.on .pog-n{background:rgba(255,255,255,.28);color:#fff}
+#supply-root .pog-views{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+#supply-root .pog-view{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--blue-ink);background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:16px;padding:4px 8px 4px 11px;cursor:pointer}
+#supply-root .pog-view.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+#supply-root .pog-vx{opacity:.55;font-weight:800;font-size:11px}
+#supply-root .pog-vx:hover{opacity:1}
+#supply-root .pog-add{font-family:inherit;font-size:12px;font-weight:700;color:var(--muted);background:transparent;border:1px dashed var(--faint);border-radius:16px;padding:4px 11px;cursor:pointer}
+#supply-root .pog-add:hover{color:var(--blue);border-color:var(--blue)}
+#supply-root .pog-pills{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap}
+#supply-root .pog-pill{appearance:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:16px;padding:4px 11px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+#supply-root .pog-pill:hover{color:var(--blue);border-color:#bfdbfe}
+#supply-root .pog-pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
 #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
 #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
@@ -2563,6 +2585,41 @@
     var ACTP=[['payment_overdue','Payment overdue'],['unpaid_payment','Unpaid payments'],['late','Late - should be Completed'],['unassigned_shipment','Unassigned shipment'],['production','Late - should have Shipped'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved']];
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['OTHER','OTHER']];
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',OTHER:'📦'};
+    // ── v28.056: two-tier tabbed filter bar (Ben's redesign) — status TABS (single-select) + region PILLS + saved views.
+    //    Drives the SAME filter state (state.f / state.ctry / state.focus / state.recent) + a directOnly flag; the
+    //    existing cur() engine does the row filtering unchanged.
+    var STAB=[['all','ALL'],['focus','★'],['production','Production'],['shipping','Shipping'],['future','Future'],['complete','Complete']];
+    var STAB_TITLE={all:'All statuses',focus:'Focus — starred, active POs',production:'Production — incl. ready to ship',shipping:'Shipping — incl. arrived',future:'Future',complete:'Complete'};
+    var RTAB=[['all','ALL'],['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['OTHER','OTHER'],['DIRECT','DIRECT']];
+    var CMAJ={UK:1,US:1,AU:1,EU:1,CA:1};
+    function curStab(){ if(state.focus)return 'focus'; var ks=Object.keys(state.f||{}).filter(function(k){return state.f[k];}); return ks.length===1?ks[0]:'all'; }
+    function curRtab(){ if(state.directOnly)return 'DIRECT'; var ks=Object.keys(state.ctry||{}).filter(function(k){return state.ctry[k];}); return ks.length===1?ks[0]:'all'; }
+    function setStab(k){ state.focus=false; state.erp=false; state.hasact=false; state.f={}; if(k==='focus')state.focus=true; else if(k!=='all')state.f[k]=1; }
+    function setRtab(k){ state.directOnly=false; state.ctry={}; if(k==='DIRECT')state.directOnly=true; else if(k!=='all')state.ctry[k]=1; }
+    function pRecent(r){ return !(state.recent && r.progress==='complete' && !((r.checkin||'')>=RECENT_CUT)); }
+    function pStab(r,k){ return k==='all'?true:(k==='focus'?(r.starred&&r.progress!=='complete'):stGroup(r.status)===k); }
+    function pRtab(r,k){ if(k==='all')return true; if(k==='DIRECT')return poIsDtc(r); var c=String(r.country||'').toUpperCase(); return CMAJ[k]?c===k:!CMAJ[c]; }
+    function cntStab(k){ var rt=curRtab(); return rows.filter(function(r){ return pRecent(r)&&pRtab(r,rt)&&pStab(r,k); }).length; }
+    function cntRtab(k){ var st=curStab(); return rows.filter(function(r){ return pRecent(r)&&pStab(r,st)&&pRtab(r,k); }).length; }
+    // saved views (per-browser) — capture the tabbed filter state as a reusable custom tab
+    var POVIEWS=[]; try{ POVIEWS=JSON.parse(localStorage.getItem('po_views_v1')||'[]')||[]; }catch(e){ POVIEWS=[]; }
+    function poViewsSave(){ try{ localStorage.setItem('po_views_v1',JSON.stringify(POVIEWS)); }catch(e){} }
+    function curViewState(){ return { stab:curStab(), rtab:curRtab(), recent:!!state.recent }; }
+    function viewActive(v){ var c=curViewState(); return v.stab===c.stab && v.rtab===c.rtab && !!v.recent===!!c.recent; }
+    function poFilterBar(){
+      var stab=curStab(), rtab=curRtab();
+      var tabs=STAB.map(function(t){ var on=(t[0]===stab); var n=cntStab(t[0]);
+        return '<button class="pog-tab'+(on?' on':'')+'" data-stab="'+t[0]+'" title="'+esc(STAB_TITLE[t[0]]||t[1])+'">'+(t[0]==='focus'?'<span style="color:#f59e0b">★</span>':esc(t[1]))+'<span class="pog-n">'+n+'</span></button>'; }).join('');
+      var views=POVIEWS.map(function(v,i){ return '<span class="pog-view'+(viewActive(v)?' on':'')+'" data-vi="'+i+'" title="Saved view">'+esc(v.name)+'<span class="pog-vx" data-vx="'+i+'" title="Remove">✕</span></span>'; }).join('');
+      var regs=RTAB.map(function(t){ var on=(t[0]===rtab); var n=cntRtab(t[0]);
+        return '<button class="pog-pill'+(on?' on':'')+'" data-rtab="'+t[0]+'"'+(t[0]==='DIRECT'?' title="Direct to Client — any country"':'')+'>'+(CFLAG[t[0]]?CFLAG[t[0]]+' ':'')+esc(t[1])+'<span class="pog-n">'+n+'</span></button>'; }).join('');
+      return '<div class="pog-bar">'
+        +'<div class="pog-row"><div class="pog-tabs">'+tabs+'</div><div class="pog-views">'+views+'<button class="pog-add" id="pog-save" title="Save the current status + market as a reusable custom tab">＋ Save view</button></div></div>'
+        +'<div class="pog-row2"><div class="pog-pills">'+regs+'</div>'
+          +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="Completed shows only the last 12 months when on">📅 Last 12m</span>'
+          +'<span class="pill po-arch'+(_poInclArch?' active':'')+'" id="po-arch-toggle" title="Include archived (completed before the production cutoff)">🗄 '+(_poInclArch?'Hide archived':'Show archived')+'</span>'
+        +'</div></div>';
+    }
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
     if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
@@ -2602,9 +2659,8 @@
     var _excOn=Object.keys(state.act||{}).some(function(k){return state.act[k];});
     var _poSkuSet=null;   // SUG-0012: set of PO refs matching the SKU filter (null = no SKU filter active)
     c.innerHTML=annot('purchase-orders')+poSubNav()
-      +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(state.f&&state.f[f[0]]?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
-      +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
-      +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
+      +poFilterBar()
+      +'<div class="bar" id="po-prog">'
       +'<input class="flt" id="sup-search" placeholder="🔍 Filter PO / supplier…" value="'+esc(state.q||'')+'">'
       +'<span id="po-sku-wrap" style="position:relative;display:inline-flex;align-items:center;gap:3px;margin-left:6px"><input class="flt" id="po-sku-search" placeholder="Filter by SKU(s)…" value="'+esc(state.sku||'')+'" title="show only POs whose order plan contains any of these SKUs — comma-separate for an OR search" style="width:160px;background:var(--pos-bg);border-color:var(--pos-bg)">'
       +'<button class="save-btn" id="po-sku-exp" title="expand — paste many SKUs" style="padding:2px 7px;background:var(--pos-bg);border:1px solid var(--pos-bg);color:var(--pos)">⤢</button>'
@@ -2612,7 +2668,7 @@
       +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
       +'<button class="save-btn outline-blue" id="po-impexp-toggle">⇅ Import/Export</button>'
       +'<button class="save-btn primary" id="po-shipplan-btn" title="Plan shipments — drag ready-to-ship POs onto containers">🚢 Plan Shipments</button>'
-      +'<span class="pill po-arch'+(_poInclArch?' active':'')+'" id="po-arch-toggle" title="Archived = completed POs before the production cutoff, hidden by default for speed. Toggle to include them. Set the cutoff in CONFIG ▸ Admin ▸ General.">🗄 '+(_poInclArch?'Hide archived':'Show archived')+'</span></div>'
+      +'</div>'
       +(function(){ var lb='background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;';   // light-blue PO action buttons
         return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
           +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
@@ -2626,7 +2682,6 @@
           +'<button class="save-btn" id="po-fulfil-dates" style="'+lb+'" title="push the planner delivery-to-warehouse date to the Fulfil requested delivery date for every ACTIVE PO whose date differs from Fulfil — complete POs are skipped (live write)">📅 Sync Fulfil Dates</button>'
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
-      +'<span class="po-filt-ship">'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')+'</span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Prod</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select></span>'
@@ -2668,6 +2723,7 @@
       if(state.recent && r.progress==='complete' && !((r.checkin||'')>=RECENT_CUT))return false;
       for(var k in state.act){ if(state.act[k] && !excMatch(k,r))return false; }
       if(anyCtry() && !ctryMatch(r))return false;   // country pills: OR within, AND with the rest (OTHER = non-major)
+      if(state.directOnly && !poIsDtc(r))return false;   // DIRECT region tab = direct-to-client, any country
       if(state.sup && r.supplier_name!==state.sup)return false;
       if(state.branch && String(r.branch)!==state.branch)return false;
       if(state.prod && String(r.prod_no)!==state.prod)return false;
@@ -2679,7 +2735,7 @@
       if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
       if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
       f=poGridSort(f);   // status-priority + PROD#-desc BEFORE paging, so the lazy-loaded first 50 surface production/shipping/ready-to-ship/future and push complete to the end
-      _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
+      _poShowClient=!!(state.ctry&&state.ctry['OTHER'])||!!state.directOnly;   // OTHER or DIRECT → reveal Client name + sales ref columns
       // page the render: reset to the first 50 whenever the filtered/searched set changes; keep the current
       // page across in-place edits + "load more" (same set → same signature, so the limit isn't reset)
       var _sig=f.length+'#'+f.map(function(r){return r.po;}).join(',');
@@ -2778,12 +2834,22 @@
         bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindSetStm(); bindPoCopy(); bindPoScrollPin();
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
-    c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){
-      if(!state.f||typeof state.f!=='object')state.f={};   // MULTI-SELECT: toggle this status in/out of the set (none = All)
-      var k=p.dataset.f; if(state.f[k]){ delete state.f[k]; p.classList.remove('active'); } else { state.f[k]=1; p.classList.add('active'); }
-      _poShowAll=false;view();};});
-    var _rp=c.querySelector('#po-prog .po-recent'); if(_rp)_rp.onclick=function(){ state.recent=!state.recent; _rp.classList.toggle('active',state.recent); _poShowAll=false; view(); };
-    var _fp=c.querySelector('#po-prog .po-focus'); if(_fp)_fp.onclick=function(){ state.focus=!state.focus; _fp.classList.toggle('active',state.focus); _poShowAll=false; view(); };
+    // v28.056: two-tier tabbed filter bar (single-select status TABS + region PILLS) — drives the same filter state.
+    function poBarRefresh(){ var w=c.querySelector('.pog-bar'); if(w){ var t=document.createElement('div'); t.innerHTML=poFilterBar(); w.parentNode.replaceChild(t.firstChild,w); poBarBind(); } }
+    function poBarBind(){
+      c.querySelectorAll('.pog-tab').forEach(function(b){ b.onclick=function(){ setStab(b.dataset.stab); _poShowAll=false; poBarRefresh(); view(); }; });
+      c.querySelectorAll('.pog-pill').forEach(function(b){ b.onclick=function(){ setRtab(b.dataset.rtab); _poShowAll=false; poBarRefresh(); view(); }; });
+      var _rp=c.querySelector('.pog-bar .po-recent'); if(_rp)_rp.onclick=function(){ state.recent=!state.recent; _poShowAll=false; poBarRefresh(); view(); };
+      var _pat=c.querySelector('.pog-bar #po-arch-toggle'); if(_pat)_pat.onclick=function(){ _poInclArch=!_poInclArch; delete cache['purchase-orders']; showPoSub('plan'); };
+      var _sv=c.querySelector('#pog-save'); if(_sv)_sv.onclick=function(){
+        var cv=curViewState(); var def=(cv.stab!=='all'?cv.stab.charAt(0).toUpperCase()+cv.stab.slice(1):'')+(cv.rtab!=='all'?(cv.stab!=='all'?' · ':'')+cv.rtab:'');
+        var name=prompt('Name this view (e.g. "P57 shipping", "XR direct"):', def||'My view'); if(name==null)return; name=name.trim(); if(!name)return;
+        POVIEWS=POVIEWS.filter(function(v){return v.name!==name;}); POVIEWS.push(Object.assign({name:name},cv)); poViewsSave(); poBarRefresh(); };
+      c.querySelectorAll('.pog-view').forEach(function(el){ el.onclick=function(ev){ if(ev.target.classList.contains('pog-vx'))return; var v=POVIEWS[+el.dataset.vi]; if(!v)return;
+        setStab(v.stab); setRtab(v.rtab); state.recent=!!v.recent; _poShowAll=false; poBarRefresh(); view(); }; });
+      c.querySelectorAll('.pog-vx').forEach(function(x){ x.onclick=function(ev){ ev.stopPropagation(); POVIEWS.splice(+x.dataset.vx,1); poViewsSave(); poBarRefresh(); }; });
+    }
+    poBarBind();
     // ⭐ star toggle next to PLAN — persists to the PO and updates the row in place (re-renders if Focus is on)
     function bindPoStars(){ document.querySelectorAll('#sup-grid .fav-star[data-star-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation();
       var po=b.dataset.starPo, row=poBy[po], nv=!(row&&row.starred); if(row)row.starred=nv;
