@@ -4614,17 +4614,19 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
     const binv = br && br.Invoices && br.Invoices[0];
     out.bill = { id: binv && binv.InvoiceID, number: binv && binv.InvoiceNumber, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + binv.InvoiceID) : null };
+    // All payments post at the SUPPLIER-PAYMENT BILL's exchange rate (Ben) — so the whole run is consistent. Xero sets
+    // the created USD bill's CurrencyRate (its daily rate); read it back and apply it to every payment.
+    const runRate = (binv && binv.CurrencyRate != null) ? Number(binv.CurrencyRate) : null;
+    out.rate = runRate;
     // 2) a payment against each linked PO bill (completion/balance lines; deposits draw down via a credit note instead)
     for (const l of plan.lines) {
       if (/deposit/i.test(String(l.type || ''))) { out.skipped.push({ po: l.reference, reason: 'deposit → use a credit note' }); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
       try {
-        // Post the payment at the BILL'S exchange rate (not 1) so there's no FX gain/loss vs the bill. Omit the rate
-        // if the bill's rate is unknown (Xero then applies its daily rate).
         const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: plan.bank.account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
-        if (l.bill_rate != null && l.bill_rate > 0) payObj.CurrencyRate = l.bill_rate;
+        if (runRate != null && runRate > 0) payObj.CurrencyRate = runRate;   // = the supplier-payment bill's rate
         const pr = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
-        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, rate: l.bill_rate || null });
+        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, rate: runRate });
       } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
     }
     res.json(Object.assign({ ok: true }, out));
