@@ -15622,6 +15622,7 @@ app.post('/api/supply/payment-fx', async (req, res) => {
       VALUES ($1,$2,$3,$4) ON CONFLICT (run_date, supplier) DO UPDATE
       SET paid_currency=excluded.paid_currency, paid_amount=excluded.paid_amount, updated_at=now()`,
       [b.run_date, b.supplier, newCcy, newAmt]);
+    try { invalidateSupplyCaches(); } catch (e) {}   // bust the cached payments-report so the run shows as paid on the next fetch (silent refresh)
     const nowConfirmed = (newAmt != null && newCcy && String(newCcy).trim() !== '');
     let emailPreview;
     if (nowConfirmed && !wasConfirmed) {   // fire the supplier payment-confirmed notification ONCE, on transition — IMMEDIATELY (no delay)
