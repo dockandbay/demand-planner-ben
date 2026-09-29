@@ -1980,7 +1980,7 @@ async function cashflowResponse(pos, q) {
       (SELECT ar.rate_per_kg FROM planner.air_freight_rates ar WHERE coalesce(a.weight_kg,0) >= ar.min_kg AND coalesce(a.weight_kg,0) < ar.max_kg ORDER BY ar.min_kg LIMIT 1) air_rate
     FROM planner.shipments sh
     LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
-    LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
+    LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments_effective f
       WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
       ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true`),
   ]);
@@ -3120,7 +3120,7 @@ async function fulfilShipmentRecs(idList) {   // idList = PO numbers OR shipment
       to_char(coalesce(f.landing_date, f.dest_estimated_arrival, f.arrival_date, f.dest_planned_arrival),'YYYY-MM-DD') landing
     FROM unnest($1::text[]) q(id)
     LEFT JOIN planner.purchase_orders po ON po.po=q.id OR nullif(po.shipment_ref,'')=q.id OR nullif(po.master_po,'')=q.id
-    LEFT JOIN planner.flexport_shipments f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po`, [idList])).rows;
+    LEFT JOIN planner.flexport_shipments_effective f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po`, [idList])).rows;
   const ctx = {};   // id → { ship_ref, landing, completion, cands:Set }
   idList.forEach(id => { ctx[id] = { ship_ref: id, landing: null, completion: null, cands: new Set([id]) }; });
   // v27.900 (Ben): the date pushed to the internal shipment's Planned Receiving is Horizon's COMPLETION date (the PO grid's
@@ -3219,7 +3219,7 @@ app.post('/api/supply/fulfil/shipment-planned-date', async (req, res) => {
     if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
     if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true')
       return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: { po, planned_date: date } });
-    const hz = (await pool.query(`SELECT coalesce(nullif(po.shipment_ref,''),po.po) ship_ref, po.po po_num, coalesce(po.master_po,'') master_po, f.shipment_name flex_name FROM planner.purchase_orders po LEFT JOIN planner.flexport_shipments f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po WHERE po.po=$1 OR nullif(po.shipment_ref,'')=$1 OR nullif(po.master_po,'')=$1 LIMIT 1`, [po])).rows[0] || {};
+    const hz = (await pool.query(`SELECT coalesce(nullif(po.shipment_ref,''),po.po) ship_ref, po.po po_num, coalesce(po.master_po,'') master_po, f.shipment_name flex_name FROM planner.purchase_orders po LEFT JOIN planner.flexport_shipments_effective f ON f.flex_id=po.flexport_reference OR f.shipment_name=po.shipment_ref OR f.shipment_name=po.po WHERE po.po=$1 OR nullif(po.shipment_ref,'')=$1 OR nullif(po.master_po,'')=$1 LIMIT 1`, [po])).rows[0] || {};
     const rows = await fulfilInternalByCandidates([po, hz.po_num, hz.ship_ref, hz.master_po, hz.flex_name]);
     const hit = rows[0];
     if (!hit) return res.status(404).json({ error: 'No Fulfil internal shipment found for ' + po });
@@ -4294,7 +4294,7 @@ async function resolvePoLinks(po, poRow) {
   try {
     if (poRow.flexport_reference || poRow.shipment_ref) {
       const f = (await pool.query(
-        `SELECT flex_id, shipment_name FROM planner.flexport_shipments
+        `SELECT flex_id, shipment_name FROM planner.flexport_shipments_effective
          WHERE flex_id=$1 OR shipment_name=$2 OR shipment_name=$3 LIMIT 1`,
         [poRow.flexport_reference || '', poRow.shipment_ref || '', po])).rows[0];
       const fid = (f && f.flex_id) || poRow.flexport_reference || '';
@@ -4753,6 +4753,86 @@ app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.040 (Ben): FLEXPORT API import — pull shipments from Flexport and refresh planner.flexport_shipments dates
+// (planned/estimated/actual as available). flex_id = 'FLEX-'+<shipment id> to match the report + po.flexport_reference;
+// shipment_name = the Flexport shipment name (matches po.shipment_ref / po.po). INERT without FLEXPORT_API_TOKEN.
+// Read-only against Flexport; upserts the mirror table (COALESCE so a null from the API never wipes existing data).
+// API: GET https://api.flexport.com/shipments · Authorization: Bearer <token> · Flexport-Version: 3 · page/per paging.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function flexportConfig() { const token = (process.env.FLEXPORT_API_TOKEN || process.env.FLEXPORT_API_KEY || '').trim(); return { token, present: !!token }; }
+async function flexportFetch(path) {
+  const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Flexport not connected (set FLEXPORT_API_TOKEN)'); e.code = 503; throw e; }
+  const url = /^https?:/.test(path) ? path : ('https://api.flexport.com' + path);
+  const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } });
+  const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
+  if (!r.ok) { const e = new Error('Flexport ' + r.status + ': ' + String((j && (j.message || (j.errors && JSON.stringify(j.errors)))) || t).slice(0, 200)); e.code = r.status; throw e; }
+  return j;
+}
+const _fxDate = v => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v == null ? '' : v)); return m ? m[1] : null; };
+const _fxPick = (o, keys) => { for (const k of keys) { if (o && o[k] != null && o[k] !== '') return o[k]; } return null; };
+app.get('/api/supply/flexport/status', async (req, res) => {
+  const cfg = flexportConfig();
+  if (!cfg.present) return res.json({ connected: false, configured: false, reason: 'Set FLEXPORT_API_TOKEN (Flexport API key) to connect.' });
+  try { const j = await flexportFetch('/shipments?per=1&page=1'); const d = j && j.data; const total = d && (d.total != null ? d.total : (Array.isArray(d.data) ? d.data.length : null)); res.json({ connected: true, configured: true, sample_total: total }); }
+  catch (e) { res.json({ connected: false, configured: true, reason: e.message }); }
+});
+app.post('/api/supply/flexport/import', async (req, res) => {
+  try {
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to import from Flexport' }); } catch (e) {}
+    const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
+    const b = req.body || {};
+    const per = Math.min(Math.max(parseInt(b.per) || 100, 1), 200);
+    const maxPages = Math.min(Math.max(parseInt(b.max_pages) || 30, 1), 200);
+    let page = 1, imported = 0, seen = 0; const samples = [];
+    while (page <= maxPages) {
+      const j = await flexportFetch('/shipments?per=' + per + '&page=' + page + '&sort=updated_at&direction=desc');
+      const list = (j && j.data && Array.isArray(j.data.data)) ? j.data.data : (Array.isArray(j && j.data) ? j.data : []);
+      if (!list.length) break;
+      for (const s of list) {
+        seen++;
+        const id = s && s.id != null ? String(s.id) : null; if (!id) continue;
+        const flexId = /^FLEX-/i.test(id) ? id : ('FLEX-' + id);
+        const estDep = _fxDate(_fxPick(s, ['estimated_departure_date', 'est_departure_date']));
+        const actDep = _fxDate(_fxPick(s, ['actual_departure_date']));
+        const estArr = _fxDate(_fxPick(s, ['estimated_arrival_date', 'est_arrival_date', 'estimated_delivered_in_full_date']));
+        const actArr = _fxDate(_fxPick(s, ['actual_arrival_date', 'actual_delivered_in_full_date']));
+        const cargoReady = _fxDate(_fxPick(s, ['cargo_ready_date']));
+        const name = _fxPick(s, ['name']); const mode = _fxPick(s, ['transportation_mode', 'mode']);
+        const status = _fxPick(s, ['status', 'status_name']); const incoterm = _fxPick(s, ['incoterm']);
+        const updated = String(_fxPick(s, ['updated_at']) || '');
+        await pool.query(
+          `INSERT INTO planner.flexport_api_shipments (flex_id, shipment_name, mode, status_description, incoterm,
+             origin_estimated_departure, origin_actual_departure, dest_estimated_arrival, dest_actual_arrival,
+             packing_date, departure_date, landing_date, arrival_date, last_modified_time)
+           VALUES ($1,$2,$3,$4,$5,$6::date,$7::date,$8::date,$9::date,$10::date,$11::date,$12::date,$13::date,$14)
+           ON CONFLICT (flex_id) DO UPDATE SET
+             shipment_name=COALESCE(EXCLUDED.shipment_name, planner.flexport_api_shipments.shipment_name),
+             mode=COALESCE(EXCLUDED.mode, planner.flexport_api_shipments.mode),
+             status_description=COALESCE(EXCLUDED.status_description, planner.flexport_api_shipments.status_description),
+             incoterm=COALESCE(EXCLUDED.incoterm, planner.flexport_api_shipments.incoterm),
+             origin_estimated_departure=COALESCE(EXCLUDED.origin_estimated_departure, planner.flexport_api_shipments.origin_estimated_departure),
+             origin_actual_departure=COALESCE(EXCLUDED.origin_actual_departure, planner.flexport_api_shipments.origin_actual_departure),
+             dest_estimated_arrival=COALESCE(EXCLUDED.dest_estimated_arrival, planner.flexport_api_shipments.dest_estimated_arrival),
+             dest_actual_arrival=COALESCE(EXCLUDED.dest_actual_arrival, planner.flexport_api_shipments.dest_actual_arrival),
+             packing_date=COALESCE(EXCLUDED.packing_date, planner.flexport_api_shipments.packing_date),
+             departure_date=COALESCE(EXCLUDED.departure_date, planner.flexport_api_shipments.departure_date),
+             landing_date=COALESCE(EXCLUDED.landing_date, planner.flexport_api_shipments.landing_date),
+             arrival_date=COALESCE(EXCLUDED.arrival_date, planner.flexport_api_shipments.arrival_date),
+             last_modified_time=EXCLUDED.last_modified_time`,
+          [flexId, name, mode, status, incoterm, estDep, actDep, estArr, actArr, cargoReady, actDep || estDep, estArr, actArr || estArr, updated]);
+        imported++;
+        if (samples.length < 5) samples.push({ flex_id: flexId, name, est_dep: estDep, act_dep: actDep, est_arr: estArr, act_arr: actArr });
+      }
+      if (list.length < per) break;
+      page++;
+    }
+    const apiCount = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments`)).rows[0].n;
+    const matched = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments f WHERE EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR p.shipment_ref=f.shipment_name OR p.po=f.shipment_name)`)).rows[0].n;
+    res.json({ ok: true, pages: page, seen, imported, api_table_rows: Number(apiCount), po_matched: Number(matched), samples });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {
@@ -5030,7 +5110,7 @@ async function buildShipmentPlan() {
     LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
     LEFT JOIN planner.branches b ON b.name=p.branch
     LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
-    LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments f
+    LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments_effective f
       WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=p.shipment_ref OR f.flex_id=p.flexport_reference
       ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
     WHERE coalesce(p.shipment_ref,'')<>'' AND coalesce(p.status,'') NOT ILIKE '%complete%'
@@ -5216,7 +5296,7 @@ async function buildActionsRows() {
               JOIN planner.purchase_orders p ON p.po=l.po
               LEFT JOIN planner.branches b ON b.name=p.branch
               JOIN planner.products pr ON pr.sku=l.sku
-              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments_effective f
                 WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
                 ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
               CROSS JOIN LATERAL (SELECT CASE upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
@@ -5241,7 +5321,7 @@ async function buildActionsRows() {
               FROM planner.purchase_orders p
               LEFT JOIN planner.branches b ON b.name=p.branch
               LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
-              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments_effective f
                 WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
                 ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
               WHERE p.client_deadline_date IS NOT NULL AND coalesce(p.status,'') NOT ILIKE '%complete%'
@@ -5329,7 +5409,7 @@ async function buildActionsRows() {
             'gotopo','po','', po.po
             FROM planner.purchase_orders po
             JOIN planner.shipments s2 ON s2.shipment_ref=po.shipment_ref
-            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments f
+            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments_effective f
               WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
             WHERE coalesce(po.status,'') ILIKE '%deliver%' AND coalesce(po.status,'') NOT ILIKE '%complete%'
               AND (coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date < current_date
@@ -5906,7 +5986,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           to_char(packing_date,'YYYY-MM-DD') packing, to_char(departure_date,'YYYY-MM-DD') departure,
           to_char(landing_date,'YYYY-MM-DD') landing, to_char(arrival_date,'YYYY-MM-DD') arrival,
           container_numbers, mbl_number, total_freight_cost, total_invoiced_amount, customs_duty_cost
-          FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
+          FROM planner.flexport_shipments_effective ORDER BY arrival_date DESC NULLS LAST`));
       case 'order-plan': {  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
         // Per-supplier portal-preview and the "show archived" toggle run LIVE (rare paths). The DEFAULT admin grid
         // (no supplier, archived hidden) is the common, expensive load → served from orderPlanCache (boot-warm + SWR).
@@ -6025,7 +6105,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             (SELECT count(*) FROM planner.supplier_charges sc WHERE sc.source_type='shipment' AND sc.source_ref=r.shipment_ref AND sc.status='pending')::int pending_charges
           FROM refs r LEFT JOIN planner.shipments sh ON sh.shipment_ref=r.shipment_ref
           LEFT JOIN agg a ON a.shipment_ref=r.shipment_ref
-          LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
+          LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments_effective f
             WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
             ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true
           -- master-PO date calc: prod-end +7 = departure; + branch transit (air/sea by shipment mode) = landing/arrival
@@ -6458,7 +6538,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
             LEFT JOIN planner.branches b ON b.name=po.branch
             LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
-            LEFT JOIN LATERAL (SELECT f.flex_id, f.mode fxmode, f.departure_date fx_dep, f.arrival_date fx_arr, f.landing_date fx_land FROM planner.flexport_shipments f
+            LEFT JOIN LATERAL (SELECT f.flex_id, f.mode fxmode, f.departure_date fx_dep, f.arrival_date fx_arr, f.landing_date fx_land FROM planner.flexport_shipments_effective f
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fxs ON true
             WHERE coalesce(po.status,'') NOT ILIKE '%complete%')
@@ -15181,7 +15261,7 @@ async function poPdfData(po) {
   const [poR, linesR, shipR] = await Promise.all([
     pool.query(`SELECT p.*,
         (SELECT default_currency FROM planner.suppliers s WHERE s.id=p.supplier_id OR s.name=p.supplier_name LIMIT 1) cur,
-        (SELECT f.flex_id FROM planner.flexport_shipments f WHERE f.shipment_name=p.po OR f.shipment_name=nullif(p.shipment_ref,'') LIMIT 1) flex_ref,
+        (SELECT f.flex_id FROM planner.flexport_shipments_effective f WHERE f.shipment_name=p.po OR f.shipment_name=nullif(p.shipment_ref,'') LIMIT 1) flex_ref,
         (SELECT mp.supplier_name FROM planner.purchase_orders mp WHERE mp.po=coalesce(nullif(p.master_po,''), nullif(p.shipment_ref,'')) AND mp.po<>p.po LIMIT 1) master_supplier
       FROM planner.purchase_orders p WHERE p.po=$1`, [po]),
     pool.query(`SELECT l.sku, l.qty, l.cost_price, coalesce(pr.product_name_final, pr.product_name, '') name FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po]),
@@ -15258,7 +15338,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     to_char(departure_date,'YYYY-MM-DD') departure,
                     to_char(landing_date,'YYYY-MM-DD') landing,
                     to_char(arrival_date,'YYYY-MM-DD') arrival,container_numbers,total_freight_cost
-                  FROM planner.flexport_shipments
+                  FROM planner.flexport_shipments_effective
                   WHERE shipment_name=$1
                      OR shipment_name=(SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1)`, [po]),
       // supplier-portal: latest submitted invoice value (+ id, status, doc) and all uploaded invoice docs
@@ -18577,7 +18657,7 @@ const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           JOIN planner.purchase_orders p ON p.po=l.po
           LEFT JOIN planner.branches b ON b.name=p.branch
           LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku
-          LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
+          LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments_effective f
             WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
             ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true`;
 
@@ -18851,7 +18931,7 @@ const OP_EXC_SQL = `
     SELECT l.po, 'disc'
       FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
       LEFT JOIN planner.branches b ON b.name=p.branch JOIN planner.products pr ON pr.sku=l.sku
-      LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+      LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments_effective f
         WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
         ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
       CROSS JOIN LATERAL (SELECT CASE upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
