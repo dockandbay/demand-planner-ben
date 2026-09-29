@@ -1974,7 +1974,7 @@ async function cashflowResponse(pos, q) {
     SELECT sh.shipment_ref,
       coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode_eff,
       coalesce(a.pallets,0) pallets, coalesce(a.weight_kg,0) weight_kg, a.market,
-      fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
+      coalesce(nullif(fx.total_freight_cost,0), fx.total_quoted_amount) flex_cost, sh.cost_manual cost_manual,   -- v28.069: invoiced freight first, else the accepted quote
       (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
         WHERE upper(fr.destination)=coalesce(nullif(a.market,''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
       (SELECT ar.rate_per_kg FROM planner.air_freight_rates ar WHERE coalesce(a.weight_kg,0) >= ar.min_kg AND coalesce(a.weight_kg,0) < ar.max_kg ORDER BY ar.min_kg LIMIT 1) air_rate
@@ -6538,7 +6538,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             coalesce(mp.mp_client,'') master_client,   -- master PO's client name (shown under branch for Direct to Client)
             coalesce(sh.delivery_notes,'') ov_delivery_notes,   -- shipment override
             coalesce(nullif(sh.delivery_notes,''), mp.mp_delivery_notes, '') delivery_notes,   -- effective: override ▸ master PO branch notes
-            fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
+            coalesce(nullif(fx.total_freight_cost,0), fx.total_quoted_amount) flex_cost, sh.cost_manual cost_manual,   -- v28.069: invoiced freight first, else the accepted quote
             (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
               WHERE upper(fr.destination)=coalesce(nullif(coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,'')),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
             (SELECT ar.rate_per_kg FROM planner.air_freight_rates ar WHERE coalesce(a.weight_kg,0) >= ar.min_kg AND coalesce(a.weight_kg,0) < ar.max_kg ORDER BY ar.min_kg LIMIT 1) air_rate,
