@@ -5128,6 +5128,156 @@ app.post('/api/cron/flexport-import', async (req, res) => {
   catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// FLEXPORT BOOKING/QUOTE REQUEST (v28.064, Ben) — foundation for the "request a Flexport booking" feature on a PO.
+// Flexport v3 has ONE creation endpoint (POST /bookings) and NO separate quote endpoint: a booking is lodged as a
+// request, Flexport quotes it, and it is ACCEPTED in the Flexport app (status submitted→booked→shipment). So HORIZON
+// only ever LODGES a request — it can never auto-commit a shipment. See memory flexport-booking-api.
+//
+// /company_entities 404s, so shipper/consignee entity refs can't be listed. We HARVEST them from existing bookings:
+// each booking is named by its PO, so booking → Horizon PO → supplier + market gives us
+//   supplier_id → shipper_entity ref   and   market (country_code) → consignee_entity ref (+ their addresses).
+// The registry is cached in app_settings.flexport_entity_registry and drives the booking preview's prefill.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+async function runFlexportEntityHarvest(opts) {
+  opts = opts || {};
+  const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Set FLEXPORT_API_TOKEN first'); e.code = 503; throw e; }
+  const per = 100, maxPages = Math.min(Math.max(parseInt(opts.max_pages) || 20, 1), 40);
+  // Horizon PO → supplier_id + market (country_code wins, else branch country) — so a booking (named by PO) resolves.
+  const poMap = {};
+  (await pool.query(`SELECT p.po, p.supplier_id, coalesce(p.supplier_name,'') supplier_name,
+      upper(coalesce(nullif(p.country_code,''), b.country_code, '')) market
+    FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch`)).rows
+    .forEach(r => { poMap[String(r.po).toUpperCase()] = r; });
+  const suppliers = {};   // supplier_id → {ref,id,name,address,country_code,from_po,seen}
+  const consignees = {};  // market      → {ref,id,name,address,country_code,from_po,seen}
+  const _addr = a => a ? { street: a.street_address || '', street2: a.street_address2 || '', city: a.city || '', state: a.state || '', country: a.country || '', country_code: a.country_code || '', zip: a.zip || '' } : null;
+  let page = 1, seen = 0, matched = 0;
+  while (page <= maxPages) {
+    const j = await flexportFetch('/bookings?per=' + per + '&page=' + page);   // NB: /bookings has no `sort` param (400)
+    const list = (j && j.data && Array.isArray(j.data.data)) ? j.data.data : [];
+    if (!list.length) break;
+    for (const b of list) {
+      seen++;
+      const po = poMap[String(b.name || '').toUpperCase()]; if (!po) continue; matched++;
+      const shp = b.shipper_entity, cns = b.consignee_entity;
+      if (shp && shp.ref && po.supplier_id != null) {
+        const k = String(po.supplier_id);
+        if (!suppliers[k]) suppliers[k] = { ref: shp.ref, id: shp.id, name: shp.name || po.supplier_name, address: _addr(shp.mailing_address), country_code: (shp.mailing_address && shp.mailing_address.country_code) || '', from_po: b.name, seen: 1 };
+        else suppliers[k].seen++;
+      }
+      if (cns && cns.ref && po.market) {
+        if (!consignees[po.market]) consignees[po.market] = { ref: cns.ref, id: cns.id, name: cns.name || '', address: _addr(cns.mailing_address), country_code: (cns.mailing_address && cns.mailing_address.country_code) || '', from_po: b.name, seen: 1 };
+        else consignees[po.market].seen++;
+      }
+    }
+    if (list.length < per) break;
+    page++;
+  }
+  const registry = { suppliers, consignees, harvested_at: new Date().toISOString(), bookings_seen: seen, bookings_matched: matched };
+  await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ('flexport_entity_registry',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [JSON.stringify(registry)]);
+  return { ok: true, pages: page, bookings_seen: seen, bookings_matched: matched, suppliers: Object.keys(suppliers).length, markets: Object.keys(consignees).length, registry };
+}
+async function flexportRegistry() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='flexport_entity_registry'`)).rows[0]; return r ? JSON.parse(r.value) : null; } catch (e) { return null; }
+}
+app.get('/api/supply/flexport/booking-registry', async (req, res) => {
+  try {
+    if (String(req.query.refresh || '') === '1') { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {} return res.json(await runFlexportEntityHarvest({})); }
+    const reg = await flexportRegistry();
+    res.json(reg || { suppliers: {}, consignees: {}, harvested_at: null, note: 'Not harvested yet — call ?refresh=1' });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+// Assemble the /bookings request body HORIZON would lodge for a PO, from PO data + the harvested entity registry.
+// Returns { body, info, missing, assumed } — `missing` = required-ish fields we can't fill (Ben sees them before submit);
+// `assumed` = values we defaulted. The server ALWAYS rebuilds this at submit time (never trusts a client-supplied body).
+async function buildFlexportBookingBody(po) {
+  const row = (await pool.query(`
+    SELECT p.po, p.supplier_id, coalesce(p.supplier_name,'') supplier_name,
+      upper(coalesce(nullif(p.country_code,''), b.country_code, '')) market,
+      coalesce(p.branch,'') branch, coalesce(nullif(p.flexport_reference,''),'') flex_ref, coalesce(nullif(p.shipment_ref,''),'') shipment_ref,
+      to_char(coalesce(p.end_production_overide,
+        (p.start_production + (coalesce(p.days_production_overide, s.production_days, 0)||' days')::interval)::date),'YYYY-MM-DD') cargo_ready,
+      to_char(coalesce(p.delivery_date_overide, p.landing_date_overide),'YYYY-MM-DD') delivery_date,
+      p.pallets_override,
+      coalesce(lower(sh.mode),'') ship_mode
+    FROM planner.purchase_orders p
+    LEFT JOIN planner.branches b ON b.name=p.branch
+    LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+    LEFT JOIN planner.shipments sh ON sh.shipment_ref = coalesce(nullif(p.shipment_ref,''), (SELECT ss.shipment_ref FROM planner.shipments ss WHERE ss.master_po=p.po LIMIT 1))
+    WHERE p.po=$1`, [po])).rows[0];
+  if (!row) { const e = new Error('PO not found: ' + po); e.code = 404; throw e; }
+  let reg = (await flexportRegistry());
+  // lazy first-run harvest: with no registry yet, build it once from existing bookings (so prod needs no manual step)
+  if ((!reg || !reg.suppliers || !Object.keys(reg.suppliers).length) && flexportConfig().present) {
+    try { reg = (await runFlexportEntityHarvest({})).registry; } catch (e) { /* token/network — fall through with empty reg */ }
+  }
+  reg = reg || { suppliers: {}, consignees: {} };
+  const shipper = row.supplier_id != null ? reg.suppliers[String(row.supplier_id)] : null;
+  const consignee = reg.consignees[row.market] || reg.consignees['UK'] || null;
+  const missing = [], assumed = [];
+  // transport mode: Horizon sea→ocean, air→air; FOB isn't a Flexport managed booking; blank → ocean (assumed)
+  const modeMap = { sea: 'ocean', air: 'air', ocean: 'ocean', truck: 'truck_intl' };
+  let mode = modeMap[row.ship_mode] || '';
+  if (row.ship_mode === 'fob') { missing.push('This PO is FOB (factory pickup) — Flexport does not manage a FOB booking. Set an ocean/air mode first.'); }
+  else if (!mode) { mode = 'ocean'; assumed.push('Transport mode defaulted to ocean (no shipment mode set on the PO).'); }
+  if (!shipper) missing.push('No Flexport shipper entity known for ' + (row.supplier_name || 'this supplier') + ' — no prior Flexport booking to harvest it from. Book once in Flexport, then re-harvest the registry.');
+  if (!consignee) missing.push('No Flexport consignee entity for market ' + (row.market || '—') + '.');
+  if (!row.cargo_ready) missing.push('No cargo-ready date (production end) on the PO.');
+  if (!row.delivery_date) assumed.push('No delivery date on the PO — Flexport will set it.');
+  const body = {
+    name: row.po,
+    metadata: { 'Purchase Order': [row.po] },
+    transportation_mode: mode || 'ocean',
+    cargo_ready_date: row.cargo_ready || null,
+    delivery_date: row.delivery_date || null,
+    wants_export_customs_service: true,
+    wants_import_customs_service: ['UK', 'US', 'EU', 'AU', 'CA'].includes(row.market),
+    wants_flexport_freight: true,
+  };
+  if (shipper) body.shipper_entity_ref = shipper.ref;
+  if (consignee) body.consignee_entity_ref = consignee.ref;
+  // mode-specific block: we don't hold ports/service level in Horizon, so lodge an empty block and let Flexport ops set
+  // routing on the quote (the booking is a REQUEST). freight_type from the linked Flexport shipment if we have it.
+  const fx = (await pool.query(`SELECT freight_type FROM planner.flexport_shipments_effective WHERE flex_id=$1 OR shipment_name=$2 OR shipment_name=$3 LIMIT 1`, [row.flex_ref, row.shipment_ref || row.po, row.po])).rows[0];
+  const svc = (fx && fx.freight_type) || null; if (!svc) assumed.push('Freight service level not known — Flexport ops will set port-to-door / door-to-door on the quote.');
+  const blockKey = mode === 'air' ? 'air_booking' : mode === 'truck_intl' ? 'trucking_booking' : 'ocean_booking';
+  body[blockKey] = svc ? { service: svc } : {};
+  assumed.push('Ports/routing and cargo dimensions are left for Flexport to quote (this lodges a booking REQUEST; you accept the quote in Flexport).');
+  return {
+    body,
+    info: { po: row.po, supplier: row.supplier_name, market: row.market, branch: row.branch, mode, cargo_ready: row.cargo_ready, delivery_date: row.delivery_date,
+      shipper: shipper ? { ref: shipper.ref, name: shipper.name } : null, consignee: consignee ? { ref: consignee.ref, name: consignee.name } : null },
+    missing, assumed, can_submit: missing.length === 0,
+  };
+}
+app.get('/api/supply/flexport/booking-preview/:po', async (req, res) => {
+  try { res.json(await buildFlexportBookingBody(decodeURIComponent(req.params.po))); }
+  catch (e) { log500(e); res.status(e.code === 404 ? 404 : e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+// LIVE WRITE — lodge the booking request with Flexport. Admin + explicit confirm. Rebuilds the body server-side; refuses
+// if required fields are missing. A booking is a REQUEST (status 'submitted'); it is quoted + accepted in the Flexport app.
+app.post('/api/supply/flexport/booking-submit', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to lodge a Flexport booking' });
+    const b = req.body || {}; const po = String(b.po || '').trim();
+    if (!po) return res.status(400).json({ error: 'po required' });
+    if (!b.confirm) return res.status(400).json({ error: 'confirm required — this lodges a live booking request with Flexport' });
+    const built = await buildFlexportBookingBody(po);
+    if (!built.can_submit) return res.status(400).json({ error: 'Cannot submit — unresolved fields: ' + built.missing.join(' | '), missing: built.missing });
+    const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
+    const r = await fetch('https://api.flexport.com/bookings', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(built.body),
+    });
+    const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
+    if (!r.ok) { const msg = (j && j.error && (j.error.message || j.error.code)) || (j && j.message) || String(t).slice(0, 300); return res.status(r.status === 400 ? 400 : 502).json({ error: 'Flexport ' + r.status + ': ' + msg, sent: built.body }); }
+    const bk = (j && j.data) || j;
+    res.json({ ok: true, booking: { id: bk && bk.id, flex_id: bk && bk.flex_id, name: bk && bk.name, status: bk && bk.status, quote_status: bk && bk.quote_status }, sent: built.body });
+  } catch (e) { log500(e); res.status(e.code === 404 ? 404 : 500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {

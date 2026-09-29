@@ -1994,6 +1994,7 @@
       +(PO_ACTCOND.preship(r)?row('Pre-shipment docs',actMark(po,'preship')):'')
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +flexTrackingBlock(d,r.flex_id||r.flexport_reference)
+      +row('Flexport booking <span class="mut tiny">(lodge a booking / quote request via the Flexport API)</span>','<button class="save-btn fx-book-btn" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:700">🚢 Request Flexport booking</button>')
       +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:var(--neg);font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
       +(isFbaAwd?docBlock('carton_barcode','Carton barcodes <span class="mut tiny">(upload — supplier downloads on the portal)</span>')+docBlock('pallet_barcode','Pallet barcodes <span class="mut tiny">(upload)</span>'):'')
       +(isEU?docBlock('idn_pallet_label','IDN pallet labels <span class="mut tiny">(upload — supplier downloads on the portal)</span>'):'')
@@ -3097,6 +3098,42 @@
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('fimp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
     setTimeout(function(){ ref.focus(); },0);
+  }
+  // Flexport booking/quote request (v28.064, Ben) — lodge a booking REQUEST with Flexport for this PO. Preview the
+  // exact request body (prefilled from the PO + the harvested entity registry), then confirm to POST /bookings. It is a
+  // request only: Flexport quotes it and you accept the quote IN THE FLEXPORT APP (Horizon never auto-commits a shipment).
+  function openFlexBooking(po){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    bg.innerHTML='<div class="pomodal" style="width:600px"><div style="font-weight:700;font-size:14px;margin-bottom:2px">🚢 Request Flexport booking — '+esc(po)+'</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">Lodges a booking <b>request</b> with Flexport (status “submitted”). Flexport quotes it; you review &amp; accept the quote in the Flexport app. Horizon never confirms a shipment on its own.</div>'
+      +'<div id="fxb-body" style="font-size:12px">Loading preview…</div>'
+      +'<div style="display:flex;align-items:center;margin-top:12px"><span style="margin-left:auto"></span><button class="save-btn light" id="fxb-cancel">Close</button> <button class="save-btn dark" id="fxb-go" style="margin-left:6px;display:none">Lodge booking request</button></div></div>';
+    document.body.appendChild(bg);
+    var box=document.getElementById('fxb-body'), goBtn=document.getElementById('fxb-go');
+    function close(){ if(bg.parentNode)bg.parentNode.removeChild(bg); }
+    bg.onclick=function(e){ if(e.target===bg)close(); };
+    document.getElementById('fxb-cancel').onclick=close;
+    function kv(l,v){ return '<div style="display:flex;gap:8px;padding:2px 0"><div style="min-width:130px;color:var(--muted)">'+l+'</div><div style="font-weight:600">'+(v||'<span class="mut">—</span>')+'</div></div>'; }
+    fetch('/api/supply/flexport/booking-preview/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){
+      if(j&&j.error){ box.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
+      var inf=j.info||{};
+      var html=kv('Supplier',esc(inf.supplier||''))+kv('Market',esc(inf.market||''))+kv('Mode',esc((inf.mode||'').toUpperCase()))
+        +kv('Cargo ready',esc(inf.cargo_ready||''))+kv('Delivery date',esc(inf.delivery_date||''))
+        +kv('Shipper (Flexport)',inf.shipper?esc(inf.shipper.name)+' <span class="mut tiny">'+esc(inf.shipper.ref)+'</span>':'')
+        +kv('Consignee (Flexport)',inf.consignee?esc(inf.consignee.name)+' <span class="mut tiny">'+esc(inf.consignee.ref)+'</span>':'');
+      if((j.missing||[]).length) html+='<div style="margin-top:10px;padding:8px 10px;border:1px solid var(--neg);border-radius:6px;background:var(--neg-bg,#fef2f2)"><b style="color:var(--neg)">Can’t submit yet:</b><ul style="margin:4px 0 0 16px;padding:0">'+j.missing.map(function(m){return '<li>'+esc(m)+'</li>';}).join('')+'</ul></div>';
+      if((j.assumed||[]).length) html+='<div style="margin-top:8px" class="mut tiny"><b>Assumed / left to Flexport:</b><ul style="margin:3px 0 0 16px;padding:0">'+j.assumed.map(function(a){return '<li>'+esc(a)+'</li>';}).join('')+'</ul></div>';
+      html+='<details style="margin-top:8px"><summary class="mut tiny" style="cursor:pointer">Request body sent to Flexport</summary><pre style="font-size:11px;background:var(--hover);border:1px solid var(--line);border-radius:6px;padding:8px;overflow:auto;max-height:200px">'+esc(JSON.stringify(j.body,null,2))+'</pre></details>';
+      box.innerHTML=html;
+      if(j.can_submit){ goBtn.style.display=''; }
+      goBtn.onclick=function(){ if(!confirm('Lodge a live booking request with Flexport for '+po+'? Flexport will quote it; you accept the quote in Flexport.'))return;
+        goBtn.disabled=true; goBtn.textContent='Lodging…';
+        fetch('/api/supply/flexport/booking-submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true})}).then(function(r){return r.json();}).then(function(res){
+          if(res&&res.error){ box.innerHTML='<div style="color:var(--neg)">'+esc(res.error)+'</div>'+box.innerHTML; goBtn.disabled=false; goBtn.textContent='Lodge booking request'; return; }
+          var b=res.booking||{};
+          box.innerHTML='<div style="padding:10px 12px;border:1px solid var(--pos,#16a34a);border-radius:6px;background:var(--pos-bg,#f0fdf4)"><b style="color:var(--pos,#16a34a)">✓ Booking request lodged</b><div style="margin-top:4px">'+esc(b.name||po)+' · status <b>'+esc(b.status||'submitted')+'</b>'+(b.flex_id?' · '+esc(b.flex_id):'')+'</div><div class="mut tiny" style="margin-top:4px">Review &amp; accept the quote in the Flexport app. Run “Import from Flexport” to pull the dates back once it’s live.</div></div>';
+          goBtn.style.display='none'; document.getElementById('fxb-cancel').textContent='Done';
+        }).catch(function(e){ box.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'+box.innerHTML; goBtn.disabled=false; goBtn.textContent='Lodge booking request'; }); };
+    }).catch(function(e){ box.innerHTML='<span style="color:var(--neg)">Failed to load preview: '+esc(e.message||e)+'</span>'; });
   }
   // ORDER PLAN paste: paste a 2-column SKU / qty block from Excel or Sheets. SKUs not in our list are skipped;
   // a SKU already on the PO has its qty overridden; new valid SKUs are added (proposed). Validation is server-side.
@@ -4799,6 +4836,8 @@
       if(pd && pd.dataset.calcStale==='1' && (pt==='pay'||pt==='landed')){ pd.dataset.calcStale=''; poRefetchPanel(po,i); } }; });   // deep-link the open sub-tab into the URL
     // Open-actions banner: a chip / line jumps to its sub-tab (clicks the matching .potab).
     if(root) root.querySelectorAll('.poact-chip,.poact-line').forEach(function(b){ b.onclick=function(){ var t=root.querySelector('.potab[data-pt="'+b.dataset.pt+'"]'); if(t)t.click(); }; });
+    // Flexport booking request (SHIPMENTS tab)
+    document.querySelectorAll('#podet-'+i+' .fx-book-btn').forEach(function(b){ b.onclick=function(){ openFlexBooking(b.dataset.po); }; });
     setupMobSubnav(root); bindDatePickers(); }
   // PO ▸ DOCUMENTS tab: every file held for this PO (all categories) — list + download + delete + upload.
   function docsPanel(po,d){ var docs=(d&&d.all_docs)||[];
