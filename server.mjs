@@ -4777,6 +4777,8 @@ app.post('/api/supply/xero/push-queue/credit-note', async (req, res) => {
 // forces a recompute. The `count` feeds the action badge in the menu headers.
 let _xeroExcCache = { at: 0, data: null };
 const _usd = n => (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const _xd = s => { const m = /\/Date\((\d+)/.exec(String(s || '')); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : (/^\d{4}-\d{2}-\d{2}/.test(String(s || '')) ? String(s).slice(0, 10) : null); };
+const _daysDiff = (a, b) => { if (!a || !b) return null; const da = new Date(a + 'T00:00:00Z'), db = new Date(b + 'T00:00:00Z'); if (isNaN(da) || isNaN(db)) return null; return Math.round((da - db) / 86400000); };
 async function _computeXeroExceptions() {
   const out = [];
   // linked POs + HORIZON payment figures
@@ -4784,6 +4786,7 @@ async function _computeXeroExceptions() {
     `SELECT p.po, coalesce(p.supplier_name,'') supplier, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch,
             coalesce(nullif(p.supplier_invoice_total,0), p.order_value_estimation, 0) total_h,
             (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)) paid_h,
+            to_char(coalesce(p.balance_due_date_overide, p.pay_balance_1_date, p.pay_completion_date),'YYYY-MM-DD') due_h,
             l.external_id bill_id, l.external_ref bill_ref
        FROM planner.purchase_orders p
        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id IS NOT NULL
@@ -4798,13 +4801,25 @@ async function _computeXeroExceptions() {
       const chunk = ids.slice(i, i + 40);
       try {
         const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?IDs=' + chunk.join(','));
-        ((j && j.Invoices) || []).forEach(v => { billById[v.InvoiceID] = { total: Number(v.Total) || 0, paid: Number(v.AmountPaid) || 0, due: Number(v.AmountDue) || 0, ccy: v.CurrencyCode, status: v.Status, number: v.InvoiceNumber }; });
+        ((j && j.Invoices) || []).forEach(v => { billById[v.InvoiceID] = { total: Number(v.Total) || 0, paid: Number(v.AmountPaid) || 0, due: Number(v.AmountDue) || 0, ccy: v.CurrencyCode, status: v.Status, number: v.InvoiceNumber, dueDate: _xd(v.DueDateString || v.DueDate), date: _xd(v.DateString || v.Date) }; });
       } catch (e) { /* region not connected / chunk failed → those POs just won't reconcile */ }
     }
   }
   const TOL = 1.0;
+  const DUE_TOL = 5;   // days
   linked.forEach(r => {
     const x = billById[r.bill_id]; if (!x) return;   // couldn't fetch the bill → skip (not a mismatch)
+    // Due-date check — independent of the amount reconciliation. Flag a bill whose due date is missing, before its
+    // own date, or off Horizon's expected balance/completion due date by more than a few days.
+    if (String(x.status || '') !== 'PAID' && String(x.status || '') !== 'VOIDED') {
+      let ddMsg = null;
+      if (x.date && x.dueDate && x.dueDate < x.date) ddMsg = 'Xero due date ' + x.dueDate + ' is before the bill date ' + x.date;
+      else if (r.due_h && x.dueDate) { const dd = _daysDiff(x.dueDate, r.due_h); if (dd != null && Math.abs(dd) > DUE_TOL) ddMsg = 'Xero due ' + x.dueDate + ' vs Horizon ' + r.due_h + ' (' + (dd > 0 ? dd + 'd later' : (-dd) + 'd earlier') + ')'; }
+      else if (r.due_h && !x.dueDate) ddMsg = 'Xero bill has no due date; Horizon expects ' + r.due_h;
+      if (ddMsg) out.push({ type: 'due_date_mismatch', po: r.po, supplier: r.supplier, region: r._reg, bill_ref: x.number || r.bill_ref,
+        bill_id: r.bill_id, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill_id,
+        message: r.po + ' — bill due date looks wrong', insight: ddMsg, action: 'review_po' });
+    }
     const dueH = (Number(r.total_h) || 0) - (Number(r.paid_h) || 0);
     const paidDiff = x.paid - (Number(r.paid_h) || 0);
     const dueDiff = x.due - dueH;
@@ -4849,6 +4864,57 @@ app.get('/api/supply/xero/exceptions', async (req, res) => {
     _xeroExcCache = { at: Date.now(), data };
     res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Bulk RESOLVE ALL po_links — one Xero bill sweep per org (paginated) + local Fulfil/Flexport/DHL joins, so the whole
+// PO book gets linked without a live call per PO. Feeds Linked Records + Exceptions. Keeps existing manual links.
+async function _resolveAllPoLinks() {
+  const poRows = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(flexport_reference,'') flexref, coalesce(shipment_ref,'') shipref FROM planner.purchase_orders WHERE coalesce(master_po,'')=''`)).rows;
+  const poSet = new Set(poRows.map(r => r.po));
+  const tokFor = str => String(str || '').split(/[\/,;\s]+/).map(s => s.trim()).filter(Boolean);
+  const matchPo = tok => poSet.has(tok) ? tok : (/\d$/.test(tok) && poSet.has(tok.replace(/\d+$/, '')) ? tok.replace(/\d+$/, '') : null);
+  // Xero: sweep ACCPAY bills per org → xeroByPo
+  const xeroByPo = {}; let billsScanned = 0;
+  for (const reg of ['uk', 'au']) {
+    try {
+      for (let page = 1; page <= 60; page++) {
+        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY"') + '&order=Date%20DESC&page=' + page);
+        const inv = (j && j.Invoices) || []; if (!inv.length) break;
+        for (const v of inv) { billsScanned++;
+          const toks = tokFor(v.Reference).concat(tokFor(v.InvoiceNumber));
+          for (const t of toks) { const po = matchPo(t); if (po && !xeroByPo[po]) xeroByPo[po] = { region: reg, id: v.InvoiceID, number: v.InvoiceNumber || v.Reference }; }
+        }
+        if (inv.length < 100) break;
+      }
+    } catch (e) { /* org not connected → skip */ }
+  }
+  // Fulfil / Flexport / DHL — local mirrors
+  const fulfilBy = {}; (await pool.query(`SELECT po, fulfil_id FROM planner.fulfil_purchase_orders WHERE fulfil_id IS NOT NULL`)).rows.forEach(r => { fulfilBy[r.po] = String(r.fulfil_id); });
+  const fc = fulfilConfigFor(await activeFulfilEnv()); const fUrl = id => (id && fc.subdomain) ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + id + '?window_name=default') : null;
+  const flexBy = {}; (await pool.query(`SELECT p.po, f.flex_id, f.shipment_name FROM planner.purchase_orders p JOIN planner.flexport_shipments_effective f ON f.flex_id=nullif(p.flexport_reference,'') OR f.shipment_name=nullif(p.shipment_ref,'') OR f.shipment_name=p.po WHERE coalesce(p.master_po,'')=''`)).rows.forEach(r => { if (!flexBy[r.po]) flexBy[r.po] = { id: r.flex_id, name: r.shipment_name }; });
+  const dhlByShip = {}; (await pool.query(`SELECT shipment_ref, carrier, carrier_ref FROM planner.shipments WHERE carrier ILIKE '%dhl%' AND coalesce(carrier_ref,'')<>''`)).rows.forEach(r => { dhlByShip[r.shipment_ref] = r; });
+  let cX = 0, cF = 0, cP = 0, cD = 0;
+  const up = async (po, system, id, ref, url, note) => { await pool.query(
+    `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,'linked',$6,'auto',now(),now())
+     ON CONFLICT (po, system) DO UPDATE SET external_id=$3, external_ref=$4, url=$5, status='linked', note=$6, updated_at=now(),
+       found_by=CASE WHEN planner.po_links.found_by='manual' THEN 'manual' ELSE 'auto' END`, [po, system, id, ref, url, note]); };
+  for (const r of poRows) {
+    const x = xeroByPo[r.po]; if (x) { await up(r.po, 'xero', x.id, x.number, 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + x.id, x.region.toUpperCase()); cX++; }
+    if (fulfilBy[r.po]) { await up(r.po, 'fulfil', fulfilBy[r.po], r.po, fUrl(fulfilBy[r.po]), null); cF++; }
+    const fx = flexBy[r.po]; if (fx && fx.id) { await up(r.po, 'flexport', fx.id, fx.name || '', 'https://app.flexport.com/shipments/' + encodeURIComponent(fx.id), null); cP++; }
+    const sh = dhlByShip[r.shipref || r.po]; if (sh) { const trk = String(sh.carrier_ref).trim(); await up(r.po, 'dhl', trk, sh.carrier, 'https://www.dhl.com/global-en/home/tracking.html?tracking-id=' + encodeURIComponent(trk) + '&submit=1', null); cD++; }
+  }
+  return { pos: poRows.length, bills_scanned: billsScanned, xero: cX, fulfil: cF, flexport: cP, dhl: cD };
+}
+app.post('/api/supply/po/links/resolve-all', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {}
+  try { const r = await _resolveAllPoLinks(); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/resolve-po-links', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { const r = await _resolveAllPoLinks(); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero/push-queue/:id/cancel', async (req, res) => {
   try {
@@ -20098,6 +20164,34 @@ app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
     await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2 WHERE id=$1`, [req.params.id, inv]);
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + inv + '.csv"'); res.send(lines.join('\n'));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.059 (Ben): create the commission bill directly in Xero (UK org) instead of the CSV. Admin + confirm; draft
+// by default, approved when {approved:true}. Contact = the rep group's Xero contact; single line coded to its account.
+app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) {}
+  if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
+  try {
+    const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
+    if (!run) return res.status(404).json({ error: 'run not found' });
+    if (!run.xero_contact) return res.status(400).json({ error: 'This rep group has no Xero contact set — add it on the agent’s account (CLIENT ▸ Clients & agents ▸ Commission).' });
+    if (!run.xero_account_code) return res.status(400).json({ error: 'This rep group has no Xero account code set — add it on the agent’s account.' });
+    const region = 'uk';   // commissions are billed from the UK org
+    const nRows = Number((await pool.query(`SELECT count(*) n FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception'`, [req.params.id])).rows[0].n) || 0;
+    const [y, m] = run.month.split('-').map(Number); const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    const inv = 'COMMISSION-' + run.month + '-' + cpSlug(run.group_name).toUpperCase();
+    const total = Math.round((Number(run.total) || 0) * 100) / 100;
+    if (!(total > 0)) return res.status(400).json({ error: 'Run total is zero — nothing to bill.' });
+    // validate the account code exists in Xero UK
+    try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts'); const valid = new Set(((ac && ac.Accounts) || []).map(a => String(a.Code || ''))); if (!valid.has(String(run.xero_account_code))) return res.status(400).json({ error: 'Account code ' + run.xero_account_code + ' is not in Xero UK — fix it on the agent’s account.' }); } catch (e) {}
+    const billStatus = (req.body.approved === true || String(req.body.status || '').toUpperCase() === 'AUTHORISED') ? 'AUTHORISED' : 'DRAFT';
+    const body = { Type: 'ACCPAY', Contact: { Name: run.xero_contact }, Date: end, DueDate: end, InvoiceNumber: inv, Reference: inv, CurrencyCode: 'GBP', Status: billStatus, LineAmountTypes: 'NoTax',
+      LineItems: [{ Description: 'Commission ' + run.month + ' — ' + nRows + ' orders (see statement)', Quantity: 1, UnitAmount: total, AccountCode: String(run.xero_account_code), TaxType: 'NONE' }] };
+    const r = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
+    const binv = r && r.Invoices && r.Invoices[0];
+    await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2 WHERE id=$1`, [req.params.id, inv]);
+    res.json({ ok: true, status: binv && binv.Status, reference: inv, contact: run.xero_contact, total: total,
+      xero_id: binv && binv.InvoiceID, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/' + (billStatus === 'AUTHORISED' ? 'View' : 'Edit') + '.aspx?InvoiceID=' + binv.InvoiceID) : null });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
