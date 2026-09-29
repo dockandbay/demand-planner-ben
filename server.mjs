@@ -4186,9 +4186,9 @@ async function xeroToken(region) {
       return j.access_token;
     } catch (e) { if (e.code === 400 || e.code === 401) { await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]).catch(() => {}); } else throw e; }   // stale (e.g. switched to a Custom Connection) → drop it and try client_credentials
   }
-  // CUSTOM CONNECTION (client_credentials) — no consent flow, one org, no refresh token
-  const scope = cfg.scopes.split(/\s+/).filter(s => s && s !== 'offline_access').join(' ');
-  const j = await xeroExchange(region, { grant_type: 'client_credentials', scope });
+  // CUSTOM CONNECTION (client_credentials) — no consent flow, one org, no refresh token. Omit scope so the token
+  // carries whatever the connection was granted (avoids "scope validation failed" if the app has a different set).
+  const j = await xeroExchange(region, { grant_type: 'client_credentials' });
   _xeroTok[region] = { token: j.access_token, exp: now + (Number(j.expires_in) || 1800) * 1000 };
   return j.access_token;
 }
@@ -4241,12 +4241,13 @@ app.get('/api/supply/xero/callback', async (req, res) => {
 app.get('/api/supply/xero/status', async (req, res) => {
   const out = { regions: {} };
   for (const region of XERO_REGIONS) {
-    const cfg = xeroConfig(region); const row = { region, configured: cfg.present, redirect_uri: cfg.redirect };
-    if (!cfg.present) { row.connected = false; row.reason = 'Set XERO_CLIENT_ID / XERO_CLIENT_SECRET (register ' + cfg.redirect + ' as a redirect URI), then Connect.'; out.regions[region] = row; continue; }
-    const store = await xeroGetStore(region);
-    if (!store || !store.refresh_token) { row.connected = false; row.reason = 'Credentials set. Click Connect to authorise the ' + region.toUpperCase() + ' organisation.'; out.regions[region] = row; continue; }
-    try { let org = null; try { const o = await xeroFetch(region, '/api.xro/2.0/Organisation'); org = o && o.Organisations && o.Organisations[0]; } catch (e) { row.connected = false; row.reason = 'Stored connection failed to refresh: ' + e.message + ' — reconnect.'; out.regions[region] = row; continue; }
-      row.connected = true; row.org_name = (org && org.Name) || store.tenant_name; row.base_currency = org && org.BaseCurrency; row.tenant_id = store.tenant_id; row.connected_by = store.connected_by; row.connected_at = store.connected_at;
+    const cfg = xeroConfig(region); const store = await xeroGetStore(region);
+    const row = { region, configured: cfg.present, mode: (store && store.refresh_token) ? 'authcode' : 'custom' };
+    if (!cfg.present) { row.connected = false; row.reason = 'Set XERO_' + region.toUpperCase() + '_CLIENT_ID and XERO_' + region.toUpperCase() + '_CLIENT_SECRET.'; out.regions[region] = row; continue; }
+    // Probe the connection (works for both a stored auth-code token and a Custom Connection's client_credentials).
+    try {
+      const o = await xeroFetch(region, '/api.xro/2.0/Organisation'); const org = o && o.Organisations && o.Organisations[0];
+      row.connected = true; row.org_name = (org && org.Name) || (store && store.tenant_name); row.base_currency = org && org.BaseCurrency; row.tenant_id = (await xeroTenant(region)).id;
     } catch (e) { row.connected = false; row.reason = e.message; }
     out.regions[region] = row;
   }

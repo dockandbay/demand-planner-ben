@@ -1,3 +1,11 @@
+## v28.028 (Ben): both Xero orgs (UK + AU) connected live via Custom Connections
+
+**File: `server.mjs`.**
+
+- **Client-credentials token requests now omit the explicit scope** — Xero was rejecting an explicit scope list on the Custom Connections ("scope validation failed"), but the no-scope client_credentials token carries the connection's full granted scopes and works. Both orgs now authenticate and read/write.
+- **Status route probes the connection** (calls Organisation) instead of gating on a stored refresh token, so Custom Connections show `connected` with the org name; it reports `mode` (custom / authcode).
+
+Verified live: **Dock & Bay (UK) · GBP** and **Dock & Bay (AU) · AUD** both connected; `GET /api/supply/xero/bills?region=uk|au` returns real purchase bills. UK bills carry Horizon PO numbers as their Reference (e.g. `PO-51UKJM3`, `PO-1395172`), the reconciliation key. No migration.
 ## v28.027 (Ben): Xero connection also supports Custom Connections (client_credentials), per region
 
 **File: `server.mjs`.** Ben deleted the auth-code app and is moving to Xero **Custom Connections** (machine-to-machine, one per org, no consent flow, avoids the org-connection limit).
