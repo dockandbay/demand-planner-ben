@@ -306,8 +306,8 @@
 /* PRODUCT module lives under #product-root (not #supply-root) — mirror the red notification badge so grid-row + timeline-tab counts render as a badge, not a bare "1" */
 #product-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #client-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
-#client-root #client-subnav{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:2px 6px;margin:2px 0 12px}
-#client-root #client-body{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+#client-root #client-subnav{margin:2px 0 10px}   /* v28.061: tight under L1, underline-tab strip (from the base rule) — no card box, matches SUPPLY */
+#client-root #client-body{}   /* v28.061: no card box — content flows under the L2/L3 menus like SUPPLY */
 #client-root #client-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--l3-bg);border:1px solid var(--blue-soft);border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #client-root #client-l3 .rtab{color:var(--faint);padding:6px 14px;font-weight:500;border:none;background:transparent;border-bottom:2px solid transparent;flex:0 0 auto;white-space:nowrap;cursor:pointer;font-family:inherit;font-size:12px}
 #client-root #client-l3 .rtab:hover{color:var(--blue)}
@@ -17278,7 +17278,7 @@
   function cpRenderCommission(b){ var S=_cpComm; if(_cpPending&&_cpPending.sub==='commission'){ S.run=_cpPending.id; S.tab='report'; _cpPending=null; }
     var money=function(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
     var TABS=[['report','Commissions report'],['overrides','Order overrides'],['paid','Paid history']];
-    b.innerHTML='<div class="annot"><b>CLIENT ▸ Commissions.</b> A run covers invoices <b>paid</b> in the month (not shipped or created). Commissionable = sales value ex tax, ex shipping. Credit notes commission at the original order\'s rate. Only a <b>finalised</b> run shows to the rep group in the portal. Each agent\'s <b>rate &amp; Xero contact</b> live on its account card (Clients &amp; agents).</div><div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===S.tab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="comm-body"><div class="count">Loading…</div></div>';
+    b.innerHTML='<div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===S.tab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="comm-body"><div class="count">Loading…</div></div>';
     b.querySelectorAll('#client-l3 .rtab').forEach(function(x){ x.onclick=function(){ S.tab=x.dataset.t; cpRenderCommission(b); }; });
     var box=document.getElementById('comm-body');
     if(S.tab==='overrides') commOverrides(); else if(S.tab==='paid') commPaid(); else commReport();
@@ -17372,7 +17372,7 @@
       var txt=function(k,w,ph){ return '<input class="fci txt cfg" data-k="'+k+'" value="'+esc(val(k))+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||'260px')+'">'; };
       var tog=function(k){ return '<label class="tiny"><input type="checkbox" class="cfg" data-k="'+k+'"'+(String(val(k))==='true'?' checked':'')+'> on</label>'; };
       var TABS=[['settings','Settings'],['import','Order import'],['prices','Price lists'],['preview','Portal preview']];
-      b.innerHTML='<div class="annot"><b>CLIENT &#9656; Config.</b> Portal-wide settings. Anything per client (visibility, stock scope, discontinue-date market, price list) lives on the client record under Clients &amp; agents.</div><div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===_cpCfgTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="cfg-body"></div>';
+      b.innerHTML='<div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===_cpCfgTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="cfg-body"></div>';
       b.querySelectorAll('#client-l3 .rtab').forEach(function(x){ x.onclick=function(){ if(_cpCfgTab!==x.dataset.t)_cpBands=null; _cpCfgTab=x.dataset.t; cpRenderConfig(b); }; });
       var box=document.getElementById('cfg-body');
       function wire(){ box.querySelectorAll('.cfg').forEach(function(el){ el.onchange=function(){ cpPost('/api/client/config',{key:el.dataset.k,value:el.type==='checkbox'?(el.checked?'true':'false'):el.value}).then(function(){ el.style.outline='2px solid var(--pos)'; setTimeout(function(){ el.style.outline=''; },800); }).catch(function(e){ alert(e.message); }); }; }); }
