@@ -311,9 +311,7 @@
  body.hz-rail #product-subnav,
  body.hz-rail #client-subnav,
  body.hz-rail #config-subs{display:none!important}
- body.hz-rail #supply-root #prod-subtabs,
- body.hz-rail #supply-root #rep-subnav,
- body.hz-rail #supply-root #config-subs-l3{display:none!important}
+ body.hz-rail .hz-l3-mirrored{display:none!important}   /* the one content L3 nav currently mirrored into the rail (set per-render) */
  body.hz-rail .ver:not(.rl-ver){display:none!important}   /* the rail foot shows the version now — drop the in-content badge */
 }
 #tl-drop .tl-po:hover{text-decoration:underline}
@@ -17795,25 +17793,32 @@
   var RAIL_L2={ supply:{sel:'#supply-subnav',item:'.stab'}, demand:{sel:'#demand-tabs',item:'.dnav'}, buy:{sel:'#buymove-tabs',item:'.dnav'}, reports:{sel:'#report-tabs',item:'.dnav'}, product:{sel:'#product-subnav',item:'.stab'}, client:{sel:'#client-subnav',item:'.stab'}, config:{sel:'#config-subs',item:'.rtab'} };
   // L3 tabs mirrored under the active L2 — per-module list of the L3 nav containers a module renders in the DOM.
   // (Supply for now; demand/buy/reports keep their L3 in content until their L3 mirror is verified.)
-  var RAIL_L3MAP={ supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3'] };
+  var RAIL_L3MAP={
+    supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3'],
+    demand:['#demand-exceptions-nav','#demand-scenario-nav','#demand-inputs-nav','#demand-analysis-nav','#demand-config-nav'],
+    reports:['#perf-subnav']
+  };
   function _railText(el){ try{ var c=el.cloneNode(true); c.querySelectorAll('.ex-badge,.rtab-count,.count,.nav-badge,.pilln,.stab-count,.tl-count').forEach(function(x){x.remove();}); return (c.textContent||'').replace(/\s+/g,' ').trim(); }catch(e){ return (el.textContent||'').replace(/\s+/g,' ').trim(); } }
   function _railL2items(mod){ var cfg=RAIL_L2[mod]; if(!cfg)return null; var cont=document.querySelector(cfg.sel); if(!cont)return null;
     var els=cont.querySelectorAll(cfg.item); if(!els.length)return null; var out=[];
     Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); return out.length?out:null; }
   function _railL3items(mod){ var sels=RAIL_L3MAP[mod]; if(!sels)return null;
-    for(var i=0;i<sels.length;i++){ var cont=document.querySelector(sels[i]); if(!cont)continue;   // selectors are scoped (e.g. #supply-root …) so they read even when the content L3 is CSS-hidden
+    for(var i=0;i<sels.length;i++){ var cont=document.querySelector(sels[i]); if(!cont)continue;   // selectors read even when the content L3 is hidden
       var els=cont.querySelectorAll('.rtab,.stab,.d3tab,.dnav3'); if(!els.length)continue; var out=[];
-      Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); if(out.length)return out; } return null; }
+      Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el}); }); if(out.length)return {items:out,el:cont}; } return null; }
   window._railL2c=[]; window._railL3c=[];
-  function renderRailList(){ var list=document.getElementById('hz-rl-list'); if(!list)return; var ak=railActiveKey(); var html='';
+  function renderRailList(){ var list=document.getElementById('hz-rl-list'); if(!list)return; var ak=railActiveKey(); var html=''; var l3hide=null;
     RAIL_L1.forEach(function(m){
       html+='<button class="rl1'+(m.k===ak?' on':'')+'" data-k="'+m.k+'">'+_railSvg(m.icon)+'<span class="lab">'+m.label+'</span></button>';
       if(m.k===ak){ var l2=_railL2items(m.k); if(l2){ window._railL2c=l2;
-        html+='<div class="rl2wrap">'+l2.map(function(it,i){ var sub=(it.active?_railL3items(m.k):null); window._railL3c=(it.active&&sub)?sub:window._railL3c;
-          return '<button class="rl2'+(it.active?' on':'')+'" data-l2="'+i+'">'+esc(it.label)+'</button>'+((it.active&&sub&&sub.length)?('<div class="rl3wrap">'+sub.map(function(s,j){return '<button class="rl3'+(s.active?' on':'')+'" data-l3="'+j+'">'+esc(s.label)+'</button>';}).join('')+'</div>'):''); }).join('')+'</div>';
+        html+='<div class="rl2wrap">'+l2.map(function(it,i){ var subres=(it.active?_railL3items(m.k):null); var sub=subres?subres.items:null; if(subres){ window._railL3c=sub; l3hide=subres.el; }
+          return '<button class="rl2'+(it.active?' on':'')+'" data-l2="'+i+'">'+esc(it.label)+'</button>'+((sub&&sub.length)?('<div class="rl3wrap">'+sub.map(function(s,j){return '<button class="rl3'+(s.active?' on':'')+'" data-l3="'+j+'">'+esc(s.label)+'</button>';}).join('')+'</div>'):''); }).join('')+'</div>';
       } }
     });
     list.innerHTML=html;
+    // hide ONLY the content L3 nav we actually mirrored (so a section whose L3 we can't read never loses its tabs)
+    if(window._railL3hidden && window._railL3hidden!==l3hide){ try{window._railL3hidden.classList.remove('hz-l3-mirrored');}catch(e){} }
+    if(l3hide){ l3hide.classList.add('hz-l3-mirrored'); window._railL3hidden=l3hide; } else window._railL3hidden=null;
     list.querySelectorAll('.rl1').forEach(function(b){ b.onclick=function(){ var m=RAIL_L1.filter(function(x){return x.k===b.dataset.k;})[0]; if(m){try{m.go();}catch(e){}} _railSoon(); }; });
     list.querySelectorAll('.rl2').forEach(function(b){ b.onclick=function(){ var it=(window._railL2c||[])[+b.dataset.l2]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
     list.querySelectorAll('.rl3').forEach(function(b){ b.onclick=function(){ var it=(window._railL3c||[])[+b.dataset.l3]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
