@@ -5307,6 +5307,34 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
   } catch (e) { log500(e); res.status(e.code === 404 ? 404 : 500).json({ error: e.message }); }
 });
 
+// ── Global command search (v28.072, Ben) — the ⌘K palette. One query across the domains a user works in: purchase
+// orders, shipments, SKUs/products, suppliers, samples. Read-only, parameterised ILIKE, tightly capped. Pages + quick
+// actions are added client-side. Path is 2-segment so the /api/supply/:section catch-all never swallows it.
+app.get('/api/hz-search', async (req, res) => {
+  const raw = String(req.query.q || '').trim();
+  if (raw.length < 1) return res.json({ q: raw, pos: [], shipments: [], skus: [], suppliers: [], samples: [] });
+  const like = '%' + raw.replace(/[%_]/g, m => '\\' + m) + '%';
+  const q = (sql, p) => pool.query(sql, p).then(r => r.rows).catch(() => []);
+  try {
+    const [pos, shipments, skus, suppliers, samples] = await Promise.all([
+      q(`SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status,
+             upper(coalesce(nullif(p.country_code,''), b.country_code,'')) market
+           FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch
+           WHERE coalesce(p.master_po,'')='' AND (p.po ILIKE $1 OR p.supplier_name ILIKE $1)
+           ORDER BY (p.po ILIKE $1) DESC, p.po DESC LIMIT 8`, [like]),
+      q(`SELECT s.shipment_ref ref, coalesce(lower(s.mode),'') mode, coalesce(s.status,'') status
+           FROM planner.shipments s WHERE s.shipment_ref ILIKE $1 ORDER BY s.shipment_ref DESC LIMIT 6`, [like]),
+      q(`SELECT sku, coalesce(product_name,'') name FROM planner.products
+           WHERE sku ILIKE $1 OR product_name ILIKE $1 ORDER BY (sku ILIKE $1) DESC, sku LIMIT 8`, [like]),
+      q(`SELECT name, coalesce(code,'') code, coalesce(kind,'') kind FROM planner.suppliers
+           WHERE name ILIKE $1 OR code ILIKE $1 ORDER BY name LIMIT 6`, [like]),
+      q(`SELECT ref, coalesce(supplier_name,'') supplier FROM planner.sample_requests
+           WHERE ref ILIKE $1 OR supplier_name ILIKE $1 ORDER BY created_at DESC LIMIT 6`, [like]),
+    ]);
+    res.json({ q: raw, pos, shipments, skus, suppliers, samples });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {

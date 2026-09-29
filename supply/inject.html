@@ -222,6 +222,37 @@
 #tl-drop .tl-tag-smp{background:#fef3c7;color:#92400e}
 #tl-drop .tl-tag-cli{background:#dcfce7;color:#166534}
 #tl-drop .tl-tag-prd{background:#ede9fe;color:#6d28d9}
+/* ── Global command search (⌘K) — v28.072 ── */
+#hzcmd-btn{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;font-weight:600;color:var(--nav-dim,#93a1b8);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:8px;padding:6px 10px;cursor:pointer;height:30px}
+#hzcmd-btn:hover{color:#fff;background:rgba(255,255,255,.12)}
+#hzcmd-btn svg{width:14px;height:14px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
+#hzcmd-btn .kk{font-size:10px;font-weight:700;border:1px solid rgba(255,255,255,.2);border-radius:5px;padding:0 5px;line-height:16px;opacity:.85}
+#hzcmd-scrim{position:fixed;inset:0;background:rgba(13,22,38,.44);z-index:2147483000;display:none;align-items:flex-start;justify-content:center;padding:72px 16px}
+#hzcmd-scrim.open{display:flex}
+#hzcmd{width:640px;max-width:96vw;max-height:74vh;background:var(--card,#fff);border:1px solid var(--line,#e5e9f0);border-radius:14px;box-shadow:0 24px 60px -18px rgba(16,24,40,.4);display:flex;flex-direction:column;overflow:hidden;font-size:13px;color:var(--ink,#101828)}
+#hzcmd .hd{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line,#e5e9f0)}
+#hzcmd .hd svg{width:18px;height:18px;stroke:var(--faint,#8b98ad);stroke-width:2.2;fill:none;stroke-linecap:round;flex:0 0 auto}
+#hzcmd .hd input{flex:1;border:0;outline:0;background:none;font-family:inherit;font-size:15px;color:var(--ink,#101828)}
+#hzcmd .hd input::placeholder{color:var(--faint,#8b98ad)}
+#hzcmd .hd .esc{font-size:10.5px;font-weight:700;color:var(--muted,#5b6b83);border:1px solid var(--line,#e5e9f0);border-radius:6px;padding:1px 6px}
+#hzcmd .body{overflow-y:auto;padding:6px}
+#hzcmd .grp{padding:6px 6px 2px}
+#hzcmd .gl{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint,#8b98ad);font-weight:800;padding:5px 10px 4px}
+#hzcmd .it{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;cursor:pointer}
+#hzcmd .it.sel,#hzcmd .it:hover{background:var(--hover,#f7f9fc)}
+#hzcmd .ic{width:30px;height:30px;border-radius:8px;background:var(--hover,#f7f9fc);border:1px solid var(--line,#e5e9f0);display:grid;place-items:center;color:var(--muted,#5b6b83);flex:0 0 auto;font-size:14px}
+#hzcmd .it.sel .ic,#hzcmd .it:hover .ic{background:var(--blue-soft,#eaf1fd);border-color:#bcd3ff;color:var(--blue,#2361d8)}
+#hzcmd .it.act .ic{background:var(--blue,#2361d8);border-color:var(--blue,#2361d8);color:#fff}
+#hzcmd .tx{flex:1;min-width:0}
+#hzcmd .p{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hzcmd .p .rk{color:var(--blue,#2361d8);font-weight:700}
+#hzcmd .s{font-size:11.5px;color:var(--muted,#5b6b83);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hzcmd .lk{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+#hzcmd .lk span{font-size:10.5px;color:var(--muted,#5b6b83);border:1px solid var(--line,#e5e9f0);border-radius:6px;padding:1px 7px}
+#hzcmd .lk span:hover{border-color:#bcd3ff;color:var(--blue,#2361d8)}
+#hzcmd .ft{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--line,#e5e9f0);color:var(--faint,#8b98ad);font-size:11px}
+#hzcmd .ft b{color:var(--muted,#5b6b83)}
+#hzcmd .empty{padding:26px 14px;text-align:center;color:var(--muted,#5b6b83)}
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
 #tl-drop .tl-acts{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
@@ -17578,7 +17609,93 @@
     var pb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]');
     var onDemand=!nonDemand && pb && pb.classList.contains('active');
     document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
+  // ── Global command search (⌘K) — v28.072 ──────────────────────────────────
+  // One search box for the whole app: pages, quick actions, POs, shipments, SKUs, suppliers, samples. Server search =
+  // /api/hz-search; pages + actions are local. Selecting a result navigates via the existing goto/section functions.
+  var HZCMD_ICON={po:'🧾',ship:'🚢',sku:'🏷️',supplier:'🏭',sample:'🎁',page:'📄',action:'⚡'};
+  function ensureCmdButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('hzcmd-btn'))return;
+    var b=document.createElement('button'); b.id='hzcmd-btn'; b.title='Search everything (⌘K / Ctrl-K)'; b.setAttribute('aria-label','Global search');
+    b.innerHTML='<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span>Search</span><span class="kk">⌘K</span>';
+    var nav=document.getElementById('supply-btn'); if(nav&&nav.nextSibling)row.insertBefore(b,nav.nextSibling); else if(nav)row.appendChild(b); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp)row.insertBefore(b,sp); else row.appendChild(b); }
+    b.onclick=function(e){ e.stopPropagation(); openCmd(); }; }
+  function hzCmdPages(){
+    var pages=[];
+    try{ (SECTIONS||[]).forEach(function(s){ pages.push({label:'Supply ▸ '+_titleCase(s[1]),go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection(s[0]); }}); }); }catch(e){}
+    pages.push({label:'Demand ▸ Plan',go:function(){ location.hash='#/demand'; _cmdRoute(); }});
+    pages.push({label:'Buy plan',go:function(){ location.hash='#/buy'; _cmdRoute(); }});
+    pages.push({label:'FBA',go:function(){ location.hash='#/fba'; _cmdRoute(); }});
+    pages.push({label:'Reports ▸ Exec',go:function(){ location.hash='#/exec'; _cmdRoute(); }});
+    return pages; }
+  function _titleCase(s){ s=String(s||''); return s.length>3?s.charAt(0)+s.slice(1).toLowerCase():s; }
+  function _cmdRoute(){ if(typeof applyRoute==='function')try{applyRoute();}catch(e){} }
+  function hzCmdActions(){ return [
+    {label:'Create a purchase order',hint:'Import a PO from Fulfil',go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection('purchase-orders'); if(typeof openPoImportFulfil==='function')setTimeout(openPoImportFulfil,150); }},
+    {label:'New sample request',hint:'Request a sample from a supplier',go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection('samples'); if(typeof openSampleForm==='function')setTimeout(openSampleForm,200); }},
+    {label:'Plan a shipment',hint:'Consolidate POs / book freight',go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection('purchase-orders'); }},
+    {label:'Record a payment',hint:'Payments workspace',go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection('payments'); }}
+  ]; }
+  var _cmdSel=0, _cmdItems=[], _cmdT=null;
+  function openCmd(){ var sc=document.getElementById('hzcmd-scrim');
+    if(!sc){ sc=document.createElement('div'); sc.id='hzcmd-scrim';
+      sc.innerHTML='<div id="hzcmd" role="dialog" aria-label="Search"><div class="hd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="hzcmd-q" placeholder="Search POs, shipments, SKUs, suppliers, pages — or an action…" autocomplete="off" spellcheck="false"><span class="esc">esc</span></div><div class="body" id="hzcmd-body"></div><div class="ft"><span><b>↑↓</b> move</span><span><b>↵</b> open</span><span><b>esc</b> close</span><span style="margin-left:auto">Global search</span></div></div>';
+      document.body.appendChild(sc);
+      sc.addEventListener('mousedown',function(e){ if(e.target===sc)closeCmd(); });
+      var qi=document.getElementById('hzcmd-q');
+      qi.addEventListener('input',function(){ clearTimeout(_cmdT); _cmdT=setTimeout(function(){ runCmd(qi.value); },170); });
+      qi.addEventListener('keydown',function(e){
+        if(e.key==='ArrowDown'){ e.preventDefault(); _cmdMove(1); }
+        else if(e.key==='ArrowUp'){ e.preventDefault(); _cmdMove(-1); }
+        else if(e.key==='Enter'){ e.preventDefault(); var it=_cmdItems[_cmdSel]; if(it&&it._go)it._go(); }
+        else if(e.key==='Escape'){ e.preventDefault(); closeCmd(); } });
+    }
+    sc.classList.add('open'); var q=document.getElementById('hzcmd-q'); q.value=''; runCmd(''); setTimeout(function(){ q.focus(); },30); }
+  function closeCmd(){ var sc=document.getElementById('hzcmd-scrim'); if(sc)sc.classList.remove('open'); }
+  function _cmdMove(d){ if(!_cmdItems.length)return; _cmdItems[_cmdSel]&&_cmdItems[_cmdSel].classList.remove('sel'); _cmdSel=(_cmdSel+d+_cmdItems.length)%_cmdItems.length; var el=_cmdItems[_cmdSel]; el.classList.add('sel'); el.scrollIntoView({block:'nearest'}); }
+  function _cmdItemHtml(icon,kind,primary,sub,links){
+    var isRef=(kind==='po'||kind==='ship'||kind==='sku');
+    var lk=(links&&links.length)?('<div class="lk">'+links.map(function(l){return '<span>↗ '+esc(l)+'</span>';}).join('')+'</div>'):'';
+    return '<div class="ic">'+(HZCMD_ICON[kind]||'•')+'</div><div class="tx"><div class="p"><span class="'+(isRef?'rk':'')+'">'+esc(primary)+'</span></div>'+(sub?'<div class="s">'+esc(sub)+'</div>':'')+lk+'</div>';
+  }
+  function runCmd(query){
+    var q=(query||'').trim(); var body=document.getElementById('hzcmd-body'); if(!body)return;
+    var ql=q.toLowerCase();
+    var groups=[]; // {label, items:[{icon,kind,primary,sub,links,go}]}
+    var actions=hzCmdActions().filter(function(a){ return !q||a.label.toLowerCase().indexOf(ql)>=0; }).map(function(a){ return {kind:'action',primary:a.label,sub:a.hint,go:a.go}; });
+    var pages=hzCmdPages().filter(function(p){ return !q||p.label.toLowerCase().indexOf(ql)>=0; }).slice(0,8).map(function(p){ return {kind:'page',primary:p.label,go:p.go}; });
+    if(!q){
+      groups.push({label:'Quick actions',items:actions});
+      groups.push({label:'Jump to',items:pages.slice(0,6)});
+      _cmdPaint(groups); return;
+    }
+    if(actions.length)groups.push({label:'Actions',items:actions});
+    if(pages.length)groups.push({label:'Pages',items:pages});
+    if(groups.length){ _cmdPaint(groups,true); }   // paint local immediately, then merge server results
+    else { var _b=document.getElementById('hzcmd-body'); if(_b)_b.innerHTML='<div class="empty">Searching…</div>'; _cmdItems=[]; _cmdSel=0; }
+    fetch('/api/hz-search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){
+      if(document.getElementById('hzcmd-q')&&document.getElementById('hzcmd-q').value.trim()!==q)return;   // stale
+      var g2=[];
+      if(actions.length)g2.push({label:'Actions',items:actions});
+      if(pages.length)g2.push({label:'Pages',items:pages});
+      (d.pos||[]).length&&g2.push({label:'Purchase orders',items:d.pos.map(function(p){ return {kind:'po',primary:p.po,sub:[p.supplier,p.market,p.status].filter(Boolean).join(' · '),links:['Payments','Shipment','Order plan'],go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof openPODrawer==='function')openPODrawer(p.po,'timeline'); closeCmd(); }}; })});
+      (d.shipments||[]).length&&g2.push({label:'Shipments',items:d.shipments.map(function(s){ return {kind:'ship',primary:s.ref,sub:[s.mode&&s.mode.toUpperCase(),s.status].filter(Boolean).join(' · '),links:['POs aboard','Flexport'],go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof gotoShipment==='function')gotoShipment(s.ref); closeCmd(); }}; })});
+      (d.skus||[]).length&&g2.push({label:'SKUs & products',items:d.skus.map(function(s){ return {kind:'sku',primary:s.sku,sub:s.name,links:['Open POs','Demand','Product'],go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection('purchase-orders'); closeCmd(); }}; })});
+      (d.suppliers||[]).length&&g2.push({label:'Suppliers',items:d.suppliers.map(function(s){ return {kind:'supplier',primary:s.name,sub:[s.code,s.kind].filter(Boolean).join(' · '),links:['POs','Samples'],go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof openSupplierDrawer==='function')openSupplierDrawer(s.name); closeCmd(); }}; })});
+      (d.samples||[]).length&&g2.push({label:'Samples',items:d.samples.map(function(s){ return {kind:'sample',primary:s.ref,sub:s.supplier,go:function(){ if(typeof gotoSample==='function')gotoSample(s.ref); closeCmd(); }}; })});
+      _cmdPaint(g2.filter(function(g){return g.items.length;}));
+    }).catch(function(){});
+  }
+  function _cmdPaint(groups,keepFocus){
+    var body=document.getElementById('hzcmd-body'); if(!body)return; _cmdItems=[]; _cmdSel=0;
+    var total=groups.reduce(function(n,g){return n+g.items.length;},0);
+    if(!total){ body.innerHTML='<div class="empty">No matches.<br><span style="color:var(--faint)">Try a PO, shipment, SKU, supplier or page name.</span></div>'; return; }
+    body.innerHTML=groups.map(function(g){ return '<div class="grp"><div class="gl">'+esc(g.label)+'</div>'+g.items.map(function(it){
+      return '<div class="it'+(it.kind==='action'?' act':'')+'">'+_cmdItemHtml(it.icon,it.kind,it.primary,it.sub,it.links)+'</div>'; }).join('')+'</div>'; }).join('');
+    var flat=[]; groups.forEach(function(g){ g.items.forEach(function(it){ flat.push(it); }); });
+    var nodes=body.querySelectorAll('.it'); _cmdItems=Array.prototype.slice.call(nodes);
+    _cmdItems.forEach(function(el,i){ var it=flat[i]; el._go=it.go; el.onclick=function(){ if(it.go)it.go(); }; el.onmouseenter=function(){ if(_cmdItems[_cmdSel])_cmdItems[_cmdSel].classList.remove('sel'); _cmdSel=i; el.classList.add('sel'); }; });
+    if(_cmdItems[0])_cmdItems[0].classList.add('sel'); }
+  document.addEventListener('keydown',function(e){ if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault(); var sc=document.getElementById('hzcmd-scrim'); if(sc&&sc.classList.contains('open'))closeCmd(); else openCmd(); } },true);
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product|client)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
