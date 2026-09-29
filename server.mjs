@@ -13101,8 +13101,9 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     if (req.body && req.body.create) {
       try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) {}
       const xregion = meta.region === 'AU' ? 'au' : 'uk';   // Coghlans (AU) → Xero AU; ILG/Geneva/iFulfilment → Xero UK org
-      const isTest = req.body.test !== false;               // default to a TEST- prefixed draft unless explicitly test:false
+      const isTest = req.body.test === true;                // real reference by default; TEST- prefix only when explicitly test:true
       const ref = (isTest ? 'TEST-' : '') + invNo;
+      const billStatus = (String(req.body.status || '').toUpperCase() === 'AUTHORISED' || req.body.approved === true) ? 'AUTHORISED' : 'DRAFT';
       const latMode = taxCfg.mode === 'inclusive' ? 'Inclusive' : (taxCfg.mode === 'none' ? 'NoTax' : 'Exclusive');
       const ttCode = (label) => { const t = String(label || '').toLowerCase(); if (/no vat|zero|exempt|none/.test(t)) return xregion === 'au' ? 'EXEMPTEXPENSES' : 'NONE'; if (xregion === 'au' || /gst/.test(t)) return 'INPUT'; return 'INPUT2'; };
       const li = blines.filter(l => Math.abs(Number(l.amount) || 0) > 0.005).map(l => { const it = { Description: String(l.desc || '').slice(0, 3900), Quantity: 1, UnitAmount: r2(l.amount) }; if (l.code) it.AccountCode = String(l.code); it.TaxType = (latMode === 'NoTax') ? (xregion === 'au' ? 'EXEMPTEXPENSES' : 'NONE') : ttCode(l.taxType); return it; });
@@ -13116,7 +13117,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
         const bad = [...new Set(li.map(x => x.AccountCode).filter(c => c && !valid.has(String(c))))];
         if (bad.length) return res.status(400).json({ error: 'Account code(s) not in Xero ' + xregion.toUpperCase() + ': ' + bad.join(', ') + '. Fix them in 3PL invoicing ▸ Config / Accounts (or create the account in Xero).', invalid_codes: bad });
       } catch (e) { /* if the accounts lookup fails, fall through and let Xero validate on create */ }
-      const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: latMode, LineItems: li };
+      const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: billStatus, LineAmountTypes: latMode, LineItems: li };
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
         const inv = r && r.Invoices && r.Invoices[0];
