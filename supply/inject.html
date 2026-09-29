@@ -279,6 +279,8 @@
 #hz-leftrail .rl3.on{color:#5aa6ea;font-weight:700}
 #hz-leftrail .rl-foot{flex:0 0 auto;border-top:1px solid rgba(255,255,255,.08);padding:11px 14px;display:flex;align-items:center;gap:9px;color:var(--nav-dim,#93a1b8);font-size:11.5px}
 #hz-leftrail .rl-foot .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(140deg,#5aa6ea,#2361d8);display:grid;place-items:center;color:#fff;font-size:10.5px;font-weight:800;flex:0 0 auto}
+#hz-leftrail .rl-foot .rl-who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c9d3e2;font-weight:600}
+#hz-leftrail .rl-ver{position:relative;margin-left:auto;background:rgba(245,184,61,.16);color:#f5b83d;font-size:9px;font-weight:800;letter-spacing:.03em;padding:3px 7px;border-radius:6px;white-space:nowrap;flex:0 0 auto}
 @media(min-width:900px){
  body.hz-rail #hz-leftrail{display:flex}
  body.hz-rail .wrap#app{margin-left:212px}
@@ -293,6 +295,7 @@
  body.hz-rail #supply-root #prod-subtabs,
  body.hz-rail #supply-root #rep-subnav,
  body.hz-rail #supply-root #config-subs-l3{display:none!important}
+ body.hz-rail .ver:not(.rl-ver){display:none!important}   /* the rail foot shows the version now — drop the in-content badge */
 }
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
@@ -7331,7 +7334,7 @@
   // Global loading indicator: a spinner overlaid on the version badge whenever a fetch is in flight. Debounced 160ms
   // so quick requests don't blink the badge. Covers every view (any fetch) — no per-container "Loading…" rows needed.
   var _hzInflight=0,_hzSpinT=null;
-  function hzBadgeSpin(show){ var bs=document.querySelectorAll('#supply-root .ver, #scenario-root .ver, #product-root .ver, #hz-ver, #ver');
+  function hzBadgeSpin(show){ var bs=document.querySelectorAll('#hz-leftrail .rl-ver, #supply-root .ver, #scenario-root .ver, #product-root .ver, #hz-ver, #ver');
     for(var i=0;i<bs.length;i++){ var b=bs[i]; if(!b)continue; var s=b.querySelector('.hz-verspin');
       if(show){ if(!s){ s=document.createElement('span'); s.className='hz-verspin'; s.textContent='loading'; b.appendChild(s); } }
       else if(s&&s.parentNode){ s.parentNode.removeChild(s); } } }
@@ -17804,7 +17807,7 @@
     var r=document.getElementById('hz-leftrail');
     if(!r){ r=document.createElement('div'); r.id='hz-leftrail';
       r.innerHTML='<div class="rl-brand">'+HZ_MARK+'<span class="nm">HORIZON</span></div><div class="rl-list" id="hz-rl-list"></div>'
-        +'<div class="rl-foot"><span class="av">'+esc((_railInitials()||'DB').toUpperCase())+'</span><span class="rl-who">'+esc(((typeof ME!=='undefined'&&ME&&ME.email)||'').split('@')[0]||'')+'</span></div>';
+        +'<div class="rl-foot"><span class="av">'+esc((_railInitials()||'DB').toUpperCase())+'</span><span class="rl-who">'+esc(((typeof ME!=='undefined'&&ME&&ME.email)||'').split('@')[0]||'')+'</span><span class="ver rl-ver">HORIZON __APP_VERSION__</span></div>';
       document.body.appendChild(r);
       window.addEventListener('hashchange',function(){ try{railSync();_railSoon();}catch(e){} });
       // keep the rail's L2/L3 in sync as each module renders its sub-nav async (debounced; renderRailList is cheap)
