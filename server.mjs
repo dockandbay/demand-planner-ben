@@ -4619,6 +4619,82 @@ app.post('/api/supply/xero/push-queue/credit-note', async (req, res) => {
     res.json({ ok: true, id: cn.id, region, allocates_to: (link && link.external_ref) || null, account: (acct && acct.code) || '602' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Xero EXCEPTIONS (replaces the Xero Compare upload). An exception = a PO whose Xero bill amount-due / payments do NOT
+// match HORIZON's, plus an insight into the likely cause. Also surfaces uncreated credit notes (a common cause) and
+// shipped POs with no bill. Hits live Xero (bills fetched by id in bulk), so the result is cached ~3 min; ?refresh=1
+// forces a recompute. The `count` feeds the action badge in the menu headers.
+let _xeroExcCache = { at: 0, data: null };
+const _usd = n => (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+async function _computeXeroExceptions() {
+  const out = [];
+  // linked POs + HORIZON payment figures
+  const linked = (await pool.query(
+    `SELECT p.po, coalesce(p.supplier_name,'') supplier, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch,
+            coalesce(nullif(p.supplier_invoice_total,0), p.order_value_estimation, 0) total_h,
+            (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)) paid_h,
+            l.external_id bill_id, l.external_ref bill_ref
+       FROM planner.purchase_orders p
+       JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id IS NOT NULL
+      WHERE coalesce(p.master_po,'')='' LIMIT 800`)).rows;
+  // bulk-fetch bills by id, per region
+  const byRegion = { uk: [], au: [] };
+  linked.forEach(r => { const reg = (r.cc === 'AU' || /coghlan/i.test(r.branch)) ? 'au' : 'uk'; r._reg = reg; byRegion[reg].push(r); });
+  const billById = {};
+  for (const reg of ['uk', 'au']) {
+    const ids = byRegion[reg].map(r => r.bill_id).filter(Boolean);
+    for (let i = 0; i < ids.length; i += 40) {
+      const chunk = ids.slice(i, i + 40);
+      try {
+        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?IDs=' + chunk.join(','));
+        ((j && j.Invoices) || []).forEach(v => { billById[v.InvoiceID] = { total: Number(v.Total) || 0, paid: Number(v.AmountPaid) || 0, due: Number(v.AmountDue) || 0, ccy: v.CurrencyCode, status: v.Status, number: v.InvoiceNumber }; });
+      } catch (e) { /* region not connected / chunk failed → those POs just won't reconcile */ }
+    }
+  }
+  const TOL = 1.0;
+  linked.forEach(r => {
+    const x = billById[r.bill_id]; if (!x) return;   // couldn't fetch the bill → skip (not a mismatch)
+    const dueH = (Number(r.total_h) || 0) - (Number(r.paid_h) || 0);
+    const paidDiff = x.paid - (Number(r.paid_h) || 0);
+    const dueDiff = x.due - dueH;
+    const totalDiff = x.total - (Number(r.total_h) || 0);
+    if (Math.abs(paidDiff) <= TOL && Math.abs(dueDiff) <= TOL && Math.abs(totalDiff) <= TOL) return;   // reconciled
+    const bits = [];
+    bits.push('Xero: due ' + _usd(x.due) + ', paid ' + _usd(x.paid) + ', total ' + _usd(x.total) + (x.ccy ? ' ' + x.ccy : '') + ' [' + (x.status || '') + ']');
+    bits.push('Horizon: due ' + _usd(dueH) + ', paid ' + _usd(r.paid_h) + ', total ' + _usd(r.total_h));
+    if (Math.abs(totalDiff) > TOL) bits.push('Bill total differs by ' + _usd(Math.abs(totalDiff)) + (totalDiff > 0 ? ' (Xero higher — invoice raised above Horizon’s value)' : ' (Horizon higher — final invoice may exceed the Xero bill)'));
+    if (Math.abs(paidDiff) > TOL) bits.push(paidDiff > 0 ? 'Xero shows ' + _usd(paidDiff) + ' more paid — Horizon may be missing this payment' : 'Horizon shows ' + _usd(-paidDiff) + ' more paid — a payment / credit note is not in Xero yet');
+    out.push({ type: 'amount_mismatch', po: r.po, supplier: r.supplier, region: r._reg, bill_ref: x.number || r.bill_ref,
+      bill_id: r.bill_id, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill_id,
+      xero: { due: x.due, paid: x.paid, total: x.total }, horizon: { due: dueH, paid: Number(r.paid_h) || 0, total: Number(r.total_h) || 0 },
+      diff: { due: dueDiff, paid: paidDiff, total: totalDiff },
+      message: r.po + ' — amounts don’t reconcile with Xero', insight: bits.join('. '), action: 'review_po' });
+  });
+  // uncreated credit notes (a common cause of a paid mismatch): starting deposit + linked bill, none queued
+  const cn = (await pool.query(
+    `SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.pay_start_deposit_assigned,0) amt,
+            coalesce(p.prod_no,'') prod_no, coalesce(p.deposit_ref,'') deposit_ref, l.external_ref bill_ref, l.external_id bill_id
+       FROM planner.purchase_orders p
+       JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked'
+      WHERE coalesce(p.pay_start_deposit_assigned,0) > 0.009
+        AND NOT EXISTS (SELECT 1 FROM planner.xero_push_queue q WHERE q.po=p.po AND q.kind='credit_note' AND q.status <> 'cancelled')
+      ORDER BY p.po LIMIT 300`)).rows;
+  cn.forEach(r => out.push({ type: 'uncreated_credit_note', po: r.po, supplier: r.supplier, amount: Number(r.amt) || 0,
+    prod_no: r.prod_no, deposit_ref: r.deposit_ref, bill_ref: r.bill_ref,
+    bill_id: r.bill_id, bill_url: r.bill_id ? ('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill_id) : null,
+    message: r.po + ' — ' + _usd(r.amt) + ' starting deposit not yet drawn down',
+    insight: 'Create a credit note coded to Stock Deposits (602)' + (r.prod_no ? ', tagged P' + String(r.prod_no).replace(/^P/i, '') : '') + ', allocated to bill ' + (r.bill_ref || 'the PO bill') + ' — until then Xero shows more owed than Horizon.', action: 'create_credit_note' }));
+  const byType = {}; out.forEach(e => { byType[e.type] = (byType[e.type] || 0) + 1; });
+  return { count: out.length, by_type: byType, exceptions: out, computed_at: new Date().toISOString() };
+}
+app.get('/api/supply/xero/exceptions', async (req, res) => {
+  try {
+    const fresh = String(req.query.refresh || '') === '1';
+    if (!fresh && _xeroExcCache.data && (Date.now() - _xeroExcCache.at) < 180000) return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, _xeroExcCache.data));
+    const data = await _computeXeroExceptions();
+    _xeroExcCache = { at: Date.now(), data };
+    res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/xero/push-queue/:id/cancel', async (req, res) => {
   try {
     const row = await _pqBy(req.params.id); if (!row) return res.status(404).json({ error: 'not found' });
