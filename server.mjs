@@ -4440,6 +4440,61 @@ app.post('/api/supply/xero/finance-config', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Suggested tracking options = HORIZON production numbers (P-prefixed to match Xero's existing 620.xx P-naming),
+// from a minimum production onward (COA restructure tags from P58). Read-only helper for the create UI.
+app.get('/api/supply/xero/tracking/suggested', async (req, res) => {
+  try {
+    const min = parseInt(req.query.min || '58', 10);
+    const r = await pool.query(`SELECT DISTINCT nullif(trim(prod_no),'') pn FROM planner.purchase_orders WHERE nullif(trim(prod_no),'') IS NOT NULL`);
+    const nums = r.rows.map(x => x.pn).filter(pn => /^\d+$/.test(pn)).map(Number).filter(n => isFinite(n) && (isNaN(min) || n >= min)).sort((a, b) => a - b);
+    res.set('Cache-Control', 'no-store').json({ min: isNaN(min) ? null : min, options: nums.map(n => 'P' + n) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── Xero TRACKING CATEGORIES (v28.031, Ben) — needed to tag Stock Deposits by production number. Read is open;
+// the ensure (create category + add options) is a LIVE XERO WRITE, gated admin + explicit confirm. Needs the
+// accounting.settings scope on the connection (settings.read alone can list but not create). ──
+app.get('/api/supply/xero/tracking', async (req, res) => {
+  try {
+    const region = xeroRegion(req.query.region);
+    const j = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+    const cats = ((j && j.TrackingCategories) || []).map(c => ({ id: c.TrackingCategoryID, name: c.Name, status: c.Status,
+      options: ((c.Options) || []).map(o => ({ id: o.TrackingOptionID, name: o.Name, status: o.Status })) }));
+    res.set('Cache-Control', 'no-store').json({ region, org: (await xeroTenant(region)).name, categories: cats });
+  } catch (e) { res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero/tracking/ensure', async (req, res) => {
+  try {
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create Xero tracking categories' }); } catch (e) {}
+    const b = req.body || {}; const region = xeroRegion(b.region);
+    if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
+    const name = String(b.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
+    let opts = Array.isArray(b.options) ? b.options.map(o => String(o || '').trim()).filter(Boolean) : [];
+    opts = [...new Set(opts)];
+    if (opts.length > 100) return res.status(400).json({ error: 'Xero allows at most 100 active options per category' });
+    // find or create the category (case-insensitive by name)
+    const cur = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+    let cat = ((cur && cur.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === name.toLowerCase());
+    let created = false;
+    if (!cat) {
+      const active = ((cur && cur.TrackingCategories) || []).filter(c => c.Status === 'ACTIVE').length;
+      if (active >= 2) return res.status(409).json({ error: 'Xero allows only 2 active tracking categories per org; this org already has 2. Archive one first.' });
+      const cr = await xeroFetch(region, '/api.xro/2.0/TrackingCategories', { method: 'POST', body: { Name: name } });
+      cat = cr && cr.TrackingCategories && cr.TrackingCategories[0]; created = true;
+    }
+    if (!cat || !cat.TrackingCategoryID) return res.status(502).json({ error: 'Xero did not return the tracking category' });
+    const have = new Set(((cat.Options) || []).map(o => String(o.Name).toLowerCase()));
+    const toAdd = opts.filter(o => !have.has(o.toLowerCase()));
+    const added = [];
+    for (const o of toAdd) {
+      try { await xeroFetch(region, '/api.xro/2.0/TrackingCategories/' + cat.TrackingCategoryID + '/Options', { method: 'POST', body: { Name: o } }); added.push(o); }
+      catch (e) { return res.status(500).json({ error: 'Added ' + added.length + ' option(s), then failed on "' + o + '": ' + e.message, category_id: cat.TrackingCategoryID, created, added }); }
+    }
+    const after = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+    const final = ((after && after.TrackingCategories) || []).find(c => c.TrackingCategoryID === cat.TrackingCategoryID);
+    res.json({ ok: true, region, created, added, category: final ? { id: final.TrackingCategoryID, name: final.Name, options: (final.Options || []).map(o => o.Name) } : null });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {

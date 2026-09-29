@@ -8734,7 +8734,7 @@
       // to real Xero Bank AccountIDs) + COA account mapping. Accounts pulled live from Xero; config persists per org.
       SUBS['xero']=function(){ var REG=window._xeroCfgReg||'uk';
         b.innerHTML='<div class="count">Loading Xero config…</div>';
-        var CFG={}, EXB=[], EXA=[], BANKS=[], ALLACC=[], STATUS=null, accErr='';
+        var CFG={}, EXB=[], EXA=[], BANKS=[], ALLACC=[], STATUS=null, accErr='', TRACK=[], SUGG=[], trackErr='';
         function cfgBankSel(regKey){ CFG.banks=CFG.banks||{}; return CFG.banks[regKey]=CFG.banks[regKey]||{}; }
         function cfgAcctSel(regKey){ CFG.accounts=CFG.accounts||{}; return CFG.accounts[regKey]=CFG.accounts[regKey]||{}; }
         function save(after){ var st=document.getElementById('xcfg-save-st'); if(st){st.textContent='Saving…';st.style.color='var(--muted)';}
@@ -8748,9 +8748,12 @@
           var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]; var conn=rr&&rr.connected;
           var accP=conn?Promise.all([
             fetch('/api/supply/xero/accounts?kind=bank&region='+REG).then(function(r){return r.json();}).catch(function(){return {accounts:[]};}),
-            fetch('/api/supply/xero/accounts?kind=all&region='+REG).then(function(r){return r.json();}).catch(function(){return {accounts:[]};})
-          ]):Promise.resolve([{accounts:[]},{accounts:[]}]);
-          accP.then(function(a){ BANKS=(a[0]&&a[0].accounts)||[]; ALLACC=(a[1]&&a[1].accounts)||[]; if(a[0]&&a[0].error)accErr=a[0].error; draw(); });
+            fetch('/api/supply/xero/accounts?kind=all&region='+REG).then(function(r){return r.json();}).catch(function(){return {accounts:[]};}),
+            fetch('/api/supply/xero/tracking?region='+REG).then(function(r){return r.json();}).catch(function(){return {categories:[]};}),
+            fetch('/api/supply/xero/tracking/suggested?min=58').then(function(r){return r.json();}).catch(function(){return {options:[]};})
+          ]):Promise.resolve([{accounts:[]},{accounts:[]},{categories:[]},{options:[]}]);
+          accP.then(function(a){ BANKS=(a[0]&&a[0].accounts)||[]; ALLACC=(a[1]&&a[1].accounts)||[]; if(a[0]&&a[0].error)accErr=a[0].error;
+            TRACK=(a[2]&&a[2].categories)||[]; if(a[2]&&a[2].error)trackErr=a[2].error; SUGG=(a[3]&&a[3].options)||[]; draw(); });
         }).catch(function(e){ b.innerHTML='<div style="color:var(--neg);padding:10px">Failed to load Xero config: '+esc(e&&e.message||e)+'</div>'; });
         function orgPills(){ return ['uk','au'].map(function(rg){ var on=(rg===REG); var nm=(STATUS&&STATUS.regions&&STATUS.regions[rg]&&(STATUS.regions[rg].org_name))||rg.toUpperCase();
           return '<span class="pill xcfg-org'+(on?' active':'')+'" data-rg="'+rg+'" style="cursor:pointer'+(on?';background:var(--blue);color:#fff;border-color:var(--blue)':'')+'">'+esc(rg.toUpperCase())+' — '+esc(nm)+'</span>'; }).join(' '); }
@@ -8790,9 +8793,36 @@
                 +'<td class="l">'+(conn?acctSel(rl):'<span class="mut tiny">connect the org to list accounts</span>')+'</td>'
                 +'<td class="l">'+(ok?'<span class="tool-badge bg-green">✓ mapped</span>':'<span class="tool-badge bg-amber">not mapped</span>')+'</td></tr>'; }).join('')
             +'</tbody></table></div>'
-            +'<div style="margin-top:10px" class="mut tiny">'+(missBanks.length?('⚠ '+missBanks.length+' payment source'+(missBanks.length>1?'s':'')+' still unbound for '+REG.toUpperCase()+' — the payment run can’t use '+missBanks.map(function(m){return m.label;}).join(', ')+' yet.'):'✓ all payment sources bound for '+REG.toUpperCase())+'</div>';
+            // ── Tracking categories (production tagging) ──
+            +'<div class="sect-h" style="margin-top:16px">Tracking categories — production tagging</div>'
+            +'<div class="mut tiny" style="max-width:760px;margin:0 0 8px">Xero allows 2 active tracking categories per org. Stock Deposits are tagged by production number via a <b>Production</b> category so each production’s deposit balance is reportable. Creating / adding options writes to live Xero.</div>'
+            +(trackErr?'<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Xero tracking error: '+esc(trackErr)+'</div>':'')
+            +(conn?('<div class="tw" style="max-width:900px;margin-bottom:8px"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Category</th><th class="l">Status</th><th class="l">Options</th></tr></thead><tbody>'
+              +(TRACK.length?TRACK.map(function(c){ return '<tr><td class="l"><b>'+esc(c.name)+'</b></td><td class="l">'+(c.status==='ACTIVE'?'<span class="tool-badge bg-green">active</span>':'<span class="tool-badge bg-neutral">'+esc((c.status||'').toLowerCase())+'</span>')+'</td><td class="l"><span class="mut tiny">'+c.options.length+': '+esc(c.options.map(function(o){return o.name;}).slice(0,24).join(', '))+(c.options.length>24?'…':'')+'</span></td></tr>'; }).join(''):'<tr><td colspan="3" class="l mut" style="padding:6px">no tracking categories</td></tr>')
+              +'</tbody></table></div>'
+              +(function(){ var activeCount=TRACK.filter(function(c){return c.status==='ACTIVE';}).length; var hasProd=TRACK.some(function(c){return String(c.name).toLowerCase()==='production'&&c.status==='ACTIVE';}); var full=activeCount>=2&&!hasProd;
+                return '<div style="max-width:900px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--hover)">'
+                  +'<div style="font-weight:700;margin-bottom:6px">'+(hasProd?'Sync the Production category':'Create the Production category')+'</div>'
+                  +(full?'<div class="annot" style="border-left:3px solid var(--amber);background:var(--amber-bg)">This org already has 2 active tracking categories — archive one in Xero before adding Production.</div>':'')
+                  +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><label class="mut tiny">Name</label><input class="fci" id="xtrk-name" value="Production" style="width:160px'+(full?';opacity:.5':'')+'"'+(full?' disabled':'')+'></div>'
+                  +'<div class="mut tiny" style="margin-bottom:3px">Options (one per line or comma-separated) — prefilled from HORIZON productions P58+:</div>'
+                  +'<textarea class="fci" id="xtrk-opts" rows="3" style="width:100%;box-sizing:border-box;font-family:inherit'+(full?';opacity:.5':'')+'"'+(full?' disabled':'')+'>'+esc(SUGG.join(', '))+'</textarea>'
+                  +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="save-btn" id="xtrk-create"'+(full?' disabled style="opacity:.5"':' style="background:var(--blue);color:#fff;border-color:var(--blue)"')+'>'+(hasProd?'↻ Sync options to Xero':'✚ Create in Xero')+'</button><span id="xtrk-st" class="mut tiny"></span></div>'
+                +'</div>'; })())
+              :'<div class="mut tiny">connect the org to manage tracking categories</div>')
+            +'<div style="margin-top:12px" class="mut tiny">'+(missBanks.length?('⚠ '+missBanks.length+' payment source'+(missBanks.length>1?'s':'')+' still unbound for '+REG.toUpperCase()+' — the payment run can’t use '+missBanks.map(function(m){return m.label;}).join(', ')+' yet.'):'✓ all payment sources bound for '+REG.toUpperCase())+'</div>';
           // bind
           b.querySelectorAll('.xcfg-org').forEach(function(p){ p.onclick=function(){ window._xeroCfgReg=p.dataset.rg; SUBS['xero'](); }; });
+          var tc=document.getElementById('xtrk-create'); if(tc)tc.onclick=function(){ var nm=(document.getElementById('xtrk-name').value||'').trim(); var raw=(document.getElementById('xtrk-opts').value||'');
+            var opts=raw.split(/[\n,]+/).map(function(x){return x.trim();}).filter(Boolean); var st=document.getElementById('xtrk-st');
+            if(!nm){ if(st){st.textContent='name required';st.style.color='var(--neg)';} return; }
+            if(!confirm('Create / sync the "'+nm+'" tracking category in Xero '+REG.toUpperCase()+' with '+opts.length+' option'+(opts.length===1?'':'s')+'?\n\nThis writes to live Xero.'))return;
+            tc.disabled=true; if(st){st.textContent='Writing to Xero…';st.style.color='var(--muted)';}
+            fetch('/api/supply/xero/tracking/ensure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({region:REG,name:nm,options:opts,confirm:true})})
+              .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+                if(st){st.textContent='✓ '+(j.created?'created':'synced')+(j.added&&j.added.length?' (+'+j.added.length+' option'+(j.added.length===1?'':'s')+')':' (no new options)');st.style.color='var(--pos)';}
+                setTimeout(function(){ SUBS['xero'](); },900); })
+              .catch(function(e){ tc.disabled=false; if(st){st.textContent='Failed: '+(e.message||e);st.style.color='var(--neg)';} }); };
           b.querySelectorAll('.xcfg-bank').forEach(function(sel){ sel.onchange=function(){ var reg=cfgBankSel(REG); var role=sel.dataset.role; var a=BANKS.filter(function(x){return x.id===sel.value;})[0];
             if(a){ reg[role]={account_id:a.id,code:a.code,name:a.name,currency:a.currency}; } else { delete reg[role]; } save(function(){ draw(); }); }; });
           b.querySelectorAll('.xcfg-acct').forEach(function(sel){ sel.onchange=function(){ var reg=cfgAcctSel(REG); var role=sel.dataset.role; var a=ALLACC.filter(function(x){return x.id===sel.value;})[0];
