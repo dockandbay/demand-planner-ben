@@ -1047,6 +1047,24 @@
   // v28.081: hzLate(fn) — badge/count fetches that are NOT needed for first paint run ~3s after page start (or at once later
   // in the page's life), so they stop competing with the grid for the browser's 6 connections and the DB pooler on load.
   function hzLate(fn){ var age=(window.performance&&performance.now)?performance.now():99999; var wait=age<8000?Math.max(0,3200-age):0; if(wait>0)setTimeout(fn,wait); else fn(); }
+  // v28.084 (perf Sprint D): the badge polls skip ticks while the tab is hidden; on return to a visible tab, refresh them once (all cheap now).
+  try{ document.addEventListener('visibilitychange',function(){ if(document.hidden)return; try{ if(typeof loadTlNotifs==='function')loadTlNotifs(); }catch(e){} try{ if(typeof loadProductUnread==='function')loadProductUnread(); }catch(e){} try{ if(typeof cpPollUnread==='function')cpPollUnread(); }catch(e){} }); }catch(e){}
+  // v28.084: stale-while-revalidate for the generic cached sections (shipments / cash flow / deposits / flexport / pipeline / upcoming …).
+  // The cached copy paints at once (as before); if it is older than 60s we refetch behind (the server answers from its own
+  // cache, usually a 304) and repaint ONLY when the payload actually changed AND the view is idle: no focused field in the
+  // section, no unsaved edit in any field, no drawer / overlay open, no click or key in the last 2s. Otherwise the fresh copy
+  // simply replaces the cache for the next visit. 'samples' (always live), 'actions' (progressive) and 'config' (forms) are excluded.
+  var _hzCacheAt={}, _hzLastInteract=0;
+  try{ document.addEventListener('mousedown',function(){ _hzLastInteract=Date.now(); },true); document.addEventListener('keydown',function(){ _hzLastInteract=Date.now(); },true); }catch(e){}
+  function hzViewIdle(){ try{ var c=document.getElementById('supply-content'); if(!c)return false; var ae=document.activeElement;
+      if(ae&&c.contains(ae)&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName))return false;
+      if(document.querySelector('#podrawer-bg.open,#shipdrawer-bg.open,#sampdrawer-bg.open,#ov.open,#hzcmd.open'))return false;
+      if(Date.now()-_hzLastInteract<2000)return false;
+      var dirty=Array.prototype.some.call(c.querySelectorAll('input,textarea,select'),function(el){ if(el.type==='checkbox'||el.type==='radio')return el.checked!==el.defaultChecked; if(el.tagName==='SELECT'){ for(var i=0;i<el.options.length;i++){ if(el.options[i].selected!==el.options[i].defaultSelected)return true; } return false; } return el.value!==el.defaultValue; });
+      return !dirty; }catch(e){ return false; } }
+  function hzRevalidate(key,tk){ if(key==='samples'||key==='actions'||key==='config')return;
+    fetch('/api/supply/'+key).then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
+      cache[key]=d; _hzCacheAt[key]=Date.now(); if(same||tk!==_navToken||current!==key||!hzViewIdle())return; try{ renderSectionData(key,d); }catch(e){} }).catch(function(){}); }
   function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
@@ -13388,6 +13406,21 @@
           .catch(function(e){ eb.disabled=false; eb.textContent=t; alert('Escalate failed: '+(e.message||e)); }); };
     }).catch(function(){}); }
 
+  function renderSectionData(key,d){   // v28.084: the section → renderer dispatch (was inline in selectSection's done()); also used by hzRevalidate
+      if(key==='actions')return renderActions(d);
+      if(key==='upcoming')return renderUpcoming(d);
+      if(key==='pipeline')return renderPipeline(d);
+      if(key==='purchase-orders')return renderPO(d);
+      if(key==='order-plan')return renderOrderPlan(d);
+      if(key==='productions')return renderProductions(d);
+      if(key==='shipments')return renderShipments(d);
+      if(key==='samples')return renderSamples(d);
+      if(key==='flexport')return renderFlexport(d);
+      if(key==='cashflow')return renderCashflow(d);
+      if(key==='deposits')return renderDeposits(d);
+      if(key==='barcodes')return renderBarcodes(d);
+      if(key==='config')return renderConfig(d);
+      renderGeneric(key,d); }
   function selectSection(key){
     var _tk=++_navToken;   // bump on EVERY nav (even the early-return sections below) so an in-flight async render from a PRIOR section (e.g. Actions on boot) can't overwrite the section we just chose
     if(key==='barcodes')return showPoSub('barcodes');                                   // now a PURCHASE ORDERS sub-tab
@@ -13403,22 +13436,9 @@
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==key)_ns.value=key;   // keep the phone section dropdown in sync
     var c=document.getElementById('supply-content');   // keep the current view visible while loading (the badge spinner signals activity) → no "Loading…" row flash on section switch
     if(!c.children.length)c.innerHTML='<div class="count" style="opacity:.6">Loading…</div>';   // only on a truly empty first paint
-    var done=function(d){ cache[key]=d; if(_tk!==_navToken)return;   // navigated away before this resolved → don't overwrite the newer view
-      if(key==='actions')return renderActions(d);
-      if(key==='upcoming')return renderUpcoming(d);
-      if(key==='pipeline')return renderPipeline(d);
-      if(key==='purchase-orders')return renderPO(d);
-      if(key==='order-plan')return renderOrderPlan(d);
-      if(key==='productions')return renderProductions(d);
-      if(key==='shipments')return renderShipments(d);
-      if(key==='samples')return renderSamples(d);
-      if(key==='flexport')return renderFlexport(d);
-      if(key==='cashflow')return renderCashflow(d);
-      if(key==='deposits')return renderDeposits(d);
-      if(key==='barcodes')return renderBarcodes(d);
-      if(key==='config')return renderConfig(d);
-      renderGeneric(key,d); };
-    if(cache[key] && key!=='samples')return done(cache[key]);   // 'samples' is cross-supplier (a supplier creating an SR must show for admin at once) → always refetch fresh; the endpoint is cheap + uncached, and the current view stays visible while it loads
+    var done=function(d){ cache[key]=d; _hzCacheAt[key]=Date.now(); if(_tk!==_navToken)return;   // navigated away before this resolved → don't overwrite the newer view
+      renderSectionData(key,d); };
+    if(cache[key] && key!=='samples'){ var _age=Date.now()-(_hzCacheAt[key]||0); done(cache[key]); if(_age>60000)hzRevalidate(key,_tk); return; }   // 'samples' is cross-supplier (a supplier creating an SR must show for admin at once) → always refetch fresh; the endpoint is cheap + uncached, and the current view stays visible while it loads. v28.084: cached paint + background revalidate when older than 60s
     if(key==='actions')return renderActionsProgressive(c,_tk);   // Actions: high-priority preview first, then the full set
     fetch('/api/supply/'+key).then(function(r){return r.json();}).then(done).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
@@ -13512,7 +13532,7 @@
     var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(bell,sa); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp&&sp.nextSibling)row.insertBefore(bell,sp.nextSibling); else row.appendChild(bell); }
     bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
     if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
-    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
+    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ if(document.hidden)return; loadTlNotifs(); }, 240000); }   // v28.084: no polling while the tab is hidden (hzVisiblePoll refreshes on return)   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   // ── Recent changes drawer (top bar 🕘) — last 10 major SUPPLY events, newest first ──────────────────────
   var ACT_ICON={po_created:'🧾',po_confirmed:'✅',shipment_created:'🚢',deposit_added:'💰',sample_created:'🎁',supplier_submission:'📩',erp_push:'⬆️'};
   function actWhen(at){ if(!at)return ''; var d=at.slice(0,10), t=at.slice(11); return fd(d)+(t?' '+t:''); }   // YYYY-MM-DD HH:MI → dd-mmm-yy HH:MI
@@ -15675,7 +15695,7 @@
     if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showProduct(); selectProductSub(PRODUCT_SUB||'plan'); };
     row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
-    loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(loadProductUnread,240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
+    loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(function(){ if(document.hidden)return; loadProductUnread(); },240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>0?(n>99?'99+':String(n)):''; b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
   function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Rejected','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
   // Item status: In development (orange) / Approved (green) / Rejected (red, value 'dropped'). Colour-coded editable dropdown.
@@ -17468,7 +17488,7 @@
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showClient(); selectClientSub(CLIENT_SUB||'clients'); };
     row.querySelectorAll('.view-toggle:not(.client-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideClient(); }); });
-    cpPollUnread(); if(!window.__cpUnreadPoll)window.__cpUnreadPoll=setInterval(cpPollUnread,240000); }
+    cpPollUnread(); if(!window.__cpUnreadPoll)window.__cpUnreadPoll=setInterval(function(){ if(document.hidden)return; cpPollUnread(); },240000); }
   function cpPollUnread(){ if(!clientCan())return; cpGet('/api/client/threads').then(function(j){ var n=(j.threads||[]).reduce(function(s,t){return s+(t.unread_ops||0);},0); var b=document.getElementById('cp-unread'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } var tb=document.getElementById('client-btn'); if(tb)tb.innerHTML='CLIENT'+(n?' <span class="ex-badge" style="display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg,#e11d48);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px">'+n+'</span>':''); }).catch(function(){}); }
   // ── CLIENTS & AGENTS ──
   function cpRenderClients(b){ var q='', typeF='';
@@ -17861,7 +17881,14 @@
       var mb=document.getElementById('hz-rl-min'); if(mb)mb.onclick=function(e){ e.stopPropagation(); var on=document.body.classList.toggle('hz-rail-min'); try{localStorage.setItem('hzRailMin',on?'1':'');}catch(_){} };
       window.addEventListener('hashchange',function(){ try{railSync();_railSoon();}catch(e){} });
       // keep the rail's L2/L3 in sync as each module renders its sub-nav async (debounced; renderRailList is cheap)
-      if(!window._railMO){ window._railMO=new MutationObserver(function(){ clearTimeout(window._railMOT); window._railMOT=setTimeout(function(){ try{renderRailList();}catch(e){} },260); }); try{ window._railMO.observe(document.body,{childList:true,subtree:true}); }catch(e){} }
+      // v28.084 (perf Sprint D): the observer still watches the body (module roots are re-created wholesale, so the nav
+      // containers can't be observed directly) but only re-renders when a mutation touches a nav container: its target
+      // sits inside one, or a node added/removed is/contains one. Grid repaints (hundreds of row mutations) no longer count.
+      if(!window._railMO){ var RAIL_NAV_SEL='#supply-subnav,#prod-subtabs,#rep-subnav,#config-subs-l3,#demand-tabs,#buymove-tabs,#report-tabs,#product-subnav,#client-subnav,#config-subs,#demand-exceptions-nav,#demand-scenario-nav,#demand-inputs-nav,#demand-analysis-nav,#demand-config-nav,#perf-subnav,#hz-leftrail';
+        var _railRel=function(muts){ try{ for(var i=0;i<muts.length;i++){ var m=muts[i], t=m.target; if(t&&t.nodeType===1&&t.closest&&t.closest(RAIL_NAV_SEL))return true;
+            var lists=[m.addedNodes,m.removedNodes]; for(var a=0;a<2;a++){ var L=lists[a]; if(!L)continue; for(var j=0;j<L.length;j++){ var n=L[j]; if(n.nodeType!==1)continue; if((n.matches&&n.matches(RAIL_NAV_SEL))||(n.querySelector&&n.querySelector(RAIL_NAV_SEL)))return true; } } }
+          return false; }catch(e){ return true; } };
+        window._railMO=new MutationObserver(function(muts){ if(!_railRel(muts))return; clearTimeout(window._railMOT); window._railMOT=setTimeout(function(){ try{renderRailList();}catch(e){} },260); }); try{ window._railMO.observe(document.body,{childList:true,subtree:true}); }catch(e){} }
     }
     railSync(); _railSoon(); }
 
