@@ -4996,6 +4996,11 @@ async function flexportFetch(path) {
 }
 const _fxDate = v => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v == null ? '' : v)); return m ? m[1] : null; };
 const _fxPick = (o, keys) => { for (const k of keys) { if (o && o[k] != null && o[k] !== '') return o[k]; } return null; };
+// numeric string ("2985.19") → number, else null (0 counts as a real value only if it isn't the "no cost yet" 0.0 placeholder)
+const _fxNum = v => { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+const _fxInt = v => { const n = _fxNum(v); return n == null ? null : Math.round(n); };
+// whole-day difference between two ISO/date strings (actual transit), else null
+const _fxDaysBetween = (a, b) => { const da = _fxDate(a), db = _fxDate(b); if (!da || !db) return null; const ms = Date.parse(db) - Date.parse(da); return Number.isFinite(ms) ? Math.round(ms / 86400000) : null; };
 app.get('/api/supply/flexport/status', async (req, res) => {
   const cfg = flexportConfig();
   let lastSync = null; try { lastSync = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='flexport_last_sync'`)).rows[0]; lastSync = lastSync ? lastSync.value : null; } catch (e) {}
@@ -5009,7 +5014,7 @@ async function runFlexportImport(opts) {
   const per = Math.min(Math.max(parseInt(opts.per) || 100, 1), 200);
   const maxPages = Math.min(Math.max(parseInt(opts.max_pages) || 30, 1), 200);
   {
-    let page = 1, imported = 0, seen = 0; const samples = [];
+    let page = 1, imported = 0, seen = 0; const samples = []; const oceanSeen = [];   // {flexId, numId} for the container pass
     while (page <= maxPages) {
       const j = await flexportFetch('/shipments?per=' + per + '&page=' + page + '&sort=updated_at&direction=desc');
       const list = (j && j.data && Array.isArray(j.data.data)) ? j.data.data : (Array.isArray(j && j.data) ? j.data : []);
@@ -5026,16 +5031,36 @@ async function runFlexportImport(opts) {
         const name = _fxPick(s, ['name']); const mode = _fxPick(s, ['transportation_mode', 'mode']);
         const status = _fxPick(s, ['status', 'status_name']); const incoterm = _fxPick(s, ['incoterm']);
         const updated = String(_fxPick(s, ['updated_at']) || '');
+        // ── richer fields (v28.062, all from the shipment payload — no extra API calls) ──
+        const freightType = _fxPick(s, ['freight_type']);
+        const oceanS = s && s.ocean_shipment, airS = s && s.air_shipment;
+        // MBL (ocean master bill) or, for air, the master airway bill — the doc number ops track a shipment by
+        const mbl = _fxPick(oceanS || {}, ['master_bill_number', 'carrier_booking_number']) || _fxPick(airS || {}, ['master_airway_bill']) || null;
+        const quoted = _fxNum(s && s.accepted_quote && s.accepted_quote.amount);      // total quoted / accepted freight
+        const freightCost = _fxNum(_fxPick(s, ['freight_cost']));                       // invoiced freight so far ("0.0" until billed)
+        const estShipCost = quoted != null ? quoted : freightCost;                      // best estimate of the shipment cost
+        const planTransit = _fxInt(_fxPick(s, ['quoted_transit_time_days_max', 'quoted_transit_time_days_min']));
+        const actTransit = _fxDaysBetween(actDep, actArr);                              // realised port-to-port days
         await pool.query(
           `INSERT INTO planner.flexport_api_shipments (flex_id, shipment_name, mode, status_description, incoterm,
+             freight_type, mbl_number, total_quoted_amount, total_freight_cost, estimated_shipment_cost,
+             planned_transit_time, actual_transit_time,
              origin_estimated_departure, origin_actual_departure, dest_estimated_arrival, dest_actual_arrival,
              packing_date, departure_date, landing_date, arrival_date, last_modified_time)
-           VALUES ($1,$2,$3,$4,$5,$6::date,$7::date,$8::date,$9::date,$10::date,$11::date,$12::date,$13::date,$14)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+             $13::date,$14::date,$15::date,$16::date,$17::date,$18::date,$19::date,$20::date,$21)
            ON CONFLICT (flex_id) DO UPDATE SET
              shipment_name=COALESCE(EXCLUDED.shipment_name, planner.flexport_api_shipments.shipment_name),
              mode=COALESCE(EXCLUDED.mode, planner.flexport_api_shipments.mode),
              status_description=COALESCE(EXCLUDED.status_description, planner.flexport_api_shipments.status_description),
              incoterm=COALESCE(EXCLUDED.incoterm, planner.flexport_api_shipments.incoterm),
+             freight_type=COALESCE(EXCLUDED.freight_type, planner.flexport_api_shipments.freight_type),
+             mbl_number=COALESCE(EXCLUDED.mbl_number, planner.flexport_api_shipments.mbl_number),
+             total_quoted_amount=COALESCE(EXCLUDED.total_quoted_amount, planner.flexport_api_shipments.total_quoted_amount),
+             total_freight_cost=COALESCE(EXCLUDED.total_freight_cost, planner.flexport_api_shipments.total_freight_cost),
+             estimated_shipment_cost=COALESCE(EXCLUDED.estimated_shipment_cost, planner.flexport_api_shipments.estimated_shipment_cost),
+             planned_transit_time=COALESCE(EXCLUDED.planned_transit_time, planner.flexport_api_shipments.planned_transit_time),
+             actual_transit_time=COALESCE(EXCLUDED.actual_transit_time, planner.flexport_api_shipments.actual_transit_time),
              origin_estimated_departure=COALESCE(EXCLUDED.origin_estimated_departure, planner.flexport_api_shipments.origin_estimated_departure),
              origin_actual_departure=COALESCE(EXCLUDED.origin_actual_departure, planner.flexport_api_shipments.origin_actual_departure),
              dest_estimated_arrival=COALESCE(EXCLUDED.dest_estimated_arrival, planner.flexport_api_shipments.dest_estimated_arrival),
@@ -5045,18 +5070,50 @@ async function runFlexportImport(opts) {
              landing_date=COALESCE(EXCLUDED.landing_date, planner.flexport_api_shipments.landing_date),
              arrival_date=COALESCE(EXCLUDED.arrival_date, planner.flexport_api_shipments.arrival_date),
              last_modified_time=EXCLUDED.last_modified_time`,
-          [flexId, name, mode, status, incoterm, estDep, actDep, estArr, actArr, cargoReady, actDep || estDep, estArr, actArr || estArr, updated]);
+          [flexId, name, mode, status, incoterm,
+           freightType, mbl, quoted, freightCost, estShipCost, planTransit, actTransit,
+           estDep, actDep, estArr, actArr, cargoReady, actDep || estDep, estArr, actArr || estArr, updated]);
+        if (oceanS && !actArr) oceanSeen.push({ flexId, numId: id, name });   // in-transit ocean → candidate for container numbers
         imported++;
-        if (samples.length < 5) samples.push({ flex_id: flexId, name, est_dep: estDep, act_dep: actDep, est_arr: estArr, act_arr: actArr });
+        if (samples.length < 5) samples.push({ flex_id: flexId, name, mode, mbl, quoted, est_dep: estDep, act_dep: actDep, est_arr: estArr, act_arr: actArr });
       }
       if (list.length < per) break;
       page++;
+    }
+    // ── Container-numbers pass (v28.062): one extra call per in-transit ocean shipment that is matched to a PO.
+    // Bounded (cap CONT_CAP) so a full sweep can't fan out to thousands of calls; skipped with opts.containers===false. ──
+    let containers_filled = 0;
+    if (opts.containers !== false && oceanSeen.length) {
+      const CONT_CAP = Math.min(Math.max(parseInt(opts.container_cap) || 80, 0), 300);
+      // only those tied to a purchase order / shipment we track (keeps the call count to what ops actually watch)
+      const names = oceanSeen.map(o => o.name).filter(Boolean);
+      const matchedNames = new Set((await pool.query(
+        `SELECT DISTINCT f.shipment_name FROM planner.flexport_api_shipments f
+         WHERE f.shipment_name = ANY($1) AND EXISTS (
+           SELECT 1 FROM planner.purchase_orders p
+           WHERE p.flexport_reference=f.flex_id OR p.shipment_ref=f.shipment_name OR p.po=f.shipment_name)`,
+        [names])).rows.map(r => r.shipment_name));
+      let calls = 0;
+      for (const o of oceanSeen) {
+        if (calls >= CONT_CAP) break;
+        if (o.name && !matchedNames.has(o.name)) continue;
+        calls++;
+        try {
+          const cj = await flexportFetch('/ocean/shipment_containers?f.shipment.id=' + encodeURIComponent(o.numId));
+          const rows = (cj && cj.data && Array.isArray(cj.data.data)) ? cj.data.data : [];
+          const nums = [...new Set(rows.map(c => c && c.container_number).filter(Boolean))];
+          if (nums.length) {
+            await pool.query(`UPDATE planner.flexport_api_shipments SET container_numbers=$2 WHERE flex_id=$1`, [o.flexId, nums.join(', ')]);
+            containers_filled++;
+          }
+        } catch (e) { /* one bad container fetch never fails the whole import */ }
+      }
     }
     const apiCount = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments`)).rows[0].n;
     const matched = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments f WHERE EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR p.shipment_ref=f.shipment_name OR p.po=f.shipment_name)`)).rows[0].n;
     const at = new Date().toISOString();
     await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ('flexport_last_sync',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [at]);
-    return { ok: true, pages: page, seen, imported, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
+    return { ok: true, pages: page, seen, imported, containers_filled, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
   }
 }
 app.post('/api/supply/flexport/import', async (req, res) => {
