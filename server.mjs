@@ -6257,17 +6257,36 @@ app.get('/api/supply/:section', async (req, res, next) => {
           ORDER BY slip_days DESC NULLS LAST, po.supplier_name, po.po`);
         return res.json({ pos: rows });
       }
-      case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes + system events (e.g. auto-complete on receipt), newest first, minus snoozed (supply_action_state key 'tlnote|<id>')
-        return res.json(await q(`
-          SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body,
-                 to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
-          FROM planner.supplier_notes sn
-          LEFT JOIN planner.purchase_orders po ON po.po = sn.po
-          LEFT JOIN planner.supply_action_state s ON s.action_key = 'tlnote|'||sn.id
-                 AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
-          WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system'))
-                AND sn.read_at IS NULL AND s.action_key IS NULL
-          ORDER BY sn.created_at DESC`));
+      case 'timeline-notifications': {   // top-bar ✉ bell: unread messages across the domains the user's permissions allow
+        // (v28.070) — PURCHASE ORDER (supplier_notes), SAMPLES (sample_notes), CLIENT (client_messages). PRODUCT has no
+        // message source yet. Each item is tagged with its type + a per-source snooze key (supply_action_state 'tlnote|…').
+        const _me = await permsFor(req);
+        const _types = Array.isArray(_me.inbox_types) ? _me.inbox_types : INBOX_TYPES_ALL;
+        const _out = [];
+        if (_types.includes('purchase_order')) {
+          (await q(`SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body, to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
+            FROM planner.supplier_notes sn LEFT JOIN planner.purchase_orders po ON po.po = sn.po
+            LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|'||sn.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
+            WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system')) AND sn.read_at IS NULL AND s.action_key IS NULL`))
+            .forEach(r => _out.push({ id: 'po:' + r.id, rid: r.id, src: 'po', type: 'purchase_order', type_label: 'Purchase order', po: r.po, ref: r.po, supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|' + r.id, open: 'po' }));
+        }
+        if (_types.includes('samples')) {
+          (await q(`SELECT n.id, coalesce(sr.ref,'') ref, coalesce(sr.supplier_name,'') supplier_name, n.body, to_char(n.created_at,'YYYY-MM-DD HH24:MI') created_at
+            FROM planner.sample_notes n LEFT JOIN planner.sample_requests sr ON sr.id = n.sample_id
+            LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|smp:'||n.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
+            WHERE n.author_kind='supplier' AND n.read_at IS NULL AND s.action_key IS NULL`))
+            .forEach(r => _out.push({ id: 'smp:' + r.id, rid: r.id, src: 'smp', type: 'samples', type_label: 'Sample', ref: r.ref || ('sample ' + r.id), supplier_name: r.supplier_name, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|smp:' + r.id, open: 'sample' }));
+        }
+        if (_types.includes('client')) {
+          (await q(`SELECT m.id, coalesce(ct.subject,'') subject, coalesce(m.sender,'') sender, ct.id thread_id, m.body, to_char(m.created_at,'YYYY-MM-DD HH24:MI') created_at
+            FROM planner.client_messages m LEFT JOIN planner.client_threads ct ON ct.id = m.thread_id
+            LEFT JOIN planner.supply_action_state s ON s.action_key='tlnote|cli:'||m.id AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
+            WHERE m.sender_kind='client' AND m.read_by_ops_at IS NULL AND s.action_key IS NULL`))
+            .forEach(r => _out.push({ id: 'cli:' + r.id, rid: r.id, src: 'cli', type: 'client', type_label: 'Client', ref: r.subject || ('thread ' + r.thread_id), supplier_name: r.sender, thread_id: r.thread_id, body: r.body, created_at: r.created_at, snooze_key: 'tlnote|cli:' + r.id, open: 'client' }));
+        }
+        _out.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));   // created_at is 'YYYY-MM-DD HH24:MI' → lexical = chronological
+        return res.json(_out.slice(0, 100));
+      }
       case 'samples':   // SUPPLY ▸ Samples grid — all sample requests + open/overdue/charge flags
         return res.json(await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
           coalesce(s.recipient_company,'') recipient_company, coalesce(s.internal_stakeholders,'[]'::jsonb) internal_stakeholders,
@@ -9952,6 +9971,19 @@ app.post('/api/supply/note-read/:id', async (req, res) => {
     res.json({ ok: true, read });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Unified top-bar Inbox mark-read (v28.070) — one endpoint for every inbox source: {src:'po'|'smp'|'cli', id}.
+// po → supplier_notes.read_at, smp → sample_notes.read_at, cli → client_messages.read_by_ops_at.
+app.post('/api/supply/inbox-read', async (req, res) => {
+  try {
+    const b = req.body || {}; const src = String(b.src || 'po'); const id = b.id;
+    if (id == null) return res.status(400).json({ error: 'id required' });
+    const read = !(b.read === false);
+    const map = { po: ['supplier_notes', 'read_at'], smp: ['sample_notes', 'read_at'], cli: ['client_messages', 'read_by_ops_at'] };
+    const t = map[src]; if (!t) return res.status(400).json({ error: 'unknown src: ' + src });
+    await pool.query(`UPDATE planner.${t[0]} SET ${t[1]}=${read ? 'now()' : 'NULL'} WHERE id=$1`, [id]);
+    res.json({ ok: true, read });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Delete the MOST RECENT note in a timeline thread. Guards against deleting older history: the id must be the
 // latest note for its thread (looked up from the note's own thread key). Optional supplierOnly restricts to
 // supplier-authored notes (portal side). table/keyCol are code literals; keyVal + id are parameterised.
@@ -10054,19 +10086,25 @@ const SUPER_ADMINS = new Set(
 const _permsMemo = new Map();   // email → { at, row }
 const PERMS_MEMO_MS = 60000;
 function permsMemoDrop(email) { if (email) _permsMemo.delete(String(email).toLowerCase()); else _permsMemo.clear(); }
+// Inbox item types a user can be granted (top-bar Inbox filter, v28.070). Order = display order.
+const INBOX_TYPES_ALL = ['samples', 'purchase_order', 'product', 'client'];
+const INBOX_TYPE_LABEL = { samples: 'Sample', purchase_order: 'Purchase order', product: 'Product', client: 'Client' };
 async function permsFor(req) {
   const email = authUser(req);
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, landing_page: 'supply/purchase-orders', favourites: [] };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
   let row = null;
   const m = _permsMemo.get(e);
   if (m && Date.now() - m.at < PERMS_MEMO_MS) row = m.row;
   else {
-    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
+    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
   }
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
-  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
+  // inbox_types: which top-bar Inbox item types this user sees. NULL/unset = all (back-compat); a saved array (incl. empty) is explicit.
+  let inboxTypes = INBOX_TYPES_ALL;
+  if (row && row.inbox_types != null) { try { const a = typeof row.inbox_types === 'string' ? JSON.parse(row.inbox_types) : row.inbox_types; if (Array.isArray(a)) inboxTypes = a.filter(t => INBOX_TYPES_ALL.includes(t)); } catch (_) {} }
+  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes };
 }
 // Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
 // No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
@@ -10089,7 +10127,9 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
+    r.rows.forEach(row => { if (row.inbox_types != null && typeof row.inbox_types === 'string') { try { row.inbox_types = JSON.parse(row.inbox_types); } catch (_) { row.inbox_types = null; } } });   // jsonb → array for the client
+    res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // ── Coghlans SFTP browser (Ben, 2026-09-08): read-only folder/file listing over the Webshare static-IP HTTP proxy. ──
 // Config-level access (supply OR demand edit, or admin). Connection params come from env (see coghlans_sftp.mjs); the
@@ -10496,9 +10536,15 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
   permsMemoDrop(email);   // v27.894: a permissions change must apply on the user's very next request
-  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, client_access, commissions, updated_at, updated_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$8,$9,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, client_access=excluded.client_access, commissions=excluded.commissions, updated_at=now(), updated_by=excluded.updated_by`,
-      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox', !!b.client_access, !!b.commissions]);
+  // inbox_types (v28.070): array of allowed Inbox item types; omit/undefined = leave unchanged, null = clear (→ all), array = set
+  let inboxJson; if (b.inbox_types === undefined) inboxJson = undefined;
+  else if (b.inbox_types === null) inboxJson = null;
+  else if (Array.isArray(b.inbox_types)) inboxJson = JSON.stringify(b.inbox_types.filter(t => INBOX_TYPES_ALL.includes(t)));
+  else inboxJson = undefined;
+  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, client_access, commissions, inbox_types, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$8,$9,$10::jsonb,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, client_access=excluded.client_access, commissions=excluded.commissions,`
+      + (inboxJson === undefined ? '' : ' inbox_types=excluded.inbox_types,') + ` updated_at=now(), updated_by=excluded.updated_by`,
+      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox', !!b.client_access, !!b.commissions, inboxJson === undefined ? null : inboxJson]);
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });

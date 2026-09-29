@@ -217,6 +217,11 @@
 #tl-drop .tl-item{padding:9px 12px;border-bottom:1px solid var(--hover)}
 #tl-drop .tl-item:last-child{border-bottom:none}
 #tl-drop .tl-po{font-weight:700;color:var(--blue);cursor:pointer}
+#tl-drop .tl-tag{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;padding:1px 5px;border-radius:4px;vertical-align:1px}
+#tl-drop .tl-tag-po{background:var(--blue-soft);color:var(--blue-ink)}
+#tl-drop .tl-tag-smp{background:#fef3c7;color:#92400e}
+#tl-drop .tl-tag-cli{background:#dcfce7;color:#166534}
+#tl-drop .tl-tag-prd{background:#ede9fe;color:#6d28d9}
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
 #tl-drop .tl-acts{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
@@ -7085,7 +7090,8 @@
     if(typeof window.__tlOnCount==='function')try{window.__tlOnCount(n);}catch(e){} }   // let the mobile drawer mirror the count
   function loadTlNotifs(cb){ fetch('/api/supply/timeline-notifications').then(function(r){return r.json();}).then(function(rows){ TL_NOTIFS=Array.isArray(rows)?rows:[]; tlSetCount(TL_NOTIFS.length); var d=document.getElementById('tl-drop'); if(d&&d.classList.contains('open'))renderTlDrop(); if(cb)cb(); }).catch(function(){}); }
   function tlItemHtml(n){ var body=String(n.body||''); if(body.length>240)body=body.slice(0,240)+'…';
-    return '<div class="tl-item" data-id="'+esc(String(n.id))+'"><div><span class="tl-po" data-po="'+esc(n.po||'')+'">'+esc(n.po||'—')+'</span>'+(n.supplier_name?' <span class="mut tiny">'+esc(n.supplier_name)+'</span>':'')+'<span class="mut tiny" style="float:right">'+esc(n.created_at||'')+'</span></div>'
+    var tag=n.type_label?'<span class="tl-tag tl-tag-'+esc(n.src||'po')+'">'+esc(n.type_label)+'</span> ':'';
+    return '<div class="tl-item" data-id="'+esc(String(n.id))+'"><div>'+tag+'<span class="tl-po" data-open="'+esc(n.open||'')+'" data-ref="'+esc(n.ref||n.po||'')+'" data-thread="'+esc(String(n.thread_id||''))+'">'+esc(n.ref||n.po||'—')+'</span>'+(n.supplier_name?' <span class="mut tiny">'+esc(n.supplier_name)+'</span>':'')+'<span class="mut tiny" style="float:right">'+esc(n.created_at||'')+'</span></div>'
       +'<div class="tl-body">'+esc(body)+'</div>'
       +'<div class="tl-acts"><button class="tl-read" data-id="'+esc(String(n.id))+'">✓ Mark read</button>'
       +'<button class="save-btn light tl-snz-menu" data-id="'+esc(String(n.id))+'" title="snooze this message">SNOOZE ▾</button>'
@@ -7105,16 +7111,20 @@
     d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px"><span>Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</span><button class="tl-close" title="Close" aria-label="Close" style="border:1px solid #cbd5e1;background:var(--hover);color:var(--muted);width:26px;height:26px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;flex:0 0 auto">&times;</button></div>'
       +(TL_NOTIFS.length?TL_NOTIFS.map(tlItemHtml).join(''):'<div class="count" style="padding:16px 12px">No unread timeline messages 🎉</div>');
     var _xb=d.querySelector('.tl-close'); if(_xb)_xb.onclick=function(e){ e.stopPropagation(); closeTlDropdown(); };
-    d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var po=el.dataset.po; if(!po)return; closeTlDropdown();
+    d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var open=el.dataset.open||'po', ref=el.dataset.ref; if(!ref&&open!=='client')return; closeTlDropdown();
+      if(open==='sample'){ if(typeof openSampleDrawer==='function')openSampleDrawer(ref); else if(typeof gotoSample==='function')gotoSample(ref); return; }
+      if(open==='client'){ var tid=el.dataset.thread; location.hash='#/client/messages'+(tid?('/'+encodeURIComponent(tid)):''); return; }
       var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); if(typeof selectSection==='function')selectSection('purchase-orders'); }   // clicked from DEMAND/BUY/etc → reveal SUPPLY so the PO drawer is visible
-      if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
+      if(typeof openPODrawer==='function')openPODrawer(ref,'timeline'); }; });
     d.querySelectorAll('.tl-read').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'read',b); }; });
     d.querySelectorAll('.tl-snz-menu').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openTlSnzMenu(b); }; }); }
   function tlAct(id,kind,btn,opts){ opts=opts||{}; if(btn)btn.disabled=true;
-    var ep = kind==='read' ? '/api/supply/note-read/'+encodeURIComponent(id) : '/api/supply/actions/state';
-    var body = kind==='read' ? {} : {key:'tlnote|'+id, status:'snoozed', snooze_days:parseInt(opts.days,10)||7, indefinite:!!opts.indef};
+    var n=TL_NOTIFS.filter(function(x){return String(x.id)===String(id);})[0]||{};
+    var ep, body;
+    if(kind==='read'){ ep='/api/supply/inbox-read'; body={src:n.src||'po', id:(n.rid!=null?n.rid:id)}; }
+    else { ep='/api/supply/actions/state'; body={key:n.snooze_key||('tlnote|'+id), status:'snoozed', snooze_days:parseInt(opts.days,10)||7, indefinite:!!opts.indef}; }
     fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-      .then(function(){ TL_NOTIFS=TL_NOTIFS.filter(function(n){return String(n.id)!==String(id);}); tlSetCount(TL_NOTIFS.length); renderTlDrop(); })
+      .then(function(){ TL_NOTIFS=TL_NOTIFS.filter(function(x){return String(x.id)!==String(id);}); tlSetCount(TL_NOTIFS.length); renderTlDrop(); })
       .catch(function(){ if(btn)btn.disabled=false; }); }
   function toggleTlDropdown(){ var d=document.getElementById('tl-drop'); if(!d)return;
     if(d.classList.contains('open')){ closeTlDropdown(); return; }
@@ -8468,6 +8478,11 @@
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
           if(rows&&rows.error){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(rows.error)+'</div>'; return; }
           function chk(email,field,val){ return '<input type="checkbox" class="pm-chk" data-em="'+esc(email)+'" data-f="'+field+'"'+(val?' checked':'')+'>'; }
+          // Inbox item-type grants (v28.070): null = see all (back-compat); an array = only those types. Checkboxes: Sample / PO / Product / Client.
+          var INBOX_KEYS=[['samples','Sample'],['purchase_order','PO'],['product','Product'],['client','Client']];
+          function inboxCell(email,types){ var all=(types==null);
+            return '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">'+INBOX_KEYS.map(function(k){ var on=all||(Array.isArray(types)&&types.indexOf(k[0])>=0);
+              return '<label style="font-size:9.5px;white-space:nowrap;cursor:pointer"><input type="checkbox" class="pm-inbox" data-em="'+esc(email)+'" data-t="'+k[0]+'"'+(on?' checked':'')+' style="vertical-align:middle;margin-right:2px">'+k[1]+'</label>'; }).join('')+'</div>'; }
           var LAND_OPTS=[['supply/purchase-orders','SUPPLY ▸ Purchase Orders'],['supply/actions','SUPPLY ▸ Actions'],['demand','DEMAND'],['buy','BUY'],['fba','FBA'],['reports','REPORTS'],['product/plan','PRODUCT'],['client/clients','CLIENT'],['config','CONFIG'],['demand/scenario','DEMAND ▸ Scenario planner']];
           function landSel(val){ var v=val||'supply/purchase-orders'; return '<select class="pm-land" style="font-size:11px;padding:2px 5px;border:1px solid var(--line);border-radius:4px">'+LAND_OPTS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+esc(o[1])+'</option>';}).join('')+'</select>'; }
           var body=(rows||[]).map(function(r){ return '<tr data-em="'+esc(r.email)+'"><td class="l" style="white-space:nowrap">'+esc(r.email)+'</td>'
@@ -8477,6 +8492,7 @@
               +'<td class="l" style="text-align:center">'+chk(r.email,'client_access',r.client_access)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'commissions',r.commissions)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'is_admin',r.is_admin)+'</td>'
+              +'<td class="l">'+inboxCell(r.email,r.inbox_types)+'</td>'
               +'<td class="l">'+landSel(r.landing_page)+'</td>'
               +'<td class="l" style="white-space:nowrap"><span class="mut tiny">'+esc(r.updated_at||'')+(r.updated_by?' · '+esc(r.updated_by):'')+'</span></td>'
               +'<td class="l"><button class="pm-del" data-em="'+esc(r.email)+'" style="cursor:pointer;border:1px solid var(--neg-cell);background:var(--neg-bg);color:var(--neg);border-radius:4px;font-size:11px;padding:3px 9px">Remove</button></td></tr>'; }).join('');
@@ -8491,14 +8507,16 @@
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nadmin"> Admin</label>'
               +'<button class="tool-badge bg-blue" id="pm-add" style="cursor:pointer;border:none">+ Grant access</button>'
               +'<span class="pm-err" style="color:var(--neg);font-size:12px"></span></div>'
-            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">CLIENT</th><th class="l" style="white-space:nowrap;text-align:center">COMMISSIONS</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="10" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
+            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">CLIENT</th><th class="l" style="white-space:nowrap;text-align:center">COMMISSIONS</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap;text-align:center" title="Which top-bar Inbox item types this user sees">Inbox</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="11" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
           function save(payload,cb){ fetch('/api/config/permissions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(cb)cb(j); }).catch(function(e){ if(cb)cb({error:(e&&e.message)||'failed'}); }); }
           function rowPayload(tr){ return { email:tr.dataset.em,
             supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked,
             product_edit:tr.querySelector('.pm-chk[data-f="product_edit"]').checked, is_admin:tr.querySelector('.pm-chk[data-f="is_admin"]').checked,
             client_access:tr.querySelector('.pm-chk[data-f="client_access"]').checked, commissions:tr.querySelector('.pm-chk[data-f="commissions"]').checked,
+            inbox_types:Array.prototype.map.call(tr.querySelectorAll('.pm-inbox:checked'),function(c){return c.dataset.t;}),
             landing_page:(tr.querySelector('.pm-land')||{}).value||'' }; }
           b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
+          b.querySelectorAll('.pm-inbox').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
           b.querySelectorAll('.pm-land').forEach(function(sel){ sel.onchange=function(){ save(rowPayload(sel.closest('tr')),function(j){ if(j&&j.error){ alert(j.error); showSub(); } }); }; });
           b.querySelectorAll('.pm-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove '+btn.dataset.em+'? They revert to read-only everywhere.'))return; fetch('/api/config/permissions/'+encodeURIComponent(btn.dataset.em),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); showSub(); }); }; });
           document.getElementById('pm-add').onclick=function(){ var em=(document.getElementById('pm-nemail').value||'').trim(); var err=b.querySelector('.pm-err'); err.textContent='';
