@@ -1,3 +1,17 @@
+## v28.123 (Ben): mirror Diviyaj's prod v28.122.1 menu fix + portal hardening
+
+**Files: `supply/inject.html`, `server.mjs`, `vercel.json`.** Mirrors what Diviyaj shipped on prod (01-Oct-26) so this repo matches.
+
+- **Menu slowness (real root cause):** the 5-min poll set `pendingData` when `/api/version.data` differed from the tab's `BOOT_DATA`, and a visible tab never cleared it, so after the first hourly Flexport sync EVERY menu click busted the supply cache and re-fetched everything. Now: bust once, clear `pendingData`, re-stamp `BOOT_DATA` to the value seen (hashchange and backgrounded paths).
+- **`/api/version` `data`** now returns the SERVED blob's freshness (`_dataCache.vals[8]`), falling back to the live 60s-cached max only when no blob is loaded, so page and poll compare like for like.
+- **Portal `GET /api/portal/asn-labels/:po`:** added `portalAuth` + `portalOwnsPO` (it was under the gate-exempt prefix with no session check).
+- **Portal `GET /api/portal/img`:** host allowlist `res.cloudinary.com`, `cdn.shopify.com` (exact hostname match).
+- **Left rail `.rl2` / `.rl3`:** reserve 34 px on the right so the "99+" badge no longer covers PURCHASE ORDERS.
+- **`vercel.json`:** dropped the `memory` line (ignored on Fluid; Function CPU is set in the Vercel dashboard).
+
+Not mirrored (prod-only, Diviyaj owns): `attachDatabasePool` + 10 s connect timeout, security headers.
+
+No migration. No new env vars.
 ## v28.028 (Ben): both Xero orgs (UK + AU) connected live via Custom Connections
 
 **File: `server.mjs`.**

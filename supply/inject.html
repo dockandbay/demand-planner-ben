@@ -268,13 +268,13 @@
 #hz-leftrail .rl1 .lab{flex:1}
 #hz-leftrail .rl2wrap{padding:2px 0 5px 12px;margin:1px 0 3px 16px;position:relative}
 #hz-leftrail .rl2wrap:before{content:"";position:absolute;left:2px;top:0;bottom:6px;width:1px;background:rgba(255,255,255,.10)}
-#hz-leftrail .rl2{display:block;width:100%;text-align:left;border:0;background:none;color:var(--nav-dim,#93a1b8);font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border-radius:7px;cursor:pointer;position:relative}
+#hz-leftrail .rl2{display:block;width:100%;text-align:left;border:0;background:none;color:var(--nav-dim,#93a1b8);font:inherit;font-size:12px;font-weight:600;padding:6px 34px 6px 10px;border-radius:7px;cursor:pointer;position:relative}
 #hz-leftrail .rl2:hover{color:#fff;background:rgba(255,255,255,.06)}
 #hz-leftrail .rl2.on{color:#fff;font-weight:700}
 #hz-leftrail .rl2.on:before{content:"";position:absolute;left:-11px;top:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:#5aa6ea}
 #hz-leftrail .rl3wrap{padding:1px 0 3px 13px;margin-left:6px;position:relative}
 #hz-leftrail .rl3wrap:before{content:"";position:absolute;left:2px;top:0;bottom:5px;width:1px;background:rgba(255,255,255,.07)}
-#hz-leftrail .rl3{display:block;width:100%;text-align:left;border:0;background:none;color:#7d8ba3;font:inherit;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer}
+#hz-leftrail .rl3{display:block;width:100%;text-align:left;border:0;background:none;color:#7d8ba3;font:inherit;font-size:11.5px;font-weight:600;padding:4px 34px 4px 10px;border-radius:6px;cursor:pointer}
 #hz-leftrail .rl3:hover{color:#fff;background:rgba(255,255,255,.06)}
 #hz-leftrail .rl3.on{color:#5aa6ea;font-weight:700}
 #hz-leftrail .rl3{position:relative}   /* anchor the action counter */
@@ -18175,7 +18175,11 @@
   //   DATA  — the ETL refreshed a source table (sales / products / inbound / Flexport). Frequent (n8n). This must
   //           NOT interrupt someone reading or entering data with a surprise full-page reload. We apply it silently
   //           only at a natural boundary: the NEXT navigation (hash change), or while the tab is backgrounded.
-  var pendingCode=false, pendingData=false, lastAct=Date.now();
+  var pendingCode=false, pendingData=false, lastAct=Date.now(), seenData=null;
+  // v28.123 (Diviyaj prod v28.122.1): once a data change has been applied (cache busted), clear the flag AND re-stamp
+  // BOOT_DATA to the value we just saw. Before, a visible tab never cleared pendingData, so after the first hourly
+  // Flexport sync EVERY menu click busted the supply cache and re-fetched everything (the "menu is slow" bug).
+  function dataApplied(){ pendingData=false; if(seenData)BOOT_DATA=seenData; }
   var STALE_MS=30*60*1000, IDLE_MS=90*1000;   // hard cap on a very old session; "idle" = no interaction 90s
   ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(function(ev){ window.addEventListener(ev,function(){ lastAct=Date.now(); },{passive:true,capture:true}); });
   // Reload, but FIRST flush any unsaved forecast edits to the DB. SMOOTH / cell edits sit in-memory until a 60s
@@ -18203,7 +18207,7 @@
       // numbers; no reload. (Visible tabs already never reload — see below.)
       try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){}
       try{ if(typeof BUY_FC_STALE!=='undefined')BUY_FC_STALE=true; }catch(e){}
-      pendingData=false; return;
+      dataApplied(); return;
     }
     /* Visible tab: NEVER force a reload — not code, not data, not even while idle (Ben: idle auto-refresh is
        disruptive — you lose scroll/position mid-task). A newer deploy is applied at the NEXT navigation
@@ -18211,13 +18215,13 @@
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
     if(j.version&&BOOT&&BOOT.indexOf('APP_VERSION')<0&&j.version!==BOOT)pendingCode=true;   // v28.122 (Ben/prod): a real newer deploy — but NOT when BOOT is an un-stamped '__APP_VERSION__' placeholder (that would reload on every nav forever)
-    if(BOOT_DATA&&j.data&&j.data!==BOOT_DATA)pendingData=true;       // ETL/source data changed since this tab loaded
+    if(BOOT_DATA&&j.data&&j.data!==BOOT_DATA){ pendingData=true; seenData=j.data; }       // ETL/source data changed since this tab loaded
     if(pendingCode||pendingData)apply(); }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { lastAct=Date.now(); check(); } });
   window.addEventListener('focus',function(){ lastAct=Date.now(); check(); });
   window.addEventListener('hashchange',function(){
     if(pendingCode){ safeReload(); return; }   // a new DEPLOY needs the new JS/HTML → full reload at this navigation (rare)
-    if(pendingData){ try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){} }   // DATA changed: silently drop cached section data so the destination view re-fetches fresh — NO full reload (nav must stay snappy). — Ben
+    if(pendingData){ try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){} dataApplied(); }   // DATA changed (bust ONCE, then clear — v28.123): silently drop cached section data so the destination view re-fetches fresh — NO full reload (nav must stay snappy). — Ben
   });
   setInterval(check,5*60*1000);                        // poll for new version / data every 5 minutes
   setInterval(function(){ if(pendingCode||pendingData)apply(); },30*1000);   // retry at safe moments (only reloads a backgrounded tab; a visible tab waits for the next navigation)

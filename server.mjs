@@ -2590,7 +2590,9 @@ app.get('/api/perf/recent', (req, res) => {
   const tot = rows.reduce((a, r) => a + r.ms, 0);
   res.set('Cache-Control', 'no-store').json({ ok: true, slow_ms: HZ_SLOW_MS, n: rows.length, avg_ms: rows.length ? Math.round(tot / rows.length) : 0, rows: rows.slice(0, 300) });
 });
-app.get('/api/version', async (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: await freshnessCached() }); });
+// v28.123 (Diviyaj prod v28.122.1): report the SERVED blob's freshness (element 8 of _buildDataVals) so the page's
+// EXTRACT_TS and the poll compare like for like; a live max() moved ahead of the blob and flagged every tab stale.
+app.get('/api/version', async (_req, res) => { const b = _dataCache && _dataCache.vals && _dataCache.vals[8]; res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: b || await freshnessCached() }); });
 // Weather cache (moved off Airtable → planner.weather_cache). The DEMAND ▸ Actions ▸ Weather panel reads
 // this instead of calling Airtable via the Anthropic MCP. Rows are refreshed by the weather job (see Diviyaj note).
 app.get('/api/weather', async (_req, res) => {
@@ -11200,9 +11202,11 @@ app.get('/api/asn-labels/:po', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal-side ASN download (gate-exempt supplier session) — same generated PDF.
-app.get('/api/portal/asn-labels/:po', async (req, res) => {
+// v28.123 (Diviyaj prod): was under the gate-exempt /api/portal/ prefix with NO session check → portalAuth + ownership.
+app.get('/api/portal/asn-labels/:po', portalAuth, async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try {
+    if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
     const r = (await pool.query('SELECT asn_numbers FROM planner.purchase_orders WHERE po=$1', [po])).rows[0];
     const asns = String((r && r.asn_numbers) || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!asns.length) return res.status(400).json({ error: 'No ASN numbers for ' + po });
@@ -22980,6 +22984,9 @@ app.get('/api/portal/asset/:name', (req, res) => {
 app.get('/api/portal/img', portalAuth, async (req, res) => {
   try {
     const u = String(req.query.url || ''); if (!/^https?:\/\//i.test(u)) return res.status(400).end();
+    // v28.123 (Diviyaj prod): image proxy limited to our two image hosts (was an open fetch-any-URL proxy).
+    let host = ''; try { host = new URL(u).hostname.toLowerCase(); } catch (_) { return res.status(400).end(); }
+    if (host !== 'res.cloudinary.com' && host !== 'cdn.shopify.com') return res.status(403).end();
     const r = await fetch(u); if (!r.ok) return res.status(502).end();
     res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
     res.setHeader('cache-control', 'public, max-age=86400');
