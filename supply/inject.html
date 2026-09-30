@@ -1222,6 +1222,9 @@
   // little ↗ tracking link for a carrier (empty string if the carrier has no tracker)
   function carrierTrackTag(carrier,ref){ var u=carrierTrackUrl(carrier,ref); return u?' <a href="'+u+'" target="_blank" rel="noopener" class="mut" title="track with '+esc(carrier||'carrier')+' ↗" style="text-decoration:none">↗</a>':''; }
   // full clickable tracking code (code + ↗) — dynamic carrier link; plain text if the carrier has no tracker
+  // v28.119 (Ben): a sample/shipment tracking number shows our LIVE DHL/FedEx status pill (click → tracking modal)
+  // when the carrier is DHL/FedEx, OR when there's no carrier but the number is a 10-digit DHL air-waybill.
+  function _smpLiveTrk(carrier,code){ code=String(code||'').replace(/\s+/g,''); if(!code)return ''; var dhl=/dhl/i.test(carrier||'')||(!String(carrier||'').trim()&&/^[0-9]{10}$/.test(code)); var fedex=/fed ?ex/i.test(carrier||''); return (dhl||fedex)?' <span class="hz-trkpill" data-trk="'+esc(code)+'"></span>':''; }
   function carrierTrackLinkInj(carrier,code){ if(!code)return ''; var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // DHL tracking pill (P2b, v27.720). Reads the server cache (planner.carrier_tracking) via /api/tracking/status,
   // never DHL directly. Drop a placeholder <span class="hz-trkpill" data-trk="NUMBER"></span> next to a DHL number,
@@ -13126,7 +13129,7 @@
       var _sa=sampActions(r);   // active (non-snoozed) exceptions → red count badge + snooze popover
       var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" data-note="'+esc(_sa.length+' action item'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze / open)')+'">'+_sa.length+'</button>':'';
       var _tu=(typeof carrierTrackUrl==='function')?carrierTrackUrl(r.carrier,r.tracking_code):'';
-      var tr=r.tracking_code?((_tu?'<a href="'+_tu+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';
+      var tr=r.tracking_code?((_tu?'<a href="'+_tu+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')+_smpLiveTrk(r.carrier,r.tracking_code)):'<span class="mut">—</span>';
       var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span> <span style="color:var(--amber);font-weight:600">'+money(r.pending_charge_amount)+' pending</span>':'';
       var acc=Number(r.accepted_charge)>0?'<span style="color:var(--pos);font-weight:600">'+money(r.accepted_charge)+' accepted</span>':'';
       var rej=r.rejected_charges>0?'<span class="tool-badge bg-red" style="font-size:9px" title="'+r.rejected_charges+' rejected charge(s)">'+r.rejected_charges+' rejected</span>':'';
@@ -13307,7 +13310,8 @@
         b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (not the ~1s native title)
         b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
       document.getElementById('samp-new').onclick=openSampleForm;
-      c.querySelectorAll('.samp-arr-open').forEach(function(b){ b.onclick=function(){ st.f='all'; _pendingSampleRef=b.dataset.ref; view(); }; });   // v28.112: open a batch from the Arriving-soon view
+      c.querySelectorAll('.samp-arr-open').forEach(function(b){ b.onclick=function(){ st.f='all'; _pendingSampleRef=b.dataset.ref; view(); }; });
+      try{ hzFillTrackPills(c); }catch(e){}   // v28.119: populate the live DHL/FedEx status pills   // v28.112: open a batch from the Arriving-soon view
       c.querySelectorAll('.samp-exp').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('sampexp-'+i), open=ex.style.display!=='none';
         ex.style.display=open?'none':''; b.classList.toggle('open',!open);
         try{ writeHash(!open && b.dataset.ref ? ['supply','samples',b.dataset.ref] : ['supply','samples']); }catch(e){}   // shareable slug for the open sample
@@ -13391,7 +13395,7 @@
           : '<span class="tiny">'+(s.supplier_expected?fd(s.supplier_expected):'—')+'</span>';
         var _stu=carrierTrackUrl(s.carrier,s.tracking_code);   // dynamic tracking link: DHL / FedEx / UPS / SF Express
         var tracking = editing ? fld('tracking_code',s.tracking_code,150,'tracking') : '<span class="tiny">'+(s.tracking_code?(_stu?'<a href="'+_stu+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+' ↗">'+esc(s.tracking_code)+' ↗</a>':esc(s.tracking_code)):'<span class="mut">—</span>')+'</span>';
-        if(!editing && s.tracking_code && /dhl/i.test(s.carrier||'')) tracking += ' <span class="hz-trkpill" data-trk="'+esc(s.tracking_code)+'"></span>';   // v27.723: DHL tracking pill on the sample card (auto-filled by the observer)
+        if(!editing) tracking += _smpLiveTrk(s.carrier, s.tracking_code);   // v28.119   // v27.723: DHL tracking pill on the sample card (auto-filled by the observer)
         var carrier  = editing ? (fld('carrier',s.carrier,120,'carrier').replace('class="fci txt samp-fld"','class="fci txt samp-fld" list="samp-carrierlist"')) : '<span class="tiny">'+(s.carrier?esc(s.carrier):'<span class="mut">—</span>')+'</span>';
         var _us=_sampNorm(s.status);   // our status normalised from s.status (NOT the detail endpoint's supplier-progress status_calc, which never matches PLANNED/SHIPPED/CANCELLED)
         var _sActsAll=sampActionsAll(s);   // all matched exceptions (incl. snoozed) → inline Ⓐ markers next to the item that carries each one

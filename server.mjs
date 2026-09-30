@@ -10868,10 +10868,15 @@ async function collectTrackingNumbers() {
     SELECT id, carrier, tracking_code, carrier_2, tracking_code_2 FROM planner.sample_requests
     WHERE received_at IS NULL AND (
          ((carrier ILIKE 'dhl%' OR carrier ILIKE 'fedex%' OR carrier ILIKE 'fed ex%') AND coalesce(tracking_code,'') <> '')
-      OR ((carrier_2 ILIKE 'dhl%' OR carrier_2 ILIKE 'fedex%' OR carrier_2 ILIKE 'fed ex%') AND coalesce(tracking_code_2,'') <> ''))`)).rows;
+      OR ((carrier_2 ILIKE 'dhl%' OR carrier_2 ILIKE 'fedex%' OR carrier_2 ILIKE 'fed ex%') AND coalesce(tracking_code_2,'') <> '')
+      OR (coalesce(trim(carrier),'') = '' AND tracking_code ~ '^[0-9]{10}$')
+      OR (coalesce(trim(carrier_2),'') = '' AND tracking_code_2 ~ '^[0-9]{10}$'))`)).rows;   // v28.119 (Ben): also poll a bare 10-digit DHL AWB with no carrier set
+  const _bareDhl = c => /^[0-9]{10}$/.test(String(c || '').replace(/\s+/g, ''));   // v28.119: bare 10-digit DHL air-waybill (no carrier set) → treat as DHL
   for (const r of sr) {
     if (_isTracked(r.carrier)) push(r.tracking_code, 'sample_requests', r.id, _carrierTag(r.carrier));
+    else if (!String(r.carrier || '').trim() && _bareDhl(r.tracking_code)) push(r.tracking_code, 'sample_requests', r.id, 'DHL');
     if (_isTracked(r.carrier_2)) push(r.tracking_code_2, 'sample_requests', r.id, _carrierTag(r.carrier_2));
+    else if (!String(r.carrier_2 || '').trim() && _bareDhl(r.tracking_code_2)) push(r.tracking_code_2, 'sample_requests', r.id, 'DHL');
   }
   // bulk shipments: skip arrived / complete / cancelled (Ben: don't poll completed items)
   const sh = (await pool.query(`
