@@ -16154,6 +16154,11 @@
     w.document.close(); }
   var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:'',supplier:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set); supplier = filter to one supplier that has products in the grid
   var _prodSort={col:'',dir:1};   // v27.671 (#12): column sort. When set, flattens the season/category grouping and sorts by the column (off → asc → desc → off).
+  // v28.113 (Ben): PRODUCT grid layout saved PER USER — the filters, sort and swatch size a user sets persist across
+  // sessions (keyed by the signed-in email in localStorage).
+  function _pgViewKey(){ try{ return 'pgview.'+(((typeof ME!=='undefined')&&ME&&ME.email)||'anon'); }catch(e){ return 'pgview.anon'; } }
+  function _pgViewSave(){ try{ localStorage.setItem(_pgViewKey(), JSON.stringify({filt:_prodFilt, sort:_prodSort, sw:_pgSwatchSize})); }catch(e){} }
+  function _pgViewLoad(){ try{ var s=JSON.parse(localStorage.getItem(_pgViewKey())||'null'); if(s){ if(s.filt&&typeof s.filt==='object')_prodFilt=Object.assign({type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:'',supplier:''}, s.filt); if(s.sort&&typeof s.sort==='object')_prodSort={col:s.sort.col||'',dir:s.sort.dir||1}; if(s.sw)_pgSwatchSize=s.sw; } }catch(e){} }
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   var _pgTab={season:'__all__',type:''}, _pgTree={season:null,type:null};   // v27.766/775 (Ben): PRODUCTS grid tabs/tree state; season tabs default to ALL
   var _prodCfgTab='season';   // PRODUCT ▸ Config active L3 sub-tab: season | cats | tags | phrases
@@ -16344,6 +16349,7 @@
       draw();
     }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; }); }
   function renderProductPlan(c){
+    _pgViewLoad();   // v28.113: restore this user's saved grid layout (filters / sort / swatch) before the filters render
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="pg-stagepills" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px"></div><div id="pg-grid"><div style="color:var(--faint)">Loading…</div></div>';
     if(!_poActStateLoaded){ loadPoActState(function(){ if(PRODUCT_SUB==='plan'&&_prodDraw)try{ _prodDraw(); }catch(e){} }); }   // snooze state for the SKU-mapping reminder — v27.878: no longer gates the first paint; the grid redraws in place once it lands
     hzqAll(['/api/product/items',['/api/app-settings',{}]]).then(function(_pr){ var rows=Array.isArray(_pr[0])?_pr[0]:[];   // v27.878: paints from cache at once (sessionStorage across reloads), revalidates behind, repaints only on change
@@ -16376,7 +16382,7 @@
         +'<span style="display:inline-flex;align-items:center;gap:5px;margin-left:auto"><span style="color:var(--muted);font-size:11px">Swatch</span><span style="display:inline-flex">'+[['sm','S'],['md','M'],['lg','L']].map(function(o){return '<button class="pg-swsize'+(_pgSwatchSize===o[0]?' active':'')+'" data-s="'+o[0]+'" title="'+({sm:'Small',md:'Medium',lg:'Large'}[o[0]])+' swatches">'+o[1]+'</button>';}).join('')+'</span></span>'+'</div>';
       document.getElementById('pg-new').onclick=openProductNew; wireProdViewSel(fb);
       var _pft=document.getElementById('pg-filt-toggle'); if(_pft)_pft.onclick=function(){ var on=fb.classList.toggle('open'); var sp=document.getElementById('pg-stagepills'); if(sp)sp.classList.toggle('open',on); _pft.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
-      fb.querySelectorAll('.pg-swsize').forEach(function(bt){ bt.onclick=function(){ _pgSwatchSize=bt.dataset.s; try{localStorage.setItem('pgSwatchSize',_pgSwatchSize);}catch(e){} fb.querySelectorAll('.pg-swsize').forEach(function(x){ x.classList.toggle('active',x.dataset.s===_pgSwatchSize); }); var g=document.getElementById('pg-grid'); if(g){ g.classList.remove('pg-sw-sm','pg-sw-md','pg-sw-lg'); g.classList.add('pg-sw-'+_pgSwatchSize); } }; });
+      fb.querySelectorAll('.pg-swsize').forEach(function(bt){ bt.onclick=function(){ _pgSwatchSize=bt.dataset.s; try{localStorage.setItem('pgSwatchSize',_pgSwatchSize);}catch(e){} _pgViewSave(); fb.querySelectorAll('.pg-swsize').forEach(function(x){ x.classList.toggle('active',x.dataset.s===_pgSwatchSize); }); var g=document.getElementById('pg-grid'); if(g){ g.classList.remove('pg-sw-sm','pg-sw-md','pg-sw-lg'); g.classList.add('pg-sw-'+_pgSwatchSize); } }; });
       wireProdTopSearch();
       // Direction A #5: stage-count pills below the filter bar. Counts reflect the current type/season/category/search
       // scope (not the active pill/status), so they always show the true stage distribution. Clicking a pill filters to
@@ -16391,6 +16397,7 @@
           var setSel=function(id,val){ var s=document.getElementById(id); if(s){ s.value=val; s.setAttribute('style',selDark(val)); } };
           setSel('pg-type','Product Development'); setSel('pg-season',''); setSel('pg-cat',''); setSel('pg-supplier',''); setSel('pg-status',''); var qi=document.getElementById('pg-q'); if(qi)qi.value=''; draw(); }; }
       function draw(){
+        _pgViewSave();   // v28.113: persist this user's grid layout on every filter/sort change
         var q=_prodFilt.q.trim().toLowerCase();
         var expandAll=!!(_prodFilt.category || q || _prodFilt.stage);   // a category / search / stage filter forces groups open so results are visible (doesn't wipe manual collapse state)
         var _passBase=function(r){
