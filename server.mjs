@@ -16189,11 +16189,11 @@ const _PO_DETAIL_Q = [
                     -- but is now discontinued is NOT flagged as "country risk" (it gets the separate DISCONTINUED
                     -- flag instead). Launch dates are always populated so they're ignored. Direct-to-Client POs
                     -- are excluded — a bespoke client order doesn't depend on retail-market availability.
-                    (EXISTS (SELECT 1 FROM planner.purchase_orders pp LEFT JOIN planner.branches bb ON bb.name=pp.branch
+                    (l.sku NOT LIKE 'POLYBAG %' AND EXISTS (SELECT 1 FROM planner.purchase_orders pp LEFT JOIN planner.branches bb ON bb.name=pp.branch
                        WHERE pp.po=l.po AND coalesce(pp.branch,'') NOT ILIKE '%direct to client%'
                          AND upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) IN ('UK','US','EU','AU','CA')
                          AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
-                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.available_no_disc))) not_avail_market,
+                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.available_no_disc))) not_avail_market,   -- v28.098: POLYBAG lines never country-risk
                     coalesce(pol.partial_carton_approved,false) partial_carton_approved,
                     coalesce(pol.supplier_risk_approved,false) supplier_risk_approved,
                     coalesce(pol.discontinue_approved,false) discontinue_approved,
@@ -19536,7 +19536,10 @@ const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Uses available_no_disc (raw channel
           -- availability flag, IGNORING discontinue) so a released-but-now-discontinued SKU is NOT flagged as
           -- country risk (it gets the DISCONTINUED flag instead). Launch dates ignored. Blank market → no flag.
+          -- v28.098 (Ben): POLYBAG (and other non-catalog packaging) lines are never a country risk — they aren't
+          -- retail products with market availability, so exclude them here.
           (coalesce(p.branch,'') NOT ILIKE '%direct to client%'
+             AND l.sku NOT LIKE 'POLYBAG %'
              AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
              SELECT 1 FROM planner.v_product_availability va
              WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.available_no_disc)) not_avail_market,
@@ -19846,6 +19849,7 @@ const OP_EXC_SQL = `
       FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
       LEFT JOIN planner.branches b ON b.name=p.branch
       WHERE coalesce(l.country_risk_approved,false)=false AND coalesce(l.qty,0)>0
+        AND l.sku NOT LIKE 'POLYBAG %'   -- v28.098 (Ben): POLYBAG packaging is not a retail SKU → never a country risk
         AND coalesce(p.status,'') NOT ILIKE '%complete%'
         AND coalesce(p.branch,'') NOT ILIKE '%direct to client%'
         AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA')
