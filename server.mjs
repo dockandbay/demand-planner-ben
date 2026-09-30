@@ -991,6 +991,36 @@ app.use(async (req, res, next) => {
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
   } catch (e) { return next(); }   // the guard must never break a request itself
 });
+// v28.089 (Ben, perf audit round 2): general response cache for heavy, param-free, user-independent GET report
+// endpoints — the SECTION_CACHE did this for /api/supply/:section; this extends the identical pattern to standalone
+// routes (bi/* sub-reports, crossdock-report, deposit-drawdown, price-list, dtc/fulfil-alignment, zalando/data,
+// trading-calendar, scenario/slow-moving, buy-extra-stock) plus a few demand/kpi analysis reads on a short TTL.
+// Cached ONLY when there are no query params (filtered variants always run live), epoch-gated (supply edits bust the
+// supply-domain entries), TTL backstop. Lazy capture: the first request per window computes + captures via a res.json
+// wrapper (so the cached bytes are provably identical to the live handler), the rest serve instantly; a request that
+// lands mid-recompute serves the last value. Registered here (after auth, before the API routes) so it wraps them.
+const RESP_CACHE = {
+  '/api/supply/crossdock-report': 600000, '/api/supply/deposit-drawdown': 600000, '/api/supply/price-list': 600000,
+  '/api/supply/dtc/fulfil-alignment': 600000, '/api/supply/zalando/data': 600000,
+  '/api/supply/bi/production-summary': 600000, '/api/supply/bi/container-fill': 600000, '/api/supply/bi/consolidations': 600000,
+  '/api/trading-calendar': 600000, '/api/buy-extra-stock': 600000, '/api/scenario/slow-moving': 600000,
+  '/api/demand/stock-cover': 90000, '/api/demand/forecast-anomalies': 90000,          // demand-derived → short TTL (a forecast edit shows within ~90s; no supply-epoch link)
+  '/api/kpi/forecast-accuracy': 90000, '/api/kpi/stockout-risk': 90000,
+};
+const _respCacheV = {}, _respCacheInflight = {};   // path -> {v,at,epoch} ; path -> bool
+app.use(async (req, res, next) => {
+  if (req.method !== 'GET') return next();
+  const ttl = RESP_CACHE[req.path];
+  if (!ttl || Object.keys(req.query || {}).length) return next();
+  let ep = 0; try { ep = await currentSupplyEpoch(); } catch (e) { /* epoch 0 on failure */ }
+  const c = _respCacheV[req.path];
+  if (c && c.epoch === ep && (Date.now() - c.at < ttl || _respCacheInflight[req.path])) return res.json(c.v);   // fresh, or stale-while-one-request-recomputes
+  _respCacheInflight[req.path] = true;
+  const _oj = res.json.bind(res);
+  res.json = (p) => { if (!(p && p.error)) _respCacheV[req.path] = { v: p, at: Date.now(), epoch: ep }; delete _respCacheInflight[req.path]; return _oj(p); };
+  res.on('close', () => { delete _respCacheInflight[req.path]; });   // aborted before json() → release the flag
+  next();
+});
 // After any supplier-portal WRITE, drop the cached portal bootstraps so the supplier's next load reflects their edit
 // (tracking, notes, completion, invoice, cost submit…). Cheap — the map holds one entry per active supplier set.
 // v27.879 (Ben, portal perf): scoped to the supplier who wrote — every other supplier keeps their cached bootstrap — and the
@@ -6235,7 +6265,8 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
 // from cache; once stale, the FIRST request recomputes (others serve stale meanwhile) then repopulates. Correct on
 // both a long-lived server and Vercel serverless (no background/self-fetch needed). Dropped by invalidateSupplyCaches
 // on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
-const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS, deposits: SUPPLY_CACHE_TTL_MS, skus: SUPPLY_CACHE_TTL_MS, 'payments-by-supplier': SUPPLY_CACHE_TTL_MS, remittances: SUPPLY_CACHE_TTL_MS, 'payment-emails': SUPPLY_CACHE_TTL_MS };   // v28.088: the remaining uncached PAYMENTS-tab reads (payments-by-supplier ~1.6s cold; remittances / payment-emails) — param-free, user-independent, epoch-busted on any payment edit   // v28.083: skus (SKU master for ORDER PLAN, 807 KB, 1.9s live on every Order-plan open) joins the cache — param-free, user-independent, product master changes land within the TTL / epoch   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
+const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS, deposits: SUPPLY_CACHE_TTL_MS, skus: SUPPLY_CACHE_TTL_MS, 'payments-by-supplier': SUPPLY_CACHE_TTL_MS, remittances: SUPPLY_CACHE_TTL_MS, 'payment-emails': SUPPLY_CACHE_TTL_MS,
+  'shipment-plan': SUPPLY_CACHE_TTL_MS, pipeline: SUPPLY_CACHE_TTL_MS, upcoming: SUPPLY_CACHE_TTL_MS, suppliers: SUPPLY_CACHE_TTL_MS, 'products-all': SUPPLY_CACHE_TTL_MS };   // v28.089: more heavy param-free user-independent section reads (shipment-plan 1.3s, pipeline/upcoming ~0.85s, suppliers 0.8s, products-all 2.5s)   // v28.088: the remaining uncached PAYMENTS-tab reads (payments-by-supplier ~1.6s cold; remittances / payment-emails) — param-free, user-independent, epoch-busted on any payment edit   // v28.083: skus (SKU master for ORDER PLAN, 807 KB, 1.9s live on every Order-plan open) joins the cache — param-free, user-independent, product master changes land within the TTL / epoch   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
 const _sectionResp = {};        // section -> { v, at, epoch }
 const _sectionInflight = {};    // section -> Promise (a recompute is running; others serve stale or await it)
 // v28.081 (Ben, perf audit): the section cache used to BLOCK the first request after TTL expiry or after any edit (the
