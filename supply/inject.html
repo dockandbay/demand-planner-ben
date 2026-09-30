@@ -2589,9 +2589,10 @@
     shipped_to_master:function(r){ return r.progress!=='complete' && r.shipment && !r.is_master && r.production_status==='shipped' && r.ship_status!=='Shipping' && r.ship_status!=='Delivered' && ['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0; },
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
     production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
-    // v28.098 (Ben): production start + end dates are MANDATORY on an active PO — a missing one is a red action.
-    // (FUTURE POs aren't chased — dates may not be set yet; complete POs are done.)
-    missing_prod_dates:function(r){ return r.progress!=='complete' && r.progress!=='future' && (!r.prod_start || !r.prod_end); },
+    // v28.098/099 (Ben): production start + end dates are MANDATORY on an active PO — each missing one is its OWN red
+    // action with an inline marker next to the empty field (FUTURE POs aren't chased; complete POs are done).
+    missing_prod_start:function(r){ return r.progress!=='complete' && r.progress!=='future' && !r.prod_start; },
+    missing_prod_end:function(r){ return r.progress!=='complete' && r.progress!=='future' && !r.prod_end; },
     // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
     dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at && !!r.require_confirmation; },   // DtC supplier approval only required when the production's "Require supplier confirmation" is ON (CONFIG ▸ Productions) — aligns with po_not_approved (Ben: off until P58)
     // production requires supplier confirmation and the supplier hasn't confirmed the PO yet
@@ -2621,8 +2622,8 @@
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',missing_prod_dates:'Production start / end date missing',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production',deposit_unassigned:'Deposit not assigned — link a production deposit (or mark No Deposit)'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',missing_prod_dates:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata',deposit_unassigned:'masterdata'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',missing_prod_start:'Production start date missing',missing_prod_end:'Production end date missing',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production',deposit_unassigned:'Deposit not assigned — link a production deposit (or mark No Deposit)'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',missing_prod_start:'dates',missing_prod_end:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata',deposit_unassigned:'masterdata'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false, _hidePayDue=false, _hideTimelineUnread=false;   // PO-grid ACTION ITEMS hide toggles
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -2709,7 +2710,8 @@
     return '<span class="act-wrap" data-mk="samp|'+esc(ref)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
   var ACT_HELP={
-    missing_prod_dates:'Production start / end date missing — both are mandatory on an active PO (they drive ship, delivery, cashflow and Flexport dates). Set them on the DATES tab.',
+    missing_prod_start:'Production start date missing — mandatory on an active PO (it drives ship, delivery, cashflow and Flexport dates). Set it in the Start cell.',
+    missing_prod_end:'Production end date missing — mandatory on an active PO (it drives ship, delivery, cashflow and Flexport dates). Set it in the End cell.',
     payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
     unpaid_payment:'Unpaid payment — a start deposit is owed (not assigned and not covered by a deposit pool). A not-yet-due invoice balance is not flagged here; once its due date passes it shows as Payment overdue. Excludes completed POs.',
     deposit_unassigned:'Deposit not assigned — this PO has a start deposit but no production-deposit reference linked (a master-data gap, separate from whether it’s paid). Assign a deposit reference, or mark No Deposit, on the MASTER DATA tab. Not raised on FUTURE or completed POs.',
@@ -2951,6 +2953,7 @@
       var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
+      try{ bindActMark(document.getElementById('sup-grid')); }catch(e){}   // v28.099: wire the inline Ⓐ + SNOOZE on the Start/End cells (missing-prod-date actions)
       try{ bindDcRefTips(); }catch(e){}   // v27.766: 120ms tooltip with the full order list on the clamped Direct cell
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping(); bindSetStm();
       fitPoGrid(); if(!window._poGridFitBound){ window._poGridFitBound=1; window.addEventListener('resize',fitPoGrid); }   // keep the grid's bottom (load-more) inside the viewport on any window size
@@ -3648,8 +3651,8 @@
         +'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r),!(Number(r.start_pct)>0))+'</td>'
-      +gDate(r,'start_production',r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
-      +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):'')+subCompBtn(r),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
+      +gDate(r,'start_production',r.prod_start,(PO_ACTCOND.missing_prod_start(r)?actMark(r.po,'missing_prod_start'):''),(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
+      +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):'')+subCompBtn(r)+(PO_ACTCOND.missing_prod_end(r)?actMark(r.po,'missing_prod_end'):''),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
       +'<td class="l">'+dcell(r.delivery)+srctagLink(r.delivery_src,r)+'</td>'
       +dTd(r.checkin,(['READY TO SHIP','SHIPPED TO MASTER','SHIPPING','DELIVERED'].indexOf(r.status)>=0?endDaysBadge(r.checkin,'completion'):''),((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
