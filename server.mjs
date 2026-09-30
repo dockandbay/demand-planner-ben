@@ -4726,7 +4726,10 @@ async function _xeroBankForCurrency(region, ccy) {
   const cfg = await _xeroFinanceCfg(); const banks = (cfg.banks && cfg.banks[region]) || {};
   for (const k of Object.keys(banks)) { const b = banks[k]; if (b && b.account_id && String(b.currency || '').toUpperCase() === ccy) return { account_id: b.account_id, name: b.name, currency: ccy, source: 'registry' }; }
   try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'));
-    const hit = ((ac && ac.Accounts) || []).find(a => a.Status === 'ACTIVE' && String(a.CurrencyCode || '').toUpperCase() === ccy);
+    // v28.105 (Ben): never auto-pick a wallet (PayPal / Payoneer / Wise / Airwallex / Stripe) as the pay-from bank — it
+    // is not a real bank and misreports the source. If no registry bank is bound and no real bank matches, return null so
+    // the preview shows "no bank bound" (a posting blocker) rather than silently paying from a wallet.
+    const hit = ((ac && ac.Accounts) || []).find(a => a.Status === 'ACTIVE' && String(a.CurrencyCode || '').toUpperCase() === ccy && !/paypal|payoneer|wise|airwallex|stripe/i.test(a.Name || ''));
     if (hit) return { account_id: hit.AccountID, name: hit.Name, currency: ccy, source: 'org' };
   } catch (e) {}
   return null;
@@ -4810,7 +4813,9 @@ async function computeXeroRunPlan(run) {
     }
   });
   const checks = [];
-  checks.push(bank ? { level: 'ok', msg: 'Pays from ' + bank.name + ' (' + bank.currency + ') — ' + region.toUpperCase() + ' org (not reconciled — only the currency matters)' } : { level: 'error', msg: 'No USD bank account in Xero ' + region.toUpperCase() + ' — add one (any USD bank works; the payment is not reconciled)' });
+  // v28.105 (Ben): dropped the "Pays from … (not reconciled — only the currency matters)" reassurance — it was
+  // inaccurate. The pay-from bank still shows in the preview header; only surface the no-bank case, which blocks posting.
+  if (!bank) checks.push({ level: 'error', msg: 'No USD bank bound in Xero ' + region.toUpperCase() + ' — bind the pay-from bank in CONFIG ▸ Payments (a PayPal wallet is not used).' });
   const overpay = outLines.filter(l => l.pay_ok === false);
   if (overpay.length) checks.push({ level: 'error', msg: overpay.length + ' payment(s) exceed the bill’s amount due (Xero would reject): ' + overpay.map(l => l.reference).join(', ') });
   ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name + ' (P58+)' } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
