@@ -1124,6 +1124,12 @@
   function hzTlSend(att,text,postOne,done){ function run(ids){ var first=ids.shift(); if(!text&&!first){ done(); return; } postOne(text||('📎 '+first.name), first?first.id:null, function(){ (function extra(){ if(!ids.length){ if(att)att.clear(); done(); return; } var x=ids.shift(); postOne('📎 '+x.name, x.id, extra); })(); }); } if(att&&att.count())att.uploadAll(run); else run([]); }
   function hzTlUploader(kind,ref,extra){ return function(f,fields,cb){ var body=Object.assign({kind:kind,ref:ref},fields,extra||{}); fetch('/api/supply/timeline-attachment',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
   function shortNotes(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; }  // shorten user emails in timeline bodies/authors
+  // v28.115 (Ben): shared 2-tab timeline switcher — Messages / Record of change. Every timeline renders .tl-tabs
+  // (buttons with data-tlt) + .tl-pane (data-tlp); this binds the switch. Activates the first tab (Messages) by default.
+  function hzTlBindTabs(scope){ if(!scope)return; var tabs=scope.querySelectorAll('.tl-tab'), panes=scope.querySelectorAll('.tl-pane'); if(!tabs.length)return;
+    function act(k){ tabs.forEach(function(t){ var on=t.dataset.tlt===k; t.classList.toggle('active',on); t.style.color=on?'var(--blue)':'var(--faint)'; t.style.borderBottomColor=on?'var(--blue)':'transparent'; t.style.fontWeight=on?'600':'500'; }); panes.forEach(function(p){ p.style.display=(p.dataset.tlp===k)?'':'none'; }); }
+    tabs.forEach(function(t){ t.onclick=function(){ act(t.dataset.tlt); }; });
+    var cur=null; tabs.forEach(function(t){ if(t.classList.contains('active'))cur=t.dataset.tlt; }); act(cur||tabs[0].dataset.tlt); }
   function isNum(v){return v!==''&&v!=null&&!isNaN(Number(v))&&/^-?[\d.]+$/.test(String(v));}
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
   // Currency helpers — show a payment amount in a supplier's own currency with the right symbol (e.g. £11,760.00 GBP).
@@ -4487,20 +4493,27 @@
       if(n.id===recentAnyId && n.author_kind==='internal' && (n.author_email||'').toLowerCase()===meEmail) ctrl += '<a class="po-note-del" data-id="'+n.id+'" data-po="'+esc(po)+'" title="delete this (most recent) message — you can only delete your own" style="font-size:10px;color:var(--neg);cursor:pointer;text-decoration:underline;white-space:nowrap">delete</a>';
       var mto=priv&&(n.mentions||[]).length?' · <span class="mut">to '+(n.mentions||[]).map(function(e){return '@'+esc(shortUser(e).replace(/@$/,''));}).join(' ')+'</span>':'';
       var who=sup?((n.supplier_name?esc(n.supplier_name):'Supplier')+(n.author_email&&!/^(d&b|dock & bay|portal)$/i.test(n.author_email)?' · '+esc(n.author_email):'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email))+' · Dock &amp; Bay':'Dock &amp; Bay');
-      var bg=priv?'var(--violet-bg)':(sup?(n.read?'var(--hover)':'#fff7ed'):'var(--violet-bg)'), bd=priv?'#c7d2fe':(sup&&!n.read?'#fdba74':'var(--line)');
-      return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+bg+';border:1px solid '+bd+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
-        +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-        +'<div style="flex:1"><span class="mut tiny">'+(priv?'🔒 ':'')+esc(n.created_at)+' · '+who+mto+'</span>'+(priv?' <span class="ex-badge" style="background:var(--violet-bg);color:var(--violet)">internal</span>':'')+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:var(--ink)">'+noteBodyHtml(n)+'</span>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')+'</div>'
-        +'</div>'; }
+      // v28.115 (Ben): conversation-thread styling — supplier messages on the left, our own on the right, roomier bubbles.
+      var mine=!sup;   // internal / Dock & Bay = "us" → right side
+      var bg=priv?'var(--violet-bg)':(sup?(n.read?'var(--hover)':'#fff7ed'):'var(--blue-soft)'), bd=priv?'#c7d2fe':(sup&&!n.read?'#fdba74':(mine?'#93c5fd':'var(--line)'));
+      return '<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+        +'<div style="max-width:76%;min-width:150px;font-size:12px;padding:8px 12px;background:'+bg+';border:1px solid '+bd+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
+        +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+(priv?'🔒 ':'')+who+(priv?' <span class="ex-badge" style="background:var(--violet-bg);color:var(--violet)">internal</span>':'')+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(n.created_at)+mto+'</span></div>'
+        +'<div style="color:var(--ink)">'+noteBodyHtml(n)+'</div>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')
+        +(ctrl?'<div style="display:flex;gap:8px;align-items:center;margin-top:5px;'+(mine?'justify-content:flex-end':'')+'">'+ctrl+'</div>':'')
+        +'</div></div>'; }
     // Record-of-change entries (status / dates / shipment / payment / ERP upload) render distinctly and interleave with notes by time.
     function fmtChangeTime(s){ s=String(s||''); var d=s.slice(0,10), t=s.slice(11,16); return (d?fd(d):s)+(t?' '+t:''); }
     function renderChange(c){ var items=c.items||null;
       var body=items?('<b>'+esc(c.head)+'</b> <span class="mut">— '+items.length+' changes</span><ul style="margin:3px 0 0 14px;padding:0;color:var(--ink-soft)">'+items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'):('<b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):''));
-      return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:4px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(rocIsHidden(po)?';display:none':'')+'"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:var(--line);color:var(--muted)">record of change</span><br><span style="color:var(--ink-soft)">'+body+'</span></div>'; }   // v27.706: grouped entries render as one card with a bullet list
-    var _tlItems=tlDesc(notes).map(function(n){ return {ts:tlTs(n.created_at)+'~'+('000000'+String(n.id||'')).slice(-6), h:renderNote(n)}; })
-      .concat(hzGroupChanges((d&&d.changes)||[]).map(function(c){ return {ts:tlTs(c.created_at)+'~000000', h:renderChange(c)}; }));   // v27.706 (Ben): burst of same-subject changes by one user → one entry
-    _tlItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });   // newest first, notes + changes interleaved (normalised ts)
-    var list=_tlItems.length?_tlItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline activity yet.</div>';
+      return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+body+'</span></div>'; }   // v28.115: record-of-change is its own tab now (no inline hide, roomier)
+    // v28.115 (Ben): Messages and Record of change are now SEPARATE tabs (no interleaving, no inline hide toggle).
+    var _msgItems=tlDesc(notes).map(function(n){ return {ts:tlTs(n.created_at)+'~'+('000000'+String(n.id||'')).slice(-6), h:renderNote(n)}; });
+    _msgItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
+    var _chgItems=hzGroupChanges((d&&d.changes)||[]).map(function(c){ return {ts:tlTs(c.created_at)+'~000000', h:renderChange(c)}; });
+    _chgItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
+    var msgList=_msgItems.length?_msgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 2px">No messages yet.</div>';
+    var chgList=_chgItems.length?_chgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 2px">No recorded changes yet.</div>';
     var compose='<div class="po-compose-row" style="display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 8px">'
       +'<div style="flex:1 1 300px;min-width:0;max-width:440px">'
         +'<div style="display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-width:0;min-height:34px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
@@ -4511,8 +4524,12 @@
         +'<div class="mut tiny" style="margin:2px 2px 0">Internal note — <b>team only, hidden from the supplier</b>. Type <b>@</b> to tag a teammate; they get an email.</div>'
       +'</div>'
     +'</div>';
-    // new-message box on top, then submission banners + the message thread below it
-    return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span> <label style="font-size:11px;font-weight:400;margin-left:10px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="tl-hide-chg"'+(rocIsHidden(po)?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'+compose+head+list; }
+    // v28.115: two-tab timeline — Messages (conversation + compose) and Record of change.
+    var _tlTabBtn=function(k,lbl,n){ return '<button class="tl-tab" data-tlt="'+k+'" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">'+lbl+(n?' <span class="mut tiny">('+n+')</span>':'')+'</button>'; };
+    return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span></div>'
+      +'<div class="tl-tabs" style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 12px">'+_tlTabBtn('messages','💬 Messages',_msgItems.length)+_tlTabBtn('changes','🕓 Record of change',_chgItems.length)+'</div>'
+      +'<div class="tl-pane" data-tlp="messages">'+compose+head+msgList+'</div>'
+      +'<div class="tl-pane" data-tlp="changes" style="display:none">'+chgList+'</div>'; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
     // Refresh ONLY this PO's row (single-row endpoint) instead of pulling the whole ~1400-row grid — much faster.
     fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr)poBy[po]=rr; loadPoDetail(po,i,wantTab); }).catch(function(){ loadPoDetail(po,i,wantTab); }); }
@@ -4922,8 +4939,8 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); })
         .catch(function(e){ alert('Delete failed — reloading the order plan so you can retry.\n('+(e.message||e)+')'); poRefetchPanel(po,i); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-goto').forEach(function(b){ b.onclick=function(){ gotoOrderPlan(b.dataset.po); }; });
-    document.querySelectorAll('#podet-'+i+' .tl-hide-chg').forEach(function(cb){ cb.onchange=function(){ rocSetHidden(po, cb.checked);
-      document.querySelectorAll('#podet-'+i+' .tl-change').forEach(function(el){ el.style.display=cb.checked?'none':''; }); }; });
+    // v28.115: Timeline tab switch (Messages / Record of change)
+    (function(){ var scope=document.getElementById('podet-'+i); if(!scope)return; hzTlBindTabs(scope); })();
     // ORDER PLAN edit mode: toggle, add-SKU row, copy, save (writes qty / new lines as proposed → auto ERP-pending)
     // in edit mode, prefetch the supplier-scoped SKU list (cached in OP_SKUS) and wire the add-SKU search picker
     (function(){ if(OP_EDIT!==po)return; var sup=(poBy[po]&&poBy[po].supplier_name)||'';
@@ -6640,26 +6657,32 @@
   // On the admin side (authorKind 'internal') supplier notes carry a read/unread toggle + 'new' badge, like the PO timeline.
   function loadShipTimeline(ref, authorKind, getBase, postEp){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
-    function renderShipChange(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(rocIsHidden(ref)?';display:none':'')+'"><span class="mut">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:var(--line);color:var(--muted)">record of change</span> — '+hzChangeBodyHtml(c)+'</div>'; }   // v27.706 grouped bursts
+    function renderShipChange(c){ return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v28.115: record-of-change tab
     Promise.all([fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}), admin?fetch('/api/supply/shipment-changes?ref='+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];}):Promise.resolve([])]).then(function(_tl){ var notes=_tl[0], _changes=_tl[1]||[];
       shortNotes(notes);
       var unread=0;
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var _items=(notes&&notes.length)?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
-        var ctrl=(admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="flex:0 0 auto;font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0" style="flex:0 0 auto">Mark read</button>')
-          :((admin&&n.id===recentOwnId)?'<button class="save-btn light sp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
-        return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:'<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:var(--amber-bg);border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
-          +(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')
-          +'<div style="flex:1">'+'<span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'D&amp;B'))+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+hzTlAttHtml(n,'/api/supply/portal-attachment/')+'</div>'
-          +'</div>'}; }):[];
-      hzGroupChanges(_changes||[]).forEach(function(c){ _items.push({ts:String(c.created_at||'')+'~0', h:renderShipChange(c)}); });   // v27.706
-      _items.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
-      var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
+      // v28.115 (Ben): conversation bubbles + Messages / Record of change tabs.
+      var _msgItems=(notes&&notes.length)?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++; var mine=!sup;
+        var ctrl=(admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
+          :((admin&&n.id===recentOwnId)?'<button class="save-btn light sp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
+        return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:'<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+          +'<div style="max-width:78%;min-width:150px;font-size:12px;padding:8px 12px;background:'+(nu?'var(--amber-bg)':(mine?'var(--violet-bg)':'var(--hover)'))+';border:1px solid '+(nu?'#fdba74':(mine?'#c7d2fe':'var(--line)'))+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
+          +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+(sup?'Supplier':(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'D&amp;B'))+(nu?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(n.created_at)+'</span></div>'
+          +'<div style="color:var(--ink);white-space:pre-wrap">'+esc(n.body)+'</div>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')
+          +(ctrl?'<div style="margin-top:5px;'+(mine?'text-align:right':'')+'">'+ctrl+'</div>':'')
+          +'</div></div>'}; }):[];
+      _msgItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
+      var _chgItems=hzGroupChanges(_changes||[]).map(function(c){ return {ts:String(c.created_at||'')+'~0', h:renderShipChange(c)}; });
+      _chgItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
+      var msgList=_msgItems.length?_msgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 0">No messages yet.</div>';
+      var chgList=_chgItems.length?_chgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 0">No recorded changes yet.</div>';
       var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
         +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>';
-      box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:8px">Timeline'+(admin?' <label style="font-weight:400;cursor:pointer;white-space:nowrap"><input type="checkbox" class="sp-hide-chg"'+(rocIsHidden(ref)?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label>':'')+'</div>'+list;
-      var _hc=box.querySelector('.sp-hide-chg'); if(_hc)_hc.onchange=function(){ rocSetHidden(ref, _hc.checked); box.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_hc.checked?'none':''; }); };
+      var _shTabs=admin?('<div class="tl-tabs" style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 12px"><button class="tl-tab" data-tlt="messages" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">💬 Messages'+(_msgItems.length?' <span class="mut tiny">('+_msgItems.length+')</span>':'')+'</button><button class="tl-tab" data-tlt="changes" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">🕓 Record of change'+(_chgItems.length?' <span class="mut tiny">('+_chgItems.length+')</span>':'')+'</button></div>'):'';
+      box.innerHTML=_shTabs+'<div class="tl-pane" data-tlp="messages">'+compose+msgList+'</div>'+(admin?'<div class="tl-pane" data-tlp="changes" style="display:none">'+chgList+'</div>':'');
+      hzTlBindTabs(box);
       if(admin)shSetUnread(ref,unread);
       (function(){ var inp=box.querySelector('.sp-note-in'), pb=box.querySelector('.sp-note-post'), att=hzTlAttach(inp,{after:inp.parentNode,upload:hzTlUploader('shipment',ref)});   // v27.571
         pb.onclick=function(){ var v=(inp.value||'').trim(); if(!v&&!att.count())return; pb.disabled=true;
@@ -13429,9 +13452,8 @@
             // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
             +tb('details','Details'+bdge(dateExc+_needSetShip))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
           +panel('details',detailsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
-          +panel('timeline',(function(){ _sampChangeLog[s.ref]=(d.change_log||[]); var _h=rocIsHidden(s.ref);
-              return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span>'
-                +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
+          +panel('timeline',(function(){ _sampChangeLog[s.ref]=(d.change_log||[]);
+              return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
         (function(){ var b=box.querySelector('.samp-batch'); if(!b)return; if(!window._pbrListP)window._pbrListP=fetch('/api/product/batch-review-list').then(function(r){return r.json();}).catch(function(){return [];});   // v27.569: SRs carrying development samples (shared with the batch page picker)
           window._pbrListP.then(function(l){ if((Array.isArray(l)?l:[]).some(function(x){ return String(x.id)===String(id); })){ b.style.display=''; b.onclick=function(){ try{ _batchSR=String(id); localStorage.setItem('hzBatchSR',String(id)); }catch(e){} if(typeof closeSampleDrawer==='function'){ try{ closeSampleDrawer(); }catch(e){} } location.hash='#/product/batch/'+id; }; } }); })();
@@ -13442,7 +13464,6 @@
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
         try{ bindActMark(box); }catch(e){}   // wire the inline Ⓐ tooltip + SNOOZE ▾ (same as the PO drawer)
-        var _shc=box.querySelector('.samp-hide-chg'); if(_shc)_shc.onchange=function(){ rocSetHidden(s.ref, _shc.checked); box.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_shc.checked?'none':''; }); };   // hide record of change (per-sample, persisted)
         var eb=box.querySelector('.samp-edit'); if(eb)eb.onclick=function(){ editing=true; paint(); };
         var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ db.disabled=true;   // ✓ Done also persists the SKU lines (fields already auto-save on change)
           shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; paint(); }); };   // silent: re-render this drawer in place, keep it open (no grid reload / no tab close)
@@ -13519,21 +13540,32 @@
       shortNotes(notes);
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var _changes=(_sampChangeLog[ref]||[]), _hid=rocIsHidden(ref);
-      function _noteRow(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
+      var _changes=(_sampChangeLog[ref]||[]);
+      function _noteRow(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read; var mine=!supSide;
         var who=onBehalf?('D&amp;B as '+esc(supName||'supplier'))
           :supSide?(esc(supName||'Supplier')+(n.author_email&&n.author_email!=='D&B'?' ('+esc(n.author_email)+')':''))
           :(n.author_email&&n.author_email!=='D&B'&&n.author_email!=='Dock & Bay'?esc(n.author_email):'D&amp;B');
         var ctrl=(admin&&supSide)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
-          :((admin&&n.id===recentOwnId)?'<button class="save-btn light samp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
+          :((admin&&n.id===recentOwnId)?'<button class="save-btn light samp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
         var _nc=String(n.created_at||''), _nw=(_nc.slice(0,10)?fd(_nc.slice(0,10)):_nc)+(_nc.slice(11,16)?' '+_nc.slice(11,16):'');
-        return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:var(--amber-bg);border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(_nw)+' · '+who+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,'/api/supply/portal-attachment/')+'</div></div>'; }
+        return '<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+          +'<div style="max-width:78%;min-width:150px;font-size:13px;padding:8px 12px;background:'+(nu?'var(--amber-bg)':(mine?'var(--violet-bg)':'var(--hover)'))+';border:1px solid '+(nu?'#fdba74':(mine?'#c7d2fe':'var(--line)'))+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
+          +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+who+(nu?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(_nw)+'</span></div>'
+          +'<div style="color:var(--ink);white-space:pre-wrap">'+esc(n.body)+'</div>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')
+          +(ctrl?'<div style="margin-top:5px;'+(mine?'text-align:right':'')+'">'+ctrl+'</div>':'')
+          +'</div></div>'; }
       function _changeRow(c){ var _ca=String(c.changed_at||''), _cw=(_ca.slice(0,10)?fd(_ca.slice(0,10)):_ca)+(_ca.slice(11,16)?' '+_ca.slice(11,16):'');
-        return '<div class="tl-change" style="font-size:12px;margin:4px 0;max-width:640px;padding:5px 9px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:var(--line);color:var(--muted);margin-right:6px">record of change</span><span class="mut" style="font-size:11px">'+esc(_cw)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v27.706 grouped bursts
-      var _items=[]; (notes||[]).forEach(function(n){ _items.push({t:String(n.created_at||''),h:_noteRow(n)}); }); hzGroupChanges((_changes||[]).map(function(c){ return Object.assign({},c,{created_at:c.changed_at}); })).forEach(function(c){ c.changed_at=c.created_at; _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); });   // v27.706 grouped bursts
-      _items.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });   // newest-first (sortable key; dd-Mmm-yy sorted by day otherwise)
-      var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
-      box.innerHTML='<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px"><textarea class="fci ssp-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:520px;text-align:left"></textarea><button class="save-btn ssp-post">Post</button></div>'+list;
+        return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(_cw)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v28.115: record-of-change tab
+      var _msgItems=(notes||[]).map(function(n){ return {t:String(n.created_at||''),h:_noteRow(n)}; });
+      _msgItems.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });
+      var _chgItems=hzGroupChanges((_changes||[]).map(function(c){ return Object.assign({},c,{created_at:c.changed_at}); })).map(function(c){ c.changed_at=c.created_at; return {t:String(c.changed_at||''),h:_changeRow(c)}; });
+      _chgItems.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });
+      var msgList=_msgItems.length?_msgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 0">No messages yet.</div>';
+      var chgList=_chgItems.length?_chgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 0">No recorded changes yet.</div>';
+      var _compose='<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px"><textarea class="fci ssp-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:520px;text-align:left"></textarea><button class="save-btn ssp-post">Post</button></div>';
+      var _smpTabs=admin?('<div class="tl-tabs" style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 12px"><button class="tl-tab" data-tlt="messages" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">💬 Messages'+(_msgItems.length?' <span class="mut tiny">('+_msgItems.length+')</span>':'')+'</button><button class="tl-tab" data-tlt="changes" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">🕓 Record of change'+(_chgItems.length?' <span class="mut tiny">('+_chgItems.length+')</span>':'')+'</button></div>'):'';
+      box.innerHTML=_smpTabs+'<div class="tl-pane" data-tlp="messages">'+_compose+msgList+'</div>'+(admin?'<div class="tl-pane" data-tlp="changes" style="display:none">'+chgList+'</div>':'');
+      hzTlBindTabs(box);
       (function(){ var inp=box.querySelector('.ssp-in'), pb=box.querySelector('.ssp-post'), att=hzTlAttach(inp,{after:inp.parentNode,upload:hzTlUploader('sample',ref),maxWidth:'520px'});   // v27.571
         pb.onclick=function(){ var v=(inp.value||'').trim(); if(!v&&!att.count())return; pb.disabled=true;
           hzTlSend(att,v,function(bodyTxt,attId,next){ shipPost('/api/supply/sample-note',{sample_id:sampleId,author_kind:authorKind||'internal',body:bodyTxt,attachment_id:attId||null},function(){ next(); }); },function(){ loadSampleTimeline(ref,sampleId,authorKind,supName); }); }; })();
@@ -17525,21 +17557,27 @@
         var bodyH=_fbBadgeify(esc(n.body||'')), _left=[];   // v27.865 (Ben): COLOUR/QUALITY headings → badges
         (n.pantone||[]).forEach(function(p){ var tok=esc('🎨 '+p.code); if(bodyH.indexOf(tok)>=0){ bodyH=bodyH.split(tok).join(panInlineChip(p)); } else { _left.push(p); } });
         var pc=_left.map(panCard).join('');
-        return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'var(--hover)':'var(--amber-bg)'):'var(--violet-bg)')+';border:1px solid '+(isNew?'var(--amber)':'var(--line)')+';border-radius:var(--r-sm);display:flex;gap:10px;align-items:flex-start">'
-          +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-          +'<div style="flex:1"><span class="mut tiny">'+esc(_fmt(n.created_at))+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:var(--ink);white-space:pre-wrap">'+bodyH+'</span>'+dl+tg+pc+'</div>'
-          +'</div>'; }
-      function _changeRow(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:var(--line);color:var(--muted);margin-right:6px">record of change</span><span class="mut tiny">'+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v27.706 grouped bursts
+        var mine=!sup;   // v28.115: conversation thread — our messages on the right, supplier on the left
+        return '<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+          +'<div style="max-width:78%;min-width:150px;font-size:12px;padding:8px 12px;background:'+(sup?(n.read?'var(--hover)':'var(--amber-bg)'):'var(--violet-bg)')+';border:1px solid '+(isNew?'var(--amber)':(mine?'#c7d2fe':'var(--line)'))+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
+          +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+who+(isNew?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(_fmt(n.created_at))+'</span></div>'
+          +'<div style="color:var(--ink);white-space:pre-wrap">'+bodyH+'</div>'+dl+tg+pc
+          +(ctrl?'<div style="margin-top:5px;'+(mine?'text-align:right':'')+'">'+ctrl+'</div>':'')
+          +'</div></div>'; }
+      function _changeRow(c){ return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v28.115: record-of-change tab (roomier, no inline hide)
       // used-tag filter bar (Phase 3): chips for the tags actually applied on THIS product; multi-select
       var usedCount={}; notes.forEach(function(n){ (n.tags||[]).forEach(function(id){ if(TAGMAP[id])usedCount[id]=(usedCount[id]||0)+1; }); });
       var usedIds=Object.keys(usedCount), anyFilt=usedIds.some(function(id){return FILT[id];});
       var filterBar=usedIds.length?('<div class="pt-tagsrow" style="margin:2px 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center"><span class="mut tiny" style="margin-right:2px">Filter:</span>'
         +usedIds.map(function(id){ var t=TAGMAP[id], on=!!FILT[id]; return '<span class="pt-filt" data-id="'+id+'" style="cursor:pointer;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;border:1px solid '+esc(t.colour||'var(--muted)')+';'+(on?('background:'+esc(t.colour||'var(--muted)')+';color:#fff'):('background:var(--card);color:'+esc(t.colour||'var(--muted)')))+'">'+esc(t.name||'')+' <span style="opacity:.7">'+usedCount[id]+'</span></span>'; }).join('')
         +(anyFilt?' <a class="pt-filt-clear" style="cursor:pointer;font-size:10px;color:var(--muted);text-decoration:underline">clear</a>':'')+'</div>'):'';
-      var _items=[]; notes.forEach(function(n){ if(anyFilt){ if(!(n.tags||[]).some(function(id){return FILT[id];}))return; } _items.push({t:String(n.created_at||''),h:_noteRow(n)}); });
-      if(!anyFilt){ hzGroupChanges(changes.map(function(c){ return Object.assign({},c,{created_at:c.changed_at}); })).forEach(function(c){ c.changed_at=c.created_at; _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); }); }   // tag filter shows tagged messages only; v27.706 grouped bursts
-      _items.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });   // newest-first (sortable key; dd-Mmm-yy sorted by day otherwise)
-      var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:6px 0">'+(anyFilt?'No messages with the selected tag'+(usedIds.filter(function(id){return FILT[id];}).length>1?'s':'')+'.':'No timeline entries yet.')+'</div>';
+      // v28.115: split into Messages (notes, tag-filterable) and Record of change (changes) — separate tabs.
+      var _msgItems=[]; notes.forEach(function(n){ if(anyFilt){ if(!(n.tags||[]).some(function(id){return FILT[id];}))return; } _msgItems.push({t:String(n.created_at||''),h:_noteRow(n)}); });
+      _msgItems.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });
+      var _chgItems=hzGroupChanges(changes.map(function(c){ return Object.assign({},c,{created_at:c.changed_at}); })).map(function(c){ c.changed_at=c.created_at; return {t:String(c.changed_at||''),h:_changeRow(c)}; });
+      _chgItems.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });
+      var msgList=_msgItems.length?_msgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 0">'+(anyFilt?'No messages with the selected tag'+(usedIds.filter(function(id){return FILT[id];}).length>1?'s':'')+'.':'No messages yet.')+'</div>';
+      var chgList=_chgItems.length?_chgItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:8px 0">No recorded changes yet.</div>';
       var _compChips=ACTTAGS.map(function(t){ return '<span class="pt-tagchip" data-id="'+t.id+'" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+esc(t.colour||'var(--muted)')+';color:'+esc(t.colour||'var(--muted)')+';background:var(--card)">'+esc(t.name||'')+'</span>'; }).join('');
       var compose='<div class="pt-compose" style="margin-top:6px;max-width:640px">'
         +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" placeholder="Add a note…  Type / for a reusable phrase · /p for a Pantone colour'+(_smpList.length?' · /s to tag a sample version':'')+' · drop photos / documents on the box or add files" style="width:100%;box-sizing:border-box;min-height:52px;text-align:left"></textarea>'
@@ -17550,7 +17588,11 @@
         +'<div class="mut tiny" style="margin:4px 0 2px"><label style="cursor:pointer;color:var(--blue);font-weight:600">📎 add files<input type="file" id="pt-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ai,.zip" style="display:none"></label></div><div id="pt-filelist" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0"></div>'
         +'<div style="margin-top:5px"><button class="save-btn" id="pt-post" style="background:var(--blue);color:#fff;border-color:var(--blue)">Post</button> <span id="pt-postmsg" class="mut tiny"></span></div></div>'
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';
-      body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product; record of change is admin-only</span> <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="prod-hide-chg"'+(_hid?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'+compose+filterBar+list;
+      body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product; record of change is admin-only</span></div>'
+        +'<div class="tl-tabs" style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 12px"><button class="tl-tab" data-tlt="messages" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">💬 Messages'+(_msgItems.length?' <span class="mut tiny">('+_msgItems.length+')</span>':'')+'</button><button class="tl-tab" data-tlt="changes" style="background:transparent;border:none;padding:7px 14px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent">🕓 Record of change'+(_chgItems.length?' <span class="mut tiny">('+_chgItems.length+')</span>':'')+'</button></div>'
+        +'<div class="tl-pane" data-tlp="messages">'+compose+filterBar+msgList+'</div>'
+        +'<div class="tl-pane" data-tlp="changes" style="display:none">'+chgList+'</div>';
+      hzTlBindTabs(body);
       if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }
       // compose tag selection
       var _sel={};
