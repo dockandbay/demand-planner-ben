@@ -20329,6 +20329,54 @@ async function cpClientById(id) {
   r.visibility = cpJson(r.visibility, {}); r.stock_scope = cpJson(r.stock_scope, { mode: 'default' }); r.features = Object.assign({}, CP_FEATURE_DEFAULTS, cpJson(r.features, {}));
   return r;
 }
+// ── v28.101 (Ben): computed price tiers ─────────────────────────────────────────────────────────────────────────────
+// RT = market retail (planner.products <mkt>_rt, incl tax) · ex-tax = RT ÷ (UK/EU 1.2, AU 1.1, US/CA 1.0) ·
+// WS = ex-tax ÷ 2 · Distributor = WS × (1 - discount), discount from planner.distributor_offers per market + method.
+const CP_RT_COL = { UK: 'uk_rt', US: 'us_rt', EU: 'eu_rt', AU: 'au_rt', CA: 'ca_rt' };
+const CP_TAX_DIV = { UK: 1.2, EU: 1.2, AU: 1.1, US: 1.0, CA: 1.0 };
+const CP_DIST_OFFER = { UK: 'UKWS', US: 'USWS', EU: 'EUWS', AU: 'AU', CA: null };   // market → distributor_offers.name
+let _distOffers = { at: 0, map: null };
+async function cpDistOffers() {
+  if (_distOffers.map && Date.now() - _distOffers.at < 300000) return _distOffers.map;
+  const map = {}; try { (await pool.query(`SELECT name, fob_discount, exw_discount, threepl_discount FROM planner.distributor_offers`)).rows
+    .forEach(r => { map[r.name] = { fob: r.fob_discount, exw: r.exw_discount, '3pl': r.threepl_discount }; }); } catch (e) { /* table absent → no offers */ }
+  _distOffers = { at: Date.now(), map }; return map;
+}
+const _r2 = n => Math.round(n * 100) / 100;
+// Compute one tier's price for a product row (with <mkt>_rt columns), given market + tier + method. Returns a number
+// or null when the retail price is missing. `offers` is the cpDistOffers() map (pass it so a batch shares one load).
+function cpTierPrice(row, market, tier, method, offers) {
+  const mkt = String(market || '').toUpperCase(); const col = CP_RT_COL[mkt]; if (!col) return null;
+  const retail = Number(row[col]); if (!(retail > 0)) return null;
+  const exTax = retail / (CP_TAX_DIV[mkt] || 1.0);
+  if (tier === 'rt') return _r2(retail);
+  const ws = exTax / 2;
+  if (tier === 'ws') return _r2(ws);
+  if (tier === 'dist') {
+    const offer = (offers || {})[CP_DIST_OFFER[mkt]]; const disc = offer ? offer[method] : null;
+    if (disc == null) return _r2(ws);   // no discount configured for this market/method → wholesale
+    return _r2(ws * (1 - Number(disc) / 100));
+  }
+  return null;
+}
+// Read-only price preview: RT / WS / Distributor(FOB/EXW/3PL) for a client (or an explicit market), across a sample of
+// SKUs, so the tier + numbers can be eyeballed before the line sheet is flipped to computed pricing. No live change.
+app.get('/api/client/price-preview', async (req, res) => {
+  try {
+    let market = String(req.query.market || '').toUpperCase();
+    if (!market && req.query.client_id) { const c = await cpClientById(req.query.client_id); if (c) market = String(c.market || '').toUpperCase(); }
+    if (!CP_RT_COL[market]) return res.status(400).json({ error: 'a valid market (UK/US/EU/AU/CA) or client_id is required' });
+    const offers = await cpDistOffers();
+    const col = CP_RT_COL[market];
+    const rows = (await pool.query(`SELECT sku, coalesce(product_name,'') product_name, ${col}
+      FROM planner.products WHERE coalesce(status,'') NOT ILIKE '%discontinued%' AND ${col} IS NOT NULL AND ${col} > 0
+      ORDER BY sku LIMIT 30`)).rows;
+    const skus = rows.map(r => ({ sku: r.sku, name: r.product_name,
+      rt: cpTierPrice(r, market, 'rt', null, offers), ws: cpTierPrice(r, market, 'ws', null, offers),
+      dist_fob: cpTierPrice(r, market, 'dist', 'fob', offers), dist_exw: cpTierPrice(r, market, 'dist', 'exw', offers), dist_3pl: cpTierPrice(r, market, 'dist', '3pl', offers) }));
+    res.set('Cache-Control', 'no-store').json({ ok: true, market, tax_divisor: CP_TAX_DIV[market], offer: (offers || {})[CP_DIST_OFFER[market]] || null, skus });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // order_origin: before the Cin7 cut-off → cin7 · from the Fulfil start → fulfil · in between → the imported Cin7 list decides.
 async function cpOriginRule() {
   return { cin7Until: await cpSetting('cp_cutover_cin7_until', '2026-09-06'), fulfilFrom: await cpSetting('cp_cutover_fulfil_from', '2026-10-01') };
@@ -20406,7 +20454,7 @@ app.get('/api/client/clients/:id', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ client: c, users: users.rows, audit: audit.rows, portal_orders: orders.rows, key_account: ka.rows[0] || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool' };
+const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', price_tier: 'text', price_method: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool' };
 app.post('/api/client/clients/:id', async (req, res) => {
   const b = req.body || {}; const sets = [], vals = [], changed = [];
   const before = await cpClientById(req.params.id); if (!before) return res.status(404).json({ error: 'not found' });
