@@ -1,3 +1,14 @@
+## v28.124 (Ben): v_po_finance indexes (migration 321)
+
+**Files: `migrations/321_po_finance_perf_indexes.sql`.** Indexes only; the view definition is untouched.
+
+- Expression index on `purchase_orders (COALESCE(NULLIF(shipment_ref,''), po))` for the per-PO shipment-group subplans (63% of the view's buffers on prod).
+- `shipment_name` indexes on `flexport_api_shipments` and `flexport_shipments` so the Flexport OR filter can BitmapOr instead of seq-scanning per PO.
+- Sandbox (padded to prod size): 1,330 ms / 471,753 buffers down to 382 ms / 183,438; output rows identical. Details and apply instructions: `docs/deploy notes/DEPLOY_2026-10-01_v28.124_po_finance_indexes.md`.
+- Must run outside a transaction (CREATE INDEX CONCURRENTLY). Applied to sandbox; not to prod (Diviyaj).
+
+No new env vars.
+
 ## v28.123 (Ben): mirror Diviyaj's prod v28.122.1 menu fix + portal hardening
 
 **Files: `supply/inject.html`, `server.mjs`, `vercel.json`.** Mirrors what Diviyaj shipped on prod (01-Oct-26) so this repo matches.
