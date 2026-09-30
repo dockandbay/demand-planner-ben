@@ -4507,12 +4507,12 @@ async function resolvePoLinks(po, poRow) {
     const where = encodeURIComponent('Type=="ACCPAY" AND ((Reference!=null AND Reference.Contains("' + poEsc + '")) OR (InvoiceNumber!=null AND InvoiceNumber.Contains("' + poEsc + '")))');
     const j = await xeroFetch(region, '/api.xro/2.0/Invoices?where=' + where + '&order=Date%20DESC&page=1');
     const poStr = String(po);
-    const tokMatch = (str) => String(str || '').split(/[\/,;\s]+/).map(s => s.trim()).some(tok =>
-      tok === poStr || (tok.startsWith(poStr) && /^\d+$/.test(tok.slice(poStr.length))));
-    const inv = ((j && j.Invoices) || []).filter(v => tokMatch(v.Reference) || tokMatch(v.InvoiceNumber));
-    // ref/InvoiceNumber may be "PO-x", "PO-x/2", "PO-x, PO-y", or "PO-x1"/"PO-x2" (deposit/balance sequence);
-    // match a token that IS the PO or the PO + a purely-numeric suffix — so a dash-variant like PO-54UKXR3-FBA is
-    // NOT matched to PO-54UKXR3's bill (its suffix "-FBA" is not all digits).
+    // v28.093 (Ben's rule): the bill Reference (or InvoiceNumber) must START WITH the PO — "PO-53EUWK1 / EXDH-…" — never
+    // merely contain it. The old .some() over all tokens matched a Flexport freight bill "FLEX-… / PO-53EUWK1 …" (raised
+    // to the Flexport contact) and mis-linked it. Only the LEADING token counts now.
+    const leadMatch = (str) => { const first = String(str || '').trim().split(/[\s/]+/)[0] || '';
+      return first === poStr || (first.startsWith(poStr) && /^\d+$/.test(first.slice(poStr.length))); };   // PO, or PO + a purely-numeric deposit/balance suffix (PO-x2) — not a dash-variant like PO-x-FBA
+    const inv = ((j && j.Invoices) || []).filter(v => leadMatch(v.Reference) || leadMatch(v.InvoiceNumber));
     if (inv.length) {
       const primary = inv[0];
       const pref = primary.InvoiceNumber || primary.Reference || primary.InvoiceID;
@@ -4967,33 +4967,26 @@ const _daysDiff = (a, b) => { if (!a || !b) return null; const da = new Date(a +
 async function _computeXeroExceptions() {
   const out = [];
   // linked POs + HORIZON payment figures
+  // v28.094: bill amounts/dates come from the LOCAL planner.xero_bills cache (kept fresh by syncXeroBills / the cron),
+  // so this is a pure DB reconciliation — no live Xero call per bill (was ~22s of by-id fetches).
   const linked = (await pool.query(
     `SELECT p.po, coalesce(p.supplier_name,'') supplier, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch,
             coalesce(nullif(p.supplier_invoice_total,0), p.order_value_estimation, 0) total_h,
             (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)) paid_h,
             to_char(coalesce(p.balance_due_date_overide, p.pay_balance_1_date, p.pay_completion_date),'YYYY-MM-DD') due_h,
-            l.external_id bill_id, l.external_ref bill_ref
+            l.external_id bill_id, l.external_ref bill_ref,
+            b.total b_total, b.amount_paid b_paid, b.amount_due b_due, b.currency_code b_ccy, b.status b_status,
+            b.invoice_number b_number, to_char(b.due_date,'YYYY-MM-DD') b_due_date, to_char(b.invoice_date,'YYYY-MM-DD') b_date
        FROM planner.purchase_orders p
        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id IS NOT NULL
+       LEFT JOIN planner.xero_bills b ON b.invoice_id=l.external_id
       WHERE coalesce(p.master_po,'')='' LIMIT 800`)).rows;
-  // bulk-fetch bills by id, per region
-  const byRegion = { uk: [], au: [] };
-  linked.forEach(r => { const reg = _poXeroRegion(r.cc, r.branch); r._reg = reg; byRegion[reg].push(r); });
-  const billById = {};
-  for (const reg of ['uk', 'au']) {
-    const ids = byRegion[reg].map(r => r.bill_id).filter(Boolean);
-    for (let i = 0; i < ids.length; i += 40) {
-      const chunk = ids.slice(i, i + 40);
-      try {
-        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?IDs=' + chunk.join(','));
-        ((j && j.Invoices) || []).forEach(v => { billById[v.InvoiceID] = { total: Number(v.Total) || 0, paid: Number(v.AmountPaid) || 0, due: Number(v.AmountDue) || 0, ccy: v.CurrencyCode, status: v.Status, number: v.InvoiceNumber, dueDate: _xd(v.DueDateString || v.DueDate), date: _xd(v.DateString || v.Date) }; });
-      } catch (e) { /* region not connected / chunk failed → those POs just won't reconcile */ }
-    }
-  }
   const TOL = 1.0;
   const DUE_TOL = 5;   // days
   linked.forEach(r => {
-    const x = billById[r.bill_id]; if (!x) return;   // couldn't fetch the bill → skip (not a mismatch)
+    r._reg = _poXeroRegion(r.cc, r.branch);
+    if (r.b_status == null && r.b_total == null) return;   // bill not in the local cache yet (unsynced) → skip
+    const x = { total: Number(r.b_total) || 0, paid: Number(r.b_paid) || 0, due: Number(r.b_due) || 0, ccy: r.b_ccy, status: r.b_status, number: r.b_number, dueDate: r.b_due_date, date: r.b_date };
     // Due-date check — independent of the amount reconciliation. Flag a bill whose due date is missing, before its
     // own date, or off Horizon's expected balance/completion due date by more than a few days.
     if (String(x.status || '') !== 'PAID' && String(x.status || '') !== 'VOIDED') {
@@ -5005,6 +4998,10 @@ async function _computeXeroExceptions() {
         bill_id: r.bill_id, bill_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill_id,
         message: r.po + ' — bill due date looks wrong', insight: ddMsg, action: 'review_po' });
     }
+    // v28.094: HORIZON figures are USD. If the Xero bill is in another currency we can't compare raw amounts without an
+    // FX rate, so skip the amount reconciliation (the due-date check above is currency-independent and still applies).
+    // This removes the biggest class of false positives (GBP/AUD/CAD/EUR bills that always "mismatched").
+    if (x.ccy && x.ccy !== 'USD') return;
     const dueH = (Number(r.total_h) || 0) - (Number(r.paid_h) || 0);
     const paidDiff = x.paid - (Number(r.paid_h) || 0);
     const dueDiff = x.due - dueH;
@@ -5044,37 +5041,87 @@ async function _computeXeroExceptions() {
 app.get('/api/supply/xero/exceptions', async (req, res) => {
   try {
     const fresh = String(req.query.refresh || '') === '1';
-    // v28.081: was a 3-min cache that BLOCKED on expiry (a 22s live Xero sweep on page load for a badge). Now SWR: within
-    // 15 min serve cached; past that serve the last sweep at once and re-sweep behind; ?refresh=1 (the Exceptions tab's
-    // "re-check" button) still forces a live sweep and waits for it.
-    if (fresh) { const data = await _computeXeroExceptions(); _xeroExcCache = { at: Date.now(), data }; swrDrop('xero:exc'); return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data)); }
+    // v28.081: was a 3-min cache that BLOCKED on expiry. Now SWR: within 15 min serve cached; past that serve the last
+    // result at once and recompute behind. The reconciliation itself is now a fast local-DB read (v28.094 — bill amounts
+    // come from planner.xero_bills), so ?refresh=1 first runs an incremental bill sync, then recomputes and waits.
+    if (fresh) { try { await syncXeroBills({}); } catch (e) { /* keep last synced bills */ } const data = await _computeXeroExceptions(); _xeroExcCache = { at: Date.now(), data }; swrDrop('xero:exc'); return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: false }, data)); }
     const _seed = _xeroExcCache.data ? _xeroExcCache : null; _xeroExcCache = { at: 0, data: null };   // migrate the old cache slot into swr once
     if (_seed) { const e = { v: _seed.data, at: _seed.at, inflight: null }; if (!_swr.has('xero:exc')) _swr.set('xero:exc', e); }
     const data = await swrGet('xero:exc', 15 * 60 * 1000, _computeXeroExceptions);
     res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, data));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// Bulk RESOLVE ALL po_links — one Xero bill sweep per org (paginated) + local Fulfil/Flexport/DHL joins, so the whole
-// PO book gets linked without a live call per PO. Feeds Linked Records + Exceptions. Keeps existing manual links.
+// ── v28.094 (Ben): local Xero-bills cache + incremental sync ────────────────────────────────────────────────────────
+// Store ACCPAY bills in planner.xero_bills and pull only bills MODIFIED since the last watermark (Xero If-Modified-Since),
+// so the link resolver and the Exceptions reconciliation read amounts/refs from Postgres instead of hitting Xero live
+// every run (was a ~3-min full sweep + a ~22s by-id refetch). First run per region (no watermark) is a full pull.
+const _xBillDate = s => { const m = /\/Date\((\d+)/.exec(String(s || '')); if (m) return new Date(Number(m[1])); const t = String(s || ''); return /^\d{4}-\d{2}-\d{2}/.test(t) ? new Date(t.length > 10 ? (t.slice(0, 19) + 'Z') : (t + 'T00:00:00Z')) : null; };
+async function syncXeroBills(opts) {
+  opts = opts || {};
+  const out = { uk: { fetched: 0, upserted: 0 }, au: { fetched: 0, upserted: 0 } };
+  for (const reg of ['uk', 'au']) {
+    let watermark = null;
+    if (!opts.full) { try { const w = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['xero_bills_sync_' + reg])).rows[0]; watermark = w && w.value ? w.value : null; } catch (e) { /* first run */ } }
+    const startedAt = new Date();
+    try {
+      for (let page = 1; page <= 120; page++) {
+        const headers = watermark ? { 'If-Modified-Since': watermark } : {};
+        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY"') + '&order=UpdatedDateUTC%20ASC&page=' + page, { headers });
+        const inv = (j && j.Invoices) || []; if (!inv.length) break;
+        out[reg].fetched += inv.length;
+        // batch the whole page into ONE multi-row upsert (was one round-trip per bill → the full first sync crawled)
+        const vals = [], params = []; let pi = 0;
+        for (const v of inv) {
+          const idt = _xBillDate(v.DateString || v.Date), ddt = _xBillDate(v.DueDateString || v.DueDate), udt = _xBillDate(v.UpdatedDateUTC);
+          vals.push('($' + (pi + 1) + ',$' + (pi + 2) + ',$' + (pi + 3) + ',$' + (pi + 4) + ',$' + (pi + 5) + ',$' + (pi + 6) + ',$' + (pi + 7) + ',$' + (pi + 8) + ',$' + (pi + 9) + ',$' + (pi + 10) + ',$' + (pi + 11) + ',$' + (pi + 12) + ',$' + (pi + 13) + ',now())');
+          params.push(v.InvoiceID, reg, v.InvoiceNumber || null, v.Reference || null, (v.Contact && v.Contact.Name) || null, Number(v.Total) || 0, Number(v.AmountPaid) || 0, Number(v.AmountDue) || 0, v.CurrencyCode || null, v.Status || null,
+            idt ? idt.toISOString().slice(0, 10) : null, ddt ? ddt.toISOString().slice(0, 10) : null, udt ? udt.toISOString() : null);
+          pi += 13;
+        }
+        await pool.query(
+          `INSERT INTO planner.xero_bills (invoice_id,region,invoice_number,reference,contact_name,total,amount_paid,amount_due,currency_code,status,invoice_date,due_date,updated_utc,synced_at)
+           VALUES ${vals.join(',')}
+           ON CONFLICT (invoice_id) DO UPDATE SET region=excluded.region,invoice_number=excluded.invoice_number,reference=excluded.reference,contact_name=excluded.contact_name,total=excluded.total,amount_paid=excluded.amount_paid,amount_due=excluded.amount_due,currency_code=excluded.currency_code,status=excluded.status,invoice_date=excluded.invoice_date,due_date=excluded.due_date,updated_utc=excluded.updated_utc,synced_at=now()`,
+          params);
+        out[reg].upserted += inv.length;
+        if (inv.length < 100) break;
+      }
+      // advance the watermark to this sync's start (a small overlap next run is harmless — the upsert is idempotent)
+      await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_bills_sync_' + reg, startedAt.toISOString().slice(0, 19)]);
+    } catch (e) { out[reg].error = e.message; /* org not connected → keep the old watermark */ }
+  }
+  out.at = new Date().toISOString();
+  return out;
+}
+app.post('/api/supply/xero/bills-sync', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {}
+  try { const r = await syncXeroBills({ full: String(req.query.full || '') === '1' }); res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cron/xero-bills-sync', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { const r = await syncXeroBills({}); res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Bulk RESOLVE ALL po_links — matches every PO against the LOCAL xero_bills cache (v28.094; was a full live Xero sweep)
+// + local Fulfil/Flexport/DHL joins. Runs an incremental bill sync first so it always matches fresh data. Keeps manual links.
 async function _resolveAllPoLinks() {
   const poRows = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(flexport_reference,'') flexref, coalesce(shipment_ref,'') shipref FROM planner.purchase_orders WHERE coalesce(master_po,'')=''`)).rows;
   const poSet = new Set(poRows.map(r => r.po));
-  const tokFor = str => String(str || '').split(/[\/,;\s]+/).map(s => s.trim()).filter(Boolean);
   const matchPo = tok => poSet.has(tok) ? tok : (/\d$/.test(tok) && poSet.has(tok.replace(/\d+$/, '')) ? tok.replace(/\d+$/, '') : null);
-  // Xero: sweep ACCPAY bills per org → xeroByPo
-  const xeroByPo = {}; let billsScanned = 0;
-  for (const reg of ['uk', 'au']) {
-    try {
-      for (let page = 1; page <= 60; page++) {
-        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY"') + '&order=Date%20DESC&page=' + page);
-        const inv = (j && j.Invoices) || []; if (!inv.length) break;
-        for (const v of inv) { billsScanned++;
-          const toks = tokFor(v.Reference).concat(tokFor(v.InvoiceNumber));
-          for (const t of toks) { const po = matchPo(t); if (po && !xeroByPo[po]) xeroByPo[po] = { region: reg, id: v.InvoiceID, number: v.InvoiceNumber || v.Reference }; }
-        }
-        if (inv.length < 100) break;
-      }
-    } catch (e) { /* org not connected → skip */ }
+  // v28.093 (Ben's rule): a Xero bill belongs to a PO only when its Reference (or InvoiceNumber) *STARTS WITH* the PO,
+  // e.g. "PO-53EUWK1 / EXDH-SMDNB-250909". The old matcher accepted the PO as ANY whitespace/slash token, so a Flexport
+  // freight bill "FLEX-3515483-12 / PO-53EUWK1 …" (raised to the Flexport contact) was wrongly linked and caused a
+  // permanent amount mismatch. Now we only take the LEADING token (before the first space or slash).
+  const leadPo = str => { const first = String(str || '').trim().split(/[\s/]+/)[0]; return first ? matchPo(first) : null; };
+  // Xero: incremental sync into the local bill cache, then match POs against the table (v28.094 — no full live sweep).
+  await syncXeroBills({});
+  const billRows = (await pool.query(`SELECT invoice_id, region, invoice_number, reference FROM planner.xero_bills
+    WHERE coalesce(status,'') NOT IN ('DELETED','VOIDED') ORDER BY invoice_date DESC NULLS LAST, updated_utc DESC NULLS LAST`)).rows;
+  const xeroByPo = {}; const billsScanned = billRows.length;
+  for (const b of billRows) {   // newest first → first match per PO wins (same as the old Date DESC sweep)
+    const po = leadPo(b.reference) || leadPo(b.invoice_number);   // Reference must START with the PO — never merely contain it
+    if (po && !xeroByPo[po]) xeroByPo[po] = { region: b.region, id: b.invoice_id, number: b.invoice_number || b.reference };
   }
   // Fulfil / Flexport / DHL — local mirrors
   const fulfilBy = {}; (await pool.query(`SELECT po, fulfil_id FROM planner.fulfil_purchase_orders WHERE fulfil_id IS NOT NULL`)).rows.forEach(r => { fulfilBy[r.po] = String(r.fulfil_id); });
@@ -5087,22 +5134,29 @@ async function _resolveAllPoLinks() {
      VALUES ($1,$2,$3,$4,$5,'linked',$6,'auto',now(),now())
      ON CONFLICT (po, system) DO UPDATE SET external_id=$3, external_ref=$4, url=$5, status='linked', note=$6, updated_at=now(),
        found_by=CASE WHEN planner.po_links.found_by='manual' THEN 'manual' ELSE 'auto' END`, [po, system, id, ref, url, note]); };
+  // v28.094 (Ben): INCREMENTAL by default — only resolve a (po, system) that isn't already linked, so a normal run
+  // touches just new/unlinked POs (was re-writing all ~769 links every time). Any real discrepancy still surfaces via
+  // the Exceptions reconciliation, which compares every linked PO regardless. opts.full = the one-time cleanup: clear
+  // stale AUTO xero links (purges the wrong ones from the old loose matcher) and re-match the whole book.
+  const already = { xero: new Set(), fulfil: new Set(), flexport: new Set(), dhl: new Set() };
+  if (!opts.full) { (await pool.query(`SELECT po, system FROM planner.po_links WHERE status='linked' AND coalesce(external_id,'')<>''`)).rows.forEach(r => { if (already[r.system]) already[r.system].add(r.po); }); }
+  if (opts.full && billsScanned > 0) { try { await pool.query(`DELETE FROM planner.po_links WHERE system='xero' AND found_by='auto'`); } catch (e) { /* non-fatal */ } }
   for (const r of poRows) {
-    const x = xeroByPo[r.po]; if (x) { await up(r.po, 'xero', x.id, x.number, 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + x.id, x.region.toUpperCase()); cX++; }
-    if (fulfilBy[r.po]) { await up(r.po, 'fulfil', fulfilBy[r.po], r.po, fUrl(fulfilBy[r.po]), null); cF++; }
-    const fx = flexBy[r.po]; if (fx && fx.id) { await up(r.po, 'flexport', fx.id, fx.name || '', 'https://app.flexport.com/shipments/' + encodeURIComponent(fx.id), null); cP++; }
-    const sh = dhlByShip[r.shipref || r.po]; if (sh) { const trk = String(sh.carrier_ref).trim(); await up(r.po, 'dhl', trk, sh.carrier, 'https://www.dhl.com/global-en/home/tracking.html?tracking-id=' + encodeURIComponent(trk) + '&submit=1', null); cD++; }
+    if (!already.xero.has(r.po)) { const x = xeroByPo[r.po]; if (x) { await up(r.po, 'xero', x.id, x.number, 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + x.id, x.region.toUpperCase()); cX++; } }
+    if (!already.fulfil.has(r.po) && fulfilBy[r.po]) { await up(r.po, 'fulfil', fulfilBy[r.po], r.po, fUrl(fulfilBy[r.po]), null); cF++; }
+    if (!already.flexport.has(r.po)) { const fx = flexBy[r.po]; if (fx && fx.id) { await up(r.po, 'flexport', fx.id, fx.name || '', 'https://app.flexport.com/shipments/' + encodeURIComponent(fx.id), null); cP++; } }
+    if (!already.dhl.has(r.po)) { const sh = dhlByShip[r.shipref || r.po]; if (sh) { const trk = String(sh.carrier_ref).trim(); await up(r.po, 'dhl', trk, sh.carrier, 'https://www.dhl.com/global-en/home/tracking.html?tracking-id=' + encodeURIComponent(trk) + '&submit=1', null); cD++; } }
   }
-  return { pos: poRows.length, bills_scanned: billsScanned, xero: cX, fulfil: cF, flexport: cP, dhl: cD };
+  return { pos: poRows.length, mode: opts.full ? 'full' : 'incremental', bills_scanned: billsScanned, xero: cX, fulfil: cF, flexport: cP, dhl: cD };
 }
 app.post('/api/supply/po/links/resolve-all', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {}
-  try { const r = await _resolveAllPoLinks(); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
+  try { const r = await _resolveAllPoLinks({ full: String(req.query.full || '') === '1' }); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cron/resolve-po-links', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
-  try { const r = await _resolveAllPoLinks(); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
+  try { const r = await _resolveAllPoLinks({ full: String(req.query.full || '') === '1' }); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero/push-queue/:id/cancel', async (req, res) => {
@@ -5367,6 +5421,7 @@ async function runFlexportEntityHarvest(opts) {
   await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ('flexport_entity_registry',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [JSON.stringify(registry)]);
   return { ok: true, pages: page, bookings_seen: seen, bookings_matched: matched, suppliers: Object.keys(suppliers).length, markets: Object.keys(consignees).length, registry };
 }
+let _flexHarvestInflight = null;   // v28.094: single-flight background registry harvest (never blocks a preview)
 async function flexportRegistry() {
   try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='flexport_entity_registry'`)).rows[0]; return r ? JSON.parse(r.value) : null; } catch (e) { return null; }
 }
@@ -5400,9 +5455,16 @@ async function buildFlexportBookingBody(po, opts) {
     WHERE p.po=$1`, [po])).rows[0];
   if (!row) { const e = new Error('PO not found: ' + po); e.code = 404; throw e; }
   let reg = (await flexportRegistry());
-  // lazy first-run harvest: with no registry yet, build it once from existing bookings (so prod needs no manual step)
-  if ((!reg || !reg.suppliers || !Object.keys(reg.suppliers).length) && flexportConfig().present) {
-    try { reg = (await runFlexportEntityHarvest({})).registry; } catch (e) { /* token/network — fall through with empty reg */ }
+  // v28.094 (Ben): the registry is harvested from prior Flexport bookings — a slow multi-page scan (~20-30s). It used
+  // to run INLINE here whenever reg.suppliers was empty, so the first preview per supplier took 30s+, and if no booking
+  // matched it re-harvested on EVERY preview. Now: never block. If the registry is missing or stale (>24h), kick off a
+  // single background harvest and proceed with whatever we have — the next preview is prefilled. Empty is handled below
+  // with a "book once in Flexport, then re-harvest" note.
+  if (flexportConfig().present) {
+    const age = (reg && reg.harvested_at) ? (Date.now() - new Date(reg.harvested_at).getTime()) : Infinity;
+    if (!_flexHarvestInflight && (!reg || !reg.harvested_at || age > 24 * 3600 * 1000)) {
+      _flexHarvestInflight = Promise.resolve().then(() => runFlexportEntityHarvest({})).catch(() => null).finally(() => { _flexHarvestInflight = null; });
+    }
   }
   reg = reg || { suppliers: {}, consignees: {} };
   const shipper = row.supplier_id != null ? reg.suppliers[String(row.supplier_id)] : null;

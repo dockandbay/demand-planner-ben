@@ -10764,15 +10764,18 @@
         +'<div class="count" style="opacity:.7;padding:14px">⏳ Checking Xero… the live reconciliation reads every linked bill and can take ~20s on first load. The rest of the page is ready.</div>'; }
       var ex=(_xpqExc&&_xpqExc.exceptions)||[];
       var body=ex.length?ex.map(function(e){
-        var act=e.action==='create_credit_note'?'<button class="save-btn xpq-mkcn" data-po="'+esc(e.po)+'" data-amt="'+(e.amount||0)+'" data-prod="'+esc(e.prod_no||'')+'" data-dep="'+esc(e.deposit_ref||'')+'" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Credit note</button>'
-          :e.action==='find_links'?'<button class="lnk-btn xpq-find" data-po="'+esc(e.po)+'" style="color:var(--blue)">find links</button>'
-          :'<button class="lnk-btn xpq-openpo" data-po="'+esc(e.po)+'" style="color:var(--blue)">open PO ↗</button>';
+        // v28.092 (Ben): every row gets Open PO (opens the PO drawer on the Payments tab) + Open in Xero (the bill),
+        // plus the type-specific action (Credit note / Find links) where relevant.
+        var openPo='<button class="lnk-btn xpq-openpo" data-po="'+esc(e.po)+'" style="color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font-weight:600">open PO ↗</button>';
+        var openXero=e.bill_url?'<a href="'+esc(e.bill_url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600;white-space:nowrap">open in Xero ↗</a>':'';
+        var extra=e.action==='create_credit_note'?'<button class="save-btn xpq-mkcn" data-po="'+esc(e.po)+'" data-amt="'+(e.amount||0)+'" data-prod="'+esc(e.prod_no||'')+'" data-dep="'+esc(e.deposit_ref||'')+'" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Credit note</button>'
+          :e.action==='find_links'?'<button class="lnk-btn xpq-find" data-po="'+esc(e.po)+'" style="color:var(--blue)">find links</button>':'';
+        var act='<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">'+openPo+openXero+extra+'</div>';
         var tlbl={amount_mismatch:'Amount mismatch',due_date_mismatch:'Due date',uncreated_credit_note:'Uncreated credit note',shipped_no_bill:'Not in Xero'}[e.type]||e.type;
         var tcol=e.type==='amount_mismatch'?'bg-red':'bg-amber';
-        var billLink=e.bill_url?' <a href="'+esc(e.bill_url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600;white-space:nowrap">open bill in Xero ↗</a>':'';
         return '<tr style="border-top:1px solid var(--line)"><td class="l"><span class="tool-badge '+tcol+'">'+esc(tlbl)+'</span></td>'
           +'<td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(e.po||'')+(e.bill_ref?'<div class="mut tiny">'+esc(e.bill_ref)+'</div>':'')+'</td><td class="l">'+esc(e.supplier||'')+'</td>'
-          +'<td class="l"><span style="font-size:12px">'+esc(e.insight||e.message||'')+'</span>'+billLink+'</td>'
+          +'<td class="l"><span style="font-size:12px">'+esc(e.insight||e.message||'')+'</span></td>'
           +'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }).join('')
         :'<tr><td colspan="5" class="l mut" style="padding:10px">✓ No exceptions — Xero and Horizon reconcile.</td></tr>';
       return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s. '+(_xpqExc&&_xpqExc.computed_at?'Checked '+esc(String(_xpqExc.computed_at).slice(11,16))+' UTC. ':'')+'<button class="lnk-btn" id="xpq-exc-refresh" style="color:var(--blue)">↻ re-check live</button> · <button class="lnk-btn" id="xpq-resolve-all" style="color:var(--blue)" title="Sweep every PO’s links from Xero / Fulfil / Flexport / DHL so exceptions cover the whole book">⟳ resolve all links</button></div>'
@@ -10812,7 +10815,7 @@
           alert('✓ Resolved links across '+x.pos+' POs — Xero '+x.xero+', Fulfil '+x.fulfil+', Flexport '+x.flexport+', DHL '+x.dhl+' ('+x.bills_scanned+' bills scanned). Re-checking exceptions…');
           loadExceptions(true); })   // v28.088: progressive re-check
           .catch(function(e){ rall.textContent='⟳ resolve all links'; alert('Resolve failed: '+(e.message||e)); }); };
-      b.querySelectorAll('.xpq-openpo').forEach(function(btn){ btn.onclick=function(){ try{ gotoPO(btn.dataset.po,'pay'); }catch(e){ try{ selectSection('purchase-orders'); }catch(_){} } }; });
+      b.querySelectorAll('.xpq-openpo').forEach(function(btn){ btn.onclick=function(){ try{ openPODrawer(btn.dataset.po,'pay'); }catch(e){ try{ gotoPO(btn.dataset.po,'pay'); }catch(_){} } }; });   // v28.092: open the PO drawer (Payments tab) in place, not navigate to the grid
       b.querySelectorAll('.xpq-find').forEach(function(btn){ btn.onclick=function(){ btn.textContent='finding…'; fetch('/api/supply/po/'+encodeURIComponent(btn.dataset.po)+'/links?refresh=1').then(function(r){return r.json();}).then(function(){ exrf&&exrf.click&&exrf.click(); btn.textContent='done'; }).catch(function(){ btn.textContent='failed'; }); }; });
       b.querySelectorAll('.xpq-mkcn').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Create a Xero credit note for '+btn.dataset.po+' ('+money(btn.dataset.amt)+') — coded to Stock Deposits (602), allocated to the PO bill?\n\nThis writes to live Xero.'))return; btn.disabled=true; btn.textContent='Creating…';
         fetch('/api/supply/xero/deposit-credit-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:btn.dataset.po,confirm:true})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); alert('✓ Credit note '+(x.credit_note_number||'')+' created for '+x.po+' ('+money(x.amount)+', '+x.production+')'+(x.allocated?' and allocated to the bill.':' — created but NOT allocated: '+(x.allocation_error||'')) ); load(); }).catch(function(e){ btn.disabled=false; btn.textContent='＋ Credit note'; alert('Failed: '+(e.message||e)); }); }; });
