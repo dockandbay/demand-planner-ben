@@ -10730,7 +10730,8 @@
       +'<option value="au"'+(payingUp==='AU'?' selected':'')+'>Pay from AU org</option></select>';
     var _old=document.getElementById('xbp-bg'); if(_old)_old.remove();
     var bg=document.createElement('div'); bg.id='xbp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
-    bg.innerHTML='<div style="background:var(--card);border-radius:12px;max-width:900px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
+    bg.innerHTML='<style>#xbp-bg th,#xbp-bg td{text-align:left!important}</style>'
+      +'<div style="background:var(--card);border-radius:12px;max-width:900px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
       +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Create in Xero</b>'+orgSel+(hasCross?'<span class="mut tiny" title="some POs live in the other Xero org and settle via the intercompany loan (901)">+ cross-org via loan 901</span>':'')+'<button id="xbp-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
       +'<div style="padding:16px 18px">'
       +((j.has_deposits&&(j.deposit_orgs||[]).length)?('<div style="background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c;font-weight:800;padding:9px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">THIS MUST BE PAID FROM A BANK LINKED TO XERO '+(j.deposit_orgs||[]).map(function(o){return String(o).toUpperCase();}).join(' &amp; ')+((j.deposit_orgs||[]).length>1?' — deposits from two orgs cannot be in one run, split them':' — deposits settle only in their home org')+'</div>'):'')
@@ -10766,7 +10767,8 @@
   // ---- AU bill migration tool (Xero UK → AU) — small helper launched from the Xero payments view (v28.109, Ben) ----
   function xeroAuMigrateModal(){
     var bg=document.createElement('div'); bg.id='aum-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
-    bg.innerHTML='<div style="background:var(--card);border-radius:12px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
+    bg.innerHTML='<style>#aum-bg table{border-collapse:collapse}#aum-bg th,#aum-bg td{text-align:left!important}</style>'
+      +'<div style="background:var(--card);border-radius:12px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
       +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">AU bill migration — Xero UK → AU</b><span class="tool-badge bg-blue">code 625</span><button id="aum-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
       +'<div style="padding:16px 18px"><div class="mut tiny" style="margin-bottom:10px">AU purchase orders (not COMPLETE) whose bill sits in Xero UK. Each creates an <b>identical DRAFT bill</b> in Xero AU with every line coded to <b>625 (Inventory Balance Sheet)</b>. If the supplier isn’t a contact in AU it’s created automatically. The UK bill and the PO link are left untouched.</div><div id="aum-body"><div class="count">Loading candidates…</div></div></div></div>';
     document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
