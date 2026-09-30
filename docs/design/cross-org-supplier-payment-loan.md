@@ -23,7 +23,14 @@ either org. When the paying org and a PO's home org differ, the money moves thro
 
 For each line compare `home_org` vs `paying_org`:
 - **Same-org line** — `home_org == paying_org`. Behaves exactly as today.
-- **Cross-org line** — `home_org != paying_org`. Uses the loan mechanism below.
+- **Cross-org line** — `home_org != paying_org`. Uses the loan mechanism below — **completion / balance / final only**.
+
+**Deposits are never cross-org (Ben).** A starting deposit, and its P58+ credit-note draw-down, always settle in
+the PO's **home org**. The loan route does not apply to them. Therefore a deposit line is only valid when
+`home_org == paying_org`; if a run's paying org differs from a deposit line's home org, that deposit line is
+**blocked** (not settled via loan) with: "Deposits settle in the PO's home org — run this deposit from the
+&lt;home org&gt; org." Completion/balance lines in the same run are unaffected. (Open: whether deposits should be
+split into their own runs entirely — see below.)
 
 ## What posts
 
@@ -65,10 +72,12 @@ paid from 901 UK loan.
   (intercompany)' }`). Populate `cfg.accounts.uk.loan` and `cfg.accounts.au.loan`:
   - UK: code **901**, AccountID `5076ed75-82b7-4317-81ba-c686a82d7c76`
   - AU: code **901**, AccountID `e2f3dc79-f268-49aa-8a42-674917d15a98`
-- Each **901 loan account must be payment-enabled** (`EnablePaymentsToAccount = true`) in its org, so a
-  Payment can post against a bill from it. Confirm in Xero.
-- **901 currency** — confirm it is USD in each org (no FX on the settlement). If 901 is base currency
-  (GBP / AUD), Xero applies the org's daily USD rate to the cross-org payment; decide whether that is wanted.
+- Each **901 loan account is payment-enabled** in its org (confirmed, Ben) — a Payment can post against a bill from it.
+- **901 currency is base currency** (confirmed, Ben): **UK 901 = GBP, AU 901 = AUD**. The supplier bills are USD,
+  so each cross-org movement carries FX: Xero posts to/from the base-currency 901 at **that org's own daily USD
+  rate**. The two legs therefore agree on the **USD amount** but book different GBP vs AUD values — this is normal
+  for an intercompany loan; **reconcile the loan on the USD figures** (put the USD amount in the line
+  description/reference on both sides so they tie out). Each org uses its own daily rate — we do not force one shared rate.
 
 ## Preview + checks (per-line, not per-run)
 
@@ -79,14 +88,20 @@ paid from 901 UK loan.
   - `loan` 901 not mapped or not payment-enabled in an org that a cross-org line needs;
   - no USD bank in the paying org.
 
-## Open questions for Ben
+## Resolved (Ben)
 
-1. **Cross-org deposits.** P58+ deposits currently draw down via a credit note, not a payment. Does the loan
-   route apply to cross-org deposits too, or only completion/balance? (Suggest: completion/balance only for v1;
-   cross-org deposits flagged as unsupported until confirmed.)
-2. **Loan line tracking.** Assume no Production tracking on the 901 loan line of the supplier-payment bill (it's
-   a settlement). Confirm.
-3. **901 currency / FX** as above.
+- **Deposits never cross-org.** Starting deposits and P58+ credit-note draw-downs always settle in the PO's home
+  org; loan route is completion/balance only. Cross-org deposit lines are blocked, not settled.
+- **901 payment-enabled** in both orgs. ✓
+- **901 is base currency** (UK GBP, AU AUD); each org posts the settlement at its own daily USD rate; reconcile on USD.
+
+## Still open for Ben
+
+1. **Separate deposit runs?** "Payments for deposits maybe should not be mixed." Options: (a) allow deposits +
+   completions in one run as long as every deposit line is same-org (blocking cross-org deposits, per above), or
+   (b) make deposits their own run type entirely, never alongside completion/balance. Which?
+2. **Loan line tracking.** Assume **no** Production tracking on the 901 loan line of the supplier-payment bill
+   (it's a settlement, not stock). Confirm.
 
 ## Code touch-points (for the build, not this doc)
 
