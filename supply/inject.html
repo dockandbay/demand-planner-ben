@@ -2349,7 +2349,7 @@
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; });
       l.querySelectorAll('.shpop-mng').forEach(function(mb){ mb.onclick=function(e){ e.stopPropagation(); closeShPop(); openSupplierDrawer(mb.dataset.sup); }; }); }
-    render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
+    render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus(); } }
   // Crossdock SKU add — same searchable popover UX as the batch/branch cell picker, but multi-add: picking a
   // SKU calls onPick(sku) (the caller appends + saves the comma list). Excludes already-selected SKUs.
   // Country-aware: for a UK/US/EU/AU PO it surfaces the crossdock-report SKUs sitting in THAT country's 3PL
@@ -2395,7 +2395,7 @@
         if(!q && allList.length>60)html+='<div class="mut tiny" style="padding:5px 10px">'+(allList.length-60)+' more — type to search…</div>';
         var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html;
         l.querySelectorAll('.shpop-opt:not(.shpop-opt-dis)').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
-      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
+      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus(); } }
     if(wh) loadXdReport(build); else build({rows:[],expected:[]}); }
   // ORDER PLAN add-SKU picker — same searchable popover UX as the batch/crossdock cell picker, scoped to the
   // PO's supplier SKUs. On pick calls onPick(sku). Fetches (and caches in OP_SKUS) the supplier list on demand.
@@ -2410,7 +2410,7 @@
       if(!q&&rows.length>20)html+='<div class="mut tiny" style="padding:5px 10px">'+(rows.length-20)+' more — type to search…</div>';
       var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
-    function ready(){ render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
+    function ready(){ render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus(); } }
     if(OP_SKUS[po]){ ready(); }
     else if(sup){ fetch('/api/supply/supplier-skus/'+encodeURIComponent(sup)).then(function(r){return r.json();}).then(function(rows){ OP_SKUS[po]=Array.isArray(rows)?rows:[]; ready(); }).catch(function(){ OP_SKUS[po]=[]; ready(); }); }
     else { OP_SKUS[po]=[]; ready(); } }
@@ -6499,7 +6499,7 @@
       var ms=list.filter(function(p){return !q||String(p.prod_no||'').toLowerCase().indexOf(q)>=0;});
       var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?80:20).map(function(p){return '<div class="shpop-opt" data-v="'+esc(p.prod_no)+'">'+esc(p.prod_no)+(p.xero_account_code?' <span class="mut tiny">'+esc(p.xero_account_code)+'</span>':'')+'</div>';}).join('');
       var l=document.getElementById('shpop-list'); if(l){ l.innerHTML=html; l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ save(o.dataset.clear?'':o.dataset.v); }; }); } }
-    var qi=pop.querySelector('.shpop-q'); qi.oninput=function(){render(this.value);}; qi.focus();
+    var qi=pop.querySelector('.shpop-q'); qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus();
     if(_depProdsCache){ render(''); }
     else fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){
       _depProdsCache=(rows||[]).filter(function(p){return String(p.status||'').toUpperCase()==='ACTIVE';}).sort(function(a,b){return String(b.prod_no).localeCompare(String(a.prod_no),undefined,{numeric:true});});
@@ -6517,7 +6517,7 @@
         +'<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?80:15).map(function(s){return '<div class="shpop-opt" data-v="'+esc(s)+'">'+esc(s)+'</div>';}).join('')
         +((!q&&ms.length>15)?'<div class="mut tiny" style="padding:5px 10px">'+(ms.length-15)+' more — type to search…</div>':'');
       var l=document.getElementById('shpop-list'); if(l){ l.innerHTML=html; l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ save(o.dataset.clear?'':o.dataset.v); }; }); } }
-    var qi=pop.querySelector('.shpop-q'); qi.oninput=function(){render(this.value);}; qi.focus();
+    var qi=pop.querySelector('.shpop-q'); qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus();
     if(supplierList&&supplierList.length){ render(''); } else fetchLookups(function(){ render(''); }); }
   function prodTable(rows){ if(!rows.length)return '<div class="count">No productions in this filter.</div>';
     var h='<div class="tw"><table><thead><tr><th class="l"></th><th class="l">PROD#</th><th class="l">Supplier</th><th>POs</th><th>Units</th><th>Value</th><th class="l">Deposits</th><th class="l">Status</th></tr></thead><tbody>';
@@ -7476,7 +7476,7 @@
           var msg=document.getElementById('cm-msg'); if(msg){ msg.textContent='Saving…'; msg.style.color='var(--muted)'; }
           clearTimeout(_cmSaveT);
           _cmSaveT=setTimeout(function(){
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'contrib_model',value:JSON.stringify(_cmModel)})})
+            (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'contrib_model',value:JSON.stringify(_cmModel)})})
               .then(function(r){return r.json();}).then(function(j){ var m=document.getElementById('cm-msg');
                 if(j&&j.error){ if(m){m.textContent='Save failed: '+j.error;m.style.color='var(--neg)';} return; }
                 if(m){ m.textContent='Saved ✓'; m.style.color='var(--pos)'; setTimeout(function(){ if(m&&m.textContent==='Saved ✓')m.textContent=''; },1400); }
@@ -7536,7 +7536,7 @@
             _cmModel[k][f]=v; patchRow(sub); cmSave(el); }; });   // auto-save + green flash on commit
           b.querySelectorAll('.cm-clr').forEach(wireClr);
         }
-        fetch('/api/app-settings').then(function(r){ if(!r.ok)throw new Error('load '+r.status); return r.json(); }).then(function(s){ s=s||{};
+        hzqGet('/api/app-settings').then(function(s){ s=s||{};
           try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }
           _cmLoaded=true; draw();
         }).catch(function(){ _cmLoaded=false;   // v27.586: do NOT open an empty editor on a load failure — a save would overwrite live with {} and wipe every saved value
@@ -7558,7 +7558,7 @@
           var m=document.getElementById('ro-msg'); if(m){ m.textContent='Saving…'; m.style.color='var(--muted)'; }
           clearTimeout(_roSaveT);
           _roSaveT=setTimeout(function(){
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'runoff_hidden_subs',value:JSON.stringify(_roHidden)})})
+            (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'runoff_hidden_subs',value:JSON.stringify(_roHidden)})})
               .then(function(r){return r.json();}).then(function(j){ var m2=document.getElementById('ro-msg');
                 if(j&&j.error){ if(m2){m2.textContent='Save failed: '+j.error;m2.style.color='var(--neg)';} return; }
                 if(m2){ m2.textContent='Saved ✓ — reload the demand plan to see the change'; m2.style.color='var(--pos)'; }
@@ -7581,7 +7581,7 @@
             if(cb.checked){ if(i<0)_roHidden.push(s); } else { if(i>=0)_roHidden.splice(i,1); }
             draw(); roSave(); }; });
         }
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+        hzqGet('/api/app-settings').then(function(s){ s=s||{};
           try{ _roHidden=s.runoff_hidden_subs?JSON.parse(s.runoff_hidden_subs):[]; }catch(e){ _roHidden=[]; }
           if(!Array.isArray(_roHidden))_roHidden=[];
           draw();
@@ -7936,7 +7936,7 @@
         load(CUR);
       };
       SUBS['general']=function(){ b.innerHTML='<div class="count">Loading…</div>';
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+        hzqGet('/api/app-settings').then(function(s){ s=s||{};
           var FIELDS=[['escalation_supply_chain','Supply chain','Default recipients for escalations (any PO/shipment that isn’t Direct-to-Client).'],
             ['escalation_dtc','Direct to Client','Used when the PO branch is Direct to Client / JLEW / NEXT.'],
             ['escalation_samples','Samples','Used when a sample is escalated (and it is NOT a product-development sample).'],
@@ -7953,7 +7953,7 @@
             +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>'
             ;   // (Buy plan logic toggle moved to DEMAND ▸ Buy Plan)
           b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='var(--line)';
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
+            (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'var(--neg)':'var(--pos)'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='var(--neg)'; }); }; });
           fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
@@ -8048,9 +8048,9 @@
               var fl=(ns==='complete'&&j&&j.emailed&&r&&r.created_by)?('📧 "This feature is going live" emailed to '+shortUser(r.created_by)+' (cc sarah@, ben@, diviyaj@)'):''; draw(rows,fl); }); }; });
           b.querySelectorAll('.sug-stk').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, v=inp.value.trim(); shipPost('/api/supply/suggestion/'+id+'/stakeholders',{stakeholders:v},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.stakeholders=(j&&j.stakeholders!=null)?j.stakeholders:v; if(j&&j.stakeholders!=null)inp.value=j.stakeholders; }); }; });
           var _sss=document.getElementById('sug-stake-save'); if(_sss)_sss.onclick=function(){ var v=(document.getElementById('sug-stake').value||'').trim(), m=document.getElementById('sug-stake-msg');
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'suggestion_stakeholders',value:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent='Error: '+j.error;return;} _sugStake=v; m.style.color='var(--pos)'; m.textContent='Saved ✓'; setTimeout(function(){if(m)m.textContent='';},1600); }).catch(function(){ m.style.color='var(--neg)'; m.textContent='Save failed'; }); };
+            (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'suggestion_stakeholders',value:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent='Error: '+j.error;return;} _sugStake=v; m.style.color='var(--pos)'; m.textContent='Saved ✓'; setTimeout(function(){if(m)m.textContent='';},1600); }).catch(function(){ m.style.color='var(--neg)'; m.textContent='Save failed'; }); };
         }
-        Promise.all([fetch('/api/supply/suggestions').then(function(r){return r.json();}), fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})])
+        Promise.all([fetch('/api/supply/suggestions').then(function(r){return r.json();}), hzqGet('/api/app-settings').catch(function(){return {};})])
           .then(function(res){ _sugStake=(res[1]&&res[1].suggestion_stakeholders)||'ben@dockandbay.com, sarah@dockandbay.com'; draw(Array.isArray(res[0])?res[0]:[]); })
           .catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; }); };
       SUBS['tax']=function(){ b.innerHTML=taxTbl(); bindEdits(); };
@@ -8491,7 +8491,7 @@
             } });
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       SUBS['admin-general']=function(){ b.innerHTML='<div class="count">Loading…</div>';
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+        hzqGet('/api/app-settings').then(function(s){ s=s||{};
           b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ General.</b> Admin-only system settings.</div>'
             +'<div class="sect-h">Purchase order archiving</div>'
             +'<div style="max-width:760px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Archive completed POs before production number '
@@ -8516,7 +8516,7 @@
               +'<div id="erp-status" class="mut tiny" style="margin-top:2px">Checking Fulfil keys…</div>'
             +'</div>';
           b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='var(--line)';
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
+            (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'var(--neg)':'var(--pos)'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='var(--neg)'; }); }; });
           fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
@@ -8529,7 +8529,7 @@
         // Materialise the sparse user-set rates forward to FY2040 (carry the last set rate forward per currency).
         function matFx(exp){ var out={}, eyrs=Object.keys(exp).map(Number).filter(function(x){return !isNaN(x);}); if(!eyrs.length)return {}; var start=Math.min.apply(null,eyrs);
           CCY.forEach(function(c){ var ccy=c[0], last=null; for(var fy=start; fy<=FX_END; fy++){ if(exp[fy]&&exp[fy][ccy]!=null&&exp[fy][ccy]!=='')last=Number(exp[fy][ccy]); if(last!=null)(out[fy]=out[fy]||{})[ccy]=last; } }); return out; }
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+        hzqGet('/api/app-settings').then(function(s){ s=s||{};
           var parse=function(v){ try{ var o=(typeof v==='string')?JSON.parse(v):(v||{}); return (o&&typeof o==='object')?o:{}; }catch(e){ return {}; } };
           var exp=parse(s.fx_rates_explicit); if(!Object.keys(exp).length)exp=parse(s.fx_rates);   // migrate: seed explicit from the old materialised/sparse fx_rates
           var mat=matFx(exp);
@@ -8546,8 +8546,8 @@
             if(!exp[y])exp[y]={}; if(raw===''){ delete exp[y][ccy]; if(!Object.keys(exp[y]).length)delete exp[y]; } else exp[y][ccy]=Number(raw);
             inp.value=raw; inp.style.borderColor='var(--line)'; var newMat=matFx(exp);
             Promise.all([
-              fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates_explicit',value:JSON.stringify(exp)})}).then(function(r){return r.json();}),
-              fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates',value:JSON.stringify(newMat)})}).then(function(r){return r.json();})
+              (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates_explicit',value:JSON.stringify(exp)})}).then(function(r){return r.json();}),
+              (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates',value:JSON.stringify(newMat)})}).then(function(r){return r.json();})
             ]).then(function(){ inp.style.borderColor='var(--pos)'; SUBS['exchange-rates'](); }).catch(function(){ inp.style.borderColor='var(--neg)'; }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(String(e))+'</div>'; }); };
       SUBS['channels']=function(){ b.innerHTML='<div class="count">Loading…</div>';
@@ -8804,7 +8804,7 @@
             var rj=document.getElementById('onb-reject'); if(rj)rj.onclick=function(){ var n=prompt('Reason shown to the supplier:',''); if(n==null)return; shipPost('/api/supply/onb/requests/'+r.id+'/reject',{note:n},function(jj){ if(jj&&jj.error){ alert(jj.error); return; } loadDetail(); }); };
           }).catch(function(e){ alert('Could not load: '+e.message); }); }
         function notifySettings(){ fetch('/api/supply/onb/requests').then(function(r){return r.json();}).then(function(j){ b.innerHTML='<div style="max-width:640px"><button class="save-btn light" id="onb-back">← All requests</button><h3 style="margin:12px 0 4px">Onboarding notifications</h3><div class="mut tiny" style="margin-bottom:12px">Who is emailed when a supplier submits or resubmits a profile, and copied on decisions. Comma-separated addresses.</div><div style="display:grid;gap:10px"><label style="display:block"><span class="mut tiny">Reviewers (To)</span><input class="fci" id="onb-to" value="'+esc(j.notify_to||'')+'" placeholder="alexandria@dockandbay.com, sarah@dockandbay.com" style="width:100%"></label><label style="display:block"><span class="mut tiny">Copy (Cc)</span><input class="fci" id="onb-cc" value="'+esc(j.notify_cc||'')+'" style="width:100%"></label></div><div style="margin-top:12px;display:flex;gap:8px"><button class="save-btn" id="onb-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Save</button></div><div class="mut tiny" style="margin-top:12px">The supplier is always emailed on a return, an approval or a rejection (to the address that submitted). New portal users get their sign-in link on approval.</div></div>';
-            document.getElementById('onb-back').onclick=loadQueue; document.getElementById('onb-save').onclick=function(){ var to=document.getElementById('onb-to').value, cc=document.getElementById('onb-cc').value; Promise.all([fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'onboarding_notify_to',value:to})}),fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'onboarding_notify_cc',value:cc})})]).then(function(){ pgetClear&&pgetClear(); loadQueue(); }).catch(function(e){ alert('Save failed: '+e.message); }); }; }); }
+            document.getElementById('onb-back').onclick=loadQueue; document.getElementById('onb-save').onclick=function(){ var to=document.getElementById('onb-to').value, cc=document.getElementById('onb-cc').value; Promise.all([(hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'onboarding_notify_to',value:to})}),(hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'onboarding_notify_cc',value:cc})})]).then(function(){ pgetClear&&pgetClear(); loadQueue(); }).catch(function(e){ alert('Save failed: '+e.message); }); }; }); }
         function pimQueue(){ fetch('/api/supply/onb/products').then(function(r){return r.json();}).then(function(j){ var rows=j.rows||[]; b.innerHTML='<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><button class="save-btn light" id="onb-back">← All requests</button><span class="count">'+rows.filter(function(x){return x.status==='pending';}).length+' pending PIM changes</span><span class="mut tiny">Product &amp; packaging data suppliers submitted — apply in the PIM (Airtable) then mark applied.</span></div><div class="tw"><table class="pay-tbl" style="font-size:12px"><thead><tr><th class="l">Supplier</th><th class="l">Request</th><th class="l">Product</th><th class="l">HS</th><th>Units/ctn</th><th>Ctn/pallet</th><th class="l">Product L×W×H · kg</th><th class="l">Pack</th><th class="l">Carton</th><th class="l">Pallet</th><th class="l">Materials</th><th class="l">Status</th><th></th></tr></thead><tbody>'+(rows.length?rows.map(function(x){ var d=x.dims||{}; var D=function(g){ g=g||{}; return esc([g.l,g.w,g.h].map(function(v){return v||'–';}).join('×'))+(g.kg?' · '+esc(g.kg)+' kg':''); }; return '<tr><td class="l">'+esc((x.supplier_id||''))+'</td><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(x.ref||'')+'</td><td class="l"><b>'+esc(x.sku_name)+'</b><div class="mut tiny">'+esc(x.created_fmt)+'</div></td><td class="l">'+esc(x.hs_code||'')+'</td><td>'+esc(x.units_per_carton||'')+'</td><td>'+esc(x.cartons_per_pallet||'')+'</td><td class="l">'+D(d.prod)+'</td><td class="l">'+D(d.pack)+'</td><td class="l">'+D(d.carton)+'</td><td class="l">'+D(d.pallet)+'</td><td class="l">'+esc(x.materials||'')+'</td><td class="l">'+pill(x.status)+'</td><td>'+(x.status==='pending'?'<button class="save-btn onb-pim-st" data-id="'+x.id+'" data-st="applied" style="background:var(--pos);color:#fff;border-color:var(--pos)">Applied</button> <button class="save-btn light onb-pim-st" data-id="'+x.id+'" data-st="rejected">Reject</button>':'<button class="save-btn light onb-pim-st" data-id="'+x.id+'" data-st="pending">Reopen</button>')+'</td></tr>'; }).join(''):'<tr><td colspan="13" class="mut" style="padding:14px">Nothing queued.</td></tr>')+'</tbody></table></div>';
             document.getElementById('onb-back').onclick=loadQueue; b.querySelectorAll('.onb-pim-st').forEach(function(bt){ bt.onclick=function(){ shipPost('/api/supply/onb/products/'+bt.dataset.id+'/status',{status:bt.dataset.st},function(jj){ if(jj&&jj.error){alert(jj.error);return;} pimQueue(); }); }; }); }); }
         loadQueue(); };
@@ -8870,7 +8870,7 @@
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       SUBS['export-uploads']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/forecast/export-settings').then(function(r){return r.json();}),
-                     fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};}),
+                     hzqGet('/api/app-settings').catch(function(){return {};}),
                      fetch('/api/export/reports').then(function(r){return r.json();}).catch(function(){return {reports:[]};})]).then(function(_res){ var rows=_res[0]||[], _appset=_res[1]||{}, _gsRep=_res[2]||{reports:[]};
           var gsDocs=hzGsDocsHtml(_appset,_gsRep);   // v28.001: Google Sheets & scripts (token + endpoints + Apps Script) at the top
           var head='<div class="sect-h">Forecast export by country <span class="mut tiny">— per-country CSV (all SKUs × month · DTC / FBA / B2B) for the next 12 months. Email it to the country contact and/or upload to DriveHQ.</span></div>';
@@ -8898,7 +8898,7 @@
           b.innerHTML=gsDocs+'<div style="height:18px"></div>'+head+bulk+tbl+rxHead+rxTbl+afHead+afBox+'<div class="mut tiny" id="fx-msg" style="margin-top:10px"></div>';
           hzGsDocsWire(b,function(){ SUBS['export-uploads'](); });
           var msg=document.getElementById('fx-msg');
-          var afR=b.querySelector('#af-recips'); if(afR)afR.onchange=function(){ afR.style.borderColor='var(--prod)'; fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'af_email_recipients',value:afR.value.trim()})}).then(function(r){return r.json();}).then(function(){ afR.style.borderColor='var(--pos)'; }).catch(function(){ afR.style.borderColor='var(--neg)'; }); };
+          var afR=b.querySelector('#af-recips'); if(afR)afR.onchange=function(){ afR.style.borderColor='var(--prod)'; (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'af_email_recipients',value:afR.value.trim()})}).then(function(r){return r.json();}).then(function(){ afR.style.borderColor='var(--pos)'; }).catch(function(){ afR.style.borderColor='var(--neg)'; }); };
           var afSend=b.querySelector('#af-email-send'); if(afSend)afSend.onclick=function(){ var m=document.getElementById('af-email-msg'); afSend.disabled=true; if(m){m.style.color='var(--faint)';m.textContent='Sending…';} fetch('/api/auto-forecast/email',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ afSend.disabled=false; if(j&&j.error){ if(m){m.style.color='var(--neg)';m.textContent=j.error;} return; } if(m){ m.style.color='var(--pos)'; m.textContent=j.sandbox?('Sandbox — would send to '+(j.recipients||[]).join(', ')):('Sent ✓ to '+(j.recipients||[]).join(', ')); } }).catch(function(e){ afSend.disabled=false; if(m){m.style.color='var(--neg)';m.textContent=String(e);} }); };
           b.querySelectorAll('.fx-email').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='var(--prod)';
             fetch('/api/forecast/export-settings/'+inp.dataset.c,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:inp.value.trim()})})
@@ -8922,7 +8922,7 @@
             else if(ek==='cf_arrivals')fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(d){ cb(rowsToCsvStr(cfArrRows(d)),'stock_arrivals.csv'); }).catch(function(e){ cb(null,null,e); });
             else fetch('/api/scenario/auto-forecast?market=all&cover=2&freight=15').then(function(r){return r.json();}).then(function(d){ cb(afPayCsvStr(d),'auto_forecast_payments_plan.csv'); }).catch(function(e){ cb(null,null,e); }); }
           b.querySelectorAll('.rx-email').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='var(--prod)';
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'export_email_'+inp.dataset.ek,value:inp.value.trim()})})
+            (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'export_email_'+inp.dataset.ek,value:inp.value.trim()})})
               .then(function(r){return r.json();}).then(function(){ inp.style.borderColor='var(--pos)'; }).catch(function(){ inp.style.borderColor='var(--neg)'; }); }; });
           b.querySelectorAll('.rx-csv').forEach(function(btn){ btn.onclick=function(){ var o=btn.textContent; btn.disabled=true; btn.textContent='…';
             buildRxCsv(btn.dataset.ek,function(csvStr,fn,err){ btn.disabled=false; btn.textContent=o; if(err||csvStr==null){ alert('Could not build CSV: '+(err&&err.message||err||'error')); return; }
@@ -10650,7 +10650,7 @@
       function render(q){ q=(q||'').trim(); var l=document.getElementById('shpop-list'); var ms=prods.filter(function(p){return !q||String(p).indexOf(q)>=0;});
         l.innerHTML=ms.length?ms.slice(0,60).map(function(p){return '<div class="shpop-opt"'+(String(p)===String(cur)?' style="background:var(--blue-soft)"':'')+' data-v="'+p+'">Production '+p+'</div>';}).join(''):'<div class="mut tiny" style="padding:6px 10px">no future productions available</div>';
         l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
-      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){qi.oninput=function(){render(this.value);};qi.focus();} }
+      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);};qi.focus();} }
     function validate(){ var ok=true;
       ov.querySelectorAll('.pl-ver').forEach(function(vb){ var vi=+vb.dataset.vi, errs=[];
         var rows=[].slice.call(vb.querySelectorAll('.pl-tr')).map(function(r){ var mq=r.querySelector('.pl-mq'), uc=r.querySelector('.pl-uc'); return {mq:mq, uc:uc, q:parseInt(mq.value,10), c:Number(uc.value), craw:uc.value}; });
@@ -10699,7 +10699,7 @@
         rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
         rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ xbPreview(f[+btn.dataset.i],btn); }; }); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
-      document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); draw(); };
+      document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); if(window._payTod)clearTimeout(window._payTod); window._payTod=setTimeout(draw,250); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
       document.getElementById('pay-q').oninput=function(){ PAY_Q=this.value; draw(); };
       _payDraw=draw; draw(); })
@@ -13942,7 +13942,7 @@
     c.querySelectorAll('[data-sp-grp]').forEach(function(p){p.onclick=function(){SP_STATE.group=p.dataset.spGrp;draw();paintPills();};});
     c.querySelectorAll('[data-sp-f]').forEach(function(p){p.onclick=function(){var k=p.dataset.spF; SP_STATE[k]=!SP_STATE[k]; draw();paintPills();};});
     c.querySelector('#sp-csv').onclick=spExport;
-    var spSkuq=c.querySelector('#sp-skuq'); if(spSkuq){ spSkuq.oninput=function(){ SP_STATE.skuq=this.value; draw(); }; }
+    var spSkuq=c.querySelector('#sp-skuq'); if(spSkuq){ spSkuq.oninput=function(){ SP_STATE.skuq=this.value; if(spSkuq._dt)clearTimeout(spSkuq._dt); spSkuq._dt=setTimeout(draw,250); }; }
     var spSkuClr=c.querySelector('#sp-skuclr'); if(spSkuClr){ spSkuClr.onclick=function(){ SP_STATE.skuq=''; if(spSkuq)spSkuq.value=''; draw(); }; }
     function paintPills(){ c.querySelectorAll('[data-sp-co]').forEach(function(p){p.classList.toggle('active',p.dataset.spCo===SP_STATE.co);});
       c.querySelectorAll('[data-sp-ch]').forEach(function(p){p.classList.toggle('active',p.dataset.spCh===SP_STATE.ch);});
@@ -15674,7 +15674,7 @@
         function on(b,a){ b.style.background=a?'var(--blue)':'#fff'; b.style.color=a?'#fff':'var(--blue-ink)'; b.style.fontWeight=a?'700':'400'; }
         on(l,_specView==='list'); on(m,_specView==='matrix'); }
       function stylePills(){ c.querySelectorAll('#sp-pills .sp-pill').forEach(function(p){ var a=!!_specTypeFilter[p.dataset.t]; p.style.background=a?'var(--blue)':'var(--violet-bg)'; p.style.color=a?'#fff':'#3730a3'; }); }
-      var qEl=c.querySelector('#sp-q'); if(qEl)qEl.oninput=function(){ _specQ=this.value; drawSpecs(); };
+      var qEl=c.querySelector('#sp-q'); if(qEl)qEl.oninput=function(){ _specQ=this.value; if(qEl._dt)clearTimeout(qEl._dt); qEl._dt=setTimeout(drawSpecs,250); };
       c.querySelectorAll('#sp-pills .sp-pill').forEach(function(p){ p.onclick=function(){ var t=p.dataset.t; _specTypeFilter[t]=!_specTypeFilter[t]; stylePills(); drawSpecs(); }; });
       var vl=c.querySelector('#sp-view-list'); if(vl)vl.onclick=function(){ _specView='list'; styleViewBtns(); drawSpecs(); };
       var vm=c.querySelector('#sp-view-matrix'); if(vm)vm.onclick=function(){ _specView='matrix'; styleViewBtns(); drawSpecs(); };
@@ -15970,7 +15970,7 @@
       list.filter(function(n){return !q||n.l.toLowerCase().indexOf(q)>=0;}).slice(0,q?80:20).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+'</div>'; });
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
-    render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
+    render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus(); }
   }); }); }
   function loadProdCfg(cb){ if(_prodCfg)return cb(_prodCfg); pget('/api/product/config').then(function(d){ _prodCfg=d||{seasons:[],categories:[]}; cb(_prodCfg); }).catch(function(){ cb({seasons:[],categories:[]}); }); }
   var _skuList=null;
@@ -15992,7 +15992,7 @@
         list.filter(function(n){return !q||n.sku.toLowerCase().indexOf(q)>=0||String(n.label||'').toLowerCase().indexOf(q)>=0;}).slice(0,q?120:25).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(n.sku)+'</b>'+(n.label?' <span class="mut">'+esc(n.label)+'</span>':'')+'</div>'; });
         var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html||'<div class="mut" style="padding:6px 10px">no match</div>';
         l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
-      render(''); if(qi){ qi.oninput=function(){render(this.value);}; }
+      render(''); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; }
     }); }
   // Searchable Specification picker — links a spec-linked component to a doc from PRODUCT ▸ Specifications.
   var _specList=null, _specPickBtn=null;
@@ -16008,7 +16008,7 @@
         list.filter(function(s){ if(!q)return true; var lb=specLabel(s); return (lb.main+' '+lb.sub+' '+(s.spec_type||'')+' '+(s.scope_category||'')+' '+(s.scope_skus||'')+' #'+s.id).toLowerCase().indexOf(q)>=0; }).slice(0,q?150:30).forEach(function(s){ var lb=specLabel(s); html+='<div class="shpop-opt" data-v="'+s.id+'"><b>'+esc(lb.main)+'</b>'+(lb.sub?' <span class="mut">'+esc(lb.sub)+'</span>':'')+' <span class="mut tiny">#'+s.id+'</span></div>'; });
         var l=document.getElementById('shpop-list'); l.innerHTML=html||'<div class="mut" style="padding:6px 10px">no match</div>';
         l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
-      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
+      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; qi.focus(); }
     }); }
   // v27.713: upload a NEW specification from the Size & variants grid and hand back its id (caller links it to the size × component).
   // Scoped to this product (scope_type 'sku', scope_skus = the product ref) so it never supersedes a category-wide or global spec.
@@ -16328,7 +16328,7 @@
         b.querySelectorAll('.pcfg-tab').forEach(function(t){ t.onclick=function(){ _prodCfgTab=t.dataset.k; try{writeHash(['product','config',t.dataset.k]);}catch(e){} draw(); }; });
         // v27.763: save the SAMPLING grid layout mode (team-wide) and reflect it immediately
         b.querySelectorAll('.pcfg-lmode input').forEach(function(inp){ inp.onchange=function(){ var mode=inp.value; d.groupMode=mode; _smpGroupMode=mode;
-          fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'sampling_group_mode',value:mode})}).then(function(r){return r.json();}).then(function(j){ var sv=b.querySelector('#pcfg-lmode-saved'); if(sv)sv.textContent=(j&&j.error)?('Save failed: '+j.error):'Saved — the SAMPLING grid now uses this layout for everyone.'; draw(); }).catch(function(e){ var sv=b.querySelector('#pcfg-lmode-saved'); if(sv)sv.textContent='Save failed: '+(e&&e.message||e); }); }; });
+          (hzqStale(/\/api\/app-settings/),fetch)('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'sampling_group_mode',value:mode})}).then(function(r){return r.json();}).then(function(j){ var sv=b.querySelector('#pcfg-lmode-saved'); if(sv)sv.textContent=(j&&j.error)?('Save failed: '+j.error):'Saved — the SAMPLING grid now uses this layout for everyone.'; draw(); }).catch(function(e){ var sv=b.querySelector('#pcfg-lmode-saved'); if(sv)sv.textContent='Save failed: '+(e&&e.message||e); }); }; });
         var _snew=b.querySelector('#pcfg-snew'); if(_snew)_snew.onclick=function(){ var code=(prompt('New season code (e.g. SS29):')||'').trim().toUpperCase(); if(!code)return; shipPost('/api/product/season',{code:code,active:true},function(){ d.seasons.push({code:code,label:'',active:true,sort:null}); draw(); }); };
         b.querySelectorAll('.pcfg-s').forEach(function(el){ el.onchange=function(){ var code=el.dataset.code, row=(d.seasons||[]).filter(function(x){return x.code===code;})[0]||{code:code};
           row[el.dataset.f]= el.dataset.f==='active'?(el.value==='true'):(el.dataset.f==='sort'?(el.value===''?null:parseInt(el.value,10)):el.value);
