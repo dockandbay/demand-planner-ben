@@ -4430,7 +4430,12 @@ async function xeroFetch(region, path, opts) {
   const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }
   const headers = Object.assign({ 'Authorization': 'Bearer ' + token, 'Xero-Tenant-Id': tenant.id, 'Accept': 'application/json' }, opts.headers || {});
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
+  let r;
+  for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
+    r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
+    if ((r.status === 429 || r.status === 503) && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
+    break;
+  }
   const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) { j = { raw: text }; }
   if (!r.ok) { const msg = (j && (j.Detail || j.Message || (j.Elements && j.Elements[0] && j.Elements[0].ValidationErrors && j.Elements[0].ValidationErrors.map(v => v.Message).join('; ')))) || ('Xero ' + r.status); const e = new Error(String(msg).slice(0, 400)); e.code = r.status; e.body = j; throw e; }
   return j;
@@ -5249,6 +5254,7 @@ async function syncXeroBills(opts) {
     let watermark = null;
     if (!opts.full) { try { const w = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['xero_bills_sync_' + reg])).rows[0]; watermark = w && w.value ? w.value : null; } catch (e) { /* first run */ } }
     const startedAt = new Date();
+    let progressWm = null;   // v28.120 (Diviyaj): high-water of updated_utc actually processed — saved even on error so a 429 mid-pull resumes, not restarts
     try {
       for (let page = 1; page <= 120; page++) {
         const headers = watermark ? { 'If-Modified-Since': watermark } : {};
@@ -5270,11 +5276,15 @@ async function syncXeroBills(opts) {
            ON CONFLICT (invoice_id) DO UPDATE SET region=excluded.region,invoice_number=excluded.invoice_number,reference=excluded.reference,contact_name=excluded.contact_name,total=excluded.total,amount_paid=excluded.amount_paid,amount_due=excluded.amount_due,currency_code=excluded.currency_code,status=excluded.status,invoice_date=excluded.invoice_date,due_date=excluded.due_date,updated_utc=excluded.updated_utc,synced_at=now()`,
           params);
         out[reg].upserted += inv.length;
+        { const _lu = inv[inv.length - 1] && inv[inv.length - 1].UpdatedDateUTC; const _d = _lu ? _xBillDate(_lu) : null; if (_d) progressWm = _d.toISOString().slice(0, 19); }
         if (inv.length < 100) break;
       }
       // advance the watermark to this sync's start (a small overlap next run is harmless — the upsert is idempotent)
       await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_bills_sync_' + reg, startedAt.toISOString().slice(0, 19)]);
-    } catch (e) { out[reg].error = e.message; /* org not connected → keep the old watermark */ }
+    } catch (e) { out[reg].error = e.message;
+      // v28.120 (Diviyaj): persist how far we got so the next run resumes via If-Modified-Since instead of pulling from page 1 again.
+      if (progressWm) { try { await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_bills_sync_' + reg, progressWm]); } catch (_) {} }
+    }
   }
   out.at = new Date().toISOString();
   return out;
@@ -5291,7 +5301,7 @@ app.post('/api/cron/xero-bills-sync', async (req, res) => {
 });
 // Bulk RESOLVE ALL po_links — matches every PO against the LOCAL xero_bills cache (v28.094; was a full live Xero sweep)
 // + local Fulfil/Flexport/DHL joins. Runs an incremental bill sync first so it always matches fresh data. Keeps manual links.
-async function _resolveAllPoLinks() {
+async function _resolveAllPoLinks(opts = {}) {   // v28.120 (Diviyaj prod fix): body uses opts.full — was undeclared → 'opts is not defined' 500
   const poRows = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(flexport_reference,'') flexref, coalesce(shipment_ref,'') shipref FROM planner.purchase_orders WHERE coalesce(master_po,'')=''`)).rows;
   const poSet = new Set(poRows.map(r => r.po));
   const matchPo = tok => poSet.has(tok) ? tok : (/\d$/.test(tok) && poSet.has(tok.replace(/\d+$/, '')) ? tok.replace(/\d+$/, '') : null);
@@ -5440,7 +5450,7 @@ app.get('/api/supply/flexport/status', async (req, res) => {
 async function runFlexportImport(opts) {
   opts = opts || {};
   const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Set FLEXPORT_API_TOKEN first'); e.code = 503; throw e; }
-  const per = Math.min(Math.max(parseInt(opts.per) || 100, 1), 200);
+  const per = Math.min(Math.max(parseInt(opts.per) || 25, 1), 200);   // v28.120 (Diviyaj): Flexport's gateway times out at 100/page (60s); 25 is safe (~84s for 4 pages)
   const maxPages = Math.min(Math.max(parseInt(opts.max_pages) || 30, 1), 200);
   {
     let page = 1, imported = 0, seen = 0; const samples = []; const oceanSeen = [];   // {flexId, numId} for the container pass
@@ -5553,7 +5563,7 @@ app.post('/api/supply/flexport/import', async (req, res) => {
 // 4-hourly cloud cron (Diviyaj wires the schedule in prod) — secret-gated, fails closed like the other crons.
 app.post('/api/cron/flexport-import', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
-  try { res.json(await runFlexportImport({ per: 100, max_pages: 50 })); }
+  try { res.json(await runFlexportImport({ per: parseInt(req.query.per) || 25, max_pages: parseInt(req.query.max_pages) || 4 })); }   // v28.120 (Diviyaj): optional ?per=/?max_pages=; 25×4 = latest 100 shipments, under Vercel's 300s
   catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 
@@ -10559,12 +10569,17 @@ app.post('/api/supply/sample-note-delete/:id', (req, res) => deleteLatestNote(re
 // The signed-in user's email, forwarded by the auth layer in front of the app (Diviyaj's Gmail login).
 // Checks the common auth-proxy headers; strips the IAP "accounts.google.com:" prefix. null if none present.
 function authUser(req) {
+  // v28.120 (review S2 / confirmed on prod by Diviyaj): the x-*-email headers are SPOOFABLE — prod passes client
+  // headers straight through, so a signed-in user could send x-user-email and impersonate an admin. When PLANNER_KEY
+  // is set (prod-like), NEVER trust them: identity comes only from the verified signed session cookie, which the prod
+  // harness resolves onto req._authEmail (the 'pu' cookie). Sandbox has no GATE → forwarded header / DEV_USER as before.
+  if (GATE) return req._authEmail || process.env.DEV_USER || null;
   const h = req.headers || {};
   let e = h['x-forwarded-email'] || h['x-auth-request-email'] || h['cf-access-authenticated-user-email']
         || h['x-goog-authenticated-user-email'] || h['x-authenticated-user-email'] || h['x-user-email'] || '';
   e = String(e).trim();
-  if (!e) return process.env.DEV_USER || null;   // sandbox has no auth proxy → optional DEV_USER attributes actions to you (live always sends a real forwarded header, which wins)
-  if (e.indexOf(':') >= 0) e = e.slice(e.lastIndexOf(':') + 1);   // e.g. accounts.google.com:foo@bar.com → foo@bar.com
+  if (!e) return process.env.DEV_USER || null;
+  if (e.indexOf(':') >= 0) e = e.slice(e.lastIndexOf(':') + 1);
   return e || null;
 }
 // Author to stamp on an INTERNAL (Dock & Bay side) note: the signed-in user if the auth layer forwards it,
