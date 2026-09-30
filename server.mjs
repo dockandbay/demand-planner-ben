@@ -4983,6 +4983,54 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
       url: (cn && cn.CreditNoteID) ? ('https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID) : null });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
+// v28.107 (Ben): MIGRATE an AU purchase order's bill from Xero UK → Xero AU. AU POs (home org AU) that are not yet
+// COMPLETE but whose ACCPAY bill was created in the UK org get an IDENTICAL bill in the AU org, with every line coded
+// to 625 "Inventory Balance Sheet" (AU stock code). Read-only when dry_run; admin + confirm to actually create.
+// It does NOT touch the UK bill or the PO's link — voiding the UK bill and re-pointing the link are deliberate
+// follow-up steps once Ben has reviewed the AU bills.
+const AU_INVENTORY_ACCT = '625';   // AU "Inventory Balance Sheet"
+async function _auBillCandidates() {
+  const rows = (await pool.query(`SELECT p.po, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch, coalesce(p.status,'') status, coalesce(p.supplier_name,'') supplier, l.external_id, l.external_ref
+    FROM planner.purchase_orders p
+    JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND coalesce(l.external_id,'')<>''
+    WHERE (upper(coalesce(p.country_code,''))='AU' OR p.branch ILIKE '%coghlan%') AND upper(coalesce(p.status,''))<>'COMPLETE'
+    ORDER BY p.po`)).rows;
+  return rows.filter(r => _poXeroRegion(r.cc, r.branch) === 'au');
+}
+app.get('/api/supply/xero/au-bill-candidates', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ candidates: await _auBillCandidates() }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
+  const dry = !!(req.body && req.body.dry_run);
+  if (!dry) { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) {} }
+  if (!dry && (req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this creates a bill in live Xero AU' });
+  try {
+    const po = String((req.body && req.body.po) || '').trim();
+    if (!po) return res.status(400).json({ error: 'po required' });
+    const poRow = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch, coalesce(status,'') status, coalesce(supplier_name,'') supplier FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!poRow) return res.status(404).json({ error: 'PO not found' });
+    if (_poXeroRegion(poRow.cc, poRow.branch) !== 'au') return res.status(400).json({ error: po + ' is not an AU purchase order (home org is UK) — nothing to move.' });
+    if (String(poRow.status).toUpperCase() === 'COMPLETE') return res.status(400).json({ error: po + ' is COMPLETE — only not-yet-complete AU POs are migrated.' });
+    const link = (await pool.query(`SELECT external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po=$1`, [po])).rows[0];
+    if (!link || !link.external_id) return res.status(400).json({ error: 'No linked Xero bill for ' + po + ' — nothing to move.' });
+    // Read the source bill from Xero UK (this both fetches its detail and confirms it lives in the UK org).
+    let src = null; try { const bi = await xeroFetch('uk', '/api.xro/2.0/Invoices/' + link.external_id); src = bi && bi.Invoices && bi.Invoices[0]; } catch (e) {}
+    if (!src) return res.status(400).json({ error: 'Bill ' + (link.external_ref || link.external_id) + ' was not found in Xero UK — it may already have been moved. Skipping ' + po + '.' });
+    const invNo = src.InvoiceNumber || po;
+    // Duplicate guard: is there already an ACCPAY bill with this number in Xero AU?
+    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/"/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; } catch (e) {}
+    if (dupe && dupe.InvoiceID) return res.status(409).json({ error: 'An AU bill ' + invNo + ' already exists (InvoiceID ' + dupe.InvoiceID + ') — ' + po + ' looks already migrated.', au_bill: { id: dupe.InvoiceID, number: dupe.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + dupe.InvoiceID } });
+    const srcLines = (src.LineItems || []).map(li => ({ Description: li.Description || (po + ' inventory'), Quantity: (li.Quantity != null ? li.Quantity : 1), UnitAmount: (li.UnitAmount != null ? li.UnitAmount : li.LineAmount), AccountCode: AU_INVENTORY_ACCT }));
+    const status = String((req.body && req.body.status) || 'DRAFT').toUpperCase() === 'AUTHORISED' ? 'AUTHORISED' : 'DRAFT';
+    const auBody = { Type: 'ACCPAY', Contact: { Name: (src.Contact && src.Contact.Name) || poRow.supplier || 'Supplier' }, Date: (src.DateString || src.Date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), DueDate: (src.DueDateString || src.DueDate || '').slice(0, 10) || undefined, InvoiceNumber: invNo, Reference: src.Reference || invNo, CurrencyCode: src.CurrencyCode || 'USD', Status: status, LineAmountTypes: 'NoTax', LineItems: srcLines };
+    const summary = { po, supplier: auBody.Contact.Name, source_bill: { id: src.InvoiceID, number: src.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + src.InvoiceID, total: Number(src.Total) || 0, currency: src.CurrencyCode, status: src.Status, amount_due: Number(src.AmountDue) || 0 }, au_bill_to_create: auBody, lines_recoded_to: AU_INVENTORY_ACCT };
+    if (dry) return res.json({ ok: true, dry_run: true, ...summary });
+    const cr = await xeroFetch('au', '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [auBody] } });
+    const ni = cr && cr.Invoices && cr.Invoices[0];
+    res.json({ ok: true, ...summary, au_bill: ni ? { id: ni.InvoiceID, number: ni.InvoiceNumber, status: ni.Status, total: Number(ni.Total) || 0, url: 'https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + ni.InvoiceID } : null, next_steps: 'Review the AU bill. Once confirmed: void the original UK bill and re-point ' + po + '’s link to the AU bill (both are separate, deliberate steps).' });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
 // ── PAYMENTS ▸ Xero payments — the manual push queue (mig 312). Enqueue on mark-paid / deposit-assign; push to live
 //    Xero manually per item. Deposits on a run route to the credit-note action, not a bank payment. ──
 async function _pqBy(id) { return (await pool.query(`SELECT * FROM planner.xero_push_queue WHERE id=$1`, [id])).rows[0]; }
