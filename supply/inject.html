@@ -18206,7 +18206,9 @@
       // refreshing on idle". Instead just drop the cached section data so the NEXT render/navigation shows fresh
       // numbers; no reload. (Visible tabs already never reload — see below.)
       try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){}
-      try{ if(typeof BUY_FC_STALE!=='undefined')BUY_FC_STALE=true; }catch(e){}
+      // v28.125 (perf): no longer sets BUY_FC_STALE here. The bust only drops SUPPLY section data; the demand inputs
+      // (SKUM / FC_OUTPUTS / inbound) are client-held and unchanged, so flagging the overlay stale forced a ~3s
+      // buildLiveDemand() on the next BUY/FBA entry that recomputed identical numbers (every data change, hourly on prod).
       dataApplied(); return;
     }
     /* Visible tab: NEVER force a reload — not code, not data, not even while idle (Ben: idle auto-refresh is

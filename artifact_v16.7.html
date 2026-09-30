@@ -1846,6 +1846,9 @@ function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
   fetch('/api/demand/sku-data').then(function(r){return r.json();}).then(function(d){ if(!d)return; var raw=d.sku_raw||{};
     if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s); if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi); if(d.fc_outputs)Object.assign(FC_OUTPUTS,d.fc_outputs);
     SKU_DATA_READY=true;
+    // v28.125: any demand overlay built before this point was built from the EMPTY lazy maps. Re-arm the build so the
+    // next render that needs it rebuilds ONCE from real data (was only corrected by the PP-cover guard's extra rebuild).
+    DEMAND_BUILT=false; _PP_COVER_INIT=false;
     try{augmentSKUM();}catch(e){if(window.console)console.error('[lazy] augmentSKUM',e);}
     try{buildLiveBpOverlay();}catch(e){if(window.console)console.error('[lazy] buildLiveBpOverlay',e);}
     try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
@@ -16659,6 +16662,10 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
   })();
   BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
   DEMAND_BUILT=true;   // shares + set explosion have settled at least once (buy render gates on this)
+  // v28.125 (perf): this pass already rebuilt PREPACK_COVER (§4) from the server-injected PREPACK_MAP/STOCK, so the
+  // one-time "build the PP cover" guards in both render()s must not trigger a SECOND ~3s rebuild. Only counts once the
+  // real SKU data is in (lazy mode ships it empty; lazyLoadSkuData() re-arms both flags when it lands).
+  if(!LAZY_SKU || SKU_DATA_READY)_PP_COVER_INIT=true;
 }
 
 // ===== LIVE PREORDER / KEY-ACCOUNT REFRESH (Airtable MCP) =====

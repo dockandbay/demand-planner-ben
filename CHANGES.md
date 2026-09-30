@@ -1,3 +1,14 @@
+## v28.125 (Ben): BUY/FBA entry no longer does redundant 3 s demand rebuilds
+
+**Files: `artifact_v16.7.html`, `supply/inject.html`.** Measured cost was `buildLiveDemand()` (~2.9 s), not `BUY_CACHE` (cold recompute of all 721 SKUs = 50 ms), so the cache is left as is.
+
+- `buildLiveDemand()` marks the prepack cover built (`_PP_COVER_INIT`) when it completes with real SKU data, so the one-time PP guards in both `render()`s stop forcing a second rebuild. First BUY entry: 2,886 ms to 10 ms.
+- Backgrounded-tab data change no longer sets `BUY_FC_STALE` (demand inputs are client-held and unchanged; the rebuild recomputed identical numbers).
+- `lazyLoadSkuData()` re-arms `DEMAND_BUILT`/`_PP_COVER_INIT` when SKU data lands, so the overlay rebuilds once from real data (previously only corrected by the redundant PP rebuild).
+- Buy plan before/after: 0 differing SKU rows across all 5 markets (415 SKUs with a buy, 70,341 units). Deploy note: `docs/deploy notes/DEPLOY_2026-10-01_v28.125_buy_entry_perf.md` (also covers the v_po_finance rewrite investigation, not shipped).
+
+No migration. No new env vars.
+
 ## v28.124 (Ben): v_po_finance indexes (migration 321)
 
 **Files: `migrations/321_po_finance_perf_indexes.sql`.** Indexes only; the view definition is untouched.
