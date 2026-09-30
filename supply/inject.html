@@ -2875,8 +2875,7 @@
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
-          +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 Dates</button>'
-          +'<button class="save-btn" id="po-fulfil-dates" style="'+lb+'" title="push the planner delivery-to-warehouse date to the Fulfil requested delivery date for every ACTIVE PO whose date differs from Fulfil — complete POs are skipped (live write)">📅 Sync Fulfil Dates</button>'
+          +'<button class="save-btn" id="po-fulfil-dates" style="'+lb+'" title="push the planner delivery-to-warehouse date to the Fulfil requested delivery date for every ACTIVE PO whose date differs from Fulfil — complete POs are skipped (live write)">📅 Sync Fulfil Dates</button>'   /* v28.095 (Ben): Cin7 decommissioned — "Sync Cin7 Dates" removed */
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
       +'<span class="po-filt-item"><span class="pill-lbl">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
@@ -3120,7 +3119,7 @@
     var _mstBtn=document.getElementById('po-master'); if(_mstBtn)_mstBtn.onclick=openMasterCreate;
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
     // the row "⚠ Date ≠ ERP" button); complete POs are excluded (poComplete). Live write → strong confirm.
-    document.getElementById('po-cin7-dates').onclick=function(){ var btn=this;
+    var _c7dBtn=document.getElementById('po-cin7-dates'); if(_c7dBtn)_c7dBtn.onclick=function(){ var btn=this;   // v28.095: button removed (Cin7 decommissioned) — guard so the render doesn't throw
       var cand=Object.keys(poBy).map(function(k){return poBy[k];})
         .filter(function(r){ return r && r.erp_date_pending>0 && !poComplete(r) && r.erp_po_id && r.checkin; })
         .map(function(r){ return {po:r.po, completion_date:r.checkin}; });
@@ -3500,22 +3499,17 @@
   function fulfilPushPO(po, btn){ var t=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
     fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines?erp=fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed: '+j.error); return; } fillErpFulfil(); }).catch(function(){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed'); }); }
   function erpUploadInert(po,forceFull,erp,fup){ closeShPop&&closeShPop();
-    // v27.743: two-button ERP model — `erp` picks the target ('cin7' default, or 'fulfil'). Both fetches force ?erp=<erp>
-    // so the push is deterministic regardless of the Active-ERP setting (in sandbox Active-ERP=fulfil, which used to
-    // silently redirect this Cin7-labelled pop). EN = display name, _eq = query suffix.
-    var EN=(erp==='fulfil')?'Fulfil':'Cin7', _eq='?erp='+(erp==='fulfil'?'fulfil':'cin7');
-    // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
-    // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
+    // v28.095 (Ben): Cin7 is decommissioned — the ERP is ALWAYS Fulfil now (the old default was 'cin7', which is why the
+    // "Update ERP" drift button was hitting Cin7). Every push forces ?erp=fulfil.
+    erp='fulfil'; var EN='Fulfil', _eq='?erp=fulfil';
     var _r=poBy[po]||{};
-    // Button visibility is drift-based and PRICE-AGNOSTIC (price is never a drift factor): SKU/qty drift shows
-    // the lines button; a date drift shows the date button. Lines drift also surfaces the date button.
-    var linesPending=(_r.erp_total>0&&!(_r.erp_in>0))||_r.erp_pending>0;
-    // Date drift is computed against Cin7 only — Fulfil has no Horizon date-drift signal, so the Fulfil pop shows lines only.
-    // v27.900 (Ben): Fulfil DOES have a date-drift signal now (grid-status: requested delivery vs Horizon delivery-to-warehouse). The
-    // badge that opened the popup says what drifted (fup = date | lines | both): a date-only drift shows ONLY the date button.
-    var _gs=(erp==='fulfil'&&window._erpGridStatus&&window._erpGridStatus[po])||null;
-    var datePending=(erp!=='fulfil') ? (_r.erp_date_pending>0 && !poComplete(_r)) : (fup==='date'||fup==='both');
-    var showLines=(erp==='fulfil')?(fup!=='date'||forceFull):(linesPending||forceFull), showDate=(erp==='fulfil')?datePending:(datePending||linesPending);   // forceFull (Push full) always offers the lines override; Fulfil = lines only
+    // Fulfil date-drift signal comes from grid-status (requested delivery vs Horizon delivery-to-warehouse). The badge
+    // that opened the popup passes fup (date|lines|both); the generic "Update ERP" button passes none, so we also derive
+    // a date drift directly from grid-status (fulfil requested delivery differs from this PO's completion date).
+    var _gs=(window._erpGridStatus&&window._erpGridStatus[po])||null;
+    var _gsDateDrift=!!(_gs && _gs.push_req_delivery && String(_gs.push_req_delivery)!==String(_gs.fulfil_req_delivery||''));
+    var datePending=(fup==='date'||fup==='both'||_gsDateDrift);
+    var showLines=(fup!=='date'||forceFull), showDate=datePending;   // forceFull (Push full) always offers the lines override
     var manualBlk=showLines
       ? '<div class="mut" style="margin-bottom:12px;font-size:13px">Push the revised order plan to '+EN+' (SKUs, quantities &amp; prices — full override), or export it to enter manually:</div>'
         +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:var(--blue);color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>'
@@ -4425,9 +4419,8 @@
     var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:var(--card)" autocomplete="off"></td><td class="l"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-paste" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--blue-soft);border:1px solid #93c5fd;color:var(--blue)" title="paste a SKU + qty block from Excel / Google Sheets (2 columns)">⧉ Paste SKU,Qty</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
-      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos);color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>'
+      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button>'   /* v28.095 (Ben): Cin7 decommissioned — "Push to Cin7 (full)" button removed; Fulfil is the only ERP */
         +' <button class="save-btn op-fulfil-full" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--blue);color:#fff;border-color:#2563eb" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Fulfil — creates the Fulfil PO if missing, else updates it (full override)">⬆ Push to Fulfil (full)</button>'
-        +'<label style="margin-left:8px;font-size:11px;cursor:pointer;white-space:nowrap" title="tick to mark this PO as NOT required in Cin7 — suppresses Cin7 drift &amp; update actions for it. It is still required in Fulfil."><input type="checkbox" class="op-cin7-nr" data-po="'+esc(po)+'"'+((((window._erpGridStatus||{})[po]||{}).cin7_not_required)?' checked':'')+' style="vertical-align:middle;margin-right:3px">not required in Cin7</label>'
         +'<span style="position:relative;display:inline-block;margin-left:4px"><button class="save-btn light op-bc-dl" data-po="'+esc(po)+'" title="download this PO&rsquo;s barcode labels as A4 print sheets — BATCH + date of production from this PO (same generator as SUPPLY &rsaquo; Barcodes)">⤓ Download barcodes ▾</button>'
         +'<span class="op-bc-menu" style="display:none;position:absolute;left:0;top:100%;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:220px;text-align:left">'
         +[['all','All barcodes'],['product','Product barcodes'],['carton','Carton + Inner barcodes']].map(function(o,ix){ return '<div class="op-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px;white-space:nowrap'+(ix?';border-top:1px solid var(--line)':'')+'">'+o[1]+'</div>'; }).join('')
