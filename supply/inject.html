@@ -17910,6 +17910,23 @@
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');
   boot(); document.addEventListener('DOMContentLoaded',boot); window.addEventListener('load',boot);
   setTimeout(boot,600); setTimeout(boot,1800); setTimeout(boot,4000);
+  // v28.087 (Ben, perf): DEMAND cold-render prewarm. The artefact's render() builds the full demand overlay
+  // (buildLiveDemand — set shares + explosion across all SKUs) the FIRST time DEMAND is opened; on cold SKU data that
+  // is ~10s (measured 12.9s for the first DEMAND click vs ~2.7s once built). The lazy-SKU loader builds augmentSKUM +
+  // buildLiveBpOverlay but NOT buildLiveDemand, so that cost lands on the click. buildLiveDemand is a pure in-memory
+  // compute (no DOM — renderMain paints separately), so we warm it in the background once the real SKU data is in.
+  // requestIdleCallback picks a quiet moment (never mid-interaction); JS is single-threaded so a click that beats the
+  // warm just builds it itself (render's own !DEMAND_BUILT guard), and the warm then no-ops — never a double build.
+  (function(){ var done=false, tries=0;
+    function warm(){ try{ if(!window.DEMAND_BUILT && typeof window.buildLiveDemand==='function')window.buildLiveDemand(); }catch(e){} }
+    var iv=setInterval(function(){ if(done)return;
+      if(++tries>120){ done=true; clearInterval(iv); return; }                       // give up after ~60s
+      if(window.DEMAND_BUILT){ done=true; clearInterval(iv); return; }               // already built (user opened DEMAND, or a load-time pass) → nothing to do
+      if(!window.SKU_DATA_READY || typeof window.buildLiveDemand!=='function')return; // wait until the lazy SKU data is in
+      done=true; clearInterval(iv);
+      if(window.requestIdleCallback)requestIdleCallback(warm,{timeout:5000}); else setTimeout(warm,1200);
+    }, 500);
+  })();
 })();
 // ── Silent auto-update ─────────────────────────────────────────────────────
 // Horizon is a SPA, so a tab left open keeps running its booted version. Poll the server's version and, when a
