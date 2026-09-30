@@ -853,13 +853,13 @@ async function signUploadHandler(req, res) {
     res.json({ ok: true, upload_url: uploadUrl, storage_path: path, storage_sig: storageSig(path) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 }
-app.post('/api/storage/sign-upload', signUploadHandler);                    // admin app — planner-key/cookie gated (Gate 1)
-app.post('/api/portal/storage/sign-upload', portalAuth, signUploadHandler); // supplier portal — magic-link session (suppliers have no planner key, so they need this /api/portal/* route)
 // Supplier-entered money fields can arrive with thousands separators / currency symbols (e.g. "3,262.35" or
 // "$1,200"). Strip everything but digits/dot/minus, then validate — returns a clean numeric string, or null if
 // it isn't a number. Guarantees a stray comma never reaches a ::numeric cast (which 500'd the PO/cashflow
 // queries when a supplier typed "3,262.35" for PO-55AUWK3). SQL twin: SAFE_NUM_SQL below.
 function sanitiseMoney(v) { const s = String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''); return /^-?[0-9]+(\.[0-9]+)?$/.test(s) ? s : null; }
+// v28.116 (review S12): NaN-safe numeric parse for body fields ('' / null → null; garbage → null — never NaN into a numeric column, which Postgres accepts and which poisons every downstream sum()).
+function numOrNull(v) { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
 // Same rule in SQL for casting a stored text value → numeric safely (garbage → NULL, never an error).
 const SAFE_NUM_SQL = col => `(CASE WHEN regexp_replace(coalesce(${col},''),'[^0-9.-]','','g') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${col},'[^0-9.-]','','g')::numeric END)`;
 
@@ -948,6 +948,11 @@ app.use((req, res, next) => {
   }
   res.set('content-type', 'text/html').send(`<!doctype html><meta charset=utf8><title>Dock & Bay — Demand Planner</title><style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}form{background:#1e293b;padding:36px 40px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.4);text-align:center}h1{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:#94a3b8;margin:0 0 4px}h2{font-size:20px;margin:0 0 22px}input{padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#fff;width:200px;text-align:center}button{margin-left:8px;padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}</style><form method=get><h1>Dock &amp; Bay</h1><h2>Demand Planner</h2><input name=key type=password placeholder="Access key" autofocus><button>Enter</button></form>`);
 });
+
+// v28.116 (review S1): the sign-upload routes were registered BEFORE the access gate → reachable with no key at all.
+// Now below it: the admin route is planner-key gated; the portal route keeps its magic-link session (exempt via /api/portal/*).
+app.post('/api/storage/sign-upload', signUploadHandler);
+app.post('/api/portal/storage/sign-upload', portalAuth, signUploadHandler);
 
 // ── Edit-permission guard (access control, phase 4) ──────────────────────────────────────────────
 // Blocks write requests from users lacking the relevant grant. LIVE-ONLY: with no auth-proxy email
@@ -1038,7 +1043,10 @@ const RESP_CACHE = {
   '/api/product/spec-suppliers': 120000, '/api/product/skus': 120000,
   // demand/kpi/client-derived → short TTL (edits show within the window; no supply-epoch link)
   '/api/demand/stock-cover': 90000, '/api/demand/forecast-anomalies': 90000, '/api/demand-actions': 90000,
-  '/api/kpi/forecast-accuracy': 90000, '/api/kpi/stockout-risk': 90000, '/api/client/orders': 60000,
+  '/api/kpi/forecast-accuracy': 90000, '/api/kpi/stockout-risk': 90000,
+  // v28.116 (review S4): /api/client/orders REMOVED — a cache hit returned before cpAdminGate (mounted later) ran, leaking to any key holder.
+  // v28.116 (review S29): po-suppliers is a param-free full-table (po, supplier) read — cache it like the other stable supply reads.
+  '/api/supply/po-suppliers': 600000,
 };
 // Live-Xero reads that vary by ?region but are otherwise stable (chart of accounts, tracking categories) — key the
 // cache by the full query so each region caches independently. Longer TTL: these change rarely and each miss is a
@@ -2817,10 +2825,10 @@ async function fulfilResolvePaymentTerm(creditDays) {
   const name = fulfilPaymentTermName(creditDays);
   const env = await activeFulfilEnv();
   const key = env + ':' + name;
-  if (key in _paymentTermCache) return _paymentTermCache[key];
+  const _ptc = _paymentTermCache[key]; if (_ptc && _ptc.at > Date.now() - 10 * 60 * 1000) return _ptc.id;   // v28.116 (review S31): 10-min TTL; a null result is not cached
   const r = await fulfilSearchOne(FULFIL_MAP.paymentTermModel, [['name', '=', name]], ['id', 'name']);
   const id = r ? r.id : null;
-  _paymentTermCache[key] = id;
+  if (id != null) _paymentTermCache[key] = { id, at: Date.now() };
   return id;
 }
 // v27.760 (Ben): the final destination goes on the metafield (mandatory) AND the PO comment (human-readable). One source of the wording.
@@ -2908,9 +2916,9 @@ async function fulfilResolveCountry(code) {
 const _chinaPortCache = {};
 async function fulfilResolveChinaPort() {
   const env = await activeFulfilEnv();
-  if (_chinaPortCache[env]) return _chinaPortCache[env];
+  const _cpc = _chinaPortCache[env]; if (_cpc && _cpc.at > Date.now() - 10 * 60 * 1000) return _cpc.id;   // v28.116 (review S31): 10-min TTL
   const r = await fulfilSearchOne(FULFIL_MAP.whModel, [['type', '=', 'warehouse'], ['code', '=', FULFIL_MAP.chinaPortCode]], ['id', 'code']);
-  if (r && r.id) _chinaPortCache[env] = r.id;
+  if (r && r.id) _chinaPortCache[env] = { id: r.id, at: Date.now() };
   return r ? r.id : null;
 }
 // v27.754 (Ben): the Horizon branch (the FINAL 3PL destination after China Port) is written to the PO's `final_destination`
@@ -3133,7 +3141,9 @@ async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil cap
   for (;;) { const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, PAGE, null, fields]); const arr = Array.isArray(rows) ? rows : []; out = out.concat(arr); if (arr.length < PAGE) break; off += PAGE; if (off > 50000) break; }
   return out;
 }
-async function fulfilImportPOs() {
+let _fulfilImportBusy = null;   // v28.116 (review S9): single-flight — the 6h timer, the n8n webhook and a manual call could overlap, and their NOT-IN prunes deleted each other's rows
+async function fulfilImportPOs() { if (_fulfilImportBusy) return _fulfilImportBusy; _fulfilImportBusy = _fulfilImportPOsRun().finally(() => { _fulfilImportBusy = null; }); return _fulfilImportBusy; }
+async function _fulfilImportPOsRun() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
   const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date']);
@@ -3181,7 +3191,7 @@ async function fulfilImportInternalShipments() {
 // Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
 app.post('/api/supply/fulfil/import-pos', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { const pos = await fulfilImportPOs(); let is = null; try { is = await fulfilImportInternalShipments(); } catch (e) { is = { ok: false, error: String(e.message || e) }; }   // v27.901: + internal shipments mirror
     res.json({ ...pos, internal_shipments: is }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
@@ -3391,6 +3401,7 @@ app.get('/api/supply/fulfil/date-sync-preview', async (_req, res) => {
 app.post('/api/supply/fulfil/date-sync-apply', async (req, res) => {
   const items = Array.isArray(req.body && req.body.items) ? req.body.items : []; if (!items.length) return res.status(400).json({ error: 'items[] required' });
   try {
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to write dates to Fulfil' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S40)
     const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
     if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: items.length });
     const by = authUser(req) || 'admin'; const results = [];
@@ -3423,6 +3434,7 @@ app.post('/api/supply/fulfil/shipment-planned-date', async (req, res) => {
   const b = req.body || {}; const po = String(b.po || '').trim(); const date = String(b.date || '').slice(0, 10);
   if (!po || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'po and date (YYYY-MM-DD) required' });
   try {
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to write dates to Fulfil' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S40)
     const cfg = fulfilConfigFor(await activeFulfilEnv());
     if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
     if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true')
@@ -3459,7 +3471,7 @@ app.post('/api/supply/crossdock-qty', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   try {
-    const qty = (b.qty === '' || b.qty == null) ? null : Number(b.qty);
+    const qty = numOrNull(b.qty);
     await pool.query(`INSERT INTO planner.crossdock_shipments (po, sku, qty, submitted_by, submitted_at)
       VALUES ($1,$2,$3,$4, now()) ON CONFLICT (po, sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, qty, b.submitted_by || null]);
@@ -3473,7 +3485,7 @@ app.get('/api/supply/additional-costs', async (req, res) => {
 });
 app.post('/api/supply/additional-cost', async (req, res) => {
   const b = req.body || {};
-  const num = v => (v === '' || v == null) ? null : Number(v);
+  const num = numOrNull;
   try {
     if (b.id) {
       // Any value edit (supplier or D&B) invalidates a prior approval; approve is a separate action.
@@ -4464,7 +4476,9 @@ app.get('/api/supply/xero/status', async (req, res) => {
   }
   res.set('Cache-Control', 'no-store').json(out);
 });
-app.post('/api/supply/xero/disconnect', async (req, res) => { try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/xero/disconnect', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to disconnect Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S15)
+  try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Live read of Xero PURCHASE bills (ACCPAY) for a region — the foundation for PO/payment reconciliation.
 app.get('/api/supply/xero/bills', async (req, res) => {
   try {
@@ -4525,7 +4539,7 @@ async function resolvePoLinks(po, poRow) {
   try {
     const mkt = String(poRow.country_code || '').toUpperCase() || (/coghlan/i.test(poRow.branch || '') ? 'AU' : '');
     const region = xeroMarketRegion(mkt);
-    const poEsc = String(po).replace(/"/g, '');
+    const poEsc = String(po).replace(/["\\]/g, '');   // v28.116 (review S13): a trailing backslash could escape the closing quote of the where= literal
     // Match the PO in EITHER the bill Reference OR its InvoiceNumber (some bills carry the PO as the invoice number).
     const where = encodeURIComponent('Type=="ACCPAY" AND ((Reference!=null AND Reference.Contains("' + poEsc + '")) OR (InvoiceNumber!=null AND InvoiceNumber.Contains("' + poEsc + '")))');
     const j = await xeroFetch(region, '/api.xro/2.0/Invoices?where=' + where + '&order=Date%20DESC&page=1');
@@ -4645,7 +4659,7 @@ app.get('/api/supply/xero/finance-config', async (req, res) => {
 });
 app.post('/api/supply/xero/finance-config', async (req, res) => {
   try {
-    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to change Xero finance config' }); } catch (e) {}
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to change Xero finance config' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
     const cfg = (req.body && req.body.config) || {};
     if (typeof cfg !== 'object' || Array.isArray(cfg)) return res.status(400).json({ error: 'config must be an object' });
     await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [XERO_CFG_KEY, JSON.stringify(cfg)]);
@@ -4677,7 +4691,7 @@ app.get('/api/supply/xero/tracking', async (req, res) => {
 });
 app.post('/api/supply/xero/tracking/ensure', async (req, res) => {
   try {
-    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create Xero tracking categories' }); } catch (e) {}
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create Xero tracking categories' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
     const b = req.body || {}; const region = xeroRegion(b.region);
     if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
     const name = String(b.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
@@ -4892,7 +4906,7 @@ app.post('/api/supply/payments/xero-preview', async (req, res) => {
 // Create the supplier-payment BILL and post the PAYMENTS against the linked PO bills in ONE action (from the Payments
 // Report XERO popup). Admin + confirm. Refuses if a payment would exceed the linked bill's amount due.
 app.post('/api/supply/payments/xero-post', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) {}
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
   try {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {});
@@ -4945,7 +4959,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
 // as-is). Creates an ACCPAYCREDIT coded to Stock Deposits (602), tagged with the production, allocated to the PO's bill.
 const _prodNum = pn => { const m = /(\d+)/.exec(String(pn || '')); return m ? parseInt(m[1], 10) : null; };
 app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) {}
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
   try {
     const po = String((req.body && req.body.po) || '');
@@ -4971,14 +4985,14 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
       LineItems: [{ Description: 'Starting-deposit draw-down ' + po, Quantity: 1, UnitAmount: amount, AccountCode: acct.code, Tracking: trackOption ? [{ Name: 'Production', Option: trackOption }] : [] }] };
     const cr = await xeroFetch(region, '/api.xro/2.0/CreditNotes', { method: 'POST', body: { CreditNotes: [cnBody] } });
     const cn = cr && cr.CreditNotes && cr.CreditNotes[0];
-    let allocated = false, allocErr = null;
+    let allocated = false, allocErr = null, _recErr = null;
     if (cn && cn.CreditNoteID) {
       try { await xeroFetch(region, '/api.xro/2.0/CreditNotes/' + cn.CreditNoteID + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: link.external_id }, Amount: amount }] } }); allocated = true; }
       catch (ae) { allocErr = ae.message; }
       // record it so the "uncreated credit note" exception clears for this PO
-      try { await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at) VALUES ($1,'xero_credit_note',$2,$3,$4,'linked',$5,'auto',now(),now()) ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, updated_at=now()`, [po, cn.CreditNoteID, cn.CreditNoteNumber || ('DEPOSIT-' + po), 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID, _usd(amount) + (trackOption ? ' ' + trackOption : '')]); } catch (e) {}
+      try { await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at) VALUES ($1,'xero_credit_note',$2,$3,$4,'linked',$5,'auto',now(),now()) ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, updated_at=now()`, [po, cn.CreditNoteID, cn.CreditNoteNumber || ('DEPOSIT-' + po), 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID, _usd(amount) + (trackOption ? ' ' + trackOption : '')]); } catch (e) { _recErr = e.message; log500(e); }   // v28.116 (review S8): swallowing this made the PO show "uncreated credit note" again → a second credit note
     }
-    res.json({ ok: true, region, po, production: trackOption, amount, account: acct.code, bill: link.external_ref,
+    res.json({ ok: true, region, po, production: trackOption, amount, account: acct.code, bill: link.external_ref, record_failed: _recErr,
       credit_note_id: cn && cn.CreditNoteID, credit_note_number: cn && cn.CreditNoteNumber, allocated, allocation_error: allocErr,
       url: (cn && cn.CreditNoteID) ? ('https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID) : null });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
@@ -4994,7 +5008,7 @@ const AU_INVENTORY_ACCT = '625';   // AU "Inventory Balance Sheet"
 // contact. (v28.109, Ben)
 async function _xeroEnsureContact(region, name, seed) {
   name = String(name || '').trim(); if (!name) return null;
-  try { const q = await xeroFetch(region, '/api.xro/2.0/Contacts?where=' + encodeURIComponent('Name=="' + name.replace(/"/g, '') + '"'));
+  try { const q = await xeroFetch(region, '/api.xro/2.0/Contacts?where=' + encodeURIComponent('Name=="' + name.replace(/["\\]/g, '') + '"'));
     const hit = ((q && q.Contacts) || [])[0]; if (hit && hit.ContactID) return { id: hit.ContactID, name: hit.Name, created: false }; } catch (e) {}
   const body = { Name: name };
   if (seed) { if (seed.FirstName) body.FirstName = seed.FirstName; if (seed.LastName) body.LastName = seed.LastName;
@@ -5028,7 +5042,7 @@ app.get('/api/supply/xero/au-bill-candidates', async (req, res) => {
 });
 app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
   const dry = !!(req.body && req.body.dry_run);
-  if (!dry) { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) {} }
+  if (!dry) { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); } }
   if (!dry && (req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this creates a bill in live Xero AU' });
   try {
     const po = String((req.body && req.body.po) || '').trim();
@@ -5044,14 +5058,14 @@ app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
     if (!src) return res.status(400).json({ error: 'Bill ' + (link.external_ref || link.external_id) + ' was not found in Xero UK — it may already have been moved. Skipping ' + po + '.' });
     const invNo = src.InvoiceNumber || po;
     // Duplicate guard: is there already an ACCPAY bill with this number in Xero AU?
-    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/"/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; } catch (e) {}
+    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/["\\]/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; } catch (e) {}
     if (dupe && dupe.InvoiceID) return res.status(409).json({ error: 'An AU bill ' + invNo + ' already exists (InvoiceID ' + dupe.InvoiceID + ') — ' + po + ' looks already migrated.', au_bill: { id: dupe.InvoiceID, number: dupe.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + dupe.InvoiceID } });
     const contactName = (src.Contact && src.Contact.Name) || poRow.supplier || 'Supplier';
     // Source contact detail from UK (to seed a new AU contact with email/address/phone, not a name-only stub).
     let srcContact = null; try { if (src.Contact && src.Contact.ContactID) { const cc = await xeroFetch('uk', '/api.xro/2.0/Contacts/' + src.Contact.ContactID); srcContact = cc && cc.Contacts && cc.Contacts[0]; } } catch (e) {}
     // Does the contact already exist in Xero AU?
     let auContactId = null, auContactExists = false;
-    try { const q = await xeroFetch('au', '/api.xro/2.0/Contacts?where=' + encodeURIComponent('Name=="' + contactName.replace(/"/g, '') + '"')); const hit = ((q && q.Contacts) || [])[0]; if (hit && hit.ContactID) { auContactId = hit.ContactID; auContactExists = true; } } catch (e) {}
+    try { const q = await xeroFetch('au', '/api.xro/2.0/Contacts?where=' + encodeURIComponent('Name=="' + contactName.replace(/["\\]/g, '') + '"')); const hit = ((q && q.Contacts) || [])[0]; if (hit && hit.ContactID) { auContactId = hit.ContactID; auContactExists = true; } } catch (e) {}
     const srcLines = (src.LineItems || []).map(li => ({ Description: li.Description || (po + ' inventory'), Quantity: (li.Quantity != null ? li.Quantity : 1), UnitAmount: (li.UnitAmount != null ? li.UnitAmount : li.LineAmount), AccountCode: AU_INVENTORY_ACCT }));
     const status = String((req.body && req.body.status) || 'DRAFT').toUpperCase() === 'AUTHORISED' ? 'AUTHORISED' : 'DRAFT';
     const auBody = { Type: 'ACCPAY', Contact: auContactId ? { ContactID: auContactId } : { Name: contactName }, Date: (src.DateString || src.Date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), DueDate: (src.DueDateString || src.DueDate || '').slice(0, 10) || undefined, InvoiceNumber: invNo, Reference: src.Reference || invNo, CurrencyCode: src.CurrencyCode || 'USD', Status: status, LineAmountTypes: 'NoTax', LineItems: srcLines };
@@ -5266,7 +5280,7 @@ async function syncXeroBills(opts) {
   return out;
 }
 app.post('/api/supply/xero/bills-sync', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {}
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const r = await syncXeroBills({ full: String(req.query.full || '') === '1' }); res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -5322,7 +5336,7 @@ async function _resolveAllPoLinks() {
   return { pos: poRows.length, mode: opts.full ? 'full' : 'incremental', bills_scanned: billsScanned, xero: cX, fulfil: cF, flexport: cP, dhl: cD };
 }
 app.post('/api/supply/po/links/resolve-all', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {}
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { const r = await _resolveAllPoLinks({ full: String(req.query.full || '') === '1' }); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -5351,7 +5365,7 @@ async function _ensureProductionOption(region, option) {
 }
 app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
   try {
-    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to push to Xero' }); } catch (e) {}
+    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to push to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
     if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
     const row = await _pqBy(req.params.id); if (!row) return res.status(404).json({ error: 'not found' });
     if (row.status === 'pushed') return res.status(409).json({ error: 'already pushed', xero_id: row.xero_id });
@@ -5532,7 +5546,7 @@ async function runFlexportImport(opts) {
   }
 }
 app.post('/api/supply/flexport/import', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to import from Flexport' }); } catch (e) {}
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to import from Flexport' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try { res.json(await runFlexportImport(req.body || {})); }
   catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
@@ -5599,7 +5613,7 @@ async function flexportRegistry() {
 }
 app.get('/api/supply/flexport/booking-registry', async (req, res) => {
   try {
-    if (String(req.query.refresh || '') === '1') { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) {} return res.json(await runFlexportEntityHarvest({})); }
+    if (String(req.query.refresh || '') === '1') { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); } return res.json(await runFlexportEntityHarvest({})); }
     const reg = await flexportRegistry();
     res.json(reg || { suppliers: {}, consignees: {}, harvested_at: null, note: 'Not harvested yet — call ?refresh=1' });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
@@ -8407,7 +8421,7 @@ app.post('/api/supply/portal-line-cost', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   try {
-    const num = v => (v === '' || v == null) ? null : Number(v);
+    const num = numOrNull;
     const cost = num(b.actual_cost), qty = num(b.amended_qty), added = !!b.is_added;
     await pool.query(`INSERT INTO planner.portal_line_costs (po, sku, actual_cost, amended_qty, is_added, submitted_by, submitted_at)
       VALUES ($1,$2,$3,$4,$5,$6, now())
@@ -8438,7 +8452,7 @@ app.post('/api/supply/po-line-final', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   try {
-    const cost = (b.final_cost === '' || b.final_cost == null) ? null : Number(b.final_cost);
+    const cost = numOrNull(b.final_cost);
     // A D&B-entered final cost IS the agreed price → stamp confirmed_at so the push / ERP verify use it
     // (both coalesce final_cost only WHEN confirmed_at IS NOT NULL). Clearing it leaves confirmed_at as-is
     // (the coalesce ignores a null final_cost anyway and falls back to the plan cost_price).
@@ -10714,7 +10728,7 @@ async function processReceivedPos() {
 // header; when unset (sandbox/dev) the endpoint is open so it stays testable. (Same env-gated pattern as RESEND_API_KEY.)
 app.post('/api/supply/received-pos/process', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { res.json({ ok: true, ...(await processReceivedPos()) }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -10952,7 +10966,7 @@ async function pollTracking(opts = {}) {
 // Poller endpoint — n8n schedule calls this (webhook-secret gated, same pattern as received-pos).
 app.post('/api/tracking/poll', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { res.json(await pollTracking({ force: req.query.force === '1' })); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -11182,7 +11196,7 @@ app.get('/api/portal/asn-labels/:po', async (req, res) => {
 app.post('/api/supply/dtc-shipment', async (req, res) => {
   const b = req.body || {}, po = (b.po || '').trim();
   if (!po) return res.status(400).json({ error: 'po required' });
-  const num = v => (v === '' || v == null) ? null : Number(v);
+  const num = numOrNull;
   const cartons = (b.cartons === '' || b.cartons == null) ? null : parseInt(b.cartons, 10);
   const cbm = num(b.cbm), wt = num(b.gross_weight_kg), dims = (b.dimensions || '').trim() || null, by = (b.entered_by || '').trim() || null;
   try {
@@ -14139,7 +14153,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     // v28.038 (Ben): CREATE the 3PL bill directly in Xero (DRAFT), instead of the CSV. Coghlans → AU org, everything
     // else → the UK org. A test run prefixes the reference with TEST-. Keeps the CSV download alongside.
     if (req.body && req.body.create) {
-      try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) {}
+      try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
       const xregion = meta.region === 'AU' ? 'au' : 'uk';   // Coghlans (AU) → Xero AU; ILG/Geneva/iFulfilment → Xero UK org
       const isTest = req.body.test === true;                // real reference by default; TEST- prefix only when explicitly test:true
       const ref = (isTest ? 'TEST-' : '') + invNo;
@@ -14534,7 +14548,7 @@ app.post('/api/demand/cache/invalidate', async (_req, res) => {
 // the rebuild so n8n gets a success confirmation (and KV is written) before responding. Webhook-secret gated (if set).
 app.post('/api/data-cache/invalidate', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { _dataCache = null; const vals = await refreshDataCache(); invalidateBiCache();
     res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, kv: KV_ON, at: new Date().toISOString() }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -17111,7 +17125,7 @@ app.post('/api/scenario/fin-overlay', async (req, res) => {
   if (!b.channel || !b.country) return res.status(400).json({ error: 'channel and country required' });
   const sub = (b.subcategory == null ? '' : String(b.subcategory));
   const period = (b.period == null ? '' : String(b.period));
-  const num = v => (v === '' || v == null) ? null : Number(v);
+  const num = numOrNull;
   try {
     await pool.query(`INSERT INTO planner.scenario_fin_overlay (channel, country, subcategory, period, growth_pct, price_pct, updated_at)
       VALUES ($1,$2,$3,$4,$5,$6, now()) ON CONFLICT (channel, country, subcategory, period) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
@@ -20232,6 +20246,7 @@ app.post('/api/forecast/snapshot', async (req, res) => {
     await client.query('COMMIT');
     res.json({ ok: true, run_id: run.id, run_at: run.run_at, rows: ins.rowCount });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }   // v28.116 (review S6): was the only pool.connect() site with no release — exhausted the Vercel pool (max 4)
 });
 
 // Forecast accuracy KPI — TRUE historical accuracy from SKU snapshots (accrues as snapshots build), plus a
@@ -21174,7 +21189,7 @@ app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
 // v28.059 (Ben): create the commission bill directly in Xero (UK org) instead of the CSV. Admin + confirm; draft
 // by default, approved when {approved:true}. Contact = the rep group's Xero contact; single line coded to its account.
 app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) {}
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
   try {
     const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
@@ -21875,7 +21890,7 @@ app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
   try {
     const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
     const r = (await pool.query(`SELECT filename, mime, data, storage_path, lower(coalesce(supplier_name,'')) sn FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
-    if (!r || (sups.length && r.sn && sups.indexOf(r.sn) < 0)) return res.status(404).json({ error: 'not found' });
+    if (!r || !r.sn || sups.indexOf(r.sn) < 0) return res.status(404).json({ error: 'not found' });   // v28.116 (review S14): an unattributed doc is not yours
     return serveStored(res, r);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -21885,7 +21900,7 @@ app.delete('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
     const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
     const r = (await pool.query(`SELECT lower(coalesce(supplier_name,'')) sn, coalesce(uploader_kind,'') uk,
         (created_at > now() - interval '24 hours') within24 FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
-    if (!r || (sups.length && r.sn && sups.indexOf(r.sn) < 0)) return res.status(404).json({ error: 'not found' });
+    if (!r || !r.sn || sups.indexOf(r.sn) < 0) return res.status(404).json({ error: 'not found' });   // v28.116 (review S14): an unattributed doc is not yours
     if (r.uk !== 'supplier') return res.status(403).json({ error: 'can only delete your own uploads' });
     if (!r.within24) return res.status(403).json({ error: 'delete window (24h) has passed' });
     await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]);
@@ -22184,14 +22199,14 @@ app.post('/api/supply/onb/requests/:id/approve', async (req, res) => {
       if (!ex) { await client.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name) VALUES ($1,$2,$3,$4)`, [em, sid, r.supplier_name, c.name || null]); const tok = portalToken(); await client.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [tok, em]); invites.push({ email: em, name: c.name || '', url: PORTAL_URL + '?token=' + tok }); } }
     const log = onbLogPush(r, 'Approved by ' + by + ' · supplier record updated' + (nProd ? ' · ' + nProd + ' product(s) queued for the PIM' : '') + (invites.length ? ' · ' + invites.length + ' portal invite(s) sent' : ''), by);
     await client.query(`UPDATE planner.supplier_onboarding_requests SET status='approved', decided_by=$2, decided_at=now(), log=$3::jsonb, updated_at=now() WHERE id=$1`, [r.id, by, JSON.stringify(log)]);
-    await client.query('COMMIT'); client.release();
+    await client.query('COMMIT'); client.release(); var _released = true;   // v28.116 (review S10): hoisted flag — the emails below run AFTER release; a throw there must not rollback/release again
     for (const inv of invites) await sendResendEmail({ to: inv.email, subject: 'Your Dock & Bay supplier portal access', html: '<p>Hello ' + escHtml(inv.name) + ',</p><p>You now have access to the Dock & Bay supplier portal for ' + escHtml(r.supplier_name) + '. Use this link to sign in (valid 7 days; you can request a new one from the portal afterwards):</p><p><a href="' + inv.url + '">' + inv.url + '</a></p>', kind: 'portal-invite', ref: r.ref, by });
     const contact = (f.contacts || []).find(c => c && c.email) || {}; const supTo = r.submitted_by || contact.email;
     if (supTo) await sendResendEmail({ to: supTo, subject: '[Dock & Bay] Your supplier profile is approved (' + r.ref + ')', html: '<p>Hello,</p><p>Your ' + (r.type === 'change' ? 'profile changes are' : 'supplier profile is') + ' approved and now live in Horizon.' + (nProd ? ' Your ' + nProd + ' product entries are with our product team.' : '') + ' You can update your profile at any time from the portal; changes go through the same review.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by });
     await onbNotifyTeam('[Horizon] ' + r.ref + ' approved · ' + escHtml(r.supplier_name), '<p>' + escHtml(by) + ' approved ' + r.ref + ' (' + escHtml(r.supplier_name) + '). Supplier record updated' + (nProd ? ', ' + nProd + ' product submission(s) pending in the PIM queue' : '') + '.</p>', r.ref);
     try { invalidateSupplyCaches(); } catch (_) {}
     res.json({ ok: true, invites: invites.length, products_queued: nProd });
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { if (!_released) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); } log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/onb/requests/:id/reject', async (req, res) => {
   const by = authUser(req) || 'admin'; const note = String((req.body || {}).note || '').trim();
@@ -23035,7 +23050,7 @@ app.post('/api/portal/crossdock-qty', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try {
-    const qty = (b.qty === '' || b.qty == null) ? null : Number(b.qty);
+    const qty = numOrNull(b.qty);
     await pool.query(`INSERT INTO planner.crossdock_shipments (po,sku,qty,submitted_by,submitted_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`, [b.po, b.sku, qty, req.portal.email]);
     res.json({ ok: true });
@@ -23045,7 +23060,7 @@ app.post('/api/portal/line-cost', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try {
-    const num = v => (v === '' || v == null) ? null : Number(v);
+    const num = numOrNull;
     await pool.query(`INSERT INTO planner.portal_line_costs (po,sku,actual_cost,amended_qty,is_added,submitted_by,submitted_at) VALUES ($1,$2,$3,$4,$5,$6,now())
       ON CONFLICT (po,sku) DO UPDATE SET actual_cost=excluded.actual_cost, amended_qty=excluded.amended_qty,
         is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
@@ -23060,7 +23075,7 @@ app.post('/api/portal/line-remove', portalAuth, async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/additional-cost', portalAuth, async (req, res) => {
-  const b = req.body || {}; const num = v => (v === '' || v == null) ? null : Number(v);
+  const b = req.body || {}; const num = numOrNull;
   try {
     if (b.id) {
       const r = (await pool.query(`SELECT po FROM planner.portal_additional_costs WHERE id=$1`, [b.id])).rows[0];
