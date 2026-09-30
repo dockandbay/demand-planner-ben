@@ -255,7 +255,7 @@
 #hzcmd .ft b{color:var(--muted,#5b6b83)}
 #hzcmd .empty{padding:26px 14px;text-align:center;color:var(--muted,#5b6b83)}
 /* ── Left rail (v28.073) — replaces the top module nav on desktop; gated on body.hz-rail (kill switch) ── */
-#hz-leftrail{display:none;position:fixed;top:0;left:0;bottom:0;width:212px;background:var(--nav,#0d1626);color:var(--nav-dim,#93a1b8);flex-direction:column;z-index:1000;border-right:1px solid rgba(255,255,255,.08);font-family:inherit}
+#hz-leftrail{display:none;position:fixed;top:0;left:0;bottom:0;width:240px;background:var(--nav,#0d1626);color:var(--nav-dim,#93a1b8);flex-direction:column;z-index:1000;border-right:1px solid rgba(255,255,255,.08);font-family:inherit}
 #hz-leftrail .rl-brand{display:flex;align-items:center;gap:9px;height:52px;padding:0 16px;flex:0 0 auto;border-bottom:1px solid rgba(255,255,255,.08)}
 #hz-leftrail .rl-brand .nm{font-weight:700;font-size:15px;letter-spacing:.05em;color:#fff}
 #hz-leftrail .rl-list{flex:1;overflow-y:auto;padding:10px 10px}
@@ -289,7 +289,7 @@
 /* collapsed rail (hamburger) — icon over tiny label, L2/L3 hidden */
 @media(min-width:900px){
  body.hz-rail-min #hz-leftrail{width:76px}
- body.hz-rail-min .wrap#app{margin-left:76px!important}   /* beats the expanded margin-left:212px (same specificity, defined later) */
+ body.hz-rail-min .wrap#app{margin-left:76px!important}   /* beats the expanded margin-left:240px (same specificity, defined later) */
  body.hz-rail-min #hz-leftrail .rl-brand{padding:0 8px;gap:4px;justify-content:center}
  body.hz-rail-min #hz-leftrail .rl-brand .nm{display:none}
  body.hz-rail-min #hz-leftrail .rl-min{margin-left:0}
@@ -302,7 +302,7 @@
 }
 @media(min-width:900px){
  body.hz-rail #hz-leftrail{display:flex}
- body.hz-rail .wrap#app{margin-left:212px}
+ body.hz-rail .wrap#app{margin-left:240px}   /* v28.126: 212 to 240 so longer L2/L3 titles (e.g. PURCHASE ORDERS + badge) fit on one line; keep equal to #hz-leftrail width */
  body.hz-rail #view-tabs-row .view-toggle,
  body.hz-rail #view-tabs-row #client-btn,
  body.hz-rail #view-tabs-row #config-btn,

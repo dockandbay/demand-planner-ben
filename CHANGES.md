@@ -1,3 +1,12 @@
+## v28.126 (Ben): wider left menu + v_po_finance set-based rewrite (migration 322)
+
+**Files: `supply/inject.html`, `migrations/322_v_po_finance_setbased.sql`.**
+
+- Left rail 212 px to 240 px (and the content offset), so longer L2/L3 titles like PURCHASE ORDERS fit on one line next to the badge. Desktop only (rail shows at 900 px and up).
+- Migration 322 (run after 321): the view's per-PO line-value, pallet-share and duty LATERALs become four CTEs that aggregate order lines once. Output identical (row md5) on all 7 app query shapes. Full list 379 to 183 ms, self-join 415 to 221 ms, portal 169 to 137 ms, deposit sums 90 to 57 ms; single-PO select * 3 to 18 ms and correlated per-deposit lookup 88 to 120 ms (accepted by Ben, ms-level). Guarded: refuses to replace an unexpected definition; re-runnable. Applied to sandbox.
+
+No new env vars.
+
 ## v28.125 (Ben): BUY/FBA entry no longer does redundant 3 s demand rebuilds
 
 **Files: `artifact_v16.7.html`, `supply/inject.html`.** Measured cost was `buildLiveDemand()` (~2.9 s), not `BUY_CACHE` (cold recompute of all 721 SKUs = 50 ms), so the cache is left as is.
