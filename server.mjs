@@ -20226,16 +20226,22 @@ app.use('/api/client', cpAdminGate);
 // ── lookups for the admin forms ──
 app.get('/api/client/lookups', async (req, res) => {
   try {
-    const [rg, ka, ch, pl, cnt] = await Promise.all([
-      pool.query(`SELECT id, name, default_rate, coalesce(xero_contact,'') xero_contact, coalesce(xero_account_code,'') xero_account_code FROM planner.rep_groups WHERE active ORDER BY name`),
-      pool.query(`SELECT id, name FROM planner.key_accounts ORDER BY name`),
-      pool.query(`SELECT channel, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(channel,'')<>'' GROUP BY 1 ORDER BY 2 DESC`).catch(() => ({ rows: [] })),
-      pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus FROM planner.client_price_lists GROUP BY code ORDER BY code`).catch(() => ({ rows: [] })),
-      pool.query(`SELECT country_code, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(country_code,'')<>'' GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).catch(() => ({ rows: [] })),
-    ]);
-    res.set('Cache-Control', 'no-store').json({ types: CP_TYPES, warehouses: CP_WAREHOUSES, markets: Object.keys(CP_MARKETS), feature_defaults: CP_FEATURE_DEFAULTS,
-      rep_groups: rg.rows, key_accounts: ka.rows, channels: ch.rows, countries: cnt.rows, price_lists: pl.rows, channel_alias: CP_CHANNEL_ALIAS,
-      me: { email: req.me.email, commissions: !!(req.me.is_admin || req.me.commissions || !req.me.live) } });
+    // v28.086 (Ben): the user-independent reference data (rep groups, key accounts, price lists, and the two
+    // fulfil_sales GROUP BYs — the channel/country scans were the ~3s cold cost) is memoised for 5 min (SWR), so the
+    // first CLIENT visit / a section switch no longer waits on those. Only `me` stays per-request.
+    const base = await swrGet('client:lookups', 5 * 60 * 1000, async () => {
+      const [rg, ka, ch, pl, cnt] = await Promise.all([
+        pool.query(`SELECT id, name, default_rate, coalesce(xero_contact,'') xero_contact, coalesce(xero_account_code,'') xero_account_code FROM planner.rep_groups WHERE active ORDER BY name`),
+        pool.query(`SELECT id, name FROM planner.key_accounts ORDER BY name`),
+        pool.query(`SELECT channel, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(channel,'')<>'' GROUP BY 1 ORDER BY 2 DESC`).catch(() => ({ rows: [] })),
+        pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus FROM planner.client_price_lists GROUP BY code ORDER BY code`).catch(() => ({ rows: [] })),
+        pool.query(`SELECT country_code, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(country_code,'')<>'' GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).catch(() => ({ rows: [] })),
+      ]);
+      return { types: CP_TYPES, warehouses: CP_WAREHOUSES, markets: Object.keys(CP_MARKETS), feature_defaults: CP_FEATURE_DEFAULTS,
+        rep_groups: rg.rows, key_accounts: ka.rows, channels: ch.rows, countries: cnt.rows, price_lists: pl.rows, channel_alias: CP_CHANNEL_ALIAS };
+    });
+    res.set('Cache-Control', 'no-store').json(Object.assign({}, base, {
+      me: { email: req.me.email, commissions: !!(req.me.is_admin || req.me.commissions || !req.me.live) } }));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

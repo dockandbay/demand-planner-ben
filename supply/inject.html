@@ -17498,7 +17498,8 @@
   function cpPollUnread(){ if(!clientCan())return; cpGet('/api/client/threads').then(function(j){ var n=(j.threads||[]).reduce(function(s,t){return s+(t.unread_ops||0);},0); var b=document.getElementById('cp-unread'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } var tb=document.getElementById('client-btn'); if(tb)tb.innerHTML='CLIENT'+(n?' <span class="ex-badge" style="display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg,#e11d48);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px">'+n+'</span>':''); }).catch(function(){}); }
   // ── CLIENTS & AGENTS ──
   function cpRenderClients(b){ var q='', typeF='';
-    cpLookups(function(LK){ cpGet('/api/client/clients').then(function(j){ var rows=j.clients||[];
+    var _cj=cpGet('/api/client/clients');   // v28.086: fire the clients fetch immediately, in parallel with lookups (was serial → ~1.7s cold on click)
+    cpLookups(function(LK){ _cj.then(function(j){ var rows=j.clients||[];
       if(_cpPending&&_cpPending.sub==='clients'){ var id=_cpPending.id; _cpPending=null; if(id==='new')return cpNewClient(b); return cpEditClient(b,id); }
       function draw(){ var f=rows.filter(function(r){ if(typeF&&r.type!==typeF)return false; if(q){ var s=(r.name+' '+r.type+' '+(r.owner_email||'')+' '+JSON.stringify(r.visibility)).toLowerCase(); if(s.indexOf(q)<0)return false; } return true; });
         var kpi=function(n,l){ return '<div class="tile" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card)"><b style="display:block;font-size:20px;font-weight:700">'+n+'</b><span class="mut tiny">'+l+'</span></div>'; };
@@ -17555,7 +17556,7 @@
     }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }); }
   // ── ORDERS ──
   var _cpOrdF={client:'',status:'',origin:'',q:'',from:'',to:''};
-  function cpRenderOrders(b){ cpLookups(function(LK){ cpGet('/api/client/clients').then(function(cj){ var clients=cj.clients||[]; var f=_cpOrdF;
+  function cpRenderOrders(b){ var _cj=cpGet('/api/client/clients'); cpLookups(function(LK){ _cj.then(function(cj){ var clients=cj.clients||[]; var f=_cpOrdF;
       var qs='?client_id='+encodeURIComponent(f.client)+(f.status?'&status='+f.status:'')+(f.q?'&q='+encodeURIComponent(f.q):'')+(f.from?'&from='+f.from:'')+(f.to?'&to='+f.to:'');
       Promise.all([cpGet('/api/client/orders'+qs),cpGet('/api/client/portal-orders')]).then(function(r){ var os=(r[0].orders||[]).filter(function(o){return !f.origin||o.origin===f.origin;}), rule=r[0].rule||{}, subs=r[1].orders||[];
         var drafts=subs.filter(function(o){return o.status!=='fulfil_draft';}).length; var sel=function(id,val,opts,lbl){ return '<select class="flt" id="'+id+'"><option value="">'+lbl+'</option>'+opts.map(function(o){return '<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>';}).join('')+'</select>'; };
@@ -17571,6 +17572,7 @@
       }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }); }); }
   // ── COMMISSIONS ──
   var _cpComm={month:'',group:'',run:null,tab:'report'};
+  var _cpMsg={client:'',thread:null};   // v28.086 (Ben): MESSAGES sub-tab state — was never declared, so clicking MESSAGES threw "ReferenceError: _cpMsg is not defined" and the page never rendered
   function cpRenderCommission(b){ var S=_cpComm; if(_cpPending&&_cpPending.sub==='commission'){ S.run=_cpPending.id; S.tab='report'; _cpPending=null; }
     var money=function(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
     var TABS=[['report','Commissions report'],['overrides','Order overrides'],['paid','Paid history']];
