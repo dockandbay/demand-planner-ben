@@ -4989,6 +4989,22 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
 // It does NOT touch the UK bill or the PO's link — voiding the UK bill and re-pointing the link are deliberate
 // follow-up steps once Ben has reviewed the AU bills.
 const AU_INVENTORY_ACCT = '625';   // AU "Inventory Balance Sheet"
+// Ensure a supplier CONTACT exists in an org, creating it if missing (seeded from a source contact's email/address/
+// phone so it isn't a name-only stub). Returns { id, name, created }. Used so bill migration never fails on a missing
+// contact. (v28.109, Ben)
+async function _xeroEnsureContact(region, name, seed) {
+  name = String(name || '').trim(); if (!name) return null;
+  try { const q = await xeroFetch(region, '/api.xro/2.0/Contacts?where=' + encodeURIComponent('Name=="' + name.replace(/"/g, '') + '"'));
+    const hit = ((q && q.Contacts) || [])[0]; if (hit && hit.ContactID) return { id: hit.ContactID, name: hit.Name, created: false }; } catch (e) {}
+  const body = { Name: name };
+  if (seed) { if (seed.FirstName) body.FirstName = seed.FirstName; if (seed.LastName) body.LastName = seed.LastName;
+    if (seed.EmailAddress) body.EmailAddress = seed.EmailAddress;
+    if (Array.isArray(seed.Addresses) && seed.Addresses.length) body.Addresses = seed.Addresses;
+    if (Array.isArray(seed.Phones) && seed.Phones.length) body.Phones = seed.Phones; }
+  const cr = await xeroFetch(region, '/api.xro/2.0/Contacts', { method: 'POST', body: { Contacts: [body] } });
+  const c = cr && cr.Contacts && cr.Contacts[0];
+  return c && c.ContactID ? { id: c.ContactID, name: c.Name, created: true } : { id: null, name, created: false };
+}
 async function _auBillCandidates() {
   const rows = (await pool.query(`SELECT p.po, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch, coalesce(p.status,'') status, coalesce(p.supplier_name,'') supplier, l.external_id, l.external_ref
     FROM planner.purchase_orders p
@@ -4998,8 +5014,17 @@ async function _auBillCandidates() {
   return rows.filter(r => _poXeroRegion(r.cc, r.branch) === 'au');
 }
 app.get('/api/supply/xero/au-bill-candidates', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json({ candidates: await _auBillCandidates() }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try {
+    const candidates = await _auBillCandidates();
+    // How many AU (home-org) POs that are not COMPLETE have NO Xero bill yet (nothing to migrate — just context).
+    let noBill = 0;
+    try { const rows = (await pool.query(`SELECT upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch
+        FROM planner.purchase_orders p
+        LEFT JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND coalesce(l.external_id,'')<>''
+        WHERE (upper(coalesce(p.country_code,''))='AU' OR p.branch ILIKE '%coghlan%') AND upper(coalesce(p.status,''))<>'COMPLETE' AND l.external_id IS NULL`)).rows;
+      noBill = rows.filter(r => _poXeroRegion(r.cc, r.branch) === 'au').length; } catch (e) {}
+    res.set('Cache-Control', 'no-store').json({ candidates, no_bill_count: noBill });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
   const dry = !!(req.body && req.body.dry_run);
@@ -5021,14 +5046,23 @@ app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
     // Duplicate guard: is there already an ACCPAY bill with this number in Xero AU?
     let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/"/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; } catch (e) {}
     if (dupe && dupe.InvoiceID) return res.status(409).json({ error: 'An AU bill ' + invNo + ' already exists (InvoiceID ' + dupe.InvoiceID + ') — ' + po + ' looks already migrated.', au_bill: { id: dupe.InvoiceID, number: dupe.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + dupe.InvoiceID } });
+    const contactName = (src.Contact && src.Contact.Name) || poRow.supplier || 'Supplier';
+    // Source contact detail from UK (to seed a new AU contact with email/address/phone, not a name-only stub).
+    let srcContact = null; try { if (src.Contact && src.Contact.ContactID) { const cc = await xeroFetch('uk', '/api.xro/2.0/Contacts/' + src.Contact.ContactID); srcContact = cc && cc.Contacts && cc.Contacts[0]; } } catch (e) {}
+    // Does the contact already exist in Xero AU?
+    let auContactId = null, auContactExists = false;
+    try { const q = await xeroFetch('au', '/api.xro/2.0/Contacts?where=' + encodeURIComponent('Name=="' + contactName.replace(/"/g, '') + '"')); const hit = ((q && q.Contacts) || [])[0]; if (hit && hit.ContactID) { auContactId = hit.ContactID; auContactExists = true; } } catch (e) {}
     const srcLines = (src.LineItems || []).map(li => ({ Description: li.Description || (po + ' inventory'), Quantity: (li.Quantity != null ? li.Quantity : 1), UnitAmount: (li.UnitAmount != null ? li.UnitAmount : li.LineAmount), AccountCode: AU_INVENTORY_ACCT }));
     const status = String((req.body && req.body.status) || 'DRAFT').toUpperCase() === 'AUTHORISED' ? 'AUTHORISED' : 'DRAFT';
-    const auBody = { Type: 'ACCPAY', Contact: { Name: (src.Contact && src.Contact.Name) || poRow.supplier || 'Supplier' }, Date: (src.DateString || src.Date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), DueDate: (src.DueDateString || src.DueDate || '').slice(0, 10) || undefined, InvoiceNumber: invNo, Reference: src.Reference || invNo, CurrencyCode: src.CurrencyCode || 'USD', Status: status, LineAmountTypes: 'NoTax', LineItems: srcLines };
-    const summary = { po, supplier: auBody.Contact.Name, source_bill: { id: src.InvoiceID, number: src.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + src.InvoiceID, total: Number(src.Total) || 0, currency: src.CurrencyCode, status: src.Status, amount_due: Number(src.AmountDue) || 0 }, au_bill_to_create: auBody, lines_recoded_to: AU_INVENTORY_ACCT };
+    const auBody = { Type: 'ACCPAY', Contact: auContactId ? { ContactID: auContactId } : { Name: contactName }, Date: (src.DateString || src.Date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), DueDate: (src.DueDateString || src.DueDate || '').slice(0, 10) || undefined, InvoiceNumber: invNo, Reference: src.Reference || invNo, CurrencyCode: src.CurrencyCode || 'USD', Status: status, LineAmountTypes: 'NoTax', LineItems: srcLines };
+    const summary = { po, supplier: contactName, contact: { name: contactName, exists_in_au: auContactExists, will_create: !auContactExists }, source_bill: { id: src.InvoiceID, number: src.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + src.InvoiceID, total: Number(src.Total) || 0, currency: src.CurrencyCode, status: src.Status, amount_due: Number(src.AmountDue) || 0 }, au_bill_to_create: auBody, lines_recoded_to: AU_INVENTORY_ACCT };
     if (dry) return res.json({ ok: true, dry_run: true, ...summary });
+    // Create the contact in AU if it's missing (seeded from the UK contact), then reference it by id — never fail the bill on a missing contact.
+    let contactCreated = false;
+    if (!auContactId) { try { const ens = await _xeroEnsureContact('au', contactName, srcContact); if (ens && ens.id) { auBody.Contact = { ContactID: ens.id }; contactCreated = ens.created; auContactId = ens.id; } } catch (e) {} }
     const cr = await xeroFetch('au', '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [auBody] } });
     const ni = cr && cr.Invoices && cr.Invoices[0];
-    res.json({ ok: true, ...summary, au_bill: ni ? { id: ni.InvoiceID, number: ni.InvoiceNumber, status: ni.Status, total: Number(ni.Total) || 0, url: 'https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + ni.InvoiceID } : null, next_steps: 'Review the AU bill. Once confirmed: void the original UK bill and re-point ' + po + '’s link to the AU bill (both are separate, deliberate steps).' });
+    res.json({ ok: true, ...summary, contact_created: contactCreated, au_bill: ni ? { id: ni.InvoiceID, number: ni.InvoiceNumber, status: ni.Status, total: Number(ni.Total) || 0, url: 'https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + ni.InvoiceID } : null, next_steps: 'Review the AU bill. Once confirmed: void the original UK bill and re-point ' + po + '’s link to the AU bill (both are separate, deliberate steps).' });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 // ── PAYMENTS ▸ Xero payments — the manual push queue (mig 312). Enqueue on mark-paid / deposit-assign; push to live

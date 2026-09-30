@@ -10763,6 +10763,43 @@
           q.textContent='✓ Posted'; if(ps)ps.textContent=''; })
         .catch(function(e){ q.disabled=false; q.textContent=_t; if(ps){ps.style.color='var(--neg)';ps.textContent='Failed: '+(e.message||e);} }); };
   }
+  // ---- AU bill migration tool (Xero UK → AU) — small helper launched from the Xero payments view (v28.109, Ben) ----
+  function xeroAuMigrateModal(){
+    var bg=document.createElement('div'); bg.id='aum-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
+    bg.innerHTML='<div style="background:var(--card);border-radius:12px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">AU bill migration — Xero UK → AU</b><span class="tool-badge bg-blue">code 625</span><button id="aum-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
+      +'<div style="padding:16px 18px"><div class="mut tiny" style="margin-bottom:10px">AU purchase orders (not COMPLETE) whose bill sits in Xero UK. Each creates an <b>identical DRAFT bill</b> in Xero AU with every line coded to <b>625 (Inventory Balance Sheet)</b>. If the supplier isn’t a contact in AU it’s created automatically. The UK bill and the PO link are left untouched.</div><div id="aum-body"><div class="count">Loading candidates…</div></div></div></div>';
+    document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
+    document.getElementById('aum-x').onclick=function(){ bg.remove(); };
+    var body=document.getElementById('aum-body');
+    fetch('/api/supply/xero/au-bill-candidates').then(function(r){return r.json();}).then(function(j){
+      var cs=(j&&j.candidates)||[]; var nb=(j&&j.no_bill_count)||0;
+      var nbNote=nb?('<div class="mut tiny" style="margin-bottom:8px">'+nb+' more AU PO(s) not COMPLETE have no Xero bill yet — nothing to migrate for those.</div>'):'';
+      if(!cs.length){ body.innerHTML='<div class="count">No AU POs with a UK bill to migrate. 🎉</div>'+nbNote; return; }
+      body.innerHTML=nbNote+'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap"><button id="aum-dryall" class="save-btn light">Dry run all ('+cs.length+')</button><button id="aum-goall" class="save-btn" style="background:var(--blue);color:#fff;border-color:var(--blue)">Migrate all → AU</button><span id="aum-prog" class="mut tiny"></span></div>'
+        +'<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Status</th><th class="l">UK bill</th><th class="l"></th></tr></thead><tbody>'
+        +cs.map(function(c){ return '<tr style="border-top:1px solid var(--line)"><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(c.po)+'</td><td class="l">'+esc(c.supplier||'')+'</td><td class="l"><span class="mut tiny">'+esc(c.status||'')+'</span></td><td class="l"><span class="mut tiny">'+esc(c.external_ref||'')+'</span></td>'
+          +'<td class="l" style="white-space:nowrap"><button class="lnk-btn aum-dry" data-po="'+esc(c.po)+'" style="color:var(--blue)">dry run</button> · <button class="save-btn aum-go" data-po="'+esc(c.po)+'" style="background:var(--blue);color:#fff;border-color:var(--blue)">migrate → AU</button></td></tr>'
+          +'<tr class="aum-res" data-po="'+esc(c.po)+'"><td colspan="5" class="l" style="padding:0 8px"></td></tr>'; }).join('')
+        +'</tbody></table></div>';
+      function resCell(po){ var tr=null; body.querySelectorAll('tr.aum-res').forEach(function(r){ if(r.getAttribute('data-po')===po)tr=r; }); return tr?tr.querySelector('td'):null; }
+      function doDry(po){ var cell=resCell(po); if(cell)cell.innerHTML='<span class="mut tiny">dry run…</span>';
+        return fetch('/api/supply/xero/migrate-au-bill',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,dry_run:true})}).then(function(r){return r.json();}).then(function(x){ if(cell){
+          if(x&&x.error){ cell.innerHTML='<span style="color:var(--neg);font-size:12px">'+esc(x.error)+'</span>'; }
+          else { var ab=x.au_bill_to_create||{}; var n=(ab.LineItems||[]).length; var tot=(ab.LineItems||[]).reduce(function(a,l){return a+(Number(l.UnitAmount)||0)*(Number(l.Quantity)||1);},0);
+            cell.innerHTML='<div style="font-size:12px;padding:6px 0"><b>Would create in AU:</b> '+esc(ab.InvoiceNumber||'')+' · '+esc((x.contact&&x.contact.name)||'')+' '+((x.contact&&x.contact.will_create)?'<span class="tool-badge bg-amber">contact will be created</span>':'<span class="tool-badge bg-green">contact exists</span>')+' · '+n+' line(s) → 625 · '+money(tot)+' '+esc(ab.CurrencyCode||'USD')+' · source <a href="'+esc((x.source_bill&&x.source_bill.url)||'#')+'" target="_blank" rel="noopener" style="color:var(--blue)">UK bill ↗</a></div>'; } } return x; }); }
+      function doGo(po){ var cell=resCell(po); if(cell)cell.innerHTML='<span class="mut tiny">creating in AU…</span>';
+        return fetch('/api/supply/xero/migrate-au-bill',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true})}).then(function(r){return r.json();}).then(function(x){ if(cell){
+          if(x&&x.error){ cell.innerHTML='<span style="color:var(--neg);font-size:12px">'+esc(x.error)+'</span>'; }
+          else { var ab=x.au_bill||{}; cell.innerHTML='<div style="font-size:12px;padding:6px 0;color:var(--pos)">✓ Created AU bill <b>'+esc(ab.number||'')+'</b> ('+esc(ab.status||'DRAFT')+', '+money(ab.total)+' '+esc((x.au_bill_to_create&&x.au_bill_to_create.CurrencyCode)||'USD')+')'+(x.contact_created?' · <span class="tool-badge bg-green">contact created</span>':'')+' '+(ab.url?'<a href="'+esc(ab.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">open in Xero ↗</a>':'')+'<div class="mut tiny" style="margin-top:3px">Next: void the UK bill and re-point the link once reviewed.</div></div>'; } } return x; }); }
+      body.querySelectorAll('.aum-dry').forEach(function(btn){ btn.onclick=function(){ doDry(btn.dataset.po); }; });
+      body.querySelectorAll('.aum-go').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Create an identical DRAFT bill in Xero AU for '+btn.dataset.po+' (lines coded to 625)?\n\nThis writes to live Xero AU.'))return; btn.disabled=true; doGo(btn.dataset.po).then(function(){ btn.textContent='migrated'; }); }; });
+      var prog=document.getElementById('aum-prog');
+      function runSeq(fn,confirmMsg){ if(confirmMsg&&!confirm(confirmMsg))return; var i=0; (function next(){ if(i>=cs.length){ if(prog)prog.textContent='✓ done ('+cs.length+')'; return; } var po=cs[i].po; if(prog)prog.textContent=(i+1)+'/'+cs.length+' — '+po; fn(po).then(function(){ i++; next(); }).catch(function(){ i++; next(); }); })(); }
+      var da=document.getElementById('aum-dryall'); if(da)da.onclick=function(){ runSeq(doDry); };
+      var ga=document.getElementById('aum-goall'); if(ga)ga.onclick=function(){ runSeq(doGo,'Create identical DRAFT bills in Xero AU for ALL '+cs.length+' PO(s), every line coded to 625?\n\nThis writes to live Xero AU.'); };
+    }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; });
+  }
   // ---- PAYMENTS ▸ Xero payments — manual push queue (bills / payments / credit notes) ----
   var XPQ_KIND={bill:{label:'Bill',ico:'🧾'},payment:{label:'Payment',ico:'💸'},credit_note:{label:'Credit note',ico:'↩'}};
   var XPQ_ST={pending:'bg-amber',pushed:'bg-green',error:'bg-red',cancelled:'bg-neutral'};
@@ -10827,10 +10864,11 @@
         :'<div class="tw" style="max-width:1100px"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Supplier</th><th class="l">Detail</th><th class="l" style="text-align:right">Amount</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'
           +(list.length?list.map(row).join(''):'<tr><td colspan="5" class="l mut" style="padding:10px">No '+esc((XPQ_KIND[_xpqTab]||{}).label||_xpqTab).toLowerCase()+'s queued.</td></tr>')+'</tbody></table></div>';
       b.innerHTML='<div class="annot"><b>PAYMENTS ▸ Xero payments.</b> The manual push queue + live reconciliation (replaces Xero Compare). Marking a run <b>PAID</b> enqueues the supplier-payment <b>bill</b> + a <b>payment</b> per linked PO bill; a starting-deposit <b>credit note</b> is added from the PO. Nothing reaches Xero until you press <b>Push</b>. '
-        +'<b>'+(counts.pending||0)+'</b> pending · '+(counts.pushed||0)+' pushed'+(counts.error?' · <span style="color:var(--neg)">'+counts.error+' error</span>':'')+((_xpqExcPending&&!_xpqExc)?' · <span class="mut tiny">checking Xero…</span>':(excN?' · <span style="color:var(--neg)">'+excN+' exception'+(excN>1?'s':'')+'</span>':''))+'. <button class="lnk-btn" id="xpq-refresh" style="color:var(--blue)">↻ refresh</button></div>'
+        +'<b>'+(counts.pending||0)+'</b> pending · '+(counts.pushed||0)+' pushed'+(counts.error?' · <span style="color:var(--neg)">'+counts.error+' error</span>':'')+((_xpqExcPending&&!_xpqExc)?' · <span class="mut tiny">checking Xero…</span>':(excN?' · <span style="color:var(--neg)">'+excN+' exception'+(excN>1?'s':'')+'</span>':''))+'. <button class="lnk-btn" id="xpq-refresh" style="color:var(--blue)">↻ refresh</button> · <button class="lnk-btn" id="xpq-aumig" style="color:var(--blue)" title="Recreate AU PO bills that sit in Xero UK as identical AU bills (code 625)">AU bill migration →</button></div>'
         +'<div style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 10px;flex-wrap:wrap">'+tabbar+'</div>'
         +bodyHtml;
       var rf=document.getElementById('xpq-refresh'); if(rf)rf.onclick=load;
+      var aum=document.getElementById('xpq-aumig'); if(aum)aum.onclick=xeroAuMigrateModal;
       b.querySelectorAll('.xpq-tab').forEach(function(t){ t.onclick=function(){ _xpqTab=t.dataset.kind; draw(_xpqQueue||j); }; });
       var exrf=document.getElementById('xpq-exc-refresh'); if(exrf)exrf.onclick=function(){ exrf.textContent='re-checking…'; loadExceptions(true); };   // v28.088: force a fresh live sweep, progressively
       var rall=document.getElementById('xpq-resolve-all'); if(rall)rall.onclick=function(){ if(!confirm('Sweep every PO and resolve its Xero / Fulfil / Flexport / DHL links now? (reads Xero bills; may take a minute)'))return; rall.textContent='resolving…';
