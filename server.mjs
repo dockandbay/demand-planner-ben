@@ -20436,6 +20436,14 @@ async function cpMintLink(userId, req) {
   await pool.query(`UPDATE planner.client_users SET invited_at=now() WHERE id=$1`, [userId]);
   return cpBase(req) + '/client?token=' + tok;
 }
+// v28.097 (Ben): mint a 7-day magic link and RETURN it (do NOT email) — for the "copy magic link" action on the client card.
+app.post('/api/client/users/:uid/magic', async (req, res) => {
+  try { const u = (await pool.query(`SELECT id, client_id, email FROM planner.client_users WHERE id=$1`, [req.params.uid])).rows[0]; if (!u) return res.status(404).json({ error: 'not found' });
+    const url = await cpMintLink(u.id, req);
+    try { await cpAudit(u.client_id, 'Magic link minted', u.email + ' (copied, not emailed)', req.me.email); } catch (e) {}
+    res.json({ ok: true, url });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/client/clients/:id/users', async (req, res) => {
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
