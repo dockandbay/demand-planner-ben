@@ -21225,7 +21225,20 @@ async function cpProducts(client, opts) {
 app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_line_sheet) return res.status(403).json({ error: 'line sheet not enabled for this account' }); res.set('Cache-Control', 'no-store').json(await cpProducts(req.cp.client, {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_stock) return res.status(403).json({ error: 'stock availability not enabled for this account' }); const r = await cpProducts(req.cp.client, { stockOnly: true }); r.products = r.products.filter(p => p.stock != null); res.set('Cache-Control', 'no-store').json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/cp/prices', cpAuth, async (req, res) => {
-  try { const c = req.cp.client; if (!c.price_list) return res.json({ code: null, prices: {}, currency: c.currency });
+  try { const c = req.cp.client;
+    // v28.102 (Ben): computed tier pricing — when the client has a price_tier, price every SKU from the product retail
+    // (RT → ex-tax → WS → distributor). Falls back to the legacy hand-maintained price_list when no tier is set.
+    if (c.price_tier) {
+      const mkt = String(c.market || '').toUpperCase(); const col = CP_RT_COL[mkt];
+      if (!col) return res.set('Cache-Control', 'no-store').json({ code: c.price_tier, tier: c.price_tier, prices: {}, currency: c.currency });
+      const offers = await cpDistOffers();
+      const rows = (await pool.query(`SELECT sku, ${col} FROM planner.products WHERE coalesce(status,'') NOT ILIKE '%discontinued%' AND ${col} IS NOT NULL AND ${col} > 0`)).rows;
+      const m = {}; const method = c.price_method || 'fob';
+      rows.forEach(r => { const p = cpTierPrice(r, mkt, c.price_tier, method, offers); if (p != null) m[r.sku] = p; });
+      const code = c.price_tier === 'dist' ? (mkt + ' Distributor ' + method.toUpperCase()) : (mkt + ' ' + c.price_tier.toUpperCase());
+      return res.set('Cache-Control', 'no-store').json({ code, tier: c.price_tier, method: c.price_tier === 'dist' ? method : null, prices: m, currency: c.currency });
+    }
+    if (!c.price_list) return res.json({ code: null, prices: {}, currency: c.currency });
     const rows = (await pool.query(`SELECT sku, price, currency FROM planner.client_price_lists WHERE code=$1`, [c.price_list])).rows; const m = {}; rows.forEach(r => { m[r.sku] = Number(r.price); });
     res.set('Cache-Control', 'no-store').json({ code: c.price_list, prices: m, currency: (rows[0] && rows[0].currency) || c.currency }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -21256,7 +21269,14 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
   if (!inLines.length) return res.status(400).json({ error: 'no lines' });
   try {
     const prods = (await pool.query(`SELECT sku, upper(coalesce(status,'')) status, carton_qty, discontinue_date_final disc FROM planner.products WHERE sku = ANY($1)`, [inLines.map(l => l.sku)])).rows; const pm = {}; prods.forEach(p => { pm[p.sku] = p; });
-    const prices = c.price_list ? (await pool.query(`SELECT sku, price FROM planner.client_price_lists WHERE code=$1 AND sku = ANY($2)`, [c.price_list, inLines.map(l => l.sku)])).rows.reduce((m, r) => { m[r.sku] = Number(r.price); return m; }, {}) : {};
+    // v28.102 (Ben): order prices come from the SAME source as the line sheet — computed tier when set, else the legacy list.
+    let prices = {};
+    if (c.price_tier) {
+      const mkt = String(c.market || '').toUpperCase(); const col = CP_RT_COL[mkt];
+      if (col) { const offers = await cpDistOffers(); const method = c.price_method || 'fob';
+        (await pool.query(`SELECT sku, ${col} FROM planner.products WHERE sku = ANY($1) AND ${col} IS NOT NULL AND ${col} > 0`, [inLines.map(l => l.sku)])).rows
+          .forEach(r => { const p = cpTierPrice(r, mkt, c.price_tier, method, offers); if (p != null) prices[r.sku] = p; }); }
+    } else prices = c.price_list ? (await pool.query(`SELECT sku, price FROM planner.client_price_lists WHERE code=$1 AND sku = ANY($2)`, [c.price_list, inLines.map(l => l.sku)])).rows.reduce((m, r) => { m[r.sku] = Number(r.price); return m; }, {}) : {};
     const problems = []; const lines = inLines.map(l => { const p = pm[l.sku]; const flags = [];
       if (!p) flags.push('unknown SKU'); else { if (p.status === 'CLOSED') flags.push('closed'); if (p.status === 'PHASE OUT' || p.status === 'LAST SEASON') flags.push('discontinuing');
         const cq = Number(p.carton_qty) || 0; if (cq > 0 && l.qty % cq !== 0 && type === 'standard') flags.push('partial carton (' + cq + '/ctn)'); }
