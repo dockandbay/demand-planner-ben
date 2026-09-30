@@ -7560,8 +7560,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log'];
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health'];
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -8663,6 +8663,37 @@
             if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email.'; return; }
             save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,product_edit:document.getElementById('pm-nproduct').checked,is_admin:document.getElementById('pm-nadmin').checked,client_access:document.getElementById('pm-nclient').checked,commissions:document.getElementById('pm-ncomm').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      // v28.091 (Ben): CONFIG ▸ Admin ▸ App health — run the server-side endpoint sweep, rank slow/errored endpoints,
+      // and copy a report to paste into Claude Code. Admin only.
+      SUBS['app-health']=function(){
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ App health.</b> Times every menu-loaded GET endpoint (admin/ops + supplier &amp; client portals) against this live server, ranks the slow ones and any errors, and gives you a report to paste into Claude Code. Read-only; portals are tested through a throwaway 5-minute session. Live Xero / Flexport calls are skipped unless you tick the box (they hit live APIs and are slow).</div>'
+          +'<div class="bar" style="gap:12px"><button class="save-btn primary" id="ah-run">▶ Run health check</button>'
+          +'<label style="font-size:12px;cursor:pointer;align-self:center"><input type="checkbox" id="ah-live" style="vertical-align:middle;margin-right:5px">include live Xero / Flexport</label>'
+          +'<span class="count" id="ah-status" style="align-self:center"></span></div>'
+          +'<div id="ah-results" style="margin-top:8px"></div>';
+        var runBtn=document.getElementById('ah-run'), liveCb=document.getElementById('ah-live'), stat=document.getElementById('ah-status');
+        function badge(r){ if(r.status>=400||r.status<=0)return '<span class="tool-badge bg-red">'+(r.status<=0?esc(r.err||'fail'):r.status)+'</span>'; if(r.ms>=1000)return '<span class="tool-badge bg-amber">'+r.ms+'ms</span>'; if(r.ms>=400)return '<span class="tool-badge" style="background:var(--line);color:var(--muted)">'+r.ms+'ms</span>'; return '<span class="tool-badge bg-green">'+r.ms+'ms</span>'; }
+        function kpi(n,l,col){ return '<div class="tile" style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--card)"><b style="display:block;font-size:22px;color:'+(col||'var(--ink)')+'">'+n+'</b><span class="mut tiny">'+esc(l)+'</span></div>'; }
+        function drawHC(d){ var rows=d.results||[]; var errN=d.counts.errors, slowN=d.counts.slow, modN=d.counts.moderate, okN=d.counts.total-errN-slowN-modN;
+          var html='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:8px 0">'
+            +kpi(errN,'errors',errN?'var(--neg)':'var(--pos)')+kpi(slowN,'slow >1s',slowN?'var(--amber)':'var(--pos)')+kpi(modN,'moderate')+kpi(okN,'fast <0.4s','var(--pos)')+kpi(d.counts.total,'total')+'</div>'
+            +'<div class="bar" style="gap:8px"><button class="save-btn" id="ah-copy" style="background:var(--blue);color:#fff;border-color:var(--blue)">📋 Copy analysis for Claude Code</button>'
+            +'<span class="mut tiny" style="align-self:center">portals: supplier '+(d.portals.supplier?'✓':'— no test user')+' · client '+(d.portals.client?'✓':'— no test user')+' · '+esc(d.version)+'</span></div>'
+            +'<div class="tw" style="margin-top:10px;max-height:58vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Time</th><th class="l">Status</th><th class="l">Size</th><th class="l">Area</th><th class="l">Endpoint</th></tr></thead><tbody>'
+            +rows.map(function(r){ var bad=(r.status>=400||r.status<=0), warn=(!bad&&r.ms>=1000);
+              return '<tr'+(bad?' style="background:var(--neg-bg)"':warn?' style="background:var(--amber-bg)"':'')+'><td class="l">'+badge(r)+'</td><td class="l">'+r.status+'</td><td class="l" style="white-space:nowrap">'+r.kb+'KB</td><td class="l"><span class="tool-badge bg-neutral">'+esc(r.group)+'</span></td><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(r.path)+'</td></tr>'; }).join('')
+            +'</tbody></table></div>';
+          document.getElementById('ah-results').innerHTML=html;
+          document.getElementById('ah-copy').onclick=function(){ var btn=this; function ok(){ btn.textContent='✓ Copied'; setTimeout(function(){btn.textContent='📋 Copy analysis for Claude Code';},1600); }
+            if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(d.report).then(ok).catch(function(){ var ta=document.createElement('textarea'); ta.value=d.report; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); ok(); }); }
+            else { var ta=document.createElement('textarea'); ta.value=d.report; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); ok(); } };
+        }
+        runBtn.onclick=function(){ runBtn.disabled=true; var t0=Date.now(); stat.textContent='Running… (up to ~1 min)'; document.getElementById('ah-results').innerHTML='';
+          fetch('/api/config/health-check'+(liveCb.checked?'?live=1':'')).then(function(r){return r.json();}).then(function(d){ runBtn.disabled=false;
+            if(!d||d.error){ stat.innerHTML='<span style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</span>'; return; }
+            stat.textContent='Done in '+((Date.now()-t0)/1000).toFixed(1)+'s'; drawHC(d);
+          }).catch(function(e){ runBtn.disabled=false; stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); };
+      };
       SUBS['email-log']=function(){
         var st={from:'',to:'',q:''};
         function elStatus(s){ var m={sent:['var(--pos-bg)','var(--pos)'],sandbox:['var(--line)','var(--muted)'],error:['var(--neg-bg)','var(--neg)']}; var c=m[s]||['var(--line)','var(--muted)']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s||'')+'</span>'; }

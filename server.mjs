@@ -20434,6 +20434,91 @@ app.post('/api/client/preview-stop', async (req, res) => {
   res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true });
 });
 
+// ── v28.091 (Ben): App health check — CONFIG ▸ App. Times EVERY menu-loaded GET endpoint (admin/ops + supplier &
+// client portals) against this running server and returns a ranked analysis + a plain-text report to paste into
+// Claude Code. Admin-only, read-only. Portal endpoints are timed through ephemeral 5-min sessions minted here and
+// deleted at the end (never a real user's session). Live Xero/Flexport endpoints are skipped unless ?live=1.
+async function _selfTime(base, path, cookie, timeoutMs) {
+  const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  const t0 = Date.now();
+  try {
+    const r = await fetch(base + path, { headers: cookie ? { cookie } : {}, signal: ctrl.signal, redirect: 'manual' });
+    const buf = await r.arrayBuffer();   // drain so timing includes the full body
+    return { ms: Date.now() - t0, status: r.status, kb: Math.round(buf.byteLength / 1024) };
+  } catch (e) { return { ms: Date.now() - t0, status: (e && e.name === 'AbortError') ? 0 : -1, kb: 0, err: (e && e.name === 'AbortError') ? 'timeout' : (e && e.message) }; }
+  finally { clearTimeout(to); }
+}
+app.get('/api/config/health-check', async (req, res) => {
+  try {
+    const me = await permsFor(req);
+    if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' });
+    const includeLive = String(req.query.live || '') === '1';
+    const base = ((req.headers['x-forwarded-proto'] === 'https') ? 'https' : 'http') + '://' + (req.headers.host || ('127.0.0.1:' + (process.env.PORT || 8124)));
+    const timeoutMs = includeLive ? 30000 : 12000;
+    // 1) enumerate registered param-free GET /api routes from the Express stack (auto-covers every menu load)
+    const seen = new Set(); const routes = [];
+    const _stack = ((app.router && app.router.stack) || (app._router && app._router.stack) || []);   // Express 5 = app.router.stack; 4 = app._router.stack
+    for (const layer of _stack) {
+      const r = layer.route; if (!r || typeof r.path !== 'string' || !(r.methods && r.methods.get)) continue;
+      const p = r.path;
+      if (!p.startsWith('/api/') || p.includes(':')) continue;
+      if (/\.(xlsx|pdf)$/.test(p) || /\/(callback|connect|img|export|token|health-check|sign-upload)\b/.test(p) || p.startsWith('/api/cron/')) continue;
+      if (seen.has(p)) continue; seen.add(p);
+      const live = /xero|flexport/.test(p);
+      let group = 'Other', auth = 'admin';
+      if (p.startsWith('/api/portal/')) { group = 'Supplier portal'; auth = 'portal'; }
+      else if (p.startsWith('/api/cp/')) { group = 'Client portal'; auth = 'cp'; }
+      else if (live) group = 'Live Xero/Flexport';
+      else if (p.startsWith('/api/supply/bi')) group = 'BI & Reports';
+      else if (p.startsWith('/api/supply/')) group = 'Supply';
+      else if (/^\/api\/(demand|kpi|forecast|scenario|preorders|price-changes|buy-)/.test(p)) group = 'Demand/Buy';
+      else if (p.startsWith('/api/product/')) group = 'Product';
+      else if (p.startsWith('/api/client/')) group = 'Client (ops)';
+      else if (p.startsWith('/api/config/') || p === '/api/app-settings') group = 'Config';
+      routes.push({ path: p, group, auth, live });
+    }
+    // 2) mint ephemeral portal + client-portal sessions so their endpoints authenticate (best-effort; cleaned up below)
+    const adminCookie = req.headers.cookie || '';
+    let psid = null, csid = null; const cleanup = [];
+    try {
+      const sup = (await pool.query(`SELECT lower(email) email, supplier_id FROM planner.supplier_portal_users WHERE active=true AND coalesce(email,'')<>'' AND supplier_id IS NOT NULL ORDER BY id LIMIT 1`)).rows[0];
+      if (sup) { psid = portalToken(); await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '5 minutes')`, [psid, sup.email, sup.supplier_id]); cleanup.push(() => pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [psid]).catch(() => {})); }
+    } catch (e) { /* no supplier portal user → skip that group */ }
+    try {
+      const cu = (await pool.query(`SELECT id FROM planner.client_users WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+      if (cu) { csid = 'cppv_' + cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '5 minutes')`, [csid, cu.id]); cleanup.push(() => pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]).catch(() => {})); }
+    } catch (e) { /* no client user → skip that group */ }
+    // 3) time each route (skip live unless asked; skip a portal group whose session couldn't be minted). Small concurrency.
+    const targets = routes.filter(r => (includeLive || !r.live) && !(r.auth === 'portal' && !psid) && !(r.auth === 'cp' && !csid));
+    const cookieFor = (auth) => auth === 'portal' ? ('psid=' + psid) : auth === 'cp' ? ('csid=' + csid) : adminCookie;
+    const results = []; let i = 0;
+    async function worker() { while (i < targets.length) { const t = targets[i++]; const r = await _selfTime(base, t.path, cookieFor(t.auth), timeoutMs); results.push(Object.assign({}, t, r)); } }
+    await Promise.all(Array.from({ length: 5 }, worker));
+    for (const c of cleanup) { try { await c(); } catch (e) {} }
+    // 4) analyse: flag slow (>1s) + errors (status>=400 or <=0). Rank slowest first.
+    results.sort((a, b) => b.ms - a.ms);
+    const errors = results.filter(r => r.status >= 400 || r.status <= 0);
+    const slow = results.filter(r => r.status >= 200 && r.status < 400 && r.ms >= 1000);
+    const mid = results.filter(r => r.status >= 200 && r.status < 400 && r.ms >= 400 && r.ms < 1000);
+    const fmt = r => `${String(r.ms).padStart(6)}ms  ${String(r.status).padStart(3)}  ${String(r.kb).padStart(5)}KB  ${r.path}${r.err ? '  (' + r.err + ')' : ''}`;
+    const lines = [];
+    lines.push(`HORIZON app health check — ${APP_VERSION} — ${new Date().toISOString()}`);
+    lines.push(`Base ${base} · ${targets.length} endpoints timed · live external ${includeLive ? 'INCLUDED' : 'skipped'}`);
+    lines.push(`Portals: supplier ${psid ? 'ok' : 'no test user'} · client ${csid ? 'ok' : 'no test user'}`);
+    lines.push(`Totals: ${errors.length} error(s), ${slow.length} slow (>1s), ${mid.length} moderate (0.4–1s)`);
+    lines.push('');
+    if (errors.length) { lines.push(`## ERRORS (${errors.length}) — investigate first (a 400/404 with 0KB is usually an endpoint that needs a query param, not a real fault; a timeout=0 or -1 is a real problem)`); errors.forEach(r => lines.push(fmt(r))); lines.push(''); }
+    if (slow.length) { lines.push(`## SLOW >1s (${slow.length}) — candidates for caching / query work`); slow.forEach(r => lines.push(fmt(r))); lines.push(''); }
+    if (mid.length) { lines.push(`## MODERATE 0.4–1s (${mid.length})`); mid.forEach(r => lines.push(fmt(r))); lines.push(''); }
+    lines.push(`## OK <0.4s: ${results.length - errors.length - slow.length - mid.length} endpoints`);
+    const report = lines.join('\n');
+    res.set('Cache-Control', 'no-store').json({ ok: true, version: APP_VERSION, at: new Date().toISOString(), base, includeLive,
+      counts: { total: targets.length, errors: errors.length, slow: slow.length, moderate: mid.length },
+      portals: { supplier: !!psid, client: !!csid },
+      results, report });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
 // ── config (portal-wide settings live in app_settings under cp_*) ──
 const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to'];
 app.get('/api/client/config', async (req, res) => {
