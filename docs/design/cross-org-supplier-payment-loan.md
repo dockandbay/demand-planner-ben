@@ -25,12 +25,17 @@ For each line compare `home_org` vs `paying_org`:
 - **Same-org line** — `home_org == paying_org`. Behaves exactly as today.
 - **Cross-org line** — `home_org != paying_org`. Uses the loan mechanism below — **completion / balance / final only**.
 
-**Deposits are never cross-org (Ben).** A starting deposit, and its P58+ credit-note draw-down, always settle in
-the PO's **home org**. The loan route does not apply to them. Therefore a deposit line is only valid when
-`home_org == paying_org`; if a run's paying org differs from a deposit line's home org, that deposit line is
-**blocked** (not settled via loan) with: "Deposits settle in the PO's home org — run this deposit from the
-&lt;home org&gt; org." Completion/balance lines in the same run are unaffected. (Open: whether deposits should be
-split into their own runs entirely — see below.)
+**Deposits are never cross-org and never use the loan (Ben).** A starting deposit, and its P58+ credit-note
+draw-down, always settle in the PO's **home org**. Completion/balance lines in the same run are unaffected and
+still loan-route cross-org. Deposits are flagged, not settled, when they don't belong to the paying org:
+
+| Condition | Row flag | Warning | Effect |
+|-----------|----------|---------|--------|
+| Deposit line, `home_org != paying_org` (cross-org deposit) | **RED row** | "Deposit must be paid from its home org (&lt;ORG&gt;) bank — cannot settle from a &lt;paying_org&gt; run." | blocks that line |
+| Deposit lines from **both** orgs in one run (UK deposit + AU deposit together) | **BRIGHT RED row** on every deposit line | "Deposits from UK and AU are mixed — run each org's deposits separately." | blocks posting |
+
+Both are hard blocks (the whole post is refused while any red/bright-red deposit row remains). A deposit whose
+home org equals the paying org is fine and settles/credit-notes in the home org exactly as today.
 
 ## What posts
 
@@ -90,18 +95,14 @@ paid from 901 UK loan.
 
 ## Resolved (Ben)
 
-- **Deposits never cross-org.** Starting deposits and P58+ credit-note draw-downs always settle in the PO's home
-  org; loan route is completion/balance only. Cross-org deposit lines are blocked, not settled.
+- **Deposits never cross-org and never use the loan.** They settle in the PO's home org. Cross-org deposits →
+  RED row + block; deposits from both orgs in one run → BRIGHT RED row + block (see the deposit table above).
+- **Loan route is completion/balance/final only.**
+- **No Production tracking on the 901 loan line** (settlement, not stock).
 - **901 payment-enabled** in both orgs. ✓
 - **901 is base currency** (UK GBP, AU AUD); each org posts the settlement at its own daily USD rate; reconcile on USD.
 
-## Still open for Ben
-
-1. **Separate deposit runs?** "Payments for deposits maybe should not be mixed." Options: (a) allow deposits +
-   completions in one run as long as every deposit line is same-org (blocking cross-org deposits, per above), or
-   (b) make deposits their own run type entirely, never alongside completion/balance. Which?
-2. **Loan line tracking.** Assume **no** Production tracking on the 901 loan line of the supplier-payment bill
-   (it's a settlement, not stock). Confirm.
+Spec is complete — ready to build on Ben's go-ahead.
 
 ## Code touch-points (for the build, not this doc)
 
