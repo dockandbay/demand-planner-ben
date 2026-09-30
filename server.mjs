@@ -4433,7 +4433,8 @@ async function xeroFetch(region, path, opts) {
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
     r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
-    if ((r.status === 429 || r.status === 503) && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
+    const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET');   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
+    if (_retryable && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
     break;
   }
   const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) { j = { raw: text }; }
@@ -10569,11 +10570,11 @@ app.post('/api/supply/sample-note-delete/:id', (req, res) => deleteLatestNote(re
 // The signed-in user's email, forwarded by the auth layer in front of the app (Diviyaj's Gmail login).
 // Checks the common auth-proxy headers; strips the IAP "accounts.google.com:" prefix. null if none present.
 function authUser(req) {
-  // v28.120 (review S2 / confirmed on prod by Diviyaj): the x-*-email headers are SPOOFABLE — prod passes client
-  // headers straight through, so a signed-in user could send x-user-email and impersonate an admin. When PLANNER_KEY
-  // is set (prod-like), NEVER trust them: identity comes only from the verified signed session cookie, which the prod
-  // harness resolves onto req._authEmail (the 'pu' cookie). Sandbox has no GATE → forwarded header / DEV_USER as before.
-  if (GATE) return req._authEmail || process.env.DEV_USER || null;
+  // v28.121 (Diviyaj): the x-*-email headers are SPOOFABLE (prod passes client headers through), so under PLANNER_KEY
+  // they are NEVER trusted — identity comes only from the verified signed 'pu' session cookie via the prod auth
+  // harness's cookieUser(req). (v28.120 wrongly assumed req._authEmail existed → every signed-in user got "session
+  // expired"; that broke prod and was reverted there.) NOT exercised in the sandbox, which has no GATE.
+  if (GATE) return cookieUser(req);
   const h = req.headers || {};
   let e = h['x-forwarded-email'] || h['x-auth-request-email'] || h['cf-access-authenticated-user-email']
         || h['x-goog-authenticated-user-email'] || h['x-authenticated-user-email'] || h['x-user-email'] || '';
