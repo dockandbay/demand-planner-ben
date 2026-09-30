@@ -18183,6 +18183,7 @@
   // real awaited write (the sendBeacon on unload is only best-effort). 4s safety so a hung save can't block the reload.
   var _reloading=false;
   function safeReload(){ if(_reloading)return; if(window.__hzNoAutoReload){ return; }   // Ben: never reload while a Create-PO (or other guarded) screen is open — deferred until it closes, then the poll re-applies
+    try{ var _vrl=parseInt(sessionStorage.getItem('hzVerReloadAt')||'0',10)||0; if(Date.now()-_vrl<120000){ pendingCode=false; return; } sessionStorage.setItem('hzVerReloadAt',String(Date.now())); }catch(e){}   // v28.122 (Ben/prod): reload at most once / 2 min — if prod flaps between versions across instances, don't reload on every click
     _reloading=true;
     try{
       if(typeof _dirty!=='undefined' && _dirty && typeof saveForecasts==='function'){
@@ -18209,7 +18210,7 @@
        (hashchange, below) or once the tab is backgrounded; DATA likewise. No banner, no surprise reload. — Ben */ }
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
-    if(j.version&&j.version!==BOOT)pendingCode=true;                 // newer deploy
+    if(j.version&&BOOT&&BOOT.indexOf('APP_VERSION')<0&&j.version!==BOOT)pendingCode=true;   // v28.122 (Ben/prod): a real newer deploy — but NOT when BOOT is an un-stamped '__APP_VERSION__' placeholder (that would reload on every nav forever)
     if(BOOT_DATA&&j.data&&j.data!==BOOT_DATA)pendingData=true;       // ETL/source data changed since this tab loaded
     if(pendingCode||pendingData)apply(); }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { lastAct=Date.now(); check(); } });
