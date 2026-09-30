@@ -4533,16 +4533,24 @@
       if(!j||!j.enabled){ el.innerHTML=''; return; }   // branch has no returns % → no section at all
       var head='<div class="sect-h" style="margin-top:6px">Add polybags to order <span class="mut tiny">('+esc(j.branch)+' branch · '+j.returns_pct+'% returns → polybag qty = units × '+j.returns_pct+'%, rounded up to nearest 50 · price $0 · uploads to Cin7 as SKU POLYBAG)</span></div>';
       if(!(j.groups&&j.groups.length)){ el.innerHTML=head+'<div class="mut tiny">No SKUs on this PO have a polybag size set — nothing to add.</div>'; return; }
-      var existing={}; (j.existing||[]).forEach(function(e){ existing[e.sku]=Number(e.qty)||0; });
-      var rows=j.groups.map(function(g){ var have=existing[g.sku];
-        return '<tr><td class="l">'+esc(g.polybags)+'</td><td style="text-align:right">'+units(g.units)+'</td><td style="text-align:right"><b>'+units(g.bags)+'</b></td><td class="l">'+(have!=null?('<span class="tool-badge bg-green" title="already on this order plan">on order: '+units(have)+'</span>'):'<span class="mut tiny">—</span>')+'</td></tr>'; }).join('');
-      var totBags=j.groups.reduce(function(a,g){return a+(g.bags||0);},0);
+      // v28.096 (Ben): only recommend the SHORTFALL (target minus what's already on order). A size already covered shows
+      // "✓ covered"; one needing top-up shows "need +N". The add button only tops up the shortfall groups.
+      var rows=j.groups.map(function(g){ var status;
+        if(g.on_order>0 && g.add<=0) status='<span class="tool-badge bg-green" title="already on this order plan">✓ on order: '+units(g.on_order)+'</span>';
+        else if(g.add>0) status='<span class="tool-badge bg-amber" title="'+units(g.on_order)+' on order, target '+units(g.bags)+'">need +'+units(g.add)+'</span>';
+        else status='<span class="mut tiny">—</span>';
+        return '<tr><td class="l">'+esc(g.polybags)+'</td><td style="text-align:right">'+units(g.units)+'</td><td style="text-align:right"><b>'+units(g.bags)+'</b></td><td class="l">'+status+'</td></tr>'; }).join('');
+      var need=j.groups.filter(function(g){return g.add>0;});
+      var totAdd=need.reduce(function(a,g){return a+(g.add||0);},0);
+      var addBtn=need.length
+        ? '<button class="save-btn op-pb-add" style="margin-top:8px;background:var(--pos-bg);border:1px solid #16a34a;color:var(--pos);font-weight:700">＋ Add '+need.length+' polybag line'+(need.length>1?'s':'')+' ('+units(totAdd)+' bags) to order</button> <span class="op-pb-msg mut tiny"></span>'
+        : '<div class="mut tiny" style="margin-top:8px;color:var(--pos)">✓ Polybags already covered on this order — nothing to add.</div>';
       el.innerHTML=head
         +'<div class="tw" style="max-width:620px"><table style="width:max-content"><thead><tr><th class="l">Polybag size</th><th style="text-align:right">Product units</th><th style="text-align:right">Polybag qty</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-        +'<button class="save-btn op-pb-add" style="margin-top:8px;background:var(--pos-bg);border:1px solid #16a34a;color:var(--pos);font-weight:700">＋ Add '+j.groups.length+' polybag line'+(j.groups.length>1?'s':'')+' ('+units(totBags)+' bags) to order</button> <span class="op-pb-msg mut tiny"></span>';
+        +addBtn;
       var btn=el.querySelector('.op-pb-add'), msg=el.querySelector('.op-pb-msg');
-      btn.onclick=function(){ if(!confirm('Add '+j.groups.length+' polybag line(s) — '+units(totBags)+' bags — to this order plan?'))return; btn.disabled=true; if(msg)msg.textContent='Adding…';
-        Promise.all(j.groups.map(function(g){ return fetch('/api/supply/po-line/'+encodeURIComponent(po+'|'+g.sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sku:g.sku,qty:g.bags,who:'polybags'})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); }); }))
+      if(btn)btn.onclick=function(){ if(!confirm('Add '+need.length+' polybag line(s) — '+units(totAdd)+' bags — to this order plan?'))return; btn.disabled=true; if(msg)msg.textContent='Adding…';
+        Promise.all(need.map(function(g){ return fetch('/api/supply/po-line/'+encodeURIComponent(po+'|'+g.sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sku:g.sku,qty:g.bags,who:'polybags'})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); }); }))
           .then(function(){ invalidateDerived(); poRefetchPanel(po,i); })
           .catch(function(e){ btn.disabled=false; if(msg)msg.textContent='Failed: '+(e&&e.message||e); }); };
     }).catch(function(){ el.innerHTML=''; }); }

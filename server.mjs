@@ -14488,14 +14488,23 @@ app.get('/api/supply/po-polybags/:po', async (req, res) => {
     const br = (await pool.query(`SELECT returns_pct FROM planner.branches WHERE name=$1`, [poRow.branch])).rows[0];
     const pct = br && br.returns_pct != null ? Number(br.returns_pct) : null;
     if (!pct || pct <= 0) return noStore({ enabled: false, branch: poRow.branch });
-    const round50 = n => Math.ceil(n / 50) * 50;   // round UP to the nearest 50 (Ben: never under-provision polybags)
+    // v28.096 (Ben): round to the nearest 50 with the tip point at 35 IN each block, not 25. So a tiny requirement
+    // (e.g. 84 units × 1.5% = 1.26 bags) rounds to 0, not up to a wasted 50-pack; and e.g. 84 raw → 50 (rem 34 < 35),
+    // 85 raw → 100. Never over-provision a whole pack for a fraction.
+    const roundBag = raw => { const base = Math.floor(raw / 50) * 50; return base + ((raw - base) >= 35 ? 50 : 0); };
     const rows = (await pool.query(
       `SELECT p.polybags, sum(l.qty)::int units
        FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku
        WHERE l.po=$1 AND l.sku NOT LIKE 'POLYBAG %' AND coalesce(p.polybags,'')<>''
        GROUP BY p.polybags ORDER BY p.polybags`, [po])).rows;
-    const groups = rows.map(r => ({ polybags: r.polybags, sku: 'POLYBAG ' + r.polybags, units: r.units, bags: round50(r.units * pct / 100) })).filter(g => g.bags > 0);
     const existing = (await pool.query(`SELECT sku, qty FROM planner.purchase_order_lines WHERE po=$1 AND sku LIKE 'POLYBAG %' ORDER BY sku`, [po])).rows;
+    const onOrder = {}; existing.forEach(e => { onOrder[e.sku] = (onOrder[e.sku] || 0) + (Number(e.qty) || 0); });
+    // per polybag size: target bags (needed), what's already on the order, and the shortfall to add. Only a positive
+    // shortfall is recommended (Ben: don't re-recommend polybags already on order). Groups with a target > 0 OR already
+    // on order are shown so the table is complete.
+    const groups = rows.map(r => { const raw = r.units * pct / 100; const sku = 'POLYBAG ' + r.polybags; const bags = roundBag(raw); const on = onOrder[sku] || 0;
+      return { polybags: r.polybags, sku, units: r.units, raw: Math.round(raw * 10) / 10, bags, on_order: on, add: Math.max(0, bags - on) }; })
+      .filter(g => g.bags > 0 || g.on_order > 0);
     res.set('Cache-Control', 'no-store').json({ enabled: true, branch: poRow.branch, returns_pct: pct, groups, existing });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
