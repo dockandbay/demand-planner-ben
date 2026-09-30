@@ -1077,7 +1077,8 @@
   // re-fetches fresh from the API — no full page reload. Called by the version poll when the ETL bumped source data
   // and the user navigates (so nav picks up fresh data without the disruptive location.reload). — Ben (nav lag/refresh)
   try{ window.__hzBustSupplyCache=function(){ try{ for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
-  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}   /* v28.117 (review C25): null-safe (was rendering the word "null") */
+  function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'\\x3c');}   /* v28.117 (review C1): escape a value for a single-quoted JS string inside an inline handler — use as esc(jsq(v)); a quote in a PO/SKU could otherwise break out of onclick */
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
 
   // hzUpload(file, opts) — shared uploader. Files ≤3MB go inline as base64 (unchanged path); larger files upload DIRECT to
@@ -2161,7 +2162,7 @@
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +flexTrackingBlock(d,r.flex_id||r.flexport_reference)
       +row('Flexport booking <span class="mut tiny">(lodge a booking / quote request via the Flexport API)</span>','<button class="save-btn fx-book-btn" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:700">🚢 Request Flexport booking</button>')
-      +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:var(--neg);font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
+      +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:var(--neg);font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(jsq(po))+'\'))">⤓ ASN PALLET LABELS</button>'):'')
       +(isFbaAwd?docBlock('carton_barcode','Carton barcodes <span class="mut tiny">(upload — supplier downloads on the portal)</span>')+docBlock('pallet_barcode','Pallet barcodes <span class="mut tiny">(upload)</span>'):'')
       +(isEU?docBlock('idn_pallet_label','IDN pallet labels <span class="mut tiny">(upload — supplier downloads on the portal)</span>'):'')
       +(preshipBranch?row('Not required?','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="preship_not_required" '+(r.preship_not_required?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">mark pre-shipment documents not required for this PO (clears the overdue action)</label>'):'')
@@ -4201,8 +4202,8 @@
       +cliRow('Value used', '<b>'+money(r.value_used)+'</b>'+(r.is_final?' <span class="tool-badge bg-green">final</span>':''))
       +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.02?' style="color:var(--neg)"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
       +'</div>'
-      +'<div style="margin:10px 0 4px"><button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(r.po)+'\'))">📄 Commercial Invoice &amp; Packing List</button>'
-      +(poIsDtc(r)?' <button class="save-btn" style="background:var(--blue-soft);color:var(--blue);border:1px solid #67e8f9" title="download the Direct to Client packing list — seller = Dock & Bay, invoice no = client sales order, consignee = the client" onclick="window.open(\'/api/invoice/dtc-packing/\'+encodeURIComponent(\''+esc(r.po)+'\'))">📦 Direct to Client Packing List</button>':'')+'</div>'
+      +'<div style="margin:10px 0 4px"><button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(jsq(r.po))+'\'))">📄 Commercial Invoice &amp; Packing List</button>'
+      +(poIsDtc(r)?' <button class="save-btn" style="background:var(--blue-soft);color:var(--blue);border:1px solid #67e8f9" title="download the Direct to Client packing list — seller = Dock & Bay, invoice no = client sales order, consignee = the client" onclick="window.open(\'/api/invoice/dtc-packing/\'+encodeURIComponent(\''+esc(jsq(r.po))+'\'))">📦 Direct to Client Packing List</button>':'')+'</div>'
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw" style="max-width:1320px"><table class="pay-tbl"><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">%</span><div class="mut tiny" style="margin-top:2px">capped at ref avail</div></td>'
@@ -4347,9 +4348,6 @@
   try{ window.hzGroupChanges=hzGroupChanges; }catch(e){}   // jsdom harness hook
   // shared renderer for a (possibly grouped) record-of-change card — used by the PO, shipment and product timelines
   function hzChangeBodyHtml(c){ if(c.items&&c.items.length>1){ return '<b>'+esc(c.head)+'</b> <span class="mut">— '+c.items.length+' changes</span><ul style="margin:3px 0 0 14px;padding:0">'+c.items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'; } return '<b>'+esc(c.event||'')+'</b>'+(c.detail?': '+esc(c.detail):''); }
-  var ROC_HIDDEN=(function(){try{var v=JSON.parse(localStorage.getItem('hzHideRocSet')||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}})();   // PO/shipment refs whose "record of change" is hidden — PER-PO, persisted per user
-  function rocIsHidden(k){ return ROC_HIDDEN.indexOf(String(k))>=0; }
-  function rocSetHidden(k,on){ k=String(k); var i=ROC_HIDDEN.indexOf(k); if(on&&i<0)ROC_HIDDEN.push(k); else if(!on&&i>=0)ROC_HIDDEN.splice(i,1); try{localStorage.setItem('hzHideRocSet',JSON.stringify(ROC_HIDDEN));}catch(e){} }
   var OP_SKUS={};     // po → supplier SKU rows [{sku,product_name}] for the add-SKU search picker (item 5)
   function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
@@ -4496,11 +4494,11 @@
       // v28.115 (Ben): conversation-thread styling — supplier messages on the left, our own on the right, roomier bubbles.
       var mine=!sup;   // internal / Dock & Bay = "us" → right side
       var bg=priv?'var(--violet-bg)':(sup?(n.read?'var(--hover)':'#fff7ed'):'var(--blue-soft)'), bd=priv?'#c7d2fe':(sup&&!n.read?'#fdba74':(mine?'#93c5fd':'var(--line)'));
-      return '<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+      return '<div style="display:flex;margin:12px 0;justify-content:flex-start;'+(mine?'padding-left:28px':'')+'">'
         +'<div style="max-width:76%;min-width:150px;font-size:12px;padding:8px 12px;background:'+bg+';border:1px solid '+bd+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
         +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+(priv?'🔒 ':'')+who+(priv?' <span class="ex-badge" style="background:var(--violet-bg);color:var(--violet)">internal</span>':'')+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(n.created_at)+mto+'</span></div>'
         +'<div style="color:var(--ink)">'+noteBodyHtml(n)+'</div>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')
-        +(ctrl?'<div style="display:flex;gap:8px;align-items:center;margin-top:5px;'+(mine?'justify-content:flex-end':'')+'">'+ctrl+'</div>':'')
+        +(ctrl?'<div style="display:flex;gap:8px;align-items:center;margin-top:5px;'+''+'">'+ctrl+'</div>':'')
         +'</div></div>'; }
     // Record-of-change entries (status / dates / shipment / payment / ERP upload) render distinctly and interleave with notes by time.
     function fmtChangeTime(s){ s=String(s||''); var d=s.slice(0,10), t=s.slice(11,16); return (d?fd(d):s)+(t?' '+t:''); }
@@ -5578,12 +5576,13 @@
     if(window._opPoll){ clearInterval(window._opPoll); }
     window._opPoll=setInterval(function(){
       if(!document.getElementById('op-grid')){ clearInterval(window._opPoll); window._opPoll=null; return; }   // navigated away → stop
+      if(document.hidden)return;   /* v28.117 (review C7): no polling in a background tab (matches the other polls) */
       fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).then(function(np){ if(!Array.isArray(np))return;
         if(plcSig(np)===_opSig)return;                                   // nothing changed
         var ae=document.activeElement; if(ae&&ae.classList&&ae.classList.contains('qtycell'))return;   // mid-edit → catch next tick
         _opSig=plcSig(np); plc.length=0; np.forEach(function(x){plc.push(x);}); plcMap={}; plc.forEach(function(x){plcMap[x.po+'|'+x.sku]=x;});
         delete cache['order-plan']; renderChanges(); view(); }).catch(function(){});
-    }, 12000); }
+    }, 60000); }   /* v28.117 (review C7): was 12s */
   function plt(pl){ return pl>20 ? '<span style="color:var(--neg);font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
   function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
@@ -6667,11 +6666,11 @@
       var _msgItems=(notes&&notes.length)?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++; var mine=!sup;
         var ctrl=(admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light sp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
-        return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:'<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+        return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:'<div style="display:flex;margin:12px 0;justify-content:flex-start;'+(mine?'padding-left:28px':'')+'">'
           +'<div style="max-width:78%;min-width:150px;font-size:12px;padding:8px 12px;background:'+(nu?'var(--amber-bg)':(mine?'var(--violet-bg)':'var(--hover)'))+';border:1px solid '+(nu?'#fdba74':(mine?'#c7d2fe':'var(--line)'))+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
           +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+(sup?'Supplier':(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'D&amp;B'))+(nu?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(n.created_at)+'</span></div>'
           +'<div style="color:var(--ink);white-space:pre-wrap">'+esc(n.body)+'</div>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')
-          +(ctrl?'<div style="margin-top:5px;'+(mine?'text-align:right':'')+'">'+ctrl+'</div>':'')
+          +(ctrl?'<div style="margin-top:5px;'+''+'">'+ctrl+'</div>':'')
           +'</div></div>'}; }):[];
       _msgItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
       var _chgItems=hzGroupChanges(_changes||[]).map(function(c){ return {ts:String(c.created_at||'')+'~0', h:renderShipChange(c)}; });
@@ -7140,8 +7139,8 @@
           +'<span class="sh-addpo-msg mut tiny" style="color:var(--neg)"></span></div>';
         // consolidated Tax Invoice for every PO aboard this shipment; + a Direct-to-Client packing list when ALL POs aboard are DTC (carry a client / sales ref)
         var _allDtc=rows.length>0 && rows.every(function(p){ return String(p.client||'').trim()||String(p.sales_order_ref||'').trim(); });
-        t+='<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line2)"><button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+ref+'\'))">📄 Tax Invoice &amp; Packing List</button>'
-          +(_allDtc?' <button class="save-btn" style="background:var(--blue-soft);color:var(--blue);border:1px solid #67e8f9" title="download the consolidated Direct to Client packing list for this shipment — seller = Dock & Bay, consignee = the client" onclick="window.open(\'/api/invoice/dtc-packing/shipment/\'+encodeURIComponent(\''+ref+'\'))">📦 Direct to Client Packing List</button>':'')
+        t+='<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line2)"><button class="save-btn" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+esc(jsq(ref))+'\'))">📄 Tax Invoice &amp; Packing List</button>'
+          +(_allDtc?' <button class="save-btn" style="background:var(--blue-soft);color:var(--blue);border:1px solid #67e8f9" title="download the consolidated Direct to Client packing list for this shipment — seller = Dock & Bay, consignee = the client" onclick="window.open(\'/api/invoice/dtc-packing/shipment/\'+encodeURIComponent(\''+esc(jsq(ref))+'\'))">📦 Direct to Client Packing List</button>':'')
           +' <span class="mut tiny">Consolidated documents for all purchase orders on this shipment.</span></div>';
         // crossdock rollup across the POs on this shipment
         var xdRows=xd.map(function(x){ return '<tr><td class="l">'+esc(x.sku)+'</td><td style="text-align:right">'+(x.qty!=null&&x.qty!==''?units(x.qty):'<span class="mut">—</span>')+'</td>'
@@ -10387,7 +10386,7 @@
         +groups[k].map(function(r){ return '<div style="font-size:12px;display:flex;gap:10px;align-items:baseline;padding:2px 0"><span style="width:130px;color:var(--muted);flex:0 0 auto">'+esc(actWhen(r.decided_at))+'</span><span style="width:88px;flex:0 0 auto">'+outcome(r.status)+'</span><span style="flex:1">'+tierStr(r)+(r.effective_from_production?(' <span class="mut tiny">from prod '+r.effective_from_production+'</span>'):'')+'</span><span class="mut tiny" style="flex:0 0 auto">'+(r.approved_by?('by '+esc(r.approved_by)):'')+'</span></div>'+(r.note?'<div class="mut tiny" style="padding-left:130px;white-space:pre-wrap">“'+esc(r.note)+'”</div>':''); }).join('')
         +'</div>'; }).join('') : '<div class="count">No price change history'+(ql?' matches your search':' yet')+'.</div>';
     }
-    if(q)q.oninput=draw;
+    if(q)q.oninput=debounce(draw,250);
     fetch(url).then(function(r){return r.json();}).then(function(rows){ ROWS=Array.isArray(rows)?rows:[]; draw(); }).catch(function(){ body.innerHTML='<div style="color:var(--neg)">Could not load the log.</div>'; });
   }
   function plPending(b,d){ var exo=document.getElementById('pl-pend-ov'); if(exo)exo.remove();
@@ -12392,7 +12391,7 @@
           .catch(function(err){ _done(); var to=String(err&&err.message)==='__TIMEOUT__'; if(m){ m.style.color='var(--amber)'; m.textContent=to?'The server timed out mid-import — click Import again to continue.':'Import error: '+(err&&err.message||err); } selectReport('dtc-mismatch'); }); }
       step({}); };
     _dtcData=d;
-    var _si=document.getElementById('dtc-search'); if(_si){ _si.value=_dtcSearch||''; _si.oninput=function(){ _dtcSearch=this.value; _dtcApplyFilter(); }; }
+    var _si=document.getElementById('dtc-search'); if(_si){ _si.value=_dtcSearch||''; _si.oninput=function(){ _dtcSearch=this.value; (_si._deb||(_si._deb=debounce(_dtcApplyFilter,250)))(); }; /* v28.117 (review C17): debounced — was rebuilding both DTC lists per keystroke */ }
     var _go=document.getElementById('dtc-grouped-only'); if(_go){ var _gs=function(){ _go.style.background=_dtcGroupedOnly?'var(--violet-bg)':'#fff'; _go.style.borderColor=_dtcGroupedOnly?'#8b5cf6':'var(--line)'; }; _gs(); _go.onclick=function(){ _dtcGroupedOnly=!_dtcGroupedOnly; _gs(); _dtcApplyFilter(); }; }
     _dtcApplyFilter();
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
@@ -12516,7 +12515,7 @@
     function draw(){ var s=(q.value||'').trim().toLowerCase(); var opts=(cfg.options||[]).filter(function(o){return !s||o.label.toLowerCase().indexOf(s)>=0;}).slice(0,80);
       list.innerHTML=opts.length?opts.map(function(o){return '<div class="dtc-pick-row" data-v="'+esc(o.val)+'" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f4f6f9">'+esc(o.label)+'</div>';}).join(''):'<div style="padding:8px 10px;color:var(--faint)">No matches — type a value + Use.</div>';
       list.querySelectorAll('.dtc-pick-row').forEach(function(x){ x.onmouseover=function(){x.style.background='var(--blue-soft)';}; x.onmouseout=function(){x.style.background='';}; x.onclick=function(){ box.remove(); cfg.onPick(x.dataset.v); }; }); }
-    q.oninput=draw; draw(); setTimeout(function(){try{q.focus();}catch(e){}},20);
+    q.oninput=debounce(draw,250); draw(); setTimeout(function(){try{q.focus();}catch(e){}},20);
     box.querySelector('#dtc-pick-use').onclick=function(){ var v=(q.value||'').trim(); if(!v)return; box.remove(); cfg.onPick(v); };
     box.querySelector('#dtc-pick-x').onclick=function(){ box.remove(); };
     setTimeout(function(){ document.addEventListener('mousedown',function h(e){ if(!box.contains(e.target)){box.remove();document.removeEventListener('mousedown',h,true);} },true); },0);
@@ -12934,7 +12933,7 @@
       .sort(function(a,b){ return ((byCo[b]||[]).length+(byCoTL[b]||[]).length)-((byCo[a]||[]).length+(byCoTL[a]||[]).length) || (a<b?-1:1); });
     var TW='max-width:1340px', SKUW='width:270px;white-space:nowrap';   // explicit width (min-width is unreliable on table cells); ~fits Plan button + longest SKU
     var TSTYLE='width:max-content;min-width:100%';   // override the global `#supply-root table{width:100%}` which was pinning the table and squashing the SKU column
-    var planBtn=function(sku){ return '<button class="ub-plan" onclick="if(window._ubOpenPlan)window._ubOpenPlan(\''+esc(sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:var(--blue-soft);color:var(--blue);cursor:pointer;font-weight:600">Plan ▸</button>'; };
+    var planBtn=function(sku){ return '<button class="ub-plan" onclick="if(window._ubOpenPlan)window._ubOpenPlan(\''+esc(jsq(sku))+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:var(--blue-soft);color:var(--blue);cursor:pointer;font-weight:600">Plan ▸</button>'; };
     function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
       return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td><td class="l" style="width:180px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
         +'<td class="l"><span class="mut tiny">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
@@ -13548,11 +13547,11 @@
         var ctrl=(admin&&supSide)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:var(--muted);cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light samp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
         var _nc=String(n.created_at||''), _nw=(_nc.slice(0,10)?fd(_nc.slice(0,10)):_nc)+(_nc.slice(11,16)?' '+_nc.slice(11,16):'');
-        return '<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+        return '<div style="display:flex;margin:12px 0;justify-content:flex-start;'+(mine?'padding-left:28px':'')+'">'
           +'<div style="max-width:78%;min-width:150px;font-size:13px;padding:8px 12px;background:'+(nu?'var(--amber-bg)':(mine?'var(--violet-bg)':'var(--hover)'))+';border:1px solid '+(nu?'#fdba74':(mine?'#c7d2fe':'var(--line)'))+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
           +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+who+(nu?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(_nw)+'</span></div>'
           +'<div style="color:var(--ink);white-space:pre-wrap">'+esc(n.body)+'</div>'+hzTlAttHtml(n,'/api/supply/portal-attachment/')
-          +(ctrl?'<div style="margin-top:5px;'+(mine?'text-align:right':'')+'">'+ctrl+'</div>':'')
+          +(ctrl?'<div style="margin-top:5px;'+''+'">'+ctrl+'</div>':'')
           +'</div></div>'; }
       function _changeRow(c){ var _ca=String(c.changed_at||''), _cw=(_ca.slice(0,10)?fd(_ca.slice(0,10)):_ca)+(_ca.slice(11,16)?' '+_ca.slice(11,16):'');
         return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(_cw)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v28.115: record-of-change tab
@@ -13626,7 +13625,7 @@
     hzLate(function(){ try{ refreshDtcBadge(); }catch(e){} });   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions) — off the first-paint path (v28.081)
     try{ refreshErpcBadge(); }catch(e){}
     hzLate(function(){ try{ refreshReallocBadge(); }catch(e){} });
-    try{ if(typeof prewarmActions==='function')prewarmActions(); }catch(e){}
+    hzLate(function(){ try{ if(typeof prewarmActions==='function')prewarmActions(); }catch(e){} });   /* v28.117 (review C13): off the SUPPLY-entry critical path */
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
@@ -13877,7 +13876,8 @@
       +'<button class="pill" id="ps-csv" style="margin-left:auto">⬇ Export CSV</button></div>'
       +'<datalist id="ps-polist"></datalist><div id="ps-meta" class="count" style="margin-bottom:8px"></div><div id="ps-grid"></div>';
     // PO list for the search box — PRODUCTION POs only (not shipped / complete; once shipped the stock is committed)
-    fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){
+    /* v28.117 (review C18): reuse the cached PO grid payload (was a 3.6 MB refetch for a datalist) */
+    (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){ cache['purchase-orders']=d; return d; })).then(function(rows){
       var prod=(rows||[]).filter(function(p){return /production/i.test(p.status||'');});
       document.getElementById('ps-polist').innerHTML=prod.map(function(p){return '<option value="'+esc(p.po)+'">'+esc(p.po)+' · '+esc(p.supplier_name||'')+'</option>';}).join('');
       var pc=document.getElementById('ps-pocount'); if(pc)pc.textContent=prod.length+' production PO(s)';
@@ -14980,7 +14980,7 @@
   function _smpRowDates(s){ var sh=(s&&s.shipment)||{}; var eta=sh.expected?('est '+_smpDM(sh.expected)):''; var rec=s.received_at?('rec '+_smpDM(s.received_at)):(sh.received_at?('rec '+_smpDM(sh.received_at)):''); var p=[eta,rec].filter(Boolean); return p.length?p.join(' · '):(s.sample_date?_smpDM(s.sample_date):(s.created_at?_smpDM(s.created_at):'')); }
   function smpMobileCard(r){
     var swSrc='/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'');
-    var sw=r.has_swatch?'<img class="smpc-sw smp-sw" data-src="'+swSrc+'" src="'+swSrc+'" title="tap to enlarge">':'<span class="smpc-sw none">—</span>';
+    var sw=r.has_swatch?'<img loading="lazy" decoding="async" class="smpc-sw smp-sw" data-src="'+swSrc+'" src="'+swSrc+'" title="tap to enlarge">':'<span class="smpc-sw none">—</span>';
     var name=esc(String(r.bulk_colour_name||'').trim()||String(r.colour_name||'').trim()||r.item_ref);
     var typ=[r.category].filter(Boolean).map(esc).join(' · ');
     var m=stageMeta(r.stage);
@@ -15082,7 +15082,7 @@
         f.forEach(function(r){ var sKey=r.season||'', cKey=r.category||'';
           if(sKey!==_spS){ _spS=sKey; _spC=null; html+='<tr class="smp-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="'+_ncol+'" title="Click to expand / collapse this season"><span class="smp-gcaret">▾</span>'+esc(sKey||'— no season —')+' <span class="smp-gcount">('+_sSeasonCount[sKey]+')</span></td></tr>'; }
           if(cKey!==_spC){ _spC=cKey; html+='<tr class="smp-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="'+_ncol+'" title="Click to expand / collapse this type"><span class="smp-gcaret">▾</span>'+esc(cKey||'— no type —')+' <span class="smp-gcount">('+_sCatCount[sKey+'|'+cKey]+')</span></td></tr>'; }
-          var sw=r.has_swatch?'<img class="pg-swatch2 smp-sw" data-src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" style="object-fit:cover;border:1px solid var(--line)" title="hover to enlarge · click to open">':'<span class="pg-swatch2 none" style="display:inline-block;border:1px dashed var(--line)"></span>';
+          var sw=r.has_swatch?'<img loading="lazy" decoding="async" class="pg-swatch2 smp-sw" data-src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" style="object-fit:cover;border:1px solid var(--line)" title="hover to enlarge · click to open">':'<span class="pg-swatch2 none" style="display:inline-block;border:1px dashed var(--line)"></span>';
           var comps=(r.components||[]); var compTxt=comps.length?comps.map(function(x){return x.name;}).join(' · '):'(no component)';
           // v27.761 (Ben): supplier acceptance of the dev request — shown on the SAMPLING grid + the MANAGE facts card
           var acc=r.supplier_accepted_at
@@ -15098,7 +15098,7 @@
             +'<td class="l">'+esc(r.supplier_name)+(r.supplier_code?' <span class="mut tiny">'+esc(r.supplier_code)+'</span>':'')+'<div style="margin-top:3px"><span class="smp-type'+(/custom/i.test(r.type||'')?' custom':'')+'">'+esc(/custom/i.test(r.type||'')?'Custom order':'Development')+'</span></div></td>'
             +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:12px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select><div style="margin-top:5px">'+smpActBadge(r)+'</div></td>';
           for(var k=1;k<=maxV;k++){ var s=(r.samples||[])[k-1]; if(!s){ cells+='<td class="smp-scell"><span class="smp-tick none" title="no sample '+k+' yet"></span></td>'; continue; }
-            var rec=!!s.received_at; var sub=_smpDM(s.sample_date||s.created_at);
+            var rec=!!s.received_at;
             var _st=_smpStatus(s);
             // v27.758 (design slice 2): tick carries the state (k-* class → colour), ✕ glyph when rejected; status word + decision counts live in the tooltip;
             // blue superscript = notes + feedback on this version (click → MANAGE S-tab); date is one faint 9px line. Tick click still toggles received (unchanged).
@@ -15803,7 +15803,7 @@
           var pBody=catKeys.map(function(cat){
             var grp='<tr class="db-grp"><td colspan="4" style="'+thP+(hzCatColourOf(f,cat)?';border-left:6px solid '+hzCatColourOf(f,cat):'')+'">'+(cat&&cat!=='—'?hzCatBadge(cat,hzCatColourOf(f,cat),{size:11,pad:'4px 11px'}):esc(cat))+' <span class="db-grp-n">('+cats[cat].length+')</span></td></tr>';   // v27.698
             return grp+cats[cat].map(function(r){ var ph=r.photo||[];
-              var sw=r.has_swatch?'<img class="db-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="db-sw none"></span>';
+              var sw=r.has_swatch?'<img loading="lazy" decoding="async" class="db-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="db-sw none"></span>';
               var tag=ph.length?'<span class="db-ov" style="background:var(--pos-bg);color:var(--pos)">📸 Approved'+(ph.length>1?' ('+ph.length+')':'')+'</span>':'<span class="db-ov" style="background:var(--hover);color:var(--faint)">— not yet</span>';
               var samples=ph.length?ph.map(function(p){ return '<div style="font-size:11px;white-space:nowrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+(p.date?' <span class="mut tiny">'+esc(fd(p.date))+'</span>':'')+'</div>'; }).join(''):'<span class="mut tiny">—</span>';
               var notes=ph.filter(function(p){return p.notes;}).map(function(p){ return '<div style="font-size:11px;color:var(--ink-soft)">'+(ph.length>1?'<span class="mut tiny" style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+': </span>':'')+esc(p.notes)+'</div>'; }).join('')||'<span class="mut tiny">—</span>';
@@ -15831,7 +15831,7 @@
         var body=catKeys.map(function(cat){
           var grp='<tr class="db-grp"><td colspan="'+(2+DIMS.length)+'" style="'+thStick+(hzCatColourOf(f,cat)?';border-left:6px solid '+hzCatColourOf(f,cat):'')+'">'+(cat&&cat!=='—'?hzCatBadge(cat,hzCatColourOf(f,cat),{size:11,pad:'4px 11px'}):esc(cat))+' <span class="db-grp-n">('+cats[cat].length+')</span></td></tr>';   // v27.698
           return grp+cats[cat].map(function(r){ var pa=(r.status==='approved');
-            var sw=r.has_swatch?'<img class="db-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="db-sw none"></span>';
+            var sw=r.has_swatch?'<img loading="lazy" decoding="async" class="db-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="db-sw none"></span>';
             return '<tr class="db-row">'
               +'<td class="db-prodcell" style="'+thStick+'"><a class="db-open" data-ref="'+esc(r.ref)+'" style="display:flex;gap:8px;align-items:center;cursor:pointer;text-decoration:none;color:inherit">'+sw+'<span style="min-width:0"><span class="db-name">'+esc(r.colour_name||'—')+'</span><span style="font-size:10px;color:var(--faint);font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</span></span></a></td>'
               +'<td class="db-td" style="text-align:center">'+ovPill(r.status)+'</td>'
@@ -16474,7 +16474,7 @@
         var _tbl='<div class="pg-desktop"><div class="tw"><table class="pg-tbl"><thead><tr>'
           +[['',''],['Ref','ref'],['Category','category'],['Sizes','sizes'],['Stage','stage'],['Requests — per component (supplier · stage)','']].map(function(c){ if(!c[1])return '<th'+(c[0]?' class="l"':'')+'>'+c[0]+'</th>'; var act=_prodSort.col===c[1]; return '<th class="pg-sort" data-sort="'+c[1]+'" title="click to sort" style="cursor:pointer;user-select:none'+(act?';color:var(--blue)':'')+'">'+c[0]+(act?(_prodSort.dir>0?' ▲':' ▼'):'')+'</th>'; }).join('')+'</tr></thead><tbody>'   // v27.703 P1: Season + Supplier columns gone (season = group header; supplier lives on the REQUEST); Category badge + Requests-per-component columns (mockup A)
           +f.map(function(r,i){
-            var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
+            var sw=r.has_swatch?'<img loading="lazy" decoding="async" class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             var sKey=r.season||'', cKey=r.category||'', hdr='';
             var _cc=r.category_colour||'';   // v27.698 category colour (mig 277)
             if(!_flat && sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="6" style="cursor:pointer;background:var(--line);border-top:2px solid var(--faint);font-weight:800;font-size:13.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);padding:8px 10px"><span style="position:sticky;left:10px;display:inline-block;vertical-align:middle"><span class="pg-caret" style="display:inline-block;width:18px;font-size:12px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:var(--muted)">('+seasonCount[sKey]+')</span></span><span class="pg-genreport" data-season="'+esc(sKey)+'" title="Generate a printable PDF report for this whole season" style="float:right;font-size:10px;font-weight:600;color:var(--blue-ink);background:var(--blue-soft);border:1px solid #93c5fd;border-radius:5px;padding:1px 8px;cursor:pointer;text-transform:none;letter-spacing:0">⤓ Report</span></td></tr>'; }
@@ -16494,7 +16494,7 @@
         var mob=f.map(function(r,i){ var sKey=r.season||'', cKey=r.category||'', hdr='';
           if(sKey!==_mS){ _mS=sKey; _mC=null; hdr+='<div class="pgm-shdr" data-season="'+esc(sKey)+'">'+esc(sKey||'— no season —')+' <span style="font-weight:500;opacity:.6">'+seasonCount[sKey]+'</span></div>'; }
           if(cKey!==_mC){ _mC=cKey; hdr+='<div class="pgm-chdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'" style="display:flex;align-items:center;gap:8px">'+esc(cKey||'— no category —')+' <span style="opacity:.6">· '+catCount[sKey+'|'+cKey]+'</span></div>'; }   // v27.762 (Ben): no colour in thegrouping (colour is in the category badge column)
-          var sw=r.has_swatch?'<img class="pgm-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="pgm-sw none"></span>';
+          var sw=r.has_swatch?'<img loading="lazy" decoding="async" class="pgm-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="pgm-sw none"></span>';
           return hdr+'<div class="pgm-card" data-ref="'+esc(r.ref)+'" data-i="'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'"'+(r.category_colour?' style="border-left:4px solid '+r.category_colour+'"':'')+'>'
             +'<div class="pgm-top">'+sw+'<div class="pgm-meta"><div class="pgm-colour">'+prodColourDisplay(r)+'</div><div class="pgm-ref">'+esc(r.ref)+' '+(cKey?hzCatBadge(cKey,r.category_colour,{size:9,pad:'2px 7px'}):'')+prodComboBadge(r)+'</div></div>'+'<span class="pgm-stage-chip">'+prodStageChip(r.stage)+'</span></div>'
             +'<div class="pgm-sub"><span>Sizes '+r.sizes_approved+'/'+r.sizes+'</span><span>'+esc(prodStageOwner(r.stage))+(r.stage_overridden?' · overridden':'')+'</span></div>'
@@ -16764,7 +16764,7 @@
       body.querySelectorAll('.pr-del').forEach(function(a){ a.onclick=function(){ var n=Number(a.dataset.n)||0; if(!confirm('Delete this development request'+(n?' and its '+n+' sample version'+(n===1?'':'s'):'')+'?'))return; shipPost('/api/product/request/'+a.dataset.rid+'/delete',{force:true},function(j){ if(j&&j.error){alert(j.error);return;} try{ prodItemInvalidate(ref); pgetClear(); }catch(e){} renderProdRequests(body,ref); }); }; });
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   // "+ Development request" — modal: supplier · components (pre-ticked from [+]) · sizes · approval · country · dev start · stakeholders · notify emails
-  function openRequestForm(ref,opts){ opts=opts||{}; closeShPop&&0;
+  function openRequestForm(ref,opts){ opts=opts||{}; closeShPop&&closeShPop(); /* v28.117 (review C2): was &&0, a no-op that left the popover + its outside-click listener open */
     Promise.all([(function(u){ return hzqPeek(u)!==undefined?Promise.resolve(hzqPeek(u)):hzqGet(u,true); })('/api/product/item/'+encodeURIComponent(ref)), hzqGet('/api/product/component-types').catch(function(){return {suppliers:[]};}), hzqGet('/api/supply/all-users').catch(function(){return [];})]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
       var pre=(opts.component_ids||[]).map(String); var defSup=''; comps.forEach(function(c){ if(pre.indexOf(String(c.id))>=0&&c.supplier&&!defSup)defSup=c.supplier; });
       // v28.114 (Ben): INLINE form (no popup) — rendered in the product Edit view (Requests-tab body, else product content).
@@ -17521,7 +17521,7 @@
     var _notesUrl='/api/product/notes/'+encodeURIComponent(ref)+(_sup?'?supplier='+encodeURIComponent(_sup):'');
     var _smpUrl='/api/product/samples/'+encodeURIComponent(ref)+(_sup?'?supplier='+encodeURIComponent(_sup):'');   // v27.873 (Ben): scope the /s sample-version chips to THIS supplier's request (was showing every supplier's samples)
     hzqAll([_notesUrl,'/api/product/item/'+encodeURIComponent(ref)+'/changes','/api/product/timeline-config',[_smpUrl,[]]]).then(function(_r){   // v27.878: instant from cache, revalidated
-      var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[], _hid=rocIsHidden(ref);
+      var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[];
       // v27.750 (P6): sample versions for the /s chip (product-dimension only), newest label first
       var _smpList=(Array.isArray(_r[3])?_r[3]:[]).map(function(s){ return { id:s.id, version:s.version, label:'Sample '+s.version, received:!!s.received_at }; });
       var _smpByVer={}; _smpList.forEach(function(s){ _smpByVer[s.version]=s.id; });
@@ -17558,11 +17558,11 @@
         (n.pantone||[]).forEach(function(p){ var tok=esc('🎨 '+p.code); if(bodyH.indexOf(tok)>=0){ bodyH=bodyH.split(tok).join(panInlineChip(p)); } else { _left.push(p); } });
         var pc=_left.map(panCard).join('');
         var mine=!sup;   // v28.115: conversation thread — our messages on the right, supplier on the left
-        return '<div style="display:flex;margin:12px 0;'+(mine?'justify-content:flex-end':'justify-content:flex-start')+'">'
+        return '<div style="display:flex;margin:12px 0;justify-content:flex-start;'+(mine?'padding-left:28px':'')+'">'
           +'<div style="max-width:78%;min-width:150px;font-size:12px;padding:8px 12px;background:'+(sup?(n.read?'var(--hover)':'var(--amber-bg)'):'var(--violet-bg)')+';border:1px solid '+(isNew?'var(--amber)':(mine?'#c7d2fe':'var(--line)'))+';border-radius:12px;border-'+(mine?'br':'bl')+'-radius:3px;line-height:1.5">'
           +'<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:2px"><span class="mut tiny" style="font-weight:600">'+who+(isNew?' <span class="ex-badge">new</span>':'')+'</span><span class="mut tiny" style="white-space:nowrap">'+esc(_fmt(n.created_at))+'</span></div>'
           +'<div style="color:var(--ink);white-space:pre-wrap">'+bodyH+'</div>'+dl+tg+pc
-          +(ctrl?'<div style="margin-top:5px;'+(mine?'text-align:right':'')+'">'+ctrl+'</div>':'')
+          +(ctrl?'<div style="margin-top:5px;'+''+'">'+ctrl+'</div>':'')
           +'</div></div>'; }
       function _changeRow(c){ return '<div class="tl-change" style="font-size:11.5px;margin:8px 0;max-width:680px;padding:7px 11px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px;line-height:1.5"><span class="mut tiny">🕓 '+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v28.115: record-of-change tab (roomier, no inline hide)
       // used-tag filter bar (Phase 3): chips for the tags actually applied on THIS product; multi-select
@@ -17658,7 +17658,6 @@
             (function extra(){ if(!ids.length){ _files=[]; _prodJsonBust(ref); renderProdTimeline(body,ref,{quiet:true}); return; } var x=ids.shift(); shipPost('/api/product/note',{ref:ref,body:'📎 '+x.name,author_email:email,tags:tags,pantone:[],attachment_id:x.id},function(){ extra(); }); })(); }); }); };
       body.querySelectorAll('.tl-att-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the supplier (emails their portal user)?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
-      var _hc=body.querySelector('.prod-hide-chg'); if(_hc)_hc.onchange=function(){ rocSetHidden(ref,_hc.checked); body.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_hc.checked?'none':''; }); };
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   // hz-preboot masks the DEMAND plan filter rows. It must persist on EVERY non-demand view (not just lift at boot) — else
   // there's a frame where the rows fall back to their static display:flex before the runtime hide catches them. Only the
