@@ -893,6 +893,29 @@ app.use((req, res, next) => {
   next();
 });
 
+// v28.104 (Ben): client portal on its own subdomain (client.dockandbay.com).
+// When a request arrives on the client host we serve ONLY the portal surface — the admin shell
+// and admin APIs are never reachable from that host — and a bare "/" serves the client portal.
+// Set CLIENT_PORTAL_HOST to override; empty string disables host routing (dev / previews).
+const CLIENT_HOST = (process.env.CLIENT_PORTAL_HOST ?? 'client.dockandbay.com').trim().toLowerCase();
+const ADMIN_HOST = (process.env.ADMIN_HOST ?? 'horizon.dockandbay.com').trim().toLowerCase();
+function reqHost(req) { return String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].split(':')[0].trim().toLowerCase(); }
+// Portal-safe paths: the page, its script, shared theme + fonts + vendor assets, the client API, the version probe.
+const CP_HOST_OK = (p) => (
+  p === '/client' || p === '/client-view.js' || p === '/hz-theme.css'
+  || p === '/favicon.ico' || p === '/api/version'
+  || p.startsWith('/api/cp/') || p.startsWith('/fonts/') || p.startsWith('/vendor/')
+);
+app.use((req, res, next) => {
+  if (!CLIENT_HOST || reqHost(req) !== CLIENT_HOST) return next();   // not the client host → unchanged behaviour
+  req._cpHost = true;
+  if (req.path === '/') { req.url = '/client' + req.url.slice(1); return next(); }   // bare portal (keeps ?token=… for magic links)
+  if (CP_HOST_OK(req.path)) return next();
+  // anything else on the client host is not part of the portal
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'not found' });
+  return res.redirect(302, '/');
+});
+
 // Access gate — only active when PLANNER_KEY is set (production). Localhost (no env var)
 // stays open and identical to what you see now. Key accepted via ?key= (stored in a cookie)
 // or x-planner-key header. Anything else gets a minimal key prompt.
@@ -20481,7 +20504,22 @@ app.post('/api/client/clients/:id/delete', async (req, res) => {
 
 // ── users + magic links ──
 const cpToken = () => crypto.randomBytes(24).toString('hex');
-function cpBase(req) { return (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host); }
+function cpBase(req) {
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  // v28.104: production dockandbay.com hosts mint client links on the dedicated portal subdomain — an admin
+  // copying a magic link from horizon.dockandbay.com still produces a client.dockandbay.com link. Previews
+  // (*.vercel.app) and the sandbox keep the request host so their links stay self-contained.
+  if (CLIENT_HOST && !IS_SANDBOX && /(^|\.)dockandbay\.com$/i.test(host.split(':')[0])) return 'https://' + CLIENT_HOST;
+  return proto + '://' + host;
+}
+// Admin (HORIZON) deep-links always resolve to the admin host, even when generated while serving a client request.
+function adminBase(req) {
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  if (ADMIN_HOST && !IS_SANDBOX && /(^|\.)dockandbay\.com$/i.test(host.split(':')[0])) return 'https://' + ADMIN_HOST;
+  return proto + '://' + host;
+}
 async function cpMintLink(userId, req) {
   const tok = cpToken();
   await pool.query(`INSERT INTO planner.client_magic_tokens (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, userId]);
@@ -21125,7 +21163,7 @@ async function cpNotifyClientMessage(threadId, req) {   // email the client's ac
 async function cpNotifyOpsMessage(threadId, client, req) {
   try { const to = String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean); if (client.owner_email && !to.includes(client.owner_email)) to.push(client.owner_email); if (!to.length) { console.log('[client portal] message from ' + client.name + ' — no cp_message_default_to / owner set, not emailed'); return; }
     const t = (await pool.query(`SELECT subject FROM planner.client_threads WHERE id=$1`, [threadId])).rows[0];
-    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Client message — ' + client.name + ': ' + ((t && t.subject) || ''), html: `<p><b>${client.name}</b> sent a message in the client portal: <b>${(t && t.subject) || ''}</b>.</p><p><a href="${cpBase(req)}/#/client/messages/${threadId}">Open in HORIZON ▸ CLIENT ▸ Messages</a></p>` }); } catch (e) {}
+    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Client message — ' + client.name + ': ' + ((t && t.subject) || ''), html: `<p><b>${client.name}</b> sent a message in the client portal: <b>${(t && t.subject) || ''}</b>.</p><p><a href="${adminBase(req)}/#/client/messages/${threadId}">Open in HORIZON ▸ CLIENT ▸ Messages</a></p>` }); } catch (e) {}
 }
 
 // ═════════════════════════════════════ PORTAL (client-facing) ═════════════════════════════════════
@@ -21293,7 +21331,7 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
     // notifications: Ops (draft waiting) + the client (their record)
     const base = cpBase(req); const ops = String(await cpSetting('cp_ops_emails', '')).split(/[,;\s]+/).filter(Boolean); if (c.owner_email && !ops.includes(c.owner_email)) ops.push(c.owner_email);
     const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${l.sku}</td><td align="right">${l.qty}</td><td align="right">${l.cartons == null ? '' : l.cartons}</td><td align="right">${l.price == null ? '' : l.price.toFixed(2)}</td><td>${l.flags.join(', ')}</td></tr>`).join('') + '</table>';
-    if (ops.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: ops, subject: (type === 'sample' ? 'Sample request' : 'Client order') + ' from ' + c.name + (fulfil.ok ? ' — draft ' + fulfil.number + ' waiting in Fulfil' : ' — needs keying (no Fulfil draft)'), html: `<p><b>${c.name}</b> (${req.cp.user.email}) submitted a ${type === 'sample' ? 'sample request' : 'order'} in the client portal.</p><p>${units} units · ${c.currency} ${total.toFixed(2)} · PO ${b.customer_po || '—'} · requested ${b.requested_date || '—'} · ship from ${b.ship_from || c.warehouse_code || ''}</p>${lineHtml}<p>${fulfil.ok ? 'Draft <b>' + fulfil.number + '</b> is waiting in Fulfil (' + fulfil.env + ') for confirmation.' : '<b>No Fulfil draft was created:</b> ' + fulfil.reason + '. Key it in Fulfil from this email.'}</p><p><a href="${base}/#/client/orders">Open in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
+    if (ops.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: ops, subject: (type === 'sample' ? 'Sample request' : 'Client order') + ' from ' + c.name + (fulfil.ok ? ' — draft ' + fulfil.number + ' waiting in Fulfil' : ' — needs keying (no Fulfil draft)'), html: `<p><b>${c.name}</b> (${req.cp.user.email}) submitted a ${type === 'sample' ? 'sample request' : 'order'} in the client portal.</p><p>${units} units · ${c.currency} ${total.toFixed(2)} · PO ${b.customer_po || '—'} · requested ${b.requested_date || '—'} · ship from ${b.ship_from || c.warehouse_code || ''}</p>${lineHtml}<p>${fulfil.ok ? 'Draft <b>' + fulfil.number + '</b> is waiting in Fulfil (' + fulfil.env + ') for confirmation.' : '<b>No Fulfil draft was created:</b> ' + fulfil.reason + '. Key it in Fulfil from this email.'}</p><p><a href="${adminBase(req)}/#/client/orders">Open in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
     if (String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false') await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to: req.cp.user.email, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id, html: `<p>Hi ${req.cp.user.name || ''},</p><p>Thanks — we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + b.customer_po + ')' : ''}. Our team will confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + c.currency + ' ' + total.toFixed(2) + ' ex shipping'}</p>${lineHtml}<p><a href="${base}/client#/orders">View your orders</a></p>` });
     res.json({ ok: true, id: o.id, status: fulfil.ok ? 'fulfil_draft' : 'submitted', fulfil, units, total, lines });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
