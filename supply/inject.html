@@ -13096,8 +13096,10 @@
   function samplesInner(rows,c){
     var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
     function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')+' '+Object.keys(r.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }   // includes the sample's SKUs
-      if(st.f==='all')return true; if(st.f==='mine')return _isMySample(r); if(st.f==='completed')return _sampNormStatus(r.status)==='COMPLETED'; return r.is_open; }); }   // OPEN = future/production; MINE = I'm an internal stakeholder; COMPLETED = completed; ALL = everything
-    var FILT=[['open','Open'],['completed','Completed'],['all','All'],['mine','⭐ My samples']];
+      if(st.f==='all')return true; if(st.f==='mine')return _isMySample(r); if(st.f==='completed')return _sampNormStatus(r.status)==='COMPLETED';
+      if(st.f==='arriving')return r.is_open && (String(r.status_calc||'')==='SHIPPED' || (r.tracking_code||'').trim() || (r.production_status||'')==='shipped');   // v28.112: incoming = in transit / shipped / has tracking, not yet received
+      return r.is_open; }); }   // OPEN = future/production; MINE = I'm an internal stakeholder; COMPLETED = completed; ALL = everything
+    var FILT=[['open','Open'],['arriving','📥 Arriving soon'],['completed','Completed'],['all','All'],['mine','⭐ My samples']];
     function rowHTML(r,i){
       var _sa=sampActions(r);   // active (non-snoozed) exceptions → red count badge + snooze popover
       var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" data-note="'+esc(_sa.length+' action item'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze / open)')+'">'+_sa.length+'</button>':'';
@@ -13119,6 +13121,27 @@
         +'<td class="l"><b>'+(r.units||0)+'</b> <span class="mut tiny">· '+(r.line_count||0)+' SKU'+((r.line_count||0)===1?'':'s')+'</span></td>'
         +'<td class="l">'+tr+'</td><td class="l">'+chCell+'</td></tr>'
         +'<tr class="exp-row" id="sampexp-'+i+'" style="display:none"><td colspan="11"><div id="sampdet-'+i+'" class="count">Loading…</div></td></tr>'; }
+    // v28.112 (Ben): "Samples arriving soon" — incoming sample batches grouped by ETA date (descending), each batch a card.
+    function arrivingHTML(f){
+      if(!f.length)return '<div class="count" style="padding:14px">No sample batches in transit right now.</div>';
+      var sorted=f.slice().sort(function(a,b){ var ea=a.supplier_expected||'', eb=b.supplier_expected||''; if(ea&&eb)return eb<ea?-1:(eb>ea?1:0); if(ea)return -1; if(eb)return 1; return 0; });
+      var groups=[], idx={};
+      sorted.forEach(function(r){ var k=r.supplier_expected||'__none'; if(idx[k]==null){ idx[k]=groups.length; groups.push({date:r.supplier_expected||'', rows:[]}); } groups[idx[k]].rows.push(r); });
+      return '<div class="mut tiny" style="margin:4px 0 2px">Sample batches on their way, grouped by supplier ETA (latest first). Click a batch to open it.</div>'+groups.map(function(g){
+        var hdr='<div style="display:flex;align-items:center;gap:8px;margin:14px 0 6px"><span style="font-weight:800;font-size:13px">'+(g.date?esc(fd(g.date)):'No ETA')+'</span><span class="mut tiny">'+g.rows.length+' batch'+(g.rows.length>1?'es':'')+'</span><span style="flex:1;height:1px;background:var(--line2)"></span></div>';
+        var cards=g.rows.map(function(r){
+          var samps=(r.dev_samples||[]).map(function(d){return esc(d.ref||d.item_ref||'');}).filter(Boolean).join(', ');
+          var tu=(typeof carrierTrackUrl==='function')?carrierTrackUrl(r.carrier,r.tracking_code):'';
+          var trk=r.tracking_code?((tu?'<a href="'+tu+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut tiny">no tracking</span>';
+          var to=esc(r.recipient_company||r.recipient_name||[r.city,r.country].filter(Boolean).join(', ')||'—');
+          return '<div class="samp-arr-open" data-ref="'+esc(r.ref||'')+'" style="cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin-bottom:6px;background:var(--card);display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
+            +'<b style="min-width:78px">'+esc(r.ref||'')+'</b><span>'+sampleStatusChip(_sampNormStatus(r.status))+'</span>'
+            +'<span style="min-width:120px">'+esc(r.supplier_name||'—')+'</span><span class="mut tiny" style="min-width:120px">→ '+to+'</span>'
+            +'<span>'+trk+'</span><span class="mut tiny">'+(r.units||0)+' u'+(samps?' · '+samps:'')+'</span></div>';
+        }).join('');
+        return hdr+cards;
+      }).join('');
+    }
     function reload(){ delete cache['samples']; fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; cache['samples']=rows; view(); }); }
     _sampleReload=reload;
     function _sampToast(msg){ var t=document.createElement('div'); t.textContent=msg; t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--pos);color:#fff;font-weight:700;font-size:13px;padding:9px 18px;border-radius:8px;box-shadow:0 8px 26px rgba(15,23,42,.28);z-index:200000;opacity:0;transition:opacity .18s'; document.body.appendChild(t); requestAnimationFrame(function(){t.style.opacity='1';}); setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); },250); },2300); }
@@ -13252,7 +13275,7 @@
         +'<button class="save-btn" id="samp-new" style="margin-left:6px;background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd">+ New sample</button>'
         +'<label style="font-size:12px;cursor:pointer;white-space:nowrap;margin-left:8px" title="show snoozed exceptions as active in the badges"><input type="checkbox" id="samp-showsnz"'+(_poShowSnoozed?' checked':'')+' style="vertical-align:middle;margin-right:4px">show snoozed</label>'
         +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient / SKU…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
-      var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Completion req.</th><th>Supplier ETA</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
+      var tbl=(st.f==='arriving')?arrivingHTML(f):'<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Completion req.</th><th>Supplier ETA</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
         +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';
       c.innerHTML=lookupDatalists()+'<datalist id="samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="Flexport"><option value="SF Express"><option value="Other"></datalist><div id="samp-form"></div>'+bar+tbl;
       c.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){st.f=p.dataset.f;view();};});
@@ -13262,6 +13285,7 @@
         b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (not the ~1s native title)
         b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
       document.getElementById('samp-new').onclick=openSampleForm;
+      c.querySelectorAll('.samp-arr-open').forEach(function(b){ b.onclick=function(){ st.f='all'; _pendingSampleRef=b.dataset.ref; view(); }; });   // v28.112: open a batch from the Arriving-soon view
       c.querySelectorAll('.samp-exp').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('sampexp-'+i), open=ex.style.display!=='none';
         ex.style.display=open?'none':''; b.classList.toggle('open',!open);
         try{ writeHash(!open && b.dataset.ref ? ['supply','samples',b.dataset.ref] : ['supply','samples']); }catch(e){}   // shareable slug for the open sample
