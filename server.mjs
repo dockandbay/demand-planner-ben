@@ -6612,6 +6612,7 @@ function invalidateSupplyCaches() {
   if (_secs.length) Promise.resolve(_epochBump).then(() => { _secs.forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 400).unref?.()); }).catch(() => {});
   swrStale('sup:');                                                    // badge counts (dtc / reallocations / product unread): serve stale once, refresh behind
   portalCacheMarkStale();                                              // portal bootstraps: served stale once + revalidated by the page (v27.880), not dropped
+  return _epochBump;   // v28.127: callers that re-read straight away (e.g. deposit-create) can await the epoch bump; others ignore it
 }
 
 
@@ -14672,6 +14673,10 @@ app.post('/api/supply/deposit-create', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       [(b.reference || '').trim() || null, b.is_deposit !== false, b.supplier_name || null,
        b.description || null, b.amount === '' || b.amount == null ? null : b.amount]);
+    // v28.127 (Ben: "adding a new deposit doesn't show"): the deposits list is SECTION_CACHE'd + epoch-gated, and this
+    // INSERT never bumped the epoch, so the page's immediate re-fetch served the cached list without the new row.
+    // Await the bump so that re-fetch is guaranteed to see it (edits go through patch(), which already bumps).
+    try { await invalidateSupplyCaches(); } catch (_) { /* non-fatal: TTL backstop */ }
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

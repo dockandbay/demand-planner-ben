@@ -1038,6 +1038,7 @@
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={};
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null,_pendingSampleTab=null;
+  var _newDepId=null;   // v28.127: id of a just-created deposit → pinned + opened for edit on the next Deposits render
   var _poInclArch=false;   // "Show archived" toggle on the PO grid → appends ?includeArchived=1 (archive cutoff set in CONFIG ▸ Admin ▸ General)   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
@@ -6265,6 +6266,7 @@
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
     var st={f:pend?'all':'remaining',q:pend?String(pend).toLowerCase():'',sup:''}; var DEP_EDIT={};   // default = open deposits that still hold money
+    var newDepId=_newDepId; _newDepId=null; if(newDepId)DEP_EDIT[newDepId]=true;   // v28.127: a just-added deposit opens unlocked, ready to fill in
     if(!pend){ var _dsv=hzFilterLoad('deposits'); if(_dsv&&typeof _dsv==='object'){ if(_dsv.f)st.f=_dsv.f; if(_dsv.sup)st.sup=_dsv.sup; } }   // restore persisted filters (sliding 1h TTL); not the search
     var depSups=Array.from(new Set((deps||[]).map(function(d){return d.supplier_name;}).filter(Boolean))).sort();
     var depPoView='unalloc';   // linked-PO column view: 'unalloc' (default) = only POs with no start deposit yet · 'open' = all non-complete · 'all' = every linked PO
@@ -6397,6 +6399,9 @@
         .catch(function(e){ d[field]=prev; draw(); alert('Failed: '+(e.message||e)); }); }
     function draw(){ try{hzFilterSave('deposits',{f:st.f,sup:st.sup});}catch(e){}   // persist filters (not the search) — sliding 1h TTL
       var f=cur().filter(function(d){return (!st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0) && (!st.sup||(d.supplier_name||'')===st.sup);});
+      // v28.127: the just-added deposit is blank (no supplier/ref yet), so a persisted Supplier filter or search hid it.
+      // Keep it pinned at the top for this visit, whatever the filters, until it's filled in.
+      if(newDepId){ f=f.filter(function(d){ return String(d.id)!==String(newDepId); }); var _nd=deps.filter(function(d){ return String(d.id)===String(newDepId); })[0]; if(_nd)f.unshift(_nd); }
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
       var _tw=document.getElementById('dep-tblwrap'), _dc=document.getElementById('dep-cards');
       if(actMob()){ if(_tw)_tw.style.display='none'; if(_dc)_dc.innerHTML=mobCards(f.length?f.map(depCard).join(''):'<div class="count">No deposits.</div>'); }   // mobile: stacked cards
@@ -6463,7 +6468,7 @@
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
     document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
     var _depSup=document.getElementById('dep-sup'); if(_depSup)_depSup.onchange=function(){st.sup=this.value;draw();};
-    document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(){ delete cache['productions']; showPoSub('deposits'); }); };
+    document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(j){ _newDepId=(j&&j.id)||null; delete cache['productions']; showPoSub('deposits'); }); };
     var _pv=document.getElementById('dep-poview'); if(_pv){ _pv.value=depPoView; _pv.onchange=function(){ depPoView=this.value; draw(); }; }
     if(pend){ var pqi=document.getElementById('dep-q'); if(pqi)pqi.value=pend; b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.toggle('active',x.dataset.f==='all');}); }
     draw(); }

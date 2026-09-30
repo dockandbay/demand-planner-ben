@@ -1,3 +1,13 @@
+## v28.127 (Ben): a newly added deposit now shows on the Deposits screen
+
+**Files: `server.mjs`, `supply/inject.html`.**
+
+- **Cause:** the deposits list (`/api/supply/deposits`) is SECTION_CACHE'd and epoch-gated, and `POST /api/supply/deposit-create` never bumped the supply epoch (edits do, via `patch()`). The page's re-fetch straight after + Deposit served the cached list without the new row. Reproduced on sandbox: 347 rows before and after create, new id missing.
+- **Fix:** `deposit-create` now awaits `invalidateSupplyCaches()` (which now returns its epoch-bump promise) before replying, so the re-fetch always sees the row. Verified: 350 to 351, new row first.
+- **Also:** a new deposit is blank, so a remembered Supplier filter or search could still hide it. It's now pinned to the top and opened for editing on that visit, whatever the filters.
+
+No migration. No new env vars. Same bug is live on prod.
+
 ## v28.126 (Ben): wider left menu + v_po_finance set-based rewrite (migration 322)
 
 **Files: `supply/inject.html`, `migrations/322_v_po_finance_setbased.sql`.**
