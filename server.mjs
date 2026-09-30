@@ -8767,9 +8767,11 @@ app.post('/api/product/request', async (req, res) => {
     await client.query('BEGIN');
     const ref = await _uniqueRef(client, 'product_dev_requests', String(b.ref || '').trim() || (it.ref + '-' + sc.code));
     const emails = a => (Array.isArray(a) ? a : []).map(x => String(x || '').trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).filter((x, i, arr) => arr.indexOf(x) === i).slice(0, 50);
-    const ins = await client.query(`INSERT INTO planner.product_dev_requests (ref, item_id, supplier_id, supplier_name, supplier_code, stage, approval_method, recipient_countries, dev_start, size_ids, internal_stakeholders, notify_emails, notes, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11::jsonb,$12::jsonb,$13,$14) RETURNING id, ref`,
-      [ref, it.id, sc.id, sup, sc.code, PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development', b.approval_method === 'photo' ? 'photo' : 'samples', String(b.recipient_countries || 'UK').trim() || 'UK', b.dev_start || null,
+    // v28.114 (Ben): the inline dev-request form can capture a recipient ADDRESS (autocompleted from past addresses).
+    const recAddrs = (Array.isArray(b.recipient_addresses) ? b.recipient_addresses : []).filter(a => a && typeof a === 'object').slice(0, 20);
+    const ins = await client.query(`INSERT INTO planner.product_dev_requests (ref, item_id, supplier_id, supplier_name, supplier_code, stage, approval_method, recipient_countries, recipient_addresses, dev_start, size_ids, internal_stakeholders, notify_emails, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::date,$11,$12::jsonb,$13::jsonb,$14,$15) RETURNING id, ref`,
+      [ref, it.id, sc.id, sup, sc.code, PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development', b.approval_method === 'photo' ? 'photo' : 'samples', String(b.recipient_countries || 'UK').trim() || 'UK', JSON.stringify(recAddrs), b.dev_start || null,
        (Array.isArray(b.size_ids) ? b.size_ids : []).map(Number).filter(Boolean), JSON.stringify(emails(b.internal_stakeholders)), JSON.stringify(emails(b.notify_emails)), String(b.notes || '').trim() || null, authUser(req) || (b.created_by || null)]);
     const rid = ins.rows[0].id;
     for (const cid of owned) await client.query(`INSERT INTO planner.product_dev_request_components (request_id, component_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [rid, cid]);
