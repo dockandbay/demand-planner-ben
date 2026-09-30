@@ -1000,25 +1000,41 @@ app.use(async (req, res, next) => {
 // wrapper (so the cached bytes are provably identical to the live handler), the rest serve instantly; a request that
 // lands mid-recompute serves the last value. Registered here (after auth, before the API routes) so it wraps them.
 const RESP_CACHE = {
+  // supply-domain, param-free, user-independent → 10min + supply-epoch busted
   '/api/supply/crossdock-report': 600000, '/api/supply/deposit-drawdown': 600000, '/api/supply/price-list': 600000,
-  '/api/supply/dtc/fulfil-alignment': 600000, '/api/supply/zalando/data': 600000,
+  '/api/supply/dtc/fulfil-alignment': 600000, '/api/supply/dtc/mismatch': 600000, '/api/supply/zalando/data': 600000,
   '/api/supply/bi/production-summary': 600000, '/api/supply/bi/container-fill': 600000, '/api/supply/bi/consolidations': 600000,
+  '/api/supply/action-metrics/pos': 600000, '/api/supply/fulfil/date-sync-preview': 600000, '/api/supply/fulfil/drift': 600000,
+  '/api/supply/fba-transfers/list': 600000, '/api/supply/barcodes': 600000, '/api/supply/po-delays': 600000,
+  '/api/supply/inventory-awd/status': 600000, '/api/supply/email-log': 600000, '/api/supply/flexport/status': 300000,
   '/api/trading-calendar': 600000, '/api/buy-extra-stock': 600000, '/api/scenario/slow-moving': 600000,
-  '/api/demand/stock-cover': 90000, '/api/demand/forecast-anomalies': 90000,          // demand-derived → short TTL (a forecast edit shows within ~90s; no supply-epoch link)
-  '/api/kpi/forecast-accuracy': 90000, '/api/kpi/stockout-risk': 90000,
+  '/api/config/channels': 600000, '/api/klaviyo-bis/status': 600000,
+  // product reference/config (edited in PRODUCT, no supply-epoch link) → 2min bound
+  '/api/product/component-types': 120000, '/api/product/config': 120000, '/api/product/reports': 120000,
+  '/api/product/specs': 120000, '/api/product/timeline-config': 120000, '/api/product/spec-scope-options': 120000,
+  '/api/product/spec-suppliers': 120000, '/api/product/skus': 120000,
+  // demand/kpi/client-derived → short TTL (edits show within the window; no supply-epoch link)
+  '/api/demand/stock-cover': 90000, '/api/demand/forecast-anomalies': 90000, '/api/demand-actions': 90000,
+  '/api/kpi/forecast-accuracy': 90000, '/api/kpi/stockout-risk': 90000, '/api/client/orders': 60000,
 };
-const _respCacheV = {}, _respCacheInflight = {};   // path -> {v,at,epoch} ; path -> bool
+// Live-Xero reads that vary by ?region but are otherwise stable (chart of accounts, tracking categories) — key the
+// cache by the full query so each region caches independently. Longer TTL: these change rarely and each miss is a
+// slow live Xero round-trip (~2s).
+const RESP_CACHE_KEYED = { '/api/supply/xero/accounts': 600000, '/api/supply/xero/tracking': 600000 };
+const _respCacheV = {}, _respCacheInflight = {};   // key -> {v,at,epoch} ; key -> bool
 app.use(async (req, res, next) => {
   if (req.method !== 'GET') return next();
-  const ttl = RESP_CACHE[req.path];
-  if (!ttl || Object.keys(req.query || {}).length) return next();
+  let key = null, ttl = 0;
+  const keyedTtl = RESP_CACHE_KEYED[req.path];
+  if (keyedTtl) { ttl = keyedTtl; const qs = Object.keys(req.query || {}).sort().map(k => k + '=' + req.query[k]).join('&'); key = req.path + (qs ? '?' + qs : ''); }
+  else { ttl = RESP_CACHE[req.path]; if (!ttl || Object.keys(req.query || {}).length) return next(); key = req.path; }   // unkeyed entries cache only the no-query variant
   let ep = 0; try { ep = await currentSupplyEpoch(); } catch (e) { /* epoch 0 on failure */ }
-  const c = _respCacheV[req.path];
-  if (c && c.epoch === ep && (Date.now() - c.at < ttl || _respCacheInflight[req.path])) return res.json(c.v);   // fresh, or stale-while-one-request-recomputes
-  _respCacheInflight[req.path] = true;
+  const c = _respCacheV[key];
+  if (c && c.epoch === ep && (Date.now() - c.at < ttl || _respCacheInflight[key])) return res.json(c.v);   // fresh, or stale-while-one-request-recomputes
+  _respCacheInflight[key] = true;
   const _oj = res.json.bind(res);
-  res.json = (p) => { if (!(p && p.error)) _respCacheV[req.path] = { v: p, at: Date.now(), epoch: ep }; delete _respCacheInflight[req.path]; return _oj(p); };
-  res.on('close', () => { delete _respCacheInflight[req.path]; });   // aborted before json() → release the flag
+  res.json = (p) => { if (!(p && p.error)) _respCacheV[key] = { v: p, at: Date.now(), epoch: ep }; delete _respCacheInflight[key]; return _oj(p); };
+  res.on('close', () => { delete _respCacheInflight[key]; });   // aborted before json() → release the flag
   next();
 });
 // After any supplier-portal WRITE, drop the cached portal bootstraps so the supplier's next load reflects their edit
