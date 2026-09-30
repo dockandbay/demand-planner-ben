@@ -10705,37 +10705,49 @@
     var chkIco={ok:'✓',warn:'⚠',error:'✕'}, chkCol={ok:'var(--pos)',warn:'var(--amber)',error:'var(--neg)'};
     var checks=(j.checks||[]).map(function(c){ return '<div style="display:flex;gap:7px;align-items:flex-start;padding:3px 0"><span style="color:'+(chkCol[c.level]||'var(--muted)')+';font-weight:800">'+(chkIco[c.level]||'•')+'</span><span>'+esc(c.msg)+'</span></div>'; }).join('');
     var hasOverpay=(j.lines||[]).some(function(l){return l.pay_ok===false;});
+    var hasBlocked=(j.lines||[]).some(function(l){return !!l.blocked;});
+    function orgPill(o){ o=String(o||'').toUpperCase(); var au=o==='AU'; return '<span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;'+(au?'background:#dcfce7;color:#15803d':'background:#fee2e2;color:#b91c1c')+'">'+esc(o||'—')+'</span>'; }
     var rows=(j.lines||[]).map(function(l){
       var acct=l.account?(esc(l.account.code)+' · '+esc(l.account.name)):'<span style="color:var(--neg)">unmapped</span>';
-      var trk=l.tracking?('Production='+esc(l.tracking.option)+(l.tracking.exists?'':' <span style="color:var(--amber)" title="will be auto-created on posting">(new)</span>')):'<span class="mut tiny">—</span>';
+      var trk=l.tracking?('Production='+esc(l.tracking.option)+(l.tracking.exists?'':' <span style="color:var(--amber)" title="will be auto-created on posting">(new)</span>')):(l.cross?'<span class="mut tiny" title="cross-org settlement via the intercompany loan (901)">via loan 901</span>':'<span class="mut tiny">—</span>');
       var bill=l.linked_bill?('<a href="'+esc(l.linked_bill.url||'#')+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(l.linked_bill.number||l.linked_bill.id||'bill')+' ↗</a>'):'<span class="mut tiny">none</span>';
       var isDep=/deposit/i.test(l.type||'');
-      var payChk=(isDep&&!l.legacy)?'<span class="mut tiny">credit note (P58+)</span>'
+      var payChk=l.blocked?('<span style="color:var(--neg);font-weight:700" title="'+esc(l.blocked)+'">✕ '+(l.flag==='brightred'?'two-org deposit':'wrong org')+'</span>')
+        :(isDep&&!l.legacy)?'<span class="mut tiny">credit note (P58+)</span>'
         :(!l.linked_bill?'<span class="mut tiny">no bill</span>'
-        :(l.pay_ok===true?'<span style="color:var(--pos);font-weight:700" title="bill amount due covers this payment">✓ due '+money(l.bill_due)+'</span>'+((isDep&&l.legacy)?' <span class="mut tiny">@ deposit rate</span>':'')
+        :(l.pay_ok===true?'<span style="color:var(--pos);font-weight:700" title="'+esc((l.cross?'settles in '+String(l.settle_org||'').toUpperCase()+' from loan 901 — ':'')+'bill amount due covers this payment')+'">✓ due '+money(l.bill_due)+'</span>'+((isDep&&l.legacy)?' <span class="mut tiny">@ deposit rate</span>':'')
         :(l.pay_ok===false?'<span style="color:var(--neg);font-weight:700" title="payment exceeds the bill’s amount due — Xero would reject">✕ over (due '+money(l.bill_due)+')</span>'
         :'<span class="mut tiny">due n/a</span>')));
-      return '<tr style="border-top:1px solid var(--line)"><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(l.reference||'')+'</td><td class="l">'+esc(l.type||'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td class="l">'+acct+'</td><td class="l">'+trk+'</td><td class="l">'+bill+'</td><td class="l">'+payChk+'</td></tr>'; }).join('');
-    var bg=document.createElement('div'); bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
+      var rowBg=l.flag==='brightred'?'background:#fecaca':(l.flag==='red'?'background:#fee2e2':'');
+      return '<tr style="border-top:1px solid var(--line);'+rowBg+'"'+(l.blocked?' title="'+esc(l.blocked)+'"':'')+'><td class="l" style="font-family:ui-monospace,Menlo,monospace;white-space:nowrap">'+orgPill(l.home_org)+' '+esc(l.reference||'')+'</td><td class="l">'+esc(l.type||'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td class="l">'+acct+'</td><td class="l">'+trk+'</td><td class="l">'+bill+'</td><td class="l">'+payChk+'</td></tr>'; }).join('');
+    var payingUp=String(j.paying_org||j.region||'uk').toUpperCase();
+    var hasCross=(j.lines||[]).some(function(l){return l.cross;});
+    var orgSel='<select id="xbp-org" title="Which Xero org pays. Cross-org POs settle via the intercompany loan (901)." style="font-weight:800;border-radius:6px;padding:3px 8px;font-size:12px;border:1px solid var(--line);'+(payingUp==='AU'?'background:#dcfce7;color:#15803d':'background:#fee2e2;color:#b91c1c')+'">'
+      +'<option value="uk"'+(payingUp==='AU'?'':' selected')+'>Pay from UK org</option>'
+      +'<option value="au"'+(payingUp==='AU'?' selected':'')+'>Pay from AU org</option></select>';
+    var _old=document.getElementById('xbp-bg'); if(_old)_old.remove();
+    var bg=document.createElement('div'); bg.id='xbp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
     bg.innerHTML='<div style="background:var(--card);border-radius:12px;max-width:900px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
-      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Create in Xero</b><span class="tool-badge bg-blue">'+esc((j.region||'').toUpperCase())+' org</span><button id="xbp-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Create in Xero</b>'+orgSel+(hasCross?'<span class="mut tiny" title="some POs live in the other Xero org and settle via the intercompany loan (901)">+ cross-org via loan 901</span>':'')+'<button id="xbp-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
       +'<div style="padding:16px 18px">'
+      +((j.has_deposits&&(j.deposit_orgs||[]).length)?('<div style="background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c;font-weight:800;padding:9px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">THIS MUST BE PAID FROM A BANK LINKED TO XERO '+(j.deposit_orgs||[]).map(function(o){return String(o).toUpperCase();}).join(' &amp; ')+((j.deposit_orgs||[]).length>1?' — deposits from two orgs cannot be in one run, split them':' — deposits settle only in their home org')+'</div>'):'')
       +'<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">'
         +'<div><div class="mut tiny">Supplier</div><b>'+esc(j.supplier||'')+'</b></div>'
         +'<div><div class="mut tiny">Bill reference</div><b style="font-family:ui-monospace,Menlo,monospace">'+esc(j.reference||'')+'</b></div>'
         +'<div><div class="mut tiny">Date</div><b>'+esc(fd(j.date)||j.date||'')+'</b></div>'
         +'<div><div class="mut tiny">Total</div><b>'+money(j.total_usd)+' USD</b></div>'
-        +'<div><div class="mut tiny">Pays from</div><b>'+(j.bank?esc(j.bank.name)+' <span class="mut tiny">('+esc(j.bank.currency)+')</span>':'<span style="color:var(--neg)">no bank bound</span>')+'</b></div>'
+        +'<div><div class="mut tiny">Pays from</div><b>'+(j.bank?esc(j.bank.name)+' <span class="mut tiny">('+esc(j.bank.currency)+')</span>':'<span style="color:var(--neg)">no bank bound</span>')+'</b>'+(hasCross?'<div class="mut tiny">cross-org lines settle from loan 901 in their home org</div>':'')+'</div>'
       +'</div>'
       +'<div class="tw" style="max-height:38vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">PO</th><th class="l">Type</th><th class="l" style="text-align:right">Amount</th><th class="l">Account</th><th class="l">Tracking</th><th class="l">Linked bill</th><th class="l">Payment check</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><div class="mut tiny" style="margin-bottom:4px">Checks</div>'+checks+'</div>'
-      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="save-btn" id="xbp-post"'+(hasOverpay?' disabled style="opacity:.5;background:var(--blue);color:#fff;border-color:var(--blue)"':' style="background:var(--blue);color:#fff;border-color:var(--blue)"')+'>Create bill + payments in Xero</button>'
-        +(hasOverpay?'<span class="mut tiny" style="color:var(--neg)">A payment exceeds a bill’s amount due — fix before posting.</span>':'<span class="mut tiny">Creates the supplier-payment bill (draft) and posts a payment against each linked PO bill — in one step.</span>')
+      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="save-btn" id="xbp-post"'+((hasOverpay||hasBlocked)?' disabled style="opacity:.5;background:var(--blue);color:#fff;border-color:var(--blue)"':' style="background:var(--blue);color:#fff;border-color:var(--blue)"')+'>Create bill + payments in Xero</button>'
+        +(hasBlocked?'<span class="mut tiny" style="color:var(--neg)">Deposits from another Xero org are in this run — pay them from their own org first (red rows).</span>':(hasOverpay?'<span class="mut tiny" style="color:var(--neg)">A payment exceeds a bill’s amount due — fix before posting.</span>':'<span class="mut tiny">Creates the supplier-payment bill (draft) in the paying org and posts a payment against each PO bill (cross-org via loan 901) — in one step.</span>'))
         +'<span id="xbp-pst" class="mut tiny"></span></div>'
       +'<div id="xbp-result" style="margin-top:10px"></div>'
       +'</div></div>';
     document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
     var x=document.getElementById('xbp-x'); if(x)x.onclick=function(){ bg.remove(); };
+    var org=document.getElementById('xbp-org'); if(org)org.onchange=function(){ xbPreview(Object.assign({},j._run,{paying_org:org.value})); };   // re-price the run against the chosen paying org
     var q=document.getElementById('xbp-post'); if(q)q.onclick=function(){
       if(!confirm('Create the supplier-payment bill AND post payments to the linked PO bills in Xero '+((j.region||'').toUpperCase())+' now?\n\nThis writes to live Xero.'))return;
       q.disabled=true; var _t=q.textContent; q.textContent='Creating…'; var ps=document.getElementById('xbp-pst'); if(ps)ps.textContent='';

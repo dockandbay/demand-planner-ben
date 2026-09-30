@@ -4734,91 +4734,144 @@ async function _xeroBankForCurrency(region, ccy) {
   } catch (e) {}
   return null;
 }
+// Resolve the intercompany-loan (901) account for an org: the registry `loan` role if bound, else the org's account
+// with Code 901. Cached ~10 min per org. Used for cross-org supplier payments (paying org's bill line + home org's payment).
+const _loanAcctMemo = {};
+async function _xeroLoanAcct(region) {
+  region = xeroRegion(region);
+  const m = _loanAcctMemo[region];
+  if (m && m.at > Date.now() - 10 * 60 * 1000) return m.v;
+  let v = null;
+  try { const cfg = await _xeroFinanceCfg(); const a = ((cfg.accounts && cfg.accounts[region]) || {}).loan; if (a && a.id) v = { code: a.code || '901', name: a.name || 'Loan (intercompany)', id: a.id }; } catch (e) {}
+  if (!v) { try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Code=="901"')); const hit = ((ac && ac.Accounts) || [])[0]; if (hit) v = { code: hit.Code || '901', name: hit.Name || 'Loan (intercompany)', id: hit.AccountID }; } catch (e) {} }
+  _loanAcctMemo[region] = { v, at: Date.now() };
+  return v;
+}
 // Shared plan computation for a payment run → the Xero bill + per-line coding + linked bills + checks. Read-only.
+// v28.106 (Ben): the PAYING org is chosen on the run (dropdown, default UK). Each PO's HOME org is where its own bill
+// lives. Completion/balance lines whose home org differs from the paying org settle via the intercompany LOAN (901):
+// the supplier-payment bill line codes to the paying org's 901, and the settlement payment posts in the home org from
+// the home org's 901. Deposits never cross orgs — a cross-org deposit is flagged RED, deposits from two orgs BRIGHT RED.
 async function computeXeroRunPlan(run) {
   const lines = Array.isArray(run.lines) ? run.lines : [];
   const payLines = lines.filter(l => l && /deposit|completion|balance|final/i.test(String(l.type || '')));   // exclude "other"
   if (!payLines.length) return { ok: false, error: 'No deposit/completion/balance lines in this run to post.' };
   const poRefs = [...new Set(payLines.map(l => String(l.reference || '')).filter(Boolean))];
-  let region = 'uk';
+  const paying = xeroRegion(run.paying_org || run.org || 'uk');   // where the supplier-payment bill + USD bank live
+  const homeByPo = {};
   if (poRefs.length) {
     const pr = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [poRefs])).rows;
-    if (pr.some(p => _poXeroRegion(p.cc, p.branch) === 'au')) region = 'au';
+    pr.forEach(p => { homeByPo[p.po] = _poXeroRegion(p.cc, p.branch); });
   }
+  const homeOf = po => homeByPo[String(po || '')] || paying;   // unknown PO → treat as paying org (no cross-org surprise)
   const cfg = await _xeroFinanceCfg();
-  const banks = (cfg.banks && cfg.banks[region]) || {};
-  const accts = (cfg.accounts && cfg.accounts[region]) || {};
-  const usdBankRole = region === 'au' ? 'gentium_usd' : 'universal_partners_usd';
-  // The payment isn't reconciled, so the exact bank doesn't matter — only the currency. Prefer the registry USD bank,
-  // else fall back to any live USD bank account in the org (currency-matched).
+  const banks = (cfg.banks && cfg.banks[paying]) || {};
+  const accts = (cfg.accounts && cfg.accounts[paying]) || {};
+  const usdBankRole = paying === 'au' ? 'gentium_usd' : 'universal_partners_usd';
   let bank = banks[usdBankRole] || null;
-  if (!bank) { try { bank = await _xeroBankForCurrency(region, 'USD'); } catch (e) {} }
+  if (!bank) { try { bank = await _xeroBankForCurrency(paying, 'USD'); } catch (e) {} }
+  // Loan (901) account for every org this run touches — the paying org (cross-org bill lines) and each home org.
+  const orgsNeeded = new Set([paying]); payLines.forEach(l => orgsNeeded.add(homeOf(l.reference)));
+  const loanByOrg = {}; for (const o of orgsNeeded) loanByOrg[o] = await _xeroLoanAcct(o);
   const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
   const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
+  // Production tracking options live in the PAYING org (the supplier-payment bill is there; only same-org deposits carry tracking).
   let trackOpts = new Set(); let trackOk = true;
-  try { const t = await xeroFetch(region, '/api.xro/2.0/TrackingCategories');
+  try { const t = await xeroFetch(paying, '/api.xro/2.0/TrackingCategories');
     const cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
     if (cat) (cat.Options || []).forEach(o => trackOpts.add(String(o.Name).toUpperCase())); else trackOk = false;
   } catch (e) { trackOk = null; }
-  // Legacy per-production account codes (for productions BEFORE P58 — both deposits and supplier payments book to the
-  // production's own Xero account, per the current prod_numbers mapping; no 602/602.1 split, no Production tracking).
+  // Legacy per-production account codes (productions BEFORE P58 — book to the production's own Xero account).
   const legacyProdAcct = {};
   try { const prods = [...new Set(payLines.map(l => String(l.prod_no || '').trim()).filter(Boolean))];
     if (prods.length) (await pool.query(`SELECT prod_no, coalesce(nullif(xero_account_code,''),'') code, coalesce(xero_account_name,'') name FROM planner.prod_numbers WHERE prod_no = ANY($1::text[])`, [prods])).rows.forEach(r => { legacyProdAcct[r.prod_no] = { code: r.code, name: r.name }; });
   } catch (e) {}
+  // Deposits from more than one home org can't share a run (bright-red block).
+  const depositOrgs = new Set(payLines.filter(l => /deposit/i.test(String(l.type || ''))).map(l => homeOf(l.reference)));
+  const depositsMultiOrg = depositOrgs.size > 1;
   const outLines = payLines.map(l => {
     const isDeposit = /deposit/i.test(String(l.type || ''));
+    const home = homeOf(l.reference);
+    const cross = home !== paying;
     const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
-    const useNew = (region === 'au') || (prodN != null && prodN >= 58);   // AU always new (602/602.1 + tracking); UK: P58+ new, earlier legacy per-production account
+    const useNew = (home === 'au') || (prodN != null && prodN >= 58);   // AU always new; UK P58+ new, earlier legacy
     const link = linkByPo[String(l.reference || '')] || null;
-    let acct, acctRole, trackOption = null;
-    if (useNew) {
-      acctRole = isDeposit ? 'stock_deposits' : 'supplier_payments';
-      const a = accts[acctRole]; acct = a ? { code: a.code, name: a.name, id: a.id } : null;
-      const prod = prodDigits; trackOption = (isDeposit && prod) ? ('P' + prod) : null;
+    let acct, acctRole, trackOption = null, blocked = null, flag = null;
+    if (isDeposit) {
+      // Deposits never cross orgs and never use the loan. Same-org → home-org stock_deposits (as today). Cross-org or
+      // two-org-mixed deposits are flagged and blocked (no settlement posts).
+      if (depositsMultiOrg) { flag = 'brightred'; blocked = 'Deposits from ' + [...depositOrgs].map(o => o.toUpperCase()).join(' + ') + ' are mixed — run each org’s deposits separately.'; }
+      else if (cross) { flag = 'red'; blocked = 'Deposit must be paid from its home org (' + home.toUpperCase() + ') bank — cannot settle from a ' + paying.toUpperCase() + ' run.'; }
+      if (useNew) { acctRole = 'stock_deposits'; const a = accts['stock_deposits']; acct = a ? { code: a.code, name: a.name, id: a.id } : null; trackOption = prodDigits ? ('P' + prodDigits) : null; }
+      else { acctRole = 'legacy'; const lp = legacyProdAcct[String(l.prod_no || '').trim()]; const code = (l.account_code || '').trim() || (lp && lp.code) || ''; acct = code ? { code, name: (lp && lp.name) || 'production account (pre-P58)', id: null } : null; }
+    } else if (cross) {
+      // Cross-org completion/balance → the supplier-payment bill line codes to the PAYING org's loan (901); the
+      // settlement payment posts in the HOME org from the home org's loan (901). No Production tracking on a loan line.
+      acctRole = 'loan'; const ln = loanByOrg[paying]; acct = ln ? { code: ln.code, name: ln.name, id: ln.id } : null;
     } else {
-      acctRole = 'legacy';   // both deposit + payment → the production's own account (line's report-computed code, else prod_numbers)
-      const lp = legacyProdAcct[String(l.prod_no || '').trim()];
-      const code = (l.account_code || '').trim() || (lp && lp.code) || '';
-      acct = code ? { code: code, name: (lp && lp.name) || 'production account (pre-P58)', id: null } : null;
+      // Same-org completion/balance → existing coding (602.1 / legacy production account).
+      if (useNew) { acctRole = 'supplier_payments'; const a = accts['supplier_payments']; acct = a ? { code: a.code, name: a.name, id: a.id } : null; }
+      else { acctRole = 'legacy'; const lp = legacyProdAcct[String(l.prod_no || '').trim()]; const code = (l.account_code || '').trim() || (lp && lp.code) || ''; acct = code ? { code, name: (lp && lp.name) || 'production account (pre-P58)', id: null } : null; }
     }
-    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '', deposit_ref: l.deposit_ref || '', legacy: !useNew,
+    return { reference: l.reference, type: l.type, amount: Number(l.amount) || 0, prod_no: l.prod_no || '', deposit_ref: l.deposit_ref || '',
+      legacy: !useNew, home_org: home, cross, blocked, flag,
       account: acct, account_role: acctRole,
       tracking: trackOption ? { category: 'Production', option: trackOption, exists: trackOpts.has(trackOption.toUpperCase()) } : null,
       linked_bill: link ? { id: link.external_id, number: link.external_ref, url: link.url } : null };
   });
   const total = outLines.reduce((s, l) => s + l.amount, 0);
   const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
-  // A line posts a PAYMENT against the PO bill when it's completion/balance, OR a pre-P58 deposit (pre-P58 deposits pay
-  // the bill at the DEPOSIT REFERENCE'S exchange rate; P58+ deposits draw down via a credit note instead → no payment).
-  const willPay = l => !!(l.linked_bill && l.linked_bill.id) && (!/deposit/i.test(String(l.type || '')) || l.legacy);
-  outLines.forEach(l => { l.will_pay = willPay(l); });
-  // deposit-reference exchange rates (pre-P58 deposit payments post at these)
+  // A line posts a PAYMENT when it's completion/balance, OR a pre-P58 same-org deposit. P58+ deposits draw down via a
+  // credit note (no payment). Blocked deposits post nothing. Cross-org completions settle in the HOME org from its loan.
+  outLines.forEach(l => {
+    const isDep = /deposit/i.test(String(l.type || ''));
+    l.will_pay = !!(l.linked_bill && l.linked_bill.id) && !l.blocked && (!isDep || l.legacy);
+    if (l.will_pay) {
+      l.settle_org = l.cross ? l.home_org : paying;
+      if (l.cross) { const ln = loanByOrg[l.home_org]; l.settle_from = 'loan'; l.settle_account_id = ln ? ln.id : null; l.settle_account_name = ln ? (ln.code + ' ' + ln.name) : null; }
+      else { l.settle_from = 'bank'; l.settle_account_id = bank ? bank.account_id : null; l.settle_account_name = bank ? bank.name : null; }
+    }
+  });
+  // deposit-reference exchange rates (pre-P58 same-org deposit payments post at these)
   const depRefs = [...new Set(outLines.filter(l => l.legacy && /deposit/i.test(String(l.type || '')) && l.deposit_ref).map(l => l.deposit_ref))];
   const depRate = {};
   if (depRefs.length) { try { (await pool.query(`SELECT reference, xero_fx FROM planner.deposits WHERE reference = ANY($1::text[])`, [depRefs])).rows.forEach(r => { depRate[r.reference] = (r.xero_fx != null ? Number(r.xero_fx) : null); }); } catch (e) {} }
   outLines.forEach(l => { if (l.legacy && /deposit/i.test(String(l.type || ''))) l.deposit_rate = depRate[l.deposit_ref] != null ? depRate[l.deposit_ref] : null; });
-  // Validate each PAYMENT against its linked bill's live AmountDue — Xero rejects a payment that exceeds what's owed.
-  const payBillIds = [...new Set(outLines.filter(l => l.will_pay).map(l => l.linked_bill.id))];
+  // Validate each PAYMENT against its bill's live AmountDue — IN ITS SETTLE ORG (a cross-org line's bill lives in the
+  // home org). Group the id lookups per org so each hits the right Xero tenant.
+  const byOrgIds = {};
+  outLines.filter(l => l.will_pay).forEach(l => { (byOrgIds[l.settle_org] = byOrgIds[l.settle_org] || new Set()).add(l.linked_bill.id); });
   const dueById = {};
-  for (let i = 0; i < payBillIds.length; i += 40) {
-    const chunk = payBillIds.slice(i, i + 40);
-    try { const jb = await xeroFetch(region, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
+  for (const org of Object.keys(byOrgIds)) {
+    const ids = [...byOrgIds[org]];
+    for (let i = 0; i < ids.length; i += 40) {
+      const chunk = ids.slice(i, i + 40);
+      try { const jb = await xeroFetch(org, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
+    }
   }
   outLines.forEach(l => {
     if (l.will_pay) {
       const b = dueById[l.linked_bill.id];
       if (b) { l.bill_due = b.due; l.bill_status = b.status; l.bill_ccy = b.ccy; l.bill_rate = b.rate; l.pay_ok = (Number(l.amount) || 0) <= b.due + 0.01; }
-      else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted) → can't validate
+      else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted, or wrong org) → can't validate
     }
   });
   const checks = [];
-  // v28.105 (Ben): dropped the "Pays from … (not reconciled — only the currency matters)" reassurance — it was
-  // inaccurate. The pay-from bank still shows in the preview header; only surface the no-bank case, which blocks posting.
-  if (!bank) checks.push({ level: 'error', msg: 'No USD bank bound in Xero ' + region.toUpperCase() + ' — bind the pay-from bank in CONFIG ▸ Payments (a PayPal wallet is not used).' });
+  if (!bank) checks.push({ level: 'error', msg: 'No USD bank bound in Xero ' + paying.toUpperCase() + ' — bind the pay-from bank in CONFIG ▸ Payments (a PayPal wallet is not used).' });
+  const brDep = outLines.filter(l => l.flag === 'brightred');
+  if (brDep.length) checks.push({ level: 'error', msg: 'Deposits from more than one Xero org are mixed (' + [...depositOrgs].map(o => o.toUpperCase()).join(' + ') + ') — run each org’s deposits separately: ' + [...new Set(brDep.map(l => l.reference))].join(', ') });
+  const rDep = outLines.filter(l => l.flag === 'red');
+  if (rDep.length) checks.push({ level: 'error', msg: rDep.length + ' deposit(s) belong to a different Xero org than the paying org (' + paying.toUpperCase() + ') — pay each from its own org: ' + [...new Set(rDep.map(l => l.reference + ' (' + l.home_org.toUpperCase() + ')'))].join(', ') });
   const overpay = outLines.filter(l => l.pay_ok === false);
   if (overpay.length) checks.push({ level: 'error', msg: overpay.length + ' payment(s) exceed the bill’s amount due (Xero would reject): ' + overpay.map(l => l.reference).join(', ') });
-  ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name + ' (P58+)' } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + region.toUpperCase() }); });
+  const crossPay = outLines.filter(l => l.cross && !/deposit/i.test(String(l.type || '')));
+  if (crossPay.length) {
+    const missOrgs = new Set();
+    crossPay.forEach(l => { if (!(l.account && l.account.code)) missOrgs.add(paying.toUpperCase()); if (l.will_pay && !l.settle_account_id) missOrgs.add(l.home_org.toUpperCase()); });
+    if (missOrgs.size) checks.push({ level: 'error', msg: 'Intercompany loan (901) account not found in Xero ' + [...missOrgs].join(' + ') + ' — bind it in CONFIG ▸ Payments.' });
+    else checks.push({ level: 'ok', msg: crossPay.length + ' cross-org line(s) settle via the intercompany loan (901): ' + [...new Set(crossPay.map(l => l.reference + ' → ' + l.home_org.toUpperCase()))].join(', ') });
+  }
+  ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name + ' (P58+)' } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + paying.toUpperCase() }); });
   const legacyLines = outLines.filter(l => l.account_role === 'legacy');
   if (legacyLines.length) {
     const un = legacyLines.filter(l => !(l.account && l.account.code));
@@ -4828,9 +4881,9 @@ async function computeXeroRunPlan(run) {
   }
   const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
-  const noBill = outLines.filter(l => !l.linked_bill).map(l => l.reference);
+  const noBill = outLines.filter(l => !l.linked_bill && !l.blocked).map(l => l.reference);
   if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
-  return { ok: true, region, supplier: run.supplier, reference: ref, currency: 'USD', date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, checks };
+  return { ok: true, region: paying, paying_org: paying, supplier: run.supplier, reference: ref, currency: 'USD', date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
 }
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
   try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
@@ -4845,35 +4898,44 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {});
     if (!plan.ok) return res.status(400).json({ error: plan.error });
     const region = plan.region, today = new Date().toISOString().slice(0, 10), date = plan.date || today;
-    if (!plan.bank || !plan.bank.account_id) return res.status(400).json({ error: 'No USD bank account found in Xero ' + region.toUpperCase() + ' to post the payment from (any USD bank works — the payment is not reconciled)' });
+    if (!plan.bank || !plan.bank.account_id) return res.status(400).json({ error: 'No USD bank account found in Xero ' + region.toUpperCase() + ' to post the payment from (bind the pay-from bank in CONFIG ▸ Payments; a PayPal wallet is not used)' });
+    // v28.106: deposits never cross orgs — refuse if any deposit is flagged (cross-org RED, two-org BRIGHT RED).
+    const depBlocked = plan.lines.filter(l => l.blocked);
+    if (depBlocked.length) return res.status(400).json({ error: depBlocked.some(l => l.flag === 'brightred') ? ('Deposits from more than one Xero org are mixed — run each org’s deposits separately: ' + [...new Set(depBlocked.filter(l => l.flag === 'brightred').map(l => l.reference))].join(', ')) : ('Deposit(s) belong to a different Xero org than the paying org (' + plan.paying_org.toUpperCase() + ') — pay each from its own org: ' + [...new Set(depBlocked.map(l => l.reference + ' (' + l.home_org.toUpperCase() + ')'))].join(', ')) });
     const badAcct = plan.lines.filter(l => Math.abs(l.amount) > 0.005 && !(l.account && l.account.code));
-    if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role))].join(', ') + ' — set it in CONFIG ▸ Xero' });
+    if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role === 'loan' ? 'intercompany loan (901)' : l.account_role))].join(', ') + ' — set it in CONFIG ▸ Payments' });
+    // Cross-org completions need the home org's loan account for the settlement payment.
+    const missLoan = plan.lines.filter(l => l.will_pay && l.settle_from === 'loan' && !l.settle_account_id);
+    if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in CONFIG ▸ Payments' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
     if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.amount) + ' > ' + _usd(l.bill_due) + ')').join('; ') });
-    const out = { region, supplier: plan.supplier, reference: plan.reference, bill: null, payments: [], skipped: [] };
-    // 1) the supplier-payment bill (DRAFT), coded 602 / 602.1 with Production tracking on deposits
+    const out = { region, paying_org: plan.paying_org, supplier: plan.supplier, reference: plan.reference, bill: null, payments: [], skipped: [] };
+    // 1) the supplier-payment bill (DRAFT) in the PAYING org. Same-org lines → 602 / 602.1 (Production tracking on
+    //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
     for (const l of plan.lines) { if (l.tracking && l.tracking.option && !l.tracking.exists) await _ensureProductionOption(region, l.tracking.option); }
-    const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference, Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
+    const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference + (l.cross ? ' (cross-org via loan, USD ' + (Math.round(l.amount * 100) / 100) + ')' : ''), Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
     const billBody = { Type: 'ACCPAY', Contact: { Name: plan.supplier || 'Supplier' }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: billLines };
     const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
     const binv = br && br.Invoices && br.Invoices[0];
     out.bill = { id: binv && binv.InvoiceID, number: binv && binv.InvoiceNumber, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + binv.InvoiceID) : null };
-    // All payments post at the SUPPLIER-PAYMENT BILL's exchange rate (Ben) — so the whole run is consistent. Xero sets
-    // the created USD bill's CurrencyRate (its daily rate); read it back and apply it to every payment.
+    // Same-org payments post at the SUPPLIER-PAYMENT bill's rate (the paying org's daily USD rate) — one consistent run.
     const runRate = (binv && binv.CurrencyRate != null) ? Number(binv.CurrencyRate) : null;
     out.rate = runRate;
-    // 2) a payment against each linked PO bill. Completion/balance → at the supplier-payment bill's rate. A PRE-P58
-    //    starting deposit → a payment at the DEPOSIT REFERENCE'S rate. A P58+ deposit → NO payment (credit-note draw-down).
+    // 2) a payment against each PO bill, IN ITS SETTLE ORG. Same-org → from the paying org's USD bank at the run rate
+    //    (a pre-P58 same-org deposit at the deposit-reference rate). Cross-org completion → in the HOME org from that
+    //    org's loan (901); we let Xero apply the home org's own daily USD rate (each entity books at its own rate).
     for (const l of plan.lines) {
       const isDep = /deposit/i.test(String(l.type || ''));
+      if (l.blocked) { out.skipped.push({ po: l.reference, reason: l.blocked }); continue; }
       if (isDep && !l.legacy) { out.skipped.push({ po: l.reference, reason: 'P58+ deposit → create a credit note' }); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
-      const rate = (isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate;
+      if (!l.settle_account_id) { out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'bank') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
+      const rate = l.cross ? null : ((isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate);
       try {
-        const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: plan.bank.account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
+        const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: l.settle_account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
         if (rate != null && rate > 0) payObj.CurrencyRate = rate;
-        const pr = await xeroFetch(region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
-        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, rate: rate, rate_src: (isDep && l.legacy) ? 'deposit-ref' : 'bill' });
+        const pr = await xeroFetch(l.settle_org, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
+        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill') });
       } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
     }
     res.json(Object.assign({ ok: true }, out));
@@ -8159,7 +8221,21 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
   const cell = 'border:1px solid #cccccc;padding:4px 8px', hcell = cell + ';background:#f2f2f2;text-align:left;font-weight:bold';
   const rowsHtml = run.lines.map(l => `<tr><td style="${cell};text-align:left">${escHtml(l.reference || '')}</td><td style="${cell};text-align:right">${fmtMoney2(l.amount)}</td><td style="${cell}">${escHtml(l.type || '')}</td><td style="${cell}">${escHtml(l.prod_no || '')}</td><td style="${cell}">${escHtml(l.deposit_ref || '')}</td></tr>`).join('');
   const greet = (us.find(u => u.contact_name) || {}).contact_name || supplier;
+  // v28.106 (Ben): when the run has DEPOSITS, warn at the top which Xero org's bank it must be paid from — deposits
+  // settle only in their home org (never cross-org). Derive the home org(s) from the run's PO references.
+  let depWarn = '';
+  try {
+    const depLines = (run.lines || []).filter(l => /deposit/i.test(String(l.type || '')));
+    if (depLines.length) {
+      const refs = [...new Set((run.lines || []).map(l => String(l.reference || '')).filter(Boolean))];
+      const pr = refs.length ? (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [refs])).rows : [];
+      const orgs = [...new Set(pr.map(p => _poXeroRegion(p.cc, p.branch)))];
+      const orgTxt = orgs.length === 1 ? ('XERO ' + orgs[0].toUpperCase()) : (orgs.length > 1 ? ('XERO ' + orgs.map(o => o.toUpperCase()).join(' & ') + ' (split — deposits from two orgs cannot be in one run)') : 'the deposit’s home Xero org');
+      depWarn = `<p style="margin:0 0 12px;padding:10px 12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;color:#b91c1c;font-weight:bold;font-size:13px">THIS MUST BE PAID FROM A BANK LINKED TO ${escHtml(orgTxt)}</p>`;
+    }
+  } catch (e) {}
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">`
+    + depWarn
     + `<p style="margin:0 0 10px">Dear ${escHtml(greet)},</p>`
     + `<p style="margin:0 0 10px">Please see below details as confirmed for the recent payment made to <b>${escHtml(supplier)}</b> for <b>${escHtml(payAmt)}</b>.</p>`
     + `<p style="margin:0 0 10px"><b>Supplier:</b> ${escHtml(supplier)}<br><b>Payment amount:</b> ${escHtml(payAmt)}<br><b>Payment reference:</b> ${escHtml(inv)}</p>`
