@@ -14919,6 +14919,9 @@
   // classes (.smp-openreq / .smp-manage / .smp-actbadge / .smp-tl / .smp-sw) so every existing handler binds unchanged;
   // sample versions become a horizontal, tappable chip strip (.smpc-samp → opens MANAGE on that sample's tab).
   function _smpKColor(k){ return {dev:'var(--muted)',shp:'var(--amber)',pkg:'var(--violet)',rv:'var(--violet)',ok:'var(--pos)',rj:'var(--neg)',stop:'var(--neg)'}[k]||'var(--muted)'; }
+  // v28.111 (Ben): sample rows show real dates — estimated delivery (the shipment's supplier-expected date) and the
+  // received date — instead of "sub <submitted date>".
+  function _smpRowDates(s){ var sh=(s&&s.shipment)||{}; var eta=sh.expected?('est '+_smpDM(sh.expected)):''; var rec=s.received_at?('rec '+_smpDM(s.received_at)):(sh.received_at?('rec '+_smpDM(sh.received_at)):''); var p=[eta,rec].filter(Boolean); return p.length?p.join(' · '):(s.sample_date?_smpDM(s.sample_date):(s.created_at?_smpDM(s.created_at):'')); }
   function smpMobileCard(r){
     var swSrc='/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'');
     var sw=r.has_swatch?'<img class="smpc-sw smp-sw" data-src="'+swSrc+'" src="'+swSrc+'" title="tap to enlarge">':'<span class="smpc-sw none">—</span>';
@@ -14932,7 +14935,7 @@
         return '<button class="smpc-samp'+(latest?' latest':'')+'" data-rid="'+r.id+'" data-sid="'+s.id+'" title="tap to review / receive">'
           +'<span class="smpc-sv"><span class="smpc-sdot smp-tick k-'+st.k+'">'+_smpGlyph(st.k)+'</span>S'+(i+1)+'</span>'
           +'<span class="smpc-sst" style="color:'+_smpKColor(st.k)+'">'+esc(st.t)+'</span>'
-          +'<span class="smpc-sdt">'+esc(s.received_at?_smpDM(s.received_at):'sub '+_smpDM(s.sample_date||s.created_at))+'</span>'
+          +'<span class="smpc-sdt">'+esc(_smpRowDates(s))+'</span>'
         +'</button>'; }).join(''):'<span class="smpc-nosamp">No samples yet — awaiting supplier</span>';
     var acc=r.supplier_accepted_at?'<span class="smpc-acc ok">✓ Accepted</span>':'<span class="smpc-acc wait">⏳ Awaiting</span>';
     var tl='<button class="smpc-tl smp-tl" data-ref="'+esc(r.item_ref)+'" title="timeline">💬 '+(r.notes||0)+(r.unread_supplier?' <span class="smpc-unread">'+r.unread_supplier+'</span>':'')+'</button>';
@@ -15046,7 +15049,7 @@
             var _n=(s.feedback||0)+(s.notes_n||0), _dec=(s.approved||s.rejected)?' · '+(s.rejected?s.rejected+' rejected':s.approved+' approved'):'';
             cells+='<td class="smp-scell"><span class="smp-tickwrap"><span class="smp-tick k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" data-rec="'+(rec?'1':'0')+'" title="'+esc(_st.t)+_dec+' · '+(rec?'received '+esc(fd(s.received_at))+' — click to un-receive':'sent '+esc(fd(s.sample_date||s.created_at))+' — click when received')+'">'+_smpGlyph(_st.k)+'</span>'
               +(_n?'<span class="smp-n" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+_n+(_n===1?' note / feedback':' notes / feedback')+' on this version — click to review">'+_n+'</span>':'')+'</span>'
-              +'<span class="smp-sdate'+(rec?'':' sub')+' k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+esc(_st.t)+_dec+(s.description?' · '+esc(s.description):'')+' — click to review">'+(rec?_smpDM(s.received_at):'sub. '+sub)+'</span>'
+              +'<span class="smp-sdate'+(rec?'':' sub')+' k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+esc(_st.t)+_dec+(s.description?' · '+esc(s.description):'')+' — click to review">'+esc(_smpRowDates(s))+'</span>'
               // v27.889 (Ben): the sample-card 3-char code under the tick — black badge, white text (type it in the search box or scan the card)
               +(s.short_code?'<span class="smp-code" data-sid="'+s.id+'" data-rid="'+r.id+'" title="Sample card code '+esc(s.short_code)+' — type it in the search box or scan the card. Click to review.">'+esc(s.short_code)+'</span>':'')
               // v27.770 (Ben): sample's shipment ref (opens the sample drawer) + tracking link under the tick, if it exists
@@ -15710,7 +15713,7 @@
     hzqSwr('/api/product/dashboard').then(function(rows){ rows=Array.isArray(rows)?rows:[];   // v27.878: instant from cache, revalidated
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       if(!_dashSeason||(_dashSeason!=='__all'&&seasons.indexOf(_dashSeason)<0))_dashSeason=seasons[seasons.length-1]||'__all';
-      function ovPill(s){ var m={approved:['Approved','var(--pos)','var(--pos-bg)'],dropped:['Rejected','var(--neg)','var(--neg-bg)']}, x=m[s]||['In development','var(--amber)','var(--amber-bg)']; return '<span class="db-ov" style="background:'+x[2]+';color:'+x[1]+'">'+x[0]+'</span>'; }
+      function ovPill(s){ var m={approved:['Approved','var(--pos)','var(--pos-bg)'],dropped:['Stop development','var(--neg)','var(--neg-bg)']}, x=m[s]||['In development','var(--amber)','var(--amber-bg)']; return '<span class="db-ov" style="background:'+x[2]+';color:'+x[1]+'">'+x[0]+'</span>'; }
       function cell(comp,prodApproved){ var req=comp?(comp.req||0):0, appr=comp?(comp.appr||0):0;
         if(req===0) return '<td class="db-c na" title="not required">—</td>';
         if(appr>=req) return '<td class="db-c ok" title="approved ('+appr+'/'+req+')">'+appr+'/'+req+'</td>';
@@ -15812,9 +15815,9 @@
     row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
     loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(function(){ if(document.hidden)return; loadProductUnread(); },240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>0?(n>99?'99+':String(n)):''; b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
-  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Rejected','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
-  // Item status: In development (orange) / Approved (green) / Rejected (red, value 'dropped'). Colour-coded editable dropdown.
-  var PROD_ITEM_STAT=[['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
+  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Stop development','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
+  // v28.111 (Ben): product status is a simple 3-state — In development / Approved / Stop development (value 'dropped', kept for DB compat). No sampling stages.
+  var PROD_ITEM_STAT=[['in_development','In development'],['approved','Approved'],['dropped','Stop development']];
   function prodStatusStyle(v){ return v==='approved'?'background:var(--pos-bg);color:var(--pos);font-weight:700':v==='dropped'?'background:var(--neg-bg);color:var(--neg);font-weight:700':'background:var(--amber-bg);color:var(--amber);font-weight:600'; }
   function prodStatusSelHtml(ref,val){ return '<select class="fci pg-status-sel" data-ref="'+esc(ref)+'" style="'+prodStatusStyle(val)+'">'+PROD_ITEM_STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
   // ── STAGE state machine (v27.395): the one field the user drives. APPROVAL (status) derives from the terminal stage.
@@ -16108,7 +16111,7 @@
       c.innerHTML=tiles+piv+sup;
       c.querySelectorAll('.pr-detail').forEach(function(a){ a.onclick=function(){ _prReportDetail(a.dataset.k, detail[a.dataset.k]||[]); }; });
     }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
-  function _prOutcome(o){ return o==='approved'?'<span style="color:var(--smp-ok);font-weight:700">Approved</span>':o==='dropped'?'<span style="color:var(--smp-rj);font-weight:700">Rejected</span>':'<span style="color:var(--smp-dev)">In progress</span>'; }
+  function _prOutcome(o){ return o==='approved'?'<span style="color:var(--smp-ok);font-weight:700">Approved</span>':o==='dropped'?'<span style="color:var(--smp-rj);font-weight:700">Stop development</span>':'<span style="color:var(--smp-dev)">In progress</span>'; }
   function _prReportDetail(key, rows){ var p=String(key).split('||'), sup=p[0], sea=p[1]||'';
     var ov=document.createElement('div'); ov.className='hz-drawer-overlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.42);z-index:200060;display:flex;justify-content:flex-end';
     var body=rows.length?rows.map(function(r){ return '<tr><td class="l" style="font-weight:600">'+esc(r.item_ref)+'</td><td class="l">'+esc(r.colour||'')+'</td><td class="l">'+esc(r.type||'')+'</td><td style="text-align:center;font-weight:700">'+r.samples+'</td><td>'+_prOutcome(r.outcome)+'</td><td class="l">'+esc(r.dev_start||'')+'</td></tr>'; }).join(''):'<tr><td colspan="6" class="mut" style="padding:8px">No requests.</td></tr>';
@@ -16121,7 +16124,7 @@
     ov.querySelector('.pr-x').onclick=function(){ ov.remove(); }; ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
     ov.querySelector('.pr-pdf').onclick=function(){ _prReportPDF(sup,sea,rows); }; }
   function _prReportPDF(sup,sea,rows){ var w=window.open('','_blank'); if(!w){ alert('Allow pop-ups to generate the report.'); return; }
-    var body=rows.map(function(r){ var oc=r.outcome==='approved'?'Approved':r.outcome==='dropped'?'Rejected':'In progress'; return '<tr><td>'+esc(r.item_ref)+'</td><td>'+esc(r.colour||'')+'</td><td>'+esc(r.type||'')+'</td><td style="text-align:center">'+r.samples+'</td><td>'+oc+'</td><td>'+esc(r.dev_start||'')+'</td></tr>'; }).join('');
+    var body=rows.map(function(r){ var oc=r.outcome==='approved'?'Approved':r.outcome==='dropped'?'Stop development':'In progress'; return '<tr><td>'+esc(r.item_ref)+'</td><td>'+esc(r.colour||'')+'</td><td>'+esc(r.type||'')+'</td><td style="text-align:center">'+r.samples+'</td><td>'+oc+'</td><td>'+esc(r.dev_start||'')+'</td></tr>'; }).join('');
     var totS=rows.reduce(function(a,r){return a+(r.samples||0);},0), title='Sampling report · '+esc(sup)+' · '+esc(sea);
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#101828}h1{font-size:18px;margin:0 0 2px}.s{color:#5b6b83;font-size:12px;margin-bottom:14px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #e5e9f0}th{background:#f4f6f9}</style></head><body><h1>'+title+'</h1><div class="s">'+rows.length+' requests · '+totS+' samples · generated '+esc(fd(new Date().toISOString().slice(0,10)))+'</div><table><thead><tr><th>Product</th><th>Colour</th><th>Type</th><th>Samples</th><th>Outcome</th><th>Dev start</th></tr></thead><tbody>'+body+'</tbody></table><scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},400);};</scr'+'ipt></body></html>');
     w.document.close(); }
@@ -16330,7 +16333,7 @@
       // values that polluted the list. Filtering (below) still shows every product linked to the chosen supplier.
       var sups=[]; rows.forEach(function(r){ (r.requests||[]).forEach(function(q){ if(q.supplier_name&&sups.indexOf(q.supplier_name)<0)sups.push(q.supplier_name); }); }); sups.sort();
       if(_prodFilt.supplier && sups.indexOf(_prodFilt.supplier)<0)_prodFilt.supplier='';   // clear a stale supplier filter if it no longer has any products
-      var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
+      var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Stop development']];
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
       var _grpNav=(_smpGroupMode==='tabs'||_smpGroupMode==='tree');   // v27.842 (Ben): season-tab / season-type-tree layouts pick the type via the tabs/tree nav, so drop the Category dropdown
