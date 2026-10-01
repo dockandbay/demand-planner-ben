@@ -18930,8 +18930,8 @@ app.get('/api/assistant/conversations/:id', async (req, res) => {
     const byMsg = {}; files.forEach(f => { (byMsg[f.message_id] = byMsg[f.message_id] || []).push(f); });
     msgs.forEach(m => { m.files = byMsg[m.id] || []; });
     // v28.139: this user's 👍/👎 on each answer (migration 326; tolerated if not applied yet)
-    try { const fb = (await pool.query(`SELECT message_id, rating, comment FROM planner.ai_message_feedback WHERE conversation_id=$1 AND user_email=$2`, [c.id, aiUser(req)])).rows;
-      const fbBy = {}; fb.forEach(f => { fbBy[f.message_id] = f; }); msgs.forEach(m => { const f = fbBy[m.id]; if (f) { m.rating = f.rating; m.feedback_comment = f.comment || ''; } }); } catch (_) {}
+    try { const fb = (await pool.query(`SELECT message_id, rating, comment, reason FROM planner.ai_message_feedback WHERE conversation_id=$1 AND user_email=$2`, [c.id, aiUser(req)])).rows;
+      const fbBy = {}; fb.forEach(f => { fbBy[f.message_id] = f; }); msgs.forEach(m => { const f = fbBy[m.id]; if (f) { m.rating = f.rating; m.feedback_comment = f.comment || ''; m.feedback_reason = f.reason || ''; } }); } catch (_) {}
     res.set('Cache-Control', 'no-store').json({ conversation: { id: c.id, title: c.title, created_at: c.created_at, updated_at: c.updated_at }, messages: msgs });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -18949,6 +18949,7 @@ app.post('/api/assistant/conversations/:id/delete', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // download a stored file (upload or returned), scoped to the caller
+const AI_FB_REASONS = { wrong_numbers: 'Wrong numbers / data', not_answered: 'Didn’t answer the question', missing_info: 'Missing information', unclear: 'Too long / unclear', other: 'Other' };
 // v28.139 (Ben): 👍 / 👎 an Ask Claude answer (+ optional comment) for feedback analysis. Only the conversation's owner can
 // rate, only assistant messages. rating 1 | -1 upserts; 0 clears. Question + answer are snapshotted (migration 326).
 app.post('/api/assistant/messages/:id/feedback', async (req, res) => {
@@ -18962,10 +18963,13 @@ app.post('/api/assistant/messages/:id/feedback', async (req, res) => {
     if (rating === 0) { await pool.query(`DELETE FROM planner.ai_message_feedback WHERE message_id = $1`, [m.id]); return res.json({ ok: true, rating: 0 }); }
     const q = (await pool.query(`SELECT content FROM planner.ai_messages WHERE conversation_id = $1 AND role = 'user' AND id < $2 ORDER BY id DESC LIMIT 1`, [m.conversation_id, m.id])).rows[0];
     const comment = b.comment == null ? null : String(b.comment).trim().slice(0, 2000) || null;
-    await pool.query(`INSERT INTO planner.ai_message_feedback (message_id, conversation_id, user_email, rating, comment, question, answer, model)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (message_id) DO UPDATE SET rating = excluded.rating, comment = coalesce(excluded.comment, planner.ai_message_feedback.comment), updated_at = now()`,
-      [m.id, m.conversation_id, aiUser(req), rating, comment, q ? String(q.content || '').slice(0, 4000) : null, String(m.content || '').slice(0, 8000), AI_ASSIST_MODEL]);
+    // v28.141: 👎 quick reason (fixed list, for counting); a 👍 clears it
+    const reason = rating === -1 && AI_FB_REASONS[String(b.reason || '')] ? String(b.reason) : null;
+    await pool.query(`INSERT INTO planner.ai_message_feedback (message_id, conversation_id, user_email, rating, comment, question, answer, model, reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (message_id) DO UPDATE SET rating = excluded.rating, comment = coalesce(excluded.comment, planner.ai_message_feedback.comment),
+         reason = CASE WHEN excluded.rating = 1 THEN NULL ELSE coalesce(excluded.reason, planner.ai_message_feedback.reason) END, updated_at = now()`,
+      [m.id, m.conversation_id, aiUser(req), rating, comment, q ? String(q.content || '').slice(0, 4000) : null, String(m.content || '').slice(0, 8000), AI_ASSIST_MODEL, reason]);
     res.json({ ok: true, rating });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -18975,17 +18979,21 @@ app.get('/api/assistant/feedback', async (req, res) => {
     if (req.me && req.me.live && !req.me.is_admin) return res.status(403).json({ error: 'Admin required' });
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 365, 1), 3650), rf = Number(req.query.rating);
     const rows = (await pool.query(`SELECT to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, user_email, CASE rating WHEN 1 THEN 'up' ELSE 'down' END rating,
-        coalesce(comment,'') comment, coalesce(question,'') question, coalesce(answer,'') answer, coalesce(model,'') model, message_id, conversation_id
+        coalesce(reason,'') reason, coalesce(comment,'') comment, coalesce(question,'') question, coalesce(answer,'') answer, coalesce(model,'') model, message_id, conversation_id
       FROM planner.ai_message_feedback WHERE created_at > now() - ($1 || ' days')::interval ${rf === 1 || rf === -1 ? 'AND rating = ' + rf : ''}
       ORDER BY created_at DESC LIMIT 5000`, [String(days)])).rows;
     const up = rows.filter(r => r.rating === 'up').length;
     if (String(req.query.format || '').toLowerCase() === 'csv') {
       const cell = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-      const cols = ['created_at', 'user_email', 'rating', 'comment', 'question', 'answer', 'model', 'message_id', 'conversation_id'];
+      const cols = ['created_at', 'user_email', 'rating', 'reason', 'comment', 'question', 'answer', 'model', 'message_id', 'conversation_id'];
       res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="ask-claude-feedback.csv"');
       return res.send([cols.join(',')].concat(rows.map(r => cols.map(c => cell(r[c])).join(','))).join('\n'));
     }
-    res.set('Cache-Control', 'no-store').json({ days, total: rows.length, up, down: rows.length - up, up_pct: rows.length ? Math.round(up / rows.length * 100) : null, rows });
+    // v28.141: page data — last 12 weeks trend (independent of ?days) + 👎 reason counts within the window
+    const weekly = (await pool.query(`SELECT to_char(date_trunc('week', created_at), 'YYYY-MM-DD') wk, count(*) FILTER (WHERE rating = 1)::int up, count(*) FILTER (WHERE rating = -1)::int down
+      FROM planner.ai_message_feedback WHERE created_at > now() - interval '12 weeks' GROUP BY 1 ORDER BY 1`)).rows;
+    const reasons = {}; rows.filter(r => r.rating === 'down').forEach(r => { const k = r.reason || 'none'; reasons[k] = (reasons[k] || 0) + 1; });
+    res.set('Cache-Control', 'no-store').json({ days, total: rows.length, up, down: rows.length - up, up_pct: rows.length ? Math.round(up / rows.length * 100) : null, weekly, reasons, reason_labels: AI_FB_REASONS, rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/assistant/file/:id', async (req, res) => {

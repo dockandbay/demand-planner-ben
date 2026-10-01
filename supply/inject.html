@@ -7623,8 +7623,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health'];
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','ask-feedback'];   // v28.141: + Ask Claude feedback
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','ask-feedback':'Ask Claude feedback'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -7635,9 +7635,9 @@
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
     // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
-    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels'].indexOf(CONFIG_SUB)>=0){
+    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback'].indexOf(CONFIG_SUB)>=0){
       c.innerHTML='<div class="count">Loading…</div>'; fetchMe(function(){ if(current==='config')renderConfig(d); }); return; }
-    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
+    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
@@ -8761,6 +8761,53 @@
             stat.textContent='Done in '+((Date.now()-t0)/1000).toFixed(1)+'s'; drawHC(d);
           }).catch(function(e){ runBtn.disabled=false; stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); };
       };
+      // v28.141 (Ben): CONFIG ▸ Admin ▸ Ask Claude feedback — totals, 12-week trend, top 👎 reasons, the 👎 list; a row opens
+      // a popup with the full question / answer / comment. Data: GET /api/assistant/feedback (admin), migration 326.
+      SUBS['ask-feedback']=function(){
+        var st={days:90, only:'down'}, D=null;
+        function shortU(e){ return String(e||'').replace(/@.*$/,'@'); }
+        function dt(s){ s=String(s||''); return (typeof fd==='function'?fd(s.slice(0,10)):s.slice(0,10))+(s.length>10?' '+s.slice(11,16):''); }
+        function rl(k){ return (D&&D.reason_labels&&D.reason_labels[k])||(k==='none'?'No reason given':k); }
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Ask Claude feedback.</b> 👍 / 👎 that users give Ask Claude answers (with the 👎 reason + note). Click a row for the full question, answer and comment.</div>'
+          +'<div class="bar" style="gap:8px"><span class="pill-lbl">Period</span><select class="flt" id="af-days" style="width:120px"><option value="30">Last 30 days</option><option value="90" selected>Last 90 days</option><option value="365">Last 12 months</option></select>'
+          +'<span class="pill-lbl" style="margin-left:6px">Show</span><select class="flt" id="af-only" style="width:140px"><option value="down" selected>👎 only</option><option value="all">All ratings</option></select>'
+          +'<a class="save-btn light" id="af-csv" style="margin-left:auto;text-decoration:none" href="/api/assistant/feedback?format=csv&days=90">⬇ CSV</a></div>'
+          +'<div id="af-body"><div class="count">Loading…</div></div>';
+        function card(lbl,val,sub,col){ return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:120px;background:var(--card)"><div class="mut tiny">'+lbl+'</div><div style="font-size:20px;font-weight:800;color:'+(col||'var(--ink)')+'">'+val+'</div>'+(sub?'<div class="mut tiny">'+sub+'</div>':'')+'</div>'; }
+        function trend(w){ if(!w.length)return '<div class="mut tiny">No ratings in the last 12 weeks.</div>'; var mx=Math.max.apply(null,w.map(function(x){return x.up+x.down;}).concat([1]));
+          return '<div style="display:flex;align-items:flex-end;gap:6px;height:96px;padding:4px 0">'+w.map(function(x){ var hu=Math.round(x.up/mx*80), hd=Math.round(x.down/mx*80);
+            return '<div title="Week of '+esc(dt(x.wk))+': 👍 '+x.up+' · 👎 '+x.down+'" style="display:flex;flex-direction:column;align-items:center;gap:2px;width:34px"><div style="display:flex;flex-direction:column-reverse;width:22px;height:80px">'
+              +'<div style="height:'+hu+'px;background:#4ade80;border-radius:0 0 3px 3px"></div><div style="height:'+hd+'px;background:#f87171;border-radius:3px 3px 0 0"></div></div><div class="mut tiny" style="font-size:9.5px;white-space:nowrap">'+esc(dt(x.wk).slice(0,6))+'</div></div>'; }).join('')+'</div>'
+            +'<div class="mut tiny"><span style="color:#16a34a">■</span> 👍 &nbsp; <span style="color:#dc2626">■</span> 👎 &nbsp;per week</div>'; }
+        function draw(){ var d=D, rows=(d.rows||[]).filter(function(r){ return st.only==='all'||r.rating==='down'; });
+          var pos=d.up_pct==null?'—':d.up_pct+'%', reasons=Object.keys(d.reasons||{}).sort(function(a,c){ return d.reasons[c]-d.reasons[a]; });
+          var h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 12px">'+card('Rated answers',d.total,'last '+st.days+' days')+card('👍 Helpful',d.up,null,'#16a34a')+card('👎 Not helpful',d.down,null,'#dc2626')+card('% positive',pos,null,d.up_pct==null?null:(d.up_pct>=80?'#16a34a':d.up_pct>=60?'#d97706':'#dc2626'))+'</div>'
+            +'<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px"><div><div class="sect-h">Trend <span class="mut tiny">(last 12 weeks)</span></div>'+trend(d.weekly||[])+'</div>'
+            +'<div style="min-width:260px"><div class="sect-h">Top 👎 reasons</div>'+(reasons.length?reasons.map(function(k){ var pct=d.down?Math.round(d.reasons[k]/d.down*100):0;
+              return '<div style="display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12.5px"><div style="width:170px">'+esc(rl(k))+'</div><div style="flex:1;min-width:80px;height:8px;background:var(--line);border-radius:4px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:#f87171"></div></div><b style="min-width:52px;text-align:right">'+d.reasons[k]+' · '+pct+'%</b></div>'; }).join(''):'<div class="mut tiny">No 👎 in this period.</div>')+'</div></div>'
+            +'<div class="sect-h">'+(st.only==='all'?'All ratings':'👎 answers')+' <span class="mut tiny">('+rows.length+')</span></div>'
+            +(rows.length?'<div class="tw" style="max-width:1440px"><table><thead><tr><th class="l">Date</th><th class="l">User</th><th class="l"></th><th class="l">Reason</th><th class="l">Comment</th><th class="l">Question</th></tr></thead><tbody>'
+              +rows.map(function(r,i){ var q=String(r.question||''); return '<tr class="af-row" data-i="'+(d.rows.indexOf(r))+'" style="cursor:pointer" title="Open the full question, answer and comment">'
+                +'<td class="l" style="white-space:nowrap">'+esc(dt(r.created_at))+'</td><td class="l">'+esc(shortU(r.user_email))+'</td><td class="l">'+(r.rating==='up'?'👍':'👎')+'</td>'
+                +'<td class="l" style="white-space:nowrap">'+(r.reason?'<span class="tool-badge bg-red">'+esc(rl(r.reason))+'</span>':'<span class="mut tiny">—</span>')+'</td>'
+                +'<td class="l" style="max-width:260px;white-space:normal">'+esc(String(r.comment||'').slice(0,140))+'</td><td class="l" style="max-width:420px;white-space:normal">'+esc(q.slice(0,140))+(q.length>140?'…':'')+'</td></tr>'; }).join('')+'</tbody></table></div>'
+              :'<div class="count">'+(st.only==='all'?'No ratings yet in this period.':'No 👎 in this period. 🎉')+'</div>');
+          document.getElementById('af-body').innerHTML=h;
+          document.querySelectorAll('#af-body .af-row').forEach(function(tr){ tr.onclick=function(){ openRow(D.rows[+tr.dataset.i]); }; }); }
+        function openRow(r){ if(!r)return; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200001;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto';
+          var blk=function(t,v,max){ return '<div style="margin-top:12px"><div class="mut tiny" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">'+t+'</div><div style="white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.5;background:var(--band,#f6f7f9);border:1px solid var(--line);border-radius:8px;padding:9px 11px'+(max?';max-height:'+max+';overflow:auto':'')+'">'+(v?esc(v):'<span class="mut">—</span>')+'</div></div>'; };
+          ov.innerHTML='<div style="background:var(--card);border-radius:12px;max-width:760px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:16px 18px">'
+            +'<div style="display:flex;align-items:center;gap:10px"><b style="font-size:15px">'+(r.rating==='up'?'👍 Helpful answer':'👎 Not helpful')+'</b>'+(r.reason?'<span class="tool-badge bg-red">'+esc(rl(r.reason))+'</span>':'')
+            +'<span class="mut tiny">'+esc(dt(r.created_at))+' · '+esc(shortU(r.user_email))+(r.model?' · '+esc(r.model):'')+'</span><button class="save-btn light" id="af-x" style="margin-left:auto">✕</button></div>'
+            +(r.rating==='down'?blk('Why — user’s note',r.comment):'')+blk('Question',r.question,'22vh')+blk('Answer',r.answer,'40vh')+'</div>';
+          document.body.appendChild(ov); var close=function(){ ov.remove(); document.removeEventListener('keydown',onKey); }; var onKey=function(e){ if(e.key==='Escape')close(); };
+          ov.addEventListener('click',function(e){ if(e.target===ov)close(); }); ov.querySelector('#af-x').onclick=close; document.addEventListener('keydown',onKey); }
+        function load(){ document.getElementById('af-body').innerHTML='<div class="count">Loading…</div>'; var csv=document.getElementById('af-csv'); if(csv)csv.href='/api/assistant/feedback?format=csv&days='+st.days;
+          fetch('/api/assistant/feedback?days='+st.days).then(function(r){return r.json();}).then(function(d){ if(d&&d.error){ document.getElementById('af-body').innerHTML='<div class="count" style="color:var(--neg)">'+esc(d.error)+(/migration|relation/i.test(d.error)?' (apply migration 326)':'')+'</div>'; return; } D=d; draw(); })
+            .catch(function(e){ document.getElementById('af-body').innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
+        document.getElementById('af-days').onchange=function(){ st.days=+this.value; load(); };
+        document.getElementById('af-only').onchange=function(){ st.only=this.value; if(D)draw(); };
+        load(); };
       SUBS['email-log']=function(){
         var st={from:'',to:'',q:''};
         function elStatus(s){ var m={sent:['var(--pos-bg)','var(--pos)'],sandbox:['var(--line)','var(--muted)'],error:['var(--neg-bg)','var(--neg)']}; var c=m[s]||['var(--line)','var(--muted)']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s||'')+'</span>'; }
@@ -12260,7 +12307,7 @@
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0?[poSub==='paydue'?'payments-due':poSub]:[]));   // v28.129 (Ben): the default sub-page gets its own deep link too (#/supply/payments/payments-due)
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
-      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','ask-feedback'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
     }
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
@@ -18123,7 +18170,8 @@
   var RAIL_L3MAP={
     supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3','#supply-root #config-subs.cfg-flat'],   // v28.135: SUPPLY ▸ CONFIG draws its items flat in #config-subs (cfg-flat), not #config-subs-l3 → rail showed no L3
     demand:['#demand-exceptions-nav','#demand-scenario-nav','#demand-inputs-nav','#demand-analysis-nav','#demand-config-nav'],
-    reports:['#perf-subnav']
+    reports:['#perf-subnav'],
+    config:['#supply-root #config-subs-l3']   // v28.141: ⚙ CONFIG ▸ Admin/Demand L3 (Email notifications … Ask Claude feedback) — v28.140 hides the in-content L3, so the rail must show it
   };
   function _railText(el){ try{ var c=el.cloneNode(true); c.querySelectorAll('.ex-badge,.rtab-count,.count,.nav-badge,.pilln,.stab-count,.tl-count').forEach(function(x){x.remove();}); return (c.textContent||'').replace(/\s+/g,' ').trim(); }catch(e){ return (el.textContent||'').replace(/\s+/g,' ').trim(); } }
   // v28.108 (Ben): mirror the in-content red action counter onto the rail L2/L3 items. Read the count off the source

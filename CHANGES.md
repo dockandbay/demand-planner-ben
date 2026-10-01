@@ -1,3 +1,13 @@
+## v28.141 (Ben): Ask Claude 👎 reason popup + CONFIG ▸ Admin ▸ Ask Claude feedback
+
+**Files: `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`, `migrations/326_ai_message_feedback.sql` (amended).**
+
+- **👎 popup:** clicking 👎 opens *What went wrong?* with quick reasons (Wrong numbers / data, Didn’t answer the question, Missing information, Too long / unclear, Other) + an optional note, and Send / Skip. The answer then shows the reason + note.
+- **Migration 326 amended** (not yet on live): adds `reason` (+ `ADD COLUMN IF NOT EXISTS` for environments that already created the table). The route stores the reason from a fixed list; a 👍 clears it. The export includes it.
+- **CONFIG ▸ Admin ▸ Ask Claude feedback** (admin): period 30 / 90 / 365 days; cards (rated, 👍, 👎, % positive); a 12-week stacked trend; top 👎 reasons with %; the 👎 (or all) list. A row opens a popup with the user's note, the full question and the answer. Plus a CSV download. Dates dd-Mmm-yy, users shortened (ben@).
+- **Regression fix from v28.140:** ⚙ Config ▸ Admin / Demand level-3 pages weren't in the left rail, and v28.140 hides the in-content L3, so they couldn't be reached. Added `config` to `RAIL_L3MAP`. Verified: rail shows all 9 Admin pages and clicking one opens it.
+- Verified on sandbox in the real panel: 👎 → popup (5 reasons) → chip + note → saved with `reason:wrong_numbers`; CONFIG page cards / trend / reasons / list / row popup; no page errors.
+
 ## v28.140 (Ben): Display settings over the rail, no L3 flash, rich Ask Claude answers
 
 **Files: `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`.**

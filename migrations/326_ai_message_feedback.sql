@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS planner.ai_message_feedback (
   user_email      text NOT NULL,
   rating          smallint NOT NULL CHECK (rating IN (-1, 1)),   -- 1 = thumbs up, -1 = thumbs down
   comment         text,                                   -- optional "what was wrong / what was good"
+  reason          text,                                   -- 👎 quick reason: wrong_numbers | not_answered | missing_info | unclear | other
   question        text,                                   -- the user message it answered (snapshot, trimmed)
   answer          text,                                   -- the assistant answer (snapshot, trimmed)
   model           text,
@@ -16,3 +17,5 @@ CREATE TABLE IF NOT EXISTS planner.ai_message_feedback (
 );
 CREATE INDEX IF NOT EXISTS ai_message_feedback_created_idx ON planner.ai_message_feedback (created_at DESC);
 CREATE INDEX IF NOT EXISTS ai_message_feedback_rating_idx ON planner.ai_message_feedback (rating, created_at DESC);
+-- v28.141: reason column (for environments that created the table before it was added)
+ALTER TABLE planner.ai_message_feedback ADD COLUMN IF NOT EXISTS reason text;
