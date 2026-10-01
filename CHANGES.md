@@ -1,3 +1,7 @@
+## v28.135 (Ben): SUPPLY ▸ CONFIG shows its items in the left menu
+
+**File: `supply/inject.html`.** SUPPLY ▸ CONFIG draws its items flat in `#config-subs.cfg-flat`, but the rail only mirrored `#config-subs-l3` (the grouped admin/demand config), so CONFIG had no level-3 items in the menu. Added to `RAIL_L3MAP.supply`. Verified in jsdom: all 17 items listed with the active one marked; clicking *Batches* opens Batches; clicking CONFIG from Payments opens Suppliers; no page errors.
+
 ## v28.134 (Ben, live bug): Xero PO-bill payments settle from the coded account, not the USD bank
 
 **Files: `server.mjs`, `supply/inject.html`.** Live example: bankTransactionID 8f855720-d224-4ae0-ae23-425f32060639, created from Horizon, paid from the bound USD bank ("TEST US AMEX").

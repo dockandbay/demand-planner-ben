@@ -18097,7 +18097,7 @@
   // L3 tabs mirrored under the active L2 — per-module list of the L3 nav containers a module renders in the DOM.
   // (Supply for now; demand/buy/reports keep their L3 in content until their L3 mirror is verified.)
   var RAIL_L3MAP={
-    supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3'],
+    supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3','#supply-root #config-subs.cfg-flat'],   // v28.135: SUPPLY ▸ CONFIG draws its items flat in #config-subs (cfg-flat), not #config-subs-l3 → rail showed no L3
     demand:['#demand-exceptions-nav','#demand-scenario-nav','#demand-inputs-nav','#demand-analysis-nav','#demand-config-nav'],
     reports:['#perf-subnav']
   };
