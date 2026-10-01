@@ -1,5 +1,5 @@
 diff --git a/artifact_v16.7.html b/artifact_v16.7.html
-index bae5b5e6..96644846 100644
+index bae5b5e6..d2a190b0 100644
 --- a/artifact_v16.7.html
 +++ b/artifact_v16.7.html
 @@ -1538,6 +1538,9 @@ function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)retur
@@ -24,18 +24,30 @@ index bae5b5e6..96644846 100644
      if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s); if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi); if(d.fc_outputs)Object.assign(FC_OUTPUTS,d.fc_outputs);
      SKU_DATA_READY=true;
      // v28.125: any demand overlay built before this point was built from the EMPTY lazy maps. Re-arm the build so the
-@@ -9999,7 +10005,9 @@ function render(){
+@@ -2274,7 +2280,8 @@ function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearT
+     fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); });
+   }).catch(function(){ _fbaTrfBlocked='network error, press refresh to retry'; _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); }); }   // v27.521: network failure LATCHES too (live parity) so the hourly auto-refresh cannot loop on a dead connection
+ function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
+-function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
++var _fbaTrfAutoAt=0;   // v28.148: at most ONE auto-refresh per hour per page (if the server's last_run did not advance, refresh → render → maybeRefresh re-fired: ×3 per FBA visit in the crawl)
++function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; if(_fbaTrfAutoAt&&Date.now()-_fbaTrfAutoAt<3600000)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000){ _fbaTrfAutoAt=Date.now(); fbaTrfRefresh(true); } }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
+ function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
+ function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!el)return;
+   var n=FBA_PENDING_ROWS.length, u=FBA_PENDING_ROWS.reduce(function(a,r){return a+(Number(r.qty)||0);},0), lr=FBA_PENDING_LR?(' · '+_fbaTrfAgo(FBA_PENDING_LR)):'';
+@@ -9999,7 +10006,11 @@ function render(){
    var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
    if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
    // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
 -  try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
 +  // v28.146: not for BUY & MOVE views; there the cold build is deferred behind a loading panel (see the _inBM branch below).
 +  var _bmV=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
-+  try{ if(!_PP_COVER_INIT && !_bmV && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
++  // v28.148: same for a COLD DEMAND visit (demand not built yet): deferred behind a loading panel after renderDemandTabs() below.
++  var _dmCold=(VIEW_MODE==='planning' && typeof DEMAND_BUILT!=='undefined' && !DEMAND_BUILT && typeof buildLiveDemand==='function');
++  try{ if(!_PP_COVER_INIT && !_bmV && !_dmCold && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
    // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
    if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
    // Toggle filter rows visibility based on view mode.
-@@ -10038,14 +10046,32 @@ function render(){
+@@ -10038,14 +10049,32 @@ function render(){
    }
    // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
    var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
@@ -70,7 +82,28 @@ index bae5b5e6..96644846 100644
      if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
      else if(VIEW_MODE==='zalando'){ var _twz=document.getElementById('tw'); if(_twz)_twz.style.display='none'; var _bwz=document.getElementById('buy-wrap'); if(_bwz)_bwz.remove(); renderZalando(); }
      else if(VIEW_MODE==='inventory'){ var _twi=document.getElementById('tw'); if(_twi)_twi.style.display='none'; var _bwi=document.getElementById('buy-wrap'); if(_bwi)_bwi.remove(); renderInventory(); }
-@@ -11683,7 +11709,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){
+@@ -10057,6 +10086,20 @@ function render(){
+   restoreMainView();
+   renderDemandTabs();
+   var planFilters=['ctabs-row','filters-row2','catrow1-wrap'];
++  if(_dmCold){   // v28.148: paint the DEMAND tabs + a loading panel, let the rail expand, then build demand and render for real
++    planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
++    var _twD=document.getElementById('tw'); if(_twD)_twD.style.display='none';
++    var _dbD=document.getElementById('demand-body'); if(_dbD)_dbD.remove();
++    _dbD=document.createElement('div'); _dbD.id='demand-body'; document.querySelector('.wrap').appendChild(_dbD);
++    _dbD.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
++    clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){
++      if(VIEW_MODE!=='planning'){ var _x=document.getElementById('demand-body'); if(_x&&DEMAND_VIEW==='plan')_x.remove(); return; }   // user moved on: don't block them
++      try{ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){} }catch(e){ console.error('buildLiveDemand failed',e); }
++      if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
++      try{ render(); }catch(e){ console.error(e); }
++    },160);
++    return;
++  }
+   if(DEMAND_VIEW!=='plan'){
+     planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+     var tw0=document.getElementById('tw'); if(tw0)tw0.style.display='none';
+@@ -11683,7 +11726,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){
  function renderExceptionsView(body){
    // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
    try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
@@ -79,7 +112,7 @@ index bae5b5e6..96644846 100644
    try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
-@@ -12025,7 +12051,7 @@ function renderBuyPlanView(body){
+@@ -12025,7 +12068,7 @@ function renderBuyPlanView(body){
    function cfCompute(b){
      fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(P){
        var cost={}; if(P&&Array.isArray(P.rows)){ P.rows.forEach(function(r){ var s=r.sku||r.SKU; if(!s)return; cost[s]=Number(String(r.cost||'').replace(/,/g,''))||0; }); }
@@ -88,7 +121,7 @@ index bae5b5e6..96644846 100644
        var CT=(typeof CTRS!=='undefined'&&CTRS.length)?CTRS:['UK','US','EU','AU','CA'];
        var order=[];
        var _MN3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-@@ -12289,7 +12315,7 @@ function renderSafetyStockView(body){
+@@ -12289,7 +12332,7 @@ function renderSafetyStockView(body){
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
    function money(n){ n=Math.round(Number(n)||0); return (n<0?'-£':'£')+Math.abs(n).toLocaleString(); }
@@ -97,7 +130,7 @@ index bae5b5e6..96644846 100644
    var Z={90:1.28,95:1.64,97.5:1.96,99:2.33}[SS_SL]||1.64;
    var CYCLE_WK=4;   // review-cycle allowance (monthly ordering) added on top of the statistical safety buffer
    var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
-@@ -12503,7 +12529,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
+@@ -12503,7 +12546,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
  function renderShipBagView(body){
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
@@ -106,7 +139,7 @@ index bae5b5e6..96644846 100644
    var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
    var fwd12=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,12):[];
    var p1=SB_P1/100,p2=SB_P2/100,p3=SB_P3/100, tot=p1+p2+p3; if(tot>0){p1/=tot;p2/=tot;p3/=tot;}   // normalise the split
-@@ -12839,7 +12865,7 @@ function renderInvStatus(){
+@@ -12839,7 +12882,7 @@ function renderInvStatus(){
    var panel=document.getElementById('invstatus-panel'); if(!panel)return;
    var mkt=INV_STATUS_MKT;
    if(typeof BP==='undefined'||!BP.statusMetrics){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
@@ -115,7 +148,7 @@ index bae5b5e6..96644846 100644
    var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:var(--neg)">'+esc((e&&e.message)||e)+'</div>'; return; }
    INV_EXPORT={};   // rebuild the per-block export payloads for this market
    var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'var(--neg)',B:'var(--amber)',C:'var(--muted)'};
-@@ -14251,7 +14277,7 @@ function daAnomalies(){
+@@ -14251,7 +14294,7 @@ function daAnomalies(){
  // FORWARD 6 months is out of line with the SKU's own seasonal flow (anomalyFlags: ratio to seasonal-expected
  // > 3 = spike, < 0.25 = dip). Reads the live buy-plan forecast (buildLiveDemand → md.demand[ch]).
  function daAnomalyReport(){
@@ -124,7 +157,7 @@ index bae5b5e6..96644846 100644
    var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]);   // full forward window (so the horizon filter incl. 7+ has data)
    if(!fwd.length||typeof BP_DATA==='undefined'||!BP_DATA.products)return [];
    var moIdx={}; fwd.forEach(function(m,i){moIdx[m]=i;});   // months-out (0 = this month)
-@@ -16055,7 +16081,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
+@@ -16055,7 +16098,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
  // (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
  // phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
  function afBuildBuyFeed(){
@@ -133,8 +166,26 @@ index bae5b5e6..96644846 100644
    var D=(typeof BP!=='undefined'&&BP.D)||null; if(!D) return [];
    var SL=D.sku_list||[], PD=D.products||{}, MK=['UK','US','EU','AU'], SEP='', agg={};
    for(var n=0;n<SL.length;n++){ var row=SL[n]; var sku=row.s; var sub=row.sc||row.c; if(!sku||!sub)continue;
+@@ -16189,9 +16232,14 @@ function renderAutoForecastReport(body){
+   if(AF_ENGINE==='old'){
+     fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(done).catch(fail);
+   } else {
+-    if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
+-    afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
+-    fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail);
++    var afGo=function(){ if(cur()!==key)return;
++      if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
++      afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
++      fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail); };
++    // v28.148: a cold demand build (~3 s) ran before the page could paint. Show what is happening, let it paint, then build.
++    var afCold=!AF_FEED && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE));
++    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(afGo,120); }
++    else afGo();
+   }
+ }
+ 
 diff --git a/server.mjs b/server.mjs
-index 0a2f6081..19c02b71 100644
+index 0a2f6081..bc4d6e21 100644
 --- a/server.mjs
 +++ b/server.mjs
 @@ -1981,7 +1981,10 @@ app.get('/', async (req, res) => {
@@ -207,7 +258,36 @@ index 0a2f6081..19c02b71 100644
            if (ec > 0) arows.push({ severity: 'amber', type: 'ERP POs not in planner',
              ref: ec + ' PO' + (ec > 1 ? 's' : ''),
              detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
-@@ -19720,9 +19732,10 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
+@@ -7769,6 +7781,14 @@ supplySectionHandler = async (req, res, next) => {
+     }
+   } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
+ };
++// v28.148: moved above the :section catch-all, which swallowed it as "unknown section" (404 on CONFIG ▸ Portal users).
++app.get('/api/supply/portal-signals', async (req, res) => {
++  try {
++    const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
++    const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
++    res.json({ unread, subs });
++  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
++});
+ app.get('/api/supply/:section', supplySectionHandler);
+ 
+ // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
+@@ -8122,13 +8142,6 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
+ // Bulk signals for the CONFIG ▸ Portal Users open-action counts: unread internal (D&B) notes per PO +
+ // all supplier submissions. Combined client-side with /api/supply/purchase-orders + samples to compute
+ // each supplier's open actions (same conditions the portal shows the supplier).
+-app.get('/api/supply/portal-signals', async (req, res) => {
+-  try {
+-    const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
+-    const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
+-    res.json({ unread, subs });
+-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+-});
+ // Send an open-actions reminder email to a supplier's registered portal address(es) — LIVE via Resend.
+ // Recipients are derived server-side from ACTIVE portal users for the supplier_id (the client cannot email
+ // an arbitrary address). Sandbox has no RESEND_API_KEY → nothing is sent (safe to test).
+@@ -19720,9 +19733,10 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
  // REST API, ~3s cold) — cache it briefly so repeat loads are instant. The cheap planner/ignored filtering below runs
  // fresh on every request, so Import/Ignore reflect immediately. ?refresh=1 forces a re-fetch.
  let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
@@ -219,7 +299,7 @@ index 0a2f6081..19c02b71 100644
    const cfg = fulfilConfigFor(env);
    if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
    const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
-@@ -19749,17 +19762,25 @@ async function fulfilCompareApiData(force) {
+@@ -19749,17 +19763,25 @@ async function fulfilCompareApiData(force) {
    _fulfilCmpCache = { env, at: Date.now(), pos, saleMap, poSaleMap };
    return _fulfilCmpCache;
  }
@@ -252,7 +332,7 @@ index 0a2f6081..19c02b71 100644
    const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
    return cand.map(p => {
 diff --git a/supply/inject.html b/supply/inject.html
-index 2bc27ff5..ce43291d 100644
+index 2bc27ff5..579bd5e3 100644
 --- a/supply/inject.html
 +++ b/supply/inject.html
 @@ -495,17 +495,17 @@
@@ -305,7 +385,7 @@ index 2bc27ff5..ce43291d 100644
      fetch('/api/supply/'+key).then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
        cache[key]=d; _hzCacheAt[key]=Date.now(); if(same||tk!==_navToken||current!==key||!hzViewIdle())return; try{ renderSectionData(key,d); }catch(e){} }).catch(function(){}); }
 -  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
-+  function invalidateDerived(){ _opGen++; ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
++  function invalidateDerived(){ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
      // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
      // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
      clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
@@ -314,7 +394,7 @@ index 2bc27ff5..ce43291d 100644
    // re-fetches fresh from the API — no full page reload. Called by the version poll when the ETL bumped source data
    // and the user navigates (so nav picks up fresh data without the disruptive location.reload). — Ben (nav lag/refresh)
 -  try{ window.__hzBustSupplyCache=function(){ try{ for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
-+  try{ window.__hzBustSupplyCache=function(){ try{ _opGen++; for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
++  try{ window.__hzBustSupplyCache=function(){ try{ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}   /* v28.117 (review C25): null-safe (was rendering the word "null") */
    function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'\\x3c');}   /* v28.117 (review C1): escape a value for a single-quoted JS string inside an inline handler — use as esc(jsq(v)); a quote in a PO/SKU could otherwise break out of onclick */
    function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -444,7 +524,7 @@ index 2bc27ff5..ce43291d 100644
      var imb=document.getElementById('fx-import'); if(imb)imb.onclick=function(){ var m=document.getElementById('fx-import-msg'); imb.disabled=true; var _t=imb.textContent; imb.textContent='Importing…'; if(m)m.textContent='';
        fetch('/api/supply/flexport/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ imb.disabled=false; imb.textContent=_t; if(j&&j.error)throw new Error(j.error);
          if(m){ m.style.color='var(--pos)'; m.textContent='✓ imported '+j.imported+' shipment'+(j.imported===1?'':'s')+' ('+j.po_matched+' match a PO). Reloading…'; } fxSyncLabel(j.last_sync); delete cache['flexport']; setTimeout(function(){ fetch('/api/supply/flexport').then(function(r){return r.json();}).then(function(d){ cache['flexport']=d; renderFlexport(d); }); },600); })
-@@ -12377,11 +12402,11 @@
+@@ -12377,22 +12402,25 @@
      var ab=document.getElementById('rep-actions-badge');   // ACTIONS L3 tab high-priority counter
      if(ab){ if(_actHi>0){ ab.textContent=_actHi; ab.style.display=''; ab.title=_actHi+' high-priority action'+(_actHi>1?'s':''); } else { ab.textContent=''; ab.style.display='none'; } } }
    // ERP-compare "to review" (non-ignored) counter shown next to the ERP COMPARE sub-nav tab.
@@ -458,7 +538,23 @@ index 2bc27ff5..ce43291d 100644
    // Open reallocation-options counter next to the REALLOCATE sub-nav tab (amber — these are opportunities, not overdue actions).
    var _reallocCount=null;
    function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
-@@ -12420,7 +12445,7 @@
+     if(_reallocCount==null||_reallocCount===0){ el.textContent=''; el.style.display='none'; }
+     else { el.textContent=_reallocCount; el.style.display=''; el.title=_reallocCount+' open reallocation option'+(_reallocCount===1?'':'s'); } }
+-  function refreshReallocBadge(){ fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
++  // v28.148 perf: the BI & REPORTS badge counts were re-fetched on EVERY report click (crawl: projection ×13, reallocations ×16,
++  // dtc/mismatch ×17). Throttled to one fetch per 2 min each; force=true (after a DTC reload) and any cache invalidation skip it.
++  var _badgeAt={}; function _badgeFresh(k,force){ if(!force&&_badgeAt[k]&&Date.now()-_badgeAt[k]<120000)return true; _badgeAt[k]=Date.now(); return false; }
++  function refreshReallocBadge(force){ if(_badgeFresh('realloc',force)){ paintReallocBadge(); return; } fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
+   var _urgentCrit=null;   // count of CRITICAL urgent-buy SKUs (excludes too-late-to-order), shown as a red action counter on the URGENT BUY tab
+   function paintUrgentBadge(){ var el=document.getElementById('rep-urgent-badge'); if(!el)return;
+     if(_urgentCrit==null||_urgentCrit===0){ el.textContent=''; el.style.display='none'; }
+     else { el.textContent=_urgentCrit; el.style.display=''; el.title=_urgentCrit+' critical stock-out risk'+(_urgentCrit===1?'':'s')+' to buy'; } }
+-  function refreshUrgentBadge(){ fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
++  function refreshUrgentBadge(force){ if(_badgeFresh('urgent',force)){ paintUrgentBadge(); return; } fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
+   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
+     if(rk==='metrics'){ try{ location.hash='#/reports/performance/supply-metrics'; }catch(e){} return; }   // Metrics moved to top-level REPORTS ▸ Performance ▸ Supply metrics
+     current='reports'; reportTab=rk; _actHost=null; syncHash();
+@@ -12420,7 +12448,7 @@
        if(rk==='reallocate')return renderReallocate(d);
        if(rk==='container-fill')return renderContainerFill(d);
        if(rk==='consolidate')return renderConsolidate(d);
@@ -467,7 +563,35 @@ index 2bc27ff5..ce43291d 100644
        cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
        if(rk==='upcoming')return renderUpcoming(d);
        if(rk==='pipeline')return renderPipeline(d);
-@@ -12984,36 +13009,7 @@
+@@ -12449,7 +12477,8 @@
+   function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list');   // .dtc-order-row = table row (desktop) or card (mobile)
+     if(host)host.querySelectorAll('.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
+     var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
+-  function refreshDtcBadge(){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
++  function refreshDtcBadge(force){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
++    if(_badgeFresh('dtc',force))return;   // v28.148: badge already painted from the last fetch (<2 min)
+     fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
+       var el=document.getElementById('nav-dtc-badge-l3'); if(el){ el.textContent=_dtcCount?String(_dtcCount):''; el.style.display=_dtcCount?'':'none'; }
+       try{ paintReportsL2Badge(); }catch(e){} }).catch(function(){}); }
+@@ -12490,7 +12519,7 @@
+     _dtcApplyFilter();
+     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
+     try{ _dtcApplyHideAcc(); }catch(e){}
+-    try{ refreshDtcBadge(); }catch(e){}
++    try{ refreshDtcBadge(); }catch(e){}   // (the reload below forces a fresh count)
+     try{ renderDtcFulfilAlign(); }catch(e){}
+   }
+   // v27.797: DTC ↔ Fulfil alignment — standalone read-only exception panel. Fulfil is the source of truth;
+@@ -12597,7 +12626,7 @@
+   function _dtcReload(){ fetch('/api/supply/dtc/mismatch').then(function(r){return r.json();}).then(function(d){ d=d||{}; _dtcData=d; var c=d.counts||{};
+     _dtcSetPill('Issues',c.issues); _dtcSetPill('Accepted',c.accepted); _dtcSetPill('OK',c.ok); _dtcSetPill('Unmapped POs',c.unmapped_pos);
+     _dtcApplyFilter();
+-    try{ refreshDtcBadge(); }catch(e){}
++    try{ refreshDtcBadge(true); }catch(e){}
+   }).catch(function(){}); }
+   // Small floating picker: filter a list of options (or type a free value), then onPick(val).
+   function _dtcPicker(anchor,cfg){ var old=document.getElementById('dtc-picker'); if(old)old.remove();
+@@ -12984,36 +13013,7 @@
        if(!confirm('Import Fulfil PO '+po+' into Horizon?\n\nBrings in the supplier, company (→ ship-to country), branch, SKUs, quantities & prices. If it already exists its lines are overwritten from Fulfil.'))return;
        x.disabled=true; x.textContent='Importing…';
        fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'po',value:po,confirm:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Import failed: '+j.error); x.disabled=false; x.textContent='⬆ Import to Horizon'; return; } invalidateDerived(); delete cache['purchase-orders']; if(_re)_re(); }).catch(function(e){ alert('Import failed: '+(e.message||e)); x.disabled=false; x.textContent='⬆ Import to Horizon'; }); }; }); }
@@ -505,7 +629,7 @@ index 2bc27ff5..ce43291d 100644
    // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
    function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
      function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
-@@ -14873,7 +14869,7 @@
+@@ -14873,7 +14873,7 @@
    window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
    // ↻ top-nav refresh (SUPPLY context): drop this module's client-side section cache + re-render the current
    // section so a just-busted server cache is re-fetched fresh, in place (no full reload). (v27.327)
@@ -514,3 +638,25 @@ index 2bc27ff5..ce43291d 100644
    // Context help for the current SUPPLY section (reuses the ANNOT descriptions). Returns {t,h}.
    window.supplyHelpText=function(){ var sec=current||'actions'; if(sec==='reports')sec=reportTab||'upcoming'; var raw=ANNOT[sec]||'';
      var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);
+diff --git a/supply/portal-view.js b/supply/portal-view.js
+index 7260572a..7df65004 100644
+--- a/supply/portal-view.js
++++ b/supply/portal-view.js
+@@ -120,6 +120,8 @@
+     return ''; }
+   function carrierTrackLink(carrier,code){ var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
+   // DHL tracking pill (P2b, v27.726) — reads the supplier-SCOPED cache (/api/portal/tracking-status), never DHL.
++  // v28.148: inside the staff app (window.__HZ_LANDING set by the shell) it reads the staff cache /api/tracking/status instead
++  // (the portal endpoint 401s for staff, so DHL pills never filled on SUPPLY ▸ Shipments / Samples / PRODUCT ▸ Sampling).
+   // Drop a <span class="hz-trkpill" data-trk="NUMBER"></span> and the observer below fills it. Status word sits
+   // in its own .pp-trkword span so the portal's zh auto-translation (PP_ZH) picks it up.
+   function hzTrkDate(s){ if(!s)return ''; s=String(s).slice(0,10); var p=s.split('-'); if(p.length!==3)return s; var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return p[2]+'-'+(mo[(+p[1])-1]||p[1])+'-'+p[0].slice(2); }
+@@ -130,7 +132,7 @@
+     return '<span title="'+esc(t.status_text||m[2])+'" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap;background:'+m[0]+';color:'+m[1]+'">'+mark+' <span class="pp-trkword">'+esc(m[2])+'</span>'+esc(when)+'</span>'; }
+   function hzFillTrackPills(root){ root=root||document; var ph=[].slice.call(root.querySelectorAll('.hz-trkpill[data-trk]')); if(!ph.length)return;
+     var seen={}; ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); if(n)seen[n]=1; }); var list=Object.keys(seen); if(!list.length)return;
+-    fetch('/api/portal/tracking-status?numbers='+encodeURIComponent(list.join(',')),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
++    fetch(((typeof window.__HZ_LANDING!=='undefined')?'/api/tracking/status':'/api/portal/tracking-status')+'?numbers='+encodeURIComponent(list.join(',')),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
+       ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n]); if(html){ el.innerHTML=html; el.setAttribute('data-num',n); el.style.cursor='pointer'; el.title='Open the DHL tracking log'; if(typeof ppTranslate==='function'&&PP_LANG==='zh'){ try{ ppTranslate(el); }catch(e){} } } }); }).catch(function(){}); }
+   (function(){ var pend=null; function scan(){ pend=null; try{ hzFillTrackPills(document); }catch(e){} }
+     try{ new MutationObserver(function(){ if(pend)return; pend=setTimeout(scan,200); }).observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();

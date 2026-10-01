@@ -1,8 +1,8 @@
-# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.147; on top of v28.143)
+# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.148; on top of v28.143)
 
 **Branch** `fix/first-click-boot-freeze` (still NOT merged into `phase-2.1-suppliers`, so it can't overwrite your `.1-.3` patches).
-Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147.
-**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-147.patch` = `git diff 3f9fb804..d07ea8e6` on `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`. Apply after the v28.143 patch.
+Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147 → `02b46533` v28.148.
+**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-148.patch` = `git diff 3f9fb804..02b46533` on `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs`. Apply after the v28.143 patch.
 No migration, no env var. Server restart needed (server.mjs changed).
 
 ## v28.144: ERP compare (Ben: "we are now 100% on fulfil")
@@ -26,6 +26,13 @@ Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB ra
 - **sku-data from `<head>`:** lazy mode only, `window.__HZ_SKUP`; `lazyLoadSkuData()` reuses it, falling back to its own fetch. Sandbox: request starts at 85 ms, one fetch total. Not emitted with `?lazysku=0`.
 - **Please check on live (your call):** the 0.4 to 0.8 s before the first byte even on cached endpoints. Is the Vercel function region the same as Supabase (eu-central-1)?
 
+## v28.148: loading panels + crawl clean-up
+- **First DEMAND visit** and **Auto Forecast** cold open: loading panel paints first, build runs after (same pattern as v28.146). DEMAND click 15 ms, panel + tabs + rail at +120 ms; Auto Forecast "Calculating demand…" at +0.5 s.
+- **Staff DHL pills** were calling `/api/portal/tracking-status` (401 for staff, pills never filled). `portal-view.js` uses `/api/tracking/status` when `window.__HZ_LANDING` is set (staff shell only). Supplier portal unchanged.
+- **`/api/supply/portal-signals`** moved above the `/api/supply/:section` catch-all (was 404 "unknown section"). Handler unchanged.
+- **BI & REPORTS badges** (reallocations / projection / DTC mismatch) throttled to 2 min, cleared by any invalidation; 6 report clicks now = 2 fetches each (badge + the report itself).
+- **FBA auto-refresh loop:** at most one auto refresh per hour per page (was ×3 per visit when `last_run` did not advance). Worth a look your side: why `last_run` does not advance after a successful refresh.
+
 ## Verified (sandbox, jsdom crawl on the served page)
 | | before | after |
 |---|---|---|
@@ -35,6 +42,6 @@ Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB ra
 | Xero status | 4.5 s every call | 5.2 s cold, 3 ms cached |
 | Flexport page status | 4.9 s | 0.3 s |
 | ERP compare tab | Cin7 + Fulfil | Fulfil only (no `bi/erp-compare` call) |
-| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146 and v28.147) |
+| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146, v28.147 and v28.148) |
 
 Still open (not in this branch): Auto Forecast's first demand build on a SUPPLY page (~3 s, genuinely needed); Shipments/Productions crawl "still loading" (pre-existing); portal-signals 404 / admin pages hitting a 401 portal endpoint; order-plan 6.3 MB and sku-data 4.2 MB payloads.
