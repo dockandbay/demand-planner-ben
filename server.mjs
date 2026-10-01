@@ -1981,7 +1981,10 @@ app.get('/', async (req, res) => {
     // never paint before boot — including on buy/fba/exec/reports hashes where #app itself is intentionally left visible.
     // Skipped only for the planning/demand hash (where those rows belong). Removed at boot end, after which the artifact governs them.
     const HEAD_NOFLASH = '<style>html.hz-hide-app #app{visibility:hidden}html.hz-preboot #ctabs-row,html.hz-preboot #filters-row2,html.hz-preboot #catrow1-wrap{display:none!important}</style><script>try{var _h=location.hash||"";if(!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(_h))document.documentElement.classList.add("hz-hide-app");if(!/^#\\/?(planning|demand)(\\/|$)/.test(_h))document.documentElement.classList.add("hz-preboot");if(localStorage.getItem("hz-theme")==="dark")document.documentElement.classList.add("om-dark");}catch(e){}window.hzToggleTheme=function(){var _d=document.documentElement.classList.toggle("om-dark");try{localStorage.setItem("hz-theme",_d?"dark":"light");}catch(_e){}var _b=document.getElementById("hz-theme-btn");if(_b)_b.setAttribute("aria-pressed",_d?"true":"false");var _m=document.getElementById("hz-theme-mob");if(_m)_m.setAttribute("aria-pressed",_d?"true":"false");};</script>';
-    html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH + G_JS);   // G_JS in <head>: the data must exist before the first (static) body script runs
+    // v28.147 perf: in lazy mode start the sku-data download from <head>, in parallel with the app bundles (was only after
+    // they downloaded + ran). lazyLoadSkuData() consumes window.__HZ_SKUP and falls back to its own fetch if this one failed.
+    const EARLY_SKU = _lazy ? '<script>try{window.__HZ_SKUP=fetch("/api/demand/sku-data").then(function(r){if(!r.ok)throw new Error("sku-data "+r.status);return r.json();});window.__HZ_SKUP.catch(function(){});}catch(e){}</script>' : '';
+    html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH + G_JS + EARLY_SKU);   // G_JS in <head>: the data must exist before the first (static) body script runs
     if (IS_SANDBOX) {
       html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox

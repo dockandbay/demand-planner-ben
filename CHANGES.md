@@ -1,3 +1,12 @@
+## v28.147 (Ben → Diviyaj, branch fix/first-click-boot-freeze): Order plan preload + earlier sku-data download
+
+**Files:** `supply/inject.html`, `artifact_v16.7.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
+
+Context (measured on live 02-Oct): `/api/supply/order-plan` 6.3 MB raw / ~136 KB gzip, 1.0-2.0 s; `/api/demand/sku-data` 4.2 MB raw / ~450 KB gzip, 2.1-2.4 s. Both are already gzipped and server serialise+gzip is ~25 ms, and the content is all used (sku-data = sales since Jan-24, forecasts, product master), so trimming fields would save little and risk the buy plan. Instead:
+
+1. **Order plan preload.** While the user is on PURCHASE ORDERS, the order plan is fetched in idle time (1.5 s after the section renders) into the client cache, so clicking Order plan opens instantly. Any cache invalidation (edits, ETL refresh, manual refresh) bumps a generation counter, and a preload that started before it is discarded, so it can never show stale data.
+2. **sku-data starts earlier.** In lazy mode (the default) the shell starts `/api/demand/sku-data` from `<head>` (`window.__HZ_SKUP`), in parallel with the app bundles, instead of after they have downloaded and run. `lazyLoadSkuData()` uses that request, falling back to its own fetch if it failed. Same data, same client path.
+
 ## v28.146 (Ben → Diviyaj, branch fix/first-click-boot-freeze): clicking Buy & Move responds immediately
 
 **File:** `artifact_v16.7.html` (+ package.json, CHANGES.md). Client-only.

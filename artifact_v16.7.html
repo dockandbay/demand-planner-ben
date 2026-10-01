@@ -1855,7 +1855,10 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
 function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
-  fetch('/api/demand/sku-data').then(function(r){return r.json();}).then(function(d){ if(!d)return; var raw=d.sku_raw||{};
+  // v28.147: reuse the request the shell started in <head> (window.__HZ_SKUP); fall back to a fresh fetch if it failed.
+  var _own=function(){ return fetch('/api/demand/sku-data').then(function(r){return r.json();}); };
+  var _early=window.__HZ_SKUP; window.__HZ_SKUP=null;
+  (_early?_early.catch(_own):_own()).then(function(d){ if(!d)return; var raw=d.sku_raw||{};
     if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s); if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi); if(d.fc_outputs)Object.assign(FC_OUTPUTS,d.fc_outputs);
     SKU_DATA_READY=true;
     // v28.125: any demand overlay built before this point was built from the EMPTY lazy maps. Re-arm the build so the

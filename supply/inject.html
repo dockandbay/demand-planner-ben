@@ -1081,7 +1081,7 @@
   function hzRevalidate(key,tk){ if(key==='samples'||key==='actions'||key==='config')return;
     fetch('/api/supply/'+key).then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
       cache[key]=d; _hzCacheAt[key]=Date.now(); if(same||tk!==_navToken||current!==key||!hzViewIdle())return; try{ renderSectionData(key,d); }catch(e){} }).catch(function(){}); }
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
+  function invalidateDerived(){ _opGen++; ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
     clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
@@ -1089,7 +1089,7 @@
   // Silent data refresh: drop ALL client-cached section responses (+ lookups + nav counts) so the NEXT view render
   // re-fetches fresh from the API — no full page reload. Called by the version poll when the ETL bumped source data
   // and the user navigates (so nav picks up fresh data without the disruptive location.reload). — Ben (nav lag/refresh)
-  try{ window.__hzBustSupplyCache=function(){ try{ for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
+  try{ window.__hzBustSupplyCache=function(){ try{ _opGen++; for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}   /* v28.117 (review C25): null-safe (was rendering the word "null") */
   function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'\\x3c');}   /* v28.117 (review C1): escape a value for a single-quoted JS string inside an inline handler — use as esc(jsq(v)); a quote in a PO/SKU could otherwise break out of onclick */
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -5592,7 +5592,7 @@
         if(plcSig(np)===_opSig)return;                                   // nothing changed
         var ae=document.activeElement; if(ae&&ae.classList&&ae.classList.contains('qtycell'))return;   // mid-edit → catch next tick
         _opSig=plcSig(np); plc.length=0; np.forEach(function(x){plc.push(x);}); plcMap={}; plc.forEach(function(x){plcMap[x.po+'|'+x.sku]=x;});
-        delete cache['order-plan']; renderChanges(); view(); }).catch(function(){});
+        _opGen++; delete cache['order-plan']; renderChanges(); view(); }).catch(function(){});
     }, 60000); }   /* v28.117 (review C7): was 12s */
   function plt(pl){ return pl>20 ? '<span style="color:var(--neg);font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
@@ -5748,7 +5748,14 @@
     return n; }
   // Populate the Shipments + Manufacturing counters in the background so their badges show from any sub-tab
   // (PLAN's count fills when the PO grid renders — it's the default tab). Runs once each; then cached.
+  // v28.147 perf (Ben): preload the Order plan (live ~1-2 s fetch) in idle time while the user is on PURCHASE ORDERS, so
+  // clicking Order plan opens instantly. _opGen bumps on every invalidation; a preload that started before one is dropped.
+  var _opGen=0, _opPre=false;
+  function prewarmOrderPlan(){ if(cache["order-plan"]||_opPre)return; var g=_opGen; _opPre=true;
+    var go=function(){ fetch("/api/supply/order-plan").then(function(r){return r.json();}).then(function(d){ _opPre=false; if(d&&!d.error&&g===_opGen&&!cache["order-plan"])cache["order-plan"]=d; }).catch(function(){ _opPre=false; }); };
+    setTimeout(function(){ if(window.requestIdleCallback)requestIdleCallback(go,{timeout:4000}); else go(); },1500); }
   function prefetchNavCounts(){
+    try{ prewarmOrderPlan(); }catch(e){}
     if(_navCounts.shipments===undefined){ (cache['shipments']?Promise.resolve(cache['shipments']):fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d;return d;}))
       .then(function(d){ _allShips=(d&&d.shipments)||[]; if(!_poActStateLoaded)loadPoActState(recomputeShipNavCount); else recomputeShipNavCount(); }).catch(function(){}); }
     if(_navCounts.manufacturing===undefined){ (cache['manufacturing']?Promise.resolve(cache['manufacturing']):fetch('/api/supply/manufacturing').then(function(r){return r.json();}).then(function(d){cache['manufacturing']=d;return d;}))
@@ -14862,7 +14869,7 @@
   window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
   // ↻ top-nav refresh (SUPPLY context): drop this module's client-side section cache + re-render the current
   // section so a just-busted server cache is re-fetched fresh, in place (no full reload). (v27.327)
-  window.hzSupplyRefresh=function(){ try{ for(var k in cache)delete cache[k]; if(current&&typeof selectSection==='function')selectSection(current); }catch(e){ if(window.console)console.log('[SUPPLY] refresh',e&&e.message); } };
+  window.hzSupplyRefresh=function(){ try{ _opGen++; for(var k in cache)delete cache[k]; if(current&&typeof selectSection==='function')selectSection(current); }catch(e){ if(window.console)console.log('[SUPPLY] refresh',e&&e.message); } };
   // Context help for the current SUPPLY section (reuses the ANNOT descriptions). Returns {t,h}.
   window.supplyHelpText=function(){ var sec=current||'actions'; if(sec==='reports')sec=reportTab||'upcoming'; var raw=ANNOT[sec]||'';
     var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);
