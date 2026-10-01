@@ -1,3 +1,16 @@
+## v28.136 (Ben): Payments Report: Paid, no Bank ccy, Xero done links (migrations 324 + 325)
+
+**Files: `server.mjs`, `supply/inject.html`, `migrations/324_payment_xero_bills.sql`, `migrations/325_seed_payment_xero_bills.sql`.**
+
+- **Paid USD → Paid:** records the bank amount = total in the **supplier's currency** (Base ccy). **Bank ccy column removed** (desktop + mobile); the save takes the supplier currency.
+- **Supplier-payment bill in the supplier's currency** (`CurrencyCode` from the run's base ccy, was hard-coded USD). The popup total shows that currency.
+- **Xero column:** a payment already in Xero shows **done ↗** (link to its supplier-payment bill) + **↻** to re-open Create in Xero. Everything before 21-Sep-26 is done (linked where a bill is found). Otherwise the XERO button as before.
+- **Migration 324:** new table `planner.payment_xero_bills` (one row per Xero bill, keyed to the payment's run_key). Every Create-in-Xero post records its bill. The report reads it defensively (works before 324 is applied, just without links).
+- **Migration 325 (one-time data import):** matches the `SUPPLIER-PAYMENT-…` bills already in `planner.xero_bills` to payments: by supplier code, else by Xero contact name (exact, trailing "(contact)" stripped, alias Jinmatex (Merry) → Jinma (Merry)). Only bills that land on a real payment. **Live dry-run 01-Oct-26: 273 bills → 264 payments.** Skipped by design: the $1 DRAFT BE test bill, and F-Orchid (not a Horizon supplier). Re-runnable.
+- Also `POST /api/supply/payments/xero-bill-sweep` (admin) does the same match on demand (writes only Horizon's table).
+
+**Deploy order:** 324 → 325 → code (code is safe before 324, without links).
+
 ## v28.135 (Ben): SUPPLY ▸ CONFIG shows its items in the left menu
 
 **File: `supply/inject.html`.** SUPPLY ▸ CONFIG draws its items flat in `#config-subs.cfg-flat`, but the rail only mirrored `#config-subs-l3` (the grouped admin/demand config), so CONFIG had no level-3 items in the menu. Added to `RAIL_L3MAP.supply`. Verified in jsdom: all 17 items listed with the active one marked; clicking *Batches* opens Batches; clicking CONFIG from Payments opens Suppliers; no page errors.

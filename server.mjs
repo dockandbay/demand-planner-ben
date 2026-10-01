@@ -4929,7 +4929,7 @@ async function computeXeroRunPlan(run) {
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
   const noBill = outLines.filter(l => !l.linked_bill && !l.blocked).map(l => l.reference);
   if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
-  return { ok: true, region: paying, paying_org: paying, supplier: run.supplier, reference: ref, currency: 'USD', date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
+  return { ok: true, region: paying, paying_org: paying, supplier: run.supplier, reference: ref, currency: String(run.base_ccy || 'USD').toUpperCase(), run_key: run.run_key || null, date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
 }
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
   try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
@@ -4937,6 +4937,40 @@ app.post('/api/supply/payments/xero-preview', async (req, res) => {
 });
 // Create the supplier-payment BILL and post the PAYMENTS against the linked PO bills in ONE action (from the Payments
 // Report XERO popup). Admin + confirm. Refuses if a payment would exceed the linked bill's amount due.
+// v28.136 (Ben): one-time (idempotent) sweep — record the supplier-payment bills ALREADY in Xero against their Payments
+// Report payment. Matches SUPPLIER-PAYMENT-<CODE>-<YYYY-MM-DD> bills in the local planner.xero_bills cache (date taken from
+// the number: Xero's stored InvoiceDate is UTC-shifted) → supplier by suppliers.code. Writes ONLY planner.payment_xero_bills
+// (nothing to Xero). One batched upsert. Deleted / voided bills are ignored.
+async function sweepSupplierPaymentBills() {
+  const _base = n => String(n || '').replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase();   // "XR Textile (Jack)" → "xr textile"
+  const ALIAS = { 'jinmatex (merry)': 'Jinma (Merry)' };   // AU Xero contact name ≠ Horizon supplier name (same rule as migration 325)
+  const byCode = {}, byName = {}, byBase = {}; (await pool.query(`SELECT coalesce(code,'') code, name FROM planner.suppliers WHERE coalesce(name,'')<>''`)).rows.forEach(s => { if (String(s.code).trim()) byCode[String(s.code).trim().toUpperCase()] = s.name; byName[String(s.name).trim().toLowerCase()] = s.name; byBase[_base(s.name)] = byBase[_base(s.name)] || s.name; });
+  const bills = (await pool.query(`SELECT invoice_id, region, invoice_number, contact_name, status FROM planner.xero_bills
+     WHERE invoice_number ILIKE 'SUPPLIER-PAYMENT-%' AND coalesce(status,'') NOT IN ('DELETED','VOIDED')`)).rows;
+  const rows = [], unmatched = [];
+  for (const b of bills) {
+    // SUPPLIER-PAYMENT-<CODE>-<DATE>; older bills have no code (SUPPLIER-PAYMENT-<DATE>) → match the Xero contact name (Ben).
+    const num = String(b.invoice_number || '').trim(), md = /(\d{4}-\d{2}-\d{2})$/.exec(num), mc = /^SUPPLIER-PAYMENT-(.+)-\d{4}-\d{2}-\d{2}$/i.exec(num);
+    const _cn = ALIAS[String(b.contact_name || '').trim().toLowerCase()] || String(b.contact_name || '');
+    const sup = (mc && byCode[mc[1].trim().toUpperCase()]) || byName[_cn.trim().toLowerCase()] || byBase[_base(_cn)] || null;
+    if (!md || !sup) { unmatched.push(num + (b.contact_name ? ' (' + b.contact_name + ')' : '')); continue; }
+    const dt = md[1], reg = String(b.region || '').toLowerCase() === 'au' ? 'AU' : 'UK';
+    rows.push([b.invoice_id, dt + '|' + sup + (reg === 'AU' && dt >= PAY_REGION_SPLIT_FROM ? '|AU' : ''), dt, sup, reg, b.invoice_number, 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + b.invoice_id, b.status || null]);
+  }
+  if (rows.length) {
+    const col = i => rows.map(r => r[i]);
+    await pool.query(`INSERT INTO planner.payment_xero_bills (bill_id, run_key, run_date, supplier, region, bill_number, bill_url, status, source)
+      SELECT u.bill_id, u.run_key, u.run_date::date, u.supplier, u.region, u.bill_number, u.bill_url, u.status, 'sweep'
+        FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[]) AS u(bill_id, run_key, run_date, supplier, region, bill_number, bill_url, status)
+      ON CONFLICT (bill_id) DO UPDATE SET status = excluded.status, updated_at = now()`, [0, 1, 2, 3, 4, 5, 6, 7].map(col));
+  }
+  return { bills_found: bills.length, recorded: rows.length, unmatched };
+}
+app.post('/api/supply/payments/xero-bill-sweep', async (req, res) => {
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try { const r = await sweepSupplierPaymentBills(); try { invalidateSupplyCaches(); } catch (_) {} res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/payments/xero-post', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
@@ -4963,10 +4997,18 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
     for (const l of plan.lines) { if (l.tracking && l.tracking.option && !l.tracking.exists) await _ensureProductionOption(region, l.tracking.option); }
     const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference + (l.cross ? ' (cross-org via loan, USD ' + (Math.round(l.amount * 100) / 100) + ')' : ''), Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
-    const billBody = { Type: 'ACCPAY', Contact: { Name: plan.supplier || 'Supplier' }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: billLines };
+    const billBody = { Type: 'ACCPAY', Contact: { Name: plan.supplier || 'Supplier' }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: plan.currency || 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: billLines };
     const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
     const binv = br && br.Invoices && br.Invoices[0];
     out.bill = { id: binv && binv.InvoiceID, number: binv && binv.InvoiceNumber, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + binv.InvoiceID) : null };
+    // v28.136 (Ben): keep the supplier-payment bill reference against this payment (migration 324) → Payments Report "done" link.
+    if (out.bill.id) { try { const rr = (req.body && req.body.run) || {};
+      const rk = rr.run_key || ((rr.dt || '') + '|' + (rr.supplier || '') + (String(rr.region || '').toUpperCase() === 'AU' && String(rr.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : ''));
+      await pool.query(`INSERT INTO planner.payment_xero_bills (bill_id, run_key, run_date, supplier, region, bill_number, bill_url, status, source, created_by)
+        VALUES ($1,$2,$3::date,$4,$5,$6,$7,'DRAFT','post',$8) ON CONFLICT (bill_id) DO UPDATE SET run_key=excluded.run_key, status=excluded.status, updated_at=now()`,
+        [out.bill.id, rk, rr.dt || null, rr.supplier || null, region === 'au' ? 'AU' : 'UK', out.bill.number || plan.reference, out.bill.url, authUser(req) || 'system']);
+      try { invalidateSupplyCaches(); } catch (_) {}
+    } catch (e) { console.error('[payment_xero_bills] record failed (migration 324 applied?):', e.message); out.record_warning = 'bill posted but its reference was not recorded: ' + e.message; } }
     // Same-org payments post at the SUPPLIER-PAYMENT bill's rate (the paying org's daily USD rate) — one consistent run.
     const runRate = (binv && binv.CurrencyRate != null) ? Number(binv.CurrencyRate) : null;
     out.rate = runRate;
@@ -7495,6 +7537,13 @@ supplySectionHandler = async (req, res, next) => {
             other_amount: f && f.paid_amount != null ? Number(f.paid_amount) : null, bank_ccy: f ? f.ccy : '',
             lines: g.lines }; })
           .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : a.supplier !== b.supplier ? (a.supplier < b.supplier ? -1 : 1) : (a.region === b.region ? 0 : a.region === 'UK' ? -1 : 1));   // UK before AU on the same date+supplier
+        // v28.136 (Ben): Xero status per payment. done = a supplier-payment bill is recorded (migration 324), OR the payment
+        // predates 21-Sep-26 (everything before then was already submitted to Xero, linked when the sweep found its bill).
+        const XERO_DONE_BEFORE = '2026-09-21';
+        let _pxb = []; try { _pxb = (await pool.query(`SELECT run_key, bill_number, bill_url, status, source FROM planner.payment_xero_bills
+          WHERE coalesce(status,'') NOT IN ('DELETED','VOIDED') ORDER BY created_at`)).rows; } catch (e) { /* migration 324 not applied yet → no links */ }
+        const _pxbBy = {}; _pxb.forEach(b => { (_pxbBy[b.run_key] = _pxbBy[b.run_key] || []).push({ number: b.bill_number, url: b.bill_url, status: b.status, source: b.source }); });
+        out.forEach(r => { r.xero_bills = _pxbBy[r.run_key] || []; r.xero_done = r.xero_bills.length > 0 || String(r.dt || '') < XERO_DONE_BEFORE; });
         return res.json(out);
       }
       case 'payments-by-supplier': {

@@ -10729,7 +10729,16 @@
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
   // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
   var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null, _payRows=[];
-  function payRunKey(r){ return r.run_key||((r.dt||'')+'|'+(r.supplier||'')); }   // v28.133: server run_key = date|supplier (UK, unchanged) or date|supplier|AU
+  function payRunKey(r){ return r.run_key||((r.dt||'')+'|'+(r.supplier||'')); }
+  // v28.136 (Ben): Xero column. Already in Xero (a recorded supplier-payment bill, or anything before 21-Sep-26) → "done",
+  // linked to the bill when we have it, + a small ↻ redo that relaunches the Create-in-Xero popup. Otherwise the XERO button
+  // (only once the payment is marked paid, as before).
+  function payXeroCell(r,i){
+    if(r.xero_done){ var bills=r.xero_bills||[];
+      var done=bills.length?bills.map(function(b){ return '<a href="'+esc(b.url||'#')+'" target="_blank" rel="noopener" title="'+esc((b.number||'supplier payment')+(b.status?' · '+b.status:''))+'" style="color:var(--pos);font-weight:700;font-size:11px;text-decoration:none;white-space:nowrap">done ↗</a>'; }).join(' ')
+        :'<span class="mut" title="Submitted to Xero before 21-Sep-26 (no supplier-payment bill found to link)" style="font-weight:700;font-size:11px;color:var(--pos)">done</span>';
+      return '<span style="display:inline-flex;gap:6px;align-items:center">'+done+((r.lines||[]).length?'<button class="lnk-btn pay-xero-preview" data-i="'+i+'" title="Re-send to Xero (opens the Create in Xero popup)" style="color:var(--mut);font-size:12px;line-height:1;padding:0 2px">↻</button>':'')+'</span>'; }
+    return (((r.lines||[]).length && (r.other_amount!=null) && String(r.bank_ccy||'').trim())?'<button class="pay-xero-preview" data-i="'+i+'" title="Create / queue this run in Xero (preview first)" style="background:#13B5EA;color:#fff;border:1px solid #13B5EA;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">XERO</button>':''); }   // v28.133: server run_key = date|supplier (UK, unchanged) or date|supplier|AU
   function payBuildMaps(rem,em){ PAY_REMIT={}; PAY_EMAILS={};
     (rem||[]).forEach(function(x){ (PAY_REMIT[x.run_key]||(PAY_REMIT[x.run_key]=[])).push(x); });
     (em||[]).forEach(function(x){ if(!PAY_EMAILS[x.run_key])PAY_EMAILS[x.run_key]=x; }); }   // list is id DESC → first seen = latest
@@ -10783,7 +10792,7 @@
         +'<div><div class="mut tiny">Supplier</div><b>'+esc(j.supplier||'')+'</b></div>'
         +'<div><div class="mut tiny">Bill reference</div><b style="font-family:ui-monospace,Menlo,monospace">'+esc(j.reference||'')+'</b></div>'
         +'<div><div class="mut tiny">Date</div><b>'+esc(fd(j.date)||j.date||'')+'</b></div>'
-        +'<div><div class="mut tiny">Total</div><b>'+money(j.total_usd)+' USD</b></div>'
+        +'<div><div class="mut tiny">Total</div><b>'+money(j.total_usd)+' '+esc(j.currency||'USD')+'</b></div>'
       +'</div>'
       +'<div class="tw" style="max-height:38vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">PO</th><th class="l">Type</th><th class="l" style="text-align:right">Amount</th><th class="l">Account</th><th class="l">Tracking</th><th class="l">Linked bill</th><th class="l">Payment check</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><div class="mut tiny" style="margin-bottom:4px">Checks</div>'+checks+'</div>'
@@ -11033,7 +11042,7 @@
   function payReportCards(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
     var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();
     var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
-    var cards=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'"';
+    var cards=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'" data-ccy="'+esc(r.base_ccy||'USD')+'"';
       var _poHit=(r.lines||[]).some(_lhit);
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
@@ -11059,12 +11068,12 @@
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details">'+xeroIco+'</button>':'';
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email" style="color:var(--violet);font-weight:700">'+emailIco+'</button>':'');
-      var xeroRunBtn=(((r.lines||[]).length && (r.other_amount!=null) && String(r.bank_ccy||'').trim())?'<button class="pay-xero-preview" data-i="'+i+'" title="Create / queue this run in Xero (preview first)" style="background:#13B5EA;color:#fff;border:1px solid #13B5EA;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">XERO</button>':'');
+      var xeroRunBtn=payXeroCell(r,i);   // v28.136
       var amtField='<input class="fci pfx-amt" '+dk+' style="width:140px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'">';
       var ccyField='<select class="fci pfx-ccy" '+dk+' style="width:74px'+((r.bank_ccy&&r.bank_ccy!=='USD')?';background:var(--amber-bg);color:var(--amber);font-weight:700':'')+'">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select>';
-      var paidUsdBtn=(((r.other_amount!=null)&&String(r.bank_ccy||'').trim())?'':'<button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD" style="background:var(--pos);color:#fff;border-color:var(--pos)">Paid USD</button>');
+      var paidUsdBtn=(((r.other_amount!=null)&&String(r.bank_ccy||'').trim())?'':'<button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this payment paid — sets the bank amount to the total, in the supplier’s currency" style="background:var(--pos);color:#fff;border-color:var(--pos)">Paid</button>');
       var badge='<span class="tool-badge '+((r.base_ccy&&r.base_ccy!=='USD')?'bg-amber':'bg-neutral')+'">'+esc(r.base_ccy||'USD')+'</span>';
-      var f=mobFld('Total (base)','<b>'+money(r.total)+'</b>')+mobFld('Bank amount',amtField)+mobFld('Bank ccy',ccyField)+((paidUsdBtn||xeroRunBtn)?mobFld(' ','<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">'+paidUsdBtn+xeroRunBtn+'</span>'):'')+mobFld('Remittance',remHtml)+mobFld('Notify',notifyHtml);
+      var f=mobFld('Total (base)','<b>'+money(r.total)+'</b>')+mobFld('Bank amount',amtField)+((paidUsdBtn||xeroRunBtn)?mobFld(' ','<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">'+paidUsdBtn+xeroRunBtn+'</span>'):'')+mobFld('Remittance',remHtml)+mobFld('Notify',notifyHtml);
       return '<div class="mob-card" style="border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--card)">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:var(--nav)">'+esc(fd(r.dt))+' · '+esc(r.supplier)+(r.region==='AU'?' <span style="font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d">AU</span>':'')+'</div>'+badge+'</div>'
         +f+'<div style="margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+' lines</button>'+xbBtns+'</div>'+det+'</div>'; }).join('');
@@ -11073,7 +11082,7 @@
     if(actMob())return payReportCards(rows);
     var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();   // searched term → PO/ref lines highlight yellow + their run opens
     var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
-    var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'"';
+    var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'" data-ccy="'+esc(r.base_ccy||'USD')+'"';
       var _poHit=(r.lines||[]).some(_lhit);   // this run contains the searched PO/ref → open it + highlight the line
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
@@ -11106,16 +11115,15 @@
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details to the clipboard">'+xeroIco+'</button>':'';
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email (supplier, amount, reference + line table)" style="color:var(--violet);font-weight:700">'+emailIco+'</button>':'');
-      var xeroRunBtn=(((r.lines||[]).length && (r.other_amount!=null) && String(r.bank_ccy||'').trim())?'<button class="pay-xero-preview" data-i="'+i+'" title="Create / queue this run in Xero (preview first)" style="background:#13B5EA;color:#fff;border:1px solid #13B5EA;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">XERO</button>':'');
+      var xeroRunBtn=payXeroCell(r,i);   // v28.136
       return '<tr'+(_poHit?' style="background:var(--amber-bg)"':'')+'><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+'</button>'+xbBtns+'</td>'
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+(r.region==='AU'?' <span title="AU payment — paid from the AU business, bill in the AU Xero org" style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d;vertical-align:1px">AU</span>':'')+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l"'+((r.base_ccy&&r.base_ccy!=='USD')?' style="background:var(--amber-bg);color:var(--amber);font-weight:700"':'')+'>'+r.base_ccy+'</td>'
         +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
-        +'<td class="l"><select class="fci pfx-ccy" '+dk+' style="width:60px'+((r.bank_ccy&&r.bank_ccy!=='USD')?';background:var(--amber-bg);color:var(--amber);font-weight:700':'')+'">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select></td>'
-        +'<td class="l" style="white-space:nowrap;padding-left:28px"><span style="display:inline-flex;gap:10px;align-items:center">'+(((r.other_amount!=null)&&String(r.bank_ccy||'').trim())?'':'<button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD — sets bank amount to the base total and currency to USD" style="background:var(--pos);color:#fff;border-color:var(--pos);white-space:nowrap;font-size:11px;padding:3px 9px;height:auto">Paid USD</button>')+xeroRunBtn+'</span></td>'
+        +'<td class="l" style="white-space:nowrap;padding-left:28px"><span style="display:inline-flex;gap:10px;align-items:center">'+(((r.other_amount!=null)&&String(r.bank_ccy||'').trim())?'':'<button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this payment paid — sets the bank amount to the total, in the supplier’s currency" style="background:var(--pos);color:#fff;border-color:var(--pos);white-space:nowrap;font-size:11px;padding:3px 9px;height:auto">Paid</button>')+xeroRunBtn+'</span></td>'
         +'<td class="l" style="white-space:nowrap;min-width:210px">'+remHtml+'<div style="margin-top:4px">'+notifyHtml+'</div></td></tr>'+det; }).join('');
     return '<div style="max-width:1220px"><div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
-      +'<div class="tw"><table style="min-width:900px"><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th><th class="l"></th><th class="l">Remittance &amp; notify</th></tr></thead><tbody>'
+      +'<div class="tw"><table style="min-width:900px"><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l"></th><th class="l">Remittance &amp; notify</th></tr></thead><tbody>'
       +body
       +'<tr class="batchrow"><td></td><td class="l" colspan="2"><b>TOTAL</b></td><td><b>'+money(tT)+'</b></td><td colspan="5"></td></tr>'
       +'</tbody></table></div></div>'; }
@@ -11126,7 +11134,7 @@
     b.querySelectorAll('.pfx-amt').forEach(function(el){ el.onblur=function(){ if(el.value.trim()!=='') el.value=fmtAmt(el.value); }; });
     b.querySelectorAll('.pfx-ccy, .pfx-amt').forEach(function(el){ el.onchange=function(){
       var tr=el.closest('tr,.mob-card'); var dt=el.dataset.dt, sup=el.dataset.sup;
-      var ccy=tr.querySelector('.pfx-ccy').value, amt=tr.querySelector('.pfx-amt').value.replace(/,/g,'');
+      var _ce=tr.querySelector('.pfx-ccy'), ccy=_ce?_ce.value:(el.dataset.ccy||'USD'), amt=tr.querySelector('.pfx-amt').value.replace(/,/g,'');   // v28.136: no Bank ccy column — the payment is in the supplier's currency
       if(el.classList.contains('pfx-amt') && amt!=='') el.value=fmtAmt(amt);
       el.classList.add('saved');
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,region:el.dataset.reg||'UK',paid_currency:ccy,paid_amount:amt})})
@@ -11134,11 +11142,11 @@
     // "Paid USD" — fill bank amount = base total, currency = USD, save (which confirms the run → notification fires)
     b.querySelectorAll('.pay-usd').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr,.mob-card');
       var amtEl=tr.querySelector('.pfx-amt'), ccyEl=tr.querySelector('.pfx-ccy'), total=String(btn.dataset.total||'').replace(/,/g,'');
-      if(amtEl)amtEl.value=fmtAmt(total); if(ccyEl)ccyEl.value='USD';
+      var _pc=btn.dataset.ccy||'USD'; if(amtEl)amtEl.value=fmtAmt(total); if(ccyEl)ccyEl.value=_pc;   // v28.136: "Paid" = total in the supplier's currency
       btn.disabled=true; var o=btn.textContent; btn.textContent='…';
-      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:btn.dataset.dt,supplier:btn.dataset.sup,region:btn.dataset.reg||'UK',paid_currency:'USD',paid_amount:total})})
+      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:btn.dataset.dt,supplier:btn.dataset.sup,region:btn.dataset.reg||'UK',paid_currency:_pc,paid_amount:total})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-          if(j&&j.emailPreview)showEmailPreview(j.emailPreview); btn.textContent='✓ USD'; payRefreshState(); })   // silent refresh → the row re-renders as paid (Paid USD hides, XERO shows)
+          if(j&&j.emailPreview)showEmailPreview(j.emailPreview); btn.textContent='✓ Paid'; payRefreshState(); })   // silent refresh → the row re-renders as paid (Paid USD hides, XERO shows)
         .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Save failed: '+(e.message||e)); }); }; });
     // ── Remittance upload + delayed paid-notification (run_key = date|supplier) ──
     b.querySelectorAll('.pr-remit-up').forEach(function(btn){ btn.onclick=function(){
