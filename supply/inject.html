@@ -10729,7 +10729,7 @@
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
   // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
   var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null, _payRows=[];
-  function payRunKey(r){ return (r.dt||'')+'|'+(r.supplier||''); }
+  function payRunKey(r){ return r.run_key||((r.dt||'')+'|'+(r.supplier||'')); }   // v28.133: server run_key = date|supplier (UK, unchanged) or date|supplier|AU
   function payBuildMaps(rem,em){ PAY_REMIT={}; PAY_EMAILS={};
     (rem||[]).forEach(function(x){ (PAY_REMIT[x.run_key]||(PAY_REMIT[x.run_key]=[])).push(x); });
     (em||[]).forEach(function(x){ if(!PAY_EMAILS[x.run_key])PAY_EMAILS[x.run_key]=x; }); }   // list is id DESC → first seen = latest
@@ -11032,7 +11032,7 @@
   function payReportCards(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
     var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();
     var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
-    var cards=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
+    var cards=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'"';
       var _poHit=(r.lines||[]).some(_lhit);
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
@@ -11065,14 +11065,14 @@
       var badge='<span class="tool-badge '+((r.base_ccy&&r.base_ccy!=='USD')?'bg-amber':'bg-neutral')+'">'+esc(r.base_ccy||'USD')+'</span>';
       var f=mobFld('Total (base)','<b>'+money(r.total)+'</b>')+mobFld('Bank amount',amtField)+mobFld('Bank ccy',ccyField)+((paidUsdBtn||xeroRunBtn)?mobFld(' ','<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">'+paidUsdBtn+xeroRunBtn+'</span>'):'')+mobFld('Remittance',remHtml)+mobFld('Notify',notifyHtml);
       return '<div class="mob-card" style="border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--card)">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:var(--nav)">'+esc(fd(r.dt))+' · '+esc(r.supplier)+'</div>'+badge+'</div>'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:var(--nav)">'+esc(fd(r.dt))+' · '+esc(r.supplier)+(r.region==='AU'?' <span style="font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d">AU</span>':'')+'</div>'+badge+'</div>'
         +f+'<div style="margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+' lines</button>'+xbBtns+'</div>'+det+'</div>'; }).join('');
     return mobCards(cards)+'<div style="text-align:right;font-weight:700;margin-top:10px;padding-top:8px;border-top:2px solid var(--line)">TOTAL '+money(tT)+'</div>'; }
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
     if(actMob())return payReportCards(rows);
     var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();   // searched term → PO/ref lines highlight yellow + their run opens
     var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
-    var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
+    var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'"';
       var _poHit=(r.lines||[]).some(_lhit);   // this run contains the searched PO/ref → open it + highlight the line
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
@@ -11107,7 +11107,7 @@
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email (supplier, amount, reference + line table)" style="color:var(--violet);font-weight:700">'+emailIco+'</button>':'');
       var xeroRunBtn=(((r.lines||[]).length && (r.other_amount!=null) && String(r.bank_ccy||'').trim())?'<button class="pay-xero-preview" data-i="'+i+'" title="Create / queue this run in Xero (preview first)" style="background:#13B5EA;color:#fff;border:1px solid #13B5EA;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">XERO</button>':'');
       return '<tr'+(_poHit?' style="background:var(--amber-bg)"':'')+'><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+'</button>'+xbBtns+'</td>'
-        +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
+        +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+(r.region==='AU'?' <span title="AU payment — paid from the AU business, bill in the AU Xero org" style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;background:#dcfce7;color:#15803d;vertical-align:1px">AU</span>':'')+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l"'+((r.base_ccy&&r.base_ccy!=='USD')?' style="background:var(--amber-bg);color:var(--amber);font-weight:700"':'')+'>'+r.base_ccy+'</td>'
         +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
         +'<td class="l"><select class="fci pfx-ccy" '+dk+' style="width:60px'+((r.bank_ccy&&r.bank_ccy!=='USD')?';background:var(--amber-bg);color:var(--amber);font-weight:700':'')+'">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select></td>'
@@ -11128,14 +11128,14 @@
       var ccy=tr.querySelector('.pfx-ccy').value, amt=tr.querySelector('.pfx-amt').value.replace(/,/g,'');
       if(el.classList.contains('pfx-amt') && amt!=='') el.value=fmtAmt(amt);
       el.classList.add('saved');
-      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,paid_currency:ccy,paid_amount:amt})})
+      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,region:el.dataset.reg||'UK',paid_currency:ccy,paid_amount:amt})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.emailPreview)showEmailPreview(j.emailPreview); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; });
     // "Paid USD" — fill bank amount = base total, currency = USD, save (which confirms the run → notification fires)
     b.querySelectorAll('.pay-usd').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr,.mob-card');
       var amtEl=tr.querySelector('.pfx-amt'), ccyEl=tr.querySelector('.pfx-ccy'), total=String(btn.dataset.total||'').replace(/,/g,'');
       if(amtEl)amtEl.value=fmtAmt(total); if(ccyEl)ccyEl.value='USD';
       btn.disabled=true; var o=btn.textContent; btn.textContent='…';
-      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:btn.dataset.dt,supplier:btn.dataset.sup,paid_currency:'USD',paid_amount:total})})
+      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:btn.dataset.dt,supplier:btn.dataset.sup,region:btn.dataset.reg||'UK',paid_currency:'USD',paid_amount:total})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
           if(j&&j.emailPreview)showEmailPreview(j.emailPreview); btn.textContent='✓ USD'; payRefreshState(); })   // silent refresh → the row re-renders as paid (Paid USD hides, XERO shows)
         .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Save failed: '+(e.message||e)); }); }; });

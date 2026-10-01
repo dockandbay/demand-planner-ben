@@ -4779,13 +4779,16 @@ async function computeXeroRunPlan(run) {
   const payLines = lines.filter(l => l && /deposit|completion|balance|final/i.test(String(l.type || '')));   // exclude "other"
   if (!payLines.length) return { ok: false, error: 'No deposit/completion/balance lines in this run to post.' };
   const poRefs = [...new Set(payLines.map(l => String(l.reference || '')).filter(Boolean))];
-  const paying = xeroRegion(run.paying_org || run.org || 'uk');   // where the supplier-payment bill + USD bank live
+  const paying = xeroRegion(run.paying_org || run.org || run.region || 'uk');   // where the supplier-payment bill + USD bank live (v28.133: an AU payment defaults to the AU org)
   const homeByPo = {};
   if (poRefs.length) {
     const pr = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [poRefs])).rows;
     pr.forEach(p => { homeByPo[p.po] = _poXeroRegion(p.cc, p.branch); });
   }
   const homeOf = po => homeByPo[String(po || '')] || paying;   // unknown PO → treat as paying org (no cross-org surprise)
+  // v28.133: a register DEPOSIT's reference is not a PO, so homeOf() fell back to the paying org and an AU deposit looked
+  // "same-org" in a UK run (the two-org block never fired). A deposit's home org is its own coding: 620.00 AU → AU.
+  const homeOfLine = l => /deposit/i.test(String(l.type || '')) ? ((String(l.account_code || '') === '620.00 AU' || String(run.region || '').toUpperCase() === 'AU') ? 'au' : 'uk') : homeOf(l.reference);
   const cfg = await _xeroFinanceCfg();
   const banks = (cfg.banks && cfg.banks[paying]) || {};
   const accts = (cfg.accounts && cfg.accounts[paying]) || {};
@@ -4793,7 +4796,7 @@ async function computeXeroRunPlan(run) {
   let bank = banks[usdBankRole] || null;
   if (!bank) { try { bank = await _xeroBankForCurrency(paying, 'USD'); } catch (e) {} }
   // Loan (901) account for every org this run touches — the paying org (cross-org bill lines) and each home org.
-  const orgsNeeded = new Set([paying]); payLines.forEach(l => orgsNeeded.add(homeOf(l.reference)));
+  const orgsNeeded = new Set([paying]); payLines.forEach(l => orgsNeeded.add(homeOfLine(l)));
   const loanByOrg = {}; for (const o of orgsNeeded) loanByOrg[o] = await _xeroLoanAcct(o);
   const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
   const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
@@ -4809,11 +4812,11 @@ async function computeXeroRunPlan(run) {
     if (prods.length) (await pool.query(`SELECT prod_no, coalesce(nullif(xero_account_code,''),'') code, coalesce(xero_account_name,'') name FROM planner.prod_numbers WHERE prod_no = ANY($1::text[])`, [prods])).rows.forEach(r => { legacyProdAcct[r.prod_no] = { code: r.code, name: r.name }; });
   } catch (e) {}
   // Deposits from more than one home org can't share a run (bright-red block).
-  const depositOrgs = new Set(payLines.filter(l => /deposit/i.test(String(l.type || ''))).map(l => homeOf(l.reference)));
+  const depositOrgs = new Set(payLines.filter(l => /deposit/i.test(String(l.type || ''))).map(l => homeOfLine(l)));
   const depositsMultiOrg = depositOrgs.size > 1;
   const outLines = payLines.map(l => {
     const isDeposit = /deposit/i.test(String(l.type || ''));
-    const home = homeOf(l.reference);
+    const home = homeOfLine(l);
     const cross = home !== paying;
     const prodDigits = String(l.prod_no || '').replace(/[^0-9]/g, ''); const prodN = prodDigits ? parseInt(prodDigits, 10) : null;
     const useNew = (home === 'au') || (prodN != null && prodN >= 58);   // AU always new; UK P58+ new, earlier legacy
@@ -7405,15 +7408,15 @@ supplySectionHandler = async (req, res, next) => {
         const lines = (await pool.query(`
           SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, coalesce(o.supplier_name,'(none)') supplier,
             o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, 'po' source,
-            ${ACCT} account_code, ${SUPC('o.supplier_name')} supplier_code, coalesce(o.prod_no,'') prod_no
+            ${ACCT} account_code, ${SUPC('o.supplier_name')} supplier_code, coalesce(o.prod_no,'') prod_no, 'UK' reg
           FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND ${KIND('o.supplier_name')}
           UNION ALL
           SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,'')
+            o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
           FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND ${KIND('o.supplier_name')}
           UNION ALL
           SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,'')
+            o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND ${KIND('o.supplier_name')}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
@@ -7422,11 +7425,11 @@ supplySectionHandler = async (req, res, next) => {
               ELSE coalesce(nullif(xero_account_code,''),
                 (SELECT pn.xero_account_code FROM planner.prod_numbers pn
                    WHERE regexp_replace(upper(coalesce(pn.prod_no,'')),'^P','')=regexp_replace(upper(coalesce(deposits.prod_no,'')),'^P','')
-                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1)) END, ${SUPC('supplier_name')}, coalesce(prod_no,'')
+                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1)) END, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,'')
+            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,''), CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}`)).rows;
         // Sample-derived Other Payments: attach a per-account split (the sample's type/purpose × its Xero account code)
         // so the Payments Report Xero download can split the single total line across accounts. Register still shows the total.
@@ -7445,12 +7448,15 @@ supplySectionHandler = async (req, res, next) => {
           const arr = ps.map(p => ({ account_code: _acct[p] || '', purpose: p, amount: base, desc }));
           const resid = Math.round((Number(amt) - base * n) * 100) / 100; if (resid) arr[0].amount = Math.round((arr[0].amount + resid) * 100) / 100;
           return arr; };
-        const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
+        const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, coalesce(region,'UK') region, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
         const normSup = s => { const p = (s || '').split(',').map(x => x.trim()).filter(Boolean); return Array.from(new Set(p)).join(', ') || '(none)'; };
-        const fxMap = {}; fx.forEach(f => fxMap[f.dt + '|' + normSup(f.supplier)] = f);
+        // v28.133: a payment is per Xero org — UK and AU are SEPARATE payments (own bank amount, remittance, Xero bill). Key = date|supplier
+        // for UK (unchanged, so every existing record still matches) and date|supplier|AU for AU.
+        const runKey = (dt, sup, reg) => dt + '|' + sup + (reg === 'AU' ? '|AU' : '');
+        const fxMap = {}; fx.forEach(f => fxMap[runKey(f.dt, normSup(f.supplier), f.region)] = f);
         const groups = {};
-        for (const l of lines) { const sup = normSup(l.supplier); const k = l.dt + '|' + sup;
-          const g = groups[k] || (groups[k] = { dt: l.dt, supplier: sup, total: 0, lines: [] });
+        for (const l of lines) { const sup = normSup(l.supplier); const reg = (l.reg === 'AU' && String(l.dt || '') >= PAY_REGION_SPLIT_FROM) ? 'AU' : 'UK'; const k = runKey(l.dt, sup, reg);   // pre-cut-off: legacy single run
+          const g = groups[k] || (groups[k] = { dt: l.dt, supplier: sup, region: reg, run_key: k, total: 0, lines: [] });
           g.total += Number(l.amount);
           if (l.supplier_code && !g.supplier_code) g.supplier_code = l.supplier_code;
           g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '', prod_no: l.prod_no || '',
@@ -7459,12 +7465,12 @@ supplySectionHandler = async (req, res, next) => {
         // base currency = the supplier's default currency (CONFIG), not a hardcoded USD
         const ccyRows = (await pool.query(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers`)).rows;
         const ccyMap = {}; ccyRows.forEach(r => { ccyMap[String(r.name).toLowerCase().trim()] = r.ccy; });
-        const out = Object.values(groups).map(g => { const f = fxMap[g.dt + '|' + g.supplier];
+        const out = Object.values(groups).map(g => { const f = fxMap[g.run_key];
           g.lines.sort((a, b) => (TYPE_ORD[a.type] ?? 9) - (TYPE_ORD[b.type] ?? 9));
-          return { dt: g.dt, supplier: g.supplier, supplier_code: g.supplier_code || '', total: Math.round(g.total * 100) / 100, base_ccy: ccyMap[String(g.supplier).toLowerCase().trim()] || 'USD',
+          return { dt: g.dt, supplier: g.supplier, region: g.region, run_key: g.run_key, supplier_code: g.supplier_code || '', total: Math.round(g.total * 100) / 100, base_ccy: ccyMap[String(g.supplier).toLowerCase().trim()] || 'USD',
             other_amount: f && f.paid_amount != null ? Number(f.paid_amount) : null, bank_ccy: f ? f.ccy : '',
             lines: g.lines }; })
-          .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : (a.supplier < b.supplier ? -1 : 1));
+          .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : a.supplier !== b.supplier ? (a.supplier < b.supplier ? -1 : 1) : (a.region === b.region ? 0 : a.region === 'UK' ? -1 : 1));   // UK before AU on the same date+supplier
         return res.json(out);
       }
       case 'payments-by-supplier': {
@@ -8298,34 +8304,38 @@ async function emailDocSubmit(po, filename, by) {
 // tables + ordering as the report) so the email mirrors the on-screen "copy for email" summary exactly.
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
 function fmtMoney2(n){ return Number(n||0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-async function paymentRunDetail(runDate, supplier) {
+// v28.133: UK and AU supplier payments are SEPARATE payments (own bank amount, remittance, Xero bill) from this date on.
+// Earlier payments stay grouped date+supplier exactly as recorded: 24 historic runs were ONE bank payment covering UK + AU
+// lines (e.g. Lixin 03-Jun-26: bank 97,572.06 = UK 73,646.90 + AU 23,925.16), so splitting them would orphan bank amounts.
+const PAY_REGION_SPLIT_FROM = '2026-10-01';
+async function paymentRunDetail(runDate, supplier, region) {   // v28.133: region (UK|AU) → only that org's payment; omitted = all (legacy)
   const rows = (await pool.query(`
     SELECT reference, round(amount,2) amount, type, deposit_ref, prod_no FROM (
-      SELECT o.po reference, o.pay_completion_assigned amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, coalesce(o.prod_no,'') prod_no, to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.supplier_name sup
+      SELECT o.po reference, o.pay_completion_assigned amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, coalesce(o.prod_no,'') prod_no, to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.supplier_name sup, 'UK' reg
         FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0
-      UNION ALL SELECT o.po, o.pay_balance_1_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.supplier_name
+      UNION ALL SELECT o.po, o.pay_balance_1_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.supplier_name, 'UK'
         FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0
-      UNION ALL SELECT o.po, o.pay_balance_2_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.supplier_name
+      UNION ALL SELECT o.po, o.pay_balance_2_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.supplier_name, 'UK'
         FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0
-      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Deposit', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name
+      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Deposit', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
         FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
-      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Other', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name
+      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Other', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
         FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
-    ) z WHERE dt=$1 AND lower(trim(sup))=lower(trim($2))
-    ORDER BY CASE type WHEN 'Deposit' THEN 0 WHEN 'Completion' THEN 1 WHEN 'Balance' THEN 2 ELSE 3 END`, [runDate, supplier])).rows;
+    ) z WHERE dt=$1 AND lower(trim(sup))=lower(trim($2)) AND ($3::text IS NULL OR reg=$3)
+    ORDER BY CASE type WHEN 'Deposit' THEN 0 WHEN 'Completion' THEN 1 WHEN 'Balance' THEN 2 ELSE 3 END`, [runDate, supplier, region || null])).rows;
   const total = Math.round(rows.reduce((a, x) => a + Number(x.amount || 0), 0) * 100) / 100;
   const code = (await pool.query(`SELECT s.code FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim($1)) LIMIT 1`, [supplier])).rows[0]?.code || '';
   return { supplier, supplier_code: code, dt: runDate, total, lines: rows };
 }
 // Email the supplier's opted-in portal users (receive_payment_notification=true) when a payment is confirmed.
 // cc ben@ + accounts@. Amount shown in the bank currency if it isn't USD, else the base USD total. Best-effort.
-async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
+async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy, region) {
   const us = (await pool.query(`SELECT lower(email) email, coalesce(contact_name,'') contact_name
      FROM planner.supplier_portal_users
      WHERE receive_payment_notification=true AND active=true AND coalesce(email,'')<>'' AND lower(trim(supplier_name))=lower(trim($1))`, [supplier])).rows;
   const to = Array.from(new Set(us.map(u => u.email)));
   const cc = ['ben@dockandbay.com', 'accounts@dockandbay.com'];
-  const run = await paymentRunDetail(runDate, supplier);
+  const run = await paymentRunDetail(runDate, supplier, region);
   // Amount is shown in the SUPPLIER's currency (suppliers.default_currency in CONFIG), with its symbol.
   const supCcy = (await pool.query(`SELECT upper(coalesce(nullif(default_currency,''),'USD')) c FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)) LIMIT 1`, [supplier])).rows[0]?.c || 'USD';
   const CCY_SYM = { USD: '$', GBP: '£', EUR: '€', AUD: 'A$', CAD: 'C$', NZD: 'NZ$', CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$' };
@@ -16663,22 +16673,23 @@ app.post('/api/supply/payment-fx', async (req, res) => {
   const b = req.body || {};
   if (!b.run_date || !b.supplier) return res.status(400).json({ error: 'run_date + supplier required' });
   try {
+    const reg = String(b.region || 'UK').toUpperCase() === 'AU' ? 'AU' : 'UK';   // v28.133: UK and AU are separate payments (migration 323)
     // A run is "confirmed paid" once it has BOTH a bank amount and a bank currency. Capture the prior state so we
     // only notify on the transition unconfirmed → confirmed (editing an already-confirmed run won't re-email).
-    const prev = (await pool.query(`SELECT paid_amount, coalesce(paid_currency,'') paid_currency FROM planner.payment_fx WHERE run_date=$1 AND supplier=$2`, [b.run_date, b.supplier])).rows[0];
+    const prev = (await pool.query(`SELECT paid_amount, coalesce(paid_currency,'') paid_currency FROM planner.payment_fx WHERE run_date=$1 AND supplier=$2 AND region=$3`, [b.run_date, b.supplier, reg])).rows[0];
     const wasConfirmed = !!(prev && prev.paid_amount != null && prev.paid_currency);
     const newAmt = (b.paid_amount === '' || b.paid_amount == null) ? null : b.paid_amount;
     const newCcy = b.paid_currency || null;
-    await pool.query(`INSERT INTO planner.payment_fx (run_date, supplier, paid_currency, paid_amount)
-      VALUES ($1,$2,$3,$4) ON CONFLICT (run_date, supplier) DO UPDATE
+    await pool.query(`INSERT INTO planner.payment_fx (run_date, supplier, paid_currency, paid_amount, region)
+      VALUES ($1,$2,$3,$4,$5) ON CONFLICT (run_date, supplier, region) DO UPDATE
       SET paid_currency=excluded.paid_currency, paid_amount=excluded.paid_amount, updated_at=now()`,
-      [b.run_date, b.supplier, newCcy, newAmt]);
+      [b.run_date, b.supplier, newCcy, newAmt, reg]);
     try { invalidateSupplyCaches(); } catch (e) {}   // bust the cached payments-report so the run shows as paid on the next fetch (silent refresh)
     const nowConfirmed = (newAmt != null && newCcy && String(newCcy).trim() !== '');
     let emailPreview;
     if (nowConfirmed && !wasConfirmed) {   // fire the supplier payment-confirmed notification ONCE, on transition — IMMEDIATELY (no delay)
-      const runKey = b.run_date + '|' + b.supplier;
-      try { const em = await emailPaymentConfirmed(b.run_date, b.supplier, newAmt, newCcy);
+      const runKey = b.run_date + '|' + b.supplier + (reg === 'AU' ? '|AU' : '');   // same key the Payments Report row carries (run_key)
+      try { const em = await emailPaymentConfirmed(b.run_date, b.supplier, newAmt, newCcy, String(b.run_date) >= PAY_REGION_SPLIT_FROM ? reg : null);   // legacy run → all its lines
         // sandbox (no RESEND key) → hand the rendered email back so the UI can pop it up for testing; prod sends silently
         if (!process.env.RESEND_API_KEY && em && em.preview) emailPreview = em.preview;
         // record the outcome so the Payments Report shows "✉ emailed" (or skipped when no recipient opted in). Best-effort.

@@ -1,3 +1,16 @@
+## v28.133 (Ben): UK and AU supplier payments are separate payments (migration 323)
+
+**Files: `server.mjs`, `supply/inject.html`, `migrations/323_payment_fx_region.sql`.**
+
+Ben: "AU deposits cannot mix with UK deposits on a single payment … the AU deposit MUST be paid from the AU business, the payment bill must go into the AU Xero org."
+
+- **Payments Report** groups by date + supplier + **region** from **01-Oct-26** (`PAY_REGION_SPLIT_FROM`). A line is AU when it is a register deposit or Other payment with country AU (the deposit coded `620.00 AU`). PO completion/balance lines stay as before (their cross-org route via loan 901 is unchanged). AU rows carry `region:'AU'`, `run_key = date|supplier|AU` and an **AU** tag; UK keys are unchanged.
+- **Earlier payments are untouched:** 24 historic runs were one bank payment covering UK + AU lines (e.g. Lixin 03-Jun-26: bank 97,572.06 = UK 73,646.90 + AU 23,925.16). Verified: all 418 pre-01-Oct payments byte-identical to v28.132.
+- **Bank amount / FX** (`payment_fx`) keyed by (run_date, supplier, region): migration 323 adds `region` (default UK) and widens the primary key. Save route, payment-confirmed email and `paymentRunDetail` are region-aware (email lists only that org's lines).
+- **Create in Xero:** an AU payment defaults to paying from the AU org. A deposit's home org now comes from its own coding (was a PO lookup that can't resolve a deposit ref, so the "deposit must be paid from its home org" block never fired). Verified on sandbox preview: UK→uk, AU→au, AU deposit forced through UK → blocked.
+
+**Deploy order:** apply migration **323 before** this code (the code reads/writes `payment_fx.region`).
+
 ## v28.132 (Ben): Create in Xero popup, removed the Pays from field
 
 **File: `supply/inject.html`.** Removed the *Pays from* bank field (e.g. "TEST US AMEX (USD)"): it was wrong and irrelevant here. The cross-org note it carried is still shown in the header.
