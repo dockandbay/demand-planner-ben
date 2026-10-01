@@ -1,8 +1,8 @@
-# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.146; on top of v28.143)
+# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.147; on top of v28.143)
 
 **Branch** `fix/first-click-boot-freeze` (still NOT merged into `phase-2.1-suppliers`, so it can't overwrite your `.1-.3` patches).
-Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146.
-**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-146.patch` = `git diff 3f9fb804..73024d0d` on `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`. Apply after the v28.143 patch.
+Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147.
+**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-147.patch` = `git diff 3f9fb804..d07ea8e6` on `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`. Apply after the v28.143 patch.
 No migration, no env var. Server restart needed (server.mjs changed).
 
 ## v28.144: ERP compare (Ben: "we are now 100% on fulfil")
@@ -20,6 +20,12 @@ No migration, no env var. Server restart needed (server.mjs changed).
 ## v28.146: clicking Buy & Move responds immediately
 Ben: clicking BUY & MOVE in the menu did nothing. On a cold entry (demand not built yet: any SUPPLY landing since v28.143, or after a forecast edit) the ~3 s build ran inside the click; the trigger was the one-time PP-cover build at the top of `render()`. Now, for BUY & MOVE views, the tabs + a "Loading Buy & Move…" panel paint first, the rail expands, and the build runs 160 ms later, then the page renders (skipped if the user has navigated away). The PP-cover build is skipped for BUY & MOVE views (the deferred build covers it). Measured: click handler 3,077 ms → **16 ms**; loading panel + tabs + rail L2 visible at +120 ms; Actions page rendered by +320 ms after the build.
 
+## v28.147: Order plan preload + earlier sku-data
+Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB raw / ~450 KB gzip, 2.1-2.4 s. Already gzipped; serialise+gzip ~25 ms; all content used, so no field trim.
+- **Order plan preload:** fetched in idle time 1.5 s after a PURCHASE ORDERS page renders, into the client cache. A generation counter bumps on every cache invalidation and a preload started before it is discarded (no stale data). Sandbox: Order plan click → table in **79 ms**, no request.
+- **sku-data from `<head>`:** lazy mode only, `window.__HZ_SKUP`; `lazyLoadSkuData()` reuses it, falling back to its own fetch. Sandbox: request starts at 85 ms, one fetch total. Not emitted with `?lazysku=0`.
+- **Please check on live (your call):** the 0.4 to 0.8 s before the first byte even on cached endpoints. Is the Vercel function region the same as Supabase (eu-central-1)?
+
 ## Verified (sandbox, jsdom crawl on the served page)
 | | before | after |
 |---|---|---|
@@ -29,6 +35,6 @@ Ben: clicking BUY & MOVE in the menu did nothing. On a cold entry (demand not bu
 | Xero status | 4.5 s every call | 5.2 s cold, 3 ms cached |
 | Flexport page status | 4.9 s | 0.3 s |
 | ERP compare tab | Cin7 + Fulfil | Fulfil only (no `bi/erp-compare` call) |
-| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146) |
+| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146 and v28.147) |
 
 Still open (not in this branch): Auto Forecast's first demand build on a SUPPLY page (~3 s, genuinely needed); Shipments/Productions crawl "still loading" (pre-existing); portal-signals 404 / admin pages hitting a 401 portal endpoint; order-plan 6.3 MB and sku-data 4.2 MB payloads.
