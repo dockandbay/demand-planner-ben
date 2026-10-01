@@ -4456,8 +4456,8 @@ app.get('/api/supply/xero/connect', async (req, res) => {
   res.redirect('https://login.xero.com/identity/connect/authorize?' + new URLSearchParams({ response_type: 'code', client_id: cfg.id, redirect_uri: cfg.redirect, scope: cfg.scopes, state }));
 });
 app.get('/api/supply/xero/callback', async (req, res) => {
-  _xeroStatusCache = { at: 0, out: null };
-  const done = (msg, ok) => res.set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
+  xeroStatusBust();
+  const done = (msg, ok) => (xeroStatusBust(), res).set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
   try {
     if (req.query.error) return done('Xero said: ' + _xeroHe(String(req.query.error_description || req.query.error)), false);
     const code = String(req.query.code || ''), state = String(req.query.state || '');
@@ -4475,10 +4475,11 @@ app.get('/api/supply/xero/callback', async (req, res) => {
 });
 // v28.145 perf: regions probed in parallel (was sequential, ~4.5 s) and the result cached 2 min; ?fresh=1 bypasses,
 // connect (callback) / disconnect clear it.
-let _xeroStatusCache = { at: 0, out: null };
+let _xeroStatusCache = { at: 0, out: null }, _xeroStatusGen = 0;
+const xeroStatusBust = () => { _xeroStatusCache = { at: 0, out: null }; _xeroStatusGen++; };   // v28.150: a probe that started before a bust cannot write its (stale) result back
 app.get('/api/supply/xero/status', async (req, res) => {
   if (!req.query.fresh && _xeroStatusCache.out && Date.now() - _xeroStatusCache.at < 120000) return res.set('Cache-Control', 'no-store').json(_xeroStatusCache.out);
-  const out = { regions: {} };
+  const out = { regions: {} }, _gen = _xeroStatusGen;
   await Promise.all(XERO_REGIONS.map(async region => {
     const cfg = xeroConfig(region); const store = await xeroGetStore(region);
     const row = { region, configured: cfg.present, mode: (store && store.refresh_token) ? 'authcode' : 'custom' };
@@ -4491,11 +4492,11 @@ app.get('/api/supply/xero/status', async (req, res) => {
     out.regions[region] = row;
   }));
   const ord = {}; XERO_REGIONS.forEach(r => { if (out.regions[r]) ord[r] = out.regions[r]; }); out.regions = ord;   // stable key order as before
-  _xeroStatusCache = { at: Date.now(), out };
+  if (_gen === _xeroStatusGen) _xeroStatusCache = { at: Date.now(), out };
   res.set('Cache-Control', 'no-store').json(out);
 });
 app.post('/api/supply/xero/disconnect', async (req, res) => {
-  _xeroStatusCache = { at: 0, out: null };
+  xeroStatusBust();
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to disconnect Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S15)
   try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Live read of Xero PURCHASE bills (ACCPAY) for a region — the foundation for PO/payment reconciliation.
@@ -19694,10 +19695,12 @@ async function fulfilCompareApiData(force, cachedOnly) {
   const env = await activeFulfilEnv();
   const have = _fulfilCmpCache.pos && _fulfilCmpCache.env === env, age = Date.now() - _fulfilCmpCache.at;
   if (!force && have && age < 120000) return _fulfilCmpCache;
-  if (cachedOnly) return have ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
-  if (!force && have && age < 600000) { if (!_fulfilCmpInflight) { _fulfilCmpInflight = _fulfilCompareFetch(env).catch(e => { log500(e); }).finally(() => { _fulfilCmpInflight = null; }); } return _fulfilCmpCache; }
-  if (_fulfilCmpInflight && !force) { await _fulfilCmpInflight; if (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) return _fulfilCmpCache; }
-  return _fulfilCompareFetch(env);
+  // v28.150: every Fulfil pull goes through ONE in-flight promise (cold, stale and background alike), so concurrent
+  // callers (badge + drawer + Actions) share a single ~3 s pull. Background starts swallow errors; awaited ones surface them.
+  const start = () => { if (!_fulfilCmpInflight) _fulfilCmpInflight = _fulfilCompareFetch(env).finally(() => { _fulfilCmpInflight = null; }); return _fulfilCmpInflight; };
+  if (cachedOnly) { if (!have || age >= 600000) start().catch(e => log500(e)); return have ? _fulfilCmpCache : null; }   // v28.144: never waits on Fulfil; v28.150: warms it in the background
+  if (!force && have && age < 600000) { start().catch(e => log500(e)); return _fulfilCmpCache; }
+  return start();
 }
 async function _fulfilCompareFetch(env) {
   const cfg = fulfilConfigFor(env);
@@ -19727,7 +19730,7 @@ async function _fulfilCompareFetch(env) {
   return _fulfilCmpCache;
 }
 async function fulfilCompareRows(force, cachedOnly) {
-  const _api = await fulfilCompareApiData(force, cachedOnly); if (!_api) return null;
+  const _api = await fulfilCompareApiData(force, cachedOnly); if (!_api) return null; const _apiAt = _api.at;
   const { pos, saleMap, poSaleMap } = _api;
   const [poR, supR, igR, lkR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
     pool.query('SELECT po, erp_po FROM planner.purchase_orders'),
@@ -19747,7 +19750,7 @@ async function fulfilCompareRows(force, cachedOnly) {
     if (linkedIds.has(String(p.id)) || plannerPOs.has(_n(p.number)) || (p.reference && plannerPOs.has(_n(p.reference)))) return false;
     return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
   const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
-  return cand.map(p => {
+  const _rows = cand.map(p => {
     const key = p.number || p.reference;
     // sale via the PO reference (SO49664 style) OR via the purchase-request chain (SO49667 → PO158 style)
     const refSale = (p.reference && /^SO/i.test(p.reference)) ? p.reference : null;
@@ -19762,10 +19765,16 @@ async function fulfilCompareRows(force, cachedOnly) {
       order_date: fulfilUnwrap(p.purchase_date), sale_ref: sale, sale_company: cleanCo(sm.company), sale_client: sm.client || null,
       ignored: ignored.has(key) };
   }).sort((a, b) => (a.ignored - b.ignored) || String(a.po).localeCompare(String(b.po)));   // v27.785 (Ben): alphabetical by PO
+  _rows.at = _apiAt;   // v28.150: the as-of of the Fulfil data these rows were built from (not whatever the global holds now)
+  return _rows;
 }
 app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
   try { const force = req.query.refresh === '1' || req.query.refresh === 'true';
-    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, as_of: _fulfilCmpCache.at ? new Date(_fulfilCmpCache.at).toISOString() : null, rows }); }
+    // v28.150: ?cached=1 (menu badge) never waits on Fulfil: cached rows or {cold:true} while a background pull warms it
+    const cachedOnly = !force && (req.query.cached === '1' || req.query.cached === 'true');
+    const rows = await fulfilCompareRows(force, cachedOnly);
+    if (!rows) return res.json({ ok: true, cold: true, count: null, rows: [] });
+    res.json({ ok: true, count: rows.filter(r => !r.ignored).length, as_of: rows.at ? new Date(rows.at).toISOString() : null, rows }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
 });
 app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {

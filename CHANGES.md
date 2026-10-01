@@ -1,3 +1,15 @@
+## v28.150 (Ben → Diviyaj, branch fix/first-click-boot-freeze): fixes from the 02-Oct end-to-end review + Reports loading panel
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
+
+1. **Stale demand after bulk forecast changes (regression from v28.145).** Auto-smooth (apply preview + cancel), smooth-to-%, forecast import, undo, the DEMAND ↻ refresh and every `markDirty()` edit now call `hzMarkDemandStale()` (`BUY_FC_STALE=true; AF_FEED=null`), so Exceptions, Safety stock, Ship bags, Inventory status, Cash flow, Auto Forecast, Buy & Move ▸ Actions and the Buy plan rebuild on next use. Before, they could show pre-change numbers (the Buy plan grid had this gap before v28.145 too).
+2. **Possible endless loading loop:** the cold BUY & MOVE / DEMAND loading path now clears `BUY_FC_STALE` even when the build throws (logged loudly), so `render()` cannot re-enter it forever.
+3. **ERP menu badge** reads `/api/supply/bi/fulfil-compare?cached=1` (cached rows or `{cold:true}`, never a foreground Fulfil pull); on a cold cache the server warms it in the background and the badge looks again in 30 s.
+4. **Fulfil compare single-flight:** cold, stale and background pulls share one in-flight promise (badge + drawer + Actions = one Fulfil pull). `as_of` now comes from the data the rows were built from. Server Actions count warms a missing/expired cache in the background.
+5. **Xero status cache race:** a generation counter stops a probe that started before a connect/disconnect writing a stale "not connected" back; the OAuth callback busts the cache when it finishes.
+6. **Reports loading panel:** a cold REPORTS entry shows the tab bar + "Loading Reports…" first, then builds demand (was a 3.1 s freeze in the crawl).
+7. **Small:** cold DEMAND views that do not use demand (Inputs, Calendar, Config…) no longer wait for the build or the loading panel; ERP drawer backdrop dims; a Fulfil compare error shows the error (was "Nothing to reconcile ✓"); failed badge fetches retry instead of waiting 2-5 min; Auto Forecast skips its deferred build if you already left the page.
+
 ## v28.149 (Ben → Diviyaj, branch fix/first-click-boot-freeze): Exceptions tabs, ERP compare cache, Cin7 compare removed
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.

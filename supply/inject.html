@@ -496,7 +496,7 @@
 #supply-root .pog-pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
 #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
-#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
+#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open,#supply-root #erpdrawer-bg.open{background:rgba(15,23,42,.32)}
 #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer{transform:translateX(0)}
 #supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
@@ -12406,7 +12406,9 @@
   function paintErpcBadge(){ var el=document.getElementById('rep-erpc-badge'); if(!el)return;
     if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
-  function refreshErpcBadge(){ if(_erpcAt&&Date.now()-_erpcAt<300000){ paintErpcBadge(); return; } _erpcAt=Date.now(); fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
+  // v28.150: the badge reads the server's CACHED compare only (?cached=1), so a SUPPLY landing never waits on / triggers a
+  // foreground Fulfil pull. Cold cache → the server warms it in the background and we look again in 30 s. A failed fetch retries.
+  function refreshErpcBadge(){ if(_erpcAt&&Date.now()-_erpcAt<300000){ paintErpcBadge(); return; } _erpcAt=Date.now(); fetch('/api/supply/bi/fulfil-compare?cached=1').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } else if(j&&j.cold){ _erpcAt=Date.now()-270000; setTimeout(refreshErpcBadge,30000); } else _erpcAt=0; }).catch(function(){ _erpcAt=0; }); }
   // Open reallocation-options counter next to the REALLOCATE sub-nav tab (amber — these are opportunities, not overdue actions).
   var _reallocCount=null;
   function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
@@ -12414,13 +12416,14 @@
     else { el.textContent=_reallocCount; el.style.display=''; el.title=_reallocCount+' open reallocation option'+(_reallocCount===1?'':'s'); } }
   // v28.148 perf: the BI & REPORTS badge counts were re-fetched on EVERY report click (crawl: projection ×13, reallocations ×16,
   // dtc/mismatch ×17). Throttled to one fetch per 2 min each; force=true (after a DTC reload) and any cache invalidation skip it.
-  var _badgeAt={}; function _badgeFresh(k,force){ if(!force&&_badgeAt[k]&&Date.now()-_badgeAt[k]<120000)return true; _badgeAt[k]=Date.now(); return false; }
-  function refreshReallocBadge(force){ if(_badgeFresh('realloc',force)){ paintReallocBadge(); return; } fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
+  var _badgeAt={}; function _badgeFail(k){ return function(){ try{ _badgeAt[k]=0; }catch(e){} }; }   // v28.150: a failed fetch does not suppress the next try
+  function _badgeFresh(k,force){ if(!force&&_badgeAt[k]&&Date.now()-_badgeAt[k]<120000)return true; _badgeAt[k]=Date.now(); return false; }
+  function refreshReallocBadge(force){ if(_badgeFresh('realloc',force)){ paintReallocBadge(); return; } fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(_badgeFail("realloc")); }
   var _urgentCrit=null;   // count of CRITICAL urgent-buy SKUs (excludes too-late-to-order), shown as a red action counter on the URGENT BUY tab
   function paintUrgentBadge(){ var el=document.getElementById('rep-urgent-badge'); if(!el)return;
     if(_urgentCrit==null||_urgentCrit===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_urgentCrit; el.style.display=''; el.title=_urgentCrit+' critical stock-out risk'+(_urgentCrit===1?'':'s')+' to buy'; } }
-  function refreshUrgentBadge(force){ if(_badgeFresh('urgent',force)){ paintUrgentBadge(); return; } fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
+  function refreshUrgentBadge(force){ if(_badgeFresh('urgent',force)){ paintUrgentBadge(); return; } fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(_badgeFail("urgent")); }
   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
     if(rk==='metrics'){ try{ location.hash='#/reports/performance/supply-metrics'; }catch(e){} return; }   // Metrics moved to top-level REPORTS ▸ Performance ▸ Supply metrics
     current='reports'; reportTab=rk; _actHost=null; syncHash();
@@ -12481,7 +12484,7 @@
     if(_badgeFresh('dtc',force))return;   // v28.148: badge already painted from the last fetch (<2 min)
     fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
       var el=document.getElementById('nav-dtc-badge-l3'); if(el){ el.textContent=_dtcCount?String(_dtcCount):''; el.style.display=_dtcCount?'':'none'; }
-      try{ paintReportsL2Badge(); }catch(e){} }).catch(function(){}); }
+      try{ paintReportsL2Badge(); }catch(e){} }).catch(_badgeFail("dtc")); }
   // DTC import freshness: parse the "DD-Mon-YY HH:MM" stamp and flag if it's more than 4 days old.
   function _dtcImportStale(s){ try{ var m=/^(\d{1,2})-([A-Za-z]{3})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(s||'')); if(!m)return false;
     var MON={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11}; var mo=MON[m[2]]; if(mo==null)return false;
@@ -13004,7 +13007,8 @@
       return '<div class="tw tw-compare"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     var htmlOut=head;
-    if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
+    if(d.error) htmlOut+='<div class="count" style="color:var(--neg)">Could not load the Fulfil compare: '+esc(d.error)+'</div>';   // v28.150: was shown as "Nothing to reconcile"
+    else if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
     else htmlOut+=tbl(active,false);
     if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— un-ignore to bring back</span></div>'+tbl(ignored,true);
     else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
