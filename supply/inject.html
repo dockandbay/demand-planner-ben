@@ -10783,7 +10783,6 @@
         +'<div><div class="mut tiny">Bill reference</div><b style="font-family:ui-monospace,Menlo,monospace">'+esc(j.reference||'')+'</b></div>'
         +'<div><div class="mut tiny">Date</div><b>'+esc(fd(j.date)||j.date||'')+'</b></div>'
         +'<div><div class="mut tiny">Total</div><b>'+money(j.total_usd)+' USD</b></div>'
-        +'<div><div class="mut tiny">Pays from</div><b>'+(j.bank?esc(j.bank.name)+' <span class="mut tiny">('+esc(j.bank.currency)+')</span>':'<span style="color:var(--neg)">no bank bound</span>')+'</b>'+(hasCross?'<div class="mut tiny">cross-org lines settle from loan 901 in their home org</div>':'')+'</div>'
       +'</div>'
       +'<div class="tw" style="max-height:38vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">PO</th><th class="l">Type</th><th class="l" style="text-align:right">Amount</th><th class="l">Account</th><th class="l">Tracking</th><th class="l">Linked bill</th><th class="l">Payment check</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><div class="mut tiny" style="margin-bottom:4px">Checks</div>'+checks+'</div>'

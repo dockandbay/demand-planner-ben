@@ -1,3 +1,7 @@
+## v28.132 (Ben): Create in Xero popup, removed the Pays from field
+
+**File: `supply/inject.html`.** Removed the *Pays from* bank field (e.g. "TEST US AMEX (USD)"): it was wrong and irrelevant here. The cross-org note it carried is still shown in the header.
+
 ## v28.131 (Ben): Create in Xero popup, org selector moved next to the post button
 
 **File: `supply/inject.html`.** The *Pay from UK/AU org* selector moved from the popup header to the action bar, directly before **Create bill + payments in Xero**, so the paying org is chosen at the point of posting.
