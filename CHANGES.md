@@ -1,3 +1,7 @@
+## v28.143 (Ben → Diviyaj, branch fix/first-click-boot-freeze): first menu click no longer freezes ~3–5 s
+
+Client-only. On SUPPLY/PRODUCT/CLIENT/CONFIG landings the boot no longer renders the hidden DEMAND plan (~1.7 s) or prewarms the demand overlay (~3 s); BUY & MOVE Actions no longer rebuilds the overlay unconditionally (~3 s per entry). Buy plan identical to the full-page baseline (0/387). Note + patch: `docs/deploy notes/FIX_2026-10-01_first-click-boot-freeze.*`.
+
 ## v28.142 (Ben, LIVE bug): BUY plan empty ("0 SKUs") + lazy-load data bugs — URGENT, artifact-only hotfix
 
 **File: `artifact_v16.7.html`** (+ package.json, CHANGES.md). No migration, no server change, so it can ship ahead of the v28.123+ package.

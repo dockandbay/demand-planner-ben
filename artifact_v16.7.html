@@ -1843,7 +1843,11 @@ if(!LAZY_SKU)buildLiveBpOverlay();
 // Fetch committed Preorder + Key-Account demand once at startup; when it lands, re-attach + rebuild demand so
 // the buy plan includes it, and re-render the buy grid if it's already mounted. (Sourced from the same
 // planner.key_account_forecasts / planner.preorders tables edited in DEMAND ▸ Inputs ▸ Key accounts.)
-try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
+// v28.143 (Ben: "first click on the menus doesn't load"): on a SUPPLY / PRODUCT / CLIENT / CONFIG landing the boot used to run the
+// DEMAND plan render (~1.7 s) and the demand-overlay build (~3 s) on the main thread, so the first menu click waited ~5 s.
+// Only do that work when DEMAND / BUY is on screen; otherwise defer it to the first visit (both build on entry when needed).
+function hzDemandOnScreen(){ return !/^#\/(supply|product|client|config)(\/|$)/.test(location.hash||''); }
+try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='function'){ if(hzDemandOnScreen())buildLiveDemand(); else DEMAND_BUILT=false; } }catch(e){}
   try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }); }catch(e){}
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
@@ -1859,7 +1863,7 @@ function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
     try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error('[lazy] cache reset',e); }
     try{augmentSKUM();}catch(e){if(window.console)console.error('[lazy] augmentSKUM',e);}
     try{buildLiveBpOverlay();}catch(e){if(window.console)console.error('[lazy] buildLiveBpOverlay',e);}
-    try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
+    try{ if(typeof renderMain==='function'){ if(hzDemandOnScreen())renderMain(); } }catch(e){}   // v28.143: off-DEMAND landing → skip; navigating to DEMAND renders it
   }).catch(function(e){ if(window.console)console.error('[lazy] sku-data',e); }); }
 if(LAZY_SKU){ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(lazyLoadSkuData,60);}); else setTimeout(lazyLoadSkuData,60); }
 
@@ -13468,7 +13472,9 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
 function renderBuyMoveActions(){
   // P2 Buy & Move v2 (Diviyaj canvas): KPI strip (To buy / Urgent / To move) + an action×country matrix; cells expand
   // to a SKU worklist. DISPLAY ONLY — reads the exact same BP.getBuyQtys / BP.trfLane numbers, buy logic untouched.
-  try{ buildLiveDemand(); }catch(e){}
+  // v28.143: gate the overlay build like every other caller (was unconditional → ~3 s on every BUY & MOVE entry even when
+  // nothing changed). A rebuild from unchanged inputs is identical, so this cannot move a buy number.
+  try{ if((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)){ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} } }catch(e){}
   var host=document.querySelector('.wrap');
   var ex=document.getElementById('bm-actions-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='bm-actions-wrap'; wrap.style.cssText='max-width:1480px;margin:6px 0 40px';
