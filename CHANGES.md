@@ -1,3 +1,11 @@
+## v28.138 (Ben): menu review fixes, SUPPLY ▸ CONFIG ▸ Xero deep link + admin-tab load race
+
+**File: `supply/inject.html`.** From a full left-menu crawl (every L1 → L2 → L3 item clicked in jsdom on sandbox).
+
+- `xero` was in the SUPPLY ▸ CONFIG menu but missing from `_SUPCFG_KEYS`, so `#/supply/config/xero` fell back to Suppliers. Added.
+- Admin-only CONFIG tabs (Xero, Email notifications, Permissions, Email log, General, Exchange rates, Channels) opened by link or refresh **before** `/api/me` loaded were treated as *not admin* and bounced to Suppliers / Exports. `renderConfig` now waits for `/api/me` once, then renders.
+- Verified: `#/supply/config/xero` opens CONFIG ▸ Xero; no page errors.
+
 ## v28.137 (Ben): all outgoing emails reply to ops@dockandbay.com
 
 **File: `server.mjs`.** Every email Horizon sends (supplier portal magic links, payment confirmations, escalations, invoice/document notifications, suggestions, the 4 direct Resend calls) now sets `reply_to` to `EMAIL_REPLY_TO` (env, default **ops@dockandbay.com**). Previously some emails replied to the person who triggered them (submitter / escalator / supplier); that per-email reply-to is now ignored. From address unchanged (`PORTAL_FROM`, default portal@dockandbay.com).

@@ -7621,6 +7621,10 @@
     if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; if(ME&&ME.is_admin)L2.push(['xero','Xero']); }   // flat (Supply chain group removed); Ben's order + duty/consignees appended; Xero finance config admin-only
     else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
+    // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
+    // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
+    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels'].indexOf(CONFIG_SUB)>=0){
+      c.innerHTML='<div class="count">Loading…</div>'; fetchMe(function(){ if(current==='config')renderConfig(d); }); return; }
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -13681,7 +13685,7 @@
     selectSection('config'); }
   // SUPPLY ▸ CONFIG (Option B native embed): reuse the config machinery but keep the SUPPLY sub-nav visible
   // (no config-mode) and scope the groups to Supply chain / Key accounts / Portal users / Portal.
-  var _SUPCFG_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen','keyaccounts','portalusers','portal','onboarding','warehouse'];   // v27.895: + onboarding / warehouse rules
+  var _SUPCFG_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen','keyaccounts','portalusers','portal','onboarding','warehouse','xero'];   // v28.138: + xero (in the menu but missing here, so its deep link fell back to Suppliers; still admin-only, see CONFIG_SUB==='xero' gate)   // v27.895: + onboarding / warehouse rules
   function enterSupplyConfig(sub){ CONFIG_CTX='supply'; showSupply(true);
     var app=document.getElementById('app'); if(app)app.classList.remove('config-mode');
     var cb=document.getElementById('config-btn'); if(cb)cb.classList.remove('active');
