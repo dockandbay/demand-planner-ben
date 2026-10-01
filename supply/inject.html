@@ -9220,7 +9220,10 @@
             +'<span class="pill-lbl">Columns</span><input id="prod-cols" class="flt" placeholder="filter columns — comma separated (e.g. carton, weight)…" style="width:260px">'
             +'<span class="pill-lbl">Release window</span><select id="prod-rw" class="flt" style="width:auto"><option value="">All</option>'+rws.map(function(w){return '<option>'+esc(w)+'</option>';}).join('')+'</select>'
             +'<span class="count" id="prod-count" style="margin-left:auto"></span></div><div id="prod-tbl"></div>';
-          function draw(){ var raw=(document.getElementById('prod-q').value||'').toLowerCase().trim();
+          // v28.145 perf: render 200 rows at a time (all 2,078 × 191 fields was ~400k cells, a ~16 s freeze); filters debounced.
+          var LIM=200; function more(){ LIM+=500; draw(true); }
+          var _dt=null; function deb(){ clearTimeout(_dt); _dt=setTimeout(function(){ LIM=200; draw(); },180); }
+          function draw(keep){ var raw=(document.getElementById('prod-q').value||'').toLowerCase().trim();
             var toks=raw?raw.split(/[\s,]+/).filter(Boolean):[]; var rw=document.getElementById('prod-rw').value;
             // column filter: comma-separated substrings; keep any column whose header matches. SKU (col 0) always kept.
             var colRaw=(document.getElementById('prod-cols').value||'').toLowerCase().trim();
@@ -9228,9 +9231,13 @@
             var shownCols=colToks.length?cols.filter(function(c,i){ return i===0 || colToks.some(function(t){return String(c).toLowerCase().indexOf(t)>=0;}); }):cols;
             var rows=all.filter(function(r){ var sk=String(r.sku||'').toLowerCase();
               return (!toks.length||toks.some(function(t){return sk.indexOf(t)>=0;}))&&(!rw||r.release_window===rw); });
-            document.getElementById('prod-tbl').innerHTML=productsTable(shownCols,rows);
+            var tw=document.querySelector('#prod-tbl .tw'), st=keep&&tw?tw.scrollTop:0;
+            document.getElementById('prod-tbl').innerHTML=productsTable(shownCols,rows.slice(0,LIM))
+              +(rows.length>LIM?'<div class="bar" style="margin-top:6px"><span class="mut tiny">Showing '+LIM+' of '+rows.length+' — filter by SKU to narrow, or</span><button class="save-btn" id="prod-more">Show 500 more</button><button class="save-btn" id="prod-all">Show all '+rows.length+'</button></div>':'');
+            if(keep){ var tw2=document.querySelector('#prod-tbl .tw'); if(tw2)tw2.scrollTop=st; }
+            var bm=document.getElementById('prod-more'); if(bm)bm.onclick=more; var ba=document.getElementById('prod-all'); if(ba)ba.onclick=function(){ LIM=rows.length; draw(true); };
             document.getElementById('prod-count').textContent=rows.length+' / '+all.length+' products · '+shownCols.length+(colToks.length?' / '+cols.length:'')+' fields'; }
-          document.getElementById('prod-q').oninput=draw; document.getElementById('prod-cols').oninput=draw; document.getElementById('prod-rw').onchange=draw; draw();
+          document.getElementById('prod-q').oninput=deb; document.getElementById('prod-cols').oninput=deb; document.getElementById('prod-rw').onchange=function(){ LIM=200; draw(); }; draw();
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       // ── CONFIG ▸ Demand ▸ Contribution model (SETS feature P3) ──
       // Editable A/B/C tier mix + Sets-vs-SKUs split per sub-category, with a Default → Country → Channel → cell
@@ -9717,7 +9724,7 @@
     function fxSyncLabel(iso){ var el=document.getElementById('fx-lastsync'); if(!el)return; if(!iso){ el.textContent='last sync: never'; return; }
       var d=new Date(iso); if(isNaN(d)){ el.textContent=''; return; } var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       var p=function(x){return (x<10?'0':'')+x;}; el.textContent='last sync: '+p(d.getDate())+'-'+M[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
-    fetch('/api/supply/flexport/status').then(function(r){return r.json();}).then(function(s){ fxSyncLabel(s&&s.last_sync); }).catch(function(){ fxSyncLabel(null); });
+    fetch('/api/supply/flexport/status?lite=1').then(function(r){return r.json();}).then(function(s){ fxSyncLabel(s&&s.last_sync); }).catch(function(){ fxSyncLabel(null); });
     var imb=document.getElementById('fx-import'); if(imb)imb.onclick=function(){ var m=document.getElementById('fx-import-msg'); imb.disabled=true; var _t=imb.textContent; imb.textContent='Importing…'; if(m)m.textContent='';
       fetch('/api/supply/flexport/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ imb.disabled=false; imb.textContent=_t; if(j&&j.error)throw new Error(j.error);
         if(m){ m.style.color='var(--pos)'; m.textContent='✓ imported '+j.imported+' shipment'+(j.imported===1?'':'s')+' ('+j.po_matched+' match a PO). Reloading…'; } fxSyncLabel(j.last_sync); delete cache['flexport']; setTimeout(function(){ fetch('/api/supply/flexport').then(function(r){return r.json();}).then(function(d){ cache['flexport']=d; renderFlexport(d); }); },600); })

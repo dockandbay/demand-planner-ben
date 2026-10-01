@@ -4453,6 +4453,7 @@ app.get('/api/supply/xero/connect', async (req, res) => {
   res.redirect('https://login.xero.com/identity/connect/authorize?' + new URLSearchParams({ response_type: 'code', client_id: cfg.id, redirect_uri: cfg.redirect, scope: cfg.scopes, state }));
 });
 app.get('/api/supply/xero/callback', async (req, res) => {
+  _xeroStatusCache = { at: 0, out: null };
   const done = (msg, ok) => res.set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
   try {
     if (req.query.error) return done('Xero said: ' + _xeroHe(String(req.query.error_description || req.query.error)), false);
@@ -4469,22 +4470,29 @@ app.get('/api/supply/xero/callback', async (req, res) => {
     done('Connected the <b>' + region.toUpperCase() + '</b> region to <b>' + _xeroHe(c.tenantName || 'your organisation') + '</b>. You can close this tab.', true);
   } catch (e) { log500(e); done(_xeroHe(e.message), false); }
 });
+// v28.145 perf: regions probed in parallel (was sequential, ~4.5 s) and the result cached 2 min; ?fresh=1 bypasses,
+// connect (callback) / disconnect clear it.
+let _xeroStatusCache = { at: 0, out: null };
 app.get('/api/supply/xero/status', async (req, res) => {
+  if (!req.query.fresh && _xeroStatusCache.out && Date.now() - _xeroStatusCache.at < 120000) return res.set('Cache-Control', 'no-store').json(_xeroStatusCache.out);
   const out = { regions: {} };
-  for (const region of XERO_REGIONS) {
+  await Promise.all(XERO_REGIONS.map(async region => {
     const cfg = xeroConfig(region); const store = await xeroGetStore(region);
     const row = { region, configured: cfg.present, mode: (store && store.refresh_token) ? 'authcode' : 'custom' };
-    if (!cfg.present) { row.connected = false; row.reason = 'Set XERO_' + region.toUpperCase() + '_CLIENT_ID and XERO_' + region.toUpperCase() + '_CLIENT_SECRET.'; out.regions[region] = row; continue; }
+    if (!cfg.present) { row.connected = false; row.reason = 'Set XERO_' + region.toUpperCase() + '_CLIENT_ID and XERO_' + region.toUpperCase() + '_CLIENT_SECRET.'; out.regions[region] = row; return; }
     // Probe the connection (works for both a stored auth-code token and a Custom Connection's client_credentials).
     try {
       const o = await xeroFetch(region, '/api.xro/2.0/Organisation'); const org = o && o.Organisations && o.Organisations[0];
       row.connected = true; row.org_name = (org && org.Name) || (store && store.tenant_name); row.base_currency = org && org.BaseCurrency; row.tenant_id = (await xeroTenant(region)).id;
     } catch (e) { row.connected = false; row.reason = e.message; }
     out.regions[region] = row;
-  }
+  }));
+  const ord = {}; XERO_REGIONS.forEach(r => { if (out.regions[r]) ord[r] = out.regions[r]; }); out.regions = ord;   // stable key order as before
+  _xeroStatusCache = { at: Date.now(), out };
   res.set('Cache-Control', 'no-store').json(out);
 });
 app.post('/api/supply/xero/disconnect', async (req, res) => {
+  _xeroStatusCache = { at: 0, out: null };
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to disconnect Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S15)
   try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Live read of Xero PURCHASE bills (ACCPAY) for a region — the foundation for PO/payment reconciliation.
@@ -5521,6 +5529,7 @@ app.get('/api/supply/flexport/status', async (req, res) => {
   const cfg = flexportConfig();
   let lastSync = null; try { lastSync = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='flexport_last_sync'`)).rows[0]; lastSync = lastSync ? lastSync.value : null; } catch (e) {}
   if (!cfg.present) return res.json({ connected: false, configured: false, last_sync: lastSync, reason: 'Set FLEXPORT_API_TOKEN (Flexport API key) to connect.' });
+  if (req.query.lite) return res.json({ configured: true, last_sync: lastSync });   // v28.145: label-only callers skip the ~4 s Flexport API probe
   try { const j = await flexportFetch('/shipments?per=1&page=1'); const d = j && j.data; const total = d && (d.total != null ? d.total : (Array.isArray(d.data) ? d.data.length : null)); res.json({ connected: true, configured: true, last_sync: lastSync, sample_total: total }); }
   catch (e) { res.json({ connected: false, configured: true, last_sync: lastSync, reason: e.message }); }
 });

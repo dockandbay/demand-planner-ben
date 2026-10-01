@@ -1,3 +1,11 @@
+## v28.145 (Ben → Diviyaj, branch fix/first-click-boot-freeze): menu perf, items 1-3 of the 01-Oct crawl plan
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
+
+1. **No repeat ~3 s demand rebuilds.** DEMAND ▸ Exceptions (every sub-tab), Analysis ▸ Safety stock / Ship bags, Inventory status, Forecast anomalies, Cash flow compute and the Auto Forecast buy feed each called `buildLiveDemand()` unconditionally on every render. They now go through `hzEnsureDemand()`: rebuild only when demand has not been built yet or a forecast edit set `BUY_FC_STALE` (the gate BUY already uses). The explicit Refresh button still always rebuilds. Numbers unchanged: same demand inputs, the rebuild was a no-op.
+2. **CONFIG ▸ Products** rendered all 2,078 products × 191 fields (~400k cells, ~16 s freeze). Now 200 rows, then "Show 500 more" / "Show all"; filters debounced 180 ms. Payload unchanged.
+3. **External status calls.** `/api/supply/xero/status` probes UK + AU in parallel (was sequential, ~4.5 s) and caches 2 min (`?fresh=1` bypasses; Xero connect / disconnect clear it). `/api/supply/flexport/status?lite=1` returns `last_sync` without the ~4 s Flexport API probe; the Flexport page label uses it.
+
 ## v28.144 (Ben → Diviyaj, branch fix/first-click-boot-freeze): ERP compare is Fulfil-only + drawer from PO Import/Export
 
 **Files:** `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.

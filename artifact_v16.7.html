@@ -1538,6 +1538,9 @@ function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)retur
 // makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
 // instead of only refreshing on BUY-tab entry.
 var BUY_FC_STALE=false;
+// v28.145 perf: rebuild demand only when it is missing or a forecast edit made it stale (was an unconditional ~3 s rebuild on every
+// Exceptions / Safety stock / Ship bags / Inventory status / Anomalies / Cash-flow / Auto Forecast render). Same gate BUY already uses.
+function hzEnsureDemand(){ try{ if(typeof buildLiveDemand!=="function")return; if(!DEMAND_BUILT||(typeof BUY_FC_STALE!=="undefined"&&BUY_FC_STALE)){ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} } }catch(e){} }
 var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
@@ -11683,7 +11686,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){ 
 function renderExceptionsView(body){
   // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
   try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
-  try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
+  hzEnsureDemand();
   try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
@@ -12025,7 +12028,7 @@ function renderBuyPlanView(body){
   function cfCompute(b){
     fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(P){
       var cost={}; if(P&&Array.isArray(P.rows)){ P.rows.forEach(function(r){ var s=r.sku||r.SKU; if(!s)return; cost[s]=Number(String(r.cost||'').replace(/,/g,''))||0; }); }
-      try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
+      hzEnsureDemand(); try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
       var CT=(typeof CTRS!=='undefined'&&CTRS.length)?CTRS:['UK','US','EU','AU','CA'];
       var order=[];
       var _MN3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -12289,7 +12292,7 @@ function renderSafetyStockView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
   function money(n){ n=Math.round(Number(n)||0); return (n<0?'-£':'£')+Math.abs(n).toLocaleString(); }
-  try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
+  hzEnsureDemand(); try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   var Z={90:1.28,95:1.64,97.5:1.96,99:2.33}[SS_SL]||1.64;
   var CYCLE_WK=4;   // review-cycle allowance (monthly ordering) added on top of the statistical safety buffer
   var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
@@ -12503,7 +12506,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
 function renderShipBagView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
-  try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
+  hzEnsureDemand(); try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var fwd12=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,12):[];
   var p1=SB_P1/100,p2=SB_P2/100,p3=SB_P3/100, tot=p1+p2+p3; if(tot>0){p1/=tot;p2/=tot;p3/=tot;}   // normalise the split
@@ -12839,7 +12842,7 @@ function renderInvStatus(){
   var panel=document.getElementById('invstatus-panel'); if(!panel)return;
   var mkt=INV_STATUS_MKT;
   if(typeof BP==='undefined'||!BP.statusMetrics){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
-  try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
+  hzEnsureDemand();
   var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:var(--neg)">'+esc((e&&e.message)||e)+'</div>'; return; }
   INV_EXPORT={};   // rebuild the per-block export payloads for this market
   var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'var(--neg)',B:'var(--amber)',C:'var(--muted)'};
@@ -14251,7 +14254,7 @@ function daAnomalies(){
 // FORWARD 6 months is out of line with the SKU's own seasonal flow (anomalyFlags: ratio to seasonal-expected
 // > 3 = spike, < 0.25 = dip). Reads the live buy-plan forecast (buildLiveDemand → md.demand[ch]).
 function daAnomalyReport(){
-  try{ buildLiveDemand(); }catch(e){}
+  hzEnsureDemand();
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]);   // full forward window (so the horizon filter incl. 7+ has data)
   if(!fwd.length||typeof BP_DATA==='undefined'||!BP_DATA.products)return [];
   var moIdx={}; fwd.forEach(function(m,i){moIdx[m]=i;});   // months-out (0 = this month)
@@ -16055,7 +16058,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
 // (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
 // phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
 function afBuildBuyFeed(){
-  try{ if(typeof buildLiveDemand==='function') buildLiveDemand(); if(typeof buildLiveBpOverlay==='function') buildLiveBpOverlay(); }catch(e){}
+  hzEnsureDemand(); try{ if(typeof buildLiveBpOverlay==='function') buildLiveBpOverlay(); }catch(e){}
   var D=(typeof BP!=='undefined'&&BP.D)||null; if(!D) return [];
   var SL=D.sku_list||[], PD=D.products||{}, MK=['UK','US','EU','AU'], SEP='', agg={};
   for(var n=0;n<SL.length;n++){ var row=SL[n]; var sku=row.s; var sub=row.sc||row.c; if(!sku||!sub)continue;
