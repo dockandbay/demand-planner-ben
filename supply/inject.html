@@ -315,6 +315,18 @@
  body.hz-rail #client-subnav,
  body.hz-rail #config-subs{display:none!important}
  body.hz-rail .hz-l3-mirrored{display:none!important}   /* the one content L3 nav currently mirrored into the rail (set per-render) */
+ /* v28.140 (Ben: "the level 3 menu tries to load, flashes, then hides"): the per-render class above is only added AFTER the
+    page has drawn its in-content L3 nav, so it flashed. With the full rail showing, level-3 navigation lives ONLY in the rail —
+    hide every L3 nav the rail mirrors (same list as RAIL_L3MAP) from first paint. Collapsed rail (hz-rail-min) keeps the old behaviour. */
+ body.hz-rail:not(.hz-rail-min) #supply-root #prod-subtabs,
+ body.hz-rail:not(.hz-rail-min) #supply-root #rep-subnav,
+ body.hz-rail:not(.hz-rail-min) #supply-root #config-subs-l3,
+ body.hz-rail:not(.hz-rail-min) #demand-exceptions-nav,
+ body.hz-rail:not(.hz-rail-min) #demand-scenario-nav,
+ body.hz-rail:not(.hz-rail-min) #demand-inputs-nav,
+ body.hz-rail:not(.hz-rail-min) #demand-analysis-nav,
+ body.hz-rail:not(.hz-rail-min) #demand-config-nav,
+ body.hz-rail:not(.hz-rail-min) #perf-subnav{display:none!important}
  body.hz-rail .ver:not(.rl-ver){display:none!important}   /* the rail foot shows the version now — drop the in-content badge */
 }
 #tl-drop .tl-po:hover{text-decoration:underline}

@@ -9922,8 +9922,11 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
 function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open){p.style.display='block'; try{buildCatChecklist();}catch(_){}} var _fr=document.getElementById('plan-fromrep-chk'); if(_fr)_fr.checked=(typeof PLAN_FROM_REP!=='undefined'&&PLAN_FROM_REP); _planPopBind(); }
 function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); if(x)x.style.display='none'; }
 function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
+// v28.140: left edge a viewport-positioned popup may use — just right of the left rail when the rail is showing (it is
+// fixed, z-index 1000, 240px wide; a popup clamped to x=6 slid underneath it), else the viewport edge.
+function hzMinLeft(){ try{ var r=document.getElementById('hz-leftrail'); if(r&&getComputedStyle(r).display!=='none'){ var rr=r.getBoundingClientRect(); if(rr.width>0&&rr.right<window.innerWidth*0.6)return Math.round(rr.right)+6; } }catch(e){} return 6; }
 function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open){p.style.display='block';
-    try{ var b=document.getElementById('plan-display-btn'); if(b){ var br=b.getBoundingClientRect(), w=p.offsetWidth||360; p.style.position='fixed'; p.style.top=(br.bottom+4)+'px'; p.style.right='auto'; p.style.left=Math.max(6,Math.min(br.right-w, window.innerWidth-w-6))+'px'; } }catch(e){} }   // clamp within the viewport (was right:0 → half off-screen on wide windows)
+    try{ var b=document.getElementById('plan-display-btn'); if(b){ var br=b.getBoundingClientRect(), w=p.offsetWidth||360; p.style.position='fixed'; p.style.top=(br.bottom+4)+'px'; p.style.right='auto'; p.style.left=Math.max(hzMinLeft(),Math.min(br.right-w, window.innerWidth-w-6))+'px'; p.style.zIndex='1100'; } }catch(e){} }   // clamp within the viewport (was right:0 → half off-screen on wide windows)
     var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); var _ro=document.getElementById('filt-runoff-cats'); if(_ro)_ro.checked=(typeof SHOW_RUNOFF_CATS!=='undefined'&&SHOW_RUNOFF_CATS); var _h1=document.getElementById('filt-hl-fclt'); if(_h1)_h1.checked=(typeof HL_FC_LT_ACT!=='undefined'&&HL_FC_LT_ACT); var _h2=document.getElementById('filt-hl-nofcinv'); if(_h2)_h2.checked=(typeof HL_NOFC_INV!=='undefined'&&HL_NOFC_INV); var _h3=document.getElementById('filt-hl-disc'); if(_h3)_h3.checked=(typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC); var _h4=document.getElementById('filt-hl-growthly'); if(_h4)_h4.checked=(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
@@ -10888,7 +10891,7 @@ function renderSummaryView(body){
         try{ t.innerHTML=_tgtHovHtml(el); }catch(e){ return; } t.style.display='block';
         var r=el.getBoundingClientRect(), th=t.offsetHeight||120;
         var top=r.bottom+6; if(top+th>window.innerHeight-8) top=Math.max(6,r.top-th-6);   // flip ABOVE when near the bottom of the screen
-        t.style.left=Math.max(6,Math.min(r.right-150,window.innerWidth-326))+'px'; t.style.top=top+'px'; }
+        t.style.left=Math.max(hzMinLeft(),Math.min(r.right-150,window.innerWidth-326))+'px'; t.style.top=top+'px'; }
       function _tgtTipHide(){ var t=document.getElementById('tgt-hov-tip'); if(t)t.style.display='none'; }
       host.querySelectorAll('.tgt-hov').forEach(function(el){
         el.addEventListener('mouseenter',function(){ if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;} if(_tgtShowT)clearTimeout(_tgtShowT); _tgtShowT=setTimeout(function(){ _tgtTipShow(el); },300); });   // 300ms hover delay before showing
@@ -18998,6 +19001,7 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
    +'.ask-msg{max-width:88%;padding:9px 12px;border-radius:12px;margin-bottom:9px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}'
    +'.ask-msg.me{margin-left:auto;background:#fff2ec;border:1px solid #ffd9c7}'
    +'.ask-msg.ai{background:var(--band,#f6f7f9);border:1px solid var(--line,#e6e9ef)}'
+   +'.ask-msg.ai{white-space:normal}.ask-msg.ai>:first-child{margin-top:0}.ask-msg.ai>:last-child{margin-bottom:0}.ask-msg.ai p{margin:0 0 7px}.ask-msg.ai h3,.ask-msg.ai h4,.ask-msg.ai h5,.ask-msg.ai h6{margin:10px 0 4px;line-height:1.3;color:var(--ink,#0f172a)}.ask-msg.ai h3{font-size:15px}.ask-msg.ai h4{font-size:13.5px}.ask-msg.ai h5,.ask-msg.ai h6{font-size:12.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut,#64748b)}.ask-msg.ai ul,.ask-msg.ai ol{margin:2px 0 7px;padding-left:20px}.ask-msg.ai li{margin:2px 0}.ask-msg.ai hr{border:0;border-top:1px solid var(--line,#e6e9ef);margin:8px 0}.ask-msg.ai a{color:var(--blue,#2563eb)}.ask-tw{overflow-x:auto;margin:4px 0 8px}.ask-msg.ai table{border-collapse:collapse;font-size:12px;background:var(--card,#fff);min-width:60%}.ask-msg.ai th,.ask-msg.ai td{border:1px solid var(--line,#e6e9ef);padding:4px 8px;text-align:left;vertical-align:top}.ask-msg.ai th{background:rgba(15,23,42,.05);font-weight:700;white-space:nowrap}.ask-msg.ai td.n,.ask-msg.ai th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.ask-msg.ai tbody tr:nth-child(even) td{background:rgba(15,23,42,.02)}'   // v28.140 rich answer rendering
    +'.ask-fb{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:-4px 0 10px 4px}.ask-fbb{border:1px solid transparent;background:none;cursor:pointer;font-size:13px;line-height:1;padding:3px 6px;border-radius:6px;opacity:.45;filter:grayscale(1)}.ask-fbb:hover{opacity:.9;filter:none;background:var(--band,#f6f7f9)}.ask-fbb.on{opacity:1;filter:none}.ask-fbb.on.up{background:#dcfce7;border-color:#86efac}.ask-fbb.on.down{background:#fee2e2;border-color:#fca5a5}.ask-fbt{font-size:11px;color:var(--mut,#64748b);margin-left:4px}.ask-fbc{display:flex;gap:6px;width:100%;margin-top:4px}.ask-fbi{flex:1;min-width:0;font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--line,#e6e9ef);border-radius:6px}.ask-fbs{font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid #ea580c;background:#ea580c;color:#fff;cursor:pointer}'   // v28.139 feedback thumbs
    +'.ask-msg code{background:rgba(15,23,42,.07);padding:1px 4px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:12px}'
    +'.ask-msg pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;overflow:auto;margin:6px 0;font-size:12px;white-space:pre}'
@@ -19046,11 +19050,43 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     if(seed){ ST.conv=seed; ST.msgs=[]; paint(); }
     api('/conversations/'+id).then(function(j){ ST.conv=j.conversation; ST.msgs=j.messages||[]; paint(); }).catch(function(e){ var b=document.getElementById('ask-body'); b.innerHTML='<div class="ask-empty" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
   function fileHtml(files){ if(!files||!files.length)return ''; return '<div>'+files.map(function(f){ return '<a class="ask-file" href="/api/assistant/file/'+f.id+'" target="_blank" rel="noopener">'+(f.direction==='out'?'&#11015; ':'&#128206; ')+esc(f.filename)+'</a>'; }).join('')+'</div>'; }
-  function mdlite(t){ t=esc(t);
-    t=t.replace(/```([\s\S]*?)```/g,function(m,code){ return '<pre>'+code.replace(/^\n/,'')+'</pre>'; });
-    t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
-    t=t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
-    return t; }
+  // v28.140 (Ben: "lots of empty lines … rich format, tables and headings, not markdown"): render the answer's Markdown as
+  // real HTML — headings, bullet / numbered lists, tables (numbers right-aligned), bold / italic, inline code, code blocks,
+  // links, rules — and collapse blank lines. SAFE: every text fragment goes through esc() before any tag is added, so the
+  // model can never inject HTML; links are http(s) only.
+  function mdlite(src){
+    var t=String(src==null?'':src).replace(/\r\n?/g,'\n'), blocks=[];
+    t=t.replace(/```[^\n]*\n?([\s\S]*?)```/g,function(m,code){ blocks.push('<pre>'+esc(code.replace(/\n+$/,''))+'</pre>'); return '\n\u0001'+(blocks.length-1)+'\u0001\n'; });
+    function inl(s){ s=esc(s);
+      s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+      s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/__([^_]+)__/g,'<b>$1</b>');
+      s=s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g,'$1<i>$2</i>');
+      s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+      return s; }
+    var RX_H=/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/, RX_HR=/^\s*([-*_])(\s*\1){2,}\s*$/, RX_UL=/^\s*[-*•+]\s+/, RX_OL=/^\s*\d+[.)]\s+/, RX_BLK=/^\u0001(\d+)\u0001$/,
+        RX_SEP=/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/, RX_NUM=/^[-+−]?[£$€¥]?\s?[\d,]+(\.\d+)?\s?(%|x|k|m|bn)?$/i;
+    function cells(l){ l=l.trim().replace(/^\|/,'').replace(/\|$/,''); return l.split('|').map(function(c){ return c.trim(); }); }
+    function isTable(i){ return /\|/.test(lines[i]||'') && RX_SEP.test(lines[i+1]||''); }
+    function special(i){ var l=lines[i]; return RX_H.test(l)||RX_HR.test(l)||RX_UL.test(l)||RX_OL.test(l)||RX_BLK.test(l.trim())||isTable(i); }
+    var lines=t.split('\n'), out=[], i=0;
+    while(i<lines.length){ var L=lines[i], m;
+      if(!L.trim()){ i++; continue; }   // blank lines never render
+      if((m=RX_BLK.exec(L.trim()))){ out.push(blocks[+m[1]]); i++; continue; }
+      if((m=RX_H.exec(L))){ var lv=Math.min(m[1].length+2,6); out.push('<h'+lv+'>'+inl(m[2])+'</h'+lv+'>'); i++; continue; }
+      if(RX_HR.test(L)){ out.push('<hr>'); i++; continue; }
+      if(isTable(i)){ var hd=cells(L); i+=2; var rows=[]; while(i<lines.length && /\|/.test(lines[i]) && lines[i].trim()){ rows.push(cells(lines[i])); i++; }
+        var numCol=hd.map(function(_,c){ var v=rows.map(function(r){return r[c]||'';}).filter(Boolean); return v.length>0 && v.every(function(x){ return RX_NUM.test(x.replace(/\*\*/g,'')); }); });
+        out.push('<div class="ask-tw"><table><thead><tr>'+hd.map(function(h,c){ return '<th'+(numCol[c]?' class="n"':'')+'>'+inl(h)+'</th>'; }).join('')+'</tr></thead><tbody>'
+          +rows.map(function(r){ return '<tr>'+hd.map(function(_,c){ return '<td'+(numCol[c]?' class="n"':'')+'>'+inl(r[c]||'')+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>'); continue; }
+      if(RX_UL.test(L)||RX_OL.test(L)){ var ol=RX_OL.test(L), rx=ol?RX_OL:RX_UL, items=[];
+        while(i<lines.length){ if(rx.test(lines[i])){ items.push('<li>'+inl(lines[i].replace(rx,''))+'</li>'); i++; }
+          else if(!lines[i].trim() && rx.test(lines[i+1]||'')){ i++; }   // blank line between items → same list
+          else if(lines[i].trim() && /^\s{2,}\S/.test(lines[i]) && items.length && !special(i)){ items[items.length-1]=items[items.length-1].replace(/<\/li>$/,' '+inl(lines[i].trim())+'</li>'); i++; }   // wrapped continuation
+          else break; }
+        out.push(ol?'<ol>'+items.join('')+'</ol>':'<ul>'+items.join('')+'</ul>'); continue; }
+      var para=[]; while(i<lines.length && lines[i].trim() && !special(i)){ para.push(inl(lines[i].trim())); i++; }
+      out.push('<p>'+para.join('<br>')+'</p>'); }
+    return out.join(''); }
   // v28.139 (Ben): 👍 / 👎 on every answer → planner.ai_message_feedback, for feedback analysis of Ask Claude.
   // Click the same thumb again to clear it. 👎 opens an optional "what was wrong?" note.
   function fbHtml(m){ if(m.role!=='assistant'||!m.id)return '';

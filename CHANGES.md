@@ -1,3 +1,13 @@
+## v28.140 (Ben): Display settings over the rail, no L3 flash, rich Ask Claude answers
+
+**Files: `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`.**
+
+- **DEMAND plan Display settings popup** opened behind the left rail (fixed, clamped to x=6, z-index 300 < rail 1000). It now stays right of the rail (`hzMinLeft()`) and above it (z 1100). The same clamp is applied to the other right-aligned popup (cell tooltip).
+- **Level-3 nav flash:** in-content L3 navs were only hidden by a class added after the page drew them, so they flashed. With the full rail showing they're now hidden from first paint by CSS (the same list as `RAIL_L3MAP`), so L3 lives only in the left menu. Collapsed rail unchanged.
+- **Ask Claude answers render as rich HTML:** headings, bullet/numbered lists, tables (numeric columns right-aligned, zebra rows), bold/italic, inline code, code blocks, links, rules. Blank lines are collapsed. Every fragment is escaped before tags are added (no HTML injection; http(s) links only). The system prompt now asks for tables, short headings and no blank lines.
+- Fixed in this round: a mid-line `//` comment that would have broken the page script (caught by the syntax check before ship).
+- Thumbs-down (v28.139) verified working in the real panel; the greyed-out case was an older page loaded during a sandbox restart (hard refresh).
+
 ## v28.139 (Ben): 👍 / 👎 feedback on Ask Claude answers (migration 326)
 
 **Files: `server.mjs`, `artifact_v16.7.html`, `migrations/326_ai_message_feedback.sql`.**
