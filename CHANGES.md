@@ -1,3 +1,7 @@
+## v28.129 (Ben): Payments Due has its own deep link
+
+**File: `supply/inject.html`.** `#/supply/payments` now rewrites to `#/supply/payments/payments-due` (was left bare because it's the default sub-page); `payments-due` and the old `paydue` both open it. Verified in jsdom: all three payments routes render with no page errors.
+
 ## v28.128 (Ben): deposit pickers no longer blank typed fields; Payments Due loads its data in parallel
 
 **File: `supply/inject.html`.**

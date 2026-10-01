@@ -12231,7 +12231,7 @@
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&(PO_SUB_KEYS.indexOf(poSub)>=0||poSub==='edi-labels')?[poSub]:[]));   // include 'plan' so PLAN has its own deep link; edi-labels = hidden page deep link
-    else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
+    else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0?[poSub==='paydue'?'payments-due':poSub]:[]));   // v28.129 (Ben): the default sub-page gets its own deep link too (#/supply/payments/payments-due)
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
       else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
@@ -12246,7 +12246,7 @@
         else selectReport(seg[2]||reportTab||'actions'); }   // #/supply/reports/<actions|recommendations|erp-compare|…>
       else if(sec==='actions'){ selectReport(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0?seg[2]:'actions'); }   // Actions folded into BI & Reports — redirect old #/supply/actions[/<sub>]
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
-      else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
+      else if(sec==='payments'){ var _ps=(seg[2]==='payments-due')?'paydue':seg[2]; showPoSub(_ps&&PAY_SUB_KEYS.indexOf(_ps)>=0?_ps:'paydue'); }   // PAYMENTS umbrella (default Payments Due); 'payments-due' = its URL slug (v28.129)
       else if(sec==='config'){ if(seg[2]==='portal'&&seg[3])_pendingPortalSup=decodeURIComponent(seg[3]); if(seg[2]==='onboarding'&&seg[3])window._pendingOnbRef=decodeURIComponent(seg[3]); enterSupplyConfig(seg[2]); }   // v27.895: #/supply/config/onboarding/<ref> opens that request   // #/supply/config/<item> — SUPPLY ▸ CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // LEGACY deep-link: .../<slug>/<PO>
