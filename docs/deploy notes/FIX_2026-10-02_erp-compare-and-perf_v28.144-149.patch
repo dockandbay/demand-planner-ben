@@ -1,5 +1,5 @@
 diff --git a/artifact_v16.7.html b/artifact_v16.7.html
-index bae5b5e6..d2a190b0 100644
+index bae5b5e6..db90fe6c 100644
 --- a/artifact_v16.7.html
 +++ b/artifact_v16.7.html
 @@ -1538,6 +1538,9 @@ function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)retur
@@ -139,6 +139,15 @@ index bae5b5e6..d2a190b0 100644
    var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
    var fwd12=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,12):[];
    var p1=SB_P1/100,p2=SB_P2/100,p3=SB_P3/100, tot=p1+p2+p3; if(tot>0){p1/=tot;p2/=tot;p3/=tot;}   // normalise the split
+@@ -12648,7 +12691,7 @@ function renderDemandTabs(){
+     if(!_ex3){ _ex3=document.createElement('div'); _ex3.id='demand-exceptions-nav'; bar.parentNode.insertBefore(_ex3, bar.nextSibling); }
+     _ex3.className='d3nav'; _ex3.style.display=''; _ex3.style.marginTop='6px';
+     _ex3.innerHTML=(typeof EXC_SUBTABS!=='undefined'?EXC_SUBTABS:[]).map(function(s){return '<button class="d3tab'+(s[0]===EXC_SUBTAB?' active':'')+'" data-ex="'+s[0]+'">'+s[1]+'</button>';}).join('');
+-    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',excSlug(b.dataset.ex)]); render(); }; });
++    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',excSlug(b.dataset.ex)]); _VIEW_ONLY_RENDER=true; render(); }; });   // v28.149 perf: a sub-tab switch changes no data, so keep the forecast memo (was ~1.4 s recompute per switch)
+   } else if(_ex3){ _ex3.style.display='none'; _ex3.innerHTML=''; }
+   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
+   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
 @@ -12839,7 +12882,7 @@ function renderInvStatus(){
    var panel=document.getElementById('invstatus-panel'); if(!panel)return;
    var mkt=INV_STATUS_MKT;
@@ -185,7 +194,7 @@ index bae5b5e6..d2a190b0 100644
  }
  
 diff --git a/server.mjs b/server.mjs
-index 0a2f6081..bc4d6e21 100644
+index 0a2f6081..71721150 100644
 --- a/server.mjs
 +++ b/server.mjs
 @@ -1981,7 +1981,10 @@ app.get('/', async (req, res) => {
@@ -287,19 +296,84 @@ index 0a2f6081..bc4d6e21 100644
  // Send an open-actions reminder email to a supplier's registered portal address(es) — LIVE via Resend.
  // Recipients are derived server-side from ACTIVE portal users for the supplier_id (the client cannot email
  // an arbitrary address). Sandbox has no RESEND_API_KEY → nothing is sent (safe to test).
-@@ -19720,9 +19733,10 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
+@@ -19663,53 +19676,7 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
+     res.json({ prods, batches, suppliers, rows });
+   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+ });
+-// ERP COMPARE — open/draft ERP POs that are NOT in the planner's purchase_orders, limited to POs whose
+-// supplier matches a product supplier in the planner (planner.suppliers, kind='supplier') so freight/
+-// internal/test vendors (Flexport, HMRC, print shops, …) are excluded.
+-const ERP_COMPARE_SQL = `
+-  SELECT e.po, coalesce(e.erp_po_id,'') erp_po_id, coalesce(e.supplier_name,'') supplier_name,
+-         coalesce(e.status,'') status, to_char(e.order_date,'YYYY-MM-DD') order_date,
+-         e.total_value, coalesce(e.currency,'') currency,
+-         to_char(e.final_delivery_date,'YYYY-MM-DD') final_delivery_date,
+-         to_char(e.synced_at,'YYYY-MM-DD HH24:MI') synced_at,
+-         (i.po IS NOT NULL) ignored,
+-         -- branch: the ERP mirror has no branch field, so derive a best-effort label from the PO reference
+-         -- (region token + FBA/Crossdock/B2B/Direct marker). Shown as '—' when nothing parses.
+-         NULLIF(trim(
+-           coalesce(substring(upper(e.po) from 'PO-[0-9]+([A-Z]{2})'),'') || ' ' ||
+-           CASE WHEN e.po ~* 'crossdock' THEN 'Crossdock' WHEN e.po ~* 'fba' THEN 'FBA'
+-                WHEN e.po ~* 'b2b' THEN 'B2B' WHEN e.po ~* 'direct' THEN 'Direct' ELSE '' END
+-         ),'') branch
+-  FROM planner.erp_purchase_orders e
+-  LEFT JOIN planner.purchase_orders p ON p.po = e.po
+-  LEFT JOIN planner.erp_compare_ignored i ON i.po = e.po
+-  WHERE p.po IS NULL                                                    -- not in the planner's PO list
+-    AND coalesce(e.status,'') !~* '(complete|cancel|void|closed|received)'   -- open / draft only
+-    AND EXISTS (SELECT 1 FROM planner.suppliers s
+-                WHERE lower(trim(s.name)) = lower(trim(e.supplier_name))
+-                  AND coalesce(s.kind,'supplier') = 'supplier')         -- product supplier in the planner
+-  ORDER BY (i.po IS NOT NULL), e.po`;   // v27.785 (Ben): alphabetical by PO
+-// active (non-ignored) count — drives the open-actions item
+-async function erpCompareActiveCount() {
+-  try { return (await pool.query(`SELECT count(*)::int c FROM (${ERP_COMPARE_SQL}) z WHERE NOT z.ignored`)).rows[0].c; }
+-  catch (e) { return 0; }
+-}
+-app.get('/api/supply/bi/erp-compare', async (req, res) => {
+-  try {
+-    const rows = (await pool.query(ERP_COMPARE_SQL)).rows;
+-    res.json({ ok: true, count: rows.filter(r => !r.ignored).length, rows });
+-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+-});
+-// Ignore / un-ignore an ERP PO on the compare report.
+-app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
+-  const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
+-  try {
+-    if (b.ignore === false) await pool.query(`DELETE FROM planner.erp_compare_ignored WHERE po=$1`, [b.po]);
+-    else await pool.query(`INSERT INTO planner.erp_compare_ignored (po, ignored_by) VALUES ($1,$2)
+-      ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
+-    res.json({ ok: true });
+-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+-});
++// v28.149: Cin7 ERP compare removed (100% on Fulfil). planner.erp_compare_ignored / erp_purchase_orders are left in place (drop = Diviyaj).
+ // ===================== Fulfil COMPARE (v27.779, Ben) =====================
+ // Open Fulfil purchase orders NOT in the planner (identity = number, else reference), limited to product suppliers —
+ // the Fulfil twin of the Cin7 ERP compare. Additionally surfaces the linked SALES ORDER (the PO's `reference` when it
+@@ -19720,9 +19687,19 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
  // REST API, ~3s cold) — cache it briefly so repeat loads are instant. The cheap planner/ignored filtering below runs
  // fresh on every request, so Import/Ignore reflect immediately. ?refresh=1 forces a re-fetch.
  let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
 -async function fulfilCompareApiData(force) {
++// v28.149 perf: Fulfil's API takes ~3 s, so the compare is served from cache for up to 10 min; past 2 min it is refreshed in the
++// background (single-flight) so the NEXT open is fresh without waiting. ?refresh=1 ("Refresh from Fulfil") always waits for a fresh pull.
++let _fulfilCmpInflight = null;
 +async function fulfilCompareApiData(force, cachedOnly) {
    const env = await activeFulfilEnv();
-   if (!force && _fulfilCmpCache.pos && _fulfilCmpCache.env === env && (Date.now() - _fulfilCmpCache.at) < 120000) return _fulfilCmpCache;
-+  if (cachedOnly) return (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
+-  if (!force && _fulfilCmpCache.pos && _fulfilCmpCache.env === env && (Date.now() - _fulfilCmpCache.at) < 120000) return _fulfilCmpCache;
++  const have = _fulfilCmpCache.pos && _fulfilCmpCache.env === env, age = Date.now() - _fulfilCmpCache.at;
++  if (!force && have && age < 120000) return _fulfilCmpCache;
++  if (cachedOnly) return have ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
++  if (!force && have && age < 600000) { if (!_fulfilCmpInflight) { _fulfilCmpInflight = _fulfilCompareFetch(env).catch(e => { log500(e); }).finally(() => { _fulfilCmpInflight = null; }); } return _fulfilCmpCache; }
++  if (_fulfilCmpInflight && !force) { await _fulfilCmpInflight; if (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) return _fulfilCmpCache; }
++  return _fulfilCompareFetch(env);
++}
++async function _fulfilCompareFetch(env) {
    const cfg = fulfilConfigFor(env);
    if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
    const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
-@@ -19749,17 +19763,25 @@ async function fulfilCompareApiData(force) {
+@@ -19749,17 +19726,25 @@ async function fulfilCompareApiData(force) {
    _fulfilCmpCache = { env, at: Date.now(), pos, saleMap, poSaleMap };
    return _fulfilCmpCache;
  }
@@ -331,8 +405,17 @@ index 0a2f6081..bc4d6e21 100644
      return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
    const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
    return cand.map(p => {
+@@ -19780,7 +19765,7 @@ async function fulfilCompareRows(force) {
+ }
+ app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
+   try { const force = req.query.refresh === '1' || req.query.refresh === 'true';
+-    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, rows }); }
++    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, as_of: _fulfilCmpCache.at ? new Date(_fulfilCmpCache.at).toISOString() : null, rows }); }
+   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
+ });
+ app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {
 diff --git a/supply/inject.html b/supply/inject.html
-index 2bc27ff5..579bd5e3 100644
+index 2bc27ff5..41c0ffd9 100644
 --- a/supply/inject.html
 +++ b/supply/inject.html
 @@ -495,17 +495,17 @@
@@ -591,7 +674,28 @@ index 2bc27ff5..579bd5e3 100644
    }).catch(function(){}); }
    // Small floating picker: filter a list of options (or type a free value), then onPick(val).
    function _dtcPicker(anchor,cfg){ var old=document.getElementById('dtc-picker'); if(old)old.remove();
-@@ -12984,36 +13013,7 @@
+@@ -12954,7 +12983,10 @@
+   function renderFulfilCompare(d,_cont,_re){ var b=_cont; if(!b)return; d=d||{}; var all=d.rows||[];
+     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
+     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Fulfil compare — open Fulfil POs missing from the planner</div>'
+-      +'<div class="mut tiny" style="margin-bottom:12px">Open purchase orders in <b>Fulfil</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner. Shows any linked Fulfil <b>sales order</b> &amp; its company. <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
++      +'<div class="mut tiny" style="margin-bottom:12px">Open purchase orders in <b>Fulfil</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner. Shows any linked Fulfil <b>sales order</b> &amp; its company. <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.'
++      // v28.149: data is cached up to 10 min server-side (background refresh) — show its age + a forced refresh
++      +(d.as_of?' <span style="margin-left:6px">As of '+(function(t){ var x=new Date(t); return isNaN(x)?'':(('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2)); })(d.as_of)+'</span>':'')
++      +' <a href="#" class="fcmp-refresh" style="margin-left:6px;color:var(--blue);font-weight:600">↻ Refresh from Fulfil</a></div>';
+     function tbl(list,isIgnored){
+       var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
+         +'<td class="l"><b>'+esc(r.po)+'</b></td>'
+@@ -12977,6 +13009,8 @@
+     if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— un-ignore to bring back</span></div>'+tbl(ignored,true);
+     else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
+     b.innerHTML=htmlOut;
++    var _fr=b.querySelector('.fcmp-refresh'); if(_fr)_fr.onclick=function(ev){ ev.preventDefault(); _fr.textContent='Refreshing from Fulfil…'; _fr.style.pointerEvents='none';
++      fetch('/api/supply/bi/fulfil-compare?refresh=1').then(function(r){return r.json();}).then(function(nd){ if(nd&&nd.error){ _fr.textContent='Refresh failed: '+nd.error; _fr.style.pointerEvents=''; return; } try{ _erpcCount=nd.count; _erpcAt=Date.now(); paintErpcBadge(); paintReportsL2Badge(); }catch(e){} renderFulfilCompare(nd,_cont,_re); }).catch(function(e){ _fr.textContent='Refresh failed'; _fr.style.pointerEvents=''; }); };
+     function setIgnore(po,ig){ fetch('/api/supply/bi/fulfil-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); }).catch(function(){alert('Could not update');}); }
+     b.querySelectorAll('.fulc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
+     b.querySelectorAll('.fulc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; });
+@@ -12984,36 +13018,7 @@
        if(!confirm('Import Fulfil PO '+po+' into Horizon?\n\nBrings in the supplier, company (→ ship-to country), branch, SKUs, quantities & prices. If it already exists its lines are overwritten from Fulfil.'))return;
        x.disabled=true; x.textContent='Importing…';
        fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'po',value:po,confirm:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Import failed: '+j.error); x.disabled=false; x.textContent='⬆ Import to Horizon'; return; } invalidateDerived(); delete cache['purchase-orders']; if(_re)_re(); }).catch(function(e){ alert('Import failed: '+(e.message||e)); x.disabled=false; x.textContent='⬆ Import to Horizon'; }); }; }); }
@@ -629,7 +733,7 @@ index 2bc27ff5..579bd5e3 100644
    // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
    function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
      function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
-@@ -14873,7 +14873,7 @@
+@@ -14873,7 +14878,7 @@
    window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
    // ↻ top-nav refresh (SUPPLY context): drop this module's client-side section cache + re-render the current
    // section so a just-busted server cache is re-fetched fresh, in place (no full reload). (v27.327)

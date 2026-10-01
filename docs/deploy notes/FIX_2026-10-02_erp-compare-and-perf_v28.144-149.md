@@ -1,8 +1,8 @@
-# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.148; on top of v28.143)
+# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.149; on top of v28.143)
 
 **Branch** `fix/first-click-boot-freeze` (still NOT merged into `phase-2.1-suppliers`, so it can't overwrite your `.1-.3` patches).
-Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147 → `02b46533` v28.148.
-**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-148.patch` = `git diff 3f9fb804..02b46533` on `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs`. Apply after the v28.143 patch.
+Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147 → `02b46533` v28.148 → `9ee0a887` v28.149.
+**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-149.patch` = `git diff 3f9fb804..9ee0a887` on `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs`. Apply after the v28.143 patch.
 No migration, no env var. Server restart needed (server.mjs changed).
 
 ## v28.144: ERP compare (Ben: "we are now 100% on fulfil")
@@ -10,7 +10,7 @@ No migration, no env var. Server restart needed (server.mjs changed).
 - PO ▸ Import/Export: "⬆ Import from Cin7" removed; new **⇄ ERP compare** button opens the Fulfil compare in a side drawer.
 - **Matching:** a Fulfil PO counts as in the planner if its Fulfil id is a `po_links` (fulfil, linked) `external_id`, OR its number or reference matches a planner `po`, `erp_po` or linked `external_ref` (trimmed, case-insensitive). Ben's case: Fulfil PO with reference `PO-57EULX-SAMPLES` (link 363). Live read-only check: 31 of 32 Horizon-style Fulfil POs now match.
 - BUY & MOVE Actions "ERP POs not in planner" uses the Fulfil compare **cache only** (never waits on Fulfil). Was the Cin7 compare.
-- Server `/api/supply/bi/erp-compare` (+ `/ignore`) left in place, unused. Safe to delete later.
+- Server `/api/supply/bi/erp-compare` (+ `/ignore`): **removed in v28.149** (see below).
 
 ## v28.145: perf (items 1-3 of the 01-Oct menu crawl)
 1. `hzEnsureDemand()` replaces 7 unconditional `buildLiveDemand()` calls (Exceptions, Safety stock, Ship bags, Inventory status, Anomalies, Cash flow compute, Auto Forecast feed). Rebuild only when `!DEMAND_BUILT || BUY_FC_STALE`.
@@ -33,6 +33,11 @@ Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB ra
 - **BI & REPORTS badges** (reallocations / projection / DTC mismatch) throttled to 2 min, cleared by any invalidation; 6 report clicks now = 2 fetches each (badge + the report itself).
 - **FBA auto-refresh loop:** at most one auto refresh per hour per page (was ×3 per visit when `last_run` did not advance). Worth a look your side: why `last_run` does not advance after a successful refresh.
 
+## v28.149: Exceptions tabs, ERP compare cache, Cin7 compare removed
+- **DEMAND ▸ Exceptions sub-tab switch** now a view-only render (keeps the forecast memo): ~1.4 s → 0.07-0.26 s; output byte-identical across 9 switches. Other DEMAND tabs unchanged.
+- **Fulfil compare:** cached up to 10 min; refreshed in the background past 2 min (single-flight); `?refresh=1` forces. Response adds `as_of`. Panel shows "As of hh:mm" + "↻ Refresh from Fulfil". Warm calls skip Fulfil entirely (only the 4 planner lookups run).
+- **Removed** `ERP_COMPARE_SQL`, `erpCompareActiveCount`, `GET /api/supply/bi/erp-compare`, `POST /api/supply/bi/erp-compare/ignore` (now 404). **Tables left in place:** `planner.erp_compare_ignored`, `planner.erp_purchase_orders`; drop them (and any n8n job feeding the Cin7 PO mirror) when you are happy.
+
 ## Verified (sandbox, jsdom crawl on the served page)
 | | before | after |
 |---|---|---|
@@ -42,6 +47,6 @@ Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB ra
 | Xero status | 4.5 s every call | 5.2 s cold, 3 ms cached |
 | Flexport page status | 4.9 s | 0.3 s |
 | ERP compare tab | Cin7 + Fulfil | Fulfil only (no `bi/erp-compare` call) |
-| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146, v28.147 and v28.148) |
+| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146 to v28.149) |
 
 Still open (not in this branch): Auto Forecast's first demand build on a SUPPLY page (~3 s, genuinely needed); Shipments/Productions crawl "still loading" (pre-existing); portal-signals 404 / admin pages hitting a 401 portal endpoint; order-plan 6.3 MB and sku-data 4.2 MB payloads.
