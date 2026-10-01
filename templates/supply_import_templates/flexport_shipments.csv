@@ -1,0 +1,2 @@
+flex_id,shipment_name,mode,status_description,incoterm,freight_type,mbl_number,container_numbers,packing_date,departure_date,landing_date,arrival_date,cleared_customs_date,planned_transit_time,actual_transit_time,total_quoted_amount,total_freight_cost,customs_duty_cost,vat_costs,total_invoiced_amount
+FLEX-ABC123,SHIP-56UK-01,Ocean,In Transit,FOB,FCL,MAEU123456789,MSKU1234567,2026-04-05,2026-04-10,2026-05-18,2026-05-18,2026-05-20,38,,5200,5000,1850,0,

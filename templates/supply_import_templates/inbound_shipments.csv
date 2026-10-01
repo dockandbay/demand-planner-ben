@@ -1,0 +1,4 @@
+reference,sku,source_type,source_location,destination_warehouse,quantity,received_quantity,estimated_delivery_date,status,notes
+PO-56UKLX1,COOL-CAB-LTPNK-R,supplier_china,Lixin,uk_3pl,3000,0,2026-05-25,in_transit,Supplier inbound from China
+TRF-UK-USFBA-001,COOL-CAB-LTPNK-R,branch_transfer,UK ILG,us_fba,500,0,2026-06-15,in_transit,3PL → FBA replenishment
+TRF-3PL-USFBA-002,COOL-CAB-LTPNK-R,branch_transfer,US AWD,us_fba,300,0,2026-06-10,in_transit,AWD → FBA transfer
