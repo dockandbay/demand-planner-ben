@@ -1,3 +1,12 @@
+## v28.144 (Ben → Diviyaj, branch fix/first-click-boot-freeze): ERP compare is Fulfil-only + drawer from PO Import/Export
+
+**Files:** `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
+
+1. **Cin7 compare removed from the UI.** SUPPLY ▸ ERP compare shows the Fulfil section only; the Cin7 table, its fetch and its badge fetch are gone (the menu was slow because it waited on the Cin7 compare). The rail badge now counts Fulfil, throttled to one fetch per 5 min. Server endpoints `/api/supply/bi/erp-compare` (+ `/ignore`) are left in place but nothing calls them.
+2. **Purchase Orders ▸ Import/Export:** "⬆ Import from Cin7" removed; new **⇄ ERP compare** button opens the Fulfil compare as a side drawer (Esc / backdrop closes; "Full page ↗" goes to the report).
+3. **Match by reference (Ben: PO314 is the same as PO-57EULX-SAMPLES).** A Fulfil PO counts as already in the planner when its Fulfil id is linked in `po_links` (fulfil, linked), or its number **or reference** matches a planner PO, `erp_po` or a linked `external_ref` (trimmed, case-insensitive). Before: number-or-reference vs planner PO only, exact case.
+4. **BUY & MOVE Actions "ERP POs not in planner"** now uses the Fulfil compare, **cached only** (never waits on the Fulfil API; no row until the compare has been loaded once). Was the Cin7 compare.
+
 ## v28.143 (Ben → Diviyaj, branch fix/first-click-boot-freeze): first menu click no longer freezes ~3–5 s
 
 Client-only. On SUPPLY/PRODUCT/CLIENT/CONFIG landings the boot no longer renders the hidden DEMAND plan (~1.7 s) or prewarms the demand overlay (~3 s); BUY & MOVE Actions no longer rebuilds the overlay unconditionally (~3 s per entry). Buy plan identical to the full-page baseline (0/387). Note + patch: `docs/deploy notes/FIX_2026-10-01_first-click-boot-freeze.*`.

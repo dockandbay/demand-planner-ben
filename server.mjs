@@ -6484,7 +6484,7 @@ async function buildActionsRows() {
         try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
         try { (await manufacturingActions()).forEach(a => arows.push(a)); } catch (e) { /* manufacturing-mismatch layer is best-effort */ }
         // ERP COMPARE — a single medium-priority action when there are open ERP POs missing from the planner
-        try { const ec = await erpCompareActiveCount();
+        try { const _fr = await fulfilCompareRows(false, true); const ec = _fr ? _fr.filter(r => !r.ignored).length : 0;   // v28.144: Fulfil (cached only), was the Cin7 compare
           if (ec > 0) arows.push({ severity: 'amber', type: 'ERP POs not in planner',
             ref: ec + ' PO' + (ec > 1 ? 's' : ''),
             detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
@@ -19720,9 +19720,10 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // REST API, ~3s cold) — cache it briefly so repeat loads are instant. The cheap planner/ignored filtering below runs
 // fresh on every request, so Import/Ignore reflect immediately. ?refresh=1 forces a re-fetch.
 let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
-async function fulfilCompareApiData(force) {
+async function fulfilCompareApiData(force, cachedOnly) {
   const env = await activeFulfilEnv();
   if (!force && _fulfilCmpCache.pos && _fulfilCmpCache.env === env && (Date.now() - _fulfilCmpCache.at) < 120000) return _fulfilCmpCache;
+  if (cachedOnly) return (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
   const cfg = fulfilConfigFor(env);
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
   const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
@@ -19749,17 +19750,25 @@ async function fulfilCompareApiData(force) {
   _fulfilCmpCache = { env, at: Date.now(), pos, saleMap, poSaleMap };
   return _fulfilCmpCache;
 }
-async function fulfilCompareRows(force) {
-  const { pos, saleMap, poSaleMap } = await fulfilCompareApiData(force);
-  const [poR, supR, igR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
-    pool.query('SELECT po FROM planner.purchase_orders'),
+async function fulfilCompareRows(force, cachedOnly) {
+  const _api = await fulfilCompareApiData(force, cachedOnly); if (!_api) return null;
+  const { pos, saleMap, poSaleMap } = _api;
+  const [poR, supR, igR, lkR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
+    pool.query('SELECT po, erp_po FROM planner.purchase_orders'),
     pool.query("SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'"),
     pool.query('SELECT po FROM planner.fulfil_compare_ignored'),
+    pool.query("SELECT external_id, external_ref FROM planner.po_links WHERE system='fulfil' AND status='linked'"),
   ]);
-  const plannerPOs = new Set(poR.rows.map(r => r.po));
+  // v28.144 (Ben: 'PO314 is the same as PO-57EULX-SAMPLES — match by reference as well'): a Fulfil PO is already in the planner
+  // when its Fulfil id is linked (po_links fulfil), OR its number OR its reference matches a planner PO / erp_po / linked ref.
+  const _n = v => String(v == null ? '' : v).trim().toUpperCase();
+  const plannerPOs = new Set(); poR.rows.forEach(r => { if (r.po) plannerPOs.add(_n(r.po)); if (r.erp_po) plannerPOs.add(_n(r.erp_po)); });
+  lkR.rows.forEach(r => { if (r.external_ref) plannerPOs.add(_n(r.external_ref)); });
+  const linkedIds = new Set(lkR.rows.map(r => String(r.external_id)));
   const suppliers = new Set(supR.rows.map(r => r.n));
   const ignored = new Set(igR.rows.map(r => r.po));
-  const cand = pos.filter(p => { const key = p.number || p.reference; if (!key) return false; if (plannerPOs.has(key)) return false;
+  const cand = pos.filter(p => { const key = p.number || p.reference; if (!key) return false;
+    if (linkedIds.has(String(p.id)) || plannerPOs.has(_n(p.number)) || (p.reference && plannerPOs.has(_n(p.reference)))) return false;
     return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
   const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
   return cand.map(p => {

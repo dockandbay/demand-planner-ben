@@ -495,17 +495,17 @@
 #supply-root .pog-pill:hover{color:var(--blue);border-color:#bfdbfe}
 #supply-root .pog-pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
-#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
+#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
 #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
-#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
-#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer{transform:translateX(0)}
-#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
+#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer{transform:translateX(0)}
+#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
 /* Drawer-overlay mode: PO drawer opened from DEMAND/BUY (supply hidden). supply-root is shown ONLY to host the
    fixed drawer overlay — every other supply child is hidden, so the drawer floats over the current view (e.g. the
    BUY plan popup) and closing it returns you there. No positioning on supply-root itself → the drawer's fixed
    z-index (100002) still beats the plan popup (z9000). */
 #supply-root.hz-drawer-overlay{display:block!important;padding:0!important}
-#supply-root.hz-drawer-overlay > *:not(#podrawer-bg):not(#shipdrawer-bg):not(#sampdrawer-bg):not(#mob-sheet-ov){display:none!important}
+#supply-root.hz-drawer-overlay > *:not(#podrawer-bg):not(#shipdrawer-bg):not(#sampdrawer-bg):not(#erpdrawer-bg):not(#mob-sheet-ov){display:none!important}
 #supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:var(--hover);flex:0 0 auto}
 #supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:var(--nav)}
 #supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:var(--muted);padding:4px 8px;font-family:inherit}
@@ -517,9 +517,9 @@
 @media (max-width:640px){
   #supply-root #sup-count{display:none}            /* PO count line — hide on mobile */
   #supply-root .po-erp-match{display:none}         /* ERP-match summary — hide on mobile */
-  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{background:transparent!important}
-  #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
-  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer{transform:translateY(0)}
+  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{background:transparent!important}
+  #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
+  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer{transform:translateY(0)}
   #supply-root .shipdrawer-head{padding:13px 14px;background:var(--nav);border-bottom:none;position:sticky;top:0;z-index:3}
   #supply-root .shipdrawer-title{color:#fff;font-size:15px}
   #supply-root .shipdrawer-x{color:#fff;font-size:22px;padding:6px 10px}
@@ -1013,7 +1013,7 @@
   var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Actions/Recommendations/ERP Compare folded in as the first 3 (Ben). Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs.
   var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','reallocate','urgent-buy','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];   // 'metrics' moved to top-level REPORTS ▸ Performance ▸ Supply metrics
-  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
+  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/fulfil-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
   var reportTab='actions';   // BI & REPORTS opens on ACTIONS by default (Ben)
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -1609,18 +1609,13 @@
         +'<div class="tw" style="max-width:900px"><table class="act-tbl">'+actHead()+'<tbody>'+open.map(actRow).join('')+'</tbody></table></div>';
       bindActFix(); bindLifecycle(statBar,sevBar,view); }
     function renderErpTab(sb){
-      // v27.779 (Ben): two stacked compare reports on this tab — Fulfil compare ABOVE, Cin7 compare below — plus a
-      // shared "Hide ignored" toggle (default on). Each section fetches independently so one being unavailable
-      // (e.g. Fulfil not configured) doesn't block the other.
+      // v28.144 (Ben: 'we are now 100% on Fulfil'): Fulfil compare only — the Cin7 compare section (and its fetch) is gone.
       sb.innerHTML='<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin:2px 0 12px"><input type="checkbox" id="erpc-hideign"'+(_erpcHideIgnored?' checked':'')+'> Hide ignored</label>'
-        +'<div id="fulfilc-sec"><div class="count" style="padding:10px 2px">Loading Fulfil compare…</div></div>'
-        +'<div id="cin7c-sec" style="margin-top:26px;border-top:1px solid var(--line);padding-top:16px"><div class="count" style="padding:10px 2px">Loading Cin7 compare…</div></div>';
+        +'<div id="fulfilc-sec"><div class="count" style="padding:10px 2px">Loading Fulfil compare…</div></div>';
       var _hi=document.getElementById('erpc-hideign'); if(_hi)_hi.onchange=function(){ _erpcHideIgnored=_hi.checked; renderErpTab(sb); };
-      fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(d){ var el=document.getElementById('fulfilc-sec'); if(el)renderFulfilCompare(d, el, function(){ renderErpTab(sb); }); })
-        .catch(function(){ var el=document.getElementById('fulfilc-sec'); if(el)el.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Fulfil compare</div><div class="mut tiny">Fulfil compare unavailable — the Fulfil API is not configured for this environment.</div>'; });
-      fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(d){ _actErpCount=(d&&typeof d.count==='number')?d.count:((d&&d.rows||[]).filter(function(x){return !x.ignored;}).length);
-        var badge=document.querySelector('#act-subnav .act-subtab[data-as="erp-compare"]'); if(badge)badge.innerHTML='⬆ ERP COMPARE'+(_actErpCount>0?' <span class="ex-badge">'+_actErpCount+'</span>':'');
-        var el=document.getElementById('cin7c-sec'); if(el)renderErpCompare(d, el, function(){ renderErpTab(sb); }); }).catch(function(){ var el=document.getElementById('cin7c-sec'); if(el)el.innerHTML='<div style="color:var(--neg)">Could not load Cin7 compare.</div>'; }); }
+      fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(d){ var el=document.getElementById('fulfilc-sec'); if(el)renderFulfilCompare(d, el, function(){ renderErpTab(sb); });
+          if(d&&typeof d.count==='number'){ _actErpCount=d.count; var badge=document.querySelector('#act-subnav .act-subtab[data-as="erp-compare"]'); if(badge)badge.innerHTML='⬆ ERP COMPARE'+(_actErpCount>0?' <span class="ex-badge">'+_actErpCount+'</span>':''); try{ _erpcCount=d.count; _erpcAt=Date.now(); paintErpcBadge(); paintReportsL2Badge(); }catch(e){} } })
+        .catch(function(){ var el=document.getElementById('fulfilc-sec'); if(el)el.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Fulfil compare</div><div class="mut tiny">Fulfil compare unavailable — the Fulfil API is not configured for this environment.</div>'; }); }
     // KPI tiles (design "Horizon Supply"): open actions · high priority · payment issues · done. Counts come from the loaded set.
     function kpiBar(){ var k=document.getElementById('act-kpis'); if(!k)return;
       var open=_acts.filter(function(r){return stOf(r)==='open';}), hi=open.filter(function(r){return r.severity==='high';}).length,
@@ -2902,7 +2897,7 @@
         return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
           +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
-          +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import from Cin7</button>'
+          +'<button class="save-btn" id="po-erp-compare" style="'+lb+'" title="ERP compare (Fulfil) — open Fulfil purchase orders that are missing from the planner">⇄ ERP compare</button>'   // v28.144: replaces ⬆ Import from Cin7 (100% on Fulfil)
           +'<button class="save-btn" id="po-import-fulfil" style="'+lb+'" title="import a purchase order from Fulfil — by PO number, or every PO linked to a sales order — brings in supplier, branch, SKUs, quantities &amp; prices">⬆ Import Fulfil PO</button>'
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
@@ -3146,7 +3141,7 @@
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=openPoCreate;
     document.getElementById('po-upload').onclick=openPoUpload;
-    var _impBtn=document.getElementById('po-import-cin7'); if(_impBtn)_impBtn.onclick=openPoImportCin7;
+    var _erpBtn=document.getElementById('po-erp-compare'); if(_erpBtn)_erpBtn.onclick=function(){ openErpDrawer(); };   // v28.144
     var _fimpBtn=document.getElementById('po-import-fulfil'); if(_fimpBtn)_fimpBtn.onclick=openPoImportFulfil;
     var _mrgBtn=document.getElementById('po-merge'); if(_mrgBtn)_mrgBtn.onclick=openPoMerge;
     var _mstBtn=document.getElementById('po-master'); if(_mstBtn)_mstBtn.onclick=openMasterCreate;
@@ -7353,6 +7348,22 @@
     ov.dataset.podrawer='1'; ov.style.zIndex=nextDrawerZ();   // mark as a PO-drawer sheet + stack above whatever's already open
     ov.style.display='block'; ov.scrollTop=0; document.body.style.overflow='hidden';
   }
+  // v28.144 (Ben): ERP compare (Fulfil) as a drawer from PURCHASE ORDERS ▸ Import/Export. Same shell as the PO drawer.
+  function openErpDrawer(){ var old=document.getElementById('erpdrawer-bg'); if(old&&old.parentNode)old.parentNode.removeChild(old);
+    var root=document.getElementById('supply-root')||document.body; var bg=document.createElement('div'); bg.id='erpdrawer-bg'; bg.style.zIndex=nextDrawerZ();
+    bg.innerHTML='<div id="erpdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">ERP compare — Fulfil</div>'
+      +'<div><button class="lnk-btn erpd-full" title="open BI &amp; REPORTS ▸ ERP COMPARE">Full page ↗</button><button class="shipdrawer-x" title="close">✕</button></div></div>'
+      +'<div class="shipdrawer-body"><div id="erpd-body"><div class="count">Loading Fulfil compare…</div></div></div></div>';
+    root.appendChild(bg); requestAnimationFrame(function(){ bg.classList.add('open'); });
+    var onKey=function(e){ if(e.key==='Escape')close(); }; var close=function(){ bg.classList.remove('open'); document.removeEventListener('keydown',onKey); setTimeout(function(){ if(bg.parentNode)bg.parentNode.removeChild(bg); },220); };
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg)close(); }); bg.querySelector('.shipdrawer-x').onclick=close; document.addEventListener('keydown',onKey);
+    bg.querySelector('.erpd-full').onclick=function(){ close(); try{ selectReport('erp-compare'); }catch(e){} };
+    function load(){ var el=document.getElementById('erpd-body'); if(!el)return;
+      fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(d){ if(!document.getElementById('erpd-body'))return;
+        if(d&&d.error){ el.innerHTML='<div class="mut tiny">Fulfil compare unavailable — '+esc(d.error)+'</div>'; return; }
+        renderFulfilCompare(d, el, load); try{ if(typeof d.count==='number'){ _erpcCount=d.count; _erpcAt=Date.now(); paintErpcBadge(); paintReportsL2Badge(); } }catch(e){} })
+        .catch(function(e){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load Fulfil compare: '+esc(e.message||e)+'</div>'; }); }
+    load(); }
   function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
     closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
     if(isPhone()){ buildPOMobSheet(po,tab); }
@@ -12377,11 +12388,11 @@
     var ab=document.getElementById('rep-actions-badge');   // ACTIONS L3 tab high-priority counter
     if(ab){ if(_actHi>0){ ab.textContent=_actHi; ab.style.display=''; ab.title=_actHi+' high-priority action'+(_actHi>1?'s':''); } else { ab.textContent=''; ab.style.display='none'; } } }
   // ERP-compare "to review" (non-ignored) counter shown next to the ERP COMPARE sub-nav tab.
-  var _erpcCount=null;
+  var _erpcCount=null, _erpcAt=0;   // v28.144: Fulfil compare count; refreshed at most every 5 min
   function paintErpcBadge(){ var el=document.getElementById('rep-erpc-badge'); if(!el)return;
     if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
-  function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
+  function refreshErpcBadge(){ if(_erpcAt&&Date.now()-_erpcAt<300000){ paintErpcBadge(); return; } _erpcAt=Date.now(); fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
   // Open reallocation-options counter next to the REALLOCATE sub-nav tab (amber — these are opportunities, not overdue actions).
   var _reallocCount=null;
   function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
@@ -12420,7 +12431,7 @@
       if(rk==='reallocate')return renderReallocate(d);
       if(rk==='container-fill')return renderContainerFill(d);
       if(rk==='consolidate')return renderConsolidate(d);
-      if(rk==='erp-compare')return renderErpCompare(d);
+      if(rk==='erp-compare')return renderFulfilCompare(d, biBody(), function(){ selectReport('erp-compare'); });   // v28.144: Fulfil only
       cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
@@ -12984,36 +12995,7 @@
       if(!confirm('Import Fulfil PO '+po+' into Horizon?\n\nBrings in the supplier, company (→ ship-to country), branch, SKUs, quantities & prices. If it already exists its lines are overwritten from Fulfil.'))return;
       x.disabled=true; x.textContent='Importing…';
       fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'po',value:po,confirm:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Import failed: '+j.error); x.disabled=false; x.textContent='⬆ Import to Horizon'; return; } invalidateDerived(); delete cache['purchase-orders']; if(_re)_re(); }).catch(function(e){ alert('Import failed: '+(e.message||e)); x.disabled=false; x.textContent='⬆ Import to Horizon'; }); }; }); }
-  function renderErpCompare(d,_cont,_re){ var b=_cont||biBody(); d=d||{}; var all=d.rows||[];
-    var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
-    _erpcCount=active.length; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){}   // keep the sub-nav counter in sync (incl. after ignore / un-ignore)
-    var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Cin7 compare — open Cin7 POs missing from the planner</div>'
-      +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in <b>Cin7</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
-    function tbl(list,isIgnored){
-      var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
-        +'<td class="l"><b>'+esc(r.po)+'</b></td>'
-        +'<td class="l">'+esc(r.erp_po_id||'—')+'</td>'
-        +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
-        +'<td class="l">'+esc(r.branch||'—')+'</td>'
-        +'<td class="l"><span class="tool-badge '+(isIgnored?'bg-neutral':'bg-amber')+'">'+esc(r.status||'—')+'</span></td>'
-        +'<td class="l">'+esc(r.order_date||'—')+'</td>'
-        +'<td>'+((r.total_value!=null&&r.total_value!=='')?esc((r.currency?r.currency+' ':'')+r.total_value):'<span class="mut">—</span>')+'</td>'
-        +'<td class="l">'+esc(r.final_delivery_date||'—')+'</td>'
-        +'<td class="l"><span class="mut tiny">'+esc(r.synced_at||'—')+'</span></td>'
-        +'<td class="l">'+(isIgnored
-            ? '<button class="save-btn light erpc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
-            : '<button class="save-btn light erpc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
-      return '<div class="tw tw-compare"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
-    }
-    var htmlOut=head;
-    if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner (or ignored). ✓</div>';
-    else htmlOut+=tbl(active,false);
-    if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— excluded from the actions count; un-ignore to bring back</span></div>'+tbl(ignored,true);
-    else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
-    b.innerHTML=htmlOut;
-    function setIgnore(po,ig){ fetch('/api/supply/bi/erp-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); else selectReport('erp-compare'); }).catch(function(){alert('Could not update');}); }
-    b.querySelectorAll('.erpc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
-    b.querySelectorAll('.erpc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; }); }
+  // v28.144: renderErpCompare (Cin7 compare table) removed — 100% on Fulfil; see renderFulfilCompare.
   // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
   function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
     function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
