@@ -4652,7 +4652,7 @@ app.get('/api/supply/xero/accounts', async (req, res) => {
     const region = xeroRegion(req.query.region);
     const kind = String(req.query.kind || 'all').toLowerCase();
     const j = await xeroFetch(region, '/api.xro/2.0/Accounts');
-    let accts = ((j && j.Accounts) || []).map(a => ({ code: a.Code || '', name: a.Name || '', id: a.AccountID, type: a.Type, cls: a.Class, currency: a.CurrencyCode || '', status: a.Status, bank_account_number: a.BankAccountNumber || '' }));
+    let accts = ((j && j.Accounts) || []).map(a => ({ code: a.Code || '', name: a.Name || '', id: a.AccountID, type: a.Type, enable_payments: !!a.EnablePaymentsToAccount, cls: a.Class, currency: a.CurrencyCode || '', status: a.Status, bank_account_number: a.BankAccountNumber || '' }));
     if (kind === 'bank') accts = accts.filter(a => a.type === 'BANK');
     accts.sort((a, b) => String(a.code || 'zzzz').localeCompare(String(b.code || 'zzzz')) || String(a.name).localeCompare(String(b.name)));
     res.set('Cache-Control', 'no-store').json({ region, org: (await xeroTenant(region)).name, count: accts.length, accounts: accts });
@@ -4848,13 +4848,30 @@ async function computeXeroRunPlan(run) {
   const ref = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + (run.dt || '');
   // A line posts a PAYMENT when it's completion/balance, OR a pre-P58 same-org deposit. P58+ deposits draw down via a
   // credit note (no payment). Blocked deposits post nothing. Cross-org completions settle in the HOME org from its loan.
+  // v28.134 (Ben, live bug): same-org PO-bill payments were posted FROM THE USD BANK (e.g. "TEST US AMEX"). Rule: a payment
+  // settles from the SAME account its line is coded to — P58 onward (and AU) → Supplier Payments 602.1; before P58 → the
+  // production's mapped account (prod_numbers.xero_account_code, e.g. 620.37 P57). The bank pays the supplier-payment bill;
+  // these accounts are the clearing side (all have "Enable payments to this account" on in Xero, checked 01-Oct-26).
+  const acctByCode = {};
+  try { const ja = await xeroFetch(paying, '/api.xro/2.0/Accounts');
+    ((ja && ja.Accounts) || []).forEach(a => { acctByCode[String(a.Code || '').trim().toUpperCase()] = { id: a.AccountID, code: a.Code, name: a.Name, pay: !!a.EnablePaymentsToAccount, active: a.Status === 'ACTIVE' }; });
+  } catch (e) { /* unreadable chart → settle_account_id stays null → the line is flagged, nothing posts from a wrong account */ }
   outLines.forEach(l => {
     const isDep = /deposit/i.test(String(l.type || ''));
     l.will_pay = !!(l.linked_bill && l.linked_bill.id) && !l.blocked && (!isDep || l.legacy);
     if (l.will_pay) {
       l.settle_org = l.cross ? l.home_org : paying;
       if (l.cross) { const ln = loanByOrg[l.home_org]; l.settle_from = 'loan'; l.settle_account_id = ln ? ln.id : null; l.settle_account_name = ln ? (ln.code + ' ' + ln.name) : null; }
-      else { l.settle_from = 'bank'; l.settle_account_id = bank ? bank.account_id : null; l.settle_account_name = bank ? bank.name : null; }
+      else {
+        const code = String((l.account && l.account.code) || '').trim(), xa = code ? acctByCode[code.toUpperCase()] : null;
+        l.settle_from = 'account'; l.settle_account_code = code || null;
+        l.settle_account_id = (xa && xa.pay && xa.active) ? xa.id : null;
+        l.settle_account_name = xa ? (xa.code + ' ' + xa.name) : (code || null);
+        if (!code) l.settle_problem = 'no account code mapped';
+        else if (!xa) l.settle_problem = 'account ' + code + ' not found in Xero ' + paying.toUpperCase();
+        else if (!xa.active) l.settle_problem = 'account ' + code + ' is archived in Xero';
+        else if (!xa.pay) l.settle_problem = 'payments are not enabled on account ' + code + ' in Xero';
+      }
     }
   });
   // deposit-reference exchange rates (pre-P58 same-org deposit payments post at these)
@@ -4882,7 +4899,11 @@ async function computeXeroRunPlan(run) {
     }
   });
   const checks = [];
-  if (!bank) checks.push({ level: 'error', msg: 'No USD bank bound in Xero ' + paying.toUpperCase() + ' — bind the pay-from bank in CONFIG ▸ Payments (a PayPal wallet is not used).' });
+  // v28.134: payments settle from the line's coded account (602.1 / production account), not the USD bank.
+  const badSettle = outLines.filter(l => l.will_pay && l.settle_from === 'account' && !l.settle_account_id);
+  if (badSettle.length) checks.push({ level: 'error', msg: 'Can’t post ' + badSettle.length + ' payment(s): ' + [...new Set(badSettle.map(l => l.reference + ' (' + (l.settle_problem || 'no settle account') + ')'))].join(', ') });
+  const okSettle = outLines.filter(l => l.will_pay && l.settle_from === 'account' && l.settle_account_id);
+  if (okSettle.length) checks.push({ level: 'ok', msg: 'Payments settle from: ' + [...new Set(okSettle.map(l => l.settle_account_name))].join(', ') + ' (the bank pays the supplier-payment bill).' });
   const brDep = outLines.filter(l => l.flag === 'brightred');
   if (brDep.length) checks.push({ level: 'error', msg: 'Deposits from more than one Xero org are mixed (' + [...depositOrgs].map(o => o.toUpperCase()).join(' + ') + ') — run each org’s deposits separately: ' + [...new Set(brDep.map(l => l.reference))].join(', ') });
   const rDep = outLines.filter(l => l.flag === 'red');
@@ -4923,7 +4944,10 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {});
     if (!plan.ok) return res.status(400).json({ error: plan.error });
     const region = plan.region, today = new Date().toISOString().slice(0, 10), date = plan.date || today;
-    if (!plan.bank || !plan.bank.account_id) return res.status(400).json({ error: 'No USD bank account found in Xero ' + region.toUpperCase() + ' to post the payment from (bind the pay-from bank in CONFIG ▸ Payments; a PayPal wallet is not used)' });
+    // v28.134: PO-bill payments settle from the line's coded account (602.1 / production account), never the USD bank.
+    // Refuse the whole post (nothing written) if any same-org payment can't resolve a payments-enabled account.
+    const badSettle = plan.lines.filter(l => l.will_pay && l.settle_from === 'account' && !l.settle_account_id);
+    if (badSettle.length) return res.status(400).json({ error: 'Payment account problem — nothing posted: ' + [...new Set(badSettle.map(l => l.reference + ' (' + (l.settle_problem || 'no settle account') + ')'))].join(', ') });
     // v28.106: deposits never cross orgs — refuse if any deposit is flagged (cross-org RED, two-org BRIGHT RED).
     const depBlocked = plan.lines.filter(l => l.blocked);
     if (depBlocked.length) return res.status(400).json({ error: depBlocked.some(l => l.flag === 'brightred') ? ('Deposits from more than one Xero org are mixed — run each org’s deposits separately: ' + [...new Set(depBlocked.filter(l => l.flag === 'brightred').map(l => l.reference))].join(', ')) : ('Deposit(s) belong to a different Xero org than the paying org (' + plan.paying_org.toUpperCase() + ') — pay each from its own org: ' + [...new Set(depBlocked.map(l => l.reference + ' (' + l.home_org.toUpperCase() + ')'))].join(', ')) });
@@ -4954,7 +4978,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
       if (l.blocked) { out.skipped.push({ po: l.reference, reason: l.blocked }); continue; }
       if (isDep && !l.legacy) { out.skipped.push({ po: l.reference, reason: 'P58+ deposit → create a credit note' }); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
-      if (!l.settle_account_id) { out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'bank') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
+      if (!l.settle_account_id) { out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'payment') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
       const rate = l.cross ? null : ((isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate);
       try {
         const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: l.settle_account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };

@@ -1,3 +1,15 @@
+## v28.134 (Ben, live bug): Xero PO-bill payments settle from the coded account, not the USD bank
+
+**Files: `server.mjs`, `supply/inject.html`.** Live example: bankTransactionID 8f855720-d224-4ae0-ae23-425f32060639, created from Horizon, paid from the bound USD bank ("TEST US AMEX").
+
+- **Rule (Ben):** each payment against a PO bill settles from the account its line is coded to: **P58 onward (and AU) → Supplier Payments 602.1**; **before P58 → the production's mapped account** (CONFIG ▸ Productions, e.g. 620.37 P57). The bank pays the supplier-payment bill; 602.1 / 620.3x are the clearing side. All have *Enable payments to this account* on in Xero UK and AU (read 01-Oct-26).
+- `computeXeroRunPlan` resolves the account by code in the paying org's chart (`settle_from:'account'`). If it's missing, archived or not payments-enabled, the preview shows an error check and the post button is disabled. Cross-org settlement via loan 901 is unchanged.
+- `xero-post` no longer requires a USD bank, and refuses the whole post (nothing written) if any payment can't resolve its account.
+- `/api/supply/xero/accounts` now also returns `enable_payments`.
+- Verified via read-only preview on sandbox: P54 balance → 620.34 P54; P58 completion → 602.1 Supplier Payments.
+
+**Not fixed by this:** the payment already posted in live Xero from the bank. It needs correcting in Xero by hand (void/delete that payment and re-post it from 620.3x / 602.1).
+
 ## v28.133 (Ben): UK and AU supplier payments are separate payments (migration 323)
 
 **Files: `server.mjs`, `supply/inject.html`, `migrations/323_payment_fx_region.sql`.**

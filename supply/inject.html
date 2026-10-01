@@ -10752,6 +10752,7 @@
     var checks=(j.checks||[]).map(function(c){ return '<div style="display:flex;gap:7px;align-items:flex-start;padding:3px 0"><span style="color:'+(chkCol[c.level]||'var(--muted)')+';font-weight:800">'+(chkIco[c.level]||'•')+'</span><span>'+esc(c.msg)+'</span></div>'; }).join('');
     var hasOverpay=(j.lines||[]).some(function(l){return l.pay_ok===false;});
     var hasBlocked=(j.lines||[]).some(function(l){return !!l.blocked;});
+    var hasSettleBad=(j.lines||[]).some(function(l){return l.will_pay&&l.settle_from==='account'&&!l.settle_account_id;});   // v28.134: payment account (602.1 / production account) unresolved
     function orgPill(o){ o=String(o||'').toUpperCase(); var au=o==='AU'; return '<span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;'+(au?'background:#dcfce7;color:#15803d':'background:#fee2e2;color:#b91c1c')+'">'+esc(o||'—')+'</span>'; }
     var rows=(j.lines||[]).map(function(l){
       var acct=l.account?(esc(l.account.code)+' · '+esc(l.account.name)):'<span style="color:var(--neg)">unmapped</span>';
@@ -10786,8 +10787,8 @@
       +'</div>'
       +'<div class="tw" style="max-height:38vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">PO</th><th class="l">Type</th><th class="l" style="text-align:right">Amount</th><th class="l">Account</th><th class="l">Tracking</th><th class="l">Linked bill</th><th class="l">Payment check</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><div class="mut tiny" style="margin-bottom:4px">Checks</div>'+checks+'</div>'
-      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+orgSel+'<button class="save-btn" id="xbp-post"'+((hasOverpay||hasBlocked)?' disabled style="opacity:.5;background:var(--blue);color:#fff;border-color:var(--blue)"':' style="background:var(--blue);color:#fff;border-color:var(--blue)"')+'>Create bill + payments in Xero</button>'
-        +(hasBlocked?'<span class="mut tiny" style="color:var(--neg)">Deposits from another Xero org are in this run — pay them from their own org first (red rows).</span>':(hasOverpay?'<span class="mut tiny" style="color:var(--neg)">A payment exceeds a bill’s amount due — fix before posting.</span>':'<span class="mut tiny">Creates the supplier-payment bill (draft) in the paying org and posts a payment against each PO bill (cross-org via loan 901) — in one step.</span>'))
+      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+orgSel+'<button class="save-btn" id="xbp-post"'+((hasOverpay||hasBlocked||hasSettleBad)?' disabled style="opacity:.5;background:var(--blue);color:#fff;border-color:var(--blue)"':' style="background:var(--blue);color:#fff;border-color:var(--blue)"')+'>Create bill + payments in Xero</button>'
+        +(hasSettleBad?'<span class="mut tiny" style="color:var(--neg)">A payment account (602.1 or the production account) can’t be used in Xero — see Checks.</span>':'')+(hasBlocked?'<span class="mut tiny" style="color:var(--neg)">Deposits from another Xero org are in this run — pay them from their own org first (red rows).</span>':(hasOverpay?'<span class="mut tiny" style="color:var(--neg)">A payment exceeds a bill’s amount due — fix before posting.</span>':'<span class="mut tiny">Creates the supplier-payment bill (draft) in the paying org and posts a payment against each PO bill (cross-org via loan 901) — in one step.</span>'))
         +'<span id="xbp-pst" class="mut tiny"></span></div>'
       +'<div id="xbp-result" style="margin-top:10px"></div>'
       +'</div></div>';
