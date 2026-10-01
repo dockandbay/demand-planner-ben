@@ -5160,6 +5160,10 @@ const _xd = s => { const m = /\/Date\((\d+)/.exec(String(s || '')); return m ? n
 const _daysDiff = (a, b) => { if (!a || !b) return null; const da = new Date(a + 'T00:00:00Z'), db = new Date(b + 'T00:00:00Z'); if (isNaN(da) || isNaN(db)) return null; return Math.round((da - db) / 86400000); };
 async function _computeXeroExceptions() {
   const out = [];
+  // v28.130 (Ben): only reconcile POs from production P55 onward; older productions are settled history (noise). POs with no
+  // numeric PROD# are kept. One predicate, used by both the bill reconciliation and the uncreated-credit-note check.
+  // CASE (not AND) so the ::int cast only ever runs on an all-digit string — Postgres doesn't guarantee AND short-circuits.
+  const MIN_PROD = 55, PROD_OK = `coalesce(CASE WHEN regexp_replace(coalesce(p.prod_no,''),'[^0-9]','','g') ~ '^[0-9]{1,6}$' THEN regexp_replace(p.prod_no,'[^0-9]','','g')::int END, ${MIN_PROD}) >= ${MIN_PROD}`;
   // linked POs + HORIZON payment figures
   // v28.094: bill amounts/dates come from the LOCAL planner.xero_bills cache (kept fresh by syncXeroBills / the cron),
   // so this is a pure DB reconciliation — no live Xero call per bill (was ~22s of by-id fetches).
@@ -5174,7 +5178,7 @@ async function _computeXeroExceptions() {
        FROM planner.purchase_orders p
        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked' AND l.external_id IS NOT NULL
        LEFT JOIN planner.xero_bills b ON b.invoice_id=l.external_id
-      WHERE coalesce(p.master_po,'')='' LIMIT 800`)).rows;
+      WHERE coalesce(p.master_po,'')='' AND ${PROD_OK} LIMIT 800`)).rows;
   const TOL = 1.0;
   const DUE_TOL = 5;   // days
   linked.forEach(r => {
@@ -5219,6 +5223,7 @@ async function _computeXeroExceptions() {
        FROM planner.purchase_orders p
        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked'
       WHERE coalesce(p.pay_start_deposit_assigned,0) > 0.009
+        AND ${PROD_OK}
         AND ( (upper(coalesce(p.country_code,''))='AU' OR (coalesce(p.country_code,'')='' AND p.branch ILIKE '%coghlan%'))
               OR (regexp_replace(coalesce(p.prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$' AND regexp_replace(p.prod_no,'[^0-9]','','g')::int >= 58) )
         AND NOT EXISTS (SELECT 1 FROM planner.po_links c WHERE c.po=p.po AND c.system='xero_credit_note' AND c.status='linked')

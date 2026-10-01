@@ -1,3 +1,10 @@
+## v28.130 (Ben): Xero payments exceptions from P55 onward; Insight column readable
+
+**Files: `server.mjs`, `supply/inject.html`.**
+
+- `_computeXeroExceptions`: both the bill reconciliation and the uncreated-credit-note check now skip POs whose PROD# is below 55 (POs with no numeric PROD# are kept). Cast guarded by CASE so a non-numeric prod_no can't throw. Sandbox: 451 to 51 exceptions, 0 below P55.
+- Exceptions table: full width (was capped at 1100 px), Insight wraps instead of being cut off, the Type column no longer inherits the 330 px `.pay-tbl` first-column minimum, and *open PO* / *open in Xero* share one link style (same size).
+
 ## v28.129 (Ben): Payments Due has its own deep link
 
 **File: `supply/inject.html`.** `#/supply/payments` now rewrites to `#/supply/payments/payments-due` (was left bare because it's the default sub-page); `payments-due` and the old `paydue` both open it. Verified in jsdom: all three payments routes render with no page errors.

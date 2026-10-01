@@ -10871,20 +10871,22 @@
       var body=ex.length?ex.map(function(e){
         // v28.092 (Ben): every row gets Open PO (opens the PO drawer on the Payments tab) + Open in Xero (the bill),
         // plus the type-specific action (Credit note / Find links) where relevant.
-        var openPo='<button class="lnk-btn xpq-openpo" data-po="'+esc(e.po)+'" style="color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font-weight:600">open PO ↗</button>';
-        var openXero=e.bill_url?'<a href="'+esc(e.bill_url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600;white-space:nowrap">open in Xero ↗</a>':'';
+        // v28.130 (Ben): both links share ONE style (the <button> did not inherit the table font, so it rendered a different size)
+        var _xl='color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font:inherit;font-size:12px;font-weight:600;line-height:1.4;text-decoration:none;white-space:nowrap';
+        var openPo='<button class="lnk-btn xpq-openpo" data-po="'+esc(e.po)+'" style="'+_xl+'">open PO ↗</button>';
+        var openXero=e.bill_url?'<a href="'+esc(e.bill_url)+'" target="_blank" rel="noopener" style="'+_xl+'">open in Xero ↗</a>':'';
         var extra=e.action==='create_credit_note'?'<button class="save-btn xpq-mkcn" data-po="'+esc(e.po)+'" data-amt="'+(e.amount||0)+'" data-prod="'+esc(e.prod_no||'')+'" data-dep="'+esc(e.deposit_ref||'')+'" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Credit note</button>'
           :e.action==='find_links'?'<button class="lnk-btn xpq-find" data-po="'+esc(e.po)+'" style="color:var(--blue)">find links</button>':'';
         var act='<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">'+openPo+openXero+extra+'</div>';
         var tlbl={amount_mismatch:'Amount mismatch',due_date_mismatch:'Due date',uncreated_credit_note:'Uncreated credit note',shipped_no_bill:'Not in Xero'}[e.type]||e.type;
         var tcol=e.type==='amount_mismatch'?'bg-red':'bg-amber';
-        return '<tr style="border-top:1px solid var(--line)"><td class="l"><span class="tool-badge '+tcol+'">'+esc(tlbl)+'</span></td>'
+        return '<tr style="border-top:1px solid var(--line)"><td class="l" style="min-width:0;width:1%"><span class="tool-badge '+tcol+'">'+esc(tlbl)+'</span></td>'
           +'<td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(e.po||'')+(e.bill_ref?'<div class="mut tiny">'+esc(e.bill_ref)+'</div>':'')+'</td><td class="l">'+esc(e.supplier||'')+'</td>'
-          +'<td class="l"><span style="font-size:12px">'+esc(e.insight||e.message||'')+'</span></td>'
+          +'<td class="l" style="white-space:normal;word-break:break-word;min-width:320px;width:100%"><span style="font-size:12px;line-height:1.45">'+esc(e.insight||e.message||'')+'</span></td>'
           +'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }).join('')
         :'<tr><td colspan="5" class="l mut" style="padding:10px">✓ No exceptions — Xero and Horizon reconcile.</td></tr>';
       return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s. '+(_xpqExc&&_xpqExc.computed_at?'Checked '+esc(String(_xpqExc.computed_at).slice(11,16))+' UTC. ':'')+'<button class="lnk-btn" id="xpq-exc-refresh" style="color:var(--blue)">↻ re-check live</button> · <button class="lnk-btn" id="xpq-resolve-all" style="color:var(--blue)" title="Sweep every PO’s links from Xero / Fulfil / Flexport / DHL so exceptions cover the whole book">⟳ resolve all links</button></div>'
-        +'<div class="tw" style="max-width:1100px"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Type</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">Insight</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
+        +'<div class="tw" style="width:100%"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l" style="min-width:0;width:1%">Type</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">Insight</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
     function draw(j){ var items=(j&&j.items)||[], counts=(j&&j.counts)||{}; var excN=(_xpqExc&&_xpqExc.count)||0;
       function row(it){
         var det=it.kind==='payment'?('→ bill '+esc(it.reference||it.linked_invoice_id||'')):(it.kind==='credit_note'?('→ '+esc(it.po||'')+' · acct '+esc(it.account_code||'602')+(it.tracking_option?' · '+esc(it.tracking_option):'')):('acct-coded lines'+(it.reference?' · '+esc(it.reference):'')));
