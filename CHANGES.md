@@ -1,3 +1,14 @@
+## v28.139 (Ben): 👍 / 👎 feedback on Ask Claude answers (migration 326)
+
+**Files: `server.mjs`, `artifact_v16.7.html`, `migrations/326_ai_message_feedback.sql`.**
+
+- Every Ask Claude answer shows 👍 / 👎. Click again to clear. 👎 opens an optional *"What was wrong or missing?"* note. The rating shows when the conversation is reopened.
+- **Migration 326:** `planner.ai_message_feedback`, one row per rated answer: rating ±1, comment, a snapshot of the question + answer, model, user, timestamps. No FK, so deleting a conversation keeps the feedback history.
+- `POST /api/assistant/messages/:id/feedback` {rating: 1 | -1 | 0, comment}: own conversations only, answers only.
+- **Analysis export (admin):** `GET /api/assistant/feedback` (JSON with up/down totals + up %) or `?format=csv`. Filters: `&days=90`, `&rating=-1` (thumbs-down only).
+- Fixed before ship: message ids arrive as strings (bigint), so the click handler compares as strings.
+- Verified on sandbox: API (up, down + comment, returned on reload, export JSON/CSV, user-message and bad-value refusals, clear) and the UI functions in jsdom.
+
 ## v28.138 (Ben): menu review fixes, SUPPLY ▸ CONFIG ▸ Xero deep link + admin-tab load race
 
 **File: `supply/inject.html`.** From a full left-menu crawl (every L1 → L2 → L3 item clicked in jsdom on sandbox).

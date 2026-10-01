@@ -18998,6 +18998,7 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
    +'.ask-msg{max-width:88%;padding:9px 12px;border-radius:12px;margin-bottom:9px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}'
    +'.ask-msg.me{margin-left:auto;background:#fff2ec;border:1px solid #ffd9c7}'
    +'.ask-msg.ai{background:var(--band,#f6f7f9);border:1px solid var(--line,#e6e9ef)}'
+   +'.ask-fb{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:-4px 0 10px 4px}.ask-fbb{border:1px solid transparent;background:none;cursor:pointer;font-size:13px;line-height:1;padding:3px 6px;border-radius:6px;opacity:.45;filter:grayscale(1)}.ask-fbb:hover{opacity:.9;filter:none;background:var(--band,#f6f7f9)}.ask-fbb.on{opacity:1;filter:none}.ask-fbb.on.up{background:#dcfce7;border-color:#86efac}.ask-fbb.on.down{background:#fee2e2;border-color:#fca5a5}.ask-fbt{font-size:11px;color:var(--mut,#64748b);margin-left:4px}.ask-fbc{display:flex;gap:6px;width:100%;margin-top:4px}.ask-fbi{flex:1;min-width:0;font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--line,#e6e9ef);border-radius:6px}.ask-fbs{font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid #ea580c;background:#ea580c;color:#fff;cursor:pointer}'   // v28.139 feedback thumbs
    +'.ask-msg code{background:rgba(15,23,42,.07);padding:1px 4px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:12px}'
    +'.ask-msg pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;overflow:auto;margin:6px 0;font-size:12px;white-space:pre}'
    +'.ask-file{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line,#e6e9ef);background:var(--card,#fff);border-radius:7px;padding:4px 9px;margin:4px 4px 0 0;font-size:12px;text-decoration:none;color:var(--blue-ink,#1d4ed8)}'
@@ -19050,9 +19051,27 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
     t=t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
     return t; }
+  // v28.139 (Ben): 👍 / 👎 on every answer → planner.ai_message_feedback, for feedback analysis of Ask Claude.
+  // Click the same thumb again to clear it. 👎 opens an optional "what was wrong?" note.
+  function fbHtml(m){ if(m.role!=='assistant'||!m.id)return '';
+    var r=Number(m.rating)||0, open=String(ST.fbOpen)===String(m.id);
+    return '<div class="ask-fb" data-id="'+m.id+'">'
+      +'<button class="ask-fbb'+(r===1?' on up':'')+'" data-r="1" title="Good answer">&#128077;</button>'
+      +'<button class="ask-fbb'+(r===-1?' on down':'')+'" data-r="-1" title="Not helpful">&#128078;</button>'
+      +(r?'<span class="ask-fbt">'+(r===1?'Thanks!':'Thanks — noted')+(m.feedback_comment?' · “'+esc(m.feedback_comment.slice(0,60))+(m.feedback_comment.length>60?'…':'')+'”':'')+'</span>':'')
+      +(open?'<div class="ask-fbc"><input class="ask-fbi" maxlength="2000" placeholder="What was wrong or missing? (optional)" value="'+esc(m.feedback_comment||'')+'"><button class="ask-fbs">Send</button></div>':'')
+      +'</div>'; }
+  function fbPost(m,rating,comment){ var prev={r:m.rating||0,c:m.feedback_comment||''}; m.rating=rating||undefined; if(comment!=null)m.feedback_comment=comment; paint();
+    api('/messages/'+m.id+'/feedback',{method:'POST',body:{rating:rating,comment:comment}}).catch(function(e){ m.rating=prev.r||undefined; m.feedback_comment=prev.c; paint(); alert('Feedback not saved: '+e.message); }); }
+  function bindFb(b){ b.querySelectorAll('.ask-fb').forEach(function(w){ var id=String(w.dataset.id), m=ST.msgs.filter(function(x){return String(x.id)===id;})[0];   // ids arrive as strings (bigint) if(!m)return;
+    w.querySelectorAll('.ask-fbb').forEach(function(btn){ btn.onclick=function(){ var r=Number(btn.dataset.r), nr=(Number(m.rating)===r)?0:r;
+      ST.fbOpen=(nr===-1)?m.id:null; fbPost(m,nr,null); if(nr===-1)setTimeout(function(){ var i=document.querySelector('.ask-fb[data-id="'+m.id+'"] .ask-fbi'); if(i)i.focus(); },0); }; });
+    var s=w.querySelector('.ask-fbs'), inp=w.querySelector('.ask-fbi');
+    if(s&&inp){ var go=function(){ ST.fbOpen=null; fbPost(m,m.rating||-1,inp.value.trim()); }; s.onclick=go; inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); go(); } }; }
+  }); }
   function paint(){ var b=document.getElementById('ask-body'); if(!b)return;
-    b.innerHTML=(ST.msgs.length?ST.msgs.map(function(m){ var cls=m.role==='assistant'?'ai':'me'; return '<div class="ask-msg '+cls+'">'+(m.role==='assistant'?mdlite(m.content):esc(m.content))+fileHtml(m.files)+'</div>'; }).join(''):'<div class="ask-empty">New chat. Type a question or attach a file to begin.</div>')+(ST.sending?'<div class="ask-typing" id="ask-typing">Claude is thinking…</div>':'');
-    b.scrollTop=b.scrollHeight; }
+    b.innerHTML=(ST.msgs.length?ST.msgs.map(function(m){ var cls=m.role==='assistant'?'ai':'me'; return '<div class="ask-msg '+cls+'">'+(m.role==='assistant'?mdlite(m.content):esc(m.content))+fileHtml(m.files)+'</div>'+fbHtml(m); }).join(''):'<div class="ask-empty">New chat. Type a question or attach a file to begin.</div>')+(ST.sending?'<div class="ask-typing" id="ask-typing">Claude is thinking…</div>':'');
+    bindFb(b); b.scrollTop=b.scrollHeight; }
   function renderComposer(){ var f=document.getElementById('ask-foot'); if(!f)return;
     f.innerHTML='<div class="ask-atts" id="ask-atts"></div><div class="ask-inrow"><button class="ask-clip" id="ask-clip" title="Attach a file">&#128206;</button><input type="file" id="ask-file" multiple style="display:none"><textarea class="ask-ta" id="ask-ta" rows="1" placeholder="Ask anything, or attach a file…"></textarea><button class="ask-send" id="ask-send" title="Send">&#10148;</button></div><div class="ask-hint">Private to you. Claude can read CSV, spreadsheets, PDF, images and text.</div>';
     var ta=document.getElementById('ask-ta'); ta.oninput=function(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,140)+'px'; };
@@ -19070,7 +19089,7 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     api('/conversations/'+ST.conv.id+'/message',{method:'POST',body:{text:text,attachments:atts}}).then(function(j){ ST.sending=false;
       // attach real ids to the just-sent user files
       if(j.user_message&&j.user_message.files&&ST.msgs.length){ ST.msgs[ST.msgs.length-1].files=j.user_message.files.map(function(f){return {id:f.id,filename:f.filename,direction:'in'};}); }
-      ST.msgs.push({role:'assistant',content:j.reply.content,files:j.reply.files||[]});
+      ST.msgs.push({id:j.reply.id,role:'assistant',content:j.reply.content,files:j.reply.files||[]});   // v28.139: keep the id so the answer can be rated
       if(j.title&&ST.conv)ST.conv.title=j.title; paint();
     }).catch(function(e){ ST.sending=false; ST.msgs.push({role:'assistant',content:'⚠ '+e.message,files:[]}); paint(); }); }
 })();
