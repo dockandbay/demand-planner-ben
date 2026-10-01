@@ -1,18 +1,38 @@
 diff --git a/artifact_v16.7.html b/artifact_v16.7.html
-index bae5b5e6..db90fe6c 100644
+index bae5b5e6..caff789b 100644
 --- a/artifact_v16.7.html
 +++ b/artifact_v16.7.html
-@@ -1538,6 +1538,9 @@ function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)retur
+@@ -1153,7 +1153,7 @@ function runAutoSmooth(){
+     }); });
+   // (v27.330) show the PROPOSED numbers in the grid, then a Review (before→after) popup. Commit (audit + dirty +
+   // the skipped-detail result) only on Apply; on Cancel restore the snapshot so nothing changed.
+-  try{renderMain();}catch(e){}
++  hzMarkDemandStale(); try{renderMain();}catch(e){}
+   _showAutoSmoothReview(applied,keys.length,skipped,_allChg,_rc,_asSnap);
+ }
+ // Restore the pre-sweep forecast state (used when the auto-smooth review is Cancelled). (v27.330)
+@@ -1199,7 +1199,7 @@ function _showAutoSmoothReview(applied,keyCount,skipped,allChg,rc,snap){
+       +'<button id="ar-apply" style="font-size:12px;padding:6px 16px;border:1px solid var(--pos);border-radius:6px;background:var(--pos);color:#fff;cursor:pointer;font-weight:700">Apply auto-smooth</button></div></div>';
+   document.body.appendChild(ov);
+   function close(){ if(ov.parentNode)ov.parentNode.removeChild(ov); }
+-  function cancel(){ _restoreAutoSmoothSnap(snap); try{renderMain();}catch(e){} close(); }
++  function cancel(){ _restoreAutoSmoothSnap(snap); hzMarkDemandStale(); try{renderMain();}catch(e){} close(); }
+   ov.onclick=function(e){ if(e.target===ov)cancel(); };   // backdrop click = safe Cancel (don't apply)
+   document.getElementById('ar-cancel').onclick=cancel;
+   document.getElementById('ar-apply').onclick=function(){ try{ logChangesBulk(allChg); }catch(e){} if(rc){ try{_markSmoothRun();}catch(e){} } try{markDirty();}catch(e){} close(); _showAutoSmoothResult(applied,keyCount,skipped); };
+@@ -1538,6 +1538,11 @@ function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)retur
  // makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
  // instead of only refreshing on BUY-tab entry.
  var BUY_FC_STALE=false;
 +// v28.145 perf: rebuild demand only when it is missing or a forecast edit made it stale (was an unconditional ~3 s rebuild on every
 +// Exceptions / Safety stock / Ship bags / Inventory status / Anomalies / Cash-flow / Auto Forecast render). Same gate BUY already uses.
++// v28.150 (review): every path that changes forecast data in bulk flags demand stale, so hzEnsureDemand / BUY rebuild on next use.
++function hzMarkDemandStale(){ try{ BUY_FC_STALE=true; }catch(e){} try{ AF_FEED=null; }catch(e){} }
 +function hzEnsureDemand(){ try{ if(typeof buildLiveDemand!=="function")return; if(!DEMAND_BUILT||(typeof BUY_FC_STALE!=="undefined"&&BUY_FC_STALE)){ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} } }catch(e){} }
  var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
  // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
  // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
-@@ -1852,7 +1855,10 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
+@@ -1852,7 +1857,10 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
  // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
  // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
  function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
@@ -24,7 +44,7 @@ index bae5b5e6..db90fe6c 100644
      if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s); if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi); if(d.fc_outputs)Object.assign(FC_OUTPUTS,d.fc_outputs);
      SKU_DATA_READY=true;
      // v28.125: any demand overlay built before this point was built from the EMPTY lazy maps. Re-arm the build so the
-@@ -2274,7 +2280,8 @@ function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearT
+@@ -2274,7 +2282,8 @@ function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearT
      fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); });
    }).catch(function(){ _fbaTrfBlocked='network error, press refresh to retry'; _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); }); }   // v27.521: network failure LATCHES too (live parity) so the hourly auto-refresh cannot loop on a dead connection
  function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
@@ -34,7 +54,16 @@ index bae5b5e6..db90fe6c 100644
  function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
  function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!el)return;
    var n=FBA_PENDING_ROWS.length, u=FBA_PENDING_ROWS.reduce(function(a,r){return a+(Number(r.qty)||0);},0), lr=FBA_PENDING_LR?(' · '+_fbaTrfAgo(FBA_PENDING_LR)):'';
-@@ -9999,7 +10006,11 @@ function render(){
+@@ -5071,7 +5080,7 @@ function smoothModeTip(el){
+   el.addEventListener('mouseleave',function(){ clearTimeout(el._t); if(_smTip)_smTip.style.display='none'; });
+ }
+ function markDirty(){
+-  _dirty=true; scheduleAutoSave();
++  _dirty=true; hzMarkDemandStale(); scheduleAutoSave();
+   const btn=document.getElementById('sv');
+   if(btn&&btn.textContent==='Save Forecasts')btn.textContent='Save Forecasts *';
+ }
+@@ -9999,7 +10008,17 @@ function render(){
    var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
    if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
    // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
@@ -42,17 +71,38 @@ index bae5b5e6..db90fe6c 100644
 +  // v28.146: not for BUY & MOVE views; there the cold build is deferred behind a loading panel (see the _inBM branch below).
 +  var _bmV=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
 +  // v28.148: same for a COLD DEMAND visit (demand not built yet): deferred behind a loading panel after renderDemandTabs() below.
-+  var _dmCold=(VIEW_MODE==='planning' && typeof DEMAND_BUILT!=='undefined' && !DEMAND_BUILT && typeof buildLiveDemand==='function');
-+  try{ if(!_PP_COVER_INIT && !_bmV && !_dmCold && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
++  // v28.150: only the DEMAND views that use the demand overlay wait for it (Inputs / Calendar / Config etc. do not, so they
++  // neither show the loading panel nor pay the one-time prepack-cover build). REPORTS gets the same deferred loading panel.
++  var _NEEDD={plan:1,exceptions:1,safetystock:1,shipbags:1,fcanom:1};
++  var _cold=(typeof DEMAND_BUILT!=='undefined' && !DEMAND_BUILT && typeof buildLiveDemand==='function');
++  var _dmCold=(VIEW_MODE==='planning' && _cold && !!_NEEDD[DEMAND_VIEW]);
++  var _rpCold=(VIEW_MODE==='exec' && _cold);
++  var _noPP=(VIEW_MODE==='planning' && !_NEEDD[DEMAND_VIEW]);
++  try{ if(!_PP_COVER_INIT && !_bmV && !_dmCold && !_rpCold && !_noPP && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
    // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
    if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
    // Toggle filter rows visibility based on view mode.
-@@ -10038,14 +10049,32 @@ function render(){
+@@ -10038,14 +10057,48 @@ function render(){
    }
    // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
    var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
 -  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
 +  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap','bm-loading'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
++  if(VIEW_MODE==='exec' && _rpCold){   // v28.150: cold REPORTS entry: tabs + loading panel first, then build, then the report
++    try{ renderReportView(true); }catch(e){}
++    ['report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
++    var _rb=document.createElement('div'); _rb.id='report-body'; document.querySelector('.wrap').appendChild(_rb);
++    _rb.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Reports…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
++    clearTimeout(window.__rpColdT); window.__rpColdT=setTimeout(function(){
++      if(VIEW_MODE!=='exec')return;   // user moved on: don't block them
++      try{ buildLiveDemand(); }catch(e){ console.error('[HORIZON] demand build FAILED',e); }
++      try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}
++      if(!DEMAND_BUILT)DEMAND_BUILT=true;
++      var _x=document.getElementById('report-body'); if(_x)_x.remove();
++      try{ render(); }catch(e){ console.error(e); }
++    },160);
++    return;
++  }
    if(VIEW_MODE==='exec'){renderReportView();return;}
    // leaving the REPORTS area — tear down its sub-tab bar + any report body
    ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
@@ -73,7 +123,8 @@ index bae5b5e6..db90fe6c 100644
 +      clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){
 +        var _stillBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
 +        if(!_stillBM){ var _l=document.getElementById('bm-loading'); if(_l)_l.remove(); return; }   // user moved on: don't block them
-+        try{ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){} }catch(e){ console.error('buildLiveDemand failed',e); }
++        var _bok=false; try{ buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
++        try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
 +        if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
 +        try{ render(); }catch(e){ console.error(e); }
 +      },160);
@@ -82,7 +133,7 @@ index bae5b5e6..db90fe6c 100644
      if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
      else if(VIEW_MODE==='zalando'){ var _twz=document.getElementById('tw'); if(_twz)_twz.style.display='none'; var _bwz=document.getElementById('buy-wrap'); if(_bwz)_bwz.remove(); renderZalando(); }
      else if(VIEW_MODE==='inventory'){ var _twi=document.getElementById('tw'); if(_twi)_twi.style.display='none'; var _bwi=document.getElementById('buy-wrap'); if(_bwi)_bwi.remove(); renderInventory(); }
-@@ -10057,6 +10086,20 @@ function render(){
+@@ -10057,6 +10110,21 @@ function render(){
    restoreMainView();
    renderDemandTabs();
    var planFilters=['ctabs-row','filters-row2','catrow1-wrap'];
@@ -94,7 +145,8 @@ index bae5b5e6..db90fe6c 100644
 +    _dbD.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
 +    clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){
 +      if(VIEW_MODE!=='planning'){ var _x=document.getElementById('demand-body'); if(_x&&DEMAND_VIEW==='plan')_x.remove(); return; }   // user moved on: don't block them
-+      try{ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){} }catch(e){ console.error('buildLiveDemand failed',e); }
++      var _bok=false; try{ buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
++        try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
 +      if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
 +      try{ render(); }catch(e){ console.error(e); }
 +    },160);
@@ -103,7 +155,7 @@ index bae5b5e6..db90fe6c 100644
    if(DEMAND_VIEW!=='plan'){
      planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
      var tw0=document.getElementById('tw'); if(tw0)tw0.style.display='none';
-@@ -11683,7 +11726,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){
+@@ -11683,7 +11751,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){
  function renderExceptionsView(body){
    // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
    try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
@@ -112,7 +164,7 @@ index bae5b5e6..db90fe6c 100644
    try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
-@@ -12025,7 +12068,7 @@ function renderBuyPlanView(body){
+@@ -12025,7 +12093,7 @@ function renderBuyPlanView(body){
    function cfCompute(b){
      fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(P){
        var cost={}; if(P&&Array.isArray(P.rows)){ P.rows.forEach(function(r){ var s=r.sku||r.SKU; if(!s)return; cost[s]=Number(String(r.cost||'').replace(/,/g,''))||0; }); }
@@ -121,7 +173,7 @@ index bae5b5e6..db90fe6c 100644
        var CT=(typeof CTRS!=='undefined'&&CTRS.length)?CTRS:['UK','US','EU','AU','CA'];
        var order=[];
        var _MN3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-@@ -12289,7 +12332,7 @@ function renderSafetyStockView(body){
+@@ -12289,7 +12357,7 @@ function renderSafetyStockView(body){
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
    function money(n){ n=Math.round(Number(n)||0); return (n<0?'-£':'£')+Math.abs(n).toLocaleString(); }
@@ -130,7 +182,7 @@ index bae5b5e6..db90fe6c 100644
    var Z={90:1.28,95:1.64,97.5:1.96,99:2.33}[SS_SL]||1.64;
    var CYCLE_WK=4;   // review-cycle allowance (monthly ordering) added on top of the statistical safety buffer
    var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
-@@ -12503,7 +12546,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
+@@ -12503,7 +12571,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
  function renderShipBagView(body){
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
@@ -139,7 +191,7 @@ index bae5b5e6..db90fe6c 100644
    var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
    var fwd12=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,12):[];
    var p1=SB_P1/100,p2=SB_P2/100,p3=SB_P3/100, tot=p1+p2+p3; if(tot>0){p1/=tot;p2/=tot;p3/=tot;}   // normalise the split
-@@ -12648,7 +12691,7 @@ function renderDemandTabs(){
+@@ -12648,7 +12716,7 @@ function renderDemandTabs(){
      if(!_ex3){ _ex3=document.createElement('div'); _ex3.id='demand-exceptions-nav'; bar.parentNode.insertBefore(_ex3, bar.nextSibling); }
      _ex3.className='d3nav'; _ex3.style.display=''; _ex3.style.marginTop='6px';
      _ex3.innerHTML=(typeof EXC_SUBTABS!=='undefined'?EXC_SUBTABS:[]).map(function(s){return '<button class="d3tab'+(s[0]===EXC_SUBTAB?' active':'')+'" data-ex="'+s[0]+'">'+s[1]+'</button>';}).join('');
@@ -148,7 +200,7 @@ index bae5b5e6..db90fe6c 100644
    } else if(_ex3){ _ex3.style.display='none'; _ex3.innerHTML=''; }
    // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
    var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
-@@ -12839,7 +12882,7 @@ function renderInvStatus(){
+@@ -12839,7 +12907,7 @@ function renderInvStatus(){
    var panel=document.getElementById('invstatus-panel'); if(!panel)return;
    var mkt=INV_STATUS_MKT;
    if(typeof BP==='undefined'||!BP.statusMetrics){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
@@ -157,7 +209,7 @@ index bae5b5e6..db90fe6c 100644
    var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:var(--neg)">'+esc((e&&e.message)||e)+'</div>'; return; }
    INV_EXPORT={};   // rebuild the per-block export payloads for this market
    var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'var(--neg)',B:'var(--amber)',C:'var(--muted)'};
-@@ -14251,7 +14294,7 @@ function daAnomalies(){
+@@ -14251,7 +14319,7 @@ function daAnomalies(){
  // FORWARD 6 months is out of line with the SKU's own seasonal flow (anomalyFlags: ratio to seasonal-expected
  // > 3 = spike, < 0.25 = dip). Reads the live buy-plan forecast (buildLiveDemand → md.demand[ch]).
  function daAnomalyReport(){
@@ -166,7 +218,24 @@ index bae5b5e6..db90fe6c 100644
    var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]);   // full forward window (so the horizon filter incl. 7+ has data)
    if(!fwd.length||typeof BP_DATA==='undefined'||!BP_DATA.products)return [];
    var moIdx={}; fwd.forEach(function(m,i){moIdx[m]=i;});   // months-out (0 = this month)
-@@ -16055,7 +16098,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
+@@ -15185,7 +15253,7 @@ function openSADrawer(){ var d=saEnsureDrawer(),bk=document.getElementById('sa-d
+     catch(e){ var b=document.getElementById('sa-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:var(--neg)">Could not load Stock Availability: '+String(e&&e.message||e)+'</div>'; } }, 20); }
+ function closeSADrawer(){ var d=document.getElementById('sa-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('sa-drawer-backdrop'); if(bk)bk.style.display='none'; }
+ if(typeof window!=='undefined'){ window.openSADrawer=openSADrawer; window.closeSADrawer=closeSADrawer; }
+-function renderReportView(){
++function renderReportView(tabsOnly){   // v28.150: tabsOnly = draw the REPORTS tab bar only (cold-entry loading panel)
+   var origTw=document.getElementById('tw'); if(origTw)origTw.style.display='none';
+   var buyWrap=document.getElementById('buy-wrap'); if(buyWrap)buyWrap.remove();
+   // sub-tab bar (persists across sub-report switches; created once, placed above the report body)
+@@ -15199,6 +15267,7 @@ function renderReportView(){
+   var _rst=document.getElementById('st'); if(_rst){ _rst.className=''; _rst.style.cssText='font-size:11px;color:var(--faint);margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46%'; bar.appendChild(_rst); }
+   var _rver=document.getElementById('ver'); if(_rver){ _rver.style.cssText='color:var(--nav);background:var(--prod);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;'+(_rst?'margin-left:10px':'margin-left:auto')+';white-space:nowrap;position:relative;flex:0 0 auto'; bar.appendChild(_rver); }
+   var _rsb=document.getElementById('statusbar'); if(_rsb)_rsb.style.display='none';
++  if(tabsOnly)return;
+   if(REPORT_VIEW==='ex'){ var rb=document.getElementById('report-body'); if(rb)rb.remove(); renderExecView(); return; }
+   // new reports — remove the exec table, render into a #report-body below the bar
+   var ew=document.getElementById('exec-wrap'); if(ew)ew.remove();
+@@ -16055,7 +16124,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
  // (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
  // phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
  function afBuildBuyFeed(){
@@ -175,14 +244,14 @@ index bae5b5e6..db90fe6c 100644
    var D=(typeof BP!=='undefined'&&BP.D)||null; if(!D) return [];
    var SL=D.sku_list||[], PD=D.products||{}, MK=['UK','US','EU','AU'], SEP='', agg={};
    for(var n=0;n<SL.length;n++){ var row=SL[n]; var sku=row.s; var sub=row.sc||row.c; if(!sku||!sub)continue;
-@@ -16189,9 +16232,14 @@ function renderAutoForecastReport(body){
+@@ -16189,9 +16258,14 @@ function renderAutoForecastReport(body){
    if(AF_ENGINE==='old'){
      fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(done).catch(fail);
    } else {
 -    if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
 -    afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
 -    fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail);
-+    var afGo=function(){ if(cur()!==key)return;
++    var afGo=function(){ if(cur()!==key)return; if(content&&!document.body.contains(content))return;   // v28.150: user left the report before the deferred build
 +      if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
 +      afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
 +      fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail); };
@@ -193,8 +262,43 @@ index bae5b5e6..db90fe6c 100644
    }
  }
  
+@@ -16782,6 +16856,7 @@ function hzRefreshCache(btn){
+     .then(function(){ return fetch('/api/demand/sku-data'); })
+     .then(function(r){ return r.json(); })
+     .then(function(d){
++      hzMarkDemandStale();   // v28.150: re-pulled forecasts/SKU data → reports + BUY rebuild on next use
+       if(d){ var raw=d.sku_raw||{};
+         if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s);
+         if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi);
+@@ -17047,7 +17122,7 @@ function openForecastImport(){
+       try{ skuOvSet(r.sku,co,ch,fym,String(q)); n++; }catch(e){}
+       try{ if(typeof bufferChange==='function'&&_old!==q)bufferChange('sku',r.sku,co,ch,fym,'imported override',_old,q); }catch(e){} }); });
+     try{ if(typeof saveForecasts==='function')saveForecasts(); }catch(e){}
+-    try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
++    hzMarkDemandStale(); try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
+     close(); alert('Applied '+n+' forecast override(s) to '+co+' · '+ch+'. Saved.'); };
+ }
+ window.openForecastImport=openForecastImport;
+@@ -17290,7 +17365,7 @@ function buildInputChanges(){
+ var _autoSaveTimer=null, _saving=false, AUTOSAVE_MS=60000;
+ function scheduleAutoSave(){ if(_autoSaveTimer)return;   // one save already scheduled — this edit batches into it
+   _autoSaveTimer=setTimeout(function(){ _autoSaveTimer=null; if(_dirty){ if(_saving) scheduleAutoSave(); else saveForecasts(); } },AUTOSAVE_MS); }
+-function markDirty(){ _dirty=true; scheduleAutoSave(); }   // SKU-level edits (FC_DIRTY) call this — sets _dirty + auto-saves
++function markDirty(){ _dirty=true; hzMarkDemandStale(); scheduleAutoSave(); }   // SKU-level edits (FC_DIRTY) call this — sets _dirty + auto-saves
+ // ── DEMAND undo — snapshot the forecast edit state (FC_OUTPUTS + IV + FC_DIRTY) before each edit gesture; undo up to the last 10 ──
+ var _UNDO=[], _UNDO_LABELS=[], _undoBusy=false, _undoReady=false;
+ function undoMark(){ if(!_undoReady||_undoBusy)return; _undoBusy=true;   // called BEFORE a mutation; batches all edits in one synchronous gesture into a single entry
+@@ -17304,7 +17379,7 @@ function undoLabel(s){ try{ if(_UNDO_LABELS.length)_UNDO_LABELS[_UNDO_LABELS.len
+ function undoApply(){ if(!_UNDO.length)return; var snap; try{ snap=JSON.parse(_UNDO.pop()); }catch(e){ return; } _UNDO_LABELS.pop();
+   function restore(target,src){ Object.keys(target).forEach(function(k){delete target[k];}); Object.keys(src||{}).forEach(function(k){target[k]=src[k];}); }
+   restore(FC_OUTPUTS, snap.fc); restore(IV, snap.iv); restore(FC_DIRTY, snap.fd);
+-  _dirty=true; try{ scheduleAutoSave(); }catch(e){}
++  _dirty=true; hzMarkDemandStale(); try{ scheduleAutoSave(); }catch(e){}
+   try{ renderMain(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
+ function updateUndoBtn(){ var b=document.getElementById('undo-btn'); if(!b)return; var n=_UNDO.length;
+   b.disabled=!n; b.style.opacity=n?'1':'.45'; b.style.cursor=n?'pointer':'default'; b.textContent='↶ Undo'+(n?(' ('+n+')'):'');
 diff --git a/server.mjs b/server.mjs
-index 0a2f6081..71721150 100644
+index 0a2f6081..caffb581 100644
 --- a/server.mjs
 +++ b/server.mjs
 @@ -1981,7 +1981,10 @@ app.get('/', async (req, res) => {
@@ -209,25 +313,29 @@ index 0a2f6081..71721150 100644
      if (IS_SANDBOX) {
        html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
        html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
-@@ -4453,6 +4456,7 @@ app.get('/api/supply/xero/connect', async (req, res) => {
+@@ -4453,7 +4456,8 @@ app.get('/api/supply/xero/connect', async (req, res) => {
    res.redirect('https://login.xero.com/identity/connect/authorize?' + new URLSearchParams({ response_type: 'code', client_id: cfg.id, redirect_uri: cfg.redirect, scope: cfg.scopes, state }));
  });
  app.get('/api/supply/xero/callback', async (req, res) => {
-+  _xeroStatusCache = { at: 0, out: null };
-   const done = (msg, ok) => res.set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
+-  const done = (msg, ok) => res.set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
++  xeroStatusBust();
++  const done = (msg, ok) => (xeroStatusBust(), res).set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
    try {
      if (req.query.error) return done('Xero said: ' + _xeroHe(String(req.query.error_description || req.query.error)), false);
-@@ -4469,22 +4473,29 @@ app.get('/api/supply/xero/callback', async (req, res) => {
+     const code = String(req.query.code || ''), state = String(req.query.state || '');
+@@ -4469,22 +4473,30 @@ app.get('/api/supply/xero/callback', async (req, res) => {
      done('Connected the <b>' + region.toUpperCase() + '</b> region to <b>' + _xeroHe(c.tenantName || 'your organisation') + '</b>. You can close this tab.', true);
    } catch (e) { log500(e); done(_xeroHe(e.message), false); }
  });
 +// v28.145 perf: regions probed in parallel (was sequential, ~4.5 s) and the result cached 2 min; ?fresh=1 bypasses,
 +// connect (callback) / disconnect clear it.
-+let _xeroStatusCache = { at: 0, out: null };
++let _xeroStatusCache = { at: 0, out: null }, _xeroStatusGen = 0;
++const xeroStatusBust = () => { _xeroStatusCache = { at: 0, out: null }; _xeroStatusGen++; };   // v28.150: a probe that started before a bust cannot write its (stale) result back
  app.get('/api/supply/xero/status', async (req, res) => {
-+  if (!req.query.fresh && _xeroStatusCache.out && Date.now() - _xeroStatusCache.at < 120000) return res.set('Cache-Control', 'no-store').json(_xeroStatusCache.out);
-   const out = { regions: {} };
+-  const out = { regions: {} };
 -  for (const region of XERO_REGIONS) {
++  if (!req.query.fresh && _xeroStatusCache.out && Date.now() - _xeroStatusCache.at < 120000) return res.set('Cache-Control', 'no-store').json(_xeroStatusCache.out);
++  const out = { regions: {} }, _gen = _xeroStatusGen;
 +  await Promise.all(XERO_REGIONS.map(async region => {
      const cfg = xeroConfig(region); const store = await xeroGetStore(region);
      const row = { region, configured: cfg.present, mode: (store && store.refresh_token) ? 'authcode' : 'custom' };
@@ -242,15 +350,15 @@ index 0a2f6081..71721150 100644
 -  }
 +  }));
 +  const ord = {}; XERO_REGIONS.forEach(r => { if (out.regions[r]) ord[r] = out.regions[r]; }); out.regions = ord;   // stable key order as before
-+  _xeroStatusCache = { at: Date.now(), out };
++  if (_gen === _xeroStatusGen) _xeroStatusCache = { at: Date.now(), out };
    res.set('Cache-Control', 'no-store').json(out);
  });
  app.post('/api/supply/xero/disconnect', async (req, res) => {
-+  _xeroStatusCache = { at: 0, out: null };
++  xeroStatusBust();
    try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to disconnect Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }   // v28.116 (review S15)
    try { const region = xeroRegion((req.body && req.body.region) || req.query.region); await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]); _xeroTok[region] = { token: null, exp: 0 }; res.json({ ok: true, region }); } catch (e) { res.status(500).json({ error: e.message }); } });
  // Live read of Xero PURCHASE bills (ACCPAY) for a region — the foundation for PO/payment reconciliation.
-@@ -5521,6 +5532,7 @@ app.get('/api/supply/flexport/status', async (req, res) => {
+@@ -5521,6 +5533,7 @@ app.get('/api/supply/flexport/status', async (req, res) => {
    const cfg = flexportConfig();
    let lastSync = null; try { lastSync = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='flexport_last_sync'`)).rows[0]; lastSync = lastSync ? lastSync.value : null; } catch (e) {}
    if (!cfg.present) return res.json({ connected: false, configured: false, last_sync: lastSync, reason: 'Set FLEXPORT_API_TOKEN (Flexport API key) to connect.' });
@@ -258,7 +366,7 @@ index 0a2f6081..71721150 100644
    try { const j = await flexportFetch('/shipments?per=1&page=1'); const d = j && j.data; const total = d && (d.total != null ? d.total : (Array.isArray(d.data) ? d.data.length : null)); res.json({ connected: true, configured: true, last_sync: lastSync, sample_total: total }); }
    catch (e) { res.json({ connected: false, configured: true, last_sync: lastSync, reason: e.message }); }
  });
-@@ -6484,7 +6496,7 @@ async function buildActionsRows() {
+@@ -6484,7 +6497,7 @@ async function buildActionsRows() {
          try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
          try { (await manufacturingActions()).forEach(a => arows.push(a)); } catch (e) { /* manufacturing-mismatch layer is best-effort */ }
          // ERP COMPARE — a single medium-priority action when there are open ERP POs missing from the planner
@@ -267,7 +375,7 @@ index 0a2f6081..71721150 100644
            if (ec > 0) arows.push({ severity: 'amber', type: 'ERP POs not in planner',
              ref: ec + ' PO' + (ec > 1 ? 's' : ''),
              detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
-@@ -7769,6 +7781,14 @@ supplySectionHandler = async (req, res, next) => {
+@@ -7769,6 +7782,14 @@ supplySectionHandler = async (req, res, next) => {
      }
    } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
  };
@@ -282,7 +390,7 @@ index 0a2f6081..71721150 100644
  app.get('/api/supply/:section', supplySectionHandler);
  
  // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
-@@ -8122,13 +8142,6 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
+@@ -8122,13 +8143,6 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
  // Bulk signals for the CONFIG ▸ Portal Users open-action counts: unread internal (D&B) notes per PO +
  // all supplier submissions. Combined client-side with /api/supply/purchase-orders + samples to compute
  // each supplier's open actions (same conditions the portal shows the supplier).
@@ -296,7 +404,7 @@ index 0a2f6081..71721150 100644
  // Send an open-actions reminder email to a supplier's registered portal address(es) — LIVE via Resend.
  // Recipients are derived server-side from ACTIVE portal users for the supplier_id (the client cannot email
  // an arbitrary address). Sandbox has no RESEND_API_KEY → nothing is sent (safe to test).
-@@ -19663,53 +19676,7 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
+@@ -19663,53 +19677,7 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
      res.json({ prods, batches, suppliers, rows });
    } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
  });
@@ -351,7 +459,7 @@ index 0a2f6081..71721150 100644
  // ===================== Fulfil COMPARE (v27.779, Ben) =====================
  // Open Fulfil purchase orders NOT in the planner (identity = number, else reference), limited to product suppliers —
  // the Fulfil twin of the Cin7 ERP compare. Additionally surfaces the linked SALES ORDER (the PO's `reference` when it
-@@ -19720,9 +19687,19 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
+@@ -19720,9 +19688,21 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
  // REST API, ~3s cold) — cache it briefly so repeat loads are instant. The cheap planner/ignored filtering below runs
  // fresh on every request, so Import/Ignore reflect immediately. ?refresh=1 forces a re-fetch.
  let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
@@ -364,16 +472,18 @@ index 0a2f6081..71721150 100644
 -  if (!force && _fulfilCmpCache.pos && _fulfilCmpCache.env === env && (Date.now() - _fulfilCmpCache.at) < 120000) return _fulfilCmpCache;
 +  const have = _fulfilCmpCache.pos && _fulfilCmpCache.env === env, age = Date.now() - _fulfilCmpCache.at;
 +  if (!force && have && age < 120000) return _fulfilCmpCache;
-+  if (cachedOnly) return have ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
-+  if (!force && have && age < 600000) { if (!_fulfilCmpInflight) { _fulfilCmpInflight = _fulfilCompareFetch(env).catch(e => { log500(e); }).finally(() => { _fulfilCmpInflight = null; }); } return _fulfilCmpCache; }
-+  if (_fulfilCmpInflight && !force) { await _fulfilCmpInflight; if (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) return _fulfilCmpCache; }
-+  return _fulfilCompareFetch(env);
++  // v28.150: every Fulfil pull goes through ONE in-flight promise (cold, stale and background alike), so concurrent
++  // callers (badge + drawer + Actions) share a single ~3 s pull. Background starts swallow errors; awaited ones surface them.
++  const start = () => { if (!_fulfilCmpInflight) _fulfilCmpInflight = _fulfilCompareFetch(env).finally(() => { _fulfilCmpInflight = null; }); return _fulfilCmpInflight; };
++  if (cachedOnly) { if (!have || age >= 600000) start().catch(e => log500(e)); return have ? _fulfilCmpCache : null; }   // v28.144: never waits on Fulfil; v28.150: warms it in the background
++  if (!force && have && age < 600000) { start().catch(e => log500(e)); return _fulfilCmpCache; }
++  return start();
 +}
 +async function _fulfilCompareFetch(env) {
    const cfg = fulfilConfigFor(env);
    if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
    const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
-@@ -19749,17 +19726,25 @@ async function fulfilCompareApiData(force) {
+@@ -19749,20 +19729,28 @@ async function fulfilCompareApiData(force) {
    _fulfilCmpCache = { env, at: Date.now(), pos, saleMap, poSaleMap };
    return _fulfilCmpCache;
  }
@@ -382,7 +492,7 @@ index 0a2f6081..71721150 100644
 -  const [poR, supR, igR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
 -    pool.query('SELECT po FROM planner.purchase_orders'),
 +async function fulfilCompareRows(force, cachedOnly) {
-+  const _api = await fulfilCompareApiData(force, cachedOnly); if (!_api) return null;
++  const _api = await fulfilCompareApiData(force, cachedOnly); if (!_api) return null; const _apiAt = _api.at;
 +  const { pos, saleMap, poSaleMap } = _api;
 +  const [poR, supR, igR, lkR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
 +    pool.query('SELECT po, erp_po FROM planner.purchase_orders'),
@@ -404,18 +514,31 @@ index 0a2f6081..71721150 100644
 +    if (linkedIds.has(String(p.id)) || plannerPOs.has(_n(p.number)) || (p.reference && plannerPOs.has(_n(p.reference)))) return false;
      return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
    const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
-   return cand.map(p => {
-@@ -19780,7 +19765,7 @@ async function fulfilCompareRows(force) {
+-  return cand.map(p => {
++  const _rows = cand.map(p => {
+     const key = p.number || p.reference;
+     // sale via the PO reference (SO49664 style) OR via the purchase-request chain (SO49667 → PO158 style)
+     const refSale = (p.reference && /^SO/i.test(p.reference)) ? p.reference : null;
+@@ -19777,10 +19765,16 @@ async function fulfilCompareRows(force) {
+       order_date: fulfilUnwrap(p.purchase_date), sale_ref: sale, sale_company: cleanCo(sm.company), sale_client: sm.client || null,
+       ignored: ignored.has(key) };
+   }).sort((a, b) => (a.ignored - b.ignored) || String(a.po).localeCompare(String(b.po)));   // v27.785 (Ben): alphabetical by PO
++  _rows.at = _apiAt;   // v28.150: the as-of of the Fulfil data these rows were built from (not whatever the global holds now)
++  return _rows;
  }
  app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
    try { const force = req.query.refresh === '1' || req.query.refresh === 'true';
 -    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, rows }); }
-+    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, as_of: _fulfilCmpCache.at ? new Date(_fulfilCmpCache.at).toISOString() : null, rows }); }
++    // v28.150: ?cached=1 (menu badge) never waits on Fulfil: cached rows or {cold:true} while a background pull warms it
++    const cachedOnly = !force && (req.query.cached === '1' || req.query.cached === 'true');
++    const rows = await fulfilCompareRows(force, cachedOnly);
++    if (!rows) return res.json({ ok: true, cold: true, count: null, rows: [] });
++    res.json({ ok: true, count: rows.filter(r => !r.ignored).length, as_of: rows.at ? new Date(rows.at).toISOString() : null, rows }); }
    catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
  });
  app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {
 diff --git a/supply/inject.html b/supply/inject.html
-index 2bc27ff5..41c0ffd9 100644
+index 2bc27ff5..713644aa 100644
 --- a/supply/inject.html
 +++ b/supply/inject.html
 @@ -495,17 +495,17 @@
@@ -423,11 +546,12 @@ index 2bc27ff5..41c0ffd9 100644
  #supply-root .pog-pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
  /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
 -#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
-+#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
- #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
+-#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
 -#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 -#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer{transform:translateX(0)}
 -#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
++#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
++#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open,#supply-root #erpdrawer-bg.open{background:rgba(15,23,42,.32)}
 +#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 +#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer{transform:translateX(0)}
 +#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
@@ -607,7 +731,7 @@ index 2bc27ff5..41c0ffd9 100644
      var imb=document.getElementById('fx-import'); if(imb)imb.onclick=function(){ var m=document.getElementById('fx-import-msg'); imb.disabled=true; var _t=imb.textContent; imb.textContent='Importing…'; if(m)m.textContent='';
        fetch('/api/supply/flexport/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ imb.disabled=false; imb.textContent=_t; if(j&&j.error)throw new Error(j.error);
          if(m){ m.style.color='var(--pos)'; m.textContent='✓ imported '+j.imported+' shipment'+(j.imported===1?'':'s')+' ('+j.po_matched+' match a PO). Reloading…'; } fxSyncLabel(j.last_sync); delete cache['flexport']; setTimeout(function(){ fetch('/api/supply/flexport').then(function(r){return r.json();}).then(function(d){ cache['flexport']=d; renderFlexport(d); }); },600); })
-@@ -12377,22 +12402,25 @@
+@@ -12377,22 +12402,28 @@
      var ab=document.getElementById('rep-actions-badge');   // ACTIONS L3 tab high-priority counter
      if(ab){ if(_actHi>0){ ab.textContent=_actHi; ab.style.display=''; ab.title=_actHi+' high-priority action'+(_actHi>1?'s':''); } else { ab.textContent=''; ab.style.display='none'; } } }
    // ERP-compare "to review" (non-ignored) counter shown next to the ERP COMPARE sub-nav tab.
@@ -617,7 +741,9 @@ index 2bc27ff5..41c0ffd9 100644
      if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
      else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
 -  function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
-+  function refreshErpcBadge(){ if(_erpcAt&&Date.now()-_erpcAt<300000){ paintErpcBadge(); return; } _erpcAt=Date.now(); fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
++  // v28.150: the badge reads the server's CACHED compare only (?cached=1), so a SUPPLY landing never waits on / triggers a
++  // foreground Fulfil pull. Cold cache → the server warms it in the background and we look again in 30 s. A failed fetch retries.
++  function refreshErpcBadge(){ if(_erpcAt&&Date.now()-_erpcAt<300000){ paintErpcBadge(); return; } _erpcAt=Date.now(); fetch('/api/supply/bi/fulfil-compare?cached=1').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } else if(j&&j.cold){ _erpcAt=Date.now()-270000; setTimeout(refreshErpcBadge,30000); } else _erpcAt=0; }).catch(function(){ _erpcAt=0; }); }
    // Open reallocation-options counter next to the REALLOCATE sub-nav tab (amber — these are opportunities, not overdue actions).
    var _reallocCount=null;
    function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
@@ -626,18 +752,19 @@ index 2bc27ff5..41c0ffd9 100644
 -  function refreshReallocBadge(){ fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
 +  // v28.148 perf: the BI & REPORTS badge counts were re-fetched on EVERY report click (crawl: projection ×13, reallocations ×16,
 +  // dtc/mismatch ×17). Throttled to one fetch per 2 min each; force=true (after a DTC reload) and any cache invalidation skip it.
-+  var _badgeAt={}; function _badgeFresh(k,force){ if(!force&&_badgeAt[k]&&Date.now()-_badgeAt[k]<120000)return true; _badgeAt[k]=Date.now(); return false; }
-+  function refreshReallocBadge(force){ if(_badgeFresh('realloc',force)){ paintReallocBadge(); return; } fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
++  var _badgeAt={}; function _badgeFail(k){ return function(){ try{ _badgeAt[k]=0; }catch(e){} }; }   // v28.150: a failed fetch does not suppress the next try
++  function _badgeFresh(k,force){ if(!force&&_badgeAt[k]&&Date.now()-_badgeAt[k]<120000)return true; _badgeAt[k]=Date.now(); return false; }
++  function refreshReallocBadge(force){ if(_badgeFresh('realloc',force)){ paintReallocBadge(); return; } fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(_badgeFail("realloc")); }
    var _urgentCrit=null;   // count of CRITICAL urgent-buy SKUs (excludes too-late-to-order), shown as a red action counter on the URGENT BUY tab
    function paintUrgentBadge(){ var el=document.getElementById('rep-urgent-badge'); if(!el)return;
      if(_urgentCrit==null||_urgentCrit===0){ el.textContent=''; el.style.display='none'; }
      else { el.textContent=_urgentCrit; el.style.display=''; el.title=_urgentCrit+' critical stock-out risk'+(_urgentCrit===1?'':'s')+' to buy'; } }
 -  function refreshUrgentBadge(){ fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
-+  function refreshUrgentBadge(force){ if(_badgeFresh('urgent',force)){ paintUrgentBadge(); return; } fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
++  function refreshUrgentBadge(force){ if(_badgeFresh('urgent',force)){ paintUrgentBadge(); return; } fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(_badgeFail("urgent")); }
    function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
      if(rk==='metrics'){ try{ location.hash='#/reports/performance/supply-metrics'; }catch(e){} return; }   // Metrics moved to top-level REPORTS ▸ Performance ▸ Supply metrics
      current='reports'; reportTab=rk; _actHost=null; syncHash();
-@@ -12420,7 +12448,7 @@
+@@ -12420,7 +12451,7 @@
        if(rk==='reallocate')return renderReallocate(d);
        if(rk==='container-fill')return renderContainerFill(d);
        if(rk==='consolidate')return renderConsolidate(d);
@@ -646,7 +773,7 @@ index 2bc27ff5..41c0ffd9 100644
        cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
        if(rk==='upcoming')return renderUpcoming(d);
        if(rk==='pipeline')return renderPipeline(d);
-@@ -12449,7 +12477,8 @@
+@@ -12449,10 +12480,11 @@
    function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list');   // .dtc-order-row = table row (desktop) or card (mobile)
      if(host)host.querySelectorAll('.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
      var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
@@ -655,8 +782,12 @@ index 2bc27ff5..41c0ffd9 100644
 +    if(_badgeFresh('dtc',force))return;   // v28.148: badge already painted from the last fetch (<2 min)
      fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
        var el=document.getElementById('nav-dtc-badge-l3'); if(el){ el.textContent=_dtcCount?String(_dtcCount):''; el.style.display=_dtcCount?'':'none'; }
-       try{ paintReportsL2Badge(); }catch(e){} }).catch(function(){}); }
-@@ -12490,7 +12519,7 @@
+-      try{ paintReportsL2Badge(); }catch(e){} }).catch(function(){}); }
++      try{ paintReportsL2Badge(); }catch(e){} }).catch(_badgeFail("dtc")); }
+   // DTC import freshness: parse the "DD-Mon-YY HH:MM" stamp and flag if it's more than 4 days old.
+   function _dtcImportStale(s){ try{ var m=/^(\d{1,2})-([A-Za-z]{3})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(s||'')); if(!m)return false;
+     var MON={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11}; var mo=MON[m[2]]; if(mo==null)return false;
+@@ -12490,7 +12522,7 @@
      _dtcApplyFilter();
      var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
      try{ _dtcApplyHideAcc(); }catch(e){}
@@ -665,7 +796,7 @@ index 2bc27ff5..41c0ffd9 100644
      try{ renderDtcFulfilAlign(); }catch(e){}
    }
    // v27.797: DTC ↔ Fulfil alignment — standalone read-only exception panel. Fulfil is the source of truth;
-@@ -12597,7 +12626,7 @@
+@@ -12597,7 +12629,7 @@
    function _dtcReload(){ fetch('/api/supply/dtc/mismatch').then(function(r){return r.json();}).then(function(d){ d=d||{}; _dtcData=d; var c=d.counts||{};
      _dtcSetPill('Issues',c.issues); _dtcSetPill('Accepted',c.accepted); _dtcSetPill('OK',c.ok); _dtcSetPill('Unmapped POs',c.unmapped_pos);
      _dtcApplyFilter();
@@ -674,7 +805,7 @@ index 2bc27ff5..41c0ffd9 100644
    }).catch(function(){}); }
    // Small floating picker: filter a list of options (or type a free value), then onPick(val).
    function _dtcPicker(anchor,cfg){ var old=document.getElementById('dtc-picker'); if(old)old.remove();
-@@ -12954,7 +12983,10 @@
+@@ -12954,7 +12986,10 @@
    function renderFulfilCompare(d,_cont,_re){ var b=_cont; if(!b)return; d=d||{}; var all=d.rows||[];
      var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
      var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Fulfil compare — open Fulfil POs missing from the planner</div>'
@@ -686,7 +817,14 @@ index 2bc27ff5..41c0ffd9 100644
      function tbl(list,isIgnored){
        var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
          +'<td class="l"><b>'+esc(r.po)+'</b></td>'
-@@ -12977,6 +13009,8 @@
+@@ -12972,11 +13007,14 @@
+       return '<div class="tw tw-compare"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+     }
+     var htmlOut=head;
+-    if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
++    if(d.error) htmlOut+='<div class="count" style="color:var(--neg)">Could not load the Fulfil compare: '+esc(d.error)+'</div>';   // v28.150: was shown as "Nothing to reconcile"
++    else if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
+     else htmlOut+=tbl(active,false);
      if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— un-ignore to bring back</span></div>'+tbl(ignored,true);
      else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
      b.innerHTML=htmlOut;
@@ -695,7 +833,7 @@ index 2bc27ff5..41c0ffd9 100644
      function setIgnore(po,ig){ fetch('/api/supply/bi/fulfil-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); }).catch(function(){alert('Could not update');}); }
      b.querySelectorAll('.fulc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
      b.querySelectorAll('.fulc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; });
-@@ -12984,36 +13018,7 @@
+@@ -12984,36 +13022,7 @@
        if(!confirm('Import Fulfil PO '+po+' into Horizon?\n\nBrings in the supplier, company (→ ship-to country), branch, SKUs, quantities & prices. If it already exists its lines are overwritten from Fulfil.'))return;
        x.disabled=true; x.textContent='Importing…';
        fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'po',value:po,confirm:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Import failed: '+j.error); x.disabled=false; x.textContent='⬆ Import to Horizon'; return; } invalidateDerived(); delete cache['purchase-orders']; if(_re)_re(); }).catch(function(e){ alert('Import failed: '+(e.message||e)); x.disabled=false; x.textContent='⬆ Import to Horizon'; }); }; }); }
@@ -733,7 +871,7 @@ index 2bc27ff5..41c0ffd9 100644
    // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
    function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
      function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
-@@ -14873,7 +14878,7 @@
+@@ -14873,7 +14882,7 @@
    window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
    // ↻ top-nav refresh (SUPPLY context): drop this module's client-side section cache + re-render the current
    // section so a just-busted server cache is re-fetched fresh, in place (no full reload). (v27.327)

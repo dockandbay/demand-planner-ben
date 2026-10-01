@@ -1,8 +1,8 @@
-# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.149; on top of v28.143)
+# FIX for Diviyaj: ERP compare Fulfil-only + menu perf (v28.144 to v28.150; on top of v28.143)
 
 **Branch** `fix/first-click-boot-freeze` (still NOT merged into `phase-2.1-suppliers`, so it can't overwrite your `.1-.3` patches).
-Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147 → `02b46533` v28.148 → `9ee0a887` v28.149.
-**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-149.patch` = `git diff 3f9fb804..9ee0a887` on `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs`. Apply after the v28.143 patch.
+Commits: `3f9fb804` v28.143 (first-click freeze, see FIX_2026-10-01 note) → `4494285e` v28.144 → `5ddd3839` v28.145 → `73024d0d` v28.146 → `d07ea8e6` v28.147 → `02b46533` v28.148 → `9ee0a887` v28.149 → `d6534b7c` v28.150.
+**Patch** `FIX_2026-10-02_erp-compare-and-perf_v28.144-150.patch` = `git diff 3f9fb804..d6534b7c` on `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs`. Apply after the v28.143 patch.
 No migration, no env var. Server restart needed (server.mjs changed).
 
 ## v28.144: ERP compare (Ben: "we are now 100% on fulfil")
@@ -38,6 +38,18 @@ Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB ra
 - **Fulfil compare:** cached up to 10 min; refreshed in the background past 2 min (single-flight); `?refresh=1` forces. Response adds `as_of`. Panel shows "As of hh:mm" + "↻ Refresh from Fulfil". Warm calls skip Fulfil entirely (only the 4 planner lookups run).
 - **Removed** `ERP_COMPARE_SQL`, `erpCompareActiveCount`, `GET /api/supply/bi/erp-compare`, `POST /api/supply/bi/erp-compare/ignore` (now 404). **Tables left in place:** `planner.erp_compare_ignored`, `planner.erp_purchase_orders`; drop them (and any n8n job feeding the Cin7 PO mirror) when you are happy.
 
+## v28.150: fixes from the 02-Oct end-to-end review (please apply with the rest)
+- **Stale demand after bulk forecast edits** (regression from v28.145): auto-smooth, smooth-to-%, import, undo, DEMAND ↻ refresh and `markDirty()` now flag `BUY_FC_STALE` via `hzMarkDemandStale()`, so reports, Buy & Move ▸ Actions and the Buy plan rebuild on next use.
+- **Loading-loop guard:** cold BUY/DEMAND path clears `BUY_FC_STALE` even if the build throws.
+- **ERP badge** uses `/api/supply/bi/fulfil-compare?cached=1` (cached or `{cold:true}` + background warm); never a foreground Fulfil pull on SUPPLY load.
+- **Fulfil single-flight** for cold/stale/background pulls; `as_of` from the rows' own data.
+- **Xero status:** generation counter (no stale "not connected" after a reconnect); callback busts on finish.
+- **Reports cold entry:** tab bar + loading panel first (was a 3.1 s freeze). Cold DEMAND views that do not use demand no longer wait.
+- Small: ERP drawer backdrop dims; compare error shown as an error; failed badge fetches retry; Auto Forecast skips its deferred build if the user left.
+
+## End-to-end crawl, v28.149 vs 01-Oct (sandbox, 140 menu items)
+Total main-thread freeze 65.6 s → 15.8 s; items freezing >1 s 14 → 5; demand rebuilds 19 → 3; API calls 301 → 234; 4xx/5xx 4 → 0. Live read-only timing: most endpoints 0.3-1.2 s with a ~0.3 s floor even on `/api/version` (network / region).
+
 ## Verified (sandbox, jsdom crawl on the served page)
 | | before | after |
 |---|---|---|
@@ -47,6 +59,6 @@ Measured on live: order-plan 6.3 MB raw / 136 KB gzip, 1-2 s; sku-data 4.2 MB ra
 | Xero status | 4.5 s every call | 5.2 s cold, 3 ms cached |
 | Flexport page status | 4.9 s | 0.3 s |
 | ERP compare tab | Cin7 + Fulfil | Fulfil only (no `bi/erp-compare` call) |
-| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146 to v28.149) |
+| Buy plan vs `?lazysku=0` baseline | | **0 / 387 rows differ, 75,113 units** (direct BUY, and Exceptions → BUY; re-checked after v28.146 to v28.150) |
 
 Still open (not in this branch): Auto Forecast's first demand build on a SUPPLY page (~3 s, genuinely needed); Shipments/Productions crawl "still loading" (pre-existing); portal-signals 404 / admin pages hitting a 401 portal endpoint; order-plan 6.3 MB and sku-data 4.2 MB payloads.
