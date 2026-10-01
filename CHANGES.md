@@ -1,3 +1,13 @@
+## v28.128 (Ben): deposit pickers no longer blank typed fields; Payments Due loads its data in parallel
+
+**File: `supply/inject.html`.**
+
+- **Deposits:** choosing a Supplier or Production redrew the row from an in-memory copy that inline edits never updated, so a just-typed Reference/Country blanked until the background reload. The row's visible inputs are now copied into memory before the optimistic redraw, and kept for unlocked rows across the reload.
+- **Payments Due** (the default PAYMENTS page): the PO list, deposits and likely-dates fetches only started after `/api/supply/lookups` finished. All four now run at once (same requests, no extra server load); the loading text says "Loading payments due…".
+- Note: the slow *Set production* picker on sandbox is network latency (about 400 ms per database round trip to the eu-central-1 sandbox; the query itself runs in 0.5 ms), not code.
+
+No migration. No new env vars.
+
 ## v28.127 (Ben): a newly added deposit now shows on the Deposits screen
 
 **Files: `server.mjs`, `supply/inject.html`.**

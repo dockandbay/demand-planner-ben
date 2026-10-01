@@ -6388,10 +6388,20 @@
       return d.status!=='closed'; }); }
     // Silent in-place refresh — refetch deposits, swap the in-memory list, redraw. DEP_EDIT persists (closure) so an
     // unlocked row STAYS in edit mode after a prod#/supplier pick; no page navigation.
-    function reloadDeps(){ fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(rows){ deps=(rows||[]).filter(function(x){return x.is_deposit;}); try{delete cache['productions'];}catch(e){} draw(); }).catch(function(){ draw(); }); }
+    // v28.128 (Ben: "choosing SUPPLIER or PRODUCTION clears reference/country, then it reappears"): inline cell edits save
+    // to the server (bindEdits) but never updated this in-memory list, so any redraw repainted the row from stale values.
+    // Copy the row's visible inputs into memory before redrawing an unlocked row.
+    function depSyncFromDom(id){ var d=deps.filter(function(x){return String(x.id)===String(id);})[0]; if(!d)return;
+      var ep='/api/supply/deposit/'+encodeURIComponent(id);
+      document.querySelectorAll('#supply-root .fci[data-field]').forEach(function(inp){ if(inp.dataset.ep!==ep||inp.classList.contains('err'))return; d[inp.dataset.field]=(inp.type==='checkbox')?inp.checked:inp.value; }); }
+    function reloadDeps(){ var _keep={}; Object.keys(DEP_EDIT).forEach(function(id){ depSyncFromDom(id); var d=deps.filter(function(x){return String(x.id)===String(id);})[0]; if(d)_keep[id]=d; });
+      fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(rows){ deps=(rows||[]).filter(function(x){return x.is_deposit;});
+        // unlocked rows: keep what's on screen for the editable fields (a just-typed value may still be saving), take the rest from the server
+        deps.forEach(function(d){ var k=_keep[d.id]; if(!k)return; ['reference','country','amount','xero_fx','date_paid','date_due','date_likely_pay','description','xero_account_code','supplier_name','prod_no'].forEach(function(f){ if(k[f]!=null&&k[f]!=='')d[f]=k[f]; }); });
+        try{delete cache['productions'];}catch(e){} draw(); }).catch(function(){ draw(); }); }
     // OPTIMISTIC field set — paint the picked value instantly (row stays in edit), POST in the background, then a
     // background reloadDeps refreshes the server-derived columns (est. alloc / linked POs / apply list). Revert on failure.
-    function depOptimisticSet(id,field,val){ var d=deps.filter(function(x){return String(x.id)===String(id);})[0]; if(!d)return;
+    function depOptimisticSet(id,field,val){ depSyncFromDom(id); var d=deps.filter(function(x){return String(x.id)===String(id);})[0]; if(!d)return;   // v28.128: keep typed reference/country etc.
       var prev=d[field]; d[field]=val; draw();   // instant
       var body={}; body[field]=val;
       fetch('/api/supply/deposit/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
@@ -10127,17 +10137,20 @@
       res.querySelectorAll('.xc-po').forEach(function(bt){ bt.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(bt.dataset.po,'pay'); else gotoPO(bt.dataset.po,'pay'); }; });
     }
   }
-  function renderPaymentsDue(b){ b.innerHTML='<div class="count">Loading…</div>';
-    fetchLookups(function(){   // ensure supplierCcy is loaded so amounts show in each supplier's currency
+  function renderPaymentsDue(b){ b.innerHTML='<div class="count">Loading payments due…</div>';
+    // v28.128 (Ben: "clicking PAYMENTS seems not to work" — Payments Due is the default page): the PO / deposits /
+    // likely-dates fetches used to start only AFTER fetchLookups finished, so a cold load paid both back to back behind
+    // a bare "Loading…". Same requests (no extra server load), now all in flight at once; render waits for all four.
+    var _lkP=new Promise(function(res){ fetchLookups(function(){ res(); }); });   // supplierCcy → amounts in each supplier's currency
     // Reuse the PO grid already fetched for PLAN/PURCHASE ORDERS if we have it (same session data) — clicking PAYMENTS
     // straight after viewing the PO grid then skips a second big /api/supply/purchase-orders fetch. The data-refresh
     // poll busts this cache when the ETL changes, so it can't go stale across a real update. — Ben (nav lag)
     var _poP=cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;});
     // likely-payment dates fetched FRESH (uncached) and overlaid, so a just-saved date always shows even if the
     // epoch-gated poRowsCache is briefly stale on serverless (≤5s cross-instance epoch poll). — Ben
-    Promise.all([_poP, fetch('/api/supply/deposits').then(function(r){return r.json();}), fetch('/api/supply/likely-dates/all').then(function(r){return r.json();}).catch(function(){return {};})])
+    Promise.all([_poP, fetch('/api/supply/deposits').then(function(r){return r.json();}), fetch('/api/supply/likely-dates/all').then(function(r){return r.json();}).catch(function(){return {};}), _lkP])
       .then(function(res){ buildPaymentsDue(b, res[0]||[], res[1]||[], res[2]||{}); })
-      .catch(function(e){b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }); }
+      .catch(function(e){b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
   function buildPaymentsDue(b, pos, deps, lmap){ lmap=lmap||{};
     pos=(Array.isArray(pos)?pos:[]).filter(function(p){return !p.master_po;});   // child POs: the master carries the money → don't list child payments
     var today=new Date().toISOString().slice(0,10);
