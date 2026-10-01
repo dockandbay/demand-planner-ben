@@ -1815,8 +1815,11 @@ function buildLiveBpOverlay(){
     // If after overlay this SKU has no markets at all, drop the SKU entirely
     if(!Object.keys(pd.mkts).length)delete BP_DATA.products[sku];
   });
-  // Rebuild sku_list (SL) from the refreshed products
-  BP_DATA.sku_list=Object.keys(BP_DATA.products).map(function(sku){
+  // Rebuild sku_list (SL) from the refreshed products.
+  // v28.142 (LIVE bug: BUY plan empty, "0 SKUs"): the BP engine captures `const SL=D.sku_list` ONCE at start-up. With lazy SKU data
+  // (default since v28.081) the engine starts before the data lands, so assigning a NEW array here left SL pointing at the old empty
+  // one. Refill the SAME array in place, then let the engine refresh what it derived from SL (tiers, categories, rule meta).
+  var _newSL=Object.keys(BP_DATA.products).map(function(sku){
     var p=SKUM[sku]||{},pd=BP_DATA.products[sku];
     var ms={};
     Object.keys(pd.mkts).forEach(function(mkt){
@@ -1828,6 +1831,8 @@ function buildLiveBpOverlay(){
     });
     return{s:sku,ti:p.ti||'C',sc:p.s,c:p.c,cs:p.cs,csf:p.csf||'',rw:p.rw||'',ms:ms};
   });
+  if(Array.isArray(BP_DATA.sku_list)){ BP_DATA.sku_list.length=0; Array.prototype.push.apply(BP_DATA.sku_list,_newSL); } else BP_DATA.sku_list=_newSL;
+  try{ if(typeof BP!=='undefined'&&BP&&BP.refreshDerived)BP.refreshDerived(); }catch(e){ if(window.console)console.error('[bp] refreshDerived',e); }
   // Refresh cur_days from today (replaces stale may_days when calendar month differs)
   var _td=new Date(),_dy=_td.getDate(),_mo=_td.getMonth()+1,_yr=_td.getFullYear();
   BP_DATA.cur_days={elapsed:_dy,remaining:Math.max(new Date(_yr,_mo,0).getDate()-_dy,0),total:new Date(_yr,_mo,0).getDate()};
@@ -1849,6 +1854,9 @@ function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
     // v28.125: any demand overlay built before this point was built from the EMPTY lazy maps. Re-arm the build so the
     // next render that needs it rebuilds ONCE from real data (was only corrected by the PP-cover guard's extra rebuild).
     DEMAND_BUILT=false; _PP_COVER_INIT=false;
+    // v28.142: anything computed from the EMPTY lazy maps before this point is wrong — re-sniff the SKUS key format and drop
+    // the sales / share / calc caches so the next render recomputes from real data.
+    try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error('[lazy] cache reset',e); }
     try{augmentSKUM();}catch(e){if(window.console)console.error('[lazy] augmentSKUM',e);}
     try{buildLiveBpOverlay();}catch(e){if(window.console)console.error('[lazy] buildLiveBpOverlay',e);}
     try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
@@ -2124,6 +2132,14 @@ const BUY_CACHE={};
 
 const CATS=[...new Set(SL.map(s=>s.c).filter(Boolean))];
 const CAT_SORTED=[...CAT_ORDER.filter(c=>CATS.includes(c)),...CATS.filter(c=>!CAT_ORDER.includes(c))];
+// v28.142: refill everything derived from SL IN PLACE (the consts keep their identity) once lazy SKU data has landed.
+function bpRefreshDerived(){
+  Object.keys(TIER_MAP).forEach(function(k){ delete TIER_MAP[k]; }); SL.forEach(function(s){ TIER_MAP[s.s]=s.ti; });
+  Object.keys(CR_SKUMETA).forEach(function(k){ delete CR_SKUMETA[k]; }); SL.forEach(function(s){ CR_SKUMETA[s.s]={cat:s.c||'',tier:s.ti||'',rw:s.rw||''}; });
+  var cats=[...new Set(SL.map(function(s){ return s.c; }).filter(Boolean))]; CATS.length=0; Array.prototype.push.apply(CATS,cats);
+  var srt=[...CAT_ORDER.filter(function(c){ return CATS.includes(c); }),...CATS.filter(function(c){ return !CAT_ORDER.includes(c); })]; CAT_SORTED.length=0; Array.prototype.push.apply(CAT_SORTED,srt);
+  for(const k in BUY_CACHE)delete BUY_CACHE[k];
+}
 
 function mk(tag,cls,txt){const e=document.createElement(tag);e.className=cls;if(txt!==undefined)e.textContent=txt;return e;}
 function stCls(st){return st==='ACTIVE'?'s-act':st==='FUTURE'?'s-fut':'s-dis';}
@@ -4361,7 +4377,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
 
   BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='ALL';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
-  open_:open_, close_:close_,
+  open_:open_, close_:close_, refreshDerived:bpRefreshDerived,   // v28.142
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
 })();
 /* ===== END BUY PLAN ENGINE ===== */
@@ -6890,19 +6906,26 @@ function skuWh(co,ch){
 // channel-split — in which case UK/US/EU/AU DTC and B2B will be merged at the 3PL
 // warehouse and the planner's expanded SKU rows will over-credit one channel.
 // Detection is by key-shape sniff at load time.
-var _SKUS_NEW_FORMAT = (function(){
+// v28.142 (LIVE bug): this sniff ran ONCE at load. With lazy SKU data (default since v28.081) SKUS is EMPTY at load, so it
+// returned false → every lookup used the legacy "SKU|warehouse" key against "SKU|CO|CH" data → NO sales history anywhere
+// (SKU shares fell back to tier weights; buy-plan demand split wrong). Now decided on first use once SKUS has data, then fixed.
+var _SKUS_NEW_FORMAT_V = null;
+function _skusNewFormat(){
+  if(_SKUS_NEW_FORMAT_V !== null) return _SKUS_NEW_FORMAT_V;
   // Walk a small sample of keys; any 3-piped key (SKU|CO|CH) confirms new format.
   // Old extract: 2 segments (SKU|wh, wh always contains "_3pl" or "_fba").
-  var seen=0;
+  var seen=0, any=false;
   for(var k in SKUS){
-    if(k.split('|').length===3) return true;
+    any=true;
+    if(k.split('|').length===3) return (_SKUS_NEW_FORMAT_V=true);
     if(++seen>50) break;
   }
+  if(any) _SKUS_NEW_FORMAT_V=false;   // only lock the answer once there is data to judge by
   return false;
-})();
+}
 var _SKUSALES_CACHE={};
 function _skuSalesRaw(sku,co,ch){
-  if(_SKUS_NEW_FORMAT) return SKUS[sku+'|'+co+'|'+ch] || {};
+  if(_skusNewFormat()) return SKUS[sku+'|'+co+'|'+ch] || {};
   return SKUS[sku+'|'+skuWh(co,ch)] || {};
 }
 // Sales history for a SKU/market/channel. REPLACEMENT SKUs (products.replacement_sku → SKUM[sku].rep) inherit
@@ -16461,7 +16484,11 @@ var LIVE_FC_MONTHS=(function(){
   for(var i=0;i<18;i++){var mm=m+i,yy=y;while(mm>12){mm-=12;yy++;}o.push(yy+'_'+(mm<10?'0':'')+mm);}
   return o;
 })();
-function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // v27.534: allocations must reflect the latest overrides / stock
+function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
+  // v28.142: wire the TikTok (TIK, UK/US) and EU Zalando (ZAL) channels BEFORE building demand. They were only wired when the
+  // DEMAND plan rendered, so the buy plan differed by navigation order (BUY opened first → no TIK/ZAL availability or rows →
+  // different demand split). Both are idempotent ("runs once data is ready").
+  try{ if(typeof zalInit==='function')zalInit(); }catch(e){} try{ if(typeof tikInit==='function')tikInit(); }catch(e){}   // v27.534: allocations must reflect the latest overrides / stock
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
   var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   var MK=['UK','US','EU','AU','CA'];

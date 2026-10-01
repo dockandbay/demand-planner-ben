@@ -1,3 +1,18 @@
+## v28.142 (Ben, LIVE bug): BUY plan empty ("0 SKUs") + lazy-load data bugs — URGENT, artifact-only hotfix
+
+**File: `artifact_v16.7.html`** (+ package.json, CHANGES.md). No migration, no server change, so it can ship ahead of the v28.123+ package.
+
+Live (v28.122.1) `#/buy-move/buy` showed *0 SKUs · UK · 0 active · No SKUs match filters* with default filters, although the page held 2,079 SKUs / 683 buy products. Root cause: lazy SKU loading (default since **v28.081**) — the page boots with empty SKU maps and fills them after first paint, but several things were captured **once at boot**:
+
+1. **Buy engine SKU list** (`const SL=D.sku_list`): `buildLiveBpOverlay` assigned a NEW array, so the engine kept the empty one → empty grid. Now refilled **in place**, plus `BP.refreshDerived()` rebuilds TIER_MAP, CR_SKUMETA, CATS and CAT_SORTED in place.
+2. **Sales key-format sniff** (`_SKUS_NEW_FORMAT`, decided at load from SKUS): empty at load → legacy key → **no sales history in any lookup** → SKU shares fell back to tier weights, so the buy-plan demand split was wrong (e.g. BAGBCH-MD-SUNKISS UK B2B Jun 84 vs correct 50, a consistent ~5/3). Now decided on first use once data exists.
+3. When lazy data lands, the sales / share / calc caches filled from empty data are dropped (`_SKUSALES_CACHE`, `_lySplitCache`, `CALC_MEMO`, `_DA_FU_CACHE`, run-off / set / ASP memos, `SET_BY_COMP`, row cache) and the format is re-sniffed.
+4. **TikTok / Zalando channel wiring** (`tikInit` / `zalInit`) only ran when the DEMAND plan rendered, so the buy plan depended on navigation order. Now run at the start of every `buildLiveDemand` (idempotent).
+
+**Verified (buy-plan before/after, sandbox):** lazy page vs full page (`?lazysku=0`) **identical: 0 of 387 SKU-market buy rows differ, 75,113 units** (was 280 of 451 differing). Grid: *0 SKUs* → *358 SKUs · UK · 226 active*. TIK/ZAL-always effect on sandbox: one row (TOWLB-CAB-XL-LTBLU-R UK urgent 0 → 8,550, from a 10,000-unit **sandbox** TIK forecast); live has no TIK forecasts (ZAL: 44 SKUs, no change on sandbox EU).
+
+Correction to earlier notes: the v28.125 "0 differing" buy-plan check ran in lazy mode with this same missing-sales bug on both sides, so it compared like with like but not with the correct numbers.
+
 ## v28.141 (Ben): Ask Claude 👎 reason popup + CONFIG ▸ Admin ▸ Ask Claude feedback
 
 **Files: `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`, `migrations/326_ai_message_feedback.sql` (amended).**
