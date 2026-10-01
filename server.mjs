@@ -19676,53 +19676,7 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
     res.json({ prods, batches, suppliers, rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// ERP COMPARE — open/draft ERP POs that are NOT in the planner's purchase_orders, limited to POs whose
-// supplier matches a product supplier in the planner (planner.suppliers, kind='supplier') so freight/
-// internal/test vendors (Flexport, HMRC, print shops, …) are excluded.
-const ERP_COMPARE_SQL = `
-  SELECT e.po, coalesce(e.erp_po_id,'') erp_po_id, coalesce(e.supplier_name,'') supplier_name,
-         coalesce(e.status,'') status, to_char(e.order_date,'YYYY-MM-DD') order_date,
-         e.total_value, coalesce(e.currency,'') currency,
-         to_char(e.final_delivery_date,'YYYY-MM-DD') final_delivery_date,
-         to_char(e.synced_at,'YYYY-MM-DD HH24:MI') synced_at,
-         (i.po IS NOT NULL) ignored,
-         -- branch: the ERP mirror has no branch field, so derive a best-effort label from the PO reference
-         -- (region token + FBA/Crossdock/B2B/Direct marker). Shown as '—' when nothing parses.
-         NULLIF(trim(
-           coalesce(substring(upper(e.po) from 'PO-[0-9]+([A-Z]{2})'),'') || ' ' ||
-           CASE WHEN e.po ~* 'crossdock' THEN 'Crossdock' WHEN e.po ~* 'fba' THEN 'FBA'
-                WHEN e.po ~* 'b2b' THEN 'B2B' WHEN e.po ~* 'direct' THEN 'Direct' ELSE '' END
-         ),'') branch
-  FROM planner.erp_purchase_orders e
-  LEFT JOIN planner.purchase_orders p ON p.po = e.po
-  LEFT JOIN planner.erp_compare_ignored i ON i.po = e.po
-  WHERE p.po IS NULL                                                    -- not in the planner's PO list
-    AND coalesce(e.status,'') !~* '(complete|cancel|void|closed|received)'   -- open / draft only
-    AND EXISTS (SELECT 1 FROM planner.suppliers s
-                WHERE lower(trim(s.name)) = lower(trim(e.supplier_name))
-                  AND coalesce(s.kind,'supplier') = 'supplier')         -- product supplier in the planner
-  ORDER BY (i.po IS NOT NULL), e.po`;   // v27.785 (Ben): alphabetical by PO
-// active (non-ignored) count — drives the open-actions item
-async function erpCompareActiveCount() {
-  try { return (await pool.query(`SELECT count(*)::int c FROM (${ERP_COMPARE_SQL}) z WHERE NOT z.ignored`)).rows[0].c; }
-  catch (e) { return 0; }
-}
-app.get('/api/supply/bi/erp-compare', async (req, res) => {
-  try {
-    const rows = (await pool.query(ERP_COMPARE_SQL)).rows;
-    res.json({ ok: true, count: rows.filter(r => !r.ignored).length, rows });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
-// Ignore / un-ignore an ERP PO on the compare report.
-app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
-  const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
-  try {
-    if (b.ignore === false) await pool.query(`DELETE FROM planner.erp_compare_ignored WHERE po=$1`, [b.po]);
-    else await pool.query(`INSERT INTO planner.erp_compare_ignored (po, ignored_by) VALUES ($1,$2)
-      ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
-    res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
+// v28.149: Cin7 ERP compare removed (100% on Fulfil). planner.erp_compare_ignored / erp_purchase_orders are left in place (drop = Diviyaj).
 // ===================== Fulfil COMPARE (v27.779, Ben) =====================
 // Open Fulfil purchase orders NOT in the planner (identity = number, else reference), limited to product suppliers —
 // the Fulfil twin of the Cin7 ERP compare. Additionally surfaces the linked SALES ORDER (the PO's `reference` when it
@@ -19733,10 +19687,19 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // REST API, ~3s cold) — cache it briefly so repeat loads are instant. The cheap planner/ignored filtering below runs
 // fresh on every request, so Import/Ignore reflect immediately. ?refresh=1 forces a re-fetch.
 let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
+// v28.149 perf: Fulfil's API takes ~3 s, so the compare is served from cache for up to 10 min; past 2 min it is refreshed in the
+// background (single-flight) so the NEXT open is fresh without waiting. ?refresh=1 ("Refresh from Fulfil") always waits for a fresh pull.
+let _fulfilCmpInflight = null;
 async function fulfilCompareApiData(force, cachedOnly) {
   const env = await activeFulfilEnv();
-  if (!force && _fulfilCmpCache.pos && _fulfilCmpCache.env === env && (Date.now() - _fulfilCmpCache.at) < 120000) return _fulfilCmpCache;
-  if (cachedOnly) return (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
+  const have = _fulfilCmpCache.pos && _fulfilCmpCache.env === env, age = Date.now() - _fulfilCmpCache.at;
+  if (!force && have && age < 120000) return _fulfilCmpCache;
+  if (cachedOnly) return have ? _fulfilCmpCache : null;   // v28.144: Actions never waits on Fulfil's API
+  if (!force && have && age < 600000) { if (!_fulfilCmpInflight) { _fulfilCmpInflight = _fulfilCompareFetch(env).catch(e => { log500(e); }).finally(() => { _fulfilCmpInflight = null; }); } return _fulfilCmpCache; }
+  if (_fulfilCmpInflight && !force) { await _fulfilCmpInflight; if (_fulfilCmpCache.pos && _fulfilCmpCache.env === env) return _fulfilCmpCache; }
+  return _fulfilCompareFetch(env);
+}
+async function _fulfilCompareFetch(env) {
   const cfg = fulfilConfigFor(env);
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
   const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
@@ -19802,7 +19765,7 @@ async function fulfilCompareRows(force, cachedOnly) {
 }
 app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
   try { const force = req.query.refresh === '1' || req.query.refresh === 'true';
-    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, rows }); }
+    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, as_of: _fulfilCmpCache.at ? new Date(_fulfilCmpCache.at).toISOString() : null, rows }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
 });
 app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {

@@ -1,3 +1,12 @@
+## v28.149 (Ben → Diviyaj, branch fix/first-click-boot-freeze): Exceptions tabs, ERP compare cache, Cin7 compare removed
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
+
+1. **DEMAND ▸ Exceptions sub-tab switches ~1.4 s → 0.07-0.26 s.** The sub-tab click did a full data render, which wipes the forecast memo, so every switch recomputed every SKU forecast. A tab switch changes no data, so it now uses the existing view-only render (like the country/channel pills). Output byte-identical across 9 switches. Inputs / Config / Scenario tabs (which host edits) unchanged.
+2. **ERP compare cache.** Fulfil's API takes ~3 s. The compare is now served from cache for up to 10 min; past 2 min it refreshes in the background (one at a time), so the next open is fresh without waiting. The panel shows "As of hh:mm" and a **↻ Refresh from Fulfil** link (`?refresh=1`, always waits for a fresh pull). The SUPPLY-load badge fetch warms it.
+3. **Cin7 ERP compare removed from the server** (`ERP_COMPARE_SQL`, `erpCompareActiveCount`, `GET /api/supply/bi/erp-compare`, `POST …/ignore`; unused since v28.144). Tables `planner.erp_compare_ignored` and `planner.erp_purchase_orders` are left in place; dropping them is a Diviyaj call.
+4. Checked, no change: SUPPLY ▸ Shipments / Productions "still loading" in the crawl was the hidden per-row detail placeholders, not a stuck page.
+
 ## v28.148 (Ben → Diviyaj, branch fix/first-click-boot-freeze): loading panels + crawl clean-up
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.

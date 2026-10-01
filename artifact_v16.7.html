@@ -12691,7 +12691,7 @@ function renderDemandTabs(){
     if(!_ex3){ _ex3=document.createElement('div'); _ex3.id='demand-exceptions-nav'; bar.parentNode.insertBefore(_ex3, bar.nextSibling); }
     _ex3.className='d3nav'; _ex3.style.display=''; _ex3.style.marginTop='6px';
     _ex3.innerHTML=(typeof EXC_SUBTABS!=='undefined'?EXC_SUBTABS:[]).map(function(s){return '<button class="d3tab'+(s[0]===EXC_SUBTAB?' active':'')+'" data-ex="'+s[0]+'">'+s[1]+'</button>';}).join('');
-    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',excSlug(b.dataset.ex)]); render(); }; });
+    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',excSlug(b.dataset.ex)]); _VIEW_ONLY_RENDER=true; render(); }; });   // v28.149 perf: a sub-tab switch changes no data, so keep the forecast memo (was ~1.4 s recompute per switch)
   } else if(_ex3){ _ex3.style.display='none'; _ex3.innerHTML=''; }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);

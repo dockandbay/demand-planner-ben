@@ -12983,7 +12983,10 @@
   function renderFulfilCompare(d,_cont,_re){ var b=_cont; if(!b)return; d=d||{}; var all=d.rows||[];
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Fulfil compare — open Fulfil POs missing from the planner</div>'
-      +'<div class="mut tiny" style="margin-bottom:12px">Open purchase orders in <b>Fulfil</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner. Shows any linked Fulfil <b>sales order</b> &amp; its company. <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
+      +'<div class="mut tiny" style="margin-bottom:12px">Open purchase orders in <b>Fulfil</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner. Shows any linked Fulfil <b>sales order</b> &amp; its company. <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.'
+      // v28.149: data is cached up to 10 min server-side (background refresh) — show its age + a forced refresh
+      +(d.as_of?' <span style="margin-left:6px">As of '+(function(t){ var x=new Date(t); return isNaN(x)?'':(('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2)); })(d.as_of)+'</span>':'')
+      +' <a href="#" class="fcmp-refresh" style="margin-left:6px;color:var(--blue);font-weight:600">↻ Refresh from Fulfil</a></div>';
     function tbl(list,isIgnored){
       var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
         +'<td class="l"><b>'+esc(r.po)+'</b></td>'
@@ -13006,6 +13009,8 @@
     if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— un-ignore to bring back</span></div>'+tbl(ignored,true);
     else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
     b.innerHTML=htmlOut;
+    var _fr=b.querySelector('.fcmp-refresh'); if(_fr)_fr.onclick=function(ev){ ev.preventDefault(); _fr.textContent='Refreshing from Fulfil…'; _fr.style.pointerEvents='none';
+      fetch('/api/supply/bi/fulfil-compare?refresh=1').then(function(r){return r.json();}).then(function(nd){ if(nd&&nd.error){ _fr.textContent='Refresh failed: '+nd.error; _fr.style.pointerEvents=''; return; } try{ _erpcCount=nd.count; _erpcAt=Date.now(); paintErpcBadge(); paintReportsL2Badge(); }catch(e){} renderFulfilCompare(nd,_cont,_re); }).catch(function(e){ _fr.textContent='Refresh failed'; _fr.style.pointerEvents=''; }); };
     function setIgnore(po,ig){ fetch('/api/supply/bi/fulfil-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); }).catch(function(){alert('Could not update');}); }
     b.querySelectorAll('.fulc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
     b.querySelectorAll('.fulc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; });
