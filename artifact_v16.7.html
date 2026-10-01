@@ -10002,7 +10002,9 @@ function render(){
   var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
   if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
-  try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
+  // v28.146: not for BUY & MOVE views; there the cold build is deferred behind a loading panel (see the _inBM branch below).
+  var _bmV=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
+  try{ if(!_PP_COVER_INIT && !_bmV && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
@@ -10041,14 +10043,32 @@ function render(){
   }
   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
   var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
-  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
+  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap','bm-loading'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
   if(VIEW_MODE==='exec'){renderReportView();return;}
   // leaving the REPORTS area — tear down its sub-tab bar + any report body
   ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   if(_inBM){
     if(window.BP)BP.BP_VIEW=((VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory')?'buy':VIEW_MODE); // hint; renderBuyView sets the engine flag
-    ['transfer-wrap','bm-actions-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    ['transfer-wrap','bm-actions-wrap','inventory-wrap','bm-loading'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
     if(VIEW_MODE!=='zalando'){ var _zw=document.getElementById('zalando-wrap'); if(_zw)_zw.remove(); }
+    // v28.146 (Ben: "click Buy & Move, nothing happens"): the cold demand build (~3 s, one main-thread block) ran inside the
+    // click, so neither the page nor the left menu could repaint until it finished. When demand still needs building, paint
+    // the BUY & MOVE tabs + a loading panel first, let the rail expand (its re-render runs at +90 ms), THEN build and render.
+    if(VIEW_MODE!=='zalando' && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)) && typeof buildLiveDemand==='function'){
+      var _twL=document.getElementById('tw'); if(_twL)_twL.style.display='none'; var _bwL=document.getElementById('buy-wrap'); if(_bwL)_bwL.remove();
+      var _ld=document.createElement('div'); _ld.id='bm-loading'; _ld.style.cssText='margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px';
+      _ld.innerHTML='<span class="hz-spin" style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Buy &amp; Move…</b><br>Calculating demand for the buy plan (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>';
+      var _hostL=document.querySelector('.wrap'); if(_hostL)_hostL.appendChild(_ld);
+      renderBuyMoveTabs();
+      clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){
+        var _stillBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
+        if(!_stillBM){ var _l=document.getElementById('bm-loading'); if(_l)_l.remove(); return; }   // user moved on: don't block them
+        try{ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){} }catch(e){ console.error('buildLiveDemand failed',e); }
+        if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
+        try{ render(); }catch(e){ console.error(e); }
+      },160);
+      return;
+    }
     if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
     else if(VIEW_MODE==='zalando'){ var _twz=document.getElementById('tw'); if(_twz)_twz.style.display='none'; var _bwz=document.getElementById('buy-wrap'); if(_bwz)_bwz.remove(); renderZalando(); }
     else if(VIEW_MODE==='inventory'){ var _twi=document.getElementById('tw'); if(_twi)_twi.style.display='none'; var _bwi=document.getElementById('buy-wrap'); if(_bwi)_bwi.remove(); renderInventory(); }

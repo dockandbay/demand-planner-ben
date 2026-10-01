@@ -1,3 +1,9 @@
+## v28.146 (Ben → Diviyaj, branch fix/first-click-boot-freeze): clicking Buy & Move responds immediately
+
+**File:** `artifact_v16.7.html` (+ package.json, CHANGES.md). Client-only.
+
+Ben: clicking BUY & MOVE in the menu did nothing for a few seconds. Cause: when demand had not been built yet (any SUPPLY/PRODUCT/CONFIG landing since v28.143, or after a forecast edit), the ~3 s `buildLiveDemand()` ran synchronously inside the click, so neither the page nor the left rail could repaint until it finished. Now the BUY & MOVE tabs and a "Loading Buy & Move…" panel paint first, the rail expands (L2/L3), and the build runs 160 ms later, then the page renders. If the user navigates away before then, the build is skipped. Warm entries (demand already built) are unchanged.
+
 ## v28.145 (Ben → Diviyaj, branch fix/first-click-boot-freeze): menu perf, items 1-3 of the 01-Oct crawl plan
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
