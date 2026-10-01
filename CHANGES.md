@@ -1,3 +1,9 @@
+## v28.137 (Ben): all outgoing emails reply to ops@dockandbay.com
+
+**File: `server.mjs`.** Every email Horizon sends (supplier portal magic links, payment confirmations, escalations, invoice/document notifications, suggestions, the 4 direct Resend calls) now sets `reply_to` to `EMAIL_REPLY_TO` (env, default **ops@dockandbay.com**). Previously some emails replied to the person who triggered them (submitter / escalator / supplier); that per-email reply-to is now ignored. From address unchanged (`PORTAL_FROM`, default portal@dockandbay.com).
+
+Optional new env var: `EMAIL_REPLY_TO` (only if ops@ should ever change).
+
 ## v28.136 (Ben): Payments Report: Paid, no Bank ccy, Xero done links (migrations 324 + 325)
 
 **Files: `server.mjs`, `supply/inject.html`, `migrations/324_payment_xero_bills.sql`, `migrations/325_seed_payment_xero_bills.sql`.**

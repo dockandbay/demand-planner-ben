@@ -8143,7 +8143,7 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     if (!process.env.RESEND_API_KEY) { console.log('[portal remind] no RESEND_API_KEY — would email ' + emails.join(', ')); return res.json({ ok: true, sent: 0, emails, sandbox: true }); }
     const r = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: emails, subject, html }) });
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
     if (!r.ok) { const t = await r.text().catch(() => ''); logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', by: authUser(req), status: 'error', error: 'resend ' + r.status }); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
     const _rid = await r.json().then(j => j && j.id).catch(() => null);
     logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', ref: b.supplier_name || null, by: authUser(req), status: 'sent', resend_id: _rid });
@@ -8274,15 +8274,18 @@ async function logEmail(m) {
        m.kind || 'other', m.ref || null, m.status || 'sent', m.error ? String(m.error).slice(0, 500) : null, m.by || null]);
   } catch (e) { /* table absent pre-migration 159, or insert failed — never block the send */ }
 }
+// v28.137 (Ben): every email Horizon sends (portal, suppliers, internal notifications) replies to ops@ — one place to set it.
+const EMAIL_REPLY_TO = (process.env.EMAIL_REPLY_TO || 'ops@dockandbay.com').trim();
 async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
   if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject + ((attachments && attachments.length) ? ' [+' + attachments.length + ' attachment]' : '')); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   try {
-    const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html };
+    const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: list, subject, html };
     if (cclist.length) payload.cc = cclist;
-    if (replyTo && /@/.test(String(replyTo))) payload.reply_to = String(replyTo).trim();   // reply goes to the person who triggered it (submitter / escalator / supplier)
+    // v28.137: reply-to is ALWAYS EMAIL_REPLY_TO (ops@), set in the payload above. Was the person who triggered the email (replyTo
+    // arg: submitter / escalator / supplier) — callers still pass it; it is now ignored.
     if (attachments && attachments.length) payload.attachments = attachments.map(a => ({ filename: a.filename || 'attachment', content: a.content }));   // Resend: content = base64 string
     const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
@@ -18539,7 +18542,7 @@ async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient,
   try {
     const r = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: emails, subject, html }) });
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
     const j = await r.json().catch(() => ({}));
     logEmail({ recipients: emails.join(', '), subject, kind: 'sample-shipped', ref, by, status: r.ok ? 'sent' : 'error', error: r.ok ? null : ('resend ' + r.status), resend_id: j && j.id });
   } catch (ex) { logEmail({ recipients: emails.join(', '), subject, kind: 'sample-shipped', ref, by, status: 'error', error: ex.message }); }
@@ -20515,7 +20518,7 @@ async function emailForecastCountry(country) {
   if (!process.env.RESEND_API_KEY) return { country: co, ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email, rows: rowCount };
   const r = await fetch('https://api.resend.com/emails', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: [email],
+    body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
       subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)',
       html: '<p>Attached is the latest 12-month forecast for <b>' + co + '</b> (DTC / FBA / B2B by SKU).</p>',
       attachments: [{ filename: 'forecast_' + co + '_12mo.csv', content: Buffer.from(csv).toString('base64') }] }) });
@@ -20543,7 +20546,7 @@ app.post('/api/export/email-csv', async (req, res) => {
     if (!process.env.RESEND_API_KEY) return res.json({ ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email });
     const r = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: [email],
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
         subject: 'Dock & Bay — ' + KEYS[key] + ' (' + new Date().toISOString().slice(0, 10) + ')',
         html: '<p>Attached is the latest <b>' + KEYS[key] + '</b> export from the Demand Planner.</p>',
         attachments: [{ filename, content: Buffer.from(csv).toString('base64') }] }) });
