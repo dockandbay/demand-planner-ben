@@ -1,5 +1,5 @@
 diff --git a/artifact_v16.7.html b/artifact_v16.7.html
-index bae5b5e6..969e6cb2 100644
+index bae5b5e6..6e268c70 100644
 --- a/artifact_v16.7.html
 +++ b/artifact_v16.7.html
 @@ -1538,6 +1538,9 @@ function hzBusy(on){ try{ var b=document.querySelector('.hz-brand'); if(!b)retur
@@ -12,7 +12,53 @@ index bae5b5e6..969e6cb2 100644
  var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
  // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
  // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
-@@ -11683,7 +11686,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){
+@@ -9999,7 +10002,9 @@ function render(){
+   var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
+   if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
+   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
+-  try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
++  // v28.146: not for BUY & MOVE views; there the cold build is deferred behind a loading panel (see the _inBM branch below).
++  var _bmV=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
++  try{ if(!_PP_COVER_INIT && !_bmV && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
+   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
+   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
+   // Toggle filter rows visibility based on view mode.
+@@ -10038,14 +10043,32 @@ function render(){
+   }
+   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
+   var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
+-  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
++  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap','bm-loading'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
+   if(VIEW_MODE==='exec'){renderReportView();return;}
+   // leaving the REPORTS area — tear down its sub-tab bar + any report body
+   ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+   if(_inBM){
+     if(window.BP)BP.BP_VIEW=((VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory')?'buy':VIEW_MODE); // hint; renderBuyView sets the engine flag
+-    ['transfer-wrap','bm-actions-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
++    ['transfer-wrap','bm-actions-wrap','inventory-wrap','bm-loading'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+     if(VIEW_MODE!=='zalando'){ var _zw=document.getElementById('zalando-wrap'); if(_zw)_zw.remove(); }
++    // v28.146 (Ben: "click Buy & Move, nothing happens"): the cold demand build (~3 s, one main-thread block) ran inside the
++    // click, so neither the page nor the left menu could repaint until it finished. When demand still needs building, paint
++    // the BUY & MOVE tabs + a loading panel first, let the rail expand (its re-render runs at +90 ms), THEN build and render.
++    if(VIEW_MODE!=='zalando' && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)) && typeof buildLiveDemand==='function'){
++      var _twL=document.getElementById('tw'); if(_twL)_twL.style.display='none'; var _bwL=document.getElementById('buy-wrap'); if(_bwL)_bwL.remove();
++      var _ld=document.createElement('div'); _ld.id='bm-loading'; _ld.style.cssText='margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px';
++      _ld.innerHTML='<span class="hz-spin" style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Buy &amp; Move…</b><br>Calculating demand for the buy plan (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>';
++      var _hostL=document.querySelector('.wrap'); if(_hostL)_hostL.appendChild(_ld);
++      renderBuyMoveTabs();
++      clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){
++        var _stillBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
++        if(!_stillBM){ var _l=document.getElementById('bm-loading'); if(_l)_l.remove(); return; }   // user moved on: don't block them
++        try{ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){} }catch(e){ console.error('buildLiveDemand failed',e); }
++        if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
++        try{ render(); }catch(e){ console.error(e); }
++      },160);
++      return;
++    }
+     if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
+     else if(VIEW_MODE==='zalando'){ var _twz=document.getElementById('tw'); if(_twz)_twz.style.display='none'; var _bwz=document.getElementById('buy-wrap'); if(_bwz)_bwz.remove(); renderZalando(); }
+     else if(VIEW_MODE==='inventory'){ var _twi=document.getElementById('tw'); if(_twi)_twi.style.display='none'; var _bwi=document.getElementById('buy-wrap'); if(_bwi)_bwi.remove(); renderInventory(); }
+@@ -11683,7 +11706,7 @@ try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){
  function renderExceptionsView(body){
    // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
    try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
@@ -21,7 +67,7 @@ index bae5b5e6..969e6cb2 100644
    try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
-@@ -12025,7 +12028,7 @@ function renderBuyPlanView(body){
+@@ -12025,7 +12048,7 @@ function renderBuyPlanView(body){
    function cfCompute(b){
      fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(P){
        var cost={}; if(P&&Array.isArray(P.rows)){ P.rows.forEach(function(r){ var s=r.sku||r.SKU; if(!s)return; cost[s]=Number(String(r.cost||'').replace(/,/g,''))||0; }); }
@@ -30,7 +76,7 @@ index bae5b5e6..969e6cb2 100644
        var CT=(typeof CTRS!=='undefined'&&CTRS.length)?CTRS:['UK','US','EU','AU','CA'];
        var order=[];
        var _MN3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-@@ -12289,7 +12292,7 @@ function renderSafetyStockView(body){
+@@ -12289,7 +12312,7 @@ function renderSafetyStockView(body){
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
    function money(n){ n=Math.round(Number(n)||0); return (n<0?'-£':'£')+Math.abs(n).toLocaleString(); }
@@ -39,7 +85,7 @@ index bae5b5e6..969e6cb2 100644
    var Z={90:1.28,95:1.64,97.5:1.96,99:2.33}[SS_SL]||1.64;
    var CYCLE_WK=4;   // review-cycle allowance (monthly ordering) added on top of the statistical safety buffer
    var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
-@@ -12503,7 +12506,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
+@@ -12503,7 +12526,7 @@ function _scKpi(lbl,val,col){ return '<div style="border:1px solid var(--line);b
  function renderShipBagView(body){
    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
    function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
@@ -48,7 +94,7 @@ index bae5b5e6..969e6cb2 100644
    var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
    var fwd12=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,12):[];
    var p1=SB_P1/100,p2=SB_P2/100,p3=SB_P3/100, tot=p1+p2+p3; if(tot>0){p1/=tot;p2/=tot;p3/=tot;}   // normalise the split
-@@ -12839,7 +12842,7 @@ function renderInvStatus(){
+@@ -12839,7 +12862,7 @@ function renderInvStatus(){
    var panel=document.getElementById('invstatus-panel'); if(!panel)return;
    var mkt=INV_STATUS_MKT;
    if(typeof BP==='undefined'||!BP.statusMetrics){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
@@ -57,7 +103,7 @@ index bae5b5e6..969e6cb2 100644
    var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:var(--neg)">'+esc((e&&e.message)||e)+'</div>'; return; }
    INV_EXPORT={};   // rebuild the per-block export payloads for this market
    var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'var(--neg)',B:'var(--amber)',C:'var(--muted)'};
-@@ -14251,7 +14254,7 @@ function daAnomalies(){
+@@ -14251,7 +14274,7 @@ function daAnomalies(){
  // FORWARD 6 months is out of line with the SKU's own seasonal flow (anomalyFlags: ratio to seasonal-expected
  // > 3 = spike, < 0.25 = dip). Reads the live buy-plan forecast (buildLiveDemand → md.demand[ch]).
  function daAnomalyReport(){
@@ -66,7 +112,7 @@ index bae5b5e6..969e6cb2 100644
    var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]);   // full forward window (so the horizon filter incl. 7+ has data)
    if(!fwd.length||typeof BP_DATA==='undefined'||!BP_DATA.products)return [];
    var moIdx={}; fwd.forEach(function(m,i){moIdx[m]=i;});   // months-out (0 = this month)
-@@ -16055,7 +16058,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
+@@ -16055,7 +16078,7 @@ setInterval(function(){ try{ if(document.visibilityState!=='visible')return; if(
  // (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
  // phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
  function afBuildBuyFeed(){
