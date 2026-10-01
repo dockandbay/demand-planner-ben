@@ -1,3 +1,7 @@
+## v28.131 (Ben): Create in Xero popup, org selector moved next to the post button
+
+**File: `supply/inject.html`.** The *Pay from UK/AU org* selector moved from the popup header to the action bar, directly before **Create bill + payments in Xero**, so the paying org is chosen at the point of posting.
+
 ## v28.130 (Ben): Xero payments exceptions from P55 onward; Insight column readable
 
 **Files: `server.mjs`, `supply/inject.html`.**
