@@ -1081,7 +1081,7 @@
   function hzRevalidate(key,tk){ if(key==='samples'||key==='actions'||key==='config')return;
     fetch('/api/supply/'+key).then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
       cache[key]=d; _hzCacheAt[key]=Date.now(); if(same||tk!==_navToken||current!==key||!hzViewIdle())return; try{ renderSectionData(key,d); }catch(e){} }).catch(function(){}); }
-  function invalidateDerived(){ _opGen++; ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
+  function invalidateDerived(){ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
     clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
@@ -1089,7 +1089,7 @@
   // Silent data refresh: drop ALL client-cached section responses (+ lookups + nav counts) so the NEXT view render
   // re-fetches fresh from the API — no full page reload. Called by the version poll when the ETL bumped source data
   // and the user navigates (so nav picks up fresh data without the disruptive location.reload). — Ben (nav lag/refresh)
-  try{ window.__hzBustSupplyCache=function(){ try{ _opGen++; for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
+  try{ window.__hzBustSupplyCache=function(){ try{ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}   /* v28.117 (review C25): null-safe (was rendering the word "null") */
   function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'\\x3c');}   /* v28.117 (review C1): escape a value for a single-quoted JS string inside an inline handler — use as esc(jsq(v)); a quote in a PO/SKU could otherwise break out of onclick */
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -12412,12 +12412,15 @@
   function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
     if(_reallocCount==null||_reallocCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_reallocCount; el.style.display=''; el.title=_reallocCount+' open reallocation option'+(_reallocCount===1?'':'s'); } }
-  function refreshReallocBadge(){ fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
+  // v28.148 perf: the BI & REPORTS badge counts were re-fetched on EVERY report click (crawl: projection ×13, reallocations ×16,
+  // dtc/mismatch ×17). Throttled to one fetch per 2 min each; force=true (after a DTC reload) and any cache invalidation skip it.
+  var _badgeAt={}; function _badgeFresh(k,force){ if(!force&&_badgeAt[k]&&Date.now()-_badgeAt[k]<120000)return true; _badgeAt[k]=Date.now(); return false; }
+  function refreshReallocBadge(force){ if(_badgeFresh('realloc',force)){ paintReallocBadge(); return; } fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
   var _urgentCrit=null;   // count of CRITICAL urgent-buy SKUs (excludes too-late-to-order), shown as a red action counter on the URGENT BUY tab
   function paintUrgentBadge(){ var el=document.getElementById('rep-urgent-badge'); if(!el)return;
     if(_urgentCrit==null||_urgentCrit===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_urgentCrit; el.style.display=''; el.title=_urgentCrit+' critical stock-out risk'+(_urgentCrit===1?'':'s')+' to buy'; } }
-  function refreshUrgentBadge(){ fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
+  function refreshUrgentBadge(force){ if(_badgeFresh('urgent',force)){ paintUrgentBadge(); return; } fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
     if(rk==='metrics'){ try{ location.hash='#/reports/performance/supply-metrics'; }catch(e){} return; }   // Metrics moved to top-level REPORTS ▸ Performance ▸ Supply metrics
     current='reports'; reportTab=rk; _actHost=null; syncHash();
@@ -12474,7 +12477,8 @@
   function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list');   // .dtc-order-row = table row (desktop) or card (mobile)
     if(host)host.querySelectorAll('.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
     var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
-  function refreshDtcBadge(){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
+  function refreshDtcBadge(force){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
+    if(_badgeFresh('dtc',force))return;   // v28.148: badge already painted from the last fetch (<2 min)
     fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
       var el=document.getElementById('nav-dtc-badge-l3'); if(el){ el.textContent=_dtcCount?String(_dtcCount):''; el.style.display=_dtcCount?'':'none'; }
       try{ paintReportsL2Badge(); }catch(e){} }).catch(function(){}); }
@@ -12515,7 +12519,7 @@
     _dtcApplyFilter();
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
-    try{ refreshDtcBadge(); }catch(e){}
+    try{ refreshDtcBadge(); }catch(e){}   // (the reload below forces a fresh count)
     try{ renderDtcFulfilAlign(); }catch(e){}
   }
   // v27.797: DTC ↔ Fulfil alignment — standalone read-only exception panel. Fulfil is the source of truth;
@@ -12622,7 +12626,7 @@
   function _dtcReload(){ fetch('/api/supply/dtc/mismatch').then(function(r){return r.json();}).then(function(d){ d=d||{}; _dtcData=d; var c=d.counts||{};
     _dtcSetPill('Issues',c.issues); _dtcSetPill('Accepted',c.accepted); _dtcSetPill('OK',c.ok); _dtcSetPill('Unmapped POs',c.unmapped_pos);
     _dtcApplyFilter();
-    try{ refreshDtcBadge(); }catch(e){}
+    try{ refreshDtcBadge(true); }catch(e){}
   }).catch(function(){}); }
   // Small floating picker: filter a list of options (or type a free value), then onPick(val).
   function _dtcPicker(anchor,cfg){ var old=document.getElementById('dtc-picker'); if(old)old.remove();

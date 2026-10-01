@@ -120,6 +120,8 @@
     return ''; }
   function carrierTrackLink(carrier,code){ var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // DHL tracking pill (P2b, v27.726) — reads the supplier-SCOPED cache (/api/portal/tracking-status), never DHL.
+  // v28.148: inside the staff app (window.__HZ_LANDING set by the shell) it reads the staff cache /api/tracking/status instead
+  // (the portal endpoint 401s for staff, so DHL pills never filled on SUPPLY ▸ Shipments / Samples / PRODUCT ▸ Sampling).
   // Drop a <span class="hz-trkpill" data-trk="NUMBER"></span> and the observer below fills it. Status word sits
   // in its own .pp-trkword span so the portal's zh auto-translation (PP_ZH) picks it up.
   function hzTrkDate(s){ if(!s)return ''; s=String(s).slice(0,10); var p=s.split('-'); if(p.length!==3)return s; var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return p[2]+'-'+(mo[(+p[1])-1]||p[1])+'-'+p[0].slice(2); }
@@ -130,7 +132,7 @@
     return '<span title="'+esc(t.status_text||m[2])+'" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap;background:'+m[0]+';color:'+m[1]+'">'+mark+' <span class="pp-trkword">'+esc(m[2])+'</span>'+esc(when)+'</span>'; }
   function hzFillTrackPills(root){ root=root||document; var ph=[].slice.call(root.querySelectorAll('.hz-trkpill[data-trk]')); if(!ph.length)return;
     var seen={}; ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); if(n)seen[n]=1; }); var list=Object.keys(seen); if(!list.length)return;
-    fetch('/api/portal/tracking-status?numbers='+encodeURIComponent(list.join(',')),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
+    fetch(((typeof window.__HZ_LANDING!=='undefined')?'/api/tracking/status':'/api/portal/tracking-status')+'?numbers='+encodeURIComponent(list.join(',')),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
       ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n]); if(html){ el.innerHTML=html; el.setAttribute('data-num',n); el.style.cursor='pointer'; el.title='Open the DHL tracking log'; if(typeof ppTranslate==='function'&&PP_LANG==='zh'){ try{ ppTranslate(el); }catch(e){} } } }); }).catch(function(){}); }
   (function(){ var pend=null; function scan(){ pend=null; try{ hzFillTrackPills(document); }catch(e){} }
     try{ new MutationObserver(function(){ if(pend)return; pend=setTimeout(scan,200); }).observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();

@@ -2280,7 +2280,8 @@ function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearT
     fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); });
   }).catch(function(){ _fbaTrfBlocked='network error, press refresh to retry'; _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); }); }   // v27.521: network failure LATCHES too (live parity) so the hourly auto-refresh cannot loop on a dead connection
 function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
-function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
+var _fbaTrfAutoAt=0;   // v28.148: at most ONE auto-refresh per hour per page (if the server's last_run did not advance, refresh → render → maybeRefresh re-fired: ×3 per FBA visit in the crawl)
+function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; if(_fbaTrfAutoAt&&Date.now()-_fbaTrfAutoAt<3600000)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000){ _fbaTrfAutoAt=Date.now(); fbaTrfRefresh(true); } }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
 function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
 function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!el)return;
   var n=FBA_PENDING_ROWS.length, u=FBA_PENDING_ROWS.reduce(function(a,r){return a+(Number(r.qty)||0);},0), lr=FBA_PENDING_LR?(' · '+_fbaTrfAgo(FBA_PENDING_LR)):'';
@@ -10007,7 +10008,9 @@ function render(){
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   // v28.146: not for BUY & MOVE views; there the cold build is deferred behind a loading panel (see the _inBM branch below).
   var _bmV=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
-  try{ if(!_PP_COVER_INIT && !_bmV && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
+  // v28.148: same for a COLD DEMAND visit (demand not built yet): deferred behind a loading panel after renderDemandTabs() below.
+  var _dmCold=(VIEW_MODE==='planning' && typeof DEMAND_BUILT!=='undefined' && !DEMAND_BUILT && typeof buildLiveDemand==='function');
+  try{ if(!_PP_COVER_INIT && !_bmV && !_dmCold && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
@@ -10083,6 +10086,20 @@ function render(){
   restoreMainView();
   renderDemandTabs();
   var planFilters=['ctabs-row','filters-row2','catrow1-wrap'];
+  if(_dmCold){   // v28.148: paint the DEMAND tabs + a loading panel, let the rail expand, then build demand and render for real
+    planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    var _twD=document.getElementById('tw'); if(_twD)_twD.style.display='none';
+    var _dbD=document.getElementById('demand-body'); if(_dbD)_dbD.remove();
+    _dbD=document.createElement('div'); _dbD.id='demand-body'; document.querySelector('.wrap').appendChild(_dbD);
+    _dbD.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
+    clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){
+      if(VIEW_MODE!=='planning'){ var _x=document.getElementById('demand-body'); if(_x&&DEMAND_VIEW==='plan')_x.remove(); return; }   // user moved on: don't block them
+      try{ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){} }catch(e){ console.error('buildLiveDemand failed',e); }
+      if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
+      try{ render(); }catch(e){ console.error(e); }
+    },160);
+    return;
+  }
   if(DEMAND_VIEW!=='plan'){
     planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var tw0=document.getElementById('tw'); if(tw0)tw0.style.display='none';
@@ -16215,9 +16232,14 @@ function renderAutoForecastReport(body){
   if(AF_ENGINE==='old'){
     fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(done).catch(fail);
   } else {
-    if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
-    afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
-    fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail);
+    var afGo=function(){ if(cur()!==key)return;
+      if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
+      afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
+      fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail); };
+    // v28.148: a cold demand build (~3 s) ran before the page could paint. Show what is happening, let it paint, then build.
+    var afCold=!AF_FEED && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE));
+    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(afGo,120); }
+    else afGo();
   }
 }
 

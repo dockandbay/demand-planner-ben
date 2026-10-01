@@ -7781,6 +7781,14 @@ supplySectionHandler = async (req, res, next) => {
     }
   } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
 };
+// v28.148: moved above the :section catch-all, which swallowed it as "unknown section" (404 on CONFIG ▸ Portal users).
+app.get('/api/supply/portal-signals', async (req, res) => {
+  try {
+    const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
+    const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
+    res.json({ unread, subs });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/:section', supplySectionHandler);
 
 // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
@@ -8134,13 +8142,6 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
 // Bulk signals for the CONFIG ▸ Portal Users open-action counts: unread internal (D&B) notes per PO +
 // all supplier submissions. Combined client-side with /api/supply/purchase-orders + samples to compute
 // each supplier's open actions (same conditions the portal shows the supplier).
-app.get('/api/supply/portal-signals', async (req, res) => {
-  try {
-    const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
-    const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
-    res.json({ unread, subs });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
 // Send an open-actions reminder email to a supplier's registered portal address(es) — LIVE via Resend.
 // Recipients are derived server-side from ACTIVE portal users for the supplier_id (the client cannot email
 // an arbitrary address). Sandbox has no RESEND_API_KEY → nothing is sent (safe to test).

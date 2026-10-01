@@ -1,3 +1,14 @@
+## v28.148 (Ben → Diviyaj, branch fix/first-click-boot-freeze): loading panels + crawl clean-up
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html`, `supply/portal-view.js`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
+
+1. **First DEMAND visit** (demand not built yet): DEMAND tabs + a "Loading Demand…" panel paint first and the rail expands; the ~3 s build runs 160 ms later, then the page renders (skipped if the user moved on). Same pattern as v28.146 BUY & MOVE.
+2. **Auto Forecast** (PAYMENTS ▸ Auto Forecast) on a cold open shows "Calculating demand for the buy feed…" and lets it paint before the build.
+3. **Staff DHL tracking pills** (SUPPLY ▸ Shipments, Samples, PRODUCT ▸ Sampling) called the SUPPLIER-portal endpoint `/api/portal/tracking-status` → 401, so they never filled. In the staff app (`window.__HZ_LANDING` set) `portal-view.js` now reads `/api/tracking/status` (same response shape). The supplier portal is unchanged.
+4. **`/api/supply/portal-signals` 404** (CONFIG ▸ Portal users): the route sat after the `/api/supply/:section` catch-all, which answered "unknown section". Moved above it; handler unchanged.
+5. **BI & REPORTS badge counts** (reallocations, urgent-buy projection, DTC mismatch) were re-fetched on every report click (crawl: ×13 to ×17). Throttled to once per 2 min each, like the ERP compare badge; any cache invalidation (edits, ETL refresh) and a DTC data reload refresh them immediately.
+6. **BUY & MOVE ▸ FBA auto-refresh loop:** when the server's `last_run` did not advance, refresh → render → auto-refresh fired again (×3 per visit). Now at most one auto-refresh per hour per page; the manual ⟳ is unchanged.
+
 ## v28.147 (Ben → Diviyaj, branch fix/first-click-boot-freeze): Order plan preload + earlier sku-data download
 
 **Files:** `supply/inject.html`, `artifact_v16.7.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
