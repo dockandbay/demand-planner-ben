@@ -3,6 +3,9 @@
   "version": "28.150",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.mjs",
     "test": "node tests/portal-inplace.cjs",
@@ -12,12 +15,14 @@
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
-    "jsdom": "^29.1.1",
     "jszip": "^3.10.1",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.296",
     "pg": "^8.21.0",
     "ssh2-sftp-client": "^12.1.1"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
   }
 }
