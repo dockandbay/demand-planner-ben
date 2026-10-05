@@ -5769,7 +5769,7 @@
   // clicking Order plan opens instantly. _opGen bumps on every invalidation; a preload that started before one is dropped.
   var _opGen=0, _opPre=false;
   function prewarmOrderPlan(){ if(cache["order-plan"]||_opPre)return; _opPre=true;
-    var go=function(){ if(cache["order-plan"]){ _opPre=false; return; } secFetch('order-plan',null,{bg:1}).then(function(){ _opPre=false; },function(){ _opPre=false; }); };   // v28.151 (review F2): shared/gen-checked via secFetch
+    var go=function(){ if(cache["order-plan"]||poSub!=='plan'){ _opPre=false; return; } secFetch('order-plan',null,{bg:1}).then(function(){ _opPre=false; },function(){ _opPre=false; }); };   // v28.151 (review F2): shared/gen-checked via secFetch; re-checks the sub-tab when it fires (mount calls this before routing)
     setTimeout(function(){ if(window.requestIdleCallback)requestIdleCallback(go,{timeout:4000}); else go(); },1500); }
   function prefetchNavCounts(){
     // v28.151 (review F2): prewarm the 6 MB order plan only from the PO grid (not Shipments/Productions/...); nav-count fetches
