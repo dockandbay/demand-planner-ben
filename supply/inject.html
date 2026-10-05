@@ -10898,13 +10898,15 @@
     var q=document.getElementById('xbp-post'); if(q)q.onclick=function(){
       if(!confirm('Create the supplier-payment bill AND post payments to the linked PO bills in Xero '+((j.region||'').toUpperCase())+' now?\n\nThis writes to live Xero.'))return;
       q.disabled=true; var _t=q.textContent; q.textContent='Creating…'; var ps=document.getElementById('xbp-pst'); if(ps)ps.textContent='';
-      fetch('/api/supply/payments/xero-post',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run:j._run,confirm:true})})
-        .then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error);
+      var _xpost=function(repost){ return fetch('/api/supply/payments/xero-post',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run:j._run,confirm:true,repost:!!repost})}).then(function(r){return r.json();}); };
+      // v28.151 (review D5): the server refuses a run that already has a live supplier-payment bill; the redo path asks first
+      _xpost(false).then(function(x){ if(x&&x.code==='ALREADY_POSTED'){ if(!confirm(x.error+'\n\nPost it AGAIN anyway (a second bill + payments)?'))throw new Error('Not posted: already in Xero'); return _xpost(true); } return x; })
+        .then(function(x){ if(x&&x.error)throw new Error(x.error);
           var rb=document.getElementById('xbp-result');
           var billHtml=x.bill?('Bill <b>'+esc(x.bill.number||x.reference||'')+'</b>'+(x.bill.url?' <a href="'+esc(x.bill.url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700">open ↗</a>':'')):'—';
           var skHtml=(x.skipped&&x.skipped.length)?('<div style="color:var(--amber);font-size:12px;margin-top:4px">Skipped: '+x.skipped.map(function(s){return esc(s.po)+' ('+esc(s.reason)+')';}).join(', ')+'</div>'):'';
-          if(rb)rb.innerHTML='<div style="border:1px solid #86efac;background:var(--pos-bg);border-radius:8px;padding:10px 12px;font-size:13px"><div style="font-weight:700;color:var(--pos)">✓ Posted to Xero</div><div style="margin-top:3px">'+billHtml+' · <b>'+(x.payments?x.payments.length:0)+'</b> payment'+((x.payments&&x.payments.length===1)?'':'s')+' posted</div>'+skHtml+'</div>';
-          q.textContent='✓ Posted'; if(ps)ps.textContent=''; })
+          if(rb)rb.innerHTML=(x.ok===false?'<div style="border:1px solid var(--neg);border-radius:8px;padding:10px 12px;font-size:13px"><div style="font-weight:700;color:var(--neg)">⚠ Posted with '+esc(x.failed_payments||'')+' failed payment(s): check the skipped list and finish them in Xero</div>':'<div style="border:1px solid #86efac;background:var(--pos-bg);border-radius:8px;padding:10px 12px;font-size:13px"><div style="font-weight:700;color:var(--pos)">✓ Posted to Xero</div>')+'<div style="margin-top:3px">'+billHtml+' · <b>'+(x.payments?x.payments.length:0)+'</b> payment'+((x.payments&&x.payments.length===1)?'':'s')+' posted</div>'+skHtml+'</div>';
+          q.textContent=x.ok===false?'⚠ Posted (errors)':'✓ Posted'; if(ps)ps.textContent=''; })
         .catch(function(e){ q.disabled=false; q.textContent=_t; if(ps){ps.style.color='var(--neg)';ps.textContent='Failed: '+(e.message||e);} }); };
   }
   // ---- AU bill migration tool (Xero UK → AU) — small helper launched from the Xero payments view (v28.109, Ben) ----

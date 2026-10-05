@@ -3015,16 +3015,19 @@ async function fulfilResolveProducts(skus) {
 // on a dedicated client held for the push: on Vercel the pool goes through the transaction pooler (6543), where a
 // session lock and its unlock can land on different backends and leak, while an xact lock is pinned to its txn and is
 // released by COMMIT/ROLLBACK or when the session dies. A concurrent push gets FULFIL_PUSH_BUSY (409) instead of waiting.
-async function withFulfilPushLock(po, fn) {
+async function _withXactLock(key, busy, fn) {   // shared by the Fulfil push (D2) and the Xero payment post (D5)
   const lc = await pool.connect(); let ok = false;
   try {
     await lc.query('BEGIN');
-    await lc.query("SET LOCAL idle_in_transaction_session_timeout = '180s'");   // bound a frozen instance; a push is ~15 calls x 20s timeout max
-    ok = (await lc.query(`SELECT pg_try_advisory_xact_lock(hashtext($1)) ok`, ['fulfil_push:' + po])).rows[0].ok;
+    await lc.query("SET LOCAL idle_in_transaction_session_timeout = '180s'");   // bound a frozen instance; a push is ~15 calls x 30s timeout max
+    ok = (await lc.query(`SELECT pg_try_advisory_xact_lock(hashtext($1)) ok`, [key])).rows[0].ok;
   } catch (e) { await _rollback(lc); lc.release(); throw e; }
-  if (!ok) { await _rollback(lc); lc.release(); const e = new Error('A Fulfil push for ' + po + ' is already in progress. Wait for it to finish, then refresh before pushing again.'); e.code = 'FULFIL_PUSH_BUSY'; throw e; }
+  if (!ok) { await _rollback(lc); lc.release(); const e = new Error(busy.message); e.code = busy.code; throw e; }
   try { return await fn(); }
   finally { await _rollback(lc); lc.release(); }   // ROLLBACK releases the xact lock (nothing was written on this client)
+}
+function withFulfilPushLock(po, fn) {
+  return _withXactLock('fulfil_push:' + po, { code: 'FULFIL_PUSH_BUSY', message: 'A Fulfil push for ' + po + ' is already in progress. Wait for it to finish, then refresh before pushing again.' }, fn);
 }
 // push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
 // data the Cin7 push uses. Resolves supplier/currency/warehouse/products to Fulfil ids first (read-only) and aborts
@@ -4463,8 +4466,31 @@ async function xeroExchange(region, params) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Basic ' + Buffer.from(cfg.id + ':' + cfg.secret).toString('base64') },
     body: new URLSearchParams(params) });
   const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) {}
-  if (!r.ok) { const e = new Error('Xero token ' + r.status + ': ' + String((j && (j.error_description || j.error)) || t).slice(0, 200)); e.code = r.status; throw e; }
+  if (!r.ok) { const e = new Error('Xero token ' + r.status + ': ' + String((j && (j.error_description || j.error)) || t).slice(0, 200)); e.code = r.status; e.oauthError = (j && j.error) || null; throw e; }   // v28.151 (review D4): carry the OAuth error code (invalid_grant etc.)
   return j;
+}
+const _xeroRefreshing = { uk: null, au: null };
+async function _xeroRefresh(region, store) {
+  const _use = async (st) => {
+    const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: st.refresh_token });   // Xero rotates the refresh token
+    const upd = Object.assign({}, st, { access_token: j.access_token, refresh_token: j.refresh_token || st.refresh_token, expires_at: Date.now() + (Number(j.expires_in) || 1800) * 1000 });
+    await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
+    return j.access_token;
+  };
+  try { return await _use(store); }
+  catch (e) {
+    if (!(e.code === 400 && e.oauthError === 'invalid_grant')) throw e;
+    const fresh = await xeroGetStore(region);
+    if (fresh && fresh.refresh_token && fresh.refresh_token !== store.refresh_token) {   // rotated by another instance
+      if (fresh.access_token && fresh.expires_at && Date.now() < fresh.expires_at - 60000) { _xeroTok[region] = { token: fresh.access_token, exp: fresh.expires_at }; return fresh.access_token; }
+      try { return await _use(fresh); }
+      catch (e2) { if (!(e2.code === 400 && e2.oauthError === 'invalid_grant')) throw e2; store = fresh; }
+    }
+    console.error('[xero] ' + region.toUpperCase() + ' refresh token rejected (invalid_grant): dropping the stored connection; reconnect needed');
+    await pool.query(`DELETE FROM planner.app_settings WHERE key=$1 AND (CASE WHEN key=$1 THEN (value::jsonb)->>'refresh_token' END) = $2`, ['xero_oauth_' + region, store.refresh_token]).catch(() => {});
+    _xeroTok[region] = { token: null, exp: 0 };
+    return null;
+  }
 }
 async function xeroToken(region) {
   region = xeroRegion(region); const cfg = xeroConfig(region); if (!cfg.present) return null;
@@ -4472,12 +4498,14 @@ async function xeroToken(region) {
   const store = await xeroGetStore(region);
   if (store && store.refresh_token) {   // AUTH-CODE (Web app) connection
     if (store.access_token && store.expires_at && now < store.expires_at - 60000) { _xeroTok[region] = { token: store.access_token, exp: store.expires_at }; return store.access_token; }
-    try {
-      const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: store.refresh_token });   // Xero rotates the refresh token
-      const upd = Object.assign({}, store, { access_token: j.access_token, refresh_token: j.refresh_token || store.refresh_token, expires_at: now + (Number(j.expires_in) || 1800) * 1000 });
-      await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
-      return j.access_token;
-    } catch (e) { if (e.code === 400 || e.code === 401) { await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]).catch(() => {}); } else throw e; }   // stale (e.g. switched to a Custom Connection) → drop it and try client_credentials
+    // v28.151 (review D4): single-flight per region (concurrent callers share one refresh, so we never spend the rotating
+    // refresh token twice), and the stored connection is only dropped on a CONFIRMED invalid_grant: on invalid_grant we
+    // re-read the store; if another instance already rotated the token we retry once with it, and the DELETE is
+    // conditional on the row still holding the token that failed. Any other 400/401 (invalid_client, outage) now throws
+    // and keeps the connection (it used to DELETE it on any 400/401, forcing an admin reconnect).
+    if (!_xeroRefreshing[region]) _xeroRefreshing[region] = _xeroRefresh(region, store).finally(() => { _xeroRefreshing[region] = null; });
+    const tok = await _xeroRefreshing[region];
+    if (tok) return tok;   // null = confirmed invalid_grant and dropped: fall through to client_credentials (as before)
   }
   // CUSTOM CONNECTION (client_credentials) — no consent flow, one org, no refresh token. Omit scope so the token
   // carries whatever the connection was granted (avoids "scope validation failed" if the app has a different set).
@@ -5069,6 +5097,14 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in CONFIG ▸ Payments' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
     if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.amount) + ' > ' + _usd(l.bill_due) + ')').join('; ') });
+    // v28.151 (review D5): server-side idempotency on run_key. A run that already has a recorded supplier-payment bill that
+    // is not VOIDED/DELETED is refused (409 ALREADY_POSTED) unless the caller sends repost:true (the redo button asks the
+    // user first). The check + post run under a per-run_key advisory lock so two admins can't post the same run at once.
+    const _rr0 = (req.body && req.body.run) || {};
+    const _rk = _rr0.run_key || ((_rr0.dt || '') + '|' + (_rr0.supplier || '') + (String(_rr0.region || '').toUpperCase() === 'AU' && String(_rr0.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : ''));
+    return await _withXactLock('xero_pay_post:' + _rk, { code: 'XERO_POST_BUSY', message: 'This payment run is already being posted to Xero. Wait for it to finish, then refresh.' }, async () => {
+    const _prior = (await pool.query(`SELECT bill_number, status FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, [_rk])).rows;
+    if (_prior.length && (req.body && req.body.repost) !== true) return res.status(409).json({ code: 'ALREADY_POSTED', error: 'This run already has a supplier-payment bill in Xero (' + _prior.map(b => (b.bill_number || '?') + (b.status ? ' ' + b.status : '')).join(', ') + '). Void or delete it in Xero first, or confirm a re-post.', bills: _prior });
     const out = { region, paying_org: plan.paying_org, supplier: plan.supplier, reference: plan.reference, bill: null, payments: [], skipped: [] };
     // 1) the supplier-payment bill (DRAFT) in the PAYING org. Same-org lines → 602 / 602.1 (Production tracking on
     //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
@@ -5104,10 +5140,13 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
         if (rate != null && rate > 0) payObj.CurrencyRate = rate;
         const pr = await xeroFetch(l.settle_org, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
         const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill') });
-      } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
+      } catch (pe) { console.error('[xero-post] payment ' + l.reference + ' failed:', pe.message); out.skipped.push({ po: l.reference, reason: pe.message, error: true }); }
     }
-    res.json(Object.assign({ ok: true }, out));
-  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+    // v28.151 (review D5): a payment that FAILED (not a by-design skip) makes the post ok:false so it can't read as complete.
+    const _failed = out.skipped.filter(x => x.error).length;
+    res.json(Object.assign({ ok: _failed === 0, failed_payments: _failed }, out));
+    });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : e.code === 'XERO_POST_BUSY' ? 409 : 500).json({ error: e.message, code: e.code === 'XERO_POST_BUSY' ? e.code : undefined }); }
 });
 // Starting-deposit DRAW-DOWN via a Xero credit note — the new feature, P58 ONWARDS ONLY (earlier productions draw down
 // as-is). Creates an ACCPAYCREDIT coded to Stock Deposits (602), tagged with the production, allocated to the PO's bill.
