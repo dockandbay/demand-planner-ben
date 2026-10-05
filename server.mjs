@@ -90,8 +90,10 @@ const pool = new pg.Pool({
   // v28.151 (review E1): fail fast instead of piling up. A checkout that can't get a connection in 10s errors (no
   // unbounded queue behind a saturated 4-conn pool = the death-spiral mechanism); a query with no reply in 35s
   // errors client-side (belt to the 30s server statement_timeout, which the pooler may drop: see E2 / ALTER ROLE).
-  connectionTimeoutMillis: 10000,
-  query_timeout: 35000,
+  // Sandbox (non-Vercel) gets 120s: its session pooler ignores the startup statement_timeout (2-min server default) and the
+  // remote eu-central-1 round trips make the heavy PO builds legitimately run 35s+ there. PG_QUERY_TIMEOUT_MS overrides.
+  connectionTimeoutMillis: process.env.VERCEL ? 10000 : 30000,   // sandbox boot warm queues ~20 builds on 8 conns over a ~1.7s remote connect
+  query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS) || (process.env.VERCEL ? 35000 : 120000),
 });
 // ── Resilience guards ─────────────────────────────────────────────────────────
 // A dropped idle DB connection makes the pool emit 'error'; with no listener Node treats it as
