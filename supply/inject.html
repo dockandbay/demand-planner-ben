@@ -1079,13 +1079,27 @@
       var dirty=Array.prototype.some.call(c.querySelectorAll('input,textarea,select'),function(el){ if(el.type==='checkbox'||el.type==='radio')return el.checked!==el.defaultChecked; if(el.tagName==='SELECT'){ for(var i=0;i<el.options.length;i++){ if(el.options[i].selected!==el.options[i].defaultSelected)return true; } return false; } return el.value!==el.defaultValue; });
       return !dirty; }catch(e){ return false; } }
   function hzRevalidate(key,tk){ if(key==='samples'||key==='actions'||key==='config')return;
-    fetch('/api/supply/'+key).then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
+    var _g=_opGen;   // v28.151 (review F3): ok-only + generation check
+    fetch('/api/supply/'+key).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json();}).then(function(d){ if(!d||d.error||_g!==_opGen)return; var same=false; try{ same=JSON.stringify(cache[key])===JSON.stringify(d); }catch(e){}
       cache[key]=d; _hzCacheAt[key]=Date.now(); if(same||tk!==_navToken||current!==key||!hzViewIdle())return; try{ renderSectionData(key,d); }catch(e){} }).catch(function(){}); }
-  function invalidateDerived(){ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
+  function invalidateDerived(){ _opGen++; try{ _badgeAt={}; _erpcAt=0; }catch(e){} ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing','deposits'].forEach(function(k){delete cache[k];}); _lookupsAt=0; try{ window.__hzFetchBust(); }catch(e){} /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
     clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
+  // v28.151 (review F2/F3): section fetch with ONE shared in-flight promise per key+url+generation, and a cache that only
+  // stores ok (2xx), non-error JSON whose generation (_opGen, bumped by every invalidation) still matches when it lands, so a
+  // pre-edit response can't repopulate the cache after an edit. opt.bg = background prefetch (does not spin the badge; a
+  // foreground caller joining it does). Rejects on HTTP/JSON error so callers show their "Failed to load" state.
+  var _secInfl={};
+  function secFetch(key,url,opt){ opt=opt||{}; if(cache[key])return Promise.resolve(cache[key]);
+    url=url||('/api/supply/'+key); var g=_opGen, f=_secInfl[key];
+    if(f&&f.url===url&&f.g===g){ if(f.bg&&!opt.bg){ try{ hzActivity(1); }catch(e){} f.p.then(function(){},function(){}).then(function(){ try{ hzActivity(-1); }catch(e){} }); } return f.p; }
+    var p=fetch(url,opt.bg?{__hzBg:1}:undefined).then(function(r){ return r.json().then(function(d){ return {r:r,d:d}; },function(){ return {r:r,d:{error:'HTTP '+r.status+' (not JSON)'}}; }); })
+      .then(function(x){ var d=x.d; if(!x.r.ok||(d&&d.error))throw new Error((d&&d.error)||('HTTP '+x.r.status)); if(g===_opGen)cache[key]=d; return d; });
+    var ent={url:url,g:g,p:p,bg:!!opt.bg}; _secInfl[key]=ent;
+    p.then(function(){},function(){}).then(function(){ if(_secInfl[key]===ent)delete _secInfl[key]; });
+    return p; }
   // Silent data refresh: drop ALL client-cached section responses (+ lookups + nav counts) so the NEXT view render
   // re-fetches fresh from the API — no full page reload. Called by the version poll when the ETL bumped source data
   // and the user navigates (so nav picks up fresh data without the disruptive location.reload). — Ben (nav lag/refresh)
@@ -1467,7 +1481,7 @@
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(key)+'<div class="bar"><input class="flt" id="sup-search" placeholder="Filter…"><span class="count" id="sup-count">'+rows.length+' rows</span></div><div id="sup-grid">'+tableHTML(rows)+'</div>';
-    document.getElementById('sup-search').oninput=function(){var f=filt(rows,this.value);document.getElementById('sup-grid').innerHTML=tableHTML(f);document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' rows';}; }
+    document.getElementById('sup-search').oninput=debounce(function(){var f=filt(rows,this.value);document.getElementById('sup-grid').innerHTML=tableHTML(f);document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' rows';},200); }   // v28.151 (review F7): debounced
 
   // ACTIONS: entering a value does NOT commit — an explicit Apply button does, then the card stays
   // visible (marked ✓) so the entry can be verified. Resolved cards clear on Refresh / re-fetch.
@@ -1538,14 +1552,17 @@
   // here we mirror that with a silent background fetch (no render unless already viewing Actions), refreshed every
   // 10 min and re-warmed shortly after any data edit clears it.
   var _actWarmStarted=false;
-  function prewarmActions(force){ if(!force && cache['actions'])return;
-    fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(full){
-      if(!Array.isArray(full))return; cache['actions']=full;
+  // v28.151 (review F7): bg = the 10-min timer. It fetches without spinning the badge, always refreshes cache + badge, but only
+  // re-renders the open Actions tab when the payload changed AND the user has not touched the page for 60s (hzViewIdle).
+  function prewarmActions(force,bg){ if(!force && cache['actions'])return;
+    fetch('/api/supply/actions',bg?{__hzBg:1}:undefined).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json();}).then(function(full){
+      if(!Array.isArray(full))return; var same=false; try{ same=!!cache['actions']&&JSON.stringify(cache['actions'])===JSON.stringify(full); }catch(e){} cache['actions']=full;
       try{ setActionsBadgeFrom(full); }catch(e){}
+      if(bg&&(same||!hzViewIdle()||Date.now()-_hzLastInteract<60000))return;   // don't re-render under the user
       if(current==='reports'&&['actions','recommendations','erp-compare'].indexOf(reportTab)>=0&&_actHost)try{ renderActions(full); }catch(e){}   // refresh in place if on a folded-in Actions tab
     }).catch(function(){}); }
   function startActionsWarm(){ if(_actWarmStarted)return; _actWarmStarted=true;
-    setInterval(function(){ prewarmActions(true); }, 600000); }   // every 10 min, matching the server cache TTL
+    setInterval(function(){ if(document.hidden)return; prewarmActions(true,true); }, 600000); }   // every 10 min, matching the server cache TTL; v28.151 (review F7): skipped while the tab is hidden
   var ACT_GROUP={ // PRIORITY — the highest-attention exceptions, surfaced first
     'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY',
     'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
@@ -3108,7 +3125,7 @@
     var hBtn=document.getElementById('po-hide-btn'), hMenu=document.getElementById('po-hide-menu');
     if(hBtn&&hMenu){
       hBtn.onclick=function(e){ e.stopPropagation(); hMenu.style.display=(hMenu.style.display==='none'?'block':'none'); };
-      document.addEventListener('click',function(e){ if(hMenu.style.display!=='none' && !hMenu.contains(e.target) && e.target!==hBtn) hMenu.style.display='none'; });
+      if(!window._poHideDocBound){ window._poHideDocBound=1; document.addEventListener('click',function(e){ var m=document.getElementById('po-hide-menu'), hb=document.getElementById('po-hide-btn'); if(m&&m.style.display!=='none' && !m.contains(e.target) && e.target!==hb) m.style.display='none'; }); }   // v28.151 (review F5): bound once, looks the menu up by id (was one listener per render)
       function syncHide(){ var n=_hideCount(); hBtn.textContent='Hide'+(n?' ('+n+')':'')+' ▾'; hBtn.style.background=n?'#0f172a':''; hBtn.style.color=n?'#fff':''; hBtn.style.borderColor=n?'#0f172a':''; hBtn.style.fontWeight=n?'700':''; }
       var ph1=document.getElementById('po-hide-snz'); if(ph1)ph1.onchange=function(){ _poShowSnoozed=!this.checked; syncHide(); view(); };
       var ph2=document.getElementById('po-hide-pay'); if(ph2)ph2.onchange=function(){ _hidePayDue=this.checked; syncHide(); view(); };
@@ -5018,7 +5035,7 @@
         var x=box.querySelector('.op-dupwarn-x'); if(x)x.onclick=function(){ x.disabled=true; fetch('/api/supply/po/'+encodeURIComponent(_po)+'/invoice-duplicates/dismiss',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(){ box.innerHTML=''; }); }; }).catch(function(){}); });
     document.querySelectorAll('#podet-'+i+' .op-bc-dl').forEach(function(b){ var menu=b.parentNode&&b.parentNode.querySelector('.op-bc-menu'); if(!menu)return;   // v27.697 Download barcodes ▾
       b.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'':'none'); };
-      document.addEventListener('click',function(){ menu.style.display='none'; });
+      if(!window._opBcDocBound){ window._opBcDocBound=1; document.addEventListener('click',function(){ document.querySelectorAll('.op-bc-menu').forEach(function(m){ if(m.style.display!=='none')m.style.display='none'; }); }); }   // v28.151 (review F5): one delegated closer for every barcode menu
       menu.querySelectorAll('.op-bc-opt').forEach(function(o){ o.onclick=function(e){ e.stopPropagation(); menu.style.display='none'; poBarcodesDownload(b.dataset.po, o.dataset.k, b); }; }); });
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
@@ -5755,22 +5772,23 @@
   // v28.147 perf (Ben): preload the Order plan (live ~1-2 s fetch) in idle time while the user is on PURCHASE ORDERS, so
   // clicking Order plan opens instantly. _opGen bumps on every invalidation; a preload that started before one is dropped.
   var _opGen=0, _opPre=false;
-  function prewarmOrderPlan(){ if(cache["order-plan"]||_opPre)return; var g=_opGen; _opPre=true;
-    var go=function(){ fetch("/api/supply/order-plan").then(function(r){return r.json();}).then(function(d){ _opPre=false; if(d&&!d.error&&g===_opGen&&!cache["order-plan"])cache["order-plan"]=d; }).catch(function(){ _opPre=false; }); };
+  function prewarmOrderPlan(){ if(cache["order-plan"]||_opPre)return; _opPre=true;
+    var go=function(){ if(cache["order-plan"]||poSub!=='plan'){ _opPre=false; return; } secFetch('order-plan',null,{bg:1}).then(function(){ _opPre=false; },function(){ _opPre=false; }); };   // v28.151 (review F2): shared/gen-checked via secFetch; re-checks the sub-tab when it fires (mount calls this before routing)
     setTimeout(function(){ if(window.requestIdleCallback)requestIdleCallback(go,{timeout:4000}); else go(); },1500); }
   function prefetchNavCounts(){
-    try{ prewarmOrderPlan(); }catch(e){}
-    if(_navCounts.shipments===undefined){ (cache['shipments']?Promise.resolve(cache['shipments']):fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d;return d;}))
+    // v28.151 (review F2): prewarm the 6 MB order plan only from the PO grid (not Shipments/Productions/...); nav-count fetches
+    // are background secFetch calls (shared with the view's own fetch, no badge spin, deposits now cached like the others).
+    try{ if(poSub==='plan')prewarmOrderPlan(); }catch(e){}
+    if(_navCounts.shipments===undefined){ secFetch('shipments',null,{bg:1})
       .then(function(d){ _allShips=(d&&d.shipments)||[]; if(!_poActStateLoaded)loadPoActState(recomputeShipNavCount); else recomputeShipNavCount(); }).catch(function(){}); }
-    if(_navCounts.manufacturing===undefined){ (cache['manufacturing']?Promise.resolve(cache['manufacturing']):fetch('/api/supply/manufacturing').then(function(r){return r.json();}).then(function(d){cache['manufacturing']=d;return d;}))
+    if(_navCounts.manufacturing===undefined){ secFetch('manufacturing',null,{bg:1})
       .then(function(d){ var cc=[]; ((d&&d.bundles)||[]).forEach(function(bn){(bn.components||[]).forEach(function(c){cc.push(c);});}); _navCounts.manufacturing=cc.filter(function(c){return c.diff!==0&&!c.accepted;}).length; updateNavBadges(); }).catch(function(){}); }
     if(_navCounts.paydue===undefined){ Promise.all([
-        (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;})),
-        fetch('/api/supply/deposits').then(function(r){return r.json();})])
+        secFetch('purchase-orders',null,{bg:1}), secFetch('deposits',null,{bg:1})])
       .then(function(res){ _navCounts.paydue=paymentsDueOverdueCount(res[0]||[], res[1]||[]); updateNavBadges(); }).catch(function(){}); }
     if(_navCounts.xeropayments===undefined){ _navCounts.xeropayments=0; hzLate(function(){ fetch('/api/supply/xero/exceptions').then(function(r){return r.json();}).then(function(d){ _navCounts.xeropayments=(d&&d.count)||0; updateNavBadges(); }).catch(function(){}); }); }   // Xero reconciliation exception count → action badge on Xero payments + PAYMENTS
     // PLAN action-item count → rolls up to the top-level PURCHASE ORDERS tab (so it shows before the grid is opened)
-    if(_navCounts.plan===undefined){ (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;}))
+    if(_navCounts.plan===undefined){ secFetch('purchase-orders',null,{bg:1})
       .then(function(rows){ rows=Array.isArray(rows)?rows:[]; var go=function(){ _navCounts.plan=rows.reduce(function(a,r){return a+poActions(r).length;},0); updateNavBadges(); }; if(!_poActStateLoaded)loadPoActState(go); else go();
         // Direct-to-Client + Custom Orders sub-tab action counters — compute here so they show on refresh (not only after visiting the report)
         try{ var _isDC=function(b){b=(b||'').toLowerCase();return b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0;};
@@ -5896,30 +5914,31 @@
     var c=document.getElementById('supply-content');
     prefetchNavCounts();   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      secFetch('purchase-orders','/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(d){ if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='orderplan'){ var showOP=function(d){ if(_tk!==_navToken)return; renderOrderPlan(d); };   // Order plan folded under PURCHASE ORDERS (was an L2 section). renderOrderPlan/opBuild prepend the PO sub-nav.
       if(cache['order-plan'])return showOP(cache['order-plan']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/order-plan').then(function(r){return r.json();}).then(function(d){cache['order-plan']=d; showOP(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      secFetch('order-plan').then(function(d){ showOP(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
       if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      secFetch('shipments').then(function(d){ showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='manufacturing'){ var showMfg=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); renderManufacturing(d, document.getElementById('prod-body')); };
       if(cache['manufacturing'])return showMfg(cache['manufacturing']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/manufacturing').then(function(r){return r.json();}).then(function(d){cache['manufacturing']=d; showMfg(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      secFetch('manufacturing').then(function(d){ showMfg(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='crossdock'){ c.innerHTML=poSubNav()+'<div id="prod-body"><div class="count">Loading…</div></div>'; bindPoSubNav();
       fetch('/api/supply/crossdock-report').then(function(r){return r.json();}).then(function(d){ if(_tk!==_navToken)return; renderCrossdock(d, document.getElementById('prod-body')); })
         .catch(function(e){ if(_tk!==_navToken)return; var pb=document.getElementById('prod-body'); if(pb)pb.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>'; }); return; }
     if(poSub==='directclient'||poSub==='customorders'){ var _rf=(poSub==='directclient')?renderDirectClient:renderCustomOrders;   // moved from BI & REPORTS — render under the PO sub-nav
       var showR=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="rep-body"></div>'; bindPoSubNav(); _rf(d); };
       if(cache['purchase-orders'])return showR(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; showR(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      secFetch('purchase-orders','/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(d){ showR(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='edi-labels'){ c.innerHTML=poSubNav()+'<div id="rep-body"></div>'; bindPoSubNav(); renderEdiLabels(document.getElementById('rep-body')); return; }
     if(poSub==='flexport'){ var showFx=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="rep-body"></div>'; bindPoSubNav(); renderFlexport(d); };
       if(cache['flexport'])return showFx(cache['flexport']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/flexport').then(function(r){return r.json();}).then(function(d){cache['flexport']=d; showFx(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      secFetch('flexport').then(function(d){ showFx(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
-    fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); }
+    // v28.151 (review F2/F3): shared in-flight + ok-only cache via secFetch
+    secFetch('productions').then(function(d){ if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); }
   // ── MASTER PO: consolidate child POs (one supplier) into a REAL master PO (in the grid, is_master), children hidden ──
   function mpMoney(x){ return Number(x||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
   var MP_BADGE='display:inline-block;background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;border-radius:3px;font-size:9px;font-weight:700;padding:0 5px;line-height:15px;margin-top:2px;letter-spacing:.3px';   // medium-blue master/child badge
@@ -6279,7 +6298,7 @@
     function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' productions';
       document.getElementById('sup-grid').innerHTML=prodTable(f); bindProdExpand(); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
-    document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;view();},200);   // v28.151 (review F7): debounced
     view(); }
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
@@ -6494,7 +6513,7 @@
           alert('Assigned '+d.reference+' to '+j.assigned+' PO(s)'+(j.skipped_region?'; '+j.skipped_region+' skipped (different region)':'')+'.');
           delete cache['purchase-orders']; delete cache['productions']; invalidateDerived(); showPoSub('deposits'); }); }; }); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
-    document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
+    document.getElementById('dep-q').oninput=debounce(function(){st.q=this.value.toLowerCase();draw();},200);   // v28.151 (review F7): debounced
     var _depSup=document.getElementById('dep-sup'); if(_depSup)_depSup.onchange=function(){st.sup=this.value;draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(j){ _newDepId=(j&&j.id)||null; delete cache['productions']; showPoSub('deposits'); }); };
     var _pv=document.getElementById('dep-poview'); if(_pv){ _pv.value=depPoView; _pv.onchange=function(){ depPoView=this.value; draw(); }; }
@@ -7472,15 +7491,16 @@
   // Read-only UX. The server is the hard boundary (403); this surfaces it: a global 403-readonly toast
   // (covers every view incl. DEMAND/FBA) + a banner on SUPPLY/CONFIG when you lack the edit right.
   (function(){ if(window.__permFetchWrapped)return; window.__permFetchWrapped=true; var of=window.fetch;
-    window.fetch=function(){ hzActivity(1);
+    window.fetch=function(){ var _bg=!!(arguments[1]&&arguments[1].__hzBg); if(!_bg)hzActivity(1);   // v28.151 (review F2): background prefetches don't spin the badge
+      var _p; try{ _p=of.apply(this,arguments); }catch(e){ if(!_bg)hzActivity(-1); return Promise.reject(e); }   // v28.151 (review F2): a sync throw still decrements
       var _u=''; try{ var a0=arguments[0]; _u=String((a0&&a0.url)||a0||''); }catch(e){}
-      return of.apply(this,arguments).then(function(res){
+      return _p.then(function(res){
         if(res&&res.status===403&&res.clone){ res.clone().json().then(function(j){ if(j&&j.code==='readonly')permToast(j.error||'Read-only access — ask an admin.'); }).catch(function(){}); }
         // v27.892 (Ben): a 401 from OUR api = the sign-in session is gone (the access gate answers 401 "unauthorised" when
         // the login cookie is missing/expired) → force sign-out right away. Supplier-portal endpoints have their own
         // session and are excluded (an admin previewing the portal must not be logged out of HORIZON by a portal 401).
         if(res&&res.status===401&&/^(https?:\/\/[^\/]+)?\/api\//.test(_u)&&!/\/api\/portal\//.test(_u)) hzForceLogout();
-        return res; }).finally(function(){ hzActivity(-1); }); }; })();
+        return res; }).finally(function(){ if(!_bg)hzActivity(-1); }); }; })();
   // Global loading indicator: a spinner overlaid on the version badge whenever a fetch is in flight. Debounced 160ms
   // so quick requests don't blink the badge. Covers every view (any fetch) — no per-container "Loading…" rows needed.
   var _hzInflight=0,_hzSpinT=null;
@@ -9743,7 +9763,7 @@
     function cur(){ return rows.filter(function(r){return st.f==='All'||r.status_group===st.f;}); }
     function view(){ var f=filt(cur(),st.q); document.getElementById('fx-count').textContent=f.length+' shipments'; document.getElementById('fx-grid').innerHTML=fxTable(f); }
     c.querySelectorAll('.pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;view();};});
-    document.getElementById('fx-q').oninput=function(){st.q=this.value;view();};
+    document.getElementById('fx-q').oninput=debounce(function(){st.q=this.value;view();},200);   // v28.151 (review F7): debounced
     view(); }
   function fxLink(ref){ if(!ref)return ''; var m=String(ref).match(/(\d+)/);
     return m?('<a href="https://app.flexport.com/shipments/'+m[1]+'" target="_blank" rel="noopener" class="tool-badge bg-blue" style="text-decoration:none">'+esc(ref)+' ↗</a>'):esc(ref); }
@@ -10237,7 +10257,7 @@
     // Reuse the PO grid already fetched for PLAN/PURCHASE ORDERS if we have it (same session data) — clicking PAYMENTS
     // straight after viewing the PO grid then skips a second big /api/supply/purchase-orders fetch. The data-refresh
     // poll busts this cache when the ETL changes, so it can't go stale across a real update. — Ben (nav lag)
-    var _poP=cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;});
+    var _poP=secFetch('purchase-orders');   // v28.151 (review F3)
     // likely-payment dates fetched FRESH (uncached) and overlaid, so a just-saved date always shows even if the
     // epoch-gated poRowsCache is briefly stale on serverless (≤5s cross-instance epoch poll). — Ben
     Promise.all([_poP, fetch('/api/supply/deposits').then(function(r){return r.json();}), fetch('/api/supply/likely-dates/all').then(function(r){return r.json();}).catch(function(){return {};}), _lkP])
@@ -11261,7 +11281,7 @@
   }
   // Live countdown for queued paid-notification emails; auto-refreshes state ~35s after the window elapses (worker runs every 30s).
   function payTickCountdown(){ if(window._payCdT)return; window._payCdT=setInterval(function(){
-    var els=document.querySelectorAll('.pr-cd'); if(!els.length)return; var now=Date.now();
+    var els=document.querySelectorAll('.pr-cd'); if(!els.length){ clearInterval(window._payCdT); window._payCdT=null; return; } var now=Date.now();   // v28.151 (review F7): stop ticking once no countdown is on screen
     els.forEach(function(el){ var t=Date.parse(el.dataset.until||''); if(!t){el.textContent='✉ sending…';return;}
       var s=Math.max(0,Math.round((t-now)/1000));
       if(s<=0){ el.textContent='✉ sending…'; if(!el.dataset.rq){ el.dataset.rq='1'; setTimeout(function(){ if(typeof payRefreshState==='function')payRefreshState(); },35000); } }
@@ -11368,7 +11388,7 @@
       Amount:(Number(x.amount)||0).toFixed(2), 'FX (Xero)':x.xero_fx||'', 'Date paid':x.date_paid||'',
       Used:(Number(x.deposit_used)||0).toFixed(2), Remaining:(closed?0:(Number(x.deposit_remaining)||0)).toFixed(2) }; }); }
     function view(){ var f=filt(rows,state.q); document.getElementById('sup-count').textContent=f.length+' deposits'; document.getElementById('sup-grid').innerHTML=depTable(f); bindEdits(); }
-    document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;view();},200);   // v28.151 (review F7): debounced
     document.getElementById('dep-new').onclick=function(){depCreate(true);};
     document.getElementById('dep-sum-copy').onclick=function(){ copyRows(depSummaryRows(),'Deposits summary'); };
     document.getElementById('dep-sum-csv').onclick=function(){ csv(depSummaryRows(),'deposits_summary.csv'); };
@@ -12147,7 +12167,7 @@
     document.getElementById('bc-sup').onchange=function(){st.sup=this.value;apply();};
     document.getElementById('bc-cat').onchange=function(){st.cat=this.value;apply();};
     document.getElementById('bc-rw').onchange=function(){st.rw=this.value;apply();};
-    (function(){ var bq=document.getElementById('bc-q'); bq.oninput=function(){st.q=this.value;apply();};
+    (function(){ var bq=document.getElementById('bc-q'); bq.oninput=debounce(function(){st.q=this.value;apply();},200);   /* v28.151 (review F7): debounced */
       bq.onpaste=function(){ var el=this; setTimeout(function(){ st.q=el.value; apply(); },0); }; })();   // paste didn't always fire input → apply on next tick
     document.getElementById('bc-batch').onchange=function(){st.batch=this.value;apply();};
     document.getElementById('bc-rrp').onchange=function(){st.rrp=this.checked;apply();};
@@ -12458,7 +12478,7 @@
       if(rk==='container-fill')return renderContainerFill(d);
       if(rk==='consolidate')return renderConsolidate(d);
       if(rk==='erp-compare')return renderFulfilCompare(d, biBody(), function(){ selectReport('erp-compare'); });   // v28.144: Fulfil only
-      cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
+      if(d&&!d.error)cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit). v28.151 (review F3): never cache an error
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
       if(rk==='supplier-timing')return renderSupplierTiming(d);
@@ -13716,11 +13736,11 @@
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==key)_ns.value=key;   // keep the phone section dropdown in sync
     var c=document.getElementById('supply-content');   // keep the current view visible while loading (the badge spinner signals activity) → no "Loading…" row flash on section switch
     if(!c.children.length)c.innerHTML='<div class="count" style="opacity:.6">Loading…</div>';   // only on a truly empty first paint
-    var done=function(d){ cache[key]=d; _hzCacheAt[key]=Date.now(); if(_tk!==_navToken)return;   // navigated away before this resolved → don't overwrite the newer view
+    var done=function(d){ if(d&&!d.error)cache[key]=d; _hzCacheAt[key]=Date.now(); if(_tk!==_navToken)return;   // navigated away before this resolved → don't overwrite the newer view
       renderSectionData(key,d); };
     if(cache[key] && key!=='samples'){ var _age=Date.now()-(_hzCacheAt[key]||0); done(cache[key]); if(_age>60000)hzRevalidate(key,_tk); return; }   // 'samples' is cross-supplier (a supplier creating an SR must show for admin at once) → always refetch fresh; the endpoint is cheap + uncached, and the current view stays visible while it loads. v28.084: cached paint + background revalidate when older than 60s
     if(key==='actions')return renderActionsProgressive(c,_tk);   // Actions: high-priority preview first, then the full set
-    fetch('/api/supply/'+key).then(function(r){return r.json();}).then(done).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); }
+    (key==='samples'?fetch('/api/supply/'+key).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json();}):secFetch(key)).then(done).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); }   // v28.151 (review F2/F3)
 
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
   // CONFIG sub-nav bridge for the mobile drawer — a STATIC list so the drawer can render sub-items immediately,
@@ -13987,7 +14007,7 @@
       +'<datalist id="ps-polist"></datalist><div id="ps-meta" class="count" style="margin-bottom:8px"></div><div id="ps-grid"></div>';
     // PO list for the search box — PRODUCTION POs only (not shipped / complete; once shipped the stock is committed)
     /* v28.117 (review C18): reuse the cached PO grid payload (was a 3.6 MB refetch for a datalist) */
-    (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){ cache['purchase-orders']=d; return d; })).then(function(rows){
+    secFetch('purchase-orders').then(function(rows){   // v28.151 (review F3)
       var prod=(rows||[]).filter(function(p){return /production/i.test(p.status||'');});
       document.getElementById('ps-polist').innerHTML=prod.map(function(p){return '<option value="'+esc(p.po)+'">'+esc(p.po)+' · '+esc(p.supplier_name||'')+'</option>';}).join('');
       var pc=document.getElementById('ps-pocount'); if(pc)pc.textContent=prod.length+' production PO(s)';
@@ -14300,7 +14320,7 @@
           if(!add.length){ alert('Tick at least one SKU (add a qty too).'); return; }
           ta.value=(ta.value?ta.value.replace(/\s*$/,'')+'\n':'')+add.join('\n'); skres.style.display='none'; skq.value=''; ta.focus(); };
       }).catch(function(){}); },300); };
-    document.addEventListener('click',function(e){ if(skres&&skq&&!skres.contains(e.target)&&e.target!==skq)skres.style.display='none'; });
+    if(!window._b2bSkDocBound){ window._b2bSkDocBound=1; document.addEventListener('click',function(e){ var r=document.getElementById('b2b-skres'), q=document.getElementById('b2b-skq'); if(r&&q&&!r.contains(e.target)&&e.target!==q)r.style.display='none'; }); }   // v28.151 (review F5): bound once (was per render)
     // ---- Recent (shared) analyses ----
     function loadRecent(){ var el=document.getElementById('b2b-recent'); if(!el)return;
       fetch('/api/scenario/b2b/recent').then(function(r){return r.json();}).then(function(d){ var rows=(d&&d.rows)||[]; if(!rows.length){ el.innerHTML=''; return; }
@@ -14814,7 +14834,7 @@
         box.addEventListener('mouseover',function(e){ if(!(e.metaKey||e.ctrlKey))return; var inp=e.target&&e.target.closest?e.target.closest('.bpm-q'):null; if(!inp)return; var k=inp.dataset.s+'|'+inp.dataset.c; if(!_selMap[k]){ var td=inp.closest('td'); if(td)td.style.boxShadow='inset 0 0 0 2px var(--violet)'; _selMap[k]={v:Number(inp.value)||0,td:td}; } _paint(e); });
         box.addEventListener('mousemove',function(e){ if((e.metaKey||e.ctrlKey)){ for(var _k in _selMap){ _paint(e); break; } } });
         box.addEventListener('mousedown',function(e){ if(!(e.metaKey||e.ctrlKey))_clr(); });
-        document.addEventListener('keydown',function(e){ if(e.key==='Escape')_clr(); });
+        window._hzSumClr=_clr; if(!window._hzSumEscBound){ window._hzSumEscBound=1; document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&window._hzSumClr)window._hzSumClr(); }); }   // v28.151 (review F5): one Esc listener; clears the latest grid's selection
       }
       var _tickQ=function(t){ var q=t.parentNode&&t.parentNode.querySelector('.bpm-q'); return q?(Number(q.value)||0):0; };   // ticking never selects a 0-qty cell
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); invalidatePreview(); drawSkus(); }; });
@@ -16987,7 +17007,7 @@
       body.querySelectorAll('.pc2-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this component from the product?'))return; shipPost('/api/product/component/'+a.dataset.id+'/delete',{},function(){ _reload(); }); }; });
       body.querySelectorAll('.pc2-spec').forEach(function(a){ a.onclick=function(){ openSpecPick(a,function(sid){ if(!sid)return; var c=byId(a.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:a.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:'spec_linked',spec_id:sid},function(){ _reload(); }); }); }; });
       body.querySelectorAll('.pc2-tosizes').forEach(function(a){ a.onclick=function(){ var host=body.parentElement||body; var b=host.querySelector('.pd-tab[data-t="sizes"]'); if(b)b.click(); }; });
-      var _ab=body.querySelector('#pc2-addbtn'), _pop=body.querySelector('#pc2-addpop'); if(_ab&&_pop){ _ab.onclick=function(e){ e.stopPropagation(); _pop.style.display=(_pop.style.display==='none'?'':'none'); if(_pop.style.display!=='none'){ var f=_pop.querySelector('.pc2-pick')||_pop.querySelector('#pc2-newname'); if(f)f.focus(); } }; _pop.onclick=function(e){ e.stopPropagation(); }; document.addEventListener('click',function(){ _pop.style.display='none'; });
+      var _ab=body.querySelector('#pc2-addbtn'), _pop=body.querySelector('#pc2-addpop'); if(_ab&&_pop){ _ab.onclick=function(e){ e.stopPropagation(); _pop.style.display=(_pop.style.display==='none'?'':'none'); if(_pop.style.display!=='none'){ var f=_pop.querySelector('.pc2-pick')||_pop.querySelector('#pc2-newname'); if(f)f.focus(); } }; _pop.onclick=function(e){ e.stopPropagation(); }; if(!window._pc2PopDocBound){ window._pc2PopDocBound=1; document.addEventListener('click',function(){ var pp=document.getElementById('pc2-addpop'); if(pp)pp.style.display='none'; }); }   // v28.151 (review F5): bound once
         body.querySelector('#pc2-addx').onclick=function(){ _pop.style.display='none'; };
         body.querySelector('#pc2-addgo').onclick=function(){ var msg=_pop.querySelector('#pc2-addmsg'); var picks=Array.prototype.slice.call(_pop.querySelectorAll('.pc2-pick:checked')); var nn=(_pop.querySelector('#pc2-newname').value||'').trim(), ns='';   // v27.713: no per-component supplier (suppliers come from requests)
           if(!picks.length&&!nn){ msg.style.color='var(--neg)'; msg.textContent='Tick a component or type a new one.'; return; } msg.style.color='var(--muted)'; msg.textContent='Adding…';

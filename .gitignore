@@ -1,4 +1,9 @@
 .env
+# v28.151 (review G low): every .env variant (.env.local, .env.live, ...) stays local; only the names-only template is tracked
+.env*
+!.env.example
+# v28.151 (review G low): UI mockups are local-only (memory: mockups/ gitignored)
+mockups/
 create_user_readonly.txt
 node_modules
 *.bak
