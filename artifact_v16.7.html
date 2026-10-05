@@ -15449,9 +15449,12 @@ function render3plInvoice(body){
     document.addEventListener('mouseout',function(ev){ var el=ev.target&&ev.target.closest&&ev.target.closest('[data-tip]'); if(!el)return; if(el.closest('.fba-inb,.tip120,.stk-inb,.crc-tip,.dp-sku-tip'))return; if(_tt){clearTimeout(_tt);_tt=null;} if(_tip)_tip.style.opacity='0'; });
     document.addEventListener('mousedown',function(){ if(_tt){clearTimeout(_tt);_tt=null;} if(_tip)_tip.style.opacity='0'; }); }
   function tplCacheKey(id){ return 'tplan_'+id; }
+  // v28.151 (review F7): cap the parsed-template cache (was unbounded) at the 12 most recent tplan_ entries.
+  function tplCachePrune(keep){ try{ var ks=[]; for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('tplan_')===0){ var at=0; try{ at=(JSON.parse(localStorage.getItem(k))||{}).at||0; }catch(_){} ks.push({k:k,at:at}); } }
+    if(ks.length<=keep)return; ks.sort(function(a,b){ return b.at-a.at; }); ks.slice(keep).forEach(function(x){ try{ localStorage.removeItem(x.k); }catch(_){} }); }catch(e){} }
   function renderParse(cont,id){ if(!cont)return; cont.innerHTML='<div style="color:var(--faint);font-size:12px;padding:8px">Parsing…</div>';
     Promise.all([fetch('/api/supply/tpl/parse/'+id,{method:'POST'}).then(function(r){return r.json();}),fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period=').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var d=_res[0], _cfg=_res[1]||{}; if(!d||!d.ok)throw new Error((d&&d.error)||'parse failed');
-      try{ localStorage.setItem(tplCacheKey(id), JSON.stringify({d:d,cfg:_cfg})); localStorage.setItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period, String(id)); }catch(e){}
+      try{ tplCachePrune(11); localStorage.setItem(tplCacheKey(id), JSON.stringify({d:d,cfg:_cfg,at:Date.now()})); localStorage.setItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period, String(id)); }catch(e){}
       renderParseData(cont,id,d,_cfg);
     }).catch(function(err){ cont.innerHTML='<div style="color:var(--neg);font-size:12px;padding:8px">Parse failed: '+e(err.message||err)+'</div>'; }); }
   function renderParseData(cont,id,d,_cfg){ if(!cont||!d)return;
@@ -17483,7 +17486,8 @@ async function saveForecasts(){
     for(var ik in IV){if(IV[ik]&&!ik.startsWith('__g'))SV[ik]=IV[ik];}
     FC_INITIAL=Object.assign({},IV); // subsequent saves diff against this
     _dirty=false; _savePausedUntil=0;   // success → clear any pause cooldown
-    try{localStorage.setItem('db_inputs_v1',JSON.stringify(IV));}catch(e){} // local cache only
+    // v28.151 (review F7): unused db_inputs_v1 localStorage write removed (nothing reads it; Supabase is the source of truth)
+    try{ localStorage.removeItem('db_inputs_v1'); }catch(e){}
     if(btn)btn.textContent='Save Forecasts';
     st('');   // (save-confirmation toast removed per Ben — no "✓ Saved N forecast inputs…" message)
   }catch(e){

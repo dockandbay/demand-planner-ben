@@ -1481,7 +1481,7 @@
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(key)+'<div class="bar"><input class="flt" id="sup-search" placeholder="Filter…"><span class="count" id="sup-count">'+rows.length+' rows</span></div><div id="sup-grid">'+tableHTML(rows)+'</div>';
-    document.getElementById('sup-search').oninput=function(){var f=filt(rows,this.value);document.getElementById('sup-grid').innerHTML=tableHTML(f);document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' rows';}; }
+    document.getElementById('sup-search').oninput=debounce(function(){var f=filt(rows,this.value);document.getElementById('sup-grid').innerHTML=tableHTML(f);document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' rows';},200); }   // v28.151 (review F7): debounced
 
   // ACTIONS: entering a value does NOT commit — an explicit Apply button does, then the card stays
   // visible (marked ✓) so the entry can be verified. Resolved cards clear on Refresh / re-fetch.
@@ -1552,14 +1552,17 @@
   // here we mirror that with a silent background fetch (no render unless already viewing Actions), refreshed every
   // 10 min and re-warmed shortly after any data edit clears it.
   var _actWarmStarted=false;
-  function prewarmActions(force){ if(!force && cache['actions'])return;
-    fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(full){
-      if(!Array.isArray(full))return; cache['actions']=full;
+  // v28.151 (review F7): bg = the 10-min timer. It fetches without spinning the badge, always refreshes cache + badge, but only
+  // re-renders the open Actions tab when the payload changed AND the user has not touched the page for 60s (hzViewIdle).
+  function prewarmActions(force,bg){ if(!force && cache['actions'])return;
+    fetch('/api/supply/actions',bg?{__hzBg:1}:undefined).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json();}).then(function(full){
+      if(!Array.isArray(full))return; var same=false; try{ same=!!cache['actions']&&JSON.stringify(cache['actions'])===JSON.stringify(full); }catch(e){} cache['actions']=full;
       try{ setActionsBadgeFrom(full); }catch(e){}
+      if(bg&&(same||!hzViewIdle()||Date.now()-_hzLastInteract<60000))return;   // don't re-render under the user
       if(current==='reports'&&['actions','recommendations','erp-compare'].indexOf(reportTab)>=0&&_actHost)try{ renderActions(full); }catch(e){}   // refresh in place if on a folded-in Actions tab
     }).catch(function(){}); }
   function startActionsWarm(){ if(_actWarmStarted)return; _actWarmStarted=true;
-    setInterval(function(){ prewarmActions(true); }, 600000); }   // every 10 min, matching the server cache TTL
+    setInterval(function(){ if(document.hidden)return; prewarmActions(true,true); }, 600000); }   // every 10 min, matching the server cache TTL; v28.151 (review F7): skipped while the tab is hidden
   var ACT_GROUP={ // PRIORITY — the highest-attention exceptions, surfaced first
     'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY',
     'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
@@ -6291,7 +6294,7 @@
     function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' productions';
       document.getElementById('sup-grid').innerHTML=prodTable(f); bindProdExpand(); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
-    document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;view();},200);   // v28.151 (review F7): debounced
     view(); }
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
@@ -6506,7 +6509,7 @@
           alert('Assigned '+d.reference+' to '+j.assigned+' PO(s)'+(j.skipped_region?'; '+j.skipped_region+' skipped (different region)':'')+'.');
           delete cache['purchase-orders']; delete cache['productions']; invalidateDerived(); showPoSub('deposits'); }); }; }); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
-    document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
+    document.getElementById('dep-q').oninput=debounce(function(){st.q=this.value.toLowerCase();draw();},200);   // v28.151 (review F7): debounced
     var _depSup=document.getElementById('dep-sup'); if(_depSup)_depSup.onchange=function(){st.sup=this.value;draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(j){ _newDepId=(j&&j.id)||null; delete cache['productions']; showPoSub('deposits'); }); };
     var _pv=document.getElementById('dep-poview'); if(_pv){ _pv.value=depPoView; _pv.onchange=function(){ depPoView=this.value; draw(); }; }
@@ -9756,7 +9759,7 @@
     function cur(){ return rows.filter(function(r){return st.f==='All'||r.status_group===st.f;}); }
     function view(){ var f=filt(cur(),st.q); document.getElementById('fx-count').textContent=f.length+' shipments'; document.getElementById('fx-grid').innerHTML=fxTable(f); }
     c.querySelectorAll('.pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;view();};});
-    document.getElementById('fx-q').oninput=function(){st.q=this.value;view();};
+    document.getElementById('fx-q').oninput=debounce(function(){st.q=this.value;view();},200);   // v28.151 (review F7): debounced
     view(); }
   function fxLink(ref){ if(!ref)return ''; var m=String(ref).match(/(\d+)/);
     return m?('<a href="https://app.flexport.com/shipments/'+m[1]+'" target="_blank" rel="noopener" class="tool-badge bg-blue" style="text-decoration:none">'+esc(ref)+' ↗</a>'):esc(ref); }
@@ -11272,7 +11275,7 @@
   }
   // Live countdown for queued paid-notification emails; auto-refreshes state ~35s after the window elapses (worker runs every 30s).
   function payTickCountdown(){ if(window._payCdT)return; window._payCdT=setInterval(function(){
-    var els=document.querySelectorAll('.pr-cd'); if(!els.length)return; var now=Date.now();
+    var els=document.querySelectorAll('.pr-cd'); if(!els.length){ clearInterval(window._payCdT); window._payCdT=null; return; } var now=Date.now();   // v28.151 (review F7): stop ticking once no countdown is on screen
     els.forEach(function(el){ var t=Date.parse(el.dataset.until||''); if(!t){el.textContent='✉ sending…';return;}
       var s=Math.max(0,Math.round((t-now)/1000));
       if(s<=0){ el.textContent='✉ sending…'; if(!el.dataset.rq){ el.dataset.rq='1'; setTimeout(function(){ if(typeof payRefreshState==='function')payRefreshState(); },35000); } }
@@ -11379,7 +11382,7 @@
       Amount:(Number(x.amount)||0).toFixed(2), 'FX (Xero)':x.xero_fx||'', 'Date paid':x.date_paid||'',
       Used:(Number(x.deposit_used)||0).toFixed(2), Remaining:(closed?0:(Number(x.deposit_remaining)||0)).toFixed(2) }; }); }
     function view(){ var f=filt(rows,state.q); document.getElementById('sup-count').textContent=f.length+' deposits'; document.getElementById('sup-grid').innerHTML=depTable(f); bindEdits(); }
-    document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;view();},200);   // v28.151 (review F7): debounced
     document.getElementById('dep-new').onclick=function(){depCreate(true);};
     document.getElementById('dep-sum-copy').onclick=function(){ copyRows(depSummaryRows(),'Deposits summary'); };
     document.getElementById('dep-sum-csv').onclick=function(){ csv(depSummaryRows(),'deposits_summary.csv'); };
@@ -12158,7 +12161,7 @@
     document.getElementById('bc-sup').onchange=function(){st.sup=this.value;apply();};
     document.getElementById('bc-cat').onchange=function(){st.cat=this.value;apply();};
     document.getElementById('bc-rw').onchange=function(){st.rw=this.value;apply();};
-    (function(){ var bq=document.getElementById('bc-q'); bq.oninput=function(){st.q=this.value;apply();};
+    (function(){ var bq=document.getElementById('bc-q'); bq.oninput=debounce(function(){st.q=this.value;apply();},200);   /* v28.151 (review F7): debounced */
       bq.onpaste=function(){ var el=this; setTimeout(function(){ st.q=el.value; apply(); },0); }; })();   // paste didn't always fire input → apply on next tick
     document.getElementById('bc-batch').onchange=function(){st.batch=this.value;apply();};
     document.getElementById('bc-rrp').onchange=function(){st.rrp=this.checked;apply();};
