@@ -11750,22 +11750,35 @@ async function sendPaymentNotify(row) {
 // Worker: every 30s, claim + send any queued email whose 5-min window has elapsed.
 let _remitTick = false;
 async function processPaymentEmails() {
-  if (_remitTick) return; _remitTick = true;
+  if (_remitTick) return { busy: true }; _remitTick = true; let sent = 0, failed = 0, reclaimed = 0;
   try {
+    // v28.151 (review E5): reclaim rows stuck in 'sending' > 10 min (the instance died or froze between claim and the
+    // sent/failed update; they were never retried). The claim stamps send_after = claim time (no schema change), so the
+    // age test is on that. Edge: a send that DID reach Resend before the crash is sent again (preferred over never).
+    reclaimed = (await pool.query(`UPDATE planner.payment_emails SET status='queued', error='reclaimed after a stalled send' WHERE status='sending' AND send_after < now() - interval '10 minutes'`)).rowCount;
+    if (reclaimed) console.warn('[payment-emails] reclaimed ' + reclaimed + ' stalled sending row(s)');
     const due = (await pool.query(`SELECT id FROM planner.payment_emails WHERE status='queued' AND send_after<=now() ORDER BY id LIMIT 20`)).rows;
     for (const d of due) {
       // claim (skip if someone else took it)
-      const claim = await pool.query(`UPDATE planner.payment_emails SET status='sending' WHERE id=$1 AND status='queued' RETURNING *`, [d.id]);
+      const claim = await pool.query(`UPDATE planner.payment_emails SET status='sending', send_after=now() WHERE id=$1 AND status='queued' RETURNING *`, [d.id]);
       const row = claim.rows[0]; if (!row) continue;
       try { const r = await sendPaymentNotify(row);
-        if (r && r.error) await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(r.error).slice(0, 300)]);
-        else await pool.query(`UPDATE planner.payment_emails SET status='sent', sent_at=now(), error=null WHERE id=$1`, [row.id]);
-      } catch (e) { await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(e.message || e).slice(0, 300)]); }
+        if (r && r.error) { failed++; await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(r.error).slice(0, 300)]); }
+        else { sent++; await pool.query(`UPDATE planner.payment_emails SET status='sent', sent_at=now(), error=null WHERE id=$1`, [row.id]); }
+      } catch (e) { failed++; await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(e.message || e).slice(0, 300)]); }
     }
-  } catch (e) { /* worker best-effort */ }
+  } catch (e) { console.error('[payment-emails] worker error:', e && e.message); }
   finally { _remitTick = false; }
+  return { sent, failed, reclaimed };
 }
-setInterval(processPaymentEmails, 30000);
+// v28.151 (review E5): the 30s timer runs on the long-lived server only. On Vercel a timer fires on frozen/idle containers
+// (pooled connection opened with no request = the stranded-connection pattern) and simply never runs when no instance
+// is warm, so prod needs a scheduler hitting the cron route below (n8n every 1-2 min, webhook-secret gated like the others).
+if (!process.env.VERCEL) setInterval(processPaymentEmails, 30000).unref?.();
+app.post('/api/cron/payment-emails', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 
 // Admin PO ▸ DOCUMENTS tab: approve / reject a supplier-submitted document (with notes). Rejection returns the
 // doc to a re-submittable state; the notes are kept so the portal shows why. Posts an INTERNAL timeline note
