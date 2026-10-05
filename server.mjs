@@ -23419,6 +23419,9 @@ if (!process.env.VERCEL) {
     const fimport = () => fulfilImportPOs().catch(() => {});
     setTimeout(() => { fimport(); setInterval(fimport, 6 * 60 * 60 * 1000).unref?.(); }, 90 * 1000).unref?.();
   }
-  app.listen(8124, () => console.log('rehost (live DATA + FC_CURRENT + save) on :8124'));
+  // v28.151 (review B4): loopback only by default (no gate locally and CIN7_AUTH is live, so the LAN must not reach it).
+  // cloudflared tunnels still work (they connect to localhost). HOST=0.0.0.0 to opt back in; PORT for parallel dev servers.
+  const _port = Number(process.env.PORT) || 8124, _host = process.env.HOST || '127.0.0.1';
+  app.listen(_port, _host, () => console.log('rehost (live DATA + FC_CURRENT + save) on ' + _host + ':' + _port));
 }
 export default app;
