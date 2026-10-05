@@ -739,6 +739,12 @@ async function buildFBADIMS() {
 }
 
 const app = express();
+// v28.151 (review B1): nosniff on every response, so a stored/proxied body is never MIME-sniffed into HTML/script.
+app.use((req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); next(); });
+// v28.151 (review B5): constant-time secret compare (planner key, webhook secret). False when either side is empty.
+// v28.151 (review B5): JSON for an inline <script>: escapes < > U+2028 U+2029 so data can never close the tag (same rule G_JS used).
+function safeInlineJson(v) { return String(JSON.stringify(v)).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'); }
+function safeEq(got, want) { try { const a = Buffer.from(String(got || '')), b = Buffer.from(String(want || '')); return !!(a.length && b.length) && a.length === b.length && crypto.timingSafeEqual(a, b); } catch (_) { return false; } }
 // Per-request context so any 500 catch can name its route in the logs (a swallowed error once hid a 5-day dead
 // Cash Flow — the alert could only name /api/index). log500(e) reads the current req via AsyncLocalStorage, so it
 // works even in helpers that don't have `req` in scope (e.g. patch()). Call log500(e) before every res.status(500).
@@ -838,9 +844,28 @@ function resolveUpload(b, { base64Field = 'data_base64', maxInline = STORAGE_INL
 async function serveStored(res, row, { filename, mime } = {}) {
   const fn = filename || (row && row.filename) || 'file';
   if (row && row.storage_path) { try { return res.redirect(302, await storageSignDownload(row.storage_path, { filename: fn })); } catch (e) { log500(e); return res.status(502).json({ error: 'storage fetch failed' }); } }
-  res.setHeader('Content-Type', (mime || (row && row.mime)) || 'application/octet-stream');
-  res.setHeader('Content-Disposition', 'attachment; filename="' + String(fn).replace(/"/g, '') + '"');
+  fileHeaders(res, mime || (row && row.mime), fn, { download: true });   // v28.151 (review B1)
   res.send(row && row.data);
+}
+// v28.151 (review B1): stored-XSS guard. Uploads keep an allowlisted mime only (anything else -> application/octet-stream), and
+// every file response gets nosniff + CSP sandbox; only raster images and PDFs may render inline, everything else downloads.
+// CSP sandbox is skipped for PDFs because Chrome's built-in PDF viewer refuses to render under it.
+const UPLOAD_MIME_ALIAS = { 'image/jpg': 'image/jpeg', 'image/pjpeg': 'image/jpeg', 'application/x-zip-compressed': 'application/zip', 'application/x-zip': 'application/zip', 'application/csv': 'text/csv', 'text/x-csv': 'text/csv' };
+const UPLOAD_MIMES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'text/csv', 'text/plain',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'application/zip', 'application/octet-stream']);
+function safeMime(m, dflt) { if (!m && dflt) m = dflt; let t = String(m || '').split(';')[0].trim().toLowerCase(); t = UPLOAD_MIME_ALIAS[t] || t; return UPLOAD_MIMES.has(t) ? t : 'application/octet-stream'; }
+const inlineSafeMime = t => t === 'application/pdf' || (/^image\//.test(t) && t !== 'image/svg+xml');
+function fileHeaders(res, mime, filename, { download } = {}) {
+  const t = safeMime(mime), raw = String(filename || 'file').replace(/["\r\n\\]/g, ''), fn = raw.replace(/[^\x20-\x7e]/g, '_');
+  res.setHeader('Content-Type', t); res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (t !== 'application/pdf') res.setHeader('Content-Security-Policy', 'sandbox');
+  res.setHeader('Content-Disposition', ((download || !inlineSafeMime(t)) ? 'attachment' : 'inline') + '; filename="' + fn + '"' + (fn !== raw ? "; filename*=UTF-8''" + encodeURIComponent(raw) : ''));
+}
+// Inline-view twin of serveStored: Storage rows 302 to a signed URL (with download= unless image/PDF), bytea rows stream with fileHeaders.
+async function serveFile(res, row, { data } = {}) {
+  const t = safeMime(row.mime);
+  if (row.storage_path) return res.redirect(302, await storageSignDownload(row.storage_path, inlineSafeMime(t) ? {} : { filename: row.filename || 'file' }));
+  fileHeaders(res, t, row.filename); res.send(data !== undefined ? data : row.data);
 }
 // Client asks for a signed upload URL for a large file, PUTs straight to Storage, then posts {storage_path,storage_sig} back to the real endpoint.
 async function signUploadHandler(req, res) {
@@ -933,7 +958,7 @@ app.use((req, res, next) => {
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
-    if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
+    if (safeEq(req.get('x-planner-key'), GATE) || safeEq(cookieVal(req, 'pk'), GATE)) return next();   // v28.151 (review B5): constant-time compare
     // v27.677: REVERTED the v27.666 header-based bypass. Prod has no auth proxy and Vercel passes client
     // headers through, so trusting a forwarded x-*-email header let anyone spoof an identity (Diviyaj). The
     // correct fix is a valid SIGNED LOGIN COOKIE passing the gate (never a header) — Diviyaj ported that upstream.
@@ -942,8 +967,9 @@ app.use((req, res, next) => {
     return res.status(401).json({ error: 'unauthorised' });
   }
   const supplied = req.query.key || cookieVal(req, 'pk');
-  if (supplied === GATE) {
-    if (req.query.key) res.setHeader('Set-Cookie', `pk=${encodeURIComponent(GATE)}; Path=/; Max-Age=2592000; SameSite=Lax`);
+  if (safeEq(supplied, GATE)) {
+    // v28.151 (review B1): pk cookie is HttpOnly (no client JS reads document.cookie) and Secure behind https, so an XSS cannot lift the key
+    if (req.query.key) res.setHeader('Set-Cookie', `pk=${encodeURIComponent(GATE)}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly` + ((req.secure || /^https/i.test(String(req.get('x-forwarded-proto') || ''))) ? '; Secure' : ''));
     return next();
   }
   res.set('content-type', 'text/html').send(`<!doctype html><meta charset=utf8><title>Dock & Bay — Demand Planner</title><style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}form{background:#1e293b;padding:36px 40px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.4);text-align:center}h1{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:#94a3b8;margin:0 0 4px}h2{font-size:20px;margin:0 0 22px}input{padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#fff;width:200px;text-align:center}button{margin-left:8px;padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}</style><form method=get><h1>Dock &amp; Bay</h1><h2>Demand Planner</h2><input name=key type=password placeholder="Access key" autofocus><button>Enter</button></form>`);
@@ -1017,7 +1043,7 @@ app.use(async (req, res, next) => {
     if (ok) return next();
     const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : 'SUPPLY';
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
-  } catch (e) { return next(); }   // the guard must never break a request itself
+  } catch (e) { if (GATE) { log500(e); return res.status(503).json({ error: 'permission check failed, try again' }); } return next(); }   // v28.151 (review B3): fail CLOSED under a GATE; local dev stays open
 });
 // v28.089 (Ben, perf audit round 2): general response cache for heavy, param-free, user-independent GET report
 // endpoints — the SECTION_CACHE did this for /api/supply/:section; this extends the identical pattern to standalone
@@ -1953,7 +1979,7 @@ app.get('/', async (req, res) => {
     // Harden the inline data script the same way replaceGlobal did (H2): a DB string containing "</script>" or a raw
     // U+2028/2029 must not break out of the <script>. JSON only emits these inside string values, so escaping keeps the
     // decoded value byte-identical.
-    const G_JS = '<script>window.__HZ_G=' + JSON.stringify(G).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') + ';</script>';
+    const G_JS = '<script>window.__HZ_G=' + safeInlineJson(G) + ';</script>';
     // UI fit (our deployment only — artefact HTML untouched): the baked `.tw` table uses a
     // fixed `max-height: calc(100vh - 184px)`, which leaves a gap on big screens and hides the
     // bottom scrollbar on small ones. Size it dynamically so its bottom sits just off the
@@ -1962,7 +1988,7 @@ app.get('/', async (req, res) => {
     // IMPORTANT: use a function replacement — the injected code contains `$'` sequences which
     // String.replace would otherwise interpret as special patterns ("text after the match"),
     // corrupting the script. A replacer function disables all `$` substitution.
-    const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
+    const FBADIMS_JS = '<script>window.FBA_DIMS=' + safeInlineJson(FBADIMS) + ';</script>';   // v28.151 (review B5): escaped like G_JS
     // Per-user landing slug + hide #app until the router lands, so a plain load goes straight to the user's page
     // (default SUPPLY ▸ Purchase Orders) with no DEMAND→SUPPLY flash. inject.html reveals #app once routed.
     let _land = 'supply/purchase-orders'; try { _land = (_perms && _perms.landing_page) || _land; } catch (_) {}   // permsFor ran in the parallel wave (v28.081)
@@ -1971,7 +1997,7 @@ app.get('/', async (req, res) => {
     // prevention is HEAD_NOFLASH below: it must run in <head>, BEFORE the browser paints the static DEMAND filter
     // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
     // Failsafe reveal only un-hides #app; hz-preboot (the demand-pill mask) is managed by hzSyncDemandPills so it persists on non-demand views.
-    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
+    const LANDING_JS = '<script>window.__HZ_LANDING=' + safeInlineJson(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
     const injectTail = LANDING_JS + FBADIMS_JS + FIT + B.inject + '</body>';   // B.inject: inject.html with its script externalised + __APP_VERSION__ baked
     html = html.replace('</body>', () => injectTail);
     // Flash prevention — MUST be in <head> so it runs before the body (the static DEMAND filter bar) is painted.
@@ -2636,17 +2662,24 @@ app.get('/api/health', async (_req, res) => {
 
 // Same-origin image proxy — lets the barcode-label PNG export embed a remote swatch without tainting the
 // canvas. Read-only fetch of a public image URL; must be registered before the generic :section route.
-app.get('/api/supply/img', async (req, res) => {
+// v28.151 (review B2): was an open fetch-any-URL proxy reflecting the upstream content-type (reflected XSS + SSRF). Now shared with
+// the portal twin: https only, exact-host allowlist (the only image hosts in products/sku_labels swatch + image URLs), no redirects
+// followed, and only raster image responses are relayed, with nosniff + CSP sandbox.
+const IMG_PROXY_HOSTS = new Set(['res.cloudinary.com', 'cdn.shopify.com']);
+async function proxyImage(req, res) {
   try {
-    const u = String(req.query.url || '');
-    if (!/^https?:\/\//i.test(u)) return res.status(400).end();
-    const r = await fetch(u);
+    let url; try { url = new URL(String(req.query.url || '')); } catch (_) { return res.status(400).end(); }
+    if (url.protocol !== 'https:' || !IMG_PROXY_HOSTS.has(url.hostname.toLowerCase()) || (url.port && url.port !== '443')) return res.status(403).end();
+    const r = await fetch(url.href, { redirect: 'error' });
     if (!r.ok) return res.status(502).end();
-    res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
+    const ct = String(r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(ct)) return res.status(415).end();
+    res.setHeader('content-type', ct); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Security-Policy', 'sandbox');
     res.setHeader('cache-control', 'public, max-age=86400');
     res.end(Buffer.from(await r.arrayBuffer()));
-  } catch (e) { log500(e); res.status(500).end(); }
-});
+  } catch (e) { if (e && e.name === 'TypeError') return res.status(502).end(); log500(e); res.status(500).end(); }   // redirect:'error' / network failure -> 502
+}
+app.get('/api/supply/img', proxyImage);
 
 // ── HORIZON theme (design tokens + app shell) and self-hosted Hanken Grotesk ─────────────────────────────────
 // supply/hz-theme.css is the single source of truth for colour/type/radius; linked into the <head> of the app and the
@@ -3196,7 +3229,7 @@ async function fulfilImportInternalShipments() {
 // Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
 app.post('/api/supply/fulfil/import-pos', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
+  if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { const pos = await fulfilImportPOs(); let is = null; try { is = await fulfilImportInternalShipments(); } catch (e) { is = { ok: false, error: String(e.message || e) }; }   // v27.901: + internal shipments mirror
     res.json({ ...pos, internal_shipments: is }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
@@ -5384,7 +5417,7 @@ app.post('/api/supply/xero/bills-sync', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cron/xero-bills-sync', async (req, res) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const r = await syncXeroBills({}); res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -5440,7 +5473,7 @@ app.post('/api/supply/po/links/resolve-all', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cron/resolve-po-links', async (req, res) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { const r = await _resolveAllPoLinks({ full: String(req.query.full || '') === '1' }); _xeroExcCache = { at: 0, data: null }; res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -5652,7 +5685,7 @@ app.post('/api/supply/flexport/import', async (req, res) => {
 });
 // 4-hourly cloud cron (Diviyaj wires the schedule in prod) — secret-gated, fails closed like the other crons.
 app.post('/api/cron/flexport-import', async (req, res) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try { res.json(await runFlexportImport({ per: parseInt(req.query.per) || 25, max_pages: parseInt(req.query.max_pages) || 4 })); }   // v28.120 (Diviyaj): optional ?per=/?max_pages=; 25×4 = latest 100 shipments, under Vercel's 300s
   catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
@@ -8135,7 +8168,7 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     if (!u.active) return res.status(400).json({ error: 'user is inactive — activate before issuing a link' });
     const token = crypto.randomBytes(24).toString('hex');
     await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [token, u.email]);
-    const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+    const base = portalLinkBase(req);   // v28.151 (review B5)
     res.json({ email: u.email, url: base + '/portal?token=' + token, expires_days: 7 });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -8265,6 +8298,12 @@ app.post('/api/supply/manufacturing-notes', async (req, res) => {
 // initiator 'internal' (grid)   → that supplier's active portal users;                 link → portal.
 const PLANNER_URL = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '');
 const PORTAL_URL = (process.env.PORTAL_URL || 'https://suppliers.dockandbay.com/portal').replace(/\/$/, '');
+// v28.151 (review B5): supplier magic links are built from the fixed PORTAL_URL env when it is set, so a forged Host /
+// X-Forwarded-Host can no longer point a real supplier's sign-in link at another site. Unset (sandbox/local): request host, as before.
+function portalLinkBase(req) {
+  if (process.env.PORTAL_URL) return PORTAL_URL.replace(/\/portal$/, '');
+  return (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+}
 function _eh(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function _emails(s) { return String(s || '').split(/[,;\s]+/).map(x => x.trim()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)); }
 function escLink(kind, ref, audience) {
@@ -9522,7 +9561,7 @@ app.post('/api/product/component-file', async (req, res) => {
     const v = (b.version === '' || b.version == null) ? null : parseInt(b.version, 10) || null;
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind, version)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'product_dim','internal',$8) RETURNING id`,
-      ['PDIM-' + row.id, b.filename || 'file', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v]);
+      ['PDIM-' + row.id, b.filename || 'file', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v]);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -9559,7 +9598,7 @@ app.post('/api/product/doc', async (req, res) => {
     if (b.thumb_base64) { try { thumb = Buffer.from(String(b.thumb_base64).replace(/^data:[^;]+;base64,/, ''), 'base64'); if (thumb.length > 400 * 1024) thumb = null; else thumbMime = /^data:image\/jpeg/i.test(String(b.thumb_base64)) ? 'image/jpeg' : 'image/png'; } catch (e) { thumb = null; } }
     const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.portal_attachments WHERE po=$1 AND category='product' AND coalesce(uploader_kind,'internal')<>'supplier'`, [ref])).rows[0].n;
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, version, thumb, thumb_mime) VALUES ($1,$2,$3,$4,$5,$6,$7,'product',$8,$9,$10) RETURNING id`,
-      [ref, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v, thumb, thumbMime]);
+      [ref, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v, thumb, thumbMime]);
     try { await pool.query(`UPDATE planner.product_dev_items SET updated_at=now() WHERE ref=$1`, [ref]); } catch (e) {}   // busts the ?t= swatch cache when the auto swatch changes
     res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize, version: v, has_thumb: !!thumb }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -9683,7 +9722,7 @@ app.post('/api/product/specs', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.product_specs
       (spec_type, filename, mime, data, storage_path, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_when, effective_stock, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
-      [st, b.filename || 'file', b.mime || 'application/octet-stream', up.buf, up.storagePath,
+      [st, b.filename || 'file', safeMime(b.mime), up.buf, up.storagePath,
        scope, scat, ssize, sskus,
        effMode, when, stock, (b.effective_prod_no || '').trim() || null,
        !!b.confirm_with_supplier, (b.confirm_with_supplier && b.confirm_suppliers) ? String(b.confirm_suppliers).trim() || null : null, internalAuthor(req, b.uploaded_by)]);
@@ -9697,7 +9736,7 @@ app.post('/api/product/specs', async (req, res) => {
     if (b.confirm_with_supplier && b.confirm_suppliers) {
       try {
         const names = String(b.confirm_suppliers).split(',').map(x => x.trim()).filter(Boolean);
-        const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+        const base = portalLinkBase(req);   // v28.151 (review B5)
         emailed = await emailSpecToSuppliers(names, st, base);
       } catch (e) { console.log('[spec-email] ' + e.message); }
     }
@@ -9720,9 +9759,7 @@ app.post('/api/product/specs/:id/delete', async (req, res) => {
 app.get('/api/product/spec-file/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.product_specs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
-    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));   // inline view (no download= param)
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+    return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/notes/:ref', async (req, res) => {
@@ -10276,7 +10313,7 @@ async function createProductSample(b, by) {
 async function insertProductSamplePhoto(sampleId, b, by, kind) {
   const up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 });   // throws {status,message} on bad/oversized/forged input
   const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind, aspect)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,'product_sample',$8,$9) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', up.byteSize, up.buf, up.storagePath, by || null, kind || 'internal', (b.aspect ? String(b.aspect).slice(0, 80) : null)]);   // v27.569: aspect = sampled component the file belongs to (mig 267)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,'product_sample',$8,$9) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', safeMime(b.mime, 'image/jpeg'), up.byteSize, up.buf, up.storagePath, by || null, kind || 'internal', (b.aspect ? String(b.aspect).slice(0, 80) : null)]);   // v27.569: aspect = sampled component the file belongs to (mig 267)
   return r.rows[0].id;
 }
 // v27.551 PRODUCT ▸ Sample batch review: one sample shipment (SR) → every development sample on it, grouped by product, with the
@@ -10682,7 +10719,9 @@ function authUser(req) {
   // they are NEVER trusted — identity comes only from the verified signed 'pu' session cookie via the prod auth
   // harness's cookieUser(req). (v28.120 wrongly assumed req._authEmail existed → every signed-in user got "session
   // expired"; that broke prod and was reverted there.) NOT exercised in the sandbox, which has no GATE.
-  if (GATE) return cookieUser(req);
+  // v28.151 (review B3): cookieUser is defined only by the prod auth harness. typeof never throws on an undeclared name, so a GATE
+  // deploy of THIS repo no longer ReferenceErrors (which the capability guard swallowed and failed OPEN); no harness = no identity.
+  if (GATE) { try { return (typeof cookieUser === 'function' && cookieUser(req)) || null; } catch (_) { return null; } }
   const h = req.headers || {};
   let e = h['x-forwarded-email'] || h['x-auth-request-email'] || h['cf-access-authenticated-user-email']
         || h['x-goog-authenticated-user-email'] || h['x-authenticated-user-email'] || h['x-user-email'] || '';
@@ -10758,6 +10797,9 @@ const INBOX_TYPES_ALL = ['samples', 'purchase_order', 'product', 'client'];
 const INBOX_TYPE_LABEL = { samples: 'Sample', purchase_order: 'Purchase order', product: 'Product', client: 'Client' };
 async function permsFor(req) {
   const email = authUser(req);
+  // v28.151 (review B3): no identity under a GATE (prod: planner key but no signed login cookie) = READ-ONLY, not admin.
+  // Local dev / sandbox (no GATE) keeps full access exactly as before.
+  if (!email && GATE) return { email: null, live: true, supply_edit: false, demand_edit: false, product_edit: false, is_admin: false, client_access: false, commissions: false, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: [] };
   if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
@@ -10852,7 +10894,7 @@ async function processReceivedPos() {
 // header; when unset (sandbox/dev) the endpoint is open so it stays testable. (Same env-gated pattern as RESEND_API_KEY.)
 app.post('/api/supply/received-pos/process', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
+  if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { res.json({ ok: true, ...(await processReceivedPos()) }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -11095,7 +11137,7 @@ async function pollTracking(opts = {}) {
 // Poller endpoint — n8n schedule calls this (webhook-secret gated, same pattern as received-pos).
 app.post('/api/tracking/poll', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
+  if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { res.json(await pollTracking({ force: req.query.force === '1' })); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -11456,8 +11498,8 @@ const TL_ATT_MAX = 4 * 1024 * 1024;
 async function tlAttachInsert(ref, b, by, uploaderKind) {
   const up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 });   // throws {status,message}
   const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,'timeline',$8) RETURNING id`,
-    [ref, String(b.filename || 'file').slice(0, 200), b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, by || null, uploaderKind]);
-  return { id: r.rows[0].id, filename: b.filename || 'file', mime: b.mime || '', byte_size: up.byteSize };
+    [ref, String(b.filename || 'file').slice(0, 200), safeMime(b.mime), up.byteSize, up.buf, up.storagePath, by || null, uploaderKind]);
+  return { id: r.rows[0].id, filename: b.filename || 'file', mime: safeMime(b.mime), byte_size: up.byteSize };
 }
 async function tlAttachRef(b) {   // kind + ref (or sample_id for the sample timeline) → the ref the file is keyed on
   const kind = ['po', 'shipment', 'sample'].includes(b.kind) ? b.kind : 'po';
@@ -11477,7 +11519,7 @@ app.post('/api/supply/portal-upload', async (req, res) => {
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, storage_path, uploaded_by, category)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, b.uploaded_by || null, b.category || 'invoice']);
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, b.uploaded_by || null, b.category || 'invoice']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -11509,7 +11551,7 @@ app.post('/api/supply/po-doc-upload', async (req, res) => {
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, b.uploaded_by || 'admin', b.category || 'document']);
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, b.uploaded_by || 'admin', b.category || 'document']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -11523,7 +11565,7 @@ app.post('/api/supply/quality-doc', async (req, res) => {
   try {
     const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, storage_path, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'admin') RETURNING id`,
-      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath,
+      [String(b.doc_type), b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath,
        b.prod_no || null, b.batch_id || null, b.po || null, b.supplier_name || null, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -11553,7 +11595,7 @@ app.post('/api/supply/remittance', async (req, res) => {
   try {
     const r = await pool.query(`INSERT INTO planner.payment_remittances (run_key, supplier_name, filename, mime, byte_size, data, storage_path, uploaded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, authUser(req) || 'admin']);
+      [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -12160,10 +12202,7 @@ app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
 app.get('/api/supply/portal-attachment/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
-    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));   // inline view (no download= param)
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
-    res.send(r.data);
+    return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── 3PL Invoice (REPORTS ▸ 3PL Invoice) ─────────────────────────────────────
@@ -12243,7 +12282,7 @@ app.post('/api/supply/tpl/upload', async (req, res) => {
     const byteSize = up.storagePath ? up.byteSize : buf.length;
     const r = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, storage_path, byte_size, uploaded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [b.tpl, b.period, b.filename || 'invoice', b.mime || 'application/octet-stream', buf, up.storagePath, byteSize, b.uploaded_by || null]);
+      [b.tpl, b.period, b.filename || 'invoice', safeMime(b.mime), buf, up.storagePath, byteSize, b.uploaded_by || null]);
     res.json({ ok: true, id: r.rows[0].id, byte_size: byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -14679,7 +14718,7 @@ app.post('/api/demand/cache/invalidate', async (_req, res) => {
 // the rebuild so n8n gets a success confirmation (and KV is written) before responding. Webhook-secret gated (if set).
 app.post('/api/data-cache/invalidate', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
-  if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
+  if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.116 (review S5): fail CLOSED when the secret is unset
   try { _dataCache = null; const vals = await refreshDataCache(); invalidateBiCache();
     res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, kv: KV_ON, at: new Date().toISOString() }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -18616,7 +18655,7 @@ app.post('/api/supply/sample-attachment', async (req, res) => {   // admin/previ
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try { const s = (await pool.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0]; if(!s) return res.status(404).json({ error: 'sample not found' });
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`,
-      [s.ref, b.filename||'attachment', b.mime||'application/octet-stream', up.byteSize, up.buf, up.storagePath, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
+      [s.ref, b.filename||'attachment', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-attachment-remove', async (req, res) => {
   const id = req.body && req.body.att_id;
@@ -18728,6 +18767,7 @@ app.post('/api/ai', async (req, res) => {
   try {
     const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? { ...req.body } : {};
     delete body.mcp_servers;
+    delete body.tools; delete body.tool_choice;   // v28.151 (review B5): no app caller sends tools (all 3 artefact calls are model/max_tokens/messages); server tools such as web_fetch would run on the company key
     body.model = AI_ALLOWED_MODELS.has(body.model) ? body.model : AI_DEFAULT_MODEL;
     const reqTok = Number(body.max_tokens);
     body.max_tokens = (Number.isFinite(reqTok) && reqTok > 0) ? Math.min(reqTok, AI_MAX_TOKENS_CAP) : 1024;
@@ -19013,8 +19053,7 @@ app.get('/api/assistant/feedback', async (req, res) => {
 app.get('/api/assistant/file/:id', async (req, res) => {
   try { const f = (await pool.query(`SELECT f.filename, f.mime, f.content FROM planner.ai_files f JOIN planner.ai_conversations c ON c.id=f.conversation_id WHERE f.id=$1 AND c.user_email=$2`, [req.params.id, aiUser(req)])).rows[0];
     if (!f) return res.status(404).send('not found');
-    res.set('content-type', f.mime || 'application/octet-stream');
-    res.set('content-disposition', 'attachment; filename="' + String(f.filename || 'file').replace(/["\r\n]/g, '') + '"');
+    fileHeaders(res, f.mime, f.filename, { download: true });   // v28.151 (review B1)
     res.send(f.content);
   } catch (e) { log500(e); res.status(500).send('error'); }
 });
@@ -21117,7 +21156,7 @@ app.post('/api/client/fulfil/import-sales', async (req, res) => {
 });
 // cron entry (webhook-secret gated like import-pos; exempt from the planner key in the gate above)
 app.post('/api/cron/client-sales', async (req, res) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });   // v28.018: fail closed — no secret set ⇒ reject
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.018: fail closed — no secret set ⇒ reject
   if (String(await cpSetting('cp_sales_import_enabled', 'false')) !== 'true') return res.status(423).json({ error: 'sales import switched off (cp_sales_import_enabled)', gated: true });
   try { res.json(await fulfilImportSales(req.query.days)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -21478,7 +21517,7 @@ async function cpThreadMessages(threadId) {
 async function cpPostMessage(threadId, senderKind, sender, body, atts) {
   const m = (await pool.query(`INSERT INTO planner.client_messages (thread_id, sender_kind, sender, body) VALUES ($1,$2,$3,$4) RETURNING id`, [threadId, senderKind, sender || null, String(body || '').trim() || null])).rows[0];
   for (const a of (Array.isArray(atts) ? atts : []).slice(0, 6)) { try { const up = resolveUpload(a, { maxInline: 8 * 1024 * 1024 }); const buf = up.storagePath ? null : up.buf; if (!buf && !up.storagePath) continue;
-      await pool.query(`INSERT INTO planner.client_message_files (message_id, filename, mime, byte_size, data, storage_path) VALUES ($1,$2,$3,$4,$5,$6)`, [m.id, String(a.filename || 'file').slice(0, 200), a.mime || 'application/octet-stream', up.storagePath ? up.byteSize : buf.length, buf, up.storagePath || null]); } catch (e) {} }
+      await pool.query(`INSERT INTO planner.client_message_files (message_id, filename, mime, byte_size, data, storage_path) VALUES ($1,$2,$3,$4,$5,$6)`, [m.id, String(a.filename || 'file').slice(0, 200), safeMime(a.mime), up.storagePath ? up.byteSize : buf.length, buf, up.storagePath || null]); } catch (e) {} }
   await pool.query(`UPDATE planner.client_threads SET last_at=now(), last_sender=$2 WHERE id=$1`, [threadId, senderKind]);
   return m.id;
 }
@@ -21500,7 +21539,7 @@ app.post('/api/client/threads/:id/reply', async (req, res) => {
 });
 app.get('/api/client/attachment/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.client_message_files WHERE id=$1`, [req.params.id])).rows[0]; if (!r) return res.status(404).send('not found');
-    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path)); res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+    return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function cpNotifyClientMessage(threadId, req) {   // email the client's active users that Dock & Bay replied (best-effort)
@@ -21711,7 +21750,7 @@ app.post('/api/cp/threads/:id/reply', cpAuth, async (req, res) => {
 });
 app.get('/api/cp/attachment/:id', cpAuth, async (req, res) => {
   try { const r = (await pool.query(`SELECT f.filename, f.mime, f.data, f.storage_path FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id JOIN planner.client_threads t ON t.id=m.thread_id WHERE f.id=$1 AND t.client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!r) return res.status(404).send('not found');
-    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path)); res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+    return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ═══════════════════════════════════════════ end CLIENT PORTAL ═══════════════════════════════════════════
@@ -21896,13 +21935,16 @@ app.get('/portal', async (req, res) => {
 
 app.post('/api/portal/request-link', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  // v28.151 (review B5): same rate limit as /api/cp/request-link (20/h per IP, 5/h per email); separate key prefix
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
+  if (_cpRateLimited('pip:' + ip, 20, 3600000) || (email && _cpRateLimited('pem:' + email, 5, 3600000))) return res.status(429).json({ error: 'too many requests, please wait a few minutes and try again' });
   try {
     if (email) {
       const sups = await portalSuppliers(email);
       if (sups.length) {
         const tok = portalToken();
         await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, email]);
-        const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+        const base = portalLinkBase(req);   // v28.151 (review B5)
         await sendMagicEmail(email, base + '/portal?token=' + tok);
       }
     }
@@ -22049,7 +22091,7 @@ app.post('/api/portal/quality-doc', portalAuth, async (req, res) => {
   try {
     const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, storage_path, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'supplier') RETURNING id`,
-      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath,
+      [String(b.doc_type), b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath,
        b.prod_no || null, b.batch_id || null, b.po || null, sup, req.portal.email || null]);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -22131,10 +22173,7 @@ app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   try {
     const r = (await pool.query(`SELECT po, filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r || !(await portalOwnsPO(req, r.po) || await portalOwnsSampleRef(req, r.po) || await portalOwnsShipmentRef(req, r.po))) return res.status(403).send('forbidden');   // v27.571: shipment-timeline files are keyed by shipment ref
-    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));   // inline view (no download= param)
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
-    res.send(r.data);
+    return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).send('error'); }
 });
 
@@ -22259,7 +22298,7 @@ app.post('/api/portal/onboarding/upload', portalAuth, async (req, res) => {
     if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'file required' });
     let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'supplier') RETURNING id`, ['SUP-' + sid, b.filename || 'file', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email, kind]);
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'supplier') RETURNING id`, ['SUP-' + sid, b.filename || 'file', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email, kind]);
     res.json({ ok: true, id: r.rows[0].id, filename: b.filename || 'file' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -22394,8 +22433,7 @@ app.get('/api/supply/onb/bank-doc/:id', async (req, res) => {
     const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).send('Finance / admin only');
     const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1 AND category='onboarding_bank'`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
-    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+    return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).send('error'); }
 });
 // Warehouse requirements table (CONFIG ▸ Warehouse rules). POST replaces the whole list (small table; keeps ids where given).
@@ -22696,9 +22734,7 @@ app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
     let ok = directed;
     if (!ok) { const ss = await specSupplierSet(s); ok = req.portal.suppliers.some(n => ss.has(n)); }
     if (!ok) return res.status(403).send('forbidden');
-    if (s.storage_path) return res.redirect(302, await storageSignDownload(s.storage_path));   // inline view (no download= param)
-    res.setHeader('Content-Type', s.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'inline; filename="' + (s.filename || 'file').replace(/"/g, '') + '"'); res.send(s.data);
+    return serveFile(res, s);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal "recent changes" drawer — key events for THIS supplier, newest first (new PO, payment received, sample).
@@ -22874,7 +22910,7 @@ app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = 
   try {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'product','supplier') RETURNING id`,
-      [ref, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email || null]);
+      [ref, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email || null]);
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
       [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -22913,7 +22949,7 @@ app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   //
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64/storage_path required' });
     let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, storage_path, uploaded_by, category)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', b.mime||'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email||'supplier']);
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email||'supplier']);
     res.json({ ok:true, id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) => {
@@ -23124,18 +23160,8 @@ app.get('/api/portal/asset/:name', (req, res) => {
   catch (e) { res.status(404).end(); }
 });
 // Swatch image proxy — session-gated so it isn't an open proxy.
-app.get('/api/portal/img', portalAuth, async (req, res) => {
-  try {
-    const u = String(req.query.url || ''); if (!/^https?:\/\//i.test(u)) return res.status(400).end();
-    // v28.123 (Diviyaj prod): image proxy limited to our two image hosts (was an open fetch-any-URL proxy).
-    let host = ''; try { host = new URL(u).hostname.toLowerCase(); } catch (_) { return res.status(400).end(); }
-    if (host !== 'res.cloudinary.com' && host !== 'cdn.shopify.com') return res.status(403).end();
-    const r = await fetch(u); if (!r.ok) return res.status(502).end();
-    res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
-    res.setHeader('cache-control', 'public, max-age=86400');
-    res.end(Buffer.from(await r.arrayBuffer()));
-  } catch (e) { log500(e); res.status(500).end(); }
-});
+// v28.123 (Diviyaj prod): image proxy limited to our two image hosts. v28.151 (review B2): shares proxyImage (https, no redirects, image/* only).
+app.get('/api/portal/img', portalAuth, proxyImage);
 // Barcode label rows — only for SKUs that appear on THIS supplier's POs (intersect with owned SKUs).
 // SHIPS-WITH shipment-label fields for one PO — supplier-scoped mirror of /api/supply/ships-with/:po.
 app.get('/api/portal/ships-with/:po', portalAuth, async (req, res) => {
@@ -23325,7 +23351,7 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
   try {
     const sid = req.portal.supplierIds[0] || null;
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [b.po, sid, b.filename || 'invoice', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email]);
+      [b.po, sid, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email]);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
