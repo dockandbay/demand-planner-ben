@@ -1,3 +1,13 @@
+## v28.155 (Ben, branch review-fixes-2026-10-05): PRODUCT searchable barcode picker + Reports ▸ Catalogue (CSV/PDF)
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no new env vars. New endpoints: `GET /api/product/reports/catalogue?season=` · `POST /api/product/reports/catalogue/pdf` (read-only; exempt from the product-edit capability).
+
+1. **Sizes master grid: workshop-barcode cell is a searchable popover** (same `#shpop` pattern as the SKU / assign-shipment pickers; phone bottom sheet inherited). Multi-term AND filter over barcode, status, `seq<n>`, assigned ref / SKU / product / colour; current code at the top with ✕ clear; mini EAN preview per code; ↑↓ / Enter / Esc / click-outside. Saves through the unchanged `POST /api/product/size/:id/barcode` (clear sends `{barcode:''}` like the old "none"). Same pool as before (free first; "used" codes still offered, flagged amber).
+2. **PRODUCT ▸ Reports ▸ Catalogue** (`#/product/reports/catalogue`): one row per product size (items with no sizes get one blank row): season, product ref, product type, colour way, size, SKU (planner or working), EAN (workshop code, else planner `product_ean`), components, stage. Season select (All seasons; server refetch, stale-response guard), multi-term search (120 ms debounce), sortable sticky left-aligned headers (asc → desc → off), monospace ref/SKU/barcode, group label rows per ref when unsorted, "N rows [of M]". **⤓ CSV** = visible rows, UTF-8 BOM, formula-injection guarded, `catalogue_<season|all>_<dd-mmm-yy>.csv`. **⤓ PDF** = visible rows → landscape A4 pdf-lib table, repeated headers per page, "Page n of N · N rows" footer.
+
+**Verified (sandbox):** endpoint all seasons 5 rows (`seasons` SS27, CUST), `?season=SS27` 4, `CUST` 1 (ref-prefix path), `NOPE` 0; PDF 3 rows = 1 page, 120 rows = 4 pages (rasterised and eyeballed). jsdom: Catalogue renders tabs + 9 headers + group rows, season/search/sort behave, CSV blob + PDF body captured; Sizes grid has 0 `<select>` left, picker filters ("free 998965" → 1), Enter posts the identical body the old select did, Esc/outside close. 0 JS errors. Fixture data restored.
+**Ben's call:** exclude "used" codes from the picker? drop the repeated Components column (barcodes live on sizes, not components)? EAN image in the PDF?
+
 ## v28.154 (Ben, branch review-fixes-2026-10-05): demand/buy engine idempotency, run-off pool, year rollover (05-Oct review, thread A)
 
 **Files:** `artifact_v16.7.html` only (+ package.json, CHANGES.md). No migration, no env vars. **⚠ BUY-CHANGING (item 5 only; separate commit `2753fb28`, revertable on its own).**
