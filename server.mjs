@@ -5936,6 +5936,12 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     const built = await buildFlexportBookingBody(po, { cargo: b.cargo });
     if (!built.can_submit) return res.status(400).json({ error: 'Cannot submit — unresolved fields: ' + built.missing.join(' | '), missing: built.missing });
     const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
+    // v28.151 (review D6): duplicate guard. Each lodged booking is recorded in the PO change log (event 'Flexport booking
+    // lodged'); a PO that already has one is refused (409 ALREADY_BOOKED) unless rebook:true (the client asks first). The
+    // check + lodge run under a per-PO advisory lock so a double submit can't lodge two bookings.
+    return await _withXactLock('flexport_booking:' + po, { code: 'FLEXPORT_BUSY', message: 'A Flexport booking for ' + po + ' is already being lodged.' }, async () => {
+    let _prior = []; try { _prior = (await pool.query(`SELECT detail, changed_by, changed_at FROM planner.po_change_log WHERE po=$1 AND event='Flexport booking lodged' ORDER BY changed_at DESC LIMIT 3`, [po])).rows; } catch (e) { console.error('[flexport] booking history read failed:', e.message); }
+    if (_prior.length && b.rebook !== true) return res.status(409).json({ code: 'ALREADY_BOOKED', error: po + ' already has a Flexport booking request (' + (_prior[0].detail || '') + ', ' + (_prior[0].changed_at ? new Date(_prior[0].changed_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'Europe/London' }).replace(/ /g, '-') : '?') + ' by ' + (_prior[0].changed_by || '?') + ').', prior: _prior });
     const r = await _fetchT('https://api.flexport.com/bookings', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -5944,8 +5950,10 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
     if (!r.ok) { const msg = (j && j.error && (j.error.message || j.error.code)) || (j && j.message) || String(t).slice(0, 300); return res.status(r.status === 400 ? 400 : 502).json({ error: 'Flexport ' + r.status + ': ' + msg, sent: built.body }); }
     const bk = (j && j.data) || j;
+    await logPoChange(po, 'Flexport booking lodged', [bk && bk.flex_id, bk && bk.name, bk && bk.id].filter(Boolean).join(' / ') || 'booking', authUser(req));
     res.json({ ok: true, booking: { id: bk && bk.id, flex_id: bk && bk.flex_id, name: bk && bk.name, status: bk && bk.status, quote_status: bk && bk.quote_status }, sent: built.body });
-  } catch (e) { log500(e); res.status(e.code === 404 ? 404 : 500).json({ error: e.message }); }
+    });
+  } catch (e) { log500(e); res.status(e.code === 404 ? 404 : e.code === 'FLEXPORT_BUSY' ? 409 : 500).json({ error: e.message }); }
 });
 
 // ── Global command search (v28.072, Ben) — the ⌘K palette. One query across the domains a user works in: purchase

@@ -3324,7 +3324,8 @@
       if(j.can_submit){ goBtn.style.display=''; }
       goBtn.onclick=function(){ if(!confirm('Lodge a live booking request with Flexport for '+po+'? Flexport will quote it; you accept the quote in Flexport.'))return;
         goBtn.disabled=true; goBtn.textContent='Lodging…';
-        fetch('/api/supply/flexport/booking-submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true,cargo:curCargo})}).then(function(r){return r.json();}).then(function(res){
+        var _fxs=function(rebook){ return fetch('/api/supply/flexport/booking-submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true,cargo:curCargo,rebook:!!rebook})}).then(function(r){return r.json();}); };
+        _fxs(false).then(function(res){ if(res&&res.code==='ALREADY_BOOKED'&&confirm(res.error+'\n\nLodge ANOTHER booking request anyway?'))return _fxs(true); return res; }).then(function(res){   // v28.151 (review D6): server duplicate guard
           if(res&&res.error){ box.innerHTML='<div style="color:var(--neg)">'+esc(res.error)+'</div>'+box.innerHTML; goBtn.disabled=false; goBtn.textContent='Lodge booking request'; return; }
           var b=res.booking||{};
           box.innerHTML='<div style="padding:10px 12px;border:1px solid var(--pos,#16a34a);border-radius:6px;background:var(--pos-bg,#f0fdf4)"><b style="color:var(--pos,#16a34a)">✓ Booking request lodged</b><div style="margin-top:4px">'+esc(b.name||po)+' · status <b>'+esc(b.status||'submitted')+'</b>'+(b.flex_id?' · '+esc(b.flex_id):'')+'</div><div class="mut tiny" style="margin-top:4px">Review &amp; accept the quote in the Flexport app. Run “Import from Flexport” to pull the dates back once it’s live.</div></div>';
