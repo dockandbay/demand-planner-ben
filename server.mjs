@@ -11819,7 +11819,9 @@ async function processPaymentEmails() {
 // v28.151 (review E5): the 30s timer runs on the long-lived server only. On Vercel a timer fires on frozen/idle containers
 // (pooled connection opened with no request = the stranded-connection pattern) and simply never runs when no instance
 // is warm, so prod needs a scheduler hitting the cron route below (n8n every 1-2 min, webhook-secret gated like the others).
-if (!process.env.VERCEL) setInterval(processPaymentEmails, 30000).unref?.();
+// Coordinator safety: prod keeps the in-process timer (today's behaviour) until the scheduler exists; Diviyaj sets
+// PAYMENT_EMAIL_CRON=1 once n8n hits /api/cron/payment-emails, which turns the Vercel timer off.
+if (!process.env.VERCEL || process.env.PAYMENT_EMAIL_CRON !== '1') setInterval(processPaymentEmails, 30000).unref?.();
 app.post('/api/cron/payment-emails', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
   try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }

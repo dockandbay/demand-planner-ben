@@ -1,3 +1,24 @@
+## v28.152 (Ben, branch review-fixes-2026-10-05): integrations + server DB/perf hardening (05-Oct review, threads D+E)
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). **Migration 327** (`327_commission_rows_unique.sql`: partial unique index on commission_rows (run_id, order_ref) for Fulfil-sourced rows, dedupe step first; sandbox applied, 0 duplicates). New optional env: `CIN7_WRITES_DISABLED=true` (blocks every non-GET Cin7 call), `PG_QUERY_TIMEOUT_MS`, `PAYMENT_EMAIL_CRON=1` (turns the in-process payment-email timer off on Vercel once a scheduler exists). New route `POST /api/cron/payment-emails` (webhook-secret gated).
+
+1. **Pool timeouts (death-spiral guard):** every pg pool now has `connectionTimeoutMillis` + `query_timeout` (Vercel 10 s / 35 s; sandbox 30 s / 120 s because its pooler ignores the 30 s statement option; forecast-save routes 125 s to match their own limit).
+2. **Safe ROLLBACK:** `_rollback()` helper at 48 catch sites; a failed rollback discards the connection (`release(err)`) instead of returning it to the pool.
+3. **Fulfil PO update is atomic:** line delete + create in ONE write; a confirmed PO is always re-confirmed in `finally`, a failed re-confirm is logged and returned (`problems` / `reconfirm_failed`, shown in the popup); line ids paged (>500 lines handled). **Per-PO push lock** (transaction-scoped advisory lock, pooler-safe): a concurrent push gets 409; the push button is disabled while in flight.
+4. **Outbound timeouts:** `_fetchT` wraps every integration call (default 20 s; Fulfil/KV 30 s, Cin7 45 s, DriveHQ 60 s, Anthropic 90 s). Existing retries unchanged.
+5. **Xero refresh:** single-flight per region; on `invalid_grant` re-read the store and retry once if another instance rotated the token; the connection is deleted only if the store still holds the token that failed; other 400/401s throw and keep the connection (was: any 400 deleted it).
+6. **Xero payment post:** 409 if the run already has a non-voided/deleted bill; redo asks first; per-run lock; any failed payment makes the response `ok:false` (popup says so).
+7. **Flexport booking:** recorded in the PO change log; second booking for a PO needs a confirm; per-PO lock.
+8. **Cin7 safety:** `CIN7_WRITES_DISABLED` kill switch; `activeErp()` no longer falls back to Cin7 on a DB error (last read value, else throws).
+9. **Preflight / partial-data guards:** Fulfil push blocked when a line has no price or a product has no UOM (was pushed as 0 / unit 1); BLADE stock throws on a bad page (no partial stock as complete); Fulfil imports skip the prune when the pull was truncated; AU bill duplicate check fails closed.
+10. **Caches:** an invalidation during an in-flight data rebuild discards that result (never cached or written to KV) and runs one more rebuild; makeCaches rebuild after the epoch bump lands (no more double rebuild), in-flight builds superseded by an edit are discarded. Eager rebuild kept.
+11. **Payment emails:** rows stuck in `sending` >10 min are re-queued; cron route added; the Vercel timer stays ON until `PAYMENT_EMAIL_CRON=1` (coordinator change so a deploy without the scheduler keeps sending).
+12. **Zalando stock upload** in one transaction with a single bulk insert (no empty/partial table mid-upload). **Commission build** loads existing rows + rate overrides once, inserts in one statement with `ON CONFLICT DO NOTHING` (falls back if 327 is not applied).
+
+**Verified:** stub tests (no network): Xero 5 concurrent callers = 1 token call, rotated-token retry, generic 400 keeps connection; Fulfil push against a fake Fulfil = one write, failed write leaves original lines and re-confirms, null price/UOM blocked; cache test never serves a stale build (the old code did). Push lock against the sandbox via the transaction pooler: concurrent refused, released after success/failure. Warm endpoints 200 on the test server.
+**Diviyaj:** `ALTER ROLE <app role> SET statement_timeout='30s'` then `SHOW statement_timeout` via 6543; pin Vercel region eu-central-1; apply migration 327 (run its duplicate SELECT first); schedule `POST /api/cron/payment-emails` every 1-2 min via n8n, then set `PAYMENT_EMAIL_CRON=1`; optionally `CIN7_WRITES_DISABLED=true`.
+**Not done:** cached gzip/ETag payloads (E9); lazy makeCache rebuild; Cin7 POLYBAG corrective PUT; Storage/image-proxy fetch timeouts; `xero/status` still reports a DB error as "not connected"; a timed-out ERP write may still have landed (verify by read-back, as today).
+
 ## v28.151 (Ben, branch review-fixes-2026-10-05): security hardening + supplier/client portal fixes (05-Oct review, threads B+C)
 
 **Files:** `server.mjs`, `supply/portal-view.js` (+ package.json, CHANGES.md). No migration. Optional env: `PORTAL_URL` (fixed base for supplier magic links; falls back to the request host), `HOST`/`PORT` for the local server.
