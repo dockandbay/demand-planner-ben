@@ -2979,7 +2979,7 @@ async function fulfilResolveProducts(skus) {
   const out = {};
   if (!uniq.length) return out;
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', uniq]], 0, uniq.length, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
-  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = { id: r.id, uom: r.purchase_uom || r.default_uom || 1 }; });   // v27.736: carry the product's purchase UOM for the required line 'unit'
+  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = { id: r.id, uom: r.purchase_uom || r.default_uom || null }; });   // v28.151 (review D8): no silent uom id 1 fallback (a missing uom is a preflight problem) · v27.736: carry the product's purchase UOM for the required line 'unit'
   // v27.839 (Ben): tolerate stray leading/trailing whitespace in a Fulfil product code — a trailing TAB on
   // "POLYBAG 215*320+50mm\t" (Fulfil id 2091) made the exact IN match miss and blocked the whole PO push. For each SKU
   // still missing, refetch by ilike (SQL wildcards in the SKU escaped) and accept only a code that equals it once trimmed.
@@ -2989,10 +2989,26 @@ async function fulfilResolveProducts(skus) {
     try {
       const cand = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'ilike', pat]], 0, 20, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
       const hit = (cand || []).find(r => r && r.code != null && String(r.code).trim() === String(s).trim());
-      if (hit) out[String(s)] = { id: hit.id, uom: hit.purchase_uom || hit.default_uom || 1 };
+      if (hit) out[String(s)] = { id: hit.id, uom: hit.purchase_uom || hit.default_uom || null };   // v28.151 (review D8)
     } catch (e) { /* best-effort whitespace fallback */ }
   }
   return out;
+}
+// v28.151 (review D2): per-PO single-flight for the Fulfil push, across instances. Two overlapping pushes of an
+// un-mirrored PO both saw "absent" and both CREATED, i.e. duplicate POs in Fulfil. Uses a TRANSACTION-scoped advisory lock
+// on a dedicated client held for the push: on Vercel the pool goes through the transaction pooler (6543), where a
+// session lock and its unlock can land on different backends and leak, while an xact lock is pinned to its txn and is
+// released by COMMIT/ROLLBACK or when the session dies. A concurrent push gets FULFIL_PUSH_BUSY (409) instead of waiting.
+async function withFulfilPushLock(po, fn) {
+  const lc = await pool.connect(); let ok = false;
+  try {
+    await lc.query('BEGIN');
+    await lc.query("SET LOCAL idle_in_transaction_session_timeout = '180s'");   // bound a frozen instance; a push is ~15 calls x 20s timeout max
+    ok = (await lc.query(`SELECT pg_try_advisory_xact_lock(hashtext($1)) ok`, ['fulfil_push:' + po])).rows[0].ok;
+  } catch (e) { await _rollback(lc); lc.release(); throw e; }
+  if (!ok) { await _rollback(lc); lc.release(); const e = new Error('A Fulfil push for ' + po + ' is already in progress. Wait for it to finish, then refresh before pushing again.'); e.code = 'FULFIL_PUSH_BUSY'; throw e; }
+  try { return await fn(); }
+  finally { await _rollback(lc); lc.release(); }   // ROLLBACK releases the xact lock (nothing was written on this client)
 }
 // push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
 // data the Cin7 push uses. Resolves supplier/currency/warehouse/products to Fulfil ids first (read-only) and aborts
@@ -3068,10 +3084,16 @@ async function fulfilPushLines(po, completion) {
   if (!fdDef) problems.push('Fulfil metafield "' + FULFIL_MAP.finalDestMetafield + '" is not defined on purchase orders in this tenant — define it in Fulfil settings first');
   if (!finalDestination) problems.push('PO has no Horizon branch to write as the final destination');
   if (missingSkus.length) problems.push(missingSkus.length + ' SKU(s) not in Fulfil catalog: ' + missingSkus.slice(0, 8).join(', ') + (missingSkus.length > 8 ? '…' : ''));
+  // v28.151 (review D8): a line with no price anywhere (confirmed cost, line cost, last priced line) or a product with no
+  // purchase/default UOM used to push unit_price 0 / unit id 1 silently. Both now block the push as preflight problems.
+  const _noPrice = lines.filter(l => l.price == null).map(l => l.sku);
+  if (_noPrice.length) problems.push(_noPrice.length + ' line(s) have no price (no confirmed, line or previous cost): ' + _noPrice.slice(0, 8).join(', ') + (_noPrice.length > 8 ? '...' : ''));
+  const _noUom = lines.filter(l => { const pm = prodMap[String(l.sku)]; return pm && pm.id && !pm.uom; }).map(l => l.sku);
+  if (_noUom.length) problems.push(_noUom.length + ' SKU(s) have no purchase/default UOM in Fulfil: ' + _noUom.slice(0, 8).join(', ') + (_noUom.length > 8 ? '...' : ''));
 
   const lineDicts = lines.map(l => { const pm = prodMap[String(l.sku)] || {}; return {
     [FULFIL_MAP.line.product]: pm.id || null,
-    [FULFIL_MAP.line.unit]: pm.uom || 1,
+    [FULFIL_MAP.line.unit]: pm.uom || null,   // v28.151 (review D8): null blocked in preflight above
     [FULFIL_MAP.line.qty]: Number(l.qty) || 0,
     [FULFIL_MAP.line.price]: l.price == null ? '0' : String(Math.round(Number(l.price) * 10000) / 10000),   // v27.736: unit_price required (0 if none) · v27.764: send as a clean decimal STRING rounded to 4dp — a JSON float (e.g. 3.92) is parsed by Fulfil as full-precision Decimal and rejected (digits limit)
     [FULFIL_MAP.line.deliveryDate]: _comp || poRow.est_delivery || (completion ? String(completion).slice(0, 10) : null),   // v27.764: line delivery = est delivery-to-warehouse
@@ -3111,19 +3133,34 @@ async function fulfilPushLines(po, completion) {
     // the edit, then re-confirm — so a confirmed PO can still be reconciled from Horizon. States past confirmation
     // (processing/done = goods in motion/received) are NOT auto-reverted; those must be handled in Fulfil by hand.
     const _preState = await fulfilPOState(fulfilId);
-    let _reconfirm = false;
-    if (_preState === 'confirmed') { await fulfilPOButton(fulfilId, 'draft', 'draft'); _reconfirm = true; }
-    else if (_preState && _preState !== 'draft' && _preState !== 'quotation') {
+    let _reconfirm = false, _upErr = null; const _upProblems = [];
+    if (_preState && _preState !== 'confirmed' && _preState !== 'draft' && _preState !== 'quotation') {
       const e = new Error('Fulfil PO is "' + _preState + '" — its lines can\'t be edited automatically. Revert it to draft in Fulfil, then push again.'); e.code = 'FULFIL_STATE_LOCKED'; throw e;
     }
-    const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
-    const ids = (existing || []).map(r => r.id);
-    if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
-    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.deliveryDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.paymentTerm]: paymentTermId || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates + v27.840: payment term + v27.904: UPDATE header dates = completion (v27.900 only fixed create + lines)
-    await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
-    if (_reconfirm) await fulfilPOButton(fulfilId, 'confirm', 'confirmed');   // v27.840 (Ben): restore the PO to confirmed after the edit
-    try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
-    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null };
+    // v28.151 (review D1): delete + create now go in ONE write (Tryton one2many takes a list of ops, applied in one server
+    // transaction), so a failure can no longer leave the PO with its lines deleted and none created. The re-confirm runs
+    // in a finally whenever we reverted to draft, so a failed edit still restores the PO to confirmed (with its old lines).
+    // Line ids are paginated (was a single 500-row page, so a >500-line PO kept stale lines).
+    try {
+      if (_preState === 'confirmed') { _reconfirm = true; await fulfilPOButton(fulfilId, 'draft', 'draft'); }   // flag first: a timed-out draft call may still have landed
+      const existing = await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', '=', fulfilId]], ['id']);
+      const ids = (existing || []).map(r => r.id);
+      const _ops = ids.length ? [['delete', ids], ['create', lineDicts]] : [['create', lineDicts]];
+      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: _ops, [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.deliveryDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.paymentTerm]: paymentTermId || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates + v27.840: payment term + v27.904: UPDATE header dates = completion (v27.900 only fixed create + lines)
+      await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
+    } catch (e) {
+      console.error('[fulfil push] update of ' + po + ' (Fulfil id ' + fulfilId + ') failed:', e && e.message);
+      e.message = 'Fulfil update failed: ' + e.message; _upErr = e; throw e;
+    } finally {
+      if (_reconfirm) {   // v27.840 (Ben): restore the PO to confirmed after the edit · v28.151 (review D1): also after a failed edit
+        try { if ((await fulfilPOState(fulfilId)) !== 'confirmed') await fulfilPOButton(fulfilId, 'confirm', 'confirmed'); }
+        catch (e) { const m = 'PO reverted to draft for the edit but could NOT be re-confirmed (' + (e && e.message) + '): confirm it in Fulfil by hand';
+          console.error('[fulfil push] ' + po + ': ' + m); _upProblems.push(m); if (_upErr) _upErr.message += '. ALSO: ' + m; }
+      }
+    }
+    try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }   // v27.738: keep the drift mirror fresh on push
+    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null,
+      problems: _upProblems, reconfirm_failed: _upProblems.length > 0 };
   }
   // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
   const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
@@ -15493,8 +15530,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   const completion = ((req.body && req.body.completion_date) || '').trim();
   const _erpLines = (req.query.erp === 'cin7' || req.query.erp === 'fulfil') ? req.query.erp : await activeErp();   // v27.741: ?erp= forces the target (2-button model)
   if (_erpLines === 'fulfil') {   // same process, Fulfil target (create-if-absent)
-    try { return res.json(await fulfilPushLines(po, completion)); }
-    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
+    try { return res.json(await withFulfilPushLock(po, () => fulfilPushLines(po, completion))); }   // v28.151 (review D2): per-PO single-flight
+    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_PUSH_BUSY' ? 409 : 502).json({ error: e.message }); }
   }
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
