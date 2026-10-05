@@ -105,6 +105,16 @@ async function _rollback(client) {
   try { await client.query('ROLLBACK'); }
   catch (e) { console.error('[pg] ROLLBACK failed, discarding client:', e && e.message); try { client.end().catch(() => {}); } catch (_) {} }
 }
+// v28.151 (review D3): bounded outbound fetch. ~30 integration calls (Fulfil, Xero, Flexport, DHL, FedEx, BLADE, Cin7,
+// Anthropic, Resend, KV, DriveHQ) had no timeout, so one hung upstream held the request (and often a pool client) until the
+// 300s function limit. AbortSignal.timeout covers headers AND body; a caller's own signal is still honoured. The abort
+// surfaces as an Error naming the host so the existing catch blocks report it. No retries added (existing ones unchanged).
+async function _fetchT(url, opts, ms) {
+  const o = Object.assign({}, opts || {}); const t = AbortSignal.timeout(ms || 20000);
+  o.signal = o.signal ? AbortSignal.any([o.signal, t]) : t;
+  try { return await fetch(url, o); }
+  catch (e) { if (e && (e.name === 'TimeoutError' || (e.name === 'AbortError' && t.aborted))) { let h = ''; try { h = new URL(String(url)).host; } catch (_) {} const x = new Error('Timed out after ' + Math.round((ms || 20000) / 1000) + 's calling ' + h); x.code = 'FETCH_TIMEOUT'; throw x; } throw e; }
+}
 // v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
 // only read at call time) gets s.q incremented on every pool.query; the finish-hook logs it. Behaviour otherwise identical.
 { const _origQuery = pool.query.bind(pool);
@@ -1117,7 +1127,7 @@ const KV_URL = (process.env.KV_REST_API_URL || '').replace(/\/$/, ''), KV_TOKEN 
 const KV_ON = !!(KV_URL && KV_TOKEN);
 const KV_KEY = 'horizon:data', KV_CHUNK = 900000;   // ~900KB base64 chunks (safely under the ~1MB REST value limit)
 async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command array → { result }
-  const r = await fetch(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) });
+  const r = await _fetchT(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }, 30000);   // v28.151 (review D3)
   if (!r.ok) throw new Error('KV ' + r.status);
   return (await r.json()).result;
 }
@@ -2765,7 +2775,13 @@ function fulfilConfigFor(env) {
   const apiKey = (process.env[P + 'API_KEY'] || '').trim();
   return { env, subdomain, apiKey, base: subdomain ? ('https://' + subdomain + '.fulfil.io/api/v2') : '', configured: !!(subdomain && apiKey) };
 }
-async function activeErp() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; return (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; } catch (e) { return 'cin7'; } }
+// v28.151 (review D7): a DB error no longer means "cin7" (that silently sent writes to LIVE Cin7 when Fulfil is active).
+// It returns the last value read OK; with none, it throws (every caller is a write path or the status card, all of which 500).
+let _activeErpMemo = null;
+async function activeErp() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; _activeErpMemo = (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; return _activeErpMemo; }
+  catch (e) { if (_activeErpMemo) return _activeErpMemo; const x = new Error('Could not read the active ERP setting (' + (e && e.message) + '). No ERP write performed; retry shortly.'); x.code = 'ERP_UNKNOWN'; throw x; }
+}
 // v27.799 (review item 7): memoize with a 10s TTL — this was a DB round-trip on EVERY fulfilFetch (push-actuals fires
 // ~120/chunk). The ERP toggle is rare, so a config flip takes effect within 10s.
 let _fulfilEnvCache = { v: null, t: 0 };
@@ -2861,7 +2877,7 @@ function fulfilCountryForCompany(id) { return (Number(id) === FULFIL_COMPANY_AU)
 async function fulfilFetch(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
+  const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
   return j;
@@ -2870,7 +2886,7 @@ async function fulfilFetch(method, path, body) {
 // dry-run/seed against 'live' never depends on or changes the CONFIG Active-ERP setting.
 async function fulfilFetchCfg(cfg, method, path, body) {
   if (!cfg || !cfg.configured) { const e = new Error('Fulfil ' + (cfg && cfg.env) + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });
+  const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
   return j;
@@ -4443,7 +4459,7 @@ async function xeroPutStore(region, store) { await pool.query(`INSERT INTO plann
 const _xeroTok = { uk: { token: null, exp: 0 }, au: { token: null, exp: 0 } };
 async function xeroExchange(region, params) {
   const cfg = xeroConfig(region);
-  const r = await fetch('https://identity.xero.com/connect/token', { method: 'POST',
+  const r = await _fetchT('https://identity.xero.com/connect/token', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Basic ' + Buffer.from(cfg.id + ':' + cfg.secret).toString('base64') },
     body: new URLSearchParams(params) });
   const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) {}
@@ -4473,7 +4489,7 @@ async function xeroTenant(region) {
   region = xeroRegion(region); const s = await xeroGetStore(region);
   if (s && s.tenant_id) return { id: s.tenant_id, name: s.tenant_name };
   const token = await xeroToken(region); if (!token) return { id: null, name: null };   // Custom Connection: discover the single org and cache it
-  const r = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
+  const r = await _fetchT('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
   const conns = await r.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || (Array.isArray(conns) ? conns[0] : null);
   if (!c || !c.tenantId) return { id: null, name: null };
   await xeroPutStore(region, { tenant_id: c.tenantId, tenant_name: c.tenantName || '', mode: 'custom', connected_at: new Date().toISOString() });
@@ -4486,7 +4502,7 @@ async function xeroFetch(region, path, opts) {
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
-    r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
+    r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
     const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET');   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
     if (_retryable && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
     break;
@@ -4514,7 +4530,7 @@ app.get('/api/supply/xero/callback', async (req, res) => {
     if (!st) return done('State mismatch or expired — start again from Connect to Xero.', false);
     _xeroStates.delete(state); const region = xeroRegion(st.region); const cfg = xeroConfig(region);
     const j = await xeroExchange(region, { grant_type: 'authorization_code', code, redirect_uri: cfg.redirect });
-    const cr = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + j.access_token, 'Accept': 'application/json' } });
+    const cr = await _fetchT('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + j.access_token, 'Accept': 'application/json' } });
     const conns = await cr.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || conns[0];
     if (!c || !c.tenantId) return done('Connected, but no organisation was authorised. Try again and pick the Dock & Bay ' + region.toUpperCase() + ' organisation.', false);
     let by = ''; try { by = (await permsFor(req)).email || ''; } catch (e) {}
@@ -5566,7 +5582,7 @@ function flexportConfig() { const token = (process.env.FLEXPORT_API_TOKEN || pro
 async function flexportFetch(path) {
   const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Flexport not connected (set FLEXPORT_API_TOKEN)'); e.code = 503; throw e; }
   const url = /^https?:/.test(path) ? path : ('https://api.flexport.com' + path);
-  const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } });
+  const r = await _fetchT(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } });
   const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
   if (!r.ok) { const e = new Error('Flexport ' + r.status + ': ' + String((j && (j.message || (j.errors && JSON.stringify(j.errors)))) || t).slice(0, 200)); e.code = r.status; throw e; }
   return j;
@@ -5881,7 +5897,7 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     const built = await buildFlexportBookingBody(po, { cargo: b.cargo });
     if (!built.can_submit) return res.status(400).json({ error: 'Cannot submit — unresolved fields: ' + built.missing.join(' | '), missing: built.missing });
     const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
-    const r = await fetch('https://api.flexport.com/bookings', {
+    const r = await _fetchT('https://api.flexport.com/bookings', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(built.body),
@@ -8204,7 +8220,7 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     const subject = String(b.subject || 'Dock & Bay — open items on your supplier portal').slice(0, 200);
     const html = b.html || '<p>Please log in to the supplier portal and action your open items.</p>';
     if (!process.env.RESEND_API_KEY) { console.log('[portal remind] no RESEND_API_KEY — would email ' + emails.join(', ')); return res.json({ ok: true, sent: 0, emails, sandbox: true }); }
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
     if (!r.ok) { const t = await r.text().catch(() => ''); logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', by: authUser(req), status: 'error', error: 'resend ' + r.status }); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
@@ -8350,7 +8366,7 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, 
     // v28.137: reply-to is ALWAYS EMAIL_REPLY_TO (ops@), set in the payload above. Was the person who triggered the email (replyTo
     // arg: submitter / escalator / supplier) — callers still pass it; it is now ignored.
     if (attachments && attachments.length) payload.attachments = attachments.map(a => ({ filename: a.filename || 'attachment', content: a.content }));   // Resend: content = base64 string
-    const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const resp = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload) });
     if (!resp.ok) { const t = await resp.text().catch(() => ''); console.error('[email] Resend error ' + resp.status + ': ' + t.slice(0, 200)); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: 'resend ' + resp.status }); return { sent: 0, error: 'resend ' + resp.status }; }
@@ -10935,7 +10951,7 @@ async function dhlLookupOne(number) {
   const key = process.env.DHL_API_KEY;
   if (!key) return null;
   const url = 'https://api-eu.dhl.com/track/shipments?trackingNumber=' + encodeURIComponent(number);
-  const r = await fetch(url, { headers: { 'DHL-API-Key': key, Accept: 'application/json' } });
+  const r = await _fetchT(url, { headers: { 'DHL-API-Key': key, Accept: 'application/json' } });
   if (r.status === 404) return { number, status_code: 'unknown', status_text: 'Not found', eta: null, delivered_at: null, last_event: null, events: [] };
   if (!r.ok) { const e = new Error('DHL HTTP ' + r.status); e.code = r.status; throw e; }
   const j = await r.json().catch(() => ({}));
@@ -10969,7 +10985,7 @@ async function fedexToken() {
   const cfg = fedexConfig(); if (!cfg.key_present) return null;
   const now = Date.now();
   if (_fedexTok.token && now < _fedexTok.exp - 60000) return _fedexTok.token;   // reuse until ~1min before expiry
-  const r = await fetch(cfg.base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const r = await _fetchT(cfg.base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'client_credentials', client_id: cfg.key, client_secret: cfg.secret }) });
   if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error('FedEx OAuth ' + r.status + ': ' + String(t).slice(0, 200)); e.code = r.status; throw e; }
   const j = await r.json();
@@ -10995,7 +11011,7 @@ function _fedexNormCode(code, text) {
 async function fedexLookupOne(number) {
   const cfg = fedexConfig(); if (!cfg.key_present) return null;
   const tok = await fedexToken();
-  const r = await fetch(cfg.base + '/track/v1/trackingnumbers', { method: 'POST',
+  const r = await _fetchT(cfg.base + '/track/v1/trackingnumbers', { method: 'POST',
     headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
     body: JSON.stringify({ includeDetailedScans: true, trackingInfo: [{ trackingNumberInfo: { trackingNumber: number } }] }) });
   if (!r.ok) { const e = new Error('FedEx HTTP ' + r.status); e.code = r.status; throw e; }
@@ -13206,7 +13222,7 @@ const BLADE = {
 };
 async function bladeLogin() {
   if (!BLADE.password) throw new Error('BLADE_PASSWORD not set in server env');
-  const r = await fetch(BLADE.base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const r = await _fetchT(BLADE.base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: BLADE.username, password: BLADE.password }) });
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error('Blade login failed (HTTP ' + r.status + ')');
@@ -13218,7 +13234,7 @@ async function bladeLogin() {
 async function bladeVariations(token) {   // paginate stock_availability → { map:{ "<id>":sku }, ids:[<id>…] }
   const map = {}; const ids = []; let page = 1;
   while (page <= 100) {
-    const r = await fetch(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
+    const r = await _fetchT(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
       { headers: { 'Access-Token': token, 'Content-Type': 'application/json' } });
     if (!r.ok) break;
     const j = await r.json().catch(() => null); const data = (j && j.data) || [];
@@ -13229,7 +13245,7 @@ async function bladeVariations(token) {   // paginate stock_availability → { m
   return { map, ids };
 }
 async function bladeStocks(token, body) {   // PUT /stocks (a read); body built from all variation ids + warehouse
-  const r = await fetch(BLADE.base + '/products/variations/stocks', { method: 'PUT',
+  const r = await _fetchT(BLADE.base + '/products/variations/stocks', { method: 'PUT',
     headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body: body });
   if (!r.ok) throw new Error('Blade stock fetch failed (HTTP ' + r.status + ')');
   const j = await r.json().catch(() => null);
@@ -13366,7 +13382,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
       try { parsed = await bladeFetchStock(); }
       catch (e) { return res.json({ market: mkt, error: e.message }); }
     } else {
-      const rsp = await fetch(cfg.url + '?' + Date.now(), { redirect: 'follow' });
+      const rsp = await _fetchT(cfg.url + '?' + Date.now(), { redirect: 'follow' });
       if (!rsp.ok) return res.status(502).json({ error: 'Report fetch failed (HTTP ' + rsp.status + ')' });
       parsed = inv3plParse(cfg, await rsp.text());
     }
@@ -15379,14 +15395,20 @@ function logCin7(url, opts, resp) {
     }).catch(() => {});
   } catch (e) { /* never break the push over logging */ }
 }
+// v28.151 (review D7): CIN7_WRITES_DISABLED=true is a hard kill switch for every non-GET Cin7 call (incl. ?erp=cin7 forced
+// pushes). It answers a synthetic 403 Response so callers take their normal "Cin7 API error" path; nothing is sent.
+const CIN7_WRITES_DISABLED = String(process.env.CIN7_WRITES_DISABLED || '').toLowerCase() === 'true';
 function cin7Fetch(url, opts) {
+  const _m = String((opts && opts.method) || 'GET').toUpperCase();
+  if (CIN7_WRITES_DISABLED && _m !== 'GET' && _m !== 'HEAD') { console.warn('[cin7] BLOCKED ' + _m + ' (CIN7_WRITES_DISABLED=true): ' + String(url).replace('https://api.cin7.com/api/v1', '').slice(0, 90));
+    return Promise.resolve(new Response(JSON.stringify({ error: 'Cin7 writes are disabled on this environment (CIN7_WRITES_DISABLED=true). Nothing was sent to Cin7.' }), { status: 403, headers: { 'content-type': 'application/json' } })); }
   const MIN_GAP = 400;   // ms between Cin7 calls → ~2.5/sec, safely under the 3/sec cap
   const run = async () => {
     const gap = MIN_GAP - (Date.now() - _cin7LastCall);
     if (gap > 0) await new Promise(r => setTimeout(r, gap));
     for (let attempt = 0; ; attempt++) {
       _cin7LastCall = Date.now();
-      const resp = await fetch(url, opts);
+      const resp = await _fetchT(url, opts, 45000);   // v28.151 (review D3): 45s (large v1 list pages); the 429 retry loop is unchanged
       if (resp.status !== 429 || attempt >= 4) { logCin7(url, opts, resp); return resp; }
       logCin7(url, opts, resp);   // log the 429 too, then back off + retry
       const ra = Number(resp.headers.get('retry-after'));
@@ -18603,7 +18625,7 @@ async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient,
     + '<p><a href="' + link + '" style="color:#1d4ed8;font-weight:600">Open the sample in HORIZON →</a></p></div>';
   if (!process.env.RESEND_API_KEY) { console.log('[sample ship email] no RESEND_API_KEY — would email ' + emails.join(', ')); return; }
   try {
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
     const j = await r.json().catch(() => ({}));
@@ -18786,9 +18808,9 @@ app.post('/api/ai', async (req, res) => {
       'anthropic-version': '2023-06-01',
     };
     if (process.env.ANTHROPIC_WORKSPACE_ID) headers['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;   // org-scoped keys need the workspace id
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await _fetchT('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers, body: JSON.stringify(body),
-    });
+    }, 90000);   // v28.151 (review D3): Anthropic gets 90s (4096-token replies run ~45-70s)
     const text = await r.text();
     res.status(r.status).set('content-type', 'application/json').send(text);
   } catch (e) {
@@ -19102,7 +19124,7 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     const AI_MAX_HOPS = 14;
     for (let hop = 0; hop < AI_MAX_HOPS; hop++) {
       const lastHop = hop === AI_MAX_HOPS - 1;   // final hop: drop tools so the model MUST give an answer instead of looping
-      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify(Object.assign({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }, lastHop ? {} : { tools: AI_TOOLS })) });
+      const r = await _fetchT('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify(Object.assign({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }, lastHop ? {} : { tools: AI_TOOLS })) }, 90000);   // v28.151 (review D3)
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
         if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';
@@ -20611,7 +20633,7 @@ async function emailForecastCountry(country) {
   const { csv, rowCount } = await forecastCountryCsv(co);
   if (!rowCount) return { country: co, ok: false, reason: 'no forecast rows for this country' };
   if (!process.env.RESEND_API_KEY) return { country: co, ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email, rows: rowCount };
-  const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+  const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
       subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)',
@@ -20639,7 +20661,7 @@ app.post('/api/export/email-csv', async (req, res) => {
     if (!email) return res.json({ ok: false, reason: 'no recipient email set for this report' });
     const filename = String(b.filename || (key + '.csv')).replace(/[^A-Za-z0-9._-]+/g, '_');
     if (!process.env.RESEND_API_KEY) return res.json({ ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email });
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
         subject: 'Dock & Bay — ' + KEYS[key] + ' (' + new Date().toISOString().slice(0, 10) + ')',
@@ -21882,7 +21904,7 @@ async function drivehqForecastCountry(country) {
   const url = [base, encodeURIComponent(folder), encodeURIComponent(filename)].join('/');
   const auth = Buffer.from(process.env.DRIVEHQ_USER + ':' + process.env.DRIVEHQ_PASS).toString('base64');
   try {
-    const r = await fetch(url, { method: 'PUT', headers: { Authorization: 'Basic ' + auth, 'Content-Type': 'text/csv' }, body: csv, redirect: 'follow' });
+    const r = await _fetchT(url, { method: 'PUT', headers: { Authorization: 'Basic ' + auth, 'Content-Type': 'text/csv' }, body: csv, redirect: 'follow' }, 60000);   // v28.151 (review D3)
     if (r.status < 200 || r.status >= 300) return { country: co, ok: false, reason: 'DriveHQ HTTP ' + r.status + ': ' + (await r.text()).slice(0, 200) };
     return { country: co, ok: true, url, rows: rowCount, bytes: Buffer.byteLength(csv) };
   } catch (e) { return { country: co, ok: false, reason: 'DriveHQ upload error: ' + e.message }; }
