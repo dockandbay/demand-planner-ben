@@ -1546,16 +1546,30 @@ function hzEnsureDemand(){ try{ if(typeof buildLiveDemand!=="function")return; i
 var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
-(function(){
-  var maxM=0;
-  (DATA||[]).forEach(function(r){ if(r&&r.m){ for(var k in r.m){ if(k.indexOf('2026_')===0){ var v=r.m[k], u=(v&&v.length)?v[0]:v; if(u){ var mo=parseInt(k.slice(5),10); if(mo>maxM)maxM=mo; } } } } });
-  if(!maxM)maxM=1;
-  ACTUAL_MONTHS=[]; for(var i=1;i<=maxM;i++)ACTUAL_MONTHS.push('2026_'+(i<10?'0':'')+i);
+// v28.151 (review A4): LY months for SKU share building = the calendar year BEFORE CUR_MONTH's year (2025_01..2025_12 while
+// CUR_MONTH is in 2026, so byte-identical now; rolls to 2026 in Jan-27). Replaces the hardcoded 2025 lists in the buy engine.
+function hzLyMonths(){ var y=(typeof CUR_MONTH==='string'&&CUR_MONTH)?(+CUR_MONTH.slice(0,4)-1):(new Date().getFullYear()-1), o=[]; for(var i=1;i<=12;i++)o.push(y+'_'+(i<10?'0':'')+i); return o; }
+// v28.151 (review A4): any year, not just '2026_'. CUR_MONTH = latest YYYY_MM with units (capped at the calendar month, so a
+// future-dated row can't move it); ACTUAL_MONTHS keeps its meaning = Jan..CUR_MONTH of CUR_MONTH's year. Byte-identical in 2026.
+// Named (was an anonymous IIFE) so a year-rollover test can re-run it; called once right here as before.
+function hzInitCurMonth(){
+  var maxK='', _n=new Date(), _cal=_n.getFullYear()+'_'+((_n.getMonth()+1)<10?'0':'')+(_n.getMonth()+1);
+  (DATA||[]).forEach(function(r){ if(r&&r.m){ for(var k in r.m){ if(/^\d{4}_\d{2}$/.test(k)&&k>maxK&&k<=_cal){ var v=r.m[k], u=(v&&v.length)?v[0]:v; if(u)maxK=k; } } } });
+  if(!maxK)maxK=_n.getFullYear()+'_01';
+  var _cy=maxK.slice(0,4), maxM=parseInt(maxK.slice(5),10);
+  ACTUAL_MONTHS=[]; for(var i=1;i<=maxM;i++)ACTUAL_MONTHS.push(_cy+'_'+(i<10?'0':'')+i);
   CUR_MONTH=ACTUAL_MONTHS[ACTUAL_MONTHS.length-1];
+  // v28.151 (review A4): FM_CALC (cascade months) must cover the buy window (18 months from the later of CUR_MONTH and the calendar
+  // month). Extend it month by month to the following Feb (fiscal year end) only when that window runs past 2029_02. No-op today.
+  (function(){ var st=(CUR_MONTH>_cal?CUR_MONTH:_cal), y=+st.slice(0,4), mo=+st.slice(5,7)+18; while(mo>12){mo-=12;y++;} var need=y+'_'+(mo<10?'0':'')+mo;
+    var last=FM_CALC[FM_CALC.length-1]; if(need<=last)return; var ly=+last.slice(0,4), lm=+last.slice(5,7);
+    while(true){ lm++; if(lm>12){lm=1;ly++;} var k=ly+'_'+(lm<10?'0':'')+lm; FM_CALC.push(k); if(k>=need&&lm===2)break; } })();
   CUR_FY_START=fyStartOf(CUR_MONTH); // e.g. Jun 2026 → FY starting Mar 2026 = 2026
   CUR_YTD_END=prevMonthKey(CUR_MONTH); // last complete month (current month is partial)
+  try{ RUNOFF_LYYM=hzLyMonths(); }catch(e){}   // v28.151 (review A4): keep the run-off LY window in step if this is re-run
   TIME_COLS=buildTimeCols(); // ordered month/total column spec for the display strip
-})();
+}
+hzInitCurMonth();
 // Buy plan data (embedded from buy_plan_data.json). Read by the BUY tab in later parts.
 // Shape: {built, demand_source, may_days, sku_list:[{s,ti,sc,c,cs,ms}], products:{sku:{cp,moq,supp,mkts}}}
 var BP_DATA={products:{},sku_list:[],built:'',demand_source:'',may_days:{elapsed:0,remaining:0,total:0}};
@@ -5345,30 +5359,31 @@ function calc(s,co,ch){
     const{y,mo}=pa(fym),ik=kb+'|'+fym,stored=IV[ik];
     // Actuals for ALL channels incl ZAL — Zalando LY actuals are now uploaded to sales_actuals (channel ZAL),
     // so past months show real actuals in the category + SKU cells (same as DTC/FBA).
-    if(ACTUAL_MONTHS.indexOf(fym)>=0){fu[fym]=a[fym]?a[fym][0]:0;return;}
+    if(fym<=CUR_MONTH){fu[fym]=a[fym]?a[fym][0]:0;return;}   // v28.151 (review A4): actual = any month up to CUR_MONTH (was ACTUAL_MONTHS = current calendar year only; identical in 2026, keeps 2026 as actuals from Jan-27)
     if(ch==='ZAL'){   // Zalando FORECAST months: absolute manual entry (no LY base / growth / smoothing). LY actuals still display via the actuals branch above.
       var _zv=(stored!=null&&stored!=='')?parseFloat(String(stored).replace(/^'/,'').replace('%','')):0;
       fu[fym]=Math.max(0,isFinite(_zv)?Math.round(_zv):0); reasons[fym]='Zalando forecast: '+fn(fu[fym])+' units'; return;
     }
     const prevAct=a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0;
-    const prevAct26=a[ym(2026,mo)]?a[ym(2026,mo)][0]:0;
-    // 2027 base lookup: when the matching 2026 month is the current/partial month,
+    // v28.151 (review A4): year rules relative to CUR_MONTH's year (_cy) instead of hardcoded 2026..2029. With _cy=2026 this is the
+    // old logic exactly: 2026 → LY actual, 2027 → 2026 fc/actual (current month → full-month FC), 2028+ → prior-year forecast.
+    const _cy=+String(CUR_MONTH).slice(0,4);
+    const prevActCY=a[ym(_cy,mo)]?a[ym(_cy,mo)][0]:0;
+    // Next-year base lookup: when the matching current-year month is the current/partial month,
     // its fu[] entry is the MTD actual (per line above), which under-represents the
     // full month. Use curMonthForecast() instead so e.g. Jun 2027 anchors on the
     // full-month Jun 2026 FC, not just the first few days' sales.
     var base;
-    if(y===2027){
-      var ref26=ym(2026,mo);
-      if(ref26===CUR_MONTH){base=curMonthForecast(s,co,ch);}
-      else{base=fu[ref26]||prevAct26||0;}
-    } else if(y===2028){
-      base=fu[ym(2027,mo)]||0; // 2028 cascades off the 2027 forecast
-    } else if(y===2029){
-      base=fu[ym(2028,mo)]||0; // calc-only Jan/Feb 2029 (feeds the FY28/29 total)
+    if(y===_cy+1){
+      var refCY=ym(_cy,mo);
+      if(refCY===CUR_MONTH){base=curMonthForecast(s,co,ch);}
+      else{base=fu[refCY]||prevActCY||0;}
+    } else if(y>_cy+1){
+      base=fu[ym(y-1,mo)]||0; // later years cascade off the prior year's forecast (incl. the calc-only FY-end spill months)
     } else {
       base=prevAct;
     }
-    const bLbl=y===2027?'2026 fc '+fn(Math.round(base)):(y===2028||y===2029)?(y-1)+' fc '+fn(Math.round(base)):'LY '+fn(Math.round(base));
+    const bLbl=y===_cy+1?_cy+' fc '+fn(Math.round(base)):(y>_cy+1)?(y-1)+' fc '+fn(Math.round(base)):'LY '+fn(Math.round(base));
     var fc;
     if(stored!=null&&stored!==''){
       const ps=parseStored(stored);
@@ -7504,7 +7519,7 @@ function buildSkuShares(skus,co,ch,lyMonths){
 // Used by the row display, skuMonthlyMap (download), both smoothing caps and buildLiveDemand (buy feed) so all agree.
 // Memoised per render / per demand build (RUNOFF_MEMO). Returns {alloc:{ch:{m:units}}, out:{ch:{m:true}}, cap:{ch:{m:units}}}.
 var RUNOFF_TAIL_MAX=100;   // v27.545: stranded run-off tail up to this many units rolls into the next month (Ben: "6 units outstanding can just go in the next month into DTC")
-var RUNOFF_MEMO={}, RUNOFF_LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+var RUNOFF_MEMO={}, RUNOFF_LYYM=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12
 function runoffChannels(p,ctry){ var av=(p.av&&p.av[ctry])||'', chs=[]; if(av.indexOf('d')>=0)chs.push('DTC'); if(av.indexOf('b')>=0)chs.push('B2B'); if(av.indexOf('t')>=0&&typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(ctry.toUpperCase())>=0)chs.push('TIK'); if(av.indexOf('f')>=0)chs.push('FBA'); return chs; }
 // ── v27.545 sets ↔ components (Ben, PNKPARA): ONE source of truth for the set demand that lands on a discontinued component
 //    (display == buy feed), and a set can only sell what its discontinued components can still build.
@@ -11485,7 +11500,7 @@ function excComputeMaps(co,ch,wmapeMonths){
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));   // 3 completed months = recent window (yoy/bias/sellnofc)
   var _wm=Math.max(1,Math.min(6,parseInt(wmapeMonths,10)||3)); var prevW=[monDec(_cm)]; for(var _wi=1;_wi<_wm;_wi++)prevW.push(monDec(prevW[_wi-1]));   // CONFIGURABLE accuracy window (last N completed months, N=1–6, default 3) — WMAPE only
-  var lym=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];   // LY months for buildSkuShares — MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
+  var lym=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12. LY months for buildSkuShares — MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
   var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b');
   var _locked=(typeof LOCKED_FC!=='undefined'&&LOCKED_FC&&LOCKED_FC.sku)?LOCKED_FC.sku:{};   // locked forecast snapshots (fc-at-the-time) for accuracy/bias
   var TVOL=10;   // trailing-window volume floor — below this, don't call a trend (too noisy)
@@ -16574,7 +16589,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
   // different demand split). Both are idempotent ("runs once data is ready").
   try{ if(typeof zalInit==='function')zalInit(); }catch(e){} try{ if(typeof tikInit==='function')tikInit(); }catch(e){}   // v27.534: allocations must reflect the latest overrides / stock
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
-  var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYearMonths=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12
   var MK=['UK','US','EU','AU','CA'];
   var CHS=[['DTC','d'],['B2B','b'],['FBA','f'],['TIK','t']];
   var subcats={};Object.keys(SKUM).forEach(function(s){var p=SKUM[s];if(p&&p.s)subcats[p.s]=1;});
