@@ -3122,7 +3122,7 @@
     var hBtn=document.getElementById('po-hide-btn'), hMenu=document.getElementById('po-hide-menu');
     if(hBtn&&hMenu){
       hBtn.onclick=function(e){ e.stopPropagation(); hMenu.style.display=(hMenu.style.display==='none'?'block':'none'); };
-      document.addEventListener('click',function(e){ if(hMenu.style.display!=='none' && !hMenu.contains(e.target) && e.target!==hBtn) hMenu.style.display='none'; });
+      if(!window._poHideDocBound){ window._poHideDocBound=1; document.addEventListener('click',function(e){ var m=document.getElementById('po-hide-menu'), hb=document.getElementById('po-hide-btn'); if(m&&m.style.display!=='none' && !m.contains(e.target) && e.target!==hb) m.style.display='none'; }); }   // v28.151 (review F5): bound once, looks the menu up by id (was one listener per render)
       function syncHide(){ var n=_hideCount(); hBtn.textContent='Hide'+(n?' ('+n+')':'')+' ▾'; hBtn.style.background=n?'#0f172a':''; hBtn.style.color=n?'#fff':''; hBtn.style.borderColor=n?'#0f172a':''; hBtn.style.fontWeight=n?'700':''; }
       var ph1=document.getElementById('po-hide-snz'); if(ph1)ph1.onchange=function(){ _poShowSnoozed=!this.checked; syncHide(); view(); };
       var ph2=document.getElementById('po-hide-pay'); if(ph2)ph2.onchange=function(){ _hidePayDue=this.checked; syncHide(); view(); };
@@ -5028,7 +5028,7 @@
         var x=box.querySelector('.op-dupwarn-x'); if(x)x.onclick=function(){ x.disabled=true; fetch('/api/supply/po/'+encodeURIComponent(_po)+'/invoice-duplicates/dismiss',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(){ box.innerHTML=''; }); }; }).catch(function(){}); });
     document.querySelectorAll('#podet-'+i+' .op-bc-dl').forEach(function(b){ var menu=b.parentNode&&b.parentNode.querySelector('.op-bc-menu'); if(!menu)return;   // v27.697 Download barcodes ▾
       b.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'':'none'); };
-      document.addEventListener('click',function(){ menu.style.display='none'; });
+      if(!window._opBcDocBound){ window._opBcDocBound=1; document.addEventListener('click',function(){ document.querySelectorAll('.op-bc-menu').forEach(function(m){ if(m.style.display!=='none')m.style.display='none'; }); }); }   // v28.151 (review F5): one delegated closer for every barcode menu
       menu.querySelectorAll('.op-bc-opt').forEach(function(o){ o.onclick=function(e){ e.stopPropagation(); menu.style.display='none'; poBarcodesDownload(b.dataset.po, o.dataset.k, b); }; }); });
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
@@ -14311,7 +14311,7 @@
           if(!add.length){ alert('Tick at least one SKU (add a qty too).'); return; }
           ta.value=(ta.value?ta.value.replace(/\s*$/,'')+'\n':'')+add.join('\n'); skres.style.display='none'; skq.value=''; ta.focus(); };
       }).catch(function(){}); },300); };
-    document.addEventListener('click',function(e){ if(skres&&skq&&!skres.contains(e.target)&&e.target!==skq)skres.style.display='none'; });
+    if(!window._b2bSkDocBound){ window._b2bSkDocBound=1; document.addEventListener('click',function(e){ var r=document.getElementById('b2b-skres'), q=document.getElementById('b2b-skq'); if(r&&q&&!r.contains(e.target)&&e.target!==q)r.style.display='none'; }); }   // v28.151 (review F5): bound once (was per render)
     // ---- Recent (shared) analyses ----
     function loadRecent(){ var el=document.getElementById('b2b-recent'); if(!el)return;
       fetch('/api/scenario/b2b/recent').then(function(r){return r.json();}).then(function(d){ var rows=(d&&d.rows)||[]; if(!rows.length){ el.innerHTML=''; return; }
@@ -14825,7 +14825,7 @@
         box.addEventListener('mouseover',function(e){ if(!(e.metaKey||e.ctrlKey))return; var inp=e.target&&e.target.closest?e.target.closest('.bpm-q'):null; if(!inp)return; var k=inp.dataset.s+'|'+inp.dataset.c; if(!_selMap[k]){ var td=inp.closest('td'); if(td)td.style.boxShadow='inset 0 0 0 2px var(--violet)'; _selMap[k]={v:Number(inp.value)||0,td:td}; } _paint(e); });
         box.addEventListener('mousemove',function(e){ if((e.metaKey||e.ctrlKey)){ for(var _k in _selMap){ _paint(e); break; } } });
         box.addEventListener('mousedown',function(e){ if(!(e.metaKey||e.ctrlKey))_clr(); });
-        document.addEventListener('keydown',function(e){ if(e.key==='Escape')_clr(); });
+        window._hzSumClr=_clr; if(!window._hzSumEscBound){ window._hzSumEscBound=1; document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&window._hzSumClr)window._hzSumClr(); }); }   // v28.151 (review F5): one Esc listener; clears the latest grid's selection
       }
       var _tickQ=function(t){ var q=t.parentNode&&t.parentNode.querySelector('.bpm-q'); return q?(Number(q.value)||0):0; };   // ticking never selects a 0-qty cell
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); invalidatePreview(); drawSkus(); }; });
@@ -16998,7 +16998,7 @@
       body.querySelectorAll('.pc2-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this component from the product?'))return; shipPost('/api/product/component/'+a.dataset.id+'/delete',{},function(){ _reload(); }); }; });
       body.querySelectorAll('.pc2-spec').forEach(function(a){ a.onclick=function(){ openSpecPick(a,function(sid){ if(!sid)return; var c=byId(a.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:a.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:'spec_linked',spec_id:sid},function(){ _reload(); }); }); }; });
       body.querySelectorAll('.pc2-tosizes').forEach(function(a){ a.onclick=function(){ var host=body.parentElement||body; var b=host.querySelector('.pd-tab[data-t="sizes"]'); if(b)b.click(); }; });
-      var _ab=body.querySelector('#pc2-addbtn'), _pop=body.querySelector('#pc2-addpop'); if(_ab&&_pop){ _ab.onclick=function(e){ e.stopPropagation(); _pop.style.display=(_pop.style.display==='none'?'':'none'); if(_pop.style.display!=='none'){ var f=_pop.querySelector('.pc2-pick')||_pop.querySelector('#pc2-newname'); if(f)f.focus(); } }; _pop.onclick=function(e){ e.stopPropagation(); }; document.addEventListener('click',function(){ _pop.style.display='none'; });
+      var _ab=body.querySelector('#pc2-addbtn'), _pop=body.querySelector('#pc2-addpop'); if(_ab&&_pop){ _ab.onclick=function(e){ e.stopPropagation(); _pop.style.display=(_pop.style.display==='none'?'':'none'); if(_pop.style.display!=='none'){ var f=_pop.querySelector('.pc2-pick')||_pop.querySelector('#pc2-newname'); if(f)f.focus(); } }; _pop.onclick=function(e){ e.stopPropagation(); }; if(!window._pc2PopDocBound){ window._pc2PopDocBound=1; document.addEventListener('click',function(){ var pp=document.getElementById('pc2-addpop'); if(pp)pp.style.display='none'; }); }   // v28.151 (review F5): bound once
         body.querySelector('#pc2-addx').onclick=function(){ _pop.style.display='none'; };
         body.querySelector('#pc2-addgo').onclick=function(){ var msg=_pop.querySelector('#pc2-addmsg'); var picks=Array.prototype.slice.call(_pop.querySelectorAll('.pc2-pick:checked')); var nn=(_pop.querySelector('#pc2-newname').value||'').trim(), ns='';   // v27.713: no per-component supplier (suppliers come from requests)
           if(!picks.length&&!nn){ msg.style.color='var(--neg)'; msg.textContent='Tick a component or type a new one.'; return; } msg.style.color='var(--muted)'; msg.textContent='Adding…';
