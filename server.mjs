@@ -1203,10 +1203,17 @@ async function _buildDataVals() {
     buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(), buildCatAspGBP(), buildLockedFc(),
   ]);
 }
+// v28.151 (review E3): generation counter. invalidateDataCache() bumps it; a build that STARTED before the bump read
+// pre-save data, so on completion it is discarded (not cached, not written to KV, where other instances would serve it for
+// up to MAX_BLOB_AGE) and exactly one more build runs. Several invalidations during one build coalesce into that one.
+let _dataGen = 0;
 function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
   if (_dataRefresh) return _dataRefresh;
+  const _gen = _dataGen;
   _dataRefresh = _buildDataVals()
-    .then(async (vals) => { _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
+    .then(async (vals) => {
+      if (_gen !== _dataGen) { _dataRefresh = null; return refreshDataCache(); }   // invalidated mid-build: stale, rebuild once more
+      _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
       try { invalidateBiCache(); } catch (e) { /* v27.886: fresh source data (ETL / self-heal rebuild) → BI/KPI projections recompute on next read */ }
       if (KV_ON) { try { await kvWriteBlob(vals); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })
     .catch((e) => { _dataRefresh = null; throw e; });
@@ -1218,8 +1225,8 @@ function bgRefresh() {
   if (_bgRefreshing || _dataRefresh) return;
   if (!KV_ON) { refreshDataCache().catch(() => {}); return; }
   if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { refreshDataCache().catch(() => {}); return; }   // blob past max age → authoritative rebuild from Supabase (surfaces ETL'd product-field changes), else just re-read
-  _bgRefreshing = true;
-  kvReadBlob().then((v) => { if (v) _dataCache = { at: Date.now(), vals: v }; }).catch(() => {}).finally(() => { _bgRefreshing = false; });
+  _bgRefreshing = true; const _gen = _dataGen;
+  kvReadBlob().then((v) => { if (v && _gen === _dataGen) _dataCache = { at: Date.now(), vals: v }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
 }
 // The accessor every serve path uses. In-process first; on a cold start, prefer KV (no Supabase); else build once.
 async function getDataVals() {
@@ -1229,7 +1236,7 @@ async function getDataVals() {
 }
 // Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
 // background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
-function invalidateDataCache() { _dataCache = null; try { shellMemoDrop(); } catch (_) {} refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
+function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoDrop(); } catch (_) {} refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
 (async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
@@ -6662,9 +6669,12 @@ async function currentSupplyEpoch() {
 }
 async function bumpSupplyEpoch() {
   try {
-    await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('supply_cache_epoch','1')
-      ON CONFLICT (key) DO UPDATE SET value=((coalesce(planner.app_settings.value,'0')::bigint)+1)::text, updated_at=now()`);
-    _epochAt = 0;   // force this instance to re-read on the next check so it sees its own bump immediately
+    const r = await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('supply_cache_epoch','1')
+      ON CONFLICT (key) DO UPDATE SET value=((coalesce(planner.app_settings.value,'0')::bigint)+1)::text, updated_at=now() RETURNING value`);
+    // v28.151 (review E4): adopt the bumped value directly (was _epochAt=0 + a re-read, which a concurrent in-flight read
+    // could overwrite with the pre-bump value for another 5s, so builds got stamped with the old epoch and ran twice).
+    const v = r.rows[0] ? Number(r.rows[0].value) : NaN;
+    if (Number.isFinite(v) && v >= _epochVal) { _epochVal = v; _epochAt = Date.now(); } else _epochAt = 0;
   } catch (e) { /* non-fatal */ }
 }
 // Run a heavy read with a hard server-side time cap, so a slow rebuild (e.g. under DB contention) can't hold a
@@ -6707,12 +6717,19 @@ async function swrGet(key, ttlMs, builder) {
 function swrStale(prefix) { for (const [k, e] of _swr) if (!prefix || k.startsWith(prefix)) { if (e.at > 0) e.at = 1; } }
 function swrDrop(prefix) { for (const k of Array.from(_swr.keys())) if (!prefix || k.startsWith(prefix)) _swr.delete(k); }
 function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
-  let entry = null, inflight = null, lastStart = 0;
-  function refresh(ep) {
+  let entry = null, inflight = null, lastStart = 0, gen = 0, pendingBump = null;
+  // v28.151 (review E4): (a) the build is stamped with the epoch read AFTER the invalidating bump has landed and BEFORE the
+  // builder runs (was: whatever _epochVal held when the build finished, usually the pre-bump value, so the next get() saw an
+  // epoch mismatch and rebuilt the whole cache a second time); (b) a generation counter: a build that was already running
+  // when invalidate() fired read pre-edit data, so it is discarded and one more build runs (was: cached as if fresh).
+  function refresh() {
     if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
-    lastStart = Date.now();
-    inflight = Promise.resolve().then(builder)
-      .then((v) => { entry = { v, at: Date.now(), epoch: (ep != null ? ep : _epochVal) }; inflight = null; return v; })
+    lastStart = Date.now(); const myGen = gen;
+    inflight = Promise.resolve(pendingBump).catch(() => {}).then(() => currentSupplyEpoch())
+      .then((ep) => Promise.resolve().then(builder).then((v) => {
+        inflight = null;
+        if (myGen !== gen) return refresh();       // invalidated mid-build → stale, rebuild once more
+        entry = { v, at: Date.now(), epoch: ep }; return v; }))
       .catch((e) => { inflight = null; throw e; });
     return inflight;
   }
@@ -6727,7 +6744,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   }
   function peek() { return entry ? entry.v : null; }
   function patch(fn) { if (!entry) return false; try { const v = fn(entry.v); if (v !== undefined) entry.v = v; return true; } catch (e) { return false; } }   // in-place row patch (keeps the epoch: a rebuild still follows, rate-limited)
-  const c = { name, get, refresh, peek, patch, invalidate() { entry = null; refresh().catch(() => {}); } };
+  const c = { name, get, refresh, peek, patch, invalidate(bump) { gen++; pendingBump = bump || null; entry = null; refresh().catch(() => {}); } };   // v28.151 (review E4): bump awaited inside refresh()
   _supplyCaches.push(c);
   // On Vercel, DON'T boot-warm or install a re-warm timer: an idle/frozen container fires the builder (opening a pooled
   // backend) with no request in flight → stranded connections + overnight reap spikes (Diviyaj 01-Sep). get() builds
@@ -6806,7 +6823,7 @@ function invalidateSupplyCaches() {
   const _epochBump = bumpSupplyEpoch();                          // shared epoch → every OTHER instance rebuilds too (cross-instance)
   try { shellMemoDrop(); } catch (_) {}                          // v28.081: the shell's fresh-builder memo too
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
-  _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
+  _supplyCaches.forEach((c) => { try { c.invalidate(_epochBump); } catch (e) { /* best-effort */ } });   // v28.151 (review E4): rebuild after the bump lands
   // v28.081: cached section responses are no longer dropped (that made the next PAYMENTS / CASH FLOW open block on a full
   // rebuild). They stay epoch-stale (never served after this edit) and rebuild NOW in the background, one after the epoch
   // bump lands so the new entries carry the new epoch; a request that lands mid-rebuild awaits it.
