@@ -3211,7 +3211,7 @@ async function fulfilMirrorOne(fulfilId, source) {
 // Import EVERY Fulfil PO into the mirror (cron: n8n later, or the in-app timer / this endpoint). One lines call for all POs.
 async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil caps page size at 500 — paginate.
   const PAGE = 500; let off = 0, out = [];
-  for (;;) { const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, PAGE, null, fields]); const arr = Array.isArray(rows) ? rows : []; out = out.concat(arr); if (arr.length < PAGE) break; off += PAGE; if (off > 50000) break; }
+  for (;;) { const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, PAGE, null, fields]); const arr = Array.isArray(rows) ? rows : []; out = out.concat(arr); if (arr.length < PAGE) break; off += PAGE; if (off > 50000) { out.truncated = true; console.warn('[fulfil] ' + model + ' search_read hit the 50k row cap: result truncated'); break; } }   // v28.151 (review D8): flag truncation
   return out;
 }
 let _fulfilImportBusy = null;   // v28.116 (review S9): single-flight — the 6h timer, the n8n webhook and a manual call could overlap, and their NOT-IN prunes deleted each other's rows
@@ -3230,8 +3230,9 @@ async function _fulfilImportPOsRun() {
   let n = 0; for (const p of list) { if (!p.reference) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
   // v27.902 (Ben): a full refresh also PRUNES rows the source no longer has (cancelled-and-purged POs, or rows imported from
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
-  let pruned = 0; if (n >= 20) { const keep = list.filter(p => p.reference).map(p => String(p.reference)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
-  return { ok: true, imported: n, pruned, env: cfg.env };
+  // v28.151 (review D8): never prune off a truncated pull (the 50k cap would delete every PO past the cap).
+  let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p.reference).map(p => String(p.reference)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
+  return { ok: true, imported: n, pruned, env: cfg.env, truncated: !!list.truncated };
 }
 // v27.901 (Ben): mirror of Fulfil INTERNAL SHIPMENTS (mig 302) — sister of the PO mirror, refreshed by the same cron.
 // Lines come from the INCOMING moves only (an IS has 4 legs of moves per SKU; summing all of them quadruples qty).
@@ -3258,7 +3259,7 @@ async function fulfilImportInternalShipments() {
       [s.id, s.number, s.reference || null, s.state || null, fulfilUnwrap(s.planned_date) || null, fulfilUnwrap(s.effective_date) || null, s['from_location.name'] || null, s['to_location.name'] || null, s.company || null, lines.length, JSON.stringify(lines), fulfilUnwrap(s.create_date) || null, fulfilUnwrap(s.write_date) || null]);
     n++;
   }
-  let pruned = 0; if (n >= 20) { pruned = (await pool.query(`DELETE FROM planner.fulfil_internal_shipments WHERE NOT (fulfil_id = ANY($1::bigint[]))`, [list.map(x => Number(x.id))])).rowCount; }   // v27.902: prune rows the source no longer has (guarded)
+  let pruned = 0; if (n >= 20 && !list.truncated) { pruned = (await pool.query(`DELETE FROM planner.fulfil_internal_shipments WHERE NOT (fulfil_id = ANY($1::bigint[]))`, [list.map(x => Number(x.id))])).rowCount; }   // v27.902: prune rows the source no longer has (guarded)
   return { ok: true, internal_shipments: n, pruned, env: cfg.env };
 }
 // Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
@@ -5251,7 +5252,9 @@ app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
     if (!src) return res.status(400).json({ error: 'Bill ' + (link.external_ref || link.external_id) + ' was not found in Xero UK — it may already have been moved. Skipping ' + po + '.' });
     const invNo = src.InvoiceNumber || po;
     // Duplicate guard: is there already an ACCPAY bill with this number in Xero AU?
-    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/["\\]/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; } catch (e) {}
+    // v28.151 (review D8): fail CLOSED. A failed duplicate check used to be swallowed (dupe=null) and the bill created anyway.
+    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/["\\]/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; }
+    catch (e) { console.error('[xero au-migrate] duplicate check failed for ' + po + ':', e.message); return res.status(502).json({ error: 'Could not check Xero AU for an existing bill ' + invNo + ' (' + e.message + '). Nothing created; try again.' }); }
     if (dupe && dupe.InvoiceID) return res.status(409).json({ error: 'An AU bill ' + invNo + ' already exists (InvoiceID ' + dupe.InvoiceID + ') — ' + po + ' looks already migrated.', au_bill: { id: dupe.InvoiceID, number: dupe.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + dupe.InvoiceID } });
     const contactName = (src.Contact && src.Contact.Name) || poRow.supplier || 'Supplier';
     // Source contact detail from UK (to seed a new AU contact with email/address/phone, not a name-only stub).
@@ -13283,13 +13286,16 @@ async function bladeVariations(token) {   // paginate stock_availability → { m
   while (page <= 100) {
     const r = await _fetchT(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
       { headers: { 'Access-Token': token, 'Content-Type': 'application/json' } });
-    if (!r.ok) break;
-    const j = await r.json().catch(() => null); const data = (j && j.data) || [];
-    if (!data.length) break;
+    // v28.151 (review D8): a failed page used to `break`, so a partial variation list built a partial stock request that
+    // was then reported as the complete EU stock position. A non-OK or unparseable page (or hitting the page cap) now throws.
+    if (!r.ok) throw new Error('Blade variations page ' + page + ' failed (HTTP ' + r.status + '): stock not fetched');
+    const j = await r.json().catch(() => null); if (!j) throw new Error('Blade variations page ' + page + ' returned unreadable JSON: stock not fetched');
+    const data = j.data || [];
+    if (!data.length) return { map, ids };
     data.forEach(v => { if (v && v.id != null) { map[String(v.id)] = String(v.sku || '').trim(); ids.push(Number(v.id)); } });
     page++;
   }
-  return { map, ids };
+  throw new Error('Blade variations exceeded 100 pages: stock not fetched (raise the cap)');
 }
 async function bladeStocks(token, body) {   // PUT /stocks (a read); body built from all variation ids + warehouse
   const r = await _fetchT(BLADE.base + '/products/variations/stocks', { method: 'PUT',
