@@ -87,6 +87,11 @@ const pool = new pg.Pool({
   // the remote pooler — the residual per-query ~300ms is network RTT to the remote sandbox (not present on live).
   idleTimeoutMillis: process.env.VERCEL ? 8000 : 30000,
   keepAlive: true,
+  // v28.151 (review E1): fail fast instead of piling up. A checkout that can't get a connection in 10s errors (no
+  // unbounded queue behind a saturated 4-conn pool = the death-spiral mechanism); a query with no reply in 35s
+  // errors client-side (belt to the 30s server statement_timeout, which the pooler may drop: see E2 / ALTER ROLE).
+  connectionTimeoutMillis: 10000,
+  query_timeout: 35000,
 });
 // ── Resilience guards ─────────────────────────────────────────────────────────
 // A dropped idle DB connection makes the pool emit 'error'; with no listener Node treats it as
@@ -2033,17 +2038,17 @@ app.post('/api/save-forecasts', async (req, res) => {
     for (let i = 0; i < ups.length; i += CH) {
       const slice = ups.slice(i, i + CH), vals = [], params = [];
       slice.forEach((r, j) => { const o = j * 5; vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},'review_ui',now())`); params.push(r[0], r[1], r[2], r[3], r[4]); });
-      await client.query(
+      await client.query({ text:
         `INSERT INTO planner.forecast_inputs (subcategory, country, channel, month, value_raw, source, updated_at)
          VALUES ${vals.join(',')}
          ON CONFLICT (subcategory, country, channel, month)
-         DO UPDATE SET value_raw=EXCLUDED.value_raw, source='review_ui', updated_at=now()`, params);
+         DO UPDATE SET value_raw=EXCLUDED.value_raw, source='review_ui', updated_at=now()`, values: params, query_timeout: 125000 });   // v28.151 (review E1): per-query override of the 35s pool query_timeout (SET LOCAL 120s above)
       upserts += slice.length;
     }
     for (let i = 0; i < dels.length; i += CH) {
       const slice = dels.slice(i, i + CH), tup = [], params = [];
       slice.forEach((r, j) => { const o = j * 4; tup.push(`($${o+1},$${o+2},$${o+3},$${o+4}::date)`); params.push(r[0], r[1], r[2], r[3]); });
-      await client.query(`DELETE FROM planner.forecast_inputs WHERE (subcategory,country,channel,month) IN (VALUES ${tup.join(',')})`, params);
+      await client.query({ text: `DELETE FROM planner.forecast_inputs WHERE (subcategory,country,channel,month) IN (VALUES ${tup.join(',')})`, values: params, query_timeout: 125000 });
       deletes += slice.length;
     }
     await client.query(
@@ -2088,11 +2093,11 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
     for (let i = 0; i < rows.length; i += CH) {
       const slice = rows.slice(i, i + CH), vals = [], params = [];
       slice.forEach((r, j) => { const o = j * 5; vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},'review_ui',now())`); params.push(r[0], r[1], r[2], r[3], r[4]); });
-      await client.query(
+      await client.query({ text:
         `INSERT INTO planner.forecast_outputs (sku, warehouse, channel, month, units, source, updated_at)
          VALUES ${vals.join(',')}
          ON CONFLICT (sku, warehouse, channel, month)
-         DO UPDATE SET units=EXCLUDED.units, source='review_ui', updated_at=now()`, params);
+         DO UPDATE SET units=EXCLUDED.units, source='review_ui', updated_at=now()`, values: params, query_timeout: 125000 });   // v28.151 (review E1): see save-forecasts
       n += slice.length;
     }
     await client.query(
