@@ -21465,13 +21465,26 @@ app.post('/api/client/commission/runs/build', async (req, res) => {
     if (run.status !== 'open') return res.status(409).json({ error: 'run is ' + run.status + ' — reopen it first' });
     // provisional Fulfil rows: done orders in scope for this group's clients, dated in the month (paid date unknown until Fulfil invoicing is mirrored)
     const clients = (await pool.query(`SELECT * FROM planner.clients WHERE rep_group_id=$1 AND active`, [gid])).rows;
-    let added = 0;
+    // v28.151 (review E8): was an exists-check + rate lookup + INSERT per order (3 round trips each, racy under a double
+    // build). Now: existing refs + rate overrides preloaded once, all new rows in ONE unnest insert, and duplicates are
+    // impossible via migration 327's partial unique index (run_id, order_ref) WHERE source='fulfil' + ON CONFLICT DO NOTHING.
+    const _have = new Set((await pool.query(`SELECT order_ref FROM planner.commission_rows WHERE run_id=$1`, [run.id])).rows.map(x => x.order_ref));
+    const _ovr = new Map((await pool.query(`SELECT order_ref, rate FROM planner.commission_overrides WHERE rep_group_id=$1`, [gid])).rows.map(x => [x.order_ref, Number(x.rate)]));
+    const _ins = { ref: [], inv: [], cust: [], paid: [], amt: [], rate: [], com: [], status: [], note: [] };
     for (const c0 of clients) { const c = await cpClientById(c0.id); const params = [month]; const vis = cpVisibilitySql(c, null, params);
       const rows = (await pool.query(`SELECT s.reference, s.number, s.party_name, s.untaxed, s.total, to_char(s.sale_date,'YYYY-MM-DD') d, s.invoice_state FROM planner.fulfil_sales s WHERE to_char(s.sale_date,'YYYY-MM')=$1 AND s.state IN ('done','processing') AND ${vis}`, params)).rows;
-      for (const r of rows) { const ref = r.reference || r.number; const exists = (await pool.query(`SELECT 1 FROM planner.commission_rows WHERE run_id=$1 AND order_ref=$2`, [run.id, ref])).rowCount; if (exists) continue;
-        const rate = await cpRateFor(gid, ref, g.default_rate); const amt = Number(r.untaxed) || 0; const com = Math.round(amt * rate) / 100;
-        await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11,'fulfil')`,
-          [run.id, ref, r.number, r.party_name, r.invoice_state === 'paid' ? r.d : null, amt, rate, com, month + ' ' + g.name, r.invoice_state === 'paid' ? 'pending' : 'exception', r.invoice_state === 'paid' ? null : 'paid date unknown — Fulfil invoice not paid/mirrored; confirm from Xero or mark manually']); added++; } }
+      for (const r of rows) { const ref = r.reference || r.number; if (_have.has(ref)) continue; _have.add(ref);
+        const rate = _ovr.has(ref) ? _ovr.get(ref) : (Number(g.default_rate) || 0); const amt = Number(r.untaxed) || 0; const com = Math.round(amt * rate) / 100;   // same rule as cpRateFor
+        const paid = r.invoice_state === 'paid';
+        _ins.ref.push(ref); _ins.inv.push(r.number); _ins.cust.push(r.party_name); _ins.paid.push(paid ? r.d : null); _ins.amt.push(amt); _ins.rate.push(rate); _ins.com.push(com);
+        _ins.status.push(paid ? 'pending' : 'exception'); _ins.note.push(paid ? null : 'paid date unknown: Fulfil invoice not paid/mirrored; confirm from Xero or mark manually'); } }
+    let added = 0;
+    if (_ins.ref.length) { const _sql = (oc) => `INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source)
+        SELECT $1, u.ref, u.inv, u.cust, u.paid, u.amt, u.rate, u.com, u.com, $2, u.status, u.note, 'fulfil'
+          FROM unnest($3::text[], $4::text[], $5::text[], $6::date[], $7::numeric[], $8::numeric[], $9::numeric[], $10::text[], $11::text[]) AS u(ref, inv, cust, paid, amt, rate, com, status, note)` + (oc ? ` ON CONFLICT (run_id, order_ref) WHERE source = 'fulfil' DO NOTHING` : '');
+      const _p = [run.id, month + ' ' + g.name, _ins.ref, _ins.inv, _ins.cust, _ins.paid, _ins.amt, _ins.rate, _ins.com, _ins.status, _ins.note];
+      try { added = (await pool.query(_sql(true), _p)).rowCount; }
+      catch (e) { if (e.code !== '42P10') throw e; console.warn('[commission build] migration 327 index missing: inserting without ON CONFLICT'); added = (await pool.query(_sql(false), _p)).rowCount; } }   // 42P10 = no matching unique index (pre-327)
     const sum = await cpRunSummary(run.id);
     await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · +' + added + ' rows', req.me.email);
     res.json({ ok: true, run_id: run.id, added, ...sum });
