@@ -11505,7 +11505,7 @@ function excComputeMaps(co,ch,wmapeMonths){
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));   // 3 completed months = recent window (yoy/bias/sellnofc)
   var _wm=Math.max(1,Math.min(6,parseInt(wmapeMonths,10)||3)); var prevW=[monDec(_cm)]; for(var _wi=1;_wi<_wm;_wi++)prevW.push(monDec(prevW[_wi-1]));   // CONFIGURABLE accuracy window (last N completed months, N=1–6, default 3) — WMAPE only
-  var lym=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12. LY months for buildSkuShares — MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
+  var lym=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12. LY months for buildSkuShares: MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
   var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b');
   var _locked=(typeof LOCKED_FC!=='undefined'&&LOCKED_FC&&LOCKED_FC.sku)?LOCKED_FC.sku:{};   // locked forecast snapshots (fc-at-the-time) for accuracy/bias
   var TVOL=10;   // trailing-window volume floor — below this, don't call a trend (too noisy)
