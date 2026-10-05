@@ -1,3 +1,22 @@
+## v28.151 (Ben, branch review-fixes-2026-10-05): security hardening + supplier/client portal fixes (05-Oct review, threads B+C)
+
+**Files:** `server.mjs`, `supply/portal-view.js` (+ package.json, CHANGES.md). No migration. Optional env: `PORTAL_URL` (fixed base for supplier magic links; falls back to the request host), `HOST`/`PORT` for the local server.
+
+1. **Uploads / file serving (stored XSS):** uploads keep only an allowlisted mime (pdf, images, csv, txt, xlsx/xls, docx/doc, zip; anything else stored as `application/octet-stream`). Every file response sends `X-Content-Type-Options: nosniff` + `Content-Security-Policy: sandbox` (not on PDF so Chrome's viewer still works) and downloads as an attachment unless image/PDF. Global nosniff header. The `pk` key cookie is now `HttpOnly` (+`Secure` on https): no client JS reads it.
+2. **Image proxy:** `/api/supply/img` and `/api/portal/img` share one proxy: https only, hosts `res.cloudinary.com` + `cdn.shopify.com` only (the only hosts in product/label swatch URLs), no redirects, response must be image/png|jpeg|gif|webp.
+3. **Permissions fail closed:** with `PLANNER_KEY` set and no identity, `permsFor` returns read-only non-admin (was full admin); `cookieUser` guarded so a gated deploy of this repo does not ReferenceError; capability check returns 503 instead of allowing if the perms lookup throws. Local no-gate dev unchanged.
+4. **Misc server:** supplier magic links use `PORTAL_URL` when set (3 sites); `/api/portal/request-link` rate-limited 20/h per IP, 5/h per email; `/api/ai` strips `tools`/`tool_choice`; planner key + all 8 webhook secrets compared with `timingSafeEqual`; `FBA_DIMS` / `__HZ_LANDING` inline JSON escaped like `G_JS`.
+5. **Portal Confirm order / Approve / Approve all now persist.** `/api/portal/submit` handles `po_confirmed` (ported from the admin preview route): `supplier_confirmed_at`, `supplier_confirmed_by = portal user`, `approved_lines` snapshot; `false` clears. Was 200-but-no-op (live has 0 supplier confirmations ever).
+6. **Portal ownership:** client-sent `shipment_ref` honoured only if the supplier owns it (else the PO's own); escalate requires ownership for po, shipment and sample kinds.
+7. **Approve all** continues past failures, re-enables the button, re-renders and shows "N of M approved. Not approved: PO (reason)"; `postJSON` gained an error callback; single Confirm re-enabled on failure.
+8. **Portal payloads:** product-item / scan responses carry only the caller's own supplier(s) and drop `internal_stakeholders` / `notify_emails`; `erp_qty` removed from portal PO lines. Deposit refs kept (own supplier only, legitimate supplier feature).
+9. **Client portal:** both order emails HTML-escape every value; client-sent `force` no longer bypasses unknown/closed SKU validation.
+10. **Local dev server** binds `127.0.0.1` by default (`HOST=0.0.0.0` to opt out; tunnels unaffected) because `CIN7_AUTH` is live and there is no gate locally.
+
+**Verified (sandbox):** `tests/portal-inplace.cjs` all pass; text/html upload stored+served as octet-stream attachment with nosniff; proxy rejects foreign/metadata/http/lookalike hosts; gated `/api/me` key-only = read-only, writes 403; portal confirm on own PO writes `supplier_confirmed_by`, foreign PO 403, foreign shipment_ref ignored, foreign escalate 403, request-link 429 after 5.
+**Diviyaj:** set `PORTAL_URL` on prod to the real portal host (the code default `suppliers.dockandbay.com` has no DNS); confirm prod's login gate always sets the cookie before the app loads (key-only callers are now read-only); check whether prod's `/api/portal/submit` already diverged for `po_confirmed`; verify thumbnails still render with CSP sandbox.
+**Not done:** shared consolidated shipments (any supplier aboard can set Shipping, needs a product decision); `?key=` still accepted on page load; low items (CSV formula injection, e.message to portal, attachment-id ownership on notes, ILIKE supplier match, negative actual_cost).
+
 ## v28.150 (Ben → Diviyaj, branch fix/first-click-boot-freeze): fixes from the 02-Oct end-to-end review + Reports loading panel
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs` (+ package.json, CHANGES.md). No migration, no env var.
