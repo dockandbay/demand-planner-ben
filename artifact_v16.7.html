@@ -7531,6 +7531,10 @@ function setLoadOnComp(sku,co){ var res={tot:{},by:{}}; setsForComp(sku).forEach
 // how many boxes of this set its discontinued (run-off) components can still supply in month m — Infinity when nothing constrains
 function setBuildCap(setSku,co,m){ var cap=Infinity; try{ var ctry=String(co).toLowerCase(), ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01'; (SET_BOM[setSku]||[]).forEach(function(c){ if(!c||!c.sku)return; var cp=SKUM[c.sku]; if(!cp)return; var cd=(cp.disc||{})[ctry]; if(!cd||!(ms>cd))return;
     var A=runoffAlloc(c.sku,co), tot=(A.extra&&A.extra[m])||0, mine=(A.setBy&&A.setBy[m]&&A.setBy[m][setSku])||0; if(tot<=0||mine<=0)return; var got=((A.alloc.SET&&A.alloc.SET[m])||0)*mine/tot; cap=Math.min(cap,Math.floor(got/Math.max(1,Number(c.qty)||1))); }); }catch(e){} return cap; }
+// v28.151 (review A3): share pool for runoffAlloc with NO UI state: same subcat + permanent-activity + channel-availability rules
+// as filteredSkus(s,co,ch,true) with no filter applied (closed lyo SKUs excluded, TIK activity judged by the SKU's market, not CUR).
+function runoffPoolSkus(s,co,ch){ var ctry=String(co).toLowerCase(), c=String(ch).toLowerCase(), chKey=c==='dtc'?'d':c==='fba'?'f':c==='zal'?'z':c==='tik'?'t':'b';
+  return Object.keys(SKUM).filter(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s||p.lyo)return false; if(!skuHasAnyActivity(sku,co,co))return false; return (((p.av||{})[ctry])||'').indexOf(chKey)>=0; }); }
 function runoffAlloc(sku,co,extra){ var key=sku+'|'+co+(extra?'|X':''); if(RUNOFF_MEMO[key])return RUNOFF_MEMO[key];   // extra = {month: units} set-exploded demand landing on this component (buildLiveDemand pass 2)
   var p=SKUM[sku]||{}, ctry=String(co).toLowerCase(), inv=p.inv||{}, oo=p.oo||{};
   var discDate=(p.disc&&p.disc[ctry])?p.disc[ctry]:((p.lyo&&p.dsc)?p.dsc:null), launchDate=(p.lch&&p.lch[ctry])||null;
@@ -7541,7 +7545,7 @@ function runoffAlloc(sku,co,extra){ var key=sku+'|'+co+(extra?'|X':''); if(RUNOF
   if(isSet&&SET_BOM&&SET_BOM[sku]&&SET_BOM[sku].length)pool3=0;   // v27.545: a build-on-fly set has no 3PL stock of its own (its "3PL" figure is a derived buildable count) → 3PL demand is served by component build capacity only; FBA set stock is real and stays
   var st={}; chs.forEach(function(ch){ var sales=skuSales(sku,co,ch), fu={}, sh=0;
     try{ fu=(calc(p.s,co,ch)||{}).fu||{}; }catch(e){}
-    try{ var all=filteredSkus(p.s,co,ch,true)||[]; if(all.indexOf(sku)<0)all=all.concat([sku]); sh=(buildSkuShares(all,co,ch,RUNOFF_LYYM)||{})[sku]||0; }catch(e){}
+    try{ var all=runoffPoolSkus(p.s,co,ch); if(all.indexOf(sku)<0)all=all.concat([sku]); sh=(buildSkuShares(all,co,ch,RUNOFF_LYYM)||{})[sku]||0; }catch(e){}   // v28.151 (review A3): data-only pool (was filteredSkus, which applied FR_ACTIVE / PLAN_SKU_QRY / PLAN_RW, so the buy moved with DEMAND screen filters)
     st[ch]={sales:sales,hasLY:skuHasLY(sales),fu:fu,sh:sh,fc:{}}; res.alloc[ch]={}; res.out[ch]={}; res.cap[ch]={}; });
   function raw(ch,m){ var x=st[ch]; var fo=skuOutFC(sku,co,ch,m); if(fo!=null)return isSet?fo/Math.max(1,_setSize(sku)):fo; if(x.hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); return (lyM<=CUR_YTD_END)?(x.sales[lyM]||0):(x.fc[lyM]||0); } return Math.round((x.fu[m]||0)*x.sh/(isSet?Math.max(1,_setSize(sku)):1)); }   // sets: everything here is BOXES — override stored item-equiv ÷setSize, LY actuals already boxes, cascade ÷setSize. runoffAlloc's pool math + buy explosion both need boxes (display consumers ×setSize back to item-equiv).
   FM_CALC.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', live=(m>=CUR_MONTH);
@@ -7754,7 +7758,7 @@ function compute3plWeeksRemaining(sku,co){
 // has SOH on the 3PL or FBA warehouse; has any inbound shipment for either
 // warehouse; has any nonzero entry in FC_OUTPUTS for any channel in this country.
 // Returns true if the SKU has at least one signal of activity in this country.
-function skuHasAnyActivity(sku,co){
+function skuHasAnyActivity(sku,co,tikCo){   // v28.151 (review A3): optional tikCo = market whose TIK enablement counts (runoffPoolSkus passes co; other callers keep CUR)
   var p=SKUM[sku];if(!p)return false;
   var ctry=co.toLowerCase(),wh3=ctry+'_3pl',whF=ctry+'_fba';
   // (1) Not discontinued (or discontinue date is in the future)
@@ -7766,7 +7770,7 @@ function skuHasAnyActivity(sku,co){
   // (3) Inbound shipments to either warehouse
   if(SKUI[sku+'|'+wh3]||SKUI[sku+'|'+whF])return true;
   // (4) Any nonzero forecast in FC_OUTPUTS for any channel in this country
-  var CHS=['DTC','FBA','B2B'].concat((typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(CUR)>=0)?['TIK']:[]);
+  var CHS=['DTC','FBA','B2B'].concat((typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(tikCo||CUR)>=0)?['TIK']:[]);
   for(var i=0;i<CHS.length;i++){
     for(var j=0;j<2;j++){
       var w=(j===0)?wh3:whF;if(!w)continue;
