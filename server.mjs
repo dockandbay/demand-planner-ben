@@ -9602,6 +9602,20 @@ app.get('/api/product/reports/catalogue', async (req, res) => {
 // v28.154 (Ben): landscape A4 PDF of the VISIBLE catalogue rows (client posts what it shows: filtered + sorted). pdf-lib,
 // repeated column headers per page, "Page n of N" footer. Standard fonts are WinAnsi-only, so text is sanitised to
 // Latin-1 (anything else becomes '?'). Max 5,000 rows per call.
+// v28.156 (Ben): EAN-13 module pattern for the catalogue PDF (same encoding as the client's ean13Pattern in supply/inject.html).
+// 12 digits get a leading 0 (UPC-A as EAN-13); anything that is not 12/13 digits returns null and prints as text only.
+function _ean13Bits(code) {
+  code = String(code || '').replace(/\D/g, ''); if (code.length === 12) code = '0' + code; if (code.length !== 13) return null;
+  const cs = code.slice(0, 12).split('').reduce((a, x, i) => a + Number(x) * (i % 2 ? 3 : 1), 0); if ((10 - cs % 10) % 10 !== Number(code[12])) return null;   // bad check digit: never print an unscannable symbol, show the text
+  const L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+  const G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+  const R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
+  const PAR = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+  const d = code.split('').map(Number), p = PAR[d[0]]; let bits = '101';
+  for (let i = 1; i <= 6; i++) bits += (p[i - 1] === 'L' ? L : G)[d[i]];
+  bits += '01010'; for (let i = 7; i <= 12; i++) bits += R[d[i]];
+  return { bits: bits + '101', code };
+}
 app.post('/api/product/reports/catalogue/pdf', async (req, res) => {
   try {
     const b = req.body || {}; const rows = Array.isArray(b.rows) ? b.rows.slice(0, 5000) : [];
@@ -9613,8 +9627,8 @@ app.post('/api/product/reports/catalogue/pdf', async (req, res) => {
     const ink = rgb(0.09, 0.13, 0.18), mut = rgb(0.42, 0.46, 0.52), line = rgb(0.85, 0.87, 0.9), accent = rgb(1, 0.34, 0.19);
     const W = 841.89, H = 595.28, ML = 32, MR = 32; let page, y;
     const safe = (t) => String(t == null ? '' : t).replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
-    const cols = [{ k: 'season', l: 'Season', w: 48 }, { k: 'ref', l: 'Product ref', w: 122 }, { k: 'product_type', l: 'Product type', w: 86 }, { k: 'colourway', l: 'Colour way', w: 88 },
-      { k: 'size_label', l: 'Size', w: 92 }, { k: 'sku', l: 'SKU', w: 108, mono: true }, { k: 'barcode', l: 'Barcode (EAN)', w: 84, mono: true }, { k: 'components', l: 'Component', w: 78 }, { k: 'stage', l: 'Stage', w: 72 }];   // sums to 778 = W - margins
+    const cols = [{ k: 'season', l: 'Season', w: 48 }, { k: 'ref', l: 'Product ref', w: 130 }, { k: 'product_type', l: 'Product type', w: 90 }, { k: 'colourway', l: 'Colour way', w: 96 },
+      { k: 'size_label', l: 'Size', w: 110 }, { k: 'sku', l: 'SKU', w: 112, mono: true }, { k: 'barcode', l: 'Barcode (EAN)', w: 120, mono: true, ean: true }, { k: 'stage', l: 'Stage', w: 72 }];   // sums to 778 = W - margins. v28.156 (Ben): Component column dropped; barcode column drawn as an EAN-13 symbol
     let x = ML; cols.forEach(c => { c.x = x; x += c.w; });
     const fit = (t, f, sz, w) => { t = safe(t); while (t.length && f.widthOfTextAtSize(t, sz) > w - 6) t = t.slice(0, -1); return t; };
     const draw = (t, xx, yy, f, sz, col) => { if (t) page.drawText(t, { x: xx, y: yy, size: sz, font: f, color: col || ink }); };
@@ -9626,10 +9640,20 @@ app.post('/api/product/reports/catalogue/pdf', async (req, res) => {
       cols.forEach(c => draw(c.l, c.x + 3, y, B, 7.5, mut)); y -= 5; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 12;
     }
     header();
+    // v28.156 (Ben): a valid EAN-13 / UPC-A prints as a vector barcode (1 pt modules, guard bars 3 pt longer, digits under it); row
+    // grows to 30 pt for it. Codes that are not 12/13 digits keep the old text-only 13 pt row.
+    const MOD = 1, BAR_H = 15, GUARD = { 0: 1, 1: 1, 2: 1, 45: 1, 46: 1, 47: 1, 48: 1, 49: 1, 92: 1, 93: 1, 94: 1 };
+    const drawEan = (e, x0, yTop) => {
+      let i = 0; const b = e.bits;
+      while (i < b.length) { if (b[i] !== '1') { i++; continue; } let j = i; while (j < b.length && b[j] === '1' && !!GUARD[j] === !!GUARD[i]) j++;
+        const h = BAR_H + (GUARD[i] ? 3 : 0); page.drawRectangle({ x: x0 + i * MOD, y: yTop - h, width: (j - i) * MOD, height: h, color: ink }); i = j; }
+      const t = e.code, tw = M.widthOfTextAtSize(t, 6.5); draw(t, x0 + (b.length * MOD - tw) / 2, yTop - BAR_H - 9, M, 6.5, ink);
+    };
     for (const r of rows) {
-      if (y < 44) header();
-      cols.forEach(c => draw(fit(r[c.k], c.mono ? M : F, 7.5, c.w), c.x + 3, y, c.mono ? M : F, 7.5, ink));
-      y -= 13;
+      const ean = _ean13Bits(r.barcode), rowH = ean ? 30 : 13;
+      if (y - rowH + 13 < 44) header();
+      cols.forEach(c => { if (c.ean && ean) drawEan(ean, c.x + 3, y + 7); else draw(fit(r[c.k], c.mono ? M : F, 7.5, c.w), c.x + 3, y, c.mono ? M : F, 7.5, ink); });
+      y -= rowH;
     }
     if (!rows.length) draw('No rows.', ML + 3, y, F, 9, mut);
     const pages = doc.getPages(); pages.forEach((p, i) => { const t = 'Page ' + (i + 1) + ' of ' + pages.length + '   ' + rows.length + ' rows'; p.drawText(t, { x: W - MR - F.widthOfTextAtSize(t, 7.5), y: 20, size: 7.5, font: F, color: mut }); });

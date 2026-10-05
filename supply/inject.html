@@ -16144,7 +16144,7 @@
       var opts=[];   // flat list of selectable options for keyboard nav: [{v:'<ean>'|'' (clear)}]
       function render(q){ q=(q||'').trim(); var html=''; opts=[];
         if(cur){ html+='<div class="shpop-opt unassign bcp-opt" data-v=""><span class="mut tiny">current</span> <span style="font-family:ui-monospace,Menlo,monospace;color:var(--ink)">'+esc(cur)+'</span> <span style="float:right">✕ clear</span></div>'; opts.push({v:''}); }
-        var free=rows.filter(function(x){ return x.status!=='assigned' && x.barcode!==cur; });   // same pool as the old select (free + used); assigned codes belong to another size
+        var free=rows.filter(function(x){ return x.status==='free' && x.barcode!==cur; });   // v28.156 (Ben): FREE codes only; "used" (printed / burnt) codes are no longer offered; assigned codes belong to another size
         if(q) free=free.filter(function(x){ return tokMatch([x.barcode,x.status,'seq'+x.seq,x.assigned_ref,x.assigned_sku,x.product_name,x.colour_name].join(' '), q); });
         free.sort(function(a,b){ return (a.status==='free'?0:1)-(b.status==='free'?0:1) || (a.seq-b.seq); });
         var shown=free.slice(0,q?60:30);
@@ -16295,7 +16295,7 @@
   // barcode picker), sortable left-aligned sticky-header grid grouped by product ref when unsorted, CSV (visible rows,
   // formula-injection guarded) and landscape PDF (server pdf-lib, visible rows posted). Deep link #/product/reports/catalogue.
   var _pcat={season:'',q:'',sort:{col:'',dir:1},data:null};
-  var _PCAT_COLS=[['season','Season'],['ref','Product ref'],['product_type','Product type'],['colourway','Colour way'],['size_label','Size'],['sku','SKU'],['barcode','Barcode (EAN)'],['components','Component'],['stage','Stage']];
+  var _PCAT_COLS=[['season','Season'],['ref','Product ref'],['product_type','Product type'],['colourway','Colour way'],['size_label','Size'],['sku','SKU'],['barcode','Barcode (EAN)'],['stage','Stage']];   // v28.156 (Ben): Component column dropped (barcodes live on sizes; the item's component list just repeated per size row)
   function _pcatVisible(){ var rows=((_pcat.data&&_pcat.data.rows)||[]).slice(), q=_pcat.q.trim();
     if(q) rows=rows.filter(function(r){ return tokMatch(_PCAT_COLS.map(function(c){return r[c[0]];}).concat([r.description,r.product_name,r.subcategory,r.item_type,r.size_status]).join(' '), q); });
     var s=_pcat.sort; if(s.col){ rows.sort(function(a,b){ var x=String(a[s.col]==null?'':a[s.col]), y=String(b[s.col]==null?'':b[s.col]); var c=x.localeCompare(y,undefined,{numeric:true,sensitivity:'base'}); return (c||String(a.ref).localeCompare(String(b.ref))||((a.size_id||0)-(b.size_id||0)))*s.dir; }); }

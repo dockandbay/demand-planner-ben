@@ -1,3 +1,13 @@
+## v28.156 (Ben, branch review-fixes-2026-10-05): Catalogue + barcode picker follow-ups
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+1. **Barcode picker offers FREE codes only.** "Used" (printed / burnt) workshop codes are no longer listed; the size's current code still shows at the top with ✕ clear. Sandbox pool has no used codes (104 free / 2 assigned), so no visible change there.
+2. **Catalogue: Component column dropped** (grid, CSV, PDF). Barcodes live on sizes, so the item's component list only repeated on every size row.
+3. **Catalogue PDF prints real EAN-13 barcodes.** Valid EAN-13 / UPC-A codes (12 digits padded with a leading 0) are drawn as vector bars (1 pt modules, longer guard bars, digits underneath) in a wider barcode column; rows with a barcode grow to 30 pt. Codes with a bad check digit or that are not 12/13 digits print as text, so the PDF never carries an unscannable symbol. Server-side `_ean13Bits()` mirrors the client's `ean13Pattern`.
+
+**Verified (sandbox):** independent decoder reads the drawn patterns back to 5064135998941 / 5064135998958 / 5064135998972 with valid check digits; a valid UPC-A gets bars; bad check digit and "ABC123" fall back to text; PDF rasterised and eyeballed; 120 rows = 6 pages.
+
 ## v28.155 (Ben, branch review-fixes-2026-10-05): PRODUCT searchable barcode picker + Reports ▸ Catalogue (CSV/PDF)
 
 **Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no new env vars. New endpoints: `GET /api/product/reports/catalogue?season=` · `POST /api/product/reports/catalogue/pdf` (read-only; exempt from the product-edit capability).
