@@ -87,12 +87,36 @@ const pool = new pg.Pool({
   // the remote pooler — the residual per-query ~300ms is network RTT to the remote sandbox (not present on live).
   idleTimeoutMillis: process.env.VERCEL ? 8000 : 30000,
   keepAlive: true,
+  // v28.151 (review E1): fail fast instead of piling up. A checkout that can't get a connection in 10s errors (no
+  // unbounded queue behind a saturated 4-conn pool = the death-spiral mechanism); a query with no reply in 35s
+  // errors client-side (belt to the 30s server statement_timeout, which the pooler may drop: see E2 / ALTER ROLE).
+  // Sandbox (non-Vercel) gets 120s: its session pooler ignores the startup statement_timeout (2-min server default) and the
+  // remote eu-central-1 round trips make the heavy PO builds legitimately run 35s+ there. PG_QUERY_TIMEOUT_MS overrides.
+  connectionTimeoutMillis: process.env.VERCEL ? 10000 : 30000,   // sandbox boot warm queues ~20 builds on 8 conns over a ~1.7s remote connect
+  query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS) || (process.env.VERCEL ? 35000 : 120000),
 });
 // ── Resilience guards ─────────────────────────────────────────────────────────
 // A dropped idle DB connection makes the pool emit 'error'; with no listener Node treats it as
 // fatal and exits (the repeated EADDRNOTAVAIL crashes in dev). Log it and let the pool recycle the
 // client — the next query opens a fresh connection.
 pool.on('error', (err) => { console.error('[pg pool] idle client error (ignored):', err && err.message); });
+// v28.151 (review E6): ROLLBACK that can't throw. A bare `await client.query('ROLLBACK')` in a catch rethrows on a dead or
+// timed-out connection (the request then never answers) and hands a mid-transaction client back to the pool. Here a failed
+// ROLLBACK ends the client so the finally's release() sees _ending and the pool discards it instead of reusing it.
+async function _rollback(client) {
+  try { await client.query('ROLLBACK'); }
+  catch (e) { console.error('[pg] ROLLBACK failed, discarding client:', e && e.message); try { client.end().catch(() => {}); } catch (_) {} }
+}
+// v28.151 (review D3): bounded outbound fetch. ~30 integration calls (Fulfil, Xero, Flexport, DHL, FedEx, BLADE, Cin7,
+// Anthropic, Resend, KV, DriveHQ) had no timeout, so one hung upstream held the request (and often a pool client) until the
+// 300s function limit. AbortSignal.timeout covers headers AND body; a caller's own signal is still honoured. The abort
+// surfaces as an Error naming the host so the existing catch blocks report it. No retries added (existing ones unchanged).
+async function _fetchT(url, opts, ms) {
+  const o = Object.assign({}, opts || {}); const t = AbortSignal.timeout(ms || 20000);
+  o.signal = o.signal ? AbortSignal.any([o.signal, t]) : t;
+  try { return await fetch(url, o); }
+  catch (e) { if (e && (e.name === 'TimeoutError' || (e.name === 'AbortError' && t.aborted))) { let h = ''; try { h = new URL(String(url)).host; } catch (_) {} const x = new Error('Timed out after ' + Math.round((ms || 20000) / 1000) + 's calling ' + h); x.code = 'FETCH_TIMEOUT'; throw x; } throw e; }
+}
 // v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
 // only read at call time) gets s.q incremented on every pool.query; the finish-hook logs it. Behaviour otherwise identical.
 { const _origQuery = pool.query.bind(pool);
@@ -1131,7 +1155,7 @@ const KV_URL = (process.env.KV_REST_API_URL || '').replace(/\/$/, ''), KV_TOKEN 
 const KV_ON = !!(KV_URL && KV_TOKEN);
 const KV_KEY = 'horizon:data', KV_CHUNK = 900000;   // ~900KB base64 chunks (safely under the ~1MB REST value limit)
 async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command array → { result }
-  const r = await fetch(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) });
+  const r = await _fetchT(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }, 30000);   // v28.151 (review D3)
   if (!r.ok) throw new Error('KV ' + r.status);
   return (await r.json()).result;
 }
@@ -1207,10 +1231,17 @@ async function _buildDataVals() {
     buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(), buildCatAspGBP(), buildLockedFc(),
   ]);
 }
+// v28.151 (review E3): generation counter. invalidateDataCache() bumps it; a build that STARTED before the bump read
+// pre-save data, so on completion it is discarded (not cached, not written to KV, where other instances would serve it for
+// up to MAX_BLOB_AGE) and exactly one more build runs. Several invalidations during one build coalesce into that one.
+let _dataGen = 0;
 function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
   if (_dataRefresh) return _dataRefresh;
+  const _gen = _dataGen;
   _dataRefresh = _buildDataVals()
-    .then(async (vals) => { _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
+    .then(async (vals) => {
+      if (_gen !== _dataGen) { _dataRefresh = null; return refreshDataCache(); }   // invalidated mid-build: stale, rebuild once more
+      _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
       try { invalidateBiCache(); } catch (e) { /* v27.886: fresh source data (ETL / self-heal rebuild) → BI/KPI projections recompute on next read */ }
       if (KV_ON) { try { await kvWriteBlob(vals); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })
     .catch((e) => { _dataRefresh = null; throw e; });
@@ -1222,8 +1253,8 @@ function bgRefresh() {
   if (_bgRefreshing || _dataRefresh) return;
   if (!KV_ON) { refreshDataCache().catch(() => {}); return; }
   if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { refreshDataCache().catch(() => {}); return; }   // blob past max age → authoritative rebuild from Supabase (surfaces ETL'd product-field changes), else just re-read
-  _bgRefreshing = true;
-  kvReadBlob().then((v) => { if (v) _dataCache = { at: Date.now(), vals: v }; }).catch(() => {}).finally(() => { _bgRefreshing = false; });
+  _bgRefreshing = true; const _gen = _dataGen;
+  kvReadBlob().then((v) => { if (v && _gen === _dataGen) _dataCache = { at: Date.now(), vals: v }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
 }
 // The accessor every serve path uses. In-process first; on a cold start, prefer KV (no Supabase); else build once.
 async function getDataVals() {
@@ -1233,7 +1264,7 @@ async function getDataVals() {
 }
 // Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
 // background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
-function invalidateDataCache() { _dataCache = null; try { shellMemoDrop(); } catch (_) {} refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
+function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoDrop(); } catch (_) {} refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
 (async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
@@ -2059,17 +2090,17 @@ app.post('/api/save-forecasts', async (req, res) => {
     for (let i = 0; i < ups.length; i += CH) {
       const slice = ups.slice(i, i + CH), vals = [], params = [];
       slice.forEach((r, j) => { const o = j * 5; vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},'review_ui',now())`); params.push(r[0], r[1], r[2], r[3], r[4]); });
-      await client.query(
+      await client.query({ text:
         `INSERT INTO planner.forecast_inputs (subcategory, country, channel, month, value_raw, source, updated_at)
          VALUES ${vals.join(',')}
          ON CONFLICT (subcategory, country, channel, month)
-         DO UPDATE SET value_raw=EXCLUDED.value_raw, source='review_ui', updated_at=now()`, params);
+         DO UPDATE SET value_raw=EXCLUDED.value_raw, source='review_ui', updated_at=now()`, values: params, query_timeout: 125000 });   // v28.151 (review E1): per-query override of the 35s pool query_timeout (SET LOCAL 120s above)
       upserts += slice.length;
     }
     for (let i = 0; i < dels.length; i += CH) {
       const slice = dels.slice(i, i + CH), tup = [], params = [];
       slice.forEach((r, j) => { const o = j * 4; tup.push(`($${o+1},$${o+2},$${o+3},$${o+4}::date)`); params.push(r[0], r[1], r[2], r[3]); });
-      await client.query(`DELETE FROM planner.forecast_inputs WHERE (subcategory,country,channel,month) IN (VALUES ${tup.join(',')})`, params);
+      await client.query({ text: `DELETE FROM planner.forecast_inputs WHERE (subcategory,country,channel,month) IN (VALUES ${tup.join(',')})`, values: params, query_timeout: 125000 });
       deletes += slice.length;
     }
     await client.query(
@@ -2081,7 +2112,7 @@ app.post('/api/save-forecasts', async (req, res) => {
     invalidateBiCache();   // forecast_outputs changed → BI/KPI projections must recompute
     res.json({ saved: upserts + deletes, upserts, deletes });
   } catch (e) {
-    await client.query('ROLLBACK');
+    await _rollback(client);
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
@@ -2114,11 +2145,11 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
     for (let i = 0; i < rows.length; i += CH) {
       const slice = rows.slice(i, i + CH), vals = [], params = [];
       slice.forEach((r, j) => { const o = j * 5; vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},'review_ui',now())`); params.push(r[0], r[1], r[2], r[3], r[4]); });
-      await client.query(
+      await client.query({ text:
         `INSERT INTO planner.forecast_outputs (sku, warehouse, channel, month, units, source, updated_at)
          VALUES ${vals.join(',')}
          ON CONFLICT (sku, warehouse, channel, month)
-         DO UPDATE SET units=EXCLUDED.units, source='review_ui', updated_at=now()`, params);
+         DO UPDATE SET units=EXCLUDED.units, source='review_ui', updated_at=now()`, values: params, query_timeout: 125000 });   // v28.151 (review E1): see save-forecasts
       n += slice.length;
     }
     await client.query(
@@ -2130,7 +2161,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
     invalidateBiCache();   // FC_OUTPUTS drives biProjection()/kpiBase() → recompute
     res.json({ saved: n });
   } catch (e) {
-    await client.query('ROLLBACK');
+    await _rollback(client);
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
@@ -2786,7 +2817,13 @@ function fulfilConfigFor(env) {
   const apiKey = (process.env[P + 'API_KEY'] || '').trim();
   return { env, subdomain, apiKey, base: subdomain ? ('https://' + subdomain + '.fulfil.io/api/v2') : '', configured: !!(subdomain && apiKey) };
 }
-async function activeErp() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; return (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; } catch (e) { return 'cin7'; } }
+// v28.151 (review D7): a DB error no longer means "cin7" (that silently sent writes to LIVE Cin7 when Fulfil is active).
+// It returns the last value read OK; with none, it throws (every caller is a write path or the status card, all of which 500).
+let _activeErpMemo = null;
+async function activeErp() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; _activeErpMemo = (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; return _activeErpMemo; }
+  catch (e) { if (_activeErpMemo) return _activeErpMemo; const x = new Error('Could not read the active ERP setting (' + (e && e.message) + '). No ERP write performed; retry shortly.'); x.code = 'ERP_UNKNOWN'; throw x; }
+}
 // v27.799 (review item 7): memoize with a 10s TTL — this was a DB round-trip on EVERY fulfilFetch (push-actuals fires
 // ~120/chunk). The ERP toggle is rare, so a config flip takes effect within 10s.
 let _fulfilEnvCache = { v: null, t: 0 };
@@ -2882,7 +2919,7 @@ function fulfilCountryForCompany(id) { return (Number(id) === FULFIL_COMPANY_AU)
 async function fulfilFetch(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
+  const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
   return j;
@@ -2891,7 +2928,7 @@ async function fulfilFetch(method, path, body) {
 // dry-run/seed against 'live' never depends on or changes the CONFIG Active-ERP setting.
 async function fulfilFetchCfg(cfg, method, path, body) {
   if (!cfg || !cfg.configured) { const e = new Error('Fulfil ' + (cfg && cfg.env) + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });
+  const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
   return j;
@@ -3000,7 +3037,7 @@ async function fulfilResolveProducts(skus) {
   const out = {};
   if (!uniq.length) return out;
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', uniq]], 0, uniq.length, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
-  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = { id: r.id, uom: r.purchase_uom || r.default_uom || 1 }; });   // v27.736: carry the product's purchase UOM for the required line 'unit'
+  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = { id: r.id, uom: r.purchase_uom || r.default_uom || null }; });   // v28.151 (review D8): no silent uom id 1 fallback (a missing uom is a preflight problem) · v27.736: carry the product's purchase UOM for the required line 'unit'
   // v27.839 (Ben): tolerate stray leading/trailing whitespace in a Fulfil product code — a trailing TAB on
   // "POLYBAG 215*320+50mm\t" (Fulfil id 2091) made the exact IN match miss and blocked the whole PO push. For each SKU
   // still missing, refetch by ilike (SQL wildcards in the SKU escaped) and accept only a code that equals it once trimmed.
@@ -3010,10 +3047,29 @@ async function fulfilResolveProducts(skus) {
     try {
       const cand = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'ilike', pat]], 0, 20, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
       const hit = (cand || []).find(r => r && r.code != null && String(r.code).trim() === String(s).trim());
-      if (hit) out[String(s)] = { id: hit.id, uom: hit.purchase_uom || hit.default_uom || 1 };
+      if (hit) out[String(s)] = { id: hit.id, uom: hit.purchase_uom || hit.default_uom || null };   // v28.151 (review D8)
     } catch (e) { /* best-effort whitespace fallback */ }
   }
   return out;
+}
+// v28.151 (review D2): per-PO single-flight for the Fulfil push, across instances. Two overlapping pushes of an
+// un-mirrored PO both saw "absent" and both CREATED, i.e. duplicate POs in Fulfil. Uses a TRANSACTION-scoped advisory lock
+// on a dedicated client held for the push: on Vercel the pool goes through the transaction pooler (6543), where a
+// session lock and its unlock can land on different backends and leak, while an xact lock is pinned to its txn and is
+// released by COMMIT/ROLLBACK or when the session dies. A concurrent push gets FULFIL_PUSH_BUSY (409) instead of waiting.
+async function _withXactLock(key, busy, fn) {   // shared by the Fulfil push (D2) and the Xero payment post (D5)
+  const lc = await pool.connect(); let ok = false;
+  try {
+    await lc.query('BEGIN');
+    await lc.query("SET LOCAL idle_in_transaction_session_timeout = '180s'");   // bound a frozen instance; a push is ~15 calls x 30s timeout max
+    ok = (await lc.query(`SELECT pg_try_advisory_xact_lock(hashtext($1)) ok`, [key])).rows[0].ok;
+  } catch (e) { await _rollback(lc); lc.release(); throw e; }
+  if (!ok) { await _rollback(lc); lc.release(); const e = new Error(busy.message); e.code = busy.code; throw e; }
+  try { return await fn(); }
+  finally { await _rollback(lc); lc.release(); }   // ROLLBACK releases the xact lock (nothing was written on this client)
+}
+function withFulfilPushLock(po, fn) {
+  return _withXactLock('fulfil_push:' + po, { code: 'FULFIL_PUSH_BUSY', message: 'A Fulfil push for ' + po + ' is already in progress. Wait for it to finish, then refresh before pushing again.' }, fn);
 }
 // push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
 // data the Cin7 push uses. Resolves supplier/currency/warehouse/products to Fulfil ids first (read-only) and aborts
@@ -3089,10 +3145,16 @@ async function fulfilPushLines(po, completion) {
   if (!fdDef) problems.push('Fulfil metafield "' + FULFIL_MAP.finalDestMetafield + '" is not defined on purchase orders in this tenant — define it in Fulfil settings first');
   if (!finalDestination) problems.push('PO has no Horizon branch to write as the final destination');
   if (missingSkus.length) problems.push(missingSkus.length + ' SKU(s) not in Fulfil catalog: ' + missingSkus.slice(0, 8).join(', ') + (missingSkus.length > 8 ? '…' : ''));
+  // v28.151 (review D8): a line with no price anywhere (confirmed cost, line cost, last priced line) or a product with no
+  // purchase/default UOM used to push unit_price 0 / unit id 1 silently. Both now block the push as preflight problems.
+  const _noPrice = lines.filter(l => l.price == null).map(l => l.sku);
+  if (_noPrice.length) problems.push(_noPrice.length + ' line(s) have no price (no confirmed, line or previous cost): ' + _noPrice.slice(0, 8).join(', ') + (_noPrice.length > 8 ? '...' : ''));
+  const _noUom = lines.filter(l => { const pm = prodMap[String(l.sku)]; return pm && pm.id && !pm.uom; }).map(l => l.sku);
+  if (_noUom.length) problems.push(_noUom.length + ' SKU(s) have no purchase/default UOM in Fulfil: ' + _noUom.slice(0, 8).join(', ') + (_noUom.length > 8 ? '...' : ''));
 
   const lineDicts = lines.map(l => { const pm = prodMap[String(l.sku)] || {}; return {
     [FULFIL_MAP.line.product]: pm.id || null,
-    [FULFIL_MAP.line.unit]: pm.uom || 1,
+    [FULFIL_MAP.line.unit]: pm.uom || null,   // v28.151 (review D8): null blocked in preflight above
     [FULFIL_MAP.line.qty]: Number(l.qty) || 0,
     [FULFIL_MAP.line.price]: l.price == null ? '0' : String(Math.round(Number(l.price) * 10000) / 10000),   // v27.736: unit_price required (0 if none) · v27.764: send as a clean decimal STRING rounded to 4dp — a JSON float (e.g. 3.92) is parsed by Fulfil as full-precision Decimal and rejected (digits limit)
     [FULFIL_MAP.line.deliveryDate]: _comp || poRow.est_delivery || (completion ? String(completion).slice(0, 10) : null),   // v27.764: line delivery = est delivery-to-warehouse
@@ -3132,19 +3194,34 @@ async function fulfilPushLines(po, completion) {
     // the edit, then re-confirm — so a confirmed PO can still be reconciled from Horizon. States past confirmation
     // (processing/done = goods in motion/received) are NOT auto-reverted; those must be handled in Fulfil by hand.
     const _preState = await fulfilPOState(fulfilId);
-    let _reconfirm = false;
-    if (_preState === 'confirmed') { await fulfilPOButton(fulfilId, 'draft', 'draft'); _reconfirm = true; }
-    else if (_preState && _preState !== 'draft' && _preState !== 'quotation') {
+    let _reconfirm = false, _upErr = null; const _upProblems = [];
+    if (_preState && _preState !== 'confirmed' && _preState !== 'draft' && _preState !== 'quotation') {
       const e = new Error('Fulfil PO is "' + _preState + '" — its lines can\'t be edited automatically. Revert it to draft in Fulfil, then push again.'); e.code = 'FULFIL_STATE_LOCKED'; throw e;
     }
-    const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
-    const ids = (existing || []).map(r => r.id);
-    if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
-    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.deliveryDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.paymentTerm]: paymentTermId || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates + v27.840: payment term + v27.904: UPDATE header dates = completion (v27.900 only fixed create + lines)
-    await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
-    if (_reconfirm) await fulfilPOButton(fulfilId, 'confirm', 'confirmed');   // v27.840 (Ben): restore the PO to confirmed after the edit
-    try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
-    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null };
+    // v28.151 (review D1): delete + create now go in ONE write (Tryton one2many takes a list of ops, applied in one server
+    // transaction), so a failure can no longer leave the PO with its lines deleted and none created. The re-confirm runs
+    // in a finally whenever we reverted to draft, so a failed edit still restores the PO to confirmed (with its old lines).
+    // Line ids are paginated (was a single 500-row page, so a >500-line PO kept stale lines).
+    try {
+      if (_preState === 'confirmed') { _reconfirm = true; await fulfilPOButton(fulfilId, 'draft', 'draft'); }   // flag first: a timed-out draft call may still have landed
+      const existing = await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', '=', fulfilId]], ['id']);
+      const ids = (existing || []).map(r => r.id);
+      const _ops = ids.length ? [['delete', ids], ['create', lineDicts]] : [['create', lineDicts]];
+      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: _ops, [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.deliveryDate]: _comp || poRow.est_delivery || null, [FULFIL_MAP.paymentTerm]: paymentTermId || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates + v27.840: payment term + v27.904: UPDATE header dates = completion (v27.900 only fixed create + lines)
+      await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
+    } catch (e) {
+      console.error('[fulfil push] update of ' + po + ' (Fulfil id ' + fulfilId + ') failed:', e && e.message);
+      e.message = 'Fulfil update failed: ' + e.message; _upErr = e; throw e;
+    } finally {
+      if (_reconfirm) {   // v27.840 (Ben): restore the PO to confirmed after the edit · v28.151 (review D1): also after a failed edit
+        try { if ((await fulfilPOState(fulfilId)) !== 'confirmed') await fulfilPOButton(fulfilId, 'confirm', 'confirmed'); }
+        catch (e) { const m = 'PO reverted to draft for the edit but could NOT be re-confirmed (' + (e && e.message) + '): confirm it in Fulfil by hand';
+          console.error('[fulfil push] ' + po + ': ' + m); _upProblems.push(m); if (_upErr) _upErr.message += '. ALSO: ' + m; }
+      }
+    }
+    try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }   // v27.738: keep the drift mirror fresh on push
+    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null,
+      problems: _upProblems, reconfirm_failed: _upProblems.length > 0 };
   }
   // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
   const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
@@ -3176,7 +3253,7 @@ async function fulfilMirrorOne(fulfilId, source) {
 // Import EVERY Fulfil PO into the mirror (cron: n8n later, or the in-app timer / this endpoint). One lines call for all POs.
 async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil caps page size at 500 — paginate.
   const PAGE = 500; let off = 0, out = [];
-  for (;;) { const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, PAGE, null, fields]); const arr = Array.isArray(rows) ? rows : []; out = out.concat(arr); if (arr.length < PAGE) break; off += PAGE; if (off > 50000) break; }
+  for (;;) { const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, PAGE, null, fields]); const arr = Array.isArray(rows) ? rows : []; out = out.concat(arr); if (arr.length < PAGE) break; off += PAGE; if (off > 50000) { out.truncated = true; console.warn('[fulfil] ' + model + ' search_read hit the 50k row cap: result truncated'); break; } }   // v28.151 (review D8): flag truncation
   return out;
 }
 let _fulfilImportBusy = null;   // v28.116 (review S9): single-flight — the 6h timer, the n8n webhook and a manual call could overlap, and their NOT-IN prunes deleted each other's rows
@@ -3195,8 +3272,9 @@ async function _fulfilImportPOsRun() {
   let n = 0; for (const p of list) { if (!p.reference) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
   // v27.902 (Ben): a full refresh also PRUNES rows the source no longer has (cancelled-and-purged POs, or rows imported from
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
-  let pruned = 0; if (n >= 20) { const keep = list.filter(p => p.reference).map(p => String(p.reference)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
-  return { ok: true, imported: n, pruned, env: cfg.env };
+  // v28.151 (review D8): never prune off a truncated pull (the 50k cap would delete every PO past the cap).
+  let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p.reference).map(p => String(p.reference)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
+  return { ok: true, imported: n, pruned, env: cfg.env, truncated: !!list.truncated };
 }
 // v27.901 (Ben): mirror of Fulfil INTERNAL SHIPMENTS (mig 302) — sister of the PO mirror, refreshed by the same cron.
 // Lines come from the INCOMING moves only (an IS has 4 legs of moves per SKU; summing all of them quadruples qty).
@@ -3223,7 +3301,7 @@ async function fulfilImportInternalShipments() {
       [s.id, s.number, s.reference || null, s.state || null, fulfilUnwrap(s.planned_date) || null, fulfilUnwrap(s.effective_date) || null, s['from_location.name'] || null, s['to_location.name'] || null, s.company || null, lines.length, JSON.stringify(lines), fulfilUnwrap(s.create_date) || null, fulfilUnwrap(s.write_date) || null]);
     n++;
   }
-  let pruned = 0; if (n >= 20) { pruned = (await pool.query(`DELETE FROM planner.fulfil_internal_shipments WHERE NOT (fulfil_id = ANY($1::bigint[]))`, [list.map(x => Number(x.id))])).rowCount; }   // v27.902: prune rows the source no longer has (guarded)
+  let pruned = 0; if (n >= 20 && !list.truncated) { pruned = (await pool.query(`DELETE FROM planner.fulfil_internal_shipments WHERE NOT (fulfil_id = ANY($1::bigint[]))`, [list.map(x => Number(x.id))])).rowCount; }   // v27.902: prune rows the source no longer has (guarded)
   return { ok: true, internal_shipments: n, pruned, env: cfg.env };
 }
 // Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
@@ -4018,7 +4096,7 @@ app.post('/api/supply/price-list', async (req, res) => {
     for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3) ON CONFLICT (entry_id,min_qty) DO UPDATE SET unit_cost=excluded.unit_cost', [id, t.min_qty, t.unit_cost]);
     await client.query('COMMIT');
     res.json({ ok: true, id });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/price-list/:id/delete', async (req, res) => {
@@ -4077,7 +4155,7 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
   try {
     await client.query('BEGIN');
     const e = (await client.query('SELECT * FROM planner.price_list_entries WHERE id=$1', [id])).rows[0];
-    if (!e) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+    if (!e) { await _rollback(client); return res.status(404).json({ error: 'not found' }); }
     await client.query(`UPDATE planner.price_list_entries SET status='superseded', updated_at=now()
       WHERE id<>$1 AND status='active' AND supplier=$2 AND scope=$3
         AND coalesce(price_type,'')=coalesce($4,'') AND coalesce(sku,'')=coalesce($5,'')
@@ -4085,7 +4163,7 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
       [id, e.supplier, e.scope, e.price_type, e.sku, e.effective_from_production]);
     await client.query(`UPDATE planner.price_list_entries SET status='active', approved_by=$2, approved_at=now(), updated_at=now() WHERE id=$1`, [id, me]);
     await client.query('COMMIT'); res.json({ ok: true });
-  } catch (err) { await client.query('ROLLBACK'); log500(err); res.status(500).json({ error: err.message }); }
+  } catch (err) { await _rollback(client); log500(err); res.status(500).json({ error: err.message }); }
   finally { client.release(); }
 });
 // Price-list change log. No params → supplier-submitted decisions (approved/rejected/superseded) across everything.
@@ -4129,7 +4207,7 @@ app.post('/api/supply/price-list/exclude', async (req, res) => {
     for (const s of [...new Set(skus)]) await client.query('INSERT INTO planner.price_list_excluded_skus (sku) VALUES ($1) ON CONFLICT (sku) DO NOTHING', [s]);
     await client.query('COMMIT');
     res.json({ ok: true, count: skus.length });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
@@ -4288,7 +4366,7 @@ app.post('/api/supply/shipments/cleanup-orphans', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches();
     res.json({ ok: true, deleted: del.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Perform a consolidation: assign `pos` onto one shipment. create=true makes a NEW master-less shipment
@@ -4317,7 +4395,7 @@ app.post('/api/supply/consolidate', async (req, res) => {
       }
     } else {
       const ex = (await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
-      if (!ex) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
+      if (!ex) { await _rollback(client); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
     }
     // capture the POs' prior shipments (to prune any now-empty self-shipment they leave behind)
     const priors = (await client.query(`SELECT DISTINCT shipment_ref FROM planner.purchase_orders
@@ -4327,7 +4405,7 @@ app.post('/api/supply/consolidate', async (req, res) => {
     for (const pr of priors) { await pruneEmptySelfShipment(client, pr); }   // clean up orphaned self-shipments
     await client.query('COMMIT');
     res.json({ ok: true, ref, assigned: upd.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -4427,12 +4505,35 @@ async function xeroPutStore(region, store) { await pool.query(`INSERT INTO plann
 const _xeroTok = { uk: { token: null, exp: 0 }, au: { token: null, exp: 0 } };
 async function xeroExchange(region, params) {
   const cfg = xeroConfig(region);
-  const r = await fetch('https://identity.xero.com/connect/token', { method: 'POST',
+  const r = await _fetchT('https://identity.xero.com/connect/token', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Basic ' + Buffer.from(cfg.id + ':' + cfg.secret).toString('base64') },
     body: new URLSearchParams(params) });
   const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) {}
-  if (!r.ok) { const e = new Error('Xero token ' + r.status + ': ' + String((j && (j.error_description || j.error)) || t).slice(0, 200)); e.code = r.status; throw e; }
+  if (!r.ok) { const e = new Error('Xero token ' + r.status + ': ' + String((j && (j.error_description || j.error)) || t).slice(0, 200)); e.code = r.status; e.oauthError = (j && j.error) || null; throw e; }   // v28.151 (review D4): carry the OAuth error code (invalid_grant etc.)
   return j;
+}
+const _xeroRefreshing = { uk: null, au: null };
+async function _xeroRefresh(region, store) {
+  const _use = async (st) => {
+    const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: st.refresh_token });   // Xero rotates the refresh token
+    const upd = Object.assign({}, st, { access_token: j.access_token, refresh_token: j.refresh_token || st.refresh_token, expires_at: Date.now() + (Number(j.expires_in) || 1800) * 1000 });
+    await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
+    return j.access_token;
+  };
+  try { return await _use(store); }
+  catch (e) {
+    if (!(e.code === 400 && e.oauthError === 'invalid_grant')) throw e;
+    const fresh = await xeroGetStore(region);
+    if (fresh && fresh.refresh_token && fresh.refresh_token !== store.refresh_token) {   // rotated by another instance
+      if (fresh.access_token && fresh.expires_at && Date.now() < fresh.expires_at - 60000) { _xeroTok[region] = { token: fresh.access_token, exp: fresh.expires_at }; return fresh.access_token; }
+      try { return await _use(fresh); }
+      catch (e2) { if (!(e2.code === 400 && e2.oauthError === 'invalid_grant')) throw e2; store = fresh; }
+    }
+    console.error('[xero] ' + region.toUpperCase() + ' refresh token rejected (invalid_grant): dropping the stored connection; reconnect needed');
+    await pool.query(`DELETE FROM planner.app_settings WHERE key=$1 AND (CASE WHEN key=$1 THEN (value::jsonb)->>'refresh_token' END) = $2`, ['xero_oauth_' + region, store.refresh_token]).catch(() => {});
+    _xeroTok[region] = { token: null, exp: 0 };
+    return null;
+  }
 }
 async function xeroToken(region) {
   region = xeroRegion(region); const cfg = xeroConfig(region); if (!cfg.present) return null;
@@ -4440,12 +4541,14 @@ async function xeroToken(region) {
   const store = await xeroGetStore(region);
   if (store && store.refresh_token) {   // AUTH-CODE (Web app) connection
     if (store.access_token && store.expires_at && now < store.expires_at - 60000) { _xeroTok[region] = { token: store.access_token, exp: store.expires_at }; return store.access_token; }
-    try {
-      const j = await xeroExchange(region, { grant_type: 'refresh_token', refresh_token: store.refresh_token });   // Xero rotates the refresh token
-      const upd = Object.assign({}, store, { access_token: j.access_token, refresh_token: j.refresh_token || store.refresh_token, expires_at: now + (Number(j.expires_in) || 1800) * 1000 });
-      await xeroPutStore(region, upd); _xeroTok[region] = { token: j.access_token, exp: upd.expires_at };
-      return j.access_token;
-    } catch (e) { if (e.code === 400 || e.code === 401) { await pool.query(`DELETE FROM planner.app_settings WHERE key=$1`, ['xero_oauth_' + region]).catch(() => {}); } else throw e; }   // stale (e.g. switched to a Custom Connection) → drop it and try client_credentials
+    // v28.151 (review D4): single-flight per region (concurrent callers share one refresh, so we never spend the rotating
+    // refresh token twice), and the stored connection is only dropped on a CONFIRMED invalid_grant: on invalid_grant we
+    // re-read the store; if another instance already rotated the token we retry once with it, and the DELETE is
+    // conditional on the row still holding the token that failed. Any other 400/401 (invalid_client, outage) now throws
+    // and keeps the connection (it used to DELETE it on any 400/401, forcing an admin reconnect).
+    if (!_xeroRefreshing[region]) _xeroRefreshing[region] = _xeroRefresh(region, store).finally(() => { _xeroRefreshing[region] = null; });
+    const tok = await _xeroRefreshing[region];
+    if (tok) return tok;   // null = confirmed invalid_grant and dropped: fall through to client_credentials (as before)
   }
   // CUSTOM CONNECTION (client_credentials) — no consent flow, one org, no refresh token. Omit scope so the token
   // carries whatever the connection was granted (avoids "scope validation failed" if the app has a different set).
@@ -4457,7 +4560,7 @@ async function xeroTenant(region) {
   region = xeroRegion(region); const s = await xeroGetStore(region);
   if (s && s.tenant_id) return { id: s.tenant_id, name: s.tenant_name };
   const token = await xeroToken(region); if (!token) return { id: null, name: null };   // Custom Connection: discover the single org and cache it
-  const r = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
+  const r = await _fetchT('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
   const conns = await r.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || (Array.isArray(conns) ? conns[0] : null);
   if (!c || !c.tenantId) return { id: null, name: null };
   await xeroPutStore(region, { tenant_id: c.tenantId, tenant_name: c.tenantName || '', mode: 'custom', connected_at: new Date().toISOString() });
@@ -4470,7 +4573,7 @@ async function xeroFetch(region, path, opts) {
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
-    r = await fetch('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
+    r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
     const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET');   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
     if (_retryable && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
     break;
@@ -4498,7 +4601,7 @@ app.get('/api/supply/xero/callback', async (req, res) => {
     if (!st) return done('State mismatch or expired — start again from Connect to Xero.', false);
     _xeroStates.delete(state); const region = xeroRegion(st.region); const cfg = xeroConfig(region);
     const j = await xeroExchange(region, { grant_type: 'authorization_code', code, redirect_uri: cfg.redirect });
-    const cr = await fetch('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + j.access_token, 'Accept': 'application/json' } });
+    const cr = await _fetchT('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + j.access_token, 'Accept': 'application/json' } });
     const conns = await cr.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || conns[0];
     if (!c || !c.tenantId) return done('Connected, but no organisation was authorised. Try again and pick the Dock & Bay ' + region.toUpperCase() + ' organisation.', false);
     let by = ''; try { by = (await permsFor(req)).email || ''; } catch (e) {}
@@ -5037,6 +5140,14 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in CONFIG ▸ Payments' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
     if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.amount) + ' > ' + _usd(l.bill_due) + ')').join('; ') });
+    // v28.151 (review D5): server-side idempotency on run_key. A run that already has a recorded supplier-payment bill that
+    // is not VOIDED/DELETED is refused (409 ALREADY_POSTED) unless the caller sends repost:true (the redo button asks the
+    // user first). The check + post run under a per-run_key advisory lock so two admins can't post the same run at once.
+    const _rr0 = (req.body && req.body.run) || {};
+    const _rk = _rr0.run_key || ((_rr0.dt || '') + '|' + (_rr0.supplier || '') + (String(_rr0.region || '').toUpperCase() === 'AU' && String(_rr0.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : ''));
+    return await _withXactLock('xero_pay_post:' + _rk, { code: 'XERO_POST_BUSY', message: 'This payment run is already being posted to Xero. Wait for it to finish, then refresh.' }, async () => {
+    const _prior = (await pool.query(`SELECT bill_number, status FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, [_rk])).rows;
+    if (_prior.length && (req.body && req.body.repost) !== true) return res.status(409).json({ code: 'ALREADY_POSTED', error: 'This run already has a supplier-payment bill in Xero (' + _prior.map(b => (b.bill_number || '?') + (b.status ? ' ' + b.status : '')).join(', ') + '). Void or delete it in Xero first, or confirm a re-post.', bills: _prior });
     const out = { region, paying_org: plan.paying_org, supplier: plan.supplier, reference: plan.reference, bill: null, payments: [], skipped: [] };
     // 1) the supplier-payment bill (DRAFT) in the PAYING org. Same-org lines → 602 / 602.1 (Production tracking on
     //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
@@ -5072,10 +5183,13 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
         if (rate != null && rate > 0) payObj.CurrencyRate = rate;
         const pr = await xeroFetch(l.settle_org, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
         const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill') });
-      } catch (pe) { out.skipped.push({ po: l.reference, reason: pe.message }); }
+      } catch (pe) { console.error('[xero-post] payment ' + l.reference + ' failed:', pe.message); out.skipped.push({ po: l.reference, reason: pe.message, error: true }); }
     }
-    res.json(Object.assign({ ok: true }, out));
-  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+    // v28.151 (review D5): a payment that FAILED (not a by-design skip) makes the post ok:false so it can't read as complete.
+    const _failed = out.skipped.filter(x => x.error).length;
+    res.json(Object.assign({ ok: _failed === 0, failed_payments: _failed }, out));
+    });
+  } catch (e) { log500(e); res.status(e.code === 503 ? 503 : e.code === 'XERO_POST_BUSY' ? 409 : 500).json({ error: e.message, code: e.code === 'XERO_POST_BUSY' ? e.code : undefined }); }
 });
 // Starting-deposit DRAW-DOWN via a Xero credit note — the new feature, P58 ONWARDS ONLY (earlier productions draw down
 // as-is). Creates an ACCPAYCREDIT coded to Stock Deposits (602), tagged with the production, allocated to the PO's bill.
@@ -5180,7 +5294,9 @@ app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
     if (!src) return res.status(400).json({ error: 'Bill ' + (link.external_ref || link.external_id) + ' was not found in Xero UK — it may already have been moved. Skipping ' + po + '.' });
     const invNo = src.InvoiceNumber || po;
     // Duplicate guard: is there already an ACCPAY bill with this number in Xero AU?
-    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/["\\]/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; } catch (e) {}
+    // v28.151 (review D8): fail CLOSED. A failed duplicate check used to be swallowed (dupe=null) and the bill created anyway.
+    let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/["\\]/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; }
+    catch (e) { console.error('[xero au-migrate] duplicate check failed for ' + po + ':', e.message); return res.status(502).json({ error: 'Could not check Xero AU for an existing bill ' + invNo + ' (' + e.message + '). Nothing created; try again.' }); }
     if (dupe && dupe.InvoiceID) return res.status(409).json({ error: 'An AU bill ' + invNo + ' already exists (InvoiceID ' + dupe.InvoiceID + ') — ' + po + ' looks already migrated.', au_bill: { id: dupe.InvoiceID, number: dupe.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + dupe.InvoiceID } });
     const contactName = (src.Contact && src.Contact.Name) || poRow.supplier || 'Supplier';
     // Source contact detail from UK (to seed a new AU contact with email/address/phone, not a name-only stub).
@@ -5550,7 +5666,7 @@ function flexportConfig() { const token = (process.env.FLEXPORT_API_TOKEN || pro
 async function flexportFetch(path) {
   const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Flexport not connected (set FLEXPORT_API_TOKEN)'); e.code = 503; throw e; }
   const url = /^https?:/.test(path) ? path : ('https://api.flexport.com' + path);
-  const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } });
+  const r = await _fetchT(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } });
   const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
   if (!r.ok) { const e = new Error('Flexport ' + r.status + ': ' + String((j && (j.message || (j.errors && JSON.stringify(j.errors)))) || t).slice(0, 200)); e.code = r.status; throw e; }
   return j;
@@ -5865,7 +5981,13 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     const built = await buildFlexportBookingBody(po, { cargo: b.cargo });
     if (!built.can_submit) return res.status(400).json({ error: 'Cannot submit — unresolved fields: ' + built.missing.join(' | '), missing: built.missing });
     const cfg = flexportConfig(); if (!cfg.present) return res.status(503).json({ error: 'Set FLEXPORT_API_TOKEN first' });
-    const r = await fetch('https://api.flexport.com/bookings', {
+    // v28.151 (review D6): duplicate guard. Each lodged booking is recorded in the PO change log (event 'Flexport booking
+    // lodged'); a PO that already has one is refused (409 ALREADY_BOOKED) unless rebook:true (the client asks first). The
+    // check + lodge run under a per-PO advisory lock so a double submit can't lodge two bookings.
+    return await _withXactLock('flexport_booking:' + po, { code: 'FLEXPORT_BUSY', message: 'A Flexport booking for ' + po + ' is already being lodged.' }, async () => {
+    let _prior = []; try { _prior = (await pool.query(`SELECT detail, changed_by, changed_at FROM planner.po_change_log WHERE po=$1 AND event='Flexport booking lodged' ORDER BY changed_at DESC LIMIT 3`, [po])).rows; } catch (e) { console.error('[flexport] booking history read failed:', e.message); }
+    if (_prior.length && b.rebook !== true) return res.status(409).json({ code: 'ALREADY_BOOKED', error: po + ' already has a Flexport booking request (' + (_prior[0].detail || '') + ', ' + (_prior[0].changed_at ? new Date(_prior[0].changed_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'Europe/London' }).replace(/ /g, '-') : '?') + ' by ' + (_prior[0].changed_by || '?') + ').', prior: _prior });
+    const r = await _fetchT('https://api.flexport.com/bookings', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(built.body),
@@ -5873,8 +5995,10 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
     if (!r.ok) { const msg = (j && j.error && (j.error.message || j.error.code)) || (j && j.message) || String(t).slice(0, 300); return res.status(r.status === 400 ? 400 : 502).json({ error: 'Flexport ' + r.status + ': ' + msg, sent: built.body }); }
     const bk = (j && j.data) || j;
+    await logPoChange(po, 'Flexport booking lodged', [bk && bk.flex_id, bk && bk.name, bk && bk.id].filter(Boolean).join(' / ') || 'booking', authUser(req));
     res.json({ ok: true, booking: { id: bk && bk.id, flex_id: bk && bk.flex_id, name: bk && bk.name, status: bk && bk.status, quote_status: bk && bk.quote_status }, sent: built.body });
-  } catch (e) { log500(e); res.status(e.code === 404 ? 404 : 500).json({ error: e.message }); }
+    });
+  } catch (e) { log500(e); res.status(e.code === 404 ? 404 : e.code === 'FLEXPORT_BUSY' ? 409 : 500).json({ error: e.message }); }
 });
 
 // ── Global command search (v28.072, Ben) — the ⌘K palette. One query across the domains a user works in: purchase
@@ -6580,9 +6704,12 @@ async function currentSupplyEpoch() {
 }
 async function bumpSupplyEpoch() {
   try {
-    await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('supply_cache_epoch','1')
-      ON CONFLICT (key) DO UPDATE SET value=((coalesce(planner.app_settings.value,'0')::bigint)+1)::text, updated_at=now()`);
-    _epochAt = 0;   // force this instance to re-read on the next check so it sees its own bump immediately
+    const r = await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('supply_cache_epoch','1')
+      ON CONFLICT (key) DO UPDATE SET value=((coalesce(planner.app_settings.value,'0')::bigint)+1)::text, updated_at=now() RETURNING value`);
+    // v28.151 (review E4): adopt the bumped value directly (was _epochAt=0 + a re-read, which a concurrent in-flight read
+    // could overwrite with the pre-bump value for another 5s, so builds got stamped with the old epoch and ran twice).
+    const v = r.rows[0] ? Number(r.rows[0].value) : NaN;
+    if (Number.isFinite(v) && v >= _epochVal) { _epochVal = v; _epochAt = Date.now(); } else _epochAt = 0;
   } catch (e) { /* non-fatal */ }
 }
 // Run a heavy read with a hard server-side time cap, so a slow rebuild (e.g. under DB contention) can't hold a
@@ -6625,12 +6752,19 @@ async function swrGet(key, ttlMs, builder) {
 function swrStale(prefix) { for (const [k, e] of _swr) if (!prefix || k.startsWith(prefix)) { if (e.at > 0) e.at = 1; } }
 function swrDrop(prefix) { for (const k of Array.from(_swr.keys())) if (!prefix || k.startsWith(prefix)) _swr.delete(k); }
 function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
-  let entry = null, inflight = null, lastStart = 0;
-  function refresh(ep) {
+  let entry = null, inflight = null, lastStart = 0, gen = 0, pendingBump = null;
+  // v28.151 (review E4): (a) the build is stamped with the epoch read AFTER the invalidating bump has landed and BEFORE the
+  // builder runs (was: whatever _epochVal held when the build finished, usually the pre-bump value, so the next get() saw an
+  // epoch mismatch and rebuilt the whole cache a second time); (b) a generation counter: a build that was already running
+  // when invalidate() fired read pre-edit data, so it is discarded and one more build runs (was: cached as if fresh).
+  function refresh() {
     if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
-    lastStart = Date.now();
-    inflight = Promise.resolve().then(builder)
-      .then((v) => { entry = { v, at: Date.now(), epoch: (ep != null ? ep : _epochVal) }; inflight = null; return v; })
+    lastStart = Date.now(); const myGen = gen;
+    inflight = Promise.resolve(pendingBump).catch(() => {}).then(() => currentSupplyEpoch())
+      .then((ep) => Promise.resolve().then(builder).then((v) => {
+        inflight = null;
+        if (myGen !== gen) return refresh();       // invalidated mid-build → stale, rebuild once more
+        entry = { v, at: Date.now(), epoch: ep }; return v; }))
       .catch((e) => { inflight = null; throw e; });
     return inflight;
   }
@@ -6645,7 +6779,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   }
   function peek() { return entry ? entry.v : null; }
   function patch(fn) { if (!entry) return false; try { const v = fn(entry.v); if (v !== undefined) entry.v = v; return true; } catch (e) { return false; } }   // in-place row patch (keeps the epoch: a rebuild still follows, rate-limited)
-  const c = { name, get, refresh, peek, patch, invalidate() { entry = null; refresh().catch(() => {}); } };
+  const c = { name, get, refresh, peek, patch, invalidate(bump) { gen++; pendingBump = bump || null; entry = null; refresh().catch(() => {}); } };   // v28.151 (review E4): bump awaited inside refresh()
   _supplyCaches.push(c);
   // On Vercel, DON'T boot-warm or install a re-warm timer: an idle/frozen container fires the builder (opening a pooled
   // backend) with no request in flight → stranded connections + overnight reap spikes (Diviyaj 01-Sep). get() builds
@@ -6724,7 +6858,7 @@ function invalidateSupplyCaches() {
   const _epochBump = bumpSupplyEpoch();                          // shared epoch → every OTHER instance rebuilds too (cross-instance)
   try { shellMemoDrop(); } catch (_) {}                          // v28.081: the shell's fresh-builder memo too
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
-  _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
+  _supplyCaches.forEach((c) => { try { c.invalidate(_epochBump); } catch (e) { /* best-effort */ } });   // v28.151 (review E4): rebuild after the bump lands
   // v28.081: cached section responses are no longer dropped (that made the next PAYMENTS / CASH FLOW open block on a full
   // rebuild). They stay epoch-stale (never served after this edit) and rebuild NOW in the background, one after the epoch
   // bump lands so the new entries carry the new epoch; a request that lands mid-rebuild awaits it.
@@ -8188,7 +8322,7 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     const subject = String(b.subject || 'Dock & Bay — open items on your supplier portal').slice(0, 200);
     const html = b.html || '<p>Please log in to the supplier portal and action your open items.</p>';
     if (!process.env.RESEND_API_KEY) { console.log('[portal remind] no RESEND_API_KEY — would email ' + emails.join(', ')); return res.json({ ok: true, sent: 0, emails, sandbox: true }); }
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
     if (!r.ok) { const t = await r.text().catch(() => ''); logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', by: authUser(req), status: 'error', error: 'resend ' + r.status }); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
@@ -8340,7 +8474,7 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, 
     // v28.137: reply-to is ALWAYS EMAIL_REPLY_TO (ops@), set in the payload above. Was the person who triggered the email (replyTo
     // arg: submitter / escalator / supplier) — callers still pass it; it is now ignored.
     if (attachments && attachments.length) payload.attachments = attachments.map(a => ({ filename: a.filename || 'attachment', content: a.content }));   // Resend: content = base64 string
-    const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const resp = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload) });
     if (!resp.ok) { const t = await resp.text().catch(() => ''); console.error('[email] Resend error ' + resp.status + ': ' + t.slice(0, 200)); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: 'resend ' + resp.status }); return { sent: 0, error: 'resend ' + resp.status }; }
@@ -8983,7 +9117,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     if (sets.length) { vals.push(id); await client.query(`UPDATE planner.product_dev_requests SET ${sets.join(',')}, updated_at=now() WHERE id=$${i}`, vals); }
     if (Array.isArray(b.component_ids)) { const comps = b.component_ids.map(Number).filter(Boolean);
       const owned = (await client.query(`SELECT id FROM planner.product_dev_components WHERE item_ref=$1 AND id = ANY($2)`, [rq.item_ref, comps])).rows.map(r => Number(r.id));
-      if (!owned.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'pick at least one component' }); }
+      if (!owned.length) { await _rollback(client); return res.status(400).json({ error: 'pick at least one component' }); }
       await client.query(`DELETE FROM planner.product_dev_request_components WHERE request_id=$1`, [id]);
       for (const cid of owned) await client.query(`INSERT INTO planner.product_dev_request_components (request_id, component_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, cid]); log.push('Request ' + rq.ref + ' components updated'); }
     const stage = await recomputeProductStatus(client, rq.item_id);
@@ -9453,11 +9587,11 @@ app.post('/api/product/size/:id/barcode', async (req, res) => {
     await client.query('BEGIN');
     const sz = (await client.query(`SELECT s.id, coalesce(s.barcode,'') cur, coalesce(s.mapped_sku,'') mapped_sku, coalesce(s.working_sku,'') working_sku, i.ref
       FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE s.id=$1::bigint`, [sizeId])).rows[0];
-    if (!sz) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'size not found' }); }
+    if (!sz) { await _rollback(client); return res.status(404).json({ error: 'size not found' }); }
     if (bc) {
       const pool0 = (await client.query(`SELECT status, assigned_size_id FROM planner.product_workshop_barcodes WHERE barcode=$1`, [bc])).rows[0];
-      if (!pool0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'barcode ' + bc + ' is not in the workshop pool' }); }
-      if (pool0.status === 'assigned' && String(pool0.assigned_size_id) !== String(sizeId)) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'barcode ' + bc + ' is already assigned to another size' }); }
+      if (!pool0) { await _rollback(client); return res.status(400).json({ error: 'barcode ' + bc + ' is not in the workshop pool' }); }
+      if (pool0.status === 'assigned' && String(pool0.assigned_size_id) !== String(sizeId)) { await _rollback(client); return res.status(409).json({ error: 'barcode ' + bc + ' is already assigned to another size' }); }
     }
     // free the size's current barcode (if changing/clearing)
     if (sz.cur && sz.cur !== bc) await client.query(`UPDATE planner.product_workshop_barcodes SET status='free', assigned_size_id=NULL, assigned_ref=NULL, assigned_sku=NULL, assigned_by=NULL, assigned_at=NULL WHERE barcode=$1`, [sz.cur]);
@@ -10929,7 +11063,7 @@ async function dhlLookupOne(number) {
   const key = process.env.DHL_API_KEY;
   if (!key) return null;
   const url = 'https://api-eu.dhl.com/track/shipments?trackingNumber=' + encodeURIComponent(number);
-  const r = await fetch(url, { headers: { 'DHL-API-Key': key, Accept: 'application/json' } });
+  const r = await _fetchT(url, { headers: { 'DHL-API-Key': key, Accept: 'application/json' } });
   if (r.status === 404) return { number, status_code: 'unknown', status_text: 'Not found', eta: null, delivered_at: null, last_event: null, events: [] };
   if (!r.ok) { const e = new Error('DHL HTTP ' + r.status); e.code = r.status; throw e; }
   const j = await r.json().catch(() => ({}));
@@ -10963,7 +11097,7 @@ async function fedexToken() {
   const cfg = fedexConfig(); if (!cfg.key_present) return null;
   const now = Date.now();
   if (_fedexTok.token && now < _fedexTok.exp - 60000) return _fedexTok.token;   // reuse until ~1min before expiry
-  const r = await fetch(cfg.base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const r = await _fetchT(cfg.base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'client_credentials', client_id: cfg.key, client_secret: cfg.secret }) });
   if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error('FedEx OAuth ' + r.status + ': ' + String(t).slice(0, 200)); e.code = r.status; throw e; }
   const j = await r.json();
@@ -10989,7 +11123,7 @@ function _fedexNormCode(code, text) {
 async function fedexLookupOne(number) {
   const cfg = fedexConfig(); if (!cfg.key_present) return null;
   const tok = await fedexToken();
-  const r = await fetch(cfg.base + '/track/v1/trackingnumbers', { method: 'POST',
+  const r = await _fetchT(cfg.base + '/track/v1/trackingnumbers', { method: 'POST',
     headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
     body: JSON.stringify({ includeDetailedScans: true, trackingInfo: [{ trackingNumberInfo: { trackingNumber: number } }] }) });
   if (!r.ok) { const e = new Error('FedEx HTTP ' + r.status); e.code = r.status; throw e; }
@@ -11661,22 +11795,35 @@ async function sendPaymentNotify(row) {
 // Worker: every 30s, claim + send any queued email whose 5-min window has elapsed.
 let _remitTick = false;
 async function processPaymentEmails() {
-  if (_remitTick) return; _remitTick = true;
+  if (_remitTick) return { busy: true }; _remitTick = true; let sent = 0, failed = 0, reclaimed = 0;
   try {
+    // v28.151 (review E5): reclaim rows stuck in 'sending' > 10 min (the instance died or froze between claim and the
+    // sent/failed update; they were never retried). The claim stamps send_after = claim time (no schema change), so the
+    // age test is on that. Edge: a send that DID reach Resend before the crash is sent again (preferred over never).
+    reclaimed = (await pool.query(`UPDATE planner.payment_emails SET status='queued', error='reclaimed after a stalled send' WHERE status='sending' AND send_after < now() - interval '10 minutes'`)).rowCount;
+    if (reclaimed) console.warn('[payment-emails] reclaimed ' + reclaimed + ' stalled sending row(s)');
     const due = (await pool.query(`SELECT id FROM planner.payment_emails WHERE status='queued' AND send_after<=now() ORDER BY id LIMIT 20`)).rows;
     for (const d of due) {
       // claim (skip if someone else took it)
-      const claim = await pool.query(`UPDATE planner.payment_emails SET status='sending' WHERE id=$1 AND status='queued' RETURNING *`, [d.id]);
+      const claim = await pool.query(`UPDATE planner.payment_emails SET status='sending', send_after=now() WHERE id=$1 AND status='queued' RETURNING *`, [d.id]);
       const row = claim.rows[0]; if (!row) continue;
       try { const r = await sendPaymentNotify(row);
-        if (r && r.error) await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(r.error).slice(0, 300)]);
-        else await pool.query(`UPDATE planner.payment_emails SET status='sent', sent_at=now(), error=null WHERE id=$1`, [row.id]);
-      } catch (e) { await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(e.message || e).slice(0, 300)]); }
+        if (r && r.error) { failed++; await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(r.error).slice(0, 300)]); }
+        else { sent++; await pool.query(`UPDATE planner.payment_emails SET status='sent', sent_at=now(), error=null WHERE id=$1`, [row.id]); }
+      } catch (e) { failed++; await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(e.message || e).slice(0, 300)]); }
     }
-  } catch (e) { /* worker best-effort */ }
+  } catch (e) { console.error('[payment-emails] worker error:', e && e.message); }
   finally { _remitTick = false; }
+  return { sent, failed, reclaimed };
 }
-setInterval(processPaymentEmails, 30000);
+// v28.151 (review E5): the 30s timer runs on the long-lived server only. On Vercel a timer fires on frozen/idle containers
+// (pooled connection opened with no request = the stranded-connection pattern) and simply never runs when no instance
+// is warm, so prod needs a scheduler hitting the cron route below (n8n every 1-2 min, webhook-secret gated like the others).
+if (!process.env.VERCEL) setInterval(processPaymentEmails, 30000).unref?.();
+app.post('/api/cron/payment-emails', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 
 // Admin PO ▸ DOCUMENTS tab: approve / reject a supplier-submitted document (with notes). Rejection returns the
 // doc to a re-submittable state; the notes are kept so the portal shows why. Posts an INTERNAL timeline note
@@ -13197,7 +13344,7 @@ const BLADE = {
 };
 async function bladeLogin() {
   if (!BLADE.password) throw new Error('BLADE_PASSWORD not set in server env');
-  const r = await fetch(BLADE.base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const r = await _fetchT(BLADE.base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: BLADE.username, password: BLADE.password }) });
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error('Blade login failed (HTTP ' + r.status + ')');
@@ -13209,18 +13356,21 @@ async function bladeLogin() {
 async function bladeVariations(token) {   // paginate stock_availability → { map:{ "<id>":sku }, ids:[<id>…] }
   const map = {}; const ids = []; let page = 1;
   while (page <= 100) {
-    const r = await fetch(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
+    const r = await _fetchT(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
       { headers: { 'Access-Token': token, 'Content-Type': 'application/json' } });
-    if (!r.ok) break;
-    const j = await r.json().catch(() => null); const data = (j && j.data) || [];
-    if (!data.length) break;
+    // v28.151 (review D8): a failed page used to `break`, so a partial variation list built a partial stock request that
+    // was then reported as the complete EU stock position. A non-OK or unparseable page (or hitting the page cap) now throws.
+    if (!r.ok) throw new Error('Blade variations page ' + page + ' failed (HTTP ' + r.status + '): stock not fetched');
+    const j = await r.json().catch(() => null); if (!j) throw new Error('Blade variations page ' + page + ' returned unreadable JSON: stock not fetched');
+    const data = j.data || [];
+    if (!data.length) return { map, ids };
     data.forEach(v => { if (v && v.id != null) { map[String(v.id)] = String(v.sku || '').trim(); ids.push(Number(v.id)); } });
     page++;
   }
-  return { map, ids };
+  throw new Error('Blade variations exceeded 100 pages: stock not fetched (raise the cap)');
 }
 async function bladeStocks(token, body) {   // PUT /stocks (a read); body built from all variation ids + warehouse
-  const r = await fetch(BLADE.base + '/products/variations/stocks', { method: 'PUT',
+  const r = await _fetchT(BLADE.base + '/products/variations/stocks', { method: 'PUT',
     headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body: body });
   if (!r.ok) throw new Error('Blade stock fetch failed (HTTP ' + r.status + ')');
   const j = await r.json().catch(() => null);
@@ -13357,7 +13507,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
       try { parsed = await bladeFetchStock(); }
       catch (e) { return res.json({ market: mkt, error: e.message }); }
     } else {
-      const rsp = await fetch(cfg.url + '?' + Date.now(), { redirect: 'follow' });
+      const rsp = await _fetchT(cfg.url + '?' + Date.now(), { redirect: 'follow' });
       if (!rsp.ok) return res.status(502).json({ error: 'Report fetch failed (HTTP ' + rsp.status + ')' });
       parsed = inv3plParse(cfg, await rsp.text());
     }
@@ -13762,12 +13912,12 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po, coalesce(p.is_master,false) is_master, coalesce(p.status,'') status, coalesce(f.value_est,0)::numeric value_est,
         EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=p.po) has_inbound
       FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [childPos])).rows;
-    if (chk.length !== childPos.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'one or more POs not found' }); }
-    const bad = chk.find(r => r.master_po || r.is_master); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + (bad.is_master ? ' is already a master' : ' is already in ' + bad.master_po) }); }
+    if (chk.length !== childPos.length) { await _rollback(client); return res.status(400).json({ error: 'one or more POs not found' }); }
+    const bad = chk.find(r => r.master_po || r.is_master); if (bad) { await _rollback(client); return res.status(409).json({ error: bad.po + (bad.is_master ? ' is already a master' : ' is already in ' + bad.master_po) }); }
     const wrongSup = chk.find(r => String(r.supplier_name || '').trim().toLowerCase() !== supplier.toLowerCase());
-    if (wrongSup) { await client.query('ROLLBACK'); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
+    if (wrongSup) { await _rollback(client); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
     const shipped = chk.find(r => r.has_inbound || /complete/i.test(r.status));   // consolidating a shipped/received PO would drop real in-transit stock or double-count
-    if (shipped) { await client.query('ROLLBACK'); return res.status(400).json({ error: shipped.po + (shipped.has_inbound ? ' already has inbound stock — consolidate before shipping' : ' is complete') }); }
+    if (shipped) { await _rollback(client); return res.status(400).json({ error: shipped.po + (shipped.has_inbound ? ' already has inbound stock — consolidate before shipping' : ' is complete') }); }
     // Biggest child by value_est, ties broken by the order they were passed in.
     const byPo = {}; chk.forEach(r => { byPo[r.po] = r; });
     let big = childPos[0]; childPos.forEach(po => { if (Number(byPo[po].value_est) > Number(byPo[big].value_est)) big = po; });
@@ -13776,8 +13926,8 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     const override = String(b.master_po || '').trim();
     let mpo;
     if (override) {
-      if (override.length > 60) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'PO reference too long' }); }
-      if ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [override])).rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'PO ' + override + ' already exists — choose another reference' }); }
+      if (override.length > 60) { await _rollback(client); return res.status(400).json({ error: 'PO reference too long' }); }
+      if ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [override])).rowCount) { await _rollback(client); return res.status(409).json({ error: 'PO ' + override + ' already exists — choose another reference' }); }
       mpo = override;
     } else { mpo = big + '-MASTER'; let sfx = 1; while ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [mpo])).rowCount) { sfx++; mpo = big + '-MASTER-' + sfx; } }
     // Build the master row by copying the biggest child's header, resetting identity/transactional columns.
@@ -13817,9 +13967,9 @@ app.post('/api/supply/master-po/:id/remove-child', async (req, res) => {   // de
   try {
     await client.query('BEGIN');
     const m = (await client.query(`SELECT po, coalesce(status,'') status FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true FOR UPDATE`, [id])).rows[0];
-    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
+    if (!m) { await _rollback(client); return res.status(404).json({ error: 'master not found' }); }
     const ch = (await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND master_po=$2`, [po, id])).rows[0];
-    if (!ch) { await client.query('ROLLBACK'); return res.status(400).json({ error: po + ' is not a child of ' + id }); }
+    if (!ch) { await _rollback(client); return res.status(400).json({ error: po + ' is not a child of ' + id }); }
     await client.query(`UPDATE planner.purchase_orders SET master_po=NULL, updated_at=now() WHERE po=$1`, [po]);   // back to a normal PO
     // Re-sum the master's consolidated lines from the remaining children (empty if none left).
     await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
@@ -13842,7 +13992,7 @@ app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: 
   try {
     await client.query('BEGIN');
     const m = (await client.query(`SELECT po FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id])).rows[0];
-    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
+    if (!m) { await _rollback(client); return res.status(404).json({ error: 'master not found' }); }
     await client.query(`UPDATE planner.purchase_orders SET master_po=NULL, updated_at=now() WHERE master_po=$1`, [id]);
     await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
     await client.query(`DELETE FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id]);
@@ -14659,8 +14809,18 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
     const rows = []; for (let r = hr + 1; r < grid.length; r++) { const sku = String((grid[r] || [])[si] == null ? '' : grid[r][si]).trim(); if (!sku) continue; const q = _tplNum((grid[r] || [])[qi]); rows.push([sku, q == null ? 0 : q]); }
     if (!rows.length) return res.json({ ok: false, error: 'no stock rows found under the headers' });
     const by = authUser(req);
-    await pool.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
-    for (const [sku, q] of rows) await pool.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at, uploaded_by) VALUES ($1,$2,now(),$3) ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now(), uploaded_by=excluded.uploaded_by`, [sku, q, by]);
+    // v28.151 (review E7): DELETE + ONE multi-row insert in a single transaction (was DELETE then a per-row INSERT with no
+    // txn: a mid-upload failure left the snapshot empty or partial, and N round trips held the pool). Duplicate SKUs in the
+    // file collapse to the last row (as the old per-row upsert did).
+    const _zm = new Map(); for (const [sku, q] of rows) _zm.set(sku, q);
+    const zc = await pool.connect();
+    try {
+      await zc.query('BEGIN');
+      await zc.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
+      await zc.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at, uploaded_by) SELECT u.sku, u.qty, now(), $3 FROM unnest($1::text[], $2::numeric[]) AS u(sku, qty)
+        ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now(), uploaded_by=excluded.uploaded_by`, [[..._zm.keys()], [..._zm.values()], by]);
+      await zc.query('COMMIT');
+    } catch (e) { await _rollback(zc); throw e; } finally { zc.release(); }
     res.json({ ok: true, count: rows.length });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -15328,7 +15488,7 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     await client.query('BEGIN');
     // Never orphan children: a master PO can only be deleted once all its child POs are removed (Child PO tab).
     const kids = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE master_po=$1`, [po])).rows[0].n;
-    if (kids > 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Cannot delete a master PO while ' + kids + ' child PO' + (kids > 1 ? 's are' : ' is') + ' assigned — remove them on the Child PO tab first' }); }
+    if (kids > 0) { await _rollback(client); return res.status(409).json({ error: 'Cannot delete a master PO while ' + kids + ' child PO' + (kids > 1 ? 's are' : ' is') + ' assigned — remove them on the Child PO tab first' }); }
     await client.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]);
@@ -15338,7 +15498,7 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     const r = await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [po]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Resolve the Cin7 Authorization header from env — accepts EITHER form, so it's flexible:
@@ -15370,14 +15530,20 @@ function logCin7(url, opts, resp) {
     }).catch(() => {});
   } catch (e) { /* never break the push over logging */ }
 }
+// v28.151 (review D7): CIN7_WRITES_DISABLED=true is a hard kill switch for every non-GET Cin7 call (incl. ?erp=cin7 forced
+// pushes). It answers a synthetic 403 Response so callers take their normal "Cin7 API error" path; nothing is sent.
+const CIN7_WRITES_DISABLED = String(process.env.CIN7_WRITES_DISABLED || '').toLowerCase() === 'true';
 function cin7Fetch(url, opts) {
+  const _m = String((opts && opts.method) || 'GET').toUpperCase();
+  if (CIN7_WRITES_DISABLED && _m !== 'GET' && _m !== 'HEAD') { console.warn('[cin7] BLOCKED ' + _m + ' (CIN7_WRITES_DISABLED=true): ' + String(url).replace('https://api.cin7.com/api/v1', '').slice(0, 90));
+    return Promise.resolve(new Response(JSON.stringify({ error: 'Cin7 writes are disabled on this environment (CIN7_WRITES_DISABLED=true). Nothing was sent to Cin7.' }), { status: 403, headers: { 'content-type': 'application/json' } })); }
   const MIN_GAP = 400;   // ms between Cin7 calls → ~2.5/sec, safely under the 3/sec cap
   const run = async () => {
     const gap = MIN_GAP - (Date.now() - _cin7LastCall);
     if (gap > 0) await new Promise(r => setTimeout(r, gap));
     for (let attempt = 0; ; attempt++) {
       _cin7LastCall = Date.now();
-      const resp = await fetch(url, opts);
+      const resp = await _fetchT(url, opts, 45000);   // v28.151 (review D3): 45s (large v1 list pages); the 429 retry loop is unchanged
       if (resp.status !== 429 || attempt >= 4) { logCin7(url, opts, resp); return resp; }
       logCin7(url, opts, resp);   // log the 429 too, then back off + retry
       const ra = Number(resp.headers.get('retry-after'));
@@ -15403,8 +15569,8 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('BEGIN');
     const chk = await client.query('SELECT po FROM planner.purchase_orders WHERE po = ANY($1)', [[into, from]]);
     const have = new Set(chk.rows.map(r => r.po));
-    if (!have.has(into)) { await client.query('ROLLBACK'); return res.status(404).json({ error: `PO 1 (${into}) not found` }); }
-    if (!have.has(from)) { await client.query('ROLLBACK'); return res.status(404).json({ error: `PO 2 (${from}) not found` }); }
+    if (!have.has(into)) { await _rollback(client); return res.status(404).json({ error: `PO 1 (${into}) not found` }); }
+    if (!have.has(from)) { await _rollback(client); return res.status(404).json({ error: `PO 2 (${from}) not found` }); }
     const fromLines = (await client.query('SELECT sku, coalesce(qty,0) qty, cost_price FROM planner.purchase_order_lines WHERE po=$1', [from])).rows;
     let summed = 0, copied = 0;
     for (const l of fromLines) {
@@ -15429,7 +15595,7 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
     await client.query('COMMIT');
     res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // BULK paste SKU/qty rows into a PO's order plan (Excel / Sheets paste). Each row is validated against our SKU
@@ -15444,7 +15610,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
   try {
     await client.query('BEGIN');
     if (!(await client.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [po])).rowCount) {
-      await client.query('ROLLBACK'); return res.status(404).json({ error: `PO ${po} not found` });
+      await _rollback(client); return res.status(404).json({ error: `PO ${po} not found` });
     }
     let added = 0, updated = 0; const skipped = [], badQty = [];
     for (const r of rows) {
@@ -15468,7 +15634,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, po, added, updated, skipped, badQty });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
@@ -15521,8 +15687,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   const completion = ((req.body && req.body.completion_date) || '').trim();
   const _erpLines = (req.query.erp === 'cin7' || req.query.erp === 'fulfil') ? req.query.erp : await activeErp();   // v27.741: ?erp= forces the target (2-button model)
   if (_erpLines === 'fulfil') {   // same process, Fulfil target (create-if-absent)
-    try { return res.json(await fulfilPushLines(po, completion)); }
-    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
+    try { return res.json(await withFulfilPushLock(po, () => fulfilPushLines(po, completion))); }   // v28.151 (review D2): per-PO single-flight
+    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_PUSH_BUSY' ? 409 : 502).json({ error: e.message }); }
   }
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
@@ -15890,7 +16056,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
   try {
     await client.query('BEGIN');
     const ex = await client.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [newpo]);
-    if (ex.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'PO ' + newpo + ' already exists' }); }
+    if (ex.rowCount) { await _rollback(client); return res.status(409).json({ error: 'PO ' + newpo + ' already exists' }); }
     await client.query('UPDATE planner.purchase_orders SET po=$1 WHERE po=$2', [newpo, oldpo]);
     await client.query("UPDATE planner.purchase_order_lines SET po=$1, po_sku=$1||'|'||sku WHERE po=$2", [newpo, oldpo]);
     await client.query('UPDATE planner.erp_purchase_order_lines SET po=$1 WHERE po=$2', [newpo, oldpo]);
@@ -15903,7 +16069,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
     await client.query('UPDATE planner.shipments SET master_po=$1 WHERE master_po=$2', [newpo, oldpo]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // v27.858 (Ben): rename a master shipment's reference (e.g. to match the Fulfil internal shipment IS124). Cascades the
@@ -15918,17 +16084,17 @@ app.post('/api/supply/shipment/:ref/rename', async (req, res) => {
   try {
     await client.query('BEGIN');
     const clash = await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1 UNION SELECT 1 FROM planner.purchase_orders WHERE po=$1 LIMIT 1`, [newref]);
-    if (clash.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: '"' + newref + '" is already a shipment or PO reference' }); }
+    if (clash.rowCount) { await _rollback(client); return res.status(409).json({ error: '"' + newref + '" is already a shipment or PO reference' }); }
     const s = await client.query('UPDATE planner.shipments SET shipment_ref=$1, updated_at=now() WHERE shipment_ref=$2', [newref, oldref]);
     const p = await client.query('UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]);
-    if (!s.rowCount && !p.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'no shipment "' + oldref + '"' }); }
+    if (!s.rowCount && !p.rowCount) { await _rollback(client); return res.status(404).json({ error: 'no shipment "' + oldref + '"' }); }
     await client.query('UPDATE planner.shipment_change_log SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
     await client.query('UPDATE planner.shipment_notes SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
     await client.query('UPDATE planner.supplier_submissions SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
     await client.query('UPDATE planner.ship_plan_locks SET ref=$1 WHERE ref=$2', [newref, oldref]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true, shipments: s.rowCount, pos: p.rowCount, new_ref: newref });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
@@ -17000,7 +17166,7 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
     const r = await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [ref]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount, unassigned_pos: unassigned.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // SELF-SHIPMENT mode gate (PO ▸ SHIPMENTS). Picking a mode turns the PO into its own shipment (a planner.shipments
@@ -17021,7 +17187,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
     await client.query('BEGIN');
     if (!mode) {
       const others = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE shipment_ref=$1 AND po<>$1`, [po])).rows[0].n;
-      if (others > 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This shipment has ' + others + ' other PO(s) aboard — manage it as a master shipment instead of clearing the mode here.' }); }
+      if (others > 0) { await _rollback(client); return res.status(409).json({ error: 'This shipment has ' + others + ' other PO(s) aboard — manage it as a master shipment instead of clearing the mode here.' }); }
       await client.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL WHERE po=$1 AND shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [po]);
@@ -18594,7 +18760,7 @@ async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient,
     + '<p><a href="' + link + '" style="color:#1d4ed8;font-weight:600">Open the sample in HORIZON →</a></p></div>';
   if (!process.env.RESEND_API_KEY) { console.log('[sample ship email] no RESEND_API_KEY — would email ' + emails.join(', ')); return; }
   try {
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
     const j = await r.json().catch(() => ({}));
@@ -18679,11 +18845,11 @@ app.post('/api/supply/sample/:id/ref', async (req, res) => {
   try {
     await client.query('BEGIN');
     const cur = (await client.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
-    if (!cur) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'sample not found' }); }
+    if (!cur) { await _rollback(client); return res.status(404).json({ error: 'sample not found' }); }
     const oldRef = cur.ref;
-    if (newRef === oldRef) { await client.query('ROLLBACK'); return res.json({ ok: true, ref: newRef }); }
+    if (newRef === oldRef) { await _rollback(client); return res.json({ ok: true, ref: newRef }); }
     const dup = (await client.query(`SELECT 1 FROM planner.sample_requests WHERE ref=$1 AND id<>$2::bigint`, [newRef, req.params.id])).rows[0];
-    if (dup) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'That reference is already used by another sample.' }); }
+    if (dup) { await _rollback(client); return res.status(409).json({ error: 'That reference is already used by another sample.' }); }
     await client.query(`UPDATE planner.sample_requests SET ref=$1, updated_at=now() WHERE id=$2::bigint`, [newRef, req.params.id]);
     await client.query(`UPDATE planner.supplier_charges SET source_ref=$1 WHERE source_type='sample' AND source_ref=$2`, [newRef, oldRef]);
     await client.query(`UPDATE planner.deposits SET reference=$1 WHERE is_deposit=false AND reference=$2`, [newRef, oldRef]);
@@ -18725,8 +18891,8 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
   const client = await pool.connect();
   try { await client.query('BEGIN');
     const c = (await client.query(`SELECT * FROM planner.supplier_charges WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
-    if (!c) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'charge not found' }); }
-    if (c.status === 'accepted') { await client.query('ROLLBACK'); return res.json({ ok:true, already:true, other_payment_id:c.other_payment_id }); }
+    if (!c) { await _rollback(client); return res.status(404).json({ error: 'charge not found' }); }
+    if (c.status === 'accepted') { await _rollback(client); return res.json({ ok:true, already:true, other_payment_id:c.other_payment_id }); }
     const fr = Math.round(Number(c.freight_cost)||0), pr = Math.round(Number(c.product_cost)||0), amount = Math.round(((Number(c.freight_cost)||0)+(Number(c.product_cost)||0))*100)/100;
     // ONE Other Payment showing the TOTAL. The per-account split (by the sample's type/purpose) is applied only in the
     // Payments Report Xero download, not here — the register keeps a single total line per charge (Ben).
@@ -18778,9 +18944,9 @@ app.post('/api/ai', async (req, res) => {
       'anthropic-version': '2023-06-01',
     };
     if (process.env.ANTHROPIC_WORKSPACE_ID) headers['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID;   // org-scoped keys need the workspace id
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await _fetchT('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers, body: JSON.stringify(body),
-    });
+    }, 90000);   // v28.151 (review D3): Anthropic gets 90s (4096-token replies run ~45-70s)
     const text = await r.text();
     res.status(r.status).set('content-type', 'application/json').send(text);
   } catch (e) {
@@ -18947,7 +19113,7 @@ async function aiQueryHorizon(sql) {
     await client.query("SET LOCAL statement_timeout = '8s'");
     await client.query('SET LOCAL search_path = planner');
     const r = await client.query(capped);
-    await client.query('ROLLBACK');
+    await _rollback(client);
     const rows = r.rows.map(aiCleanRow);
     return { columns: (r.fields || []).map(f => f.name), row_count: rows.length, rows, truncated: rows.length >= 500 };
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} return { error: e.message }; }
@@ -19093,7 +19259,7 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
     const AI_MAX_HOPS = 14;
     for (let hop = 0; hop < AI_MAX_HOPS; hop++) {
       const lastHop = hop === AI_MAX_HOPS - 1;   // final hop: drop tools so the model MUST give an answer instead of looping
-      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify(Object.assign({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }, lastHop ? {} : { tools: AI_TOOLS })) });
+      const r = await _fetchT('https://api.anthropic.com/v1/messages', { method: 'POST', headers: _aiHeaders, body: JSON.stringify(Object.assign({ model: AI_ASSIST_MODEL, max_tokens: 4096, system: AI_SYSTEM, messages }, lastHop ? {} : { tools: AI_TOOLS })) }, 90000);   // v28.151 (review D3)
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { let msg = (j && j.error && j.error.message) || ('AI error ' + r.status);
         if (r.status === 401 || (j && j.error && j.error.type === 'authentication_error')) msg = 'The AI key on this environment is invalid or expired — ask an admin to refresh ANTHROPIC_API_KEY (it is set on production). Your message has been saved.';
@@ -19529,7 +19695,7 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
   try {
     await client.query('BEGIN');
     const fq = (await client.query(`SELECT qty FROM planner.purchase_order_lines WHERE po=$1 AND sku=$2 FOR UPDATE`, [fromPo, sku])).rows[0];
-    if (!fq || Number(fq.qty) < qty) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Donor line no longer has ' + qty + ' units (now ' + (fq ? fq.qty : 0) + ') — recompute.' }); }
+    if (!fq || Number(fq.qty) < qty) { await _rollback(client); return res.status(409).json({ error: 'Donor line no longer has ' + qty + ' units (now ' + (fq ? fq.qty : 0) + ') — recompute.' }); }
     await client.query(`UPDATE planner.purchase_order_lines SET qty=qty-$3 WHERE po=$1 AND sku=$2`, [fromPo, sku, qty]);
     await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty) VALUES ($1||'|'||$2,$1,$2,$3)
       ON CONFLICT (po_sku) DO UPDATE SET qty=coalesce(planner.purchase_order_lines.qty,0)+$3`, [toPo, sku, qty]);
@@ -19538,7 +19704,7 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
       [key, 'reallocated ' + qty + ' ' + sku + ' ' + fromPo + '→' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, moved: qty, from_po: fromPo, to_po: toPo, sku });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -19628,7 +19794,7 @@ app.post('/api/supply/bi/apply-fill', async (req, res) => {
       [key, 'container-fill +' + qty + ' ' + sku + ' → ' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, added: qty, to_po: toPo, sku });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -20349,7 +20515,7 @@ app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
       [key, 'consolidated ' + merge + ' → ' + keep + ' (' + r.rowCount + ' PO)']);
     await client.query('COMMIT');
     res.json({ ok: true, repointed: r.rowCount, keep, merge });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 const kpiGroup = q => (['Core', 'Seasonal', 'Non-Core'].includes(q) ? q : '');
@@ -20433,7 +20599,7 @@ app.post('/api/forecast/snapshot', async (req, res) => {
   try {
     await client.query('BEGIN');
     const hz = (await client.query(`SELECT min(month) s, max(month) e, count(*) n FROM planner.forecast_outputs`)).rows[0];
-    if (!hz.s || Number(hz.n) === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'no forecast to snapshot (forecast_outputs is empty)' }); }
+    if (!hz.s || Number(hz.n) === 0) { await _rollback(client); return res.status(400).json({ error: 'no forecast to snapshot (forecast_outputs is empty)' }); }
     const run = (await client.query(`INSERT INTO planner.forecast_runs (engine_version, horizon_start, horizon_end, notes)
       VALUES ('sku-snapshot', $1, $2, $3) RETURNING id, to_char(run_at,'YYYY-MM-DD HH24:MI') run_at`,
       [hz.s, hz.e, (req.body && req.body.note) || 'Manual SKU forecast snapshot'])).rows[0];
@@ -20602,7 +20768,7 @@ async function emailForecastCountry(country) {
   const { csv, rowCount } = await forecastCountryCsv(co);
   if (!rowCount) return { country: co, ok: false, reason: 'no forecast rows for this country' };
   if (!process.env.RESEND_API_KEY) return { country: co, ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email, rows: rowCount };
-  const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+  const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
       subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)',
@@ -20630,7 +20796,7 @@ app.post('/api/export/email-csv', async (req, res) => {
     if (!email) return res.json({ ok: false, reason: 'no recipient email set for this report' });
     const filename = String(b.filename || (key + '.csv')).replace(/[^A-Za-z0-9._-]+/g, '_');
     if (!process.env.RESEND_API_KEY) return res.json({ ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email });
-    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
         subject: 'Dock & Bay — ' + KEYS[key] + ' (' + new Date().toISOString().slice(0, 10) + ')',
@@ -21341,13 +21507,26 @@ app.post('/api/client/commission/runs/build', async (req, res) => {
     if (run.status !== 'open') return res.status(409).json({ error: 'run is ' + run.status + ' — reopen it first' });
     // provisional Fulfil rows: done orders in scope for this group's clients, dated in the month (paid date unknown until Fulfil invoicing is mirrored)
     const clients = (await pool.query(`SELECT * FROM planner.clients WHERE rep_group_id=$1 AND active`, [gid])).rows;
-    let added = 0;
+    // v28.151 (review E8): was an exists-check + rate lookup + INSERT per order (3 round trips each, racy under a double
+    // build). Now: existing refs + rate overrides preloaded once, all new rows in ONE unnest insert, and duplicates are
+    // impossible via migration 327's partial unique index (run_id, order_ref) WHERE source='fulfil' + ON CONFLICT DO NOTHING.
+    const _have = new Set((await pool.query(`SELECT order_ref FROM planner.commission_rows WHERE run_id=$1`, [run.id])).rows.map(x => x.order_ref));
+    const _ovr = new Map((await pool.query(`SELECT order_ref, rate FROM planner.commission_overrides WHERE rep_group_id=$1`, [gid])).rows.map(x => [x.order_ref, Number(x.rate)]));
+    const _ins = { ref: [], inv: [], cust: [], paid: [], amt: [], rate: [], com: [], status: [], note: [] };
     for (const c0 of clients) { const c = await cpClientById(c0.id); const params = [month]; const vis = cpVisibilitySql(c, null, params);
       const rows = (await pool.query(`SELECT s.reference, s.number, s.party_name, s.untaxed, s.total, to_char(s.sale_date,'YYYY-MM-DD') d, s.invoice_state FROM planner.fulfil_sales s WHERE to_char(s.sale_date,'YYYY-MM')=$1 AND s.state IN ('done','processing') AND ${vis}`, params)).rows;
-      for (const r of rows) { const ref = r.reference || r.number; const exists = (await pool.query(`SELECT 1 FROM planner.commission_rows WHERE run_id=$1 AND order_ref=$2`, [run.id, ref])).rowCount; if (exists) continue;
-        const rate = await cpRateFor(gid, ref, g.default_rate); const amt = Number(r.untaxed) || 0; const com = Math.round(amt * rate) / 100;
-        await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11,'fulfil')`,
-          [run.id, ref, r.number, r.party_name, r.invoice_state === 'paid' ? r.d : null, amt, rate, com, month + ' ' + g.name, r.invoice_state === 'paid' ? 'pending' : 'exception', r.invoice_state === 'paid' ? null : 'paid date unknown — Fulfil invoice not paid/mirrored; confirm from Xero or mark manually']); added++; } }
+      for (const r of rows) { const ref = r.reference || r.number; if (_have.has(ref)) continue; _have.add(ref);
+        const rate = _ovr.has(ref) ? _ovr.get(ref) : (Number(g.default_rate) || 0); const amt = Number(r.untaxed) || 0; const com = Math.round(amt * rate) / 100;   // same rule as cpRateFor
+        const paid = r.invoice_state === 'paid';
+        _ins.ref.push(ref); _ins.inv.push(r.number); _ins.cust.push(r.party_name); _ins.paid.push(paid ? r.d : null); _ins.amt.push(amt); _ins.rate.push(rate); _ins.com.push(com);
+        _ins.status.push(paid ? 'pending' : 'exception'); _ins.note.push(paid ? null : 'paid date unknown: Fulfil invoice not paid/mirrored; confirm from Xero or mark manually'); } }
+    let added = 0;
+    if (_ins.ref.length) { const _sql = (oc) => `INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source)
+        SELECT $1, u.ref, u.inv, u.cust, u.paid, u.amt, u.rate, u.com, u.com, $2, u.status, u.note, 'fulfil'
+          FROM unnest($3::text[], $4::text[], $5::text[], $6::date[], $7::numeric[], $8::numeric[], $9::numeric[], $10::text[], $11::text[]) AS u(ref, inv, cust, paid, amt, rate, com, status, note)` + (oc ? ` ON CONFLICT (run_id, order_ref) WHERE source = 'fulfil' DO NOTHING` : '');
+      const _p = [run.id, month + ' ' + g.name, _ins.ref, _ins.inv, _ins.cust, _ins.paid, _ins.amt, _ins.rate, _ins.com, _ins.status, _ins.note];
+      try { added = (await pool.query(_sql(true), _p)).rowCount; }
+      catch (e) { if (e.code !== '42P10') throw e; console.warn('[commission build] migration 327 index missing: inserting without ON CONFLICT'); added = (await pool.query(_sql(false), _p)).rowCount; } }   // 42P10 = no matching unique index (pre-327)
     const sum = await cpRunSummary(run.id);
     await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · +' + added + ' rows', req.me.email);
     res.json({ ok: true, run_id: run.id, added, ...sum });
@@ -21874,7 +22053,7 @@ async function drivehqForecastCountry(country) {
   const url = [base, encodeURIComponent(folder), encodeURIComponent(filename)].join('/');
   const auth = Buffer.from(process.env.DRIVEHQ_USER + ':' + process.env.DRIVEHQ_PASS).toString('base64');
   try {
-    const r = await fetch(url, { method: 'PUT', headers: { Authorization: 'Basic ' + auth, 'Content-Type': 'text/csv' }, body: csv, redirect: 'follow' });
+    const r = await _fetchT(url, { method: 'PUT', headers: { Authorization: 'Basic ' + auth, 'Content-Type': 'text/csv' }, body: csv, redirect: 'follow' }, 60000);   // v28.151 (review D3)
     if (r.status < 200 || r.status >= 300) return { country: co, ok: false, reason: 'DriveHQ HTTP ' + r.status + ': ' + (await r.text()).slice(0, 200) };
     return { country: co, ok: true, url, rows: rowCount, bytes: Buffer.byteLength(csv) };
   } catch (e) { return { country: co, ok: false, reason: 'DriveHQ upload error: ' + e.message }; }
@@ -22066,7 +22245,7 @@ app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {
       [b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, b.currency || 'USD', efp, b.note || null, req.portal.email || ''])).rows[0].id;
     for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3)', [id, t.min_qty, t.unit_cost]);
     await client.query('COMMIT'); res.json({ ok: true, id });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Portal price-list change log (scoped to the supplier). No params → recent decisions (approved/rejected/superseded)
