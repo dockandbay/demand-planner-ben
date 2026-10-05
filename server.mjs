@@ -98,6 +98,13 @@ const pool = new pg.Pool({
 // fatal and exits (the repeated EADDRNOTAVAIL crashes in dev). Log it and let the pool recycle the
 // client — the next query opens a fresh connection.
 pool.on('error', (err) => { console.error('[pg pool] idle client error (ignored):', err && err.message); });
+// v28.151 (review E6): ROLLBACK that can't throw. A bare `await client.query('ROLLBACK')` in a catch rethrows on a dead or
+// timed-out connection (the request then never answers) and hands a mid-transaction client back to the pool. Here a failed
+// ROLLBACK ends the client so the finally's release() sees _ending and the pool discards it instead of reusing it.
+async function _rollback(client) {
+  try { await client.query('ROLLBACK'); }
+  catch (e) { console.error('[pg] ROLLBACK failed, discarding client:', e && e.message); try { client.end().catch(() => {}); } catch (_) {} }
+}
 // v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
 // only read at call time) gets s.q incremented on every pool.query; the finish-hook logs it. Behaviour otherwise identical.
 { const _origQuery = pool.query.bind(pool);
@@ -2060,7 +2067,7 @@ app.post('/api/save-forecasts', async (req, res) => {
     invalidateBiCache();   // forecast_outputs changed → BI/KPI projections must recompute
     res.json({ saved: upserts + deletes, upserts, deletes });
   } catch (e) {
-    await client.query('ROLLBACK');
+    await _rollback(client);
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
@@ -2109,7 +2116,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
     invalidateBiCache();   // FC_OUTPUTS drives biProjection()/kpiBase() → recompute
     res.json({ saved: n });
   } catch (e) {
-    await client.query('ROLLBACK');
+    await _rollback(client);
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
@@ -3990,7 +3997,7 @@ app.post('/api/supply/price-list', async (req, res) => {
     for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3) ON CONFLICT (entry_id,min_qty) DO UPDATE SET unit_cost=excluded.unit_cost', [id, t.min_qty, t.unit_cost]);
     await client.query('COMMIT');
     res.json({ ok: true, id });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/price-list/:id/delete', async (req, res) => {
@@ -4049,7 +4056,7 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
   try {
     await client.query('BEGIN');
     const e = (await client.query('SELECT * FROM planner.price_list_entries WHERE id=$1', [id])).rows[0];
-    if (!e) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+    if (!e) { await _rollback(client); return res.status(404).json({ error: 'not found' }); }
     await client.query(`UPDATE planner.price_list_entries SET status='superseded', updated_at=now()
       WHERE id<>$1 AND status='active' AND supplier=$2 AND scope=$3
         AND coalesce(price_type,'')=coalesce($4,'') AND coalesce(sku,'')=coalesce($5,'')
@@ -4057,7 +4064,7 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
       [id, e.supplier, e.scope, e.price_type, e.sku, e.effective_from_production]);
     await client.query(`UPDATE planner.price_list_entries SET status='active', approved_by=$2, approved_at=now(), updated_at=now() WHERE id=$1`, [id, me]);
     await client.query('COMMIT'); res.json({ ok: true });
-  } catch (err) { await client.query('ROLLBACK'); log500(err); res.status(500).json({ error: err.message }); }
+  } catch (err) { await _rollback(client); log500(err); res.status(500).json({ error: err.message }); }
   finally { client.release(); }
 });
 // Price-list change log. No params → supplier-submitted decisions (approved/rejected/superseded) across everything.
@@ -4101,7 +4108,7 @@ app.post('/api/supply/price-list/exclude', async (req, res) => {
     for (const s of [...new Set(skus)]) await client.query('INSERT INTO planner.price_list_excluded_skus (sku) VALUES ($1) ON CONFLICT (sku) DO NOTHING', [s]);
     await client.query('COMMIT');
     res.json({ ok: true, count: skus.length });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
@@ -4260,7 +4267,7 @@ app.post('/api/supply/shipments/cleanup-orphans', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches();
     res.json({ ok: true, deleted: del.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Perform a consolidation: assign `pos` onto one shipment. create=true makes a NEW master-less shipment
@@ -4289,7 +4296,7 @@ app.post('/api/supply/consolidate', async (req, res) => {
       }
     } else {
       const ex = (await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
-      if (!ex) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
+      if (!ex) { await _rollback(client); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
     }
     // capture the POs' prior shipments (to prune any now-empty self-shipment they leave behind)
     const priors = (await client.query(`SELECT DISTINCT shipment_ref FROM planner.purchase_orders
@@ -4299,7 +4306,7 @@ app.post('/api/supply/consolidate', async (req, res) => {
     for (const pr of priors) { await pruneEmptySelfShipment(client, pr); }   // clean up orphaned self-shipments
     await client.query('COMMIT');
     res.json({ ok: true, ref, assigned: upd.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -8949,7 +8956,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     if (sets.length) { vals.push(id); await client.query(`UPDATE planner.product_dev_requests SET ${sets.join(',')}, updated_at=now() WHERE id=$${i}`, vals); }
     if (Array.isArray(b.component_ids)) { const comps = b.component_ids.map(Number).filter(Boolean);
       const owned = (await client.query(`SELECT id FROM planner.product_dev_components WHERE item_ref=$1 AND id = ANY($2)`, [rq.item_ref, comps])).rows.map(r => Number(r.id));
-      if (!owned.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'pick at least one component' }); }
+      if (!owned.length) { await _rollback(client); return res.status(400).json({ error: 'pick at least one component' }); }
       await client.query(`DELETE FROM planner.product_dev_request_components WHERE request_id=$1`, [id]);
       for (const cid of owned) await client.query(`INSERT INTO planner.product_dev_request_components (request_id, component_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, cid]); log.push('Request ' + rq.ref + ' components updated'); }
     const stage = await recomputeProductStatus(client, rq.item_id);
@@ -9419,11 +9426,11 @@ app.post('/api/product/size/:id/barcode', async (req, res) => {
     await client.query('BEGIN');
     const sz = (await client.query(`SELECT s.id, coalesce(s.barcode,'') cur, coalesce(s.mapped_sku,'') mapped_sku, coalesce(s.working_sku,'') working_sku, i.ref
       FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE s.id=$1::bigint`, [sizeId])).rows[0];
-    if (!sz) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'size not found' }); }
+    if (!sz) { await _rollback(client); return res.status(404).json({ error: 'size not found' }); }
     if (bc) {
       const pool0 = (await client.query(`SELECT status, assigned_size_id FROM planner.product_workshop_barcodes WHERE barcode=$1`, [bc])).rows[0];
-      if (!pool0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'barcode ' + bc + ' is not in the workshop pool' }); }
-      if (pool0.status === 'assigned' && String(pool0.assigned_size_id) !== String(sizeId)) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'barcode ' + bc + ' is already assigned to another size' }); }
+      if (!pool0) { await _rollback(client); return res.status(400).json({ error: 'barcode ' + bc + ' is not in the workshop pool' }); }
+      if (pool0.status === 'assigned' && String(pool0.assigned_size_id) !== String(sizeId)) { await _rollback(client); return res.status(409).json({ error: 'barcode ' + bc + ' is already assigned to another size' }); }
     }
     // free the size's current barcode (if changing/clearing)
     if (sz.cur && sz.cur !== bc) await client.query(`UPDATE planner.product_workshop_barcodes SET status='free', assigned_size_id=NULL, assigned_ref=NULL, assigned_sku=NULL, assigned_by=NULL, assigned_at=NULL WHERE barcode=$1`, [sz.cur]);
@@ -13727,12 +13734,12 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po, coalesce(p.is_master,false) is_master, coalesce(p.status,'') status, coalesce(f.value_est,0)::numeric value_est,
         EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=p.po) has_inbound
       FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [childPos])).rows;
-    if (chk.length !== childPos.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'one or more POs not found' }); }
-    const bad = chk.find(r => r.master_po || r.is_master); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + (bad.is_master ? ' is already a master' : ' is already in ' + bad.master_po) }); }
+    if (chk.length !== childPos.length) { await _rollback(client); return res.status(400).json({ error: 'one or more POs not found' }); }
+    const bad = chk.find(r => r.master_po || r.is_master); if (bad) { await _rollback(client); return res.status(409).json({ error: bad.po + (bad.is_master ? ' is already a master' : ' is already in ' + bad.master_po) }); }
     const wrongSup = chk.find(r => String(r.supplier_name || '').trim().toLowerCase() !== supplier.toLowerCase());
-    if (wrongSup) { await client.query('ROLLBACK'); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
+    if (wrongSup) { await _rollback(client); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
     const shipped = chk.find(r => r.has_inbound || /complete/i.test(r.status));   // consolidating a shipped/received PO would drop real in-transit stock or double-count
-    if (shipped) { await client.query('ROLLBACK'); return res.status(400).json({ error: shipped.po + (shipped.has_inbound ? ' already has inbound stock — consolidate before shipping' : ' is complete') }); }
+    if (shipped) { await _rollback(client); return res.status(400).json({ error: shipped.po + (shipped.has_inbound ? ' already has inbound stock — consolidate before shipping' : ' is complete') }); }
     // Biggest child by value_est, ties broken by the order they were passed in.
     const byPo = {}; chk.forEach(r => { byPo[r.po] = r; });
     let big = childPos[0]; childPos.forEach(po => { if (Number(byPo[po].value_est) > Number(byPo[big].value_est)) big = po; });
@@ -13741,8 +13748,8 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     const override = String(b.master_po || '').trim();
     let mpo;
     if (override) {
-      if (override.length > 60) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'PO reference too long' }); }
-      if ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [override])).rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'PO ' + override + ' already exists — choose another reference' }); }
+      if (override.length > 60) { await _rollback(client); return res.status(400).json({ error: 'PO reference too long' }); }
+      if ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [override])).rowCount) { await _rollback(client); return res.status(409).json({ error: 'PO ' + override + ' already exists — choose another reference' }); }
       mpo = override;
     } else { mpo = big + '-MASTER'; let sfx = 1; while ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [mpo])).rowCount) { sfx++; mpo = big + '-MASTER-' + sfx; } }
     // Build the master row by copying the biggest child's header, resetting identity/transactional columns.
@@ -13782,9 +13789,9 @@ app.post('/api/supply/master-po/:id/remove-child', async (req, res) => {   // de
   try {
     await client.query('BEGIN');
     const m = (await client.query(`SELECT po, coalesce(status,'') status FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true FOR UPDATE`, [id])).rows[0];
-    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
+    if (!m) { await _rollback(client); return res.status(404).json({ error: 'master not found' }); }
     const ch = (await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND master_po=$2`, [po, id])).rows[0];
-    if (!ch) { await client.query('ROLLBACK'); return res.status(400).json({ error: po + ' is not a child of ' + id }); }
+    if (!ch) { await _rollback(client); return res.status(400).json({ error: po + ' is not a child of ' + id }); }
     await client.query(`UPDATE planner.purchase_orders SET master_po=NULL, updated_at=now() WHERE po=$1`, [po]);   // back to a normal PO
     // Re-sum the master's consolidated lines from the remaining children (empty if none left).
     await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
@@ -13807,7 +13814,7 @@ app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: 
   try {
     await client.query('BEGIN');
     const m = (await client.query(`SELECT po FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id])).rows[0];
-    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
+    if (!m) { await _rollback(client); return res.status(404).json({ error: 'master not found' }); }
     await client.query(`UPDATE planner.purchase_orders SET master_po=NULL, updated_at=now() WHERE master_po=$1`, [id]);
     await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
     await client.query(`DELETE FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id]);
@@ -15293,7 +15300,7 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     await client.query('BEGIN');
     // Never orphan children: a master PO can only be deleted once all its child POs are removed (Child PO tab).
     const kids = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE master_po=$1`, [po])).rows[0].n;
-    if (kids > 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Cannot delete a master PO while ' + kids + ' child PO' + (kids > 1 ? 's are' : ' is') + ' assigned — remove them on the Child PO tab first' }); }
+    if (kids > 0) { await _rollback(client); return res.status(409).json({ error: 'Cannot delete a master PO while ' + kids + ' child PO' + (kids > 1 ? 's are' : ' is') + ' assigned — remove them on the Child PO tab first' }); }
     await client.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]);
@@ -15303,7 +15310,7 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     const r = await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [po]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Resolve the Cin7 Authorization header from env — accepts EITHER form, so it's flexible:
@@ -15368,8 +15375,8 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('BEGIN');
     const chk = await client.query('SELECT po FROM planner.purchase_orders WHERE po = ANY($1)', [[into, from]]);
     const have = new Set(chk.rows.map(r => r.po));
-    if (!have.has(into)) { await client.query('ROLLBACK'); return res.status(404).json({ error: `PO 1 (${into}) not found` }); }
-    if (!have.has(from)) { await client.query('ROLLBACK'); return res.status(404).json({ error: `PO 2 (${from}) not found` }); }
+    if (!have.has(into)) { await _rollback(client); return res.status(404).json({ error: `PO 1 (${into}) not found` }); }
+    if (!have.has(from)) { await _rollback(client); return res.status(404).json({ error: `PO 2 (${from}) not found` }); }
     const fromLines = (await client.query('SELECT sku, coalesce(qty,0) qty, cost_price FROM planner.purchase_order_lines WHERE po=$1', [from])).rows;
     let summed = 0, copied = 0;
     for (const l of fromLines) {
@@ -15394,7 +15401,7 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
     await client.query('COMMIT');
     res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // BULK paste SKU/qty rows into a PO's order plan (Excel / Sheets paste). Each row is validated against our SKU
@@ -15409,7 +15416,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
   try {
     await client.query('BEGIN');
     if (!(await client.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [po])).rowCount) {
-      await client.query('ROLLBACK'); return res.status(404).json({ error: `PO ${po} not found` });
+      await _rollback(client); return res.status(404).json({ error: `PO ${po} not found` });
     }
     let added = 0, updated = 0; const skipped = [], badQty = [];
     for (const r of rows) {
@@ -15433,7 +15440,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, po, added, updated, skipped, badQty });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
@@ -15855,7 +15862,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
   try {
     await client.query('BEGIN');
     const ex = await client.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [newpo]);
-    if (ex.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'PO ' + newpo + ' already exists' }); }
+    if (ex.rowCount) { await _rollback(client); return res.status(409).json({ error: 'PO ' + newpo + ' already exists' }); }
     await client.query('UPDATE planner.purchase_orders SET po=$1 WHERE po=$2', [newpo, oldpo]);
     await client.query("UPDATE planner.purchase_order_lines SET po=$1, po_sku=$1||'|'||sku WHERE po=$2", [newpo, oldpo]);
     await client.query('UPDATE planner.erp_purchase_order_lines SET po=$1 WHERE po=$2', [newpo, oldpo]);
@@ -15868,7 +15875,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
     await client.query('UPDATE planner.shipments SET master_po=$1 WHERE master_po=$2', [newpo, oldpo]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // v27.858 (Ben): rename a master shipment's reference (e.g. to match the Fulfil internal shipment IS124). Cascades the
@@ -15883,17 +15890,17 @@ app.post('/api/supply/shipment/:ref/rename', async (req, res) => {
   try {
     await client.query('BEGIN');
     const clash = await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1 UNION SELECT 1 FROM planner.purchase_orders WHERE po=$1 LIMIT 1`, [newref]);
-    if (clash.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: '"' + newref + '" is already a shipment or PO reference' }); }
+    if (clash.rowCount) { await _rollback(client); return res.status(409).json({ error: '"' + newref + '" is already a shipment or PO reference' }); }
     const s = await client.query('UPDATE planner.shipments SET shipment_ref=$1, updated_at=now() WHERE shipment_ref=$2', [newref, oldref]);
     const p = await client.query('UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]);
-    if (!s.rowCount && !p.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'no shipment "' + oldref + '"' }); }
+    if (!s.rowCount && !p.rowCount) { await _rollback(client); return res.status(404).json({ error: 'no shipment "' + oldref + '"' }); }
     await client.query('UPDATE planner.shipment_change_log SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
     await client.query('UPDATE planner.shipment_notes SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
     await client.query('UPDATE planner.supplier_submissions SET shipment_ref=$1 WHERE shipment_ref=$2', [newref, oldref]).catch(() => {});
     await client.query('UPDATE planner.ship_plan_locks SET ref=$1 WHERE ref=$2', [newref, oldref]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true, shipments: s.rowCount, pos: p.rowCount, new_ref: newref });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
@@ -16965,7 +16972,7 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
     const r = await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [ref]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount, unassigned_pos: unassigned.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // SELF-SHIPMENT mode gate (PO ▸ SHIPMENTS). Picking a mode turns the PO into its own shipment (a planner.shipments
@@ -16986,7 +16993,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
     await client.query('BEGIN');
     if (!mode) {
       const others = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE shipment_ref=$1 AND po<>$1`, [po])).rows[0].n;
-      if (others > 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This shipment has ' + others + ' other PO(s) aboard — manage it as a master shipment instead of clearing the mode here.' }); }
+      if (others > 0) { await _rollback(client); return res.status(409).json({ error: 'This shipment has ' + others + ' other PO(s) aboard — manage it as a master shipment instead of clearing the mode here.' }); }
       await client.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL WHERE po=$1 AND shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [po]);
@@ -18644,11 +18651,11 @@ app.post('/api/supply/sample/:id/ref', async (req, res) => {
   try {
     await client.query('BEGIN');
     const cur = (await client.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
-    if (!cur) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'sample not found' }); }
+    if (!cur) { await _rollback(client); return res.status(404).json({ error: 'sample not found' }); }
     const oldRef = cur.ref;
-    if (newRef === oldRef) { await client.query('ROLLBACK'); return res.json({ ok: true, ref: newRef }); }
+    if (newRef === oldRef) { await _rollback(client); return res.json({ ok: true, ref: newRef }); }
     const dup = (await client.query(`SELECT 1 FROM planner.sample_requests WHERE ref=$1 AND id<>$2::bigint`, [newRef, req.params.id])).rows[0];
-    if (dup) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'That reference is already used by another sample.' }); }
+    if (dup) { await _rollback(client); return res.status(409).json({ error: 'That reference is already used by another sample.' }); }
     await client.query(`UPDATE planner.sample_requests SET ref=$1, updated_at=now() WHERE id=$2::bigint`, [newRef, req.params.id]);
     await client.query(`UPDATE planner.supplier_charges SET source_ref=$1 WHERE source_type='sample' AND source_ref=$2`, [newRef, oldRef]);
     await client.query(`UPDATE planner.deposits SET reference=$1 WHERE is_deposit=false AND reference=$2`, [newRef, oldRef]);
@@ -18690,8 +18697,8 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
   const client = await pool.connect();
   try { await client.query('BEGIN');
     const c = (await client.query(`SELECT * FROM planner.supplier_charges WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
-    if (!c) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'charge not found' }); }
-    if (c.status === 'accepted') { await client.query('ROLLBACK'); return res.json({ ok:true, already:true, other_payment_id:c.other_payment_id }); }
+    if (!c) { await _rollback(client); return res.status(404).json({ error: 'charge not found' }); }
+    if (c.status === 'accepted') { await _rollback(client); return res.json({ ok:true, already:true, other_payment_id:c.other_payment_id }); }
     const fr = Math.round(Number(c.freight_cost)||0), pr = Math.round(Number(c.product_cost)||0), amount = Math.round(((Number(c.freight_cost)||0)+(Number(c.product_cost)||0))*100)/100;
     // ONE Other Payment showing the TOTAL. The per-account split (by the sample's type/purpose) is applied only in the
     // Payments Report Xero download, not here — the register keeps a single total line per charge (Ben).
@@ -18911,7 +18918,7 @@ async function aiQueryHorizon(sql) {
     await client.query("SET LOCAL statement_timeout = '8s'");
     await client.query('SET LOCAL search_path = planner');
     const r = await client.query(capped);
-    await client.query('ROLLBACK');
+    await _rollback(client);
     const rows = r.rows.map(aiCleanRow);
     return { columns: (r.fields || []).map(f => f.name), row_count: rows.length, rows, truncated: rows.length >= 500 };
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} return { error: e.message }; }
@@ -19494,7 +19501,7 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
   try {
     await client.query('BEGIN');
     const fq = (await client.query(`SELECT qty FROM planner.purchase_order_lines WHERE po=$1 AND sku=$2 FOR UPDATE`, [fromPo, sku])).rows[0];
-    if (!fq || Number(fq.qty) < qty) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Donor line no longer has ' + qty + ' units (now ' + (fq ? fq.qty : 0) + ') — recompute.' }); }
+    if (!fq || Number(fq.qty) < qty) { await _rollback(client); return res.status(409).json({ error: 'Donor line no longer has ' + qty + ' units (now ' + (fq ? fq.qty : 0) + ') — recompute.' }); }
     await client.query(`UPDATE planner.purchase_order_lines SET qty=qty-$3 WHERE po=$1 AND sku=$2`, [fromPo, sku, qty]);
     await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty) VALUES ($1||'|'||$2,$1,$2,$3)
       ON CONFLICT (po_sku) DO UPDATE SET qty=coalesce(planner.purchase_order_lines.qty,0)+$3`, [toPo, sku, qty]);
@@ -19503,7 +19510,7 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
       [key, 'reallocated ' + qty + ' ' + sku + ' ' + fromPo + '→' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, moved: qty, from_po: fromPo, to_po: toPo, sku });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -19593,7 +19600,7 @@ app.post('/api/supply/bi/apply-fill', async (req, res) => {
       [key, 'container-fill +' + qty + ' ' + sku + ' → ' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, added: qty, to_po: toPo, sku });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -20314,7 +20321,7 @@ app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
       [key, 'consolidated ' + merge + ' → ' + keep + ' (' + r.rowCount + ' PO)']);
     await client.query('COMMIT');
     res.json({ ok: true, repointed: r.rowCount, keep, merge });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 const kpiGroup = q => (['Core', 'Seasonal', 'Non-Core'].includes(q) ? q : '');
@@ -20398,7 +20405,7 @@ app.post('/api/forecast/snapshot', async (req, res) => {
   try {
     await client.query('BEGIN');
     const hz = (await client.query(`SELECT min(month) s, max(month) e, count(*) n FROM planner.forecast_outputs`)).rows[0];
-    if (!hz.s || Number(hz.n) === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'no forecast to snapshot (forecast_outputs is empty)' }); }
+    if (!hz.s || Number(hz.n) === 0) { await _rollback(client); return res.status(400).json({ error: 'no forecast to snapshot (forecast_outputs is empty)' }); }
     const run = (await client.query(`INSERT INTO planner.forecast_runs (engine_version, horizon_start, horizon_end, notes)
       VALUES ('sku-snapshot', $1, $2, $3) RETURNING id, to_char(run_at,'YYYY-MM-DD HH24:MI') run_at`,
       [hz.s, hz.e, (req.body && req.body.note) || 'Manual SKU forecast snapshot'])).rows[0];
@@ -22016,7 +22023,7 @@ app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {
       [b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, b.currency || 'USD', efp, b.note || null, req.portal.email || ''])).rows[0].id;
     for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3)', [id, t.min_qty, t.unit_cost]);
     await client.query('COMMIT'); res.json({ ok: true, id });
-  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Portal price-list change log (scoped to the supplier). No params → recent decisions (approved/rejected/superseded)
