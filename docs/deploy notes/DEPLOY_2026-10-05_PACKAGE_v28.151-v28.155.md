@@ -24,6 +24,11 @@
 - **v28.154 demand/buy engine (artifact):** `buildLiveDemand` idempotent (your +19,637-per-rebuild finding: the Preorder/KA fold added past-dated months that step 1 never cleared; Ben's rule: past KA/preorder months are past forecasts, ignored, never roll forward); run-off share pool no longer depends on DEMAND filters/search (a SKU search changed 174 buy rows); **Jan-2027 year rollover** (CUR_MONTH was hardcoded to 2026); memo/cache resets. **⚠ BUY-CHANGING (one commit, `2753fb28`):** with CUR_MONTH = Sep-26 and the window starting Oct-26, the chained last-year rule read 0 for Sep-26, so **Sep-27 forecast was 0 for every continuing SKU** (live too). Fixed; sandbox effect Buy 3PL +288 units on 6 UK SKUs, urgent/FBA/transfers unchanged. Expect a small uplift in Sep-27 demand and a few UK buys when this lands.
 - **v28.155 PRODUCT:** searchable workshop-barcode picker on the Sizes grid; Reports ▸ Catalogue (season filter, search, CSV, landscape PDF). New read-only endpoints `GET /api/product/reports/catalogue`, `POST /api/product/reports/catalogue/pdf`.
 
+## Added 06-Oct (same branch, deploy with the rest): v28.156 to v28.157
+- **v28.156 PRODUCT:** catalogue PDF prints real EAN-13 barcodes (vector, check-digit validated, bad codes print as text); Component column dropped; barcode picker offers free codes only.
+- **v28.157:** Jan-27 year-agnostic DEMAND UI (last-year lists, ASP, Exec Summary FY cards, FY strip, YoY loops all roll from CUR_MONTH; **0 / 320 buy rows differ, plan/exec render identical today**); catalogue Season + new Category dropdowns on one row with search; PRODUCT ▸ Reports / Config level-3 tabs moved into the left rail (`RAIL_L3MAP.product`); barcode picker shows assigned codes in search, greyed with "assigned to <SKU>", not selectable.
+- Still no new migration beyond 327, no new env vars, no server change in v28.157. Client files only plus the catalogue PDF route in v28.156.
+
 ## Verification done on the sandbox (details in CHANGES.md)
 - Buy plan: see the comparison line at the end of this note.
 - Demand total identical across 4 rebuilds (1,786,072); DEMAND search no longer changes the buy (0 rows).
