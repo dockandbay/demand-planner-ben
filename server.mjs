@@ -9177,7 +9177,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
 app.get('/api/portal/product-item/:ref', portalAuth, async (req, res) => {
   const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); res.json(p); }
+  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); portalScopeItem(req, p.item); res.json(p); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
@@ -10558,6 +10558,7 @@ app.get('/api/portal/scan/:code', portalAuth, async (req, res) => {
   try {
     const p = await sampleScanPayload(req.params.code, 'portal'); if (!p) return res.status(404).json({ error: 'no sample for that code' });
     if (!(await portalOwnsProductSample(req, p.id))) return res.status(403).json({ error: 'not your sample' });
+    p.supplier = portalOwnNames(req, p.supplier);   // v28.151 (review C5): only the caller's own supplier name(s), not every supplier on the item
     res.json({ ok: true, sample: p });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -21707,7 +21708,7 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
         const cq = Number(p.carton_qty) || 0; if (cq > 0 && l.qty % cq !== 0 && type === 'standard') flags.push('partial carton (' + cq + '/ctn)'); }
       const price = prices[l.sku] != null ? prices[l.sku] : null; if (flags.some(f => /unknown|closed/.test(f))) problems.push(l.sku + ': ' + flags.join(', '));
       return { sku: l.sku, qty: l.qty, cartons: p && Number(p.carton_qty) ? Math.round(l.qty / Number(p.carton_qty) * 100) / 100 : null, price, amount: price != null ? Math.round(price * l.qty * 100) / 100 : null, flags }; });
-    if (problems.length && !b.force) return res.status(422).json({ error: 'fix these lines first', problems, lines });
+    if (problems.length) return res.status(422).json({ error: 'fix these lines first', problems, lines });   // v28.151 (review C7): client-sent force ignored (it let unknown / closed SKUs through); the client UI never sends it
     const partial = lines.filter(l => l.flags.some(f => /partial/.test(f))); if (partial.length && !b.accept_partial) return res.status(422).json({ error: partial.length + ' line(s) are not whole cartons', partial: partial.map(l => l.sku), lines });
     const units = lines.reduce((s, l) => s + l.qty, 0); const total = type === 'sample' ? 0 : lines.reduce((s, l) => s + (l.amount || 0), 0);
     const o = (await pool.query(`INSERT INTO planner.client_orders (client_id, user_id, order_type, customer_po, ship_to, requested_date, ship_from, method, notes, lines, units, total, currency, submitted_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14) RETURNING id, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`,
@@ -21717,9 +21718,10 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
     await cpAudit(c.id, (type === 'sample' ? 'Sample request' : 'Order') + ' submitted', '#' + o.id + ' · ' + units + ' units' + (fulfil.ok ? ' · Fulfil ' + fulfil.number : ' · ' + fulfil.reason), req.cp.user.email);
     // notifications: Ops (draft waiting) + the client (their record)
     const base = cpBase(req); const ops = String(await cpSetting('cp_ops_emails', '')).split(/[,;\s]+/).filter(Boolean); if (c.owner_email && !ops.includes(c.owner_email)) ops.push(c.owner_email);
-    const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${l.sku}</td><td align="right">${l.qty}</td><td align="right">${l.cartons == null ? '' : l.cartons}</td><td align="right">${l.price == null ? '' : l.price.toFixed(2)}</td><td>${l.flags.join(', ')}</td></tr>`).join('') + '</table>';
-    if (ops.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: ops, subject: (type === 'sample' ? 'Sample request' : 'Client order') + ' from ' + c.name + (fulfil.ok ? ' — draft ' + fulfil.number + ' waiting in Fulfil' : ' — needs keying (no Fulfil draft)'), html: `<p><b>${c.name}</b> (${req.cp.user.email}) submitted a ${type === 'sample' ? 'sample request' : 'order'} in the client portal.</p><p>${units} units · ${c.currency} ${total.toFixed(2)} · PO ${b.customer_po || '—'} · requested ${b.requested_date || '—'} · ship from ${b.ship_from || c.warehouse_code || ''}</p>${lineHtml}<p>${fulfil.ok ? 'Draft <b>' + fulfil.number + '</b> is waiting in Fulfil (' + fulfil.env + ') for confirmation.' : '<b>No Fulfil draft was created:</b> ' + fulfil.reason + '. Key it in Fulfil from this email.'}</p><p><a href="${adminBase(req)}/#/client/orders">Open in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
-    if (String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false') await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to: req.cp.user.email, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id, html: `<p>Hi ${req.cp.user.name || ''},</p><p>Thanks — we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + b.customer_po + ')' : ''}. Our team will confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + c.currency + ' ' + total.toFixed(2) + ' ex shipping'}</p>${lineHtml}<p><a href="${base}/client#/orders">View your orders</a></p>` });
+    const E = escHtml;   // v28.151 (review C7): every interpolated value in both order emails is HTML-escaped (client-typed PO / notes / names, SKUs, Fulfil reasons)
+    const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${E(l.sku)}</td><td align="right">${E(l.qty)}</td><td align="right">${l.cartons == null ? '' : E(l.cartons)}</td><td align="right">${l.price == null ? '' : E(l.price.toFixed(2))}</td><td>${E(l.flags.join(', '))}</td></tr>`).join('') + '</table>';
+    if (ops.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: ops, subject: (type === 'sample' ? 'Sample request' : 'Client order') + ' from ' + c.name + (fulfil.ok ? ' — draft ' + fulfil.number + ' waiting in Fulfil' : ' — needs keying (no Fulfil draft)'), html: `<p><b>${E(c.name)}</b> (${E(req.cp.user.email)}) submitted a ${type === 'sample' ? 'sample request' : 'order'} in the client portal.</p><p>${units} units · ${E(c.currency)} ${total.toFixed(2)} · PO ${E(b.customer_po || '—')} · requested ${E(b.requested_date || '—')} · ship from ${E(b.ship_from || c.warehouse_code || '')}</p>${lineHtml}<p>${fulfil.ok ? 'Draft <b>' + E(fulfil.number) + '</b> is waiting in Fulfil (' + E(fulfil.env) + ') for confirmation.' : '<b>No Fulfil draft was created:</b> ' + E(fulfil.reason) + '. Key it in Fulfil from this email.'}</p><p><a href="${E(adminBase(req))}/#/client/orders">Open in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
+    if (String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false') await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to: req.cp.user.email, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id, html: `<p>Hi ${E(req.cp.user.name || '')},</p><p>Thanks — we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + E(b.customer_po) + ')' : ''}. Our team will confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + E(c.currency) + ' ' + total.toFixed(2) + ' ex shipping'}</p>${lineHtml}<p><a href="${E(base)}/client#/orders">View your orders</a></p>` });
     res.json({ ok: true, id: o.id, status: fulfil.ok ? 'fulfil_draft' : 'submitted', fulfil, units, total, lines });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -21902,6 +21904,17 @@ async function portalAuth(req, res, next) {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 }
 // Ownership guard: the PO must belong to one of the session's suppliers.
+// v28.151 (review C5): portal payload scoping. A dev item can be requested from several (competing) suppliers; the shared admin
+// item payload carries every request (supplier names, internal stakeholders, notify emails, notes). The portal UI never reads
+// item.requests and only shows its own supplier, so the server now sends just the caller's own requests / names.
+function portalOwnNames(req, csv) { const mine = new Set((req.portal.suppliers || []).map(n => String(n).toLowerCase().trim()));
+  return String(csv || '').split(',').map(x => x.trim()).filter(x => x && mine.has(x.toLowerCase())).join(', '); }
+function portalScopeItem(req, item) { if (!item) return item; const mine = new Set((req.portal.suppliers || []).map(n => String(n).toLowerCase().trim()));
+  if (Array.isArray(item.requests)) item.requests = item.requests.filter(r => mine.has(String(r.supplier_name || '').toLowerCase().trim()))
+    .map(r => { const o = Object.assign({}, r); delete o.internal_stakeholders; delete o.notify_emails; return o; });
+  item.supplier = portalOwnNames(req, item.supplier);
+  if (Array.isArray(item.requests)) item.supplier_code = [...new Set(item.requests.map(r => r.supplier_code).filter(Boolean))].join(', ');
+  return item; }
 async function portalOwnsPO(req, po) {
   if (!po) return false;
   const r = (await pool.query(`SELECT supplier_name FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
@@ -22671,7 +22684,7 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
     const poList = pos.map(p => p.po);
     const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
     const [lines, lc, xd, ac, _ap, drows, bps] = await Promise.all([
-      grab(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, l.carton_qty,
+      grab(`SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty,   -- v28.151 (review C5): erp_qty dropped, the portal never reads it (internal ERP state)
               -- product default cost for the PO's supplier (cost_<code>, e.g. LX→cost_lx), fallback general cost.
               -- The order-plan Est. cost when the line has no negotiated cost_price — mirrors admin (po-detail sku_cost).
               coalesce(
