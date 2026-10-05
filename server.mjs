@@ -14767,8 +14767,18 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
     const rows = []; for (let r = hr + 1; r < grid.length; r++) { const sku = String((grid[r] || [])[si] == null ? '' : grid[r][si]).trim(); if (!sku) continue; const q = _tplNum((grid[r] || [])[qi]); rows.push([sku, q == null ? 0 : q]); }
     if (!rows.length) return res.json({ ok: false, error: 'no stock rows found under the headers' });
     const by = authUser(req);
-    await pool.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
-    for (const [sku, q] of rows) await pool.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at, uploaded_by) VALUES ($1,$2,now(),$3) ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now(), uploaded_by=excluded.uploaded_by`, [sku, q, by]);
+    // v28.151 (review E7): DELETE + ONE multi-row insert in a single transaction (was DELETE then a per-row INSERT with no
+    // txn: a mid-upload failure left the snapshot empty or partial, and N round trips held the pool). Duplicate SKUs in the
+    // file collapse to the last row (as the old per-row upsert did).
+    const _zm = new Map(); for (const [sku, q] of rows) _zm.set(sku, q);
+    const zc = await pool.connect();
+    try {
+      await zc.query('BEGIN');
+      await zc.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
+      await zc.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at, uploaded_by) SELECT u.sku, u.qty, now(), $3 FROM unnest($1::text[], $2::numeric[]) AS u(sku, qty)
+        ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now(), uploaded_by=excluded.uploaded_by`, [[..._zm.keys()], [..._zm.values()], by]);
+      await zc.query('COMMIT');
+    } catch (e) { await _rollback(zc); throw e; } finally { zc.release(); }
     res.json({ ok: true, count: rows.length });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
