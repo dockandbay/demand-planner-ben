@@ -1380,11 +1380,11 @@ const FM=[...F26,...F27,...F28];
 const FM_CALC=[...F26,...F27,...F28,...F29];
 // Display fiscal years on the monthly strip (Mar–Feb): FY24/25 … FY28/29. Declared here (before the
 // init IIFE that builds TIME_COLS) so it's assigned by the time buildTimeCols() runs.
-const DISP_FY_STARTS=[2024,2025,2026,2027,2028];
+const DISP_FY_STARTS=[2024,2025,2026,2027,2028];   // v28.156 (review A4 follow-up): seed only; hzRollDispFy() (from buildTimeCols) re-derives it from CUR_FY_START
 var TIME_COLS=[]; // flat ordered time-column spec; populated by buildTimeCols() in the init IIFE (declared here so a later `var` doesn't reset it)
 // Fiscal years collapsed to just their total column (monthly cells hidden via the FY pill). Persists
 // across sessions. Default: the two history years (FY24/25, FY25/26) start collapsed for a tidy view.
-var FY_COLLAPSED=(function(){try{var s=JSON.parse(localStorage.getItem('db_fy_collapsed_v1'));if(Array.isArray(s))return new Set(s);}catch(e){}return new Set([2024,2025]);})();
+var FY_COLLAPSED=(function(){try{var s=JSON.parse(localStorage.getItem('db_fy_collapsed_v1'));if(Array.isArray(s))return new Set(s);}catch(e){}var _n=new Date(),_fy=_n.getMonth()>=2?_n.getFullYear():_n.getFullYear()-1;return new Set([_fy-2,_fy-1]);})();   // v28.156 (review A4 follow-up): default = the two history FYs before today's FY (was fixed 2024,2025)
 function saveFyCollapsed(){try{localStorage.setItem('db_fy_collapsed_v1',JSON.stringify(Array.from(FY_COLLAPSED)));}catch(e){}}
 // FY show/hide pill: toggle the fiscal year's collapsed state, rebuild the column spec, re-render.
 (function(){if(typeof document==='undefined'||!document.addEventListener)return;
@@ -1561,6 +1561,22 @@ var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a ful
 // v28.151 (review A4): LY months for SKU share building = the calendar year BEFORE CUR_MONTH's year (2025_01..2025_12 while
 // CUR_MONTH is in 2026, so byte-identical now; rolls to 2026 in Jan-27). Replaces the hardcoded 2025 lists in the buy engine.
 function hzLyMonths(){ var y=(typeof CUR_MONTH==='string'&&CUR_MONTH)?(+CUR_MONTH.slice(0,4)-1):(new Date().getFullYear()-1), o=[]; for(var i=1;i<=12;i++)o.push(y+'_'+(i<10?'0':'')+i); return o; }
+// v28.156 (review A4 follow-up): UI-side year helpers so the DEMAND plan / reports roll with CUR_MONTH like the engine does.
+function hzCurYear(){ return (typeof CUR_MONTH==='string'&&CUR_MONTH)?+CUR_MONTH.slice(0,4):new Date().getFullYear(); }   // calendar year of CUR_MONTH (2026 today); same basis as hzLyMonths, cheap enough for per-cell use
+function hzLyYear(){ return hzCurYear()-1; }       // calendar year before it (2025 today)
+// Completed months of the calendar year to date = Jan..CUR_YTD_END of CUR_YTD_END's year (== ACTUAL_MONTHS minus the partial
+// CUR_MONTH while CUR_MONTH isn't January; in Jan-27 it is Jan..Dec-26 instead of an empty list).
+function hzYtdDoneMonths(){ var e=String(CUR_YTD_END||''), y=e.slice(0,4), m=+e.slice(5,7), o=[]; for(var i=1;i<=m;i++)o.push(y+'_'+(i<10?'0':'')+i); return o; }
+// Dock & Bay FY naming: FY runs Mar..Feb and is named by the year it ENDS (FY27 = Mar-26..Feb-27). startY = fiscal start year (CUR_FY_START).
+function hzFyName(startY){ return 'FY'+String(startY+1).slice(2); }
+function hzFyRange(startY){ return 'Mar '+String(startY).slice(2)+' '+String.fromCharCode(8211)+' Feb '+String(startY+1).slice(2); }
+// Display strip FY window: two history FYs, the current FY, and forward FYs as far as FM_CALC (the forecast cascade) covers, max 2.
+// Mutated in place (DISP_FY_STARTS is const) and called from buildTimeCols. Today: CUR_FY_START 2026, FM_CALC to 2029_02 → 2024..2028.
+function hzRollDispFy(){ if(typeof CUR_FY_START!=='number'||!isFinite(CUR_FY_START)||typeof FM_CALC==='undefined')return;
+  var lo=CUR_FY_START-2, hi=Math.min(CUR_FY_START+2, fyStartOf(FM_CALC[FM_CALC.length-1])); if(hi<CUR_FY_START)hi=CUR_FY_START;
+  if(DISP_FY_STARTS[0]===lo&&DISP_FY_STARTS[DISP_FY_STARTS.length-1]===hi&&DISP_FY_STARTS.length===hi-lo+1)return;
+  DISP_FY_STARTS.length=0; for(var Y=lo;Y<=hi;Y++)DISP_FY_STARTS.push(Y);
+  if(typeof DISP_MONTHS!=='undefined'&&Array.isArray(DISP_MONTHS)){ DISP_MONTHS.length=0; DISP_FY_STARTS.forEach(function(Y){ fyMonths(Y).forEach(function(m){ DISP_MONTHS.push(m); }); }); } }
 // v28.151 (review A4): any year, not just '2026_'. CUR_MONTH = latest YYYY_MM with units (capped at the calendar month, so a
 // future-dated row can't move it); ACTUAL_MONTHS keeps its meaning = Jan..CUR_MONTH of CUR_MONTH's year. Byte-identical in 2026.
 // Named (was an anonymous IIFE) so a year-rollover test can re-run it; called once right here as before.
@@ -1941,7 +1957,7 @@ const CAT_LABELS={
 const _TODAY_BP=new Date();
 const _CUR_Y=_TODAY_BP.getFullYear();
 const _CUR_M=_TODAY_BP.getMonth()+1;             // 1..12
-const _CUR_MON_LC=MN[_CUR_M].toLowerCase();      // 'jan'..'dec' → mtd_<mon> key
+const _CUR_MON_LC=MN[_CUR_M].toLowerCase();      // 'jan'..'dec' → mtd_<mon> key. v28.156 (review A4 follow-up): NOT off by one: this MN is the BP IIFE's 1-based list ['','Jan',..], so MN[_CUR_M] is the current month (and the const is currently unread)
 
 const PROJ=(()=>{
   const o=[];
@@ -5258,7 +5274,8 @@ var DISP_MONTHS=[]; DISP_FY_STARTS.forEach(function(Y){fyMonths(Y).forEach(funct
 // Flat ordered column spec for the time region (TIME_COLS declared near the F-arrays). Built once
 // CUR_MONTH is known (see init IIFE). Entries: {t:'m',m} | {t:'fc',m} current-month extra | {t:'tot',startY,label}
 function tcFY(tc){return (tc.t==='m'||tc.t==='fc')?fyStartOf(tc.m):tc.startY;}   // FY a time-column belongs to (q/h/tot carry startY; m/fc carry a month)
-function buildTimeCols(){var out=[];DISP_FY_STARTS.forEach(function(Y){
+function buildTimeCols(){var out=[];try{hzRollDispFy();}catch(e){}   // v28.156 (review A4 follow-up): roll the FY window with CUR_FY_START first
+  DISP_FY_STARTS.forEach(function(Y){
   if(!FY_COLLAPSED.has(Y)){ var fm=fyMonths(Y); fm.forEach(function(m,idx){ if(m===CUR_MONTH){out.push({t:'fc',m:m});}else{out.push({t:'m',m:m});}   // current month = ONE column (forecast cell, with actuals-to-date shown in green brackets); no separate actuals column
     if(SHOW_Q&&(idx+1)%3===0){var qn=(idx+1)/3;out.push({t:'q',startY:Y,months:fm.slice(idx-2,idx+1),label:'Q'+qn});}   // quarter total after each 3rd fiscal month (Q1 Mar-May …)
     if(SHOW_H&&(idx+1)%6===0){var hn=(idx+1)/6;out.push({t:'h',startY:Y,months:fm.slice(idx-5,idx+1),label:'H'+hn});}   // half total after month 6 (H1 Mar-Aug) and 12 (H2 Sep-Feb)
@@ -5373,7 +5390,7 @@ function disp(v){
   return(n>=0?'+':'')+Math.round(n*100)+'%';
 }
 function gk(s,co,ch){return'__g|'+s+'|'+co+'|'+ch}
-function aspF(s,co,ch){const a=ga(co,ch,s);const u=sumU(a,2025),r=sumR(a,2025);return u>0?r/u:0}
+function aspF(s,co,ch){const a=ga(co,ch,s),_ly=hzLyYear();const u=sumU(a,_ly),r=sumR(a,_ly);return u>0?r/u:0}   // v28.156 (review A4 follow-up): last calendar year's ASP (was fixed 2025)
 
 function calc(s,co,ch){
   const kb=s+'|'+co+'|'+ch; var _memo=CALC_MEMO[kb]; if(_memo)return _memo;
@@ -5495,7 +5512,8 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
     var el=null;try{el=document.querySelector('.fcr[data-rk="'+ik.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"]');}catch(e){}if(!el)return;
     const stored=IV[ik],gv=IV[gk(s,co,ch)];
     const isOvr=stored!=null&&stored!==''&&parseFloat(stored)>=4;
-    el.className='fcr'+(fym.startsWith('2027')?' y27':fym.startsWith('2028')||fym.startsWith('2029')?' y28':'')+(isOvr?' ovc':!stored&&!gv?' flat':'');
+    var _fy=+fym.slice(0,4), _cy0=hzCurYear();   // v28.156 (review A4 follow-up): year tint relative to CUR_MONTH's year (was fixed 2027 / 2028+)
+    el.className='fcr'+(_fy===_cy0+1?' y27':_fy>=_cy0+2?' y28':'')+(isOvr?' ovc':!stored&&!gv?' flat':'');
     el.textContent=fn(fu[fym]);
   });
   // Fiscal-year total cells — recompute in place on edit (Mar–Feb basis)
@@ -5536,7 +5554,7 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
       var dParent=inp.parentElement;if(!dParent)return;
       // Remove any existing pill (covers both regular-month and current-month-special cells)
       dParent.querySelectorAll(':scope > .skuvar-pill').forEach(function(el){el.remove();});
-      if(ACTUAL_MONTHS.indexOf(fym2)>=0)return;
+      if(isActualMonth(fym2))return;   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS
       var fcv2=fu[fym2]||0;
       if(fcv2<=0||!_se||_se.active<=0||!_vw.has(fym2))return;
       var sum2=(_se.totals&&_se.totals[fym2])||0;
@@ -5759,7 +5777,7 @@ function trendLabel(p){
 }
 function aiRec(s,co,ch){
   var a=ga(co,ch,s), yoy=[], biLifted=false;
-  ACTUAL_MONTHS.forEach(function(am){ if(am===CUR_MONTH)return;   // skip the partial current month
+  hzYtdDoneMonths().forEach(function(am){ if(am===CUR_MONTH)return;   // skip the partial current month (v28.156 review A4 follow-up: completed YTD months, any year; was ACTUAL_MONTHS = empty in Jan)
     var y=parseInt(am.split('_')[0],10),m=parseInt(am.split('_')[1],10);
     var tv=a[am]?a[am][0]:0, lk=ym(y-1,m), lv=a[lk]?a[lk][0]:0;
     var lt=getMonthBILift(s,co,ch,am), ll=getMonthBILift(s,co,ch,lk);
@@ -5833,7 +5851,7 @@ function buildRowConfidencePopup(s,co,ch){
     return pop;
   }
   if(rec.pct==null){ pop.innerHTML='<div style="font-size:11px;color:var(--muted)">No year-on-year basis for <b>'+s+'</b> — not enough matching months to recommend a trend.</div>'; return pop; }
-  var fwd=[]; FM.forEach(function(fym){ if(ACTUAL_MONTHS.indexOf(fym)<0)fwd.push(fym); });
+  var fwd=[]; FM.forEach(function(fym){ if(!isActualMonth(fym))fwd.push(fym); });   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS (current calendar year only)
   var _MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function previewHtml(pct){
     return fwd.slice(0,8).map(function(fym){
@@ -5856,7 +5874,7 @@ function buildRowConfidencePopup(s,co,ch){
   pop.querySelectorAll('.conf-opt-row').forEach(function(btn){ var p=parseFloat(btn.dataset.pct);
     btn.onmouseenter=function(){ var pv=document.getElementById('rec-preview'); if(pv)pv.innerHTML='<div style="color:var(--faint);font-size:9px;margin-bottom:2px">Preview at '+((p>=0?'+':'')+Math.round(p*100))+'%:</div>'+previewHtml(p); };
     btn.onclick=function(e){ e.stopPropagation(); e.preventDefault();
-      FM.forEach(function(fym){ if(ACTUAL_MONTHS.indexOf(fym)<0)IV[s+'|'+co+'|'+ch+'|'+fym]=''; });   // clear forward per-month overrides so the row % applies everywhere
+      FM.forEach(function(fym){ if(!isActualMonth(fym))IV[s+'|'+co+'|'+ch+'|'+fym]=''; });   // clear forward per-month overrides so the row % applies everywhere
       IV[gk(s,co,ch)]=p;                                                                              // single row growth % (calc applies LY×(1+p) to every future month)
       markDirty(); pop.remove(); render();
     };
@@ -5910,7 +5928,7 @@ async function applyBIRules(s,co,ch,fu,annualTotal){
   var ruleTexts=rules.map(function(r){return r.rule;}).join(' | ');
   var monthlyData=FM.map(function(m){
     var mo=pa(m).mo;
-    return MN[mo-1]+(m.startsWith('2027')?' 27':' 26')+': '+Math.round(fu[m]||0);
+    return MN[mo-1]+' '+m.slice(2,4)+': '+Math.round(fu[m]||0);   // v28.156 (review A4 follow-up): real 2-digit year (was ' 27' for 2027 else ' 26', so 2028 months were mislabelled ' 26')
   }).join(', ');
 
   var prompt='You are a demand forecasting assistant. '
@@ -6027,7 +6045,7 @@ function confidenceOptions(s,co,ch,fym,curForecast){
   // the trend reflects true demand growth rather than supply-capped sales.
   var yoyRates=[];
   var biLiftedMonths=[]; // historical months whose actuals were lifted, for transparency in the reason text
-  ACTUAL_MONTHS.forEach(function(am){
+  hzYtdDoneMonths().forEach(function(am){   // v28.156 (review A4 follow-up): completed YTD months, any year (was ACTUAL_MONTHS)
     if(am===CUR_MONTH)return; // partial current month: MTD vs LY full month is not a like-for-like YoY
     var amY=parseInt(am.split('_')[0]);
     var amM=parseInt(am.split('_')[1]);
@@ -6073,8 +6091,8 @@ function confidenceOptions(s,co,ch,fym,curForecast){
   var lowValue=Math.round(Math.max(0,medValue*(1-bandWidth)));
 
   // Step 7: HWM sanity cap on HIGH
-  var monthHist=[];
-  for(var y=2024;y<=2026;y++){
+  var monthHist=[];   // v28.156 (review A4 follow-up): HWM years run to CUR_MONTH's year (was fixed 2026)
+  for(var y=2024;y<=hzCurYear();y++){
     if(y===year)continue;
     var k=ym(y,mo);
     if(a[k]&&a[k][0]>0)monthHist.push(a[k][0]);
@@ -6167,7 +6185,7 @@ function skuConfidenceOptions(sku,co,ch,fym,wh,curForecast,sales,share,subcatFU)
 
   // Previous-months YoY volatility (drives the band; BI-aware like aiRec)
   var yoyRates=[], biLiftedMonths=[];
-  ACTUAL_MONTHS.forEach(function(am){
+  hzYtdDoneMonths().forEach(function(am){   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS
     if(am===CUR_MONTH)return;
     var amY=parseInt(am.split('_')[0]), amM=parseInt(am.split('_')[1]);
     var thisVal=sales[am]||0, lyKey=ym(amY-1,amM), lyVal2=sales[lyKey]||0;
@@ -6195,7 +6213,7 @@ function skuConfidenceOptions(sku,co,ch,fym,wh,curForecast,sales,share,subcatFU)
   // (b) PREVIOUS-MONTHS momentum: recent completed months -> deseasonalised annual level -> this month
   var seas=function(mm){ return BIZ_SHARES[String(mm)]||(1/12); };
   var annLevels=[];
-  ACTUAL_MONTHS.filter(function(a){return a!==CUR_MONTH;}).slice(-6).forEach(function(am){
+  hzYtdDoneMonths().slice(-6).forEach(function(am){   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS minus CUR_MONTH
     var amM=parseInt(am.split('_')[1]), v=sales[am]||0, sh=seas(amM);
     if(v>0&&sh>0)annLevels.push(v/sh);
   });
@@ -6228,8 +6246,8 @@ function skuConfidenceOptions(sku,co,ch,fym,wh,curForecast,sales,share,subcatFU)
   var lowValue=Math.round(Math.max(0,central*(1-band)));
 
   // Previous-years seasonal peak (HWM) caps HIGH, but never below the central
-  var monthHist=[];
-  for(var y=2023;y<=2026;y++){ if(y===year)continue; var k=ym(y,mo); if(sales[k]&&sales[k]>0)monthHist.push(sales[k]); }
+  var monthHist=[];   // v28.156 (review A4 follow-up): to CUR_MONTH's year (was fixed 2026)
+  for(var y=2023;y<=hzCurYear();y++){ if(y===year)continue; var k=ym(y,mo); if(sales[k]&&sales[k]>0)monthHist.push(sales[k]); }
   var hwm=monthHist.length?Math.max.apply(null,monthHist):Math.max(lyVal,central);
   var hwmCap=Math.round(hwm*1.25);
   var highCapped=false;
@@ -6330,7 +6348,7 @@ function buildConfidencePopup(s,co,ch,fym,curForecast,onApply){
       +'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Current forecast</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(ctx.curForecast)+'</span></div>'
       +'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">All-time '+ctx.mo+' high</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(ctx.hwm)+'</span></div>'
       +'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">24mo volatility (CV)</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+ctx.cv.toFixed(2)+' <span style="color:'+cvColor+';font-weight:400">'+ctx.cvLabel+'</span></span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">YTD 2026 trend</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:'+ytdColor+'">'+ytdSign+Math.round(ctx.ytdGrowth*100)+'% vs LY</span></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">YTD '+String(CUR_YTD_END).slice(0,4)+' trend</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:'+ytdColor+'">'+ytdSign+Math.round(ctx.ytdGrowth*100)+'% vs LY</span></div>'
     +'</div>'
     // Options
     +'<div style="display:flex;flex-direction:column;gap:3px">'
@@ -6571,7 +6589,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // LY ref: forecast-on-forecast years (2027+) anchor on the prior-year forecast; everything else on the prior-year actual.
   const _pm=ym(y-1,mo);
   const _pmAct=(typeof isActualMonth==='function'&&isActualMonth(_pm)&&a[_pm]);   // v27.587: prior-year month is a COMPLETED ACTUAL → anchor LY on it (like-for-like with the exploded ·dot + the growth target), not the stale prior-year forecast. Only genuinely-future prior-year months keep forecast-on-forecast.
-  const ly_u=_pmAct?(a[_pm][0]||0):(y>=2027?(fu[_pm]||0):(a[_pm]?a[_pm][0]:0));
+  const _cyR=hzCurYear();   // v28.156 (review A4 follow-up): forecast-on-forecast years = after CUR_MONTH's year (was fixed 2027+), same rule as calc()
+  const ly_u=_pmAct?(a[_pm][0]||0):(y>=_cyR+1?(fu[_pm]||0):(a[_pm]?a[_pm][0]:0));
   const fcv=fu[fym]||0;
   const isActual=isActualMonth(fym);
 
@@ -6621,9 +6640,9 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const isOvr=_ps0&&_ps0.lit;
   const isPct=_ps0&&!_ps0.lit;
   const gv=IV[gk(s,co,ch)];
-  const is27=fym.startsWith('2027');
-  const isFcLy=y>=2027&&!_pmAct; // v27.587: forecast-on-forecast ONLY when the LY ref is itself still a forecast; a completed prior-year actual explodes like an actual
-  var anom=aflags&&aflags[fym]?(' anomaly-'+aflags[fym].type):'';  const td=document.createElement('td');td.className='fctd hz-fc'+extraCls+(is27?' y27':y>=2028?' y28':'')+anom;
+  const is27=(y===_cyR+1);
+  const isFcLy=y>=_cyR+1&&!_pmAct; // v27.587: forecast-on-forecast ONLY when the LY ref is itself still a forecast; a completed prior-year actual explodes like an actual
+  var anom=aflags&&aflags[fym]?(' anomaly-'+aflags[fym].type):'';  const td=document.createElement('td');td.className='fctd hz-fc'+extraCls+(is27?' y27':y>=_cyR+2?' y28':'')+anom;
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
   var _rhF=cellRailForKey(_nk); if(_rhF){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rhF); }
@@ -6784,8 +6803,10 @@ function buildDataRow(s,co,ch,x,fu_cache){
   const yt26u=fyToDateU(a,CUR_FY_START,CUR_YTD_END),yt26r=fyToDateR(a,CUR_FY_START,CUR_YTD_END),yt25u=fyToDateU(a,CUR_FY_START-1,_ytdPrevEnd); // YTD (complete months) current FY vs prior FY same period
   // 1mo / 3mo trends use the most recent COMPLETED full months — the current month is partial, so exclude it.
   const _curMo=parseInt(CUR_MONTH.slice(5),10),_lastMo=_curMo-1;
-  const lc25=(a[ym(2025,_lastMo)]||[0])[0],lc26=(a[ym(2026,_lastMo)]||[0])[0];
-  const m3_25=sumUT(a,2025,_lastMo)-sumUT(a,2025,_lastMo-3),m3_26=sumUT(a,2026,_lastMo)-sumUT(a,2026,_lastMo-3);
+  // v28.156 (review A4 follow-up): rolling off CUR_YTD_END (any year, crosses Dec/Jan) instead of fixed 2025/2026 + month index. Same months today.
+  const _lyK=function(k){var p=pa(k);return ym(p.y-1,p.mo);}, _l3=[prevMonthKey(prevMonthKey(CUR_YTD_END)),prevMonthKey(CUR_YTD_END),CUR_YTD_END], _uK=function(k){return a[k]?a[k][0]:0;};
+  const lc25=(a[_lyK(CUR_YTD_END)]||[0])[0],lc26=(a[CUR_YTD_END]||[0])[0];
+  const m3_25=_l3.reduce(function(t,k){return t+_uK(_lyK(k));},0),m3_26=_l3.reduce(function(t,k){return t+_uK(k);},0);
   const t1=fp(lc26,lc25),t3=fp(m3_26,m3_25);
   const _cr1=calc(s,co,ch);const fu=_cr1.fu;const reasons=_cr1.reasons;if(fu_cache)fu_cache[s+'|'+co+'|'+ch]=fu;
   const sp=aspF(s,co,ch);
@@ -7640,7 +7661,7 @@ function buildPlanDownload(fyStarts){
   var subs=[], seen={};
   DATA.forEach(function(d){ if(d.co!==co||d.ch!==ch)return; var sub=d.s; if(!sub||seen[sub])return; var cat=_subcatParent(sub); if(!selAll&&!(SEL.has(cat)||SEL.has(sub)))return; seen[sub]=1; subs.push(sub); });
   subs.sort();
-  var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYM=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   var head=['SKU','Product','Subcategory','Category','Country','Channel','Metric'];
   months.forEach(function(m){ head.push(_planMonLabel(m)+(isActualMonth(m)?' (A)':' (F)')); });
   var grid=[head], nSku=0;
@@ -7738,8 +7759,7 @@ function reset3plCache(){_3PL_CACHE={};}
 function compute3plMonthlyDemand(sku,subcat,co){
   var key=subcat+'|'+co;
   if(_3PL_CACHE&&_3PL_CACHE[key])return _3PL_CACHE[key];
-  var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06',
-                    '2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYearMonths=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   var perSku={}; // {sku: {fym: demand}}
   // For each of DTC and B2B (both ship from 3PL), build shares and apply to forecast
   ['DTC','B2B'].forEach(function(ch){
@@ -7929,8 +7949,7 @@ function renderSkuView(){
   var subcatFU=subcatCalc.fu;
 
   // Build LY shares using 2025 actuals (Jan-Dec)
-  var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06',
-                    '2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYearMonths=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   var shares=buildSkuShares(skus,co,ch,lyYearMonths);
 
   // Build table
@@ -8381,7 +8400,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   var FU=(calc(s,co,ch).fu)||{};
   var target=Math.round((m===CUR_MONTH)?curMonthForecast(s,co,ch):(FU[m]||0));
   if(target<=0) return {};
-  var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYM=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   var all=Object.keys(SKUM).filter(function(sku){
     var p=SKUM[sku]; if(!p||p.s!==s) return false;
     var av=(p.av||{})[ctry]||''; return av.indexOf(chKey)>=0;
@@ -8630,7 +8649,7 @@ function subcatSkuEffTotals(s,co,ch){
   var wh=skuWh(co,ch), ctry=co.toLowerCase();
   var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var FU=(calc(s,co,ch).fu)||{};
-  var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYM=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
   var shares=buildSkuShares(all,co,ch,lyYM);
   var DIS=smoothDisregards(co,ch,s);   // disregard discontinued → they run to 0 (active SKUs carry the subcat)
@@ -8679,8 +8698,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     return ((pp.av||{})[ctry]||'').includes(_chKey);});
   var subcatCalc=calc(s,co,ch);
   var subcatFU=subcatCalc.fu;
-  var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06',
-                    '2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var lyYearMonths=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   var shares=buildSkuShares(shareSkus,co,ch,lyYearMonths);
   var parentKey=s+'|'+co+'|'+ch;
   var insertRef=afterTr.nextSibling;
@@ -8958,7 +8976,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var _lc=CUR_YTD_END;
         var mo1_26=sales[_lc]||0, mo1_25=sales[(parseInt(_lc.slice(0,4))-1)+'_'+_lc.slice(5)]||0;
         var t1=mo1_25>0?Math.round((mo1_26-mo1_25)/mo1_25*100):null;
-        var t3months=ACTUAL_MONTHS.filter(function(m){return m<=_lc;}).slice(-3);   // 3 completed months (excludes the partial current month)
+        var t3months=[prevMonthKey(prevMonthKey(_lc)),prevMonthKey(_lc),_lc];   // 3 completed months (excludes the partial current month). v28.156 (review A4 follow-up): rolling, crosses Dec/Jan (was ACTUAL_MONTHS = current calendar year only)
         var t3_26=t3months.reduce(function(a,m){return a+(sales[m]||0);},0);
         var t3_25=t3months.map(function(m){return (parseInt(m.slice(0,4))-1)+'_'+m.slice(5);}).reduce(function(a,m){return a+(sales[m]||0);},0);
         var t3=t3_25>0?Math.round((t3_26-t3_25)/t3_25*100):null;
@@ -9566,10 +9584,10 @@ function buildBody(){
       // Per-month roll up across the whole display strip (Mar24–Feb29)
       DISP_MONTHS.forEach(function(fym){
         var{y,mo}=pa(fym);
-        // LY: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual
-        var _glx=(y>=2027)?expFc(r.s,CUR,r.ch,ym(y-1,mo),fu2[ym(y-1,mo)]||0,a):expAct(r.s,CUR,r.ch,ym(y-1,mo),a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);   // EXPLODED (v27.470)
+        // LY: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual. v28.156 (review A4 follow-up): "forecast-on-forecast" = after CUR_MONTH's year (was fixed 2027+)
+        var _glx=(y>=hzCurYear()+1)?expFc(r.s,CUR,r.ch,ym(y-1,mo),fu2[ym(y-1,mo)]||0,a):expAct(r.s,CUR,r.ch,ym(y-1,mo),a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);   // EXPLODED (v27.470)
         gtMonthLY[fym]+=_glx.E; gtSplitLY[fym]=_msAdd(gtSplitLY[fym],_glx);
-        gtMonthLYRev[fym]=(gtMonthLYRev[fym]||0)+((y>=2027)?((fu2[ym(y-1,mo)]||0)*getASP(CUR,r.ch,r.s,y-1,mo)):(a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0));   // LY revenue (v27.495: grand-total revenue growth)
+        gtMonthLYRev[fym]=(gtMonthLYRev[fym]||0)+((y>=hzCurYear()+1)?((fu2[ym(y-1,mo)]||0)*getASP(CUR,r.ch,r.s,y-1,mo)):(a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0));   // LY revenue (v27.495: grand-total revenue growth)
         // TY units + revenue: actual months from `a`, forecast months from fu2 — units exploded, revenue as-is
         var _gtx;
         if(isActualMonth(fym)){
@@ -9773,14 +9791,14 @@ function _makeCatTotRow(cat){
       var _cm=pa(CUR_MONTH); cCurFCRev+=_cmf*getASP(CUR,r.ch,r.s,_cm.y,_cm.mo);
       DISP_MONTHS.forEach(function(fym){
         var mo=pa(fym).mo,y=pa(fym).y,isAct=isActualMonth(fym);
-        // LY units: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual
-        var _lyx=(y>=2027)?expFc(r.s,CUR,r.ch,ym(y-1,mo),fu2[ym(y-1,mo)]||0,a):expAct(r.s,CUR,r.ch,ym(y-1,mo),a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);   // EXPLODED (v27.470)
+        // LY units: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual. v28.156 (review A4 follow-up): relative to CUR_MONTH's year (was fixed 2027+)
+        var _lyx=(y>=hzCurYear()+1)?expFc(r.s,CUR,r.ch,ym(y-1,mo),fu2[ym(y-1,mo)]||0,a):expAct(r.s,CUR,r.ch,ym(y-1,mo),a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);   // EXPLODED (v27.470)
         cMonthLY[fym]+=_lyx.E; cSplitLY[fym]=_msAdd(cSplitLY[fym],_lyx);
         // TY units: actual months from `a`, forecast from fu2 — exploded
         var _tyx=isAct?expAct(r.s,CUR,r.ch,fym,a[fym]?a[fym][0]:0):expFc(r.s,CUR,r.ch,fym,fu2[fym]||0,a);
         cMonthFC[fym]+=_tyx.E; cSplitTY[fym]=_msAdd(cSplitTY[fym],_tyx);
         // LY revenue
-        if(y>=2027){ cMonthLYRev[fym]+=(fu2[ym(y-1,mo)]||0)*getASP(CUR,r.ch,r.s,y-1,mo); }
+        if(y>=hzCurYear()+1){ cMonthLYRev[fym]+=(fu2[ym(y-1,mo)]||0)*getASP(CUR,r.ch,r.s,y-1,mo); }
         else { cMonthLYRev[fym]+=(a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0); }
         // TY revenue
         if(isAct){ cMonthFCRev[fym]+=(a[fym]?(a[fym][1]||0):0); }
@@ -10363,7 +10381,7 @@ function _trCutoffNum(){ var c=(typeof _trendsCutoff==='function')?_trendsCutoff
 function _trQS(){ var r=TRENDS_REFRESH?'&refresh=1':''; TRENDS_REFRESH=false; return '?grain='+encodeURIComponent(TRENDS_GRAIN)+'&from='+TRENDS_FROM+'&to='+TRENDS_TO+r; }   // server-affecting params (grain + month range) + one-shot cache-bust
 function _trInvalidate(){ _TR_PS_DATA=null; _TR_MY_DATA=null; _TR_CM_DATA=null; _TR_TM_DATA=null; }   // grain/range change → the cached server data is stale
 function _trMonLbl(ym){ if(!ym)return '—'; var p=String(ym).split('_'); var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (MN[(+p[1]||1)-1]||p[1])+'-'+String(p[0]).slice(2); }
-function _trendsCutoff(){ try{ var ms=(typeof ACTUAL_MONTHS!=='undefined'?ACTUAL_MONTHS.slice():[]).sort(); var last=ms[ms.length-1]||''; if(last===CUR_MONTH&&ms.length>1)last=ms[ms.length-2]; return last; }catch(e){ return ''; } }
+function _trendsCutoff(){ try{ return (typeof CUR_YTD_END==='string'&&CUR_YTD_END)?CUR_YTD_END:''; }catch(e){ return ''; } }   // v28.156 (review A4 follow-up): last COMPLETE month, any year (was 2nd-last of ACTUAL_MONTHS = same value except in January)
 function renderTrendsView(body){
   var cut=_trendsCutoff(), curL=_trMonLbl(CUR_MONTH);
   if(TRENDS_TO==null)TRENDS_TO=_trCutoffNum();
@@ -10679,7 +10697,7 @@ function renderSummaryView(body){
   function _tr(Y){ return _isRevM()?cvR(Y):1; }   // v27.576: target roll-ups convert only when showing money
   var DATAr=(typeof DATA!=='undefined')?DATA:[];
   var subs=[]; DATAr.forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
-  var LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var LYYM=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   // per-subcat: actuals map (a), forecast (fu) → unified value per month (actual months = actuals, else forecast) + LY (prior-year same month, from actuals)
   var sdCache={}; function subData(s){ if(!(s in sdCache)){ var a=ga(co,ch,s)||{}, fu=(calc(s,co,ch).fu)||{}, val={}, ly={}, valU={}, lyU={};
       DISP_MONTHS.forEach(function(m){ var u=isActualMonth(m)?((a[m]&&a[m][0])||0):(fu[m]||0), lu=(a[prevY(m)]&&a[prevY(m)][0])||0;
@@ -11808,7 +11826,7 @@ function renderExceptionsView(body){
   // fully elapsed → run-rate = actual. Keeps the run-rate honest on the 1st (matches excComputeMaps).
   (function(){ var n=new Date(), cy=n.getFullYear(), cm2=n.getMonth()+1, cal=cy+'_'+(cm2<10?'0':'')+cm2; if(_cm && _cm<cal){ _cd={elapsed:_cd.total||30,remaining:0,total:_cd.total||30}; elapsed=Math.max(1,_cd.elapsed||1); total=_cd.total||30; frac=elapsed/total; } })();
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
-  var lym=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];   // LY months for buildSkuShares — MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
+  var lym=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12. LY months for buildSkuShares — MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];   // next 4 months incl current (Selling-no-forecast shows these editable)
   var fwd6=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,6):[_cm];   // 6-month window scanned for forecast anomalies
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));
@@ -14058,17 +14076,18 @@ function closeTrecDrawer(){ var d=document.getElementById('trec-drawer'); if(d)d
 function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!p)return;
   var d=buildExecData();
   var gbp=function(v){ if(Math.abs(v)>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(Math.abs(v)>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); };
-  var FY27=['2026_03','2026_04','2026_05','2026_06','2026_07','2026_08','2026_09','2026_10','2026_11','2026_12','2027_01','2027_02'];
-  var FY28=['2027_03','2027_04','2027_05','2027_06','2027_07','2027_08','2027_09','2027_10','2027_11','2027_12'];
+  // v28.156 (review A4 follow-up): current FY / next FY derived from CUR_FY_START (were fixed FY27 / FY28 month lists). "FY27" here = the current
+  // FY, "FY28" = the next FY's Mar..Dec (partial, as before). Labels via hzFyName, so in Mar-27 this reads FY27 · last year / FY28 / FY29 · partial.
+  var _fyC=CUR_FY_START, FY27=fyMonths(_fyC), FY28=fyMonths(_fyC+1).slice(0,10);
   function psum(mm,mons){ var u=0,r=0,lu=0,lr=0; mons.forEach(function(m){ if(mm&&mm[m]){ u+=mm[m].u; r+=mm[m].r; lu+=mm[m].lyU||0; lr+=mm[m].lyR||0; } }); return {u:u,r:r,lu:lu,lr:lr}; }
   var t27=psum(d.tot,FY27), t28=psum(d.tot,FY28);
   var pct=function(a,b){ return b>0?Math.round((a-b)/b*100):null; };
   var badge=function(g){ if(g==null)return '<span style="color:var(--faint)">—</span>'; var up=g>=0; return '<span style="color:'+(up?'var(--pos)':'var(--neg)')+';font-weight:700">'+(up?'▲ +':'▼ ')+g+'%</span>'; };
   // 3-year card: FY26 (last year, from lyR) → FY27 → FY28 (partial)
   var card='<div style="display:flex;gap:6px;padding:10px 13px">'
-    +'<div style="flex:1;background:var(--hover);border:1px solid var(--line2);border-radius:9px;padding:8px"><div style="color:var(--muted);font-size:10px;font-weight:700">FY26 · last year</div><div style="font-weight:800;font-size:14px">'+gbp(t27.lr)+'</div><div style="color:var(--muted);font-size:10px">'+fn(Math.round(t27.lu))+' u</div></div>'
-    +'<div style="flex:1;background:var(--blue-soft);border:1px solid var(--blue-soft);border-radius:9px;padding:8px"><div style="color:var(--blue);font-size:10px;font-weight:700">FY27</div><div style="font-weight:800;font-size:14px">'+gbp(t27.r)+'</div><div style="font-size:10px">'+badge(pct(t27.r,t27.lr))+' rev · '+badge(pct(t27.u,t27.lu))+' u</div></div>'
-    +'<div style="flex:1;background:var(--pos-bg);border:1px solid #ccfbf1;border-radius:9px;padding:8px"><div style="color:var(--pos);font-size:10px;font-weight:700">FY28 · partial</div><div style="font-weight:800;font-size:14px">'+gbp(t28.r)+'</div><div style="color:var(--muted);font-size:10px">'+fn(Math.round(t28.u))+' u</div></div>'
+    +'<div style="flex:1;background:var(--hover);border:1px solid var(--line2);border-radius:9px;padding:8px"><div style="color:var(--muted);font-size:10px;font-weight:700">'+hzFyName(_fyC-1)+' · last year</div><div style="font-weight:800;font-size:14px">'+gbp(t27.lr)+'</div><div style="color:var(--muted);font-size:10px">'+fn(Math.round(t27.lu))+' u</div></div>'
+    +'<div style="flex:1;background:var(--blue-soft);border:1px solid var(--blue-soft);border-radius:9px;padding:8px"><div style="color:var(--blue);font-size:10px;font-weight:700">'+hzFyName(_fyC)+'</div><div style="font-weight:800;font-size:14px">'+gbp(t27.r)+'</div><div style="font-size:10px">'+badge(pct(t27.r,t27.lr))+' rev · '+badge(pct(t27.u,t27.lu))+' u</div></div>'
+    +'<div style="flex:1;background:var(--pos-bg);border:1px solid #ccfbf1;border-radius:9px;padding:8px"><div style="color:var(--pos);font-size:10px;font-weight:700">'+hzFyName(_fyC+1)+' · partial</div><div style="font-weight:800;font-size:14px">'+gbp(t28.r)+'</div><div style="color:var(--muted);font-size:10px">'+fn(Math.round(t28.u))+' u</div></div>'
     +'</div>';
   // Per-channel FY27 breakdown
   var chOrder=['DTC','FBA','B2B','TIK'], rows=chOrder.map(function(cn){ var s=psum(d.ch[cn],FY27);
@@ -14080,7 +14099,7 @@ function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!
       +'<div><div style="font-weight:800;font-size:13px">Executive summary</div><div style="color:var(--muted);font-size:11px">All markets · FY revenue &amp; units vs last year</div></div>'
       +'<button id="esp-x" style="border:none;background:var(--hover);border-radius:8px;width:26px;height:26px;cursor:pointer;font-size:15px;line-height:1">✕</button></div>'
     +card
-    +'<div style="padding:2px 13px 4px;color:var(--muted);font-weight:700">By channel · FY27</div>'
+    +'<div style="padding:2px 13px 4px;color:var(--muted);font-weight:700">By channel · '+hzFyName(_fyC)+'</div>'
     +'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="padding:2px 13px;text-align:left">Channel</th><th style="padding:2px 13px;text-align:right">Revenue</th><th style="padding:2px 13px;text-align:right">Units</th><th style="padding:2px 13px;text-align:right">YoY</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +'<div style="padding:9px 13px 12px;border-top:1px solid var(--line2);margin-top:6px"><button id="esp-goto" style="width:100%;border:1px solid #0f766e;background:var(--pos-bg);color:var(--pos);border-radius:8px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Open full Executive Summary report →</button></div>';
   p.querySelector('#esp-x').onclick=function(){ p.remove(); };
@@ -14314,7 +14333,7 @@ function daSkuInsights(coSel,chSel){
   var an=[]; try{ an=daAnomalyItems()||[]; }catch(e){}
   an.forEach(function(it){ if(coSel&&coSel!=='ALL'&&it.co!==coSel)return; if(chSel&&chSel!=='ALL'&&it.ch!==chSel)return; if(it.svRank>1)return; if(!fwdSet[it.fym])return; ensure(it.sku,it.co,it.ch).anoms.push(it); });
   // (b) recommendation gaps — only drill subcats whose category trend is off-plan (bounds the compute)
-  var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'], seen={};
+  var lyYM=hzLyMonths(), seen={};   // v28.156 (review A4 follow-up): was hardcoded 2025_01..2025_12
   DATA.forEach(function(r){ var sub=r.s,co=r.co,ch=r.ch; if(!sub||!co||!ch)return;
     if(coSel&&coSel!=='ALL'&&co!==coSel)return; if(chSel&&chSel!=='ALL'&&ch!==chSel)return;
     var ck=sub+'|'+co+'|'+ch; if(seen[ck])return; seen[ck]=1;
@@ -14616,7 +14635,7 @@ function renderDemandActionsView(body,opts){
         var si; try{ si=daSkuInsights(tgCo,tgCh); }catch(e){ si=null; }
         if(!si){ body.innerHTML=secNav()+filtBar+'<div style="padding:22px;color:var(--neg);font-size:12px">Could not build SKU insights.</div>'; wireCommon(); return; }
         var past=si.months.past, fwd=si.months.fwd;
-        var _fuC={}, _shC={}, _lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+        var _fuC={}, _shC={}, _lyYM=hzLyMonths();   // v28.156 (review A4 follow-up): was hardcoded 2025
         var fuOf=function(sub,co,ch){ var k=sub+'|'+co+'|'+ch; if(!(k in _fuC)){ try{ _fuC[k]=(calc(sub,co,ch).fu)||{}; }catch(e){ _fuC[k]={}; } } return _fuC[k]; };
         var shOf=function(sub,co,ch){ var k=sub+'|'+co+'|'+ch; if(!(k in _shC)){ try{ _shC[k]=buildSkuShares(filteredSkus(sub,co,ch)||[],co,ch,_lyYM)||{}; }catch(e){ _shC[k]={}; } } return _shC[k]; };
         var shown=si.rows.filter(function(r){ return tgSt==='all'?true:r.status===tgSt; });
@@ -14992,6 +15011,9 @@ function renderCalendarView(body){
 function buildExecData(){
   var ch={DTC:{},FBA:{},B2B:{}},coc={DTC:{},FBA:{},B2B:{}},cocs={DTC:{},FBA:{},B2B:{}},tot={};
   function ensure(o,m){if(!o[m])o[m]={u:0,r:0,lyU:0,lyR:0};}
+  // v28.156 (review A4 follow-up): FM plus any month of the current + next FY that FM lacks (none today; from Mar-27 the next FY ends Feb-29,
+  // past FM's 2028_12, and calc() covers it via FM_CALC), so the exec report's next-FY columns are never blank.
+  var _exM=FM.slice(); [CUR_FY_START,CUR_FY_START+1].forEach(function(Y){ fyMonths(Y).forEach(function(m){ if(_exM.indexOf(m)<0)_exM.push(m); }); });
   DATA.forEach(function(row){
     if(['DTC','FBA','B2B','TIK'].indexOf(row.ch)<0)return;
     var chKey=(row.ch==='TIK')?'DTC':row.ch;   // TIK is a DTC clone (v26.955) — fold into the DTC bucket for exec/finmodel (data + ASP still use TIK's own forecast). Prevents ch['TIK'] undefined crash.
@@ -15002,9 +15024,9 @@ function buildExecData(){
     var a=row.m;
     var cmF=null;   // full-month forecast for CUR_MONTH (computed once per row, lazily)
     var cmfOf=function(){ return cmF!=null?cmF:(cmF=Number(curMonthForecast(row.s,row.co,row.ch))||0); };
-    FM.forEach(function(fym){
+    _exM.forEach(function(fym){   // v28.156 (review A4 follow-up): was FM
       var pm=pa(fym);
-      var isAct=ACTUAL_MONTHS.indexOf(fym)>=0;
+      var isAct=isActualMonth(fym);   // v28.156 (review A4 follow-up): any month up to CUR_MONTH (was ACTUAL_MONTHS = current calendar year only)
       var u,r;
       if(isAct && fym!==CUR_MONTH){
         u=a[fym]?(a[fym][0]||0):0;
@@ -15023,8 +15045,8 @@ function buildExecData(){
       } else if(a[lyYM]){
         // Real actual
         lyU=a[lyYM][0]||0;lyR=a[lyYM][1]||0;
-      } else if(pm.y-1>=2026){
-        // 2027 month → LY is 2026 forecast; use cascade × ASP for revenue
+      } else if(pm.y-1>=hzCurYear()){   // v28.156 (review A4 follow-up): was fixed 2026
+        // next-year month → LY is this year's forecast; use cascade × ASP for revenue
         lyU=Number(fu[lyYM])||0;
         if(lyU>0){var lyAsp=Number(getASP(row.co,row.ch,row.s,pm.y-1,pm.mo))||0;lyR=lyU*lyAsp;}
       }
@@ -16394,8 +16416,11 @@ function renderExecView(host){
 
   // Financial year = March → February. Data window covers FY27 (Mar26–Feb27) fully and FY28
   // (Mar27–Dec27) partially. FY26 (Mar25–Feb26) comes from each FY27 month's prior-year value (lyU).
-  var FY27_months=['2026_03','2026_04','2026_05','2026_06','2026_07','2026_08','2026_09','2026_10','2026_11','2026_12','2027_01','2027_02'];
-  var FY28_months=['2027_03','2027_04','2027_05','2027_06','2027_07','2027_08','2027_09','2027_10','2027_11','2027_12','2028_01','2028_02'];   // full FY28: Mar 27 – Feb 28 (Jan/Feb 28 are forecast; FM covers them)
+  // v28.156 (review A4 follow-up): FY27_months = the CURRENT FY, FY28_months = the NEXT FY, both from CUR_FY_START (were fixed lists);
+  // labels via hzFyName/hzFyRange. Today identical (CUR_FY_START 2026 → FY27 Mar 26..Feb 27, FY28 Mar 27..Feb 28); FY28 becomes current in Mar-27.
+  var _fyC=CUR_FY_START, _yy=function(Y){return String(Y).slice(2);};
+  var FY27_months=fyMonths(_fyC);
+  var FY28_months=fyMonths(_fyC+1);   // full next FY (Jan/Feb of the following year are forecast; buildExecData covers them)
   var FY_ORDER=FY27_months.concat(FY28_months); // table column order (Mar 26 → Feb 28)
   function periodSum(monthMap,months){
     var u=0,r=0;
@@ -16452,8 +16477,8 @@ function renderExecView(host){
   }
   var yrBar=document.createElement('div');yrBar.className='yr-summary';
   yrBar.innerHTML=''
-    +yearCard('FY26','Mar 25 – Feb 26 · prior year',p_fy26.u,p_fy26.r,'actual',fy26grow,'FY25')
-    +yearCard('FY27','Mar 26 – Feb 27 · Actual + Forecast',p_fy27.u,p_fy27.r,'mixed',{u:yoy_u,r:yoy_r},'FY26');
+    +yearCard(hzFyName(_fyC-1),hzFyRange(_fyC-1)+' · prior year',p_fy26.u,p_fy26.r,'actual',fy26grow,hzFyName(_fyC-2))
+    +yearCard(hzFyName(_fyC),hzFyRange(_fyC)+' · Actual + Forecast',p_fy27.u,p_fy27.r,'mixed',{u:yoy_u,r:yoy_r},hzFyName(_fyC-1));   // v28.156 (review A4 follow-up): labels from CUR_FY_START
   wrap.appendChild(yrBar);
 
   if(!document.getElementById('exec-half-sty')){ var _hs=document.createElement('style'); _hs.id='exec-half-sty';
@@ -16469,7 +16494,7 @@ function renderExecView(host){
 
   // Hint
   var hint=document.createElement('div');hint.style.cssText='font-size:10px;color:var(--faint);margin-bottom:4px';
-  hint.innerHTML='Financial year Mar–Feb. Click <b>DTC</b>, <b>FBA</b>, or <b>B2B</b> to expand and see country contribution. Scroll right for FY28 (Mar 27 – Feb 28; Jan/Feb 28 forecast).';
+  hint.innerHTML='Financial year Mar–Feb. Click <b>DTC</b>, <b>FBA</b>, or <b>B2B</b> to expand and see country contribution. Scroll right for '+hzFyName(_fyC+1)+' ('+hzFyRange(_fyC+1)+'; Jan/Feb '+_yy(_fyC+2)+' forecast).';
   wrap.appendChild(hint);
 
   // Table wrapper
@@ -16482,18 +16507,18 @@ function renderExecView(host){
   var gr=document.createElement('tr');
   var glbl=document.createElement('th');glbl.className='lbl-col grp-th';glbl.rowSpan=2;glbl.textContent='Channel';gr.appendChild(glbl);
   function halfHdrs(){ if(!EXEC_SHOW_H)return; ['H1','H2'].forEach(function(h){ var th=document.createElement('th');th.rowSpan=2;th.className='grp-th yr-total-th yr-half-total';th.textContent=h;gr.appendChild(th); }); }
-  var g26=document.createElement('th');g26.colSpan=12;g26.className='grp-th year-26';g26.textContent='FY27 · Mar 26 – Feb 27';gr.appendChild(g26);
+  var g26=document.createElement('th');g26.colSpan=12;g26.className='grp-th year-26';g26.textContent=hzFyName(_fyC)+' · '+hzFyRange(_fyC);gr.appendChild(g26);
   halfHdrs();
-  var g26t=document.createElement('th');g26t.rowSpan=2;g26t.className='grp-th yr-total-th yr-26-total';g26t.textContent='FY27 TOTAL';gr.appendChild(g26t);
-  var g27=document.createElement('th');g27.colSpan=12;g27.className='grp-th year-27';g27.textContent='FY28 · Mar 27 – Feb 28';gr.appendChild(g27);
+  var g26t=document.createElement('th');g26t.rowSpan=2;g26t.className='grp-th yr-total-th yr-26-total';g26t.textContent=hzFyName(_fyC)+' TOTAL';gr.appendChild(g26t);
+  var g27=document.createElement('th');g27.colSpan=12;g27.className='grp-th year-27';g27.textContent=hzFyName(_fyC+1)+' · '+hzFyRange(_fyC+1);gr.appendChild(g27);
   halfHdrs();
-  var g27t=document.createElement('th');g27t.rowSpan=2;g27t.className='grp-th yr-total-th yr-27-total';g27t.textContent='FY28 TOTAL';gr.appendChild(g27t);
+  var g27t=document.createElement('th');g27t.rowSpan=2;g27t.className='grp-th yr-total-th yr-27-total';g27t.textContent=hzFyName(_fyC+1)+' TOTAL';gr.appendChild(g27t);
   thead.appendChild(gr);
   // Month row
   var mr=document.createElement('tr');
   FY_ORDER.forEach(function(fym,fi){
     var th=document.createElement('th');
-    var isAct=ACTUAL_MONTHS.indexOf(fym)>=0;
+    var isAct=isActualMonth(fym);   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS
     var is27=FY28_months.indexOf(fym)>=0;   // FY28 month (incl Jan/Feb 28) → FY28 colour, not by year-prefix
     th.className=(isAct?'actual-mo':(is27?'fc-27':'fc-26'))+(fym===CUR_MONTH?' actual-hdr':'');
     var pm=pa(fym);
@@ -16508,7 +16533,7 @@ function renderExecView(host){
   var tbody=document.createElement('tbody');
   function renderCell(data,fym,extra){
     var td=document.createElement('td');
-    var isAct=ACTUAL_MONTHS.indexOf(fym)>=0;
+    var isAct=isActualMonth(fym);   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS
     var is27=FY28_months.indexOf(fym)>=0;   // FY28 month (incl Jan/Feb 28) → FY28 colour banding
     td.className=(isAct?'actual-mo':(is27?'fc-27':'fc-26'))+(extra||'');
     var v=data&&data[fym]||{u:0,r:0,lyU:0,lyR:0};
@@ -16552,7 +16577,7 @@ function renderExecView(host){
     FY_ORDER.forEach(function(fym){
       tr.appendChild(renderCell(d.ch[chKey],fym));
       // Insert FY27 summary (H1/H2 if on, then total) after Feb 2027
-      if(fym==='2027_02')fySum(tr,d.ch[chKey],FY27_months,'yr-26-total');
+      if(fym===FY27_months[11])fySum(tr,d.ch[chKey],FY27_months,'yr-26-total');
     });
     fySum(tr,d.ch[chKey],FY28_months,'yr-27-total');
     tbody.appendChild(tr);
@@ -16566,7 +16591,7 @@ function renderExecView(host){
         ctr.appendChild(clbl);
         FY_ORDER.forEach(function(fym){
           ctr.appendChild(renderCell(d.coc[chKey][co],fym,' country-cell'));
-          if(fym==='2027_02')fySum(ctr,d.coc[chKey][co],FY27_months,'yr-26-total','country-cell');
+          if(fym===FY27_months[11])fySum(ctr,d.coc[chKey][co],FY27_months,'yr-26-total','country-cell');
         });
         fySum(ctr,d.coc[chKey][co],FY28_months,'yr-27-total','country-cell');
         tbody.appendChild(ctr);
@@ -16580,7 +16605,7 @@ function renderExecView(host){
   var lblT=document.createElement('td');lblT.className='lbl-col';lblT.textContent='TOTAL';trT.appendChild(lblT);
   FY_ORDER.forEach(function(fym){
     trT.appendChild(renderCell(d.tot,fym));
-    if(fym==='2027_02')fySum(trT,d.tot,FY27_months,'yr-26-total');
+    if(fym===FY27_months[11])fySum(trT,d.tot,FY27_months,'yr-26-total');
   });
   fySum(trT,d.tot,FY28_months,'yr-27-total');
   tbody.appendChild(trT);
@@ -17784,9 +17809,9 @@ function applyInsight(idx){
     // Find current DTC and FBA forecast totals to compute mix
     var dtcRow=DATA.find(function(r){return r.s===subcat&&r.co===co&&r.ch==='DTC';});
     var fbaRow=DATA.find(function(r){return r.s===subcat&&r.co===co&&r.ch==='FBA';});
-    if(dtcRow&&fbaRow){
-      var dtcLY=Object.keys(dtcRow.m).filter(function(k){return k.startsWith('2025');}).reduce(function(a,k){return a+(dtcRow.m[k][0]||0);},0);
-      var fbaLY=Object.keys(fbaRow.m).filter(function(k){return k.startsWith('2025');}).reduce(function(a,k){return a+(fbaRow.m[k][0]||0);},0);
+    if(dtcRow&&fbaRow){   // v28.156 (review A4 follow-up): LY mix = last calendar year (was fixed '2025')
+      var dtcLY=Object.keys(dtcRow.m).filter(function(k){return k.startsWith(String(hzLyYear()));}).reduce(function(a,k){return a+(dtcRow.m[k][0]||0);},0);
+      var fbaLY=Object.keys(fbaRow.m).filter(function(k){return k.startsWith(String(hzLyYear()));}).reduce(function(a,k){return a+(fbaRow.m[k][0]||0);},0);
       var total=dtcLY+fbaLY;
       if(total>0){
         targets.push({ch:'DTC',weight:dtcLY/total});
@@ -17815,8 +17840,8 @@ function applyInsight(idx){
         // Decide: % growth vs absolute
         // ly_u for this month
         var a=ga(co,t.ch,subcat);
-        var{y,mo}=pa(m);
-        var lyVal=y===2027?(cr.fu[ym(2026,mo)]||0):(a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);
+        var{y,mo}=pa(m);   // v28.156 (review A4 follow-up): next-year LY = this year's fc (was fixed 2027/2026)
+        var lyVal=y===hzCurYear()+1?(cr.fu[ym(hzCurYear(),mo)]||0):(a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);
         if(lyVal>0){
           var pctChange=(targetVal-lyVal)/lyVal;
           if(pctChange>-0.5&&pctChange<1.0){
@@ -18015,7 +18040,7 @@ function gatherForecastContext(s,co,ch,fym){
   var biSubcatLevel=getBIForSubcat(s,co,ch);
   // Recent YoY rates (completed 2026 months vs 2025; skip the partial current month) — same calc as confidenceOptions but exposed for narrative
   var yoyRates=[];
-  ACTUAL_MONTHS.forEach(function(am){
+  hzYtdDoneMonths().forEach(function(am){   // v28.156 (review A4 follow-up): was ACTUAL_MONTHS
     if(am===CUR_MONTH)return; // partial current month excluded
     var amY=parseInt(am.split('_')[0]);
     var amM=parseInt(am.split('_')[1]);
