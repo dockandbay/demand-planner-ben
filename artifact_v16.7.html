@@ -16575,12 +16575,15 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
   var CHS=[['DTC','d'],['B2B','b'],['FBA','f'],['TIK','t']];
   var subcats={};Object.keys(SKUM).forEach(function(s){var p=SKUM[s];if(p&&p.s)subcats[p.s]=1;});
   var subList=Object.keys(subcats);
-  // 1) Clear forecast-month demand everywhere (drops the baked x1.10 fallback)
+  // 1) Clear demand everywhere (drops the baked x1.10 fallback)
+  // v28.151 (review A1): clear EVERY month, not just LIVE_FC_MONTHS. md.demand is written only by this function, so a full clear
+  // leaves no prior-run contribution behind (the old window-only clear let the past-month Preorder/KA fold grow every rebuild).
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
       var d=mk[co].demand;if(!d)return;
-      ['DTC','B2B','FBA','TIK'].forEach(function(ch){if(d[ch])LIVE_FC_MONTHS.forEach(function(fym){delete d[ch][fym];});});
+      ['DTC','B2B','FBA','TIK'].forEach(function(ch){if(d[ch])Object.keys(d[ch]).forEach(function(fym){delete d[ch][fym];});});
+      delete d.ZAL;   // v28.151 (review A1): 2c only cleared ZAL for SKUs still in ZAL_SKUS; a SKU that left the scope kept its old overlay
     });
   });
   // 2) Live cascade: subcat monthly forecast (calc, reads IV) x SKU share
@@ -16606,19 +16609,22 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
           var s2sales=skuSales(s2,co,ch), s2HasLY=skuHasLY(s2sales);
           var ovMap=FC_OUTPUTS[s2+'|'+skuWh(co,ch)+'|'+ch]||{};   // saved SKU-level overrides (forecast_outputs)
           if(!s2HasLY&&sh<=0&&!Object.keys(ovMap).length)return;   // new SKU with no share, no LY and no override → nothing to forecast
-          // Chronological pass so the CHAINED last-year rule can read md.demand[ch][lyM] computed earlier this loop.
+          // Chronological pass so the CHAINED last-year rule can read the month computed earlier this loop.
+          // v28.151 (review A2): the chain reads a RUN-LOCAL map (chFC, like the SETS path), never md.demand[ch][lyM], so a month
+          // outside the window (not rebuilt this run) can't feed a stale or folded value into the chain.
+          var chFC={};
           LIVE_FC_MONTHS.forEach(function(fym){
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01';
             var raw;
             if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                        // saved SKU override wins
             else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7);   // continuing SKU: same month, last year
-              raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(md.demand[ch][lyM]||0); }           // complete → last-year ACTUAL; incomplete → last-year FORECAST (chained)
+              raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(chFC[lyM]||0); }                     // complete → last-year ACTUAL; incomplete → last-year FORECAST (chained, this run)
             else { raw=(fu[fym]||0)*sh; }                                                  // new SKU → subcat cascade × share
             var fc;
             if(launchDate&&ms<launchDate){fc=0;}
             else if(discDate&&ms>discDate){ var _RA=runoffAlloc(s2,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (ZAL: allocator has no ZAL channel → legacy path)
             else{fc=Math.round(raw);}
-            if(fc>0)md.demand[ch][fym]=fc;else delete md.demand[ch][fym];
+            if(fc>0){ md.demand[ch][fym]=fc; chFC[fym]=fc; } else delete md.demand[ch][fym];
           });
         });
       });
@@ -16650,12 +16656,15 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
     });
   })();
   // 3) Re-fold committed Preorder/KA demand into B2B (pka stays on each market)
+  // v28.151 (review A1): fold ONLY months inside LIVE_FC_MONTHS. Ben's rule: past-dated Preorder/KA months are past forecasts,
+  // so they never appear in the demand or the buy and never roll forward; months beyond the window are ignored too.
+  var _pkaWin={}; LIVE_FC_MONTHS.forEach(function(m){ _pkaWin[m]=1; });
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
       var md=mk[co];if(!md.pka)return;
       if(!md.demand)md.demand={};if(!md.demand.B2B)md.demand.B2B={};
-      Object.keys(md.pka).forEach(function(fym){md.demand.B2B[fym]=(md.demand.B2B[fym]||0)+(md.pka[fym]||0);});
+      Object.keys(md.pka).forEach(function(fym){ if(!_pkaWin[fym])return; md.demand.B2B[fym]=(md.demand.B2B[fym]||0)+(md.pka[fym]||0);});
     });
   });
   // TIK fold: TikTok behaves like DTC on the 3PL pool. Built above as its own channel (gated to TIK_COUNTRIES); here we
