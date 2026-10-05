@@ -16148,12 +16148,18 @@
         if(q) free=free.filter(function(x){ return tokMatch([x.barcode,x.status,'seq'+x.seq,x.assigned_ref,x.assigned_sku,x.product_name,x.colour_name].join(' '), q); });
         free.sort(function(a,b){ return (a.status==='free'?0:1)-(b.status==='free'?0:1) || (a.seq-b.seq); });
         var shown=free.slice(0,q?60:30);
-        shown.forEach(function(x){ var used=x.status==='used'; opts.push({v:x.barcode});
-          html+='<div class="shpop-opt bcp-opt" data-v="'+esc(x.barcode)+'" style="display:flex;align-items:center;gap:8px">'+bcMiniSvg(x.barcode)
+        // v28.157 (Ben): number only (no rendered barcode); assigned codes appear in SEARCH results, greyed and not selectable, with the SKU they are assigned to
+        shown.forEach(function(x){ opts.push({v:x.barcode});
+          html+='<div class="shpop-opt bcp-opt" data-v="'+esc(x.barcode)+'" style="display:flex;align-items:center;gap:8px">'
             +'<span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;flex:1">'+esc(x.barcode)+'</span>'
-            +'<span class="mut tiny" style="white-space:nowrap">#'+esc(x.seq)+(used?' · <span style="color:var(--amber)">used</span>':'')+'</span></div>'; });
-        if(!shown.length)html+='<div class="mut" style="padding:6px 10px">'+(q?'no match':'no free barcodes in the pool')+'</div>';
-        else if(free.length>shown.length)html+='<div class="mut tiny" style="padding:5px 10px">'+(free.length-shown.length)+' more, type to narrow…</div>';
+            +'<span class="mut tiny" style="white-space:nowrap">#'+esc(x.seq)+'</span></div>'; });
+        var taken=q?rows.filter(function(x){ return x.status==='assigned' && x.barcode!==cur && tokMatch([x.barcode,x.status,'seq'+x.seq,x.assigned_ref,x.assigned_sku,x.product_name,x.colour_name].join(' '), q); }).slice(0,40):[];
+        taken.forEach(function(x){ var to=x.assigned_sku||x.assigned_ref||'another size';
+          html+='<div class="shpop-opt bcp-dis" title="already assigned, cannot be selected" style="display:flex;align-items:center;gap:8px;cursor:not-allowed;opacity:.55">'
+            +'<span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;flex:1">'+esc(x.barcode)+'</span>'
+            +'<span class="mut tiny" style="white-space:nowrap">assigned to <b style="font-family:ui-monospace,Menlo,monospace">'+esc(to)+'</b>'+(x.assigned_sku&&x.assigned_ref?' · '+esc(x.assigned_ref):'')+'</span></div>'; });
+        if(!shown.length&&!taken.length)html+='<div class="mut" style="padding:6px 10px">'+(q?'no match':'no free barcodes in the pool')+'</div>';
+        else if(free.length>shown.length)html+='<div class="mut tiny" style="padding:5px 10px">'+(free.length-shown.length)+' more free, type to narrow…</div>';
         var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html; l._sel=0; paint();
         l.querySelectorAll('.bcp-opt').forEach(function(o,ix){ o.onclick=function(){ set(o.dataset.v||''); }; o.onmouseenter=function(){ l._sel=ix; paint(); }; }); }
       function paint(){ var l=document.getElementById('shpop-list'); if(!l)return; l.querySelectorAll('.bcp-opt').forEach(function(o,ix){ o.style.background=(ix===l._sel)?'var(--blue-soft)':''; if(ix===l._sel&&o.scrollIntoView)try{ o.scrollIntoView({block:'nearest'}); }catch(e){} }); }
@@ -16294,24 +16300,30 @@
   // barcode) from /api/product/reports/catalogue. Season filter (server-side), multi-term search (tokMatch, same as the
   // barcode picker), sortable left-aligned sticky-header grid grouped by product ref when unsorted, CSV (visible rows,
   // formula-injection guarded) and landscape PDF (server pdf-lib, visible rows posted). Deep link #/product/reports/catalogue.
-  var _pcat={season:'',q:'',sort:{col:'',dir:1},data:null};
+  var _pcat={season:'',cat:'',q:'',sort:{col:'',dir:1},data:null};   // v28.157 (Ben): + cat (product category filter, client-side over the loaded season)
   var _PCAT_COLS=[['season','Season'],['ref','Product ref'],['product_type','Product type'],['colourway','Colour way'],['size_label','Size'],['sku','SKU'],['barcode','Barcode (EAN)'],['stage','Stage']];   // v28.156 (Ben): Component column dropped (barcodes live on sizes; the item's component list just repeated per size row)
   function _pcatVisible(){ var rows=((_pcat.data&&_pcat.data.rows)||[]).slice(), q=_pcat.q.trim();
+    if(_pcat.cat) rows=rows.filter(function(r){ return (r.product_type||'')===_pcat.cat; });
     if(q) rows=rows.filter(function(r){ return tokMatch(_PCAT_COLS.map(function(c){return r[c[0]];}).concat([r.description,r.product_name,r.subcategory,r.item_type,r.size_status]).join(' '), q); });
     var s=_pcat.sort; if(s.col){ rows.sort(function(a,b){ var x=String(a[s.col]==null?'':a[s.col]), y=String(b[s.col]==null?'':b[s.col]); var c=x.localeCompare(y,undefined,{numeric:true,sensitivity:'base'}); return (c||String(a.ref).localeCompare(String(b.ref))||((a.size_id||0)-(b.size_id||0)))*s.dir; }); }
     return rows; }
-  function _pcatFname(ext){ var sea=(_pcat.season||'all').replace(/[^A-Za-z0-9]+/g,'_').toLowerCase(); return 'catalogue_'+sea+'_'+fd(new Date().toISOString().slice(0,10))+'.'+ext; }
+  function _pcatFname(ext){ var sea=((_pcat.season||'all')+(_pcat.cat?'_'+_pcat.cat:'')).replace(/[^A-Za-z0-9]+/g,'_').toLowerCase(); return 'catalogue_'+sea+'_'+fd(new Date().toISOString().slice(0,10))+'.'+ext; }
   function _pcatCsv(rows){ var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };   // apostrophe-prefix formula triggers (= + - @)
     return '﻿'+_PCAT_COLS.map(function(c){return cell(c[1]);}).join(',')+'\n'+rows.map(function(r){ return _PCAT_COLS.map(function(c){return cell(r[c[0]]);}).join(','); }).join('\n')+'\n'; }
   function renderProductCatalogue(c){
+    // v28.157 (Ben): Season + Category dropdowns kept short and on the same row as the search box (flex:0 0 auto so .fci can't stretch them)
     c.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px">'
-      +'<select class="fci" id="pcat-season" style="font-size:12px"><option value="">All seasons</option></select>'
-      +'<input class="fci" id="pcat-q" placeholder="search… (space = AND: e.g. towel large 5064)" value="'+esc(_pcat.q)+'" style="font-size:12px;width:280px;max-width:60vw">'
+      +'<select class="fci" id="pcat-season" title="season" style="font-size:12px;width:auto;flex:0 0 auto;max-width:140px"><option value="">All seasons</option></select>'
+      +'<select class="fci" id="pcat-cat" title="product category" style="font-size:12px;width:auto;flex:0 0 auto;max-width:190px"><option value="">All categories</option></select>'
+      +'<input class="fci" id="pcat-q" placeholder="search… (space = AND: e.g. towel large 5064)" value="'+esc(_pcat.q)+'" style="font-size:12px;width:280px;flex:0 1 280px;min-width:160px;max-width:60vw">'
       +'<button class="save-btn light" id="pcat-csv" title="download the visible rows as CSV">⤓ CSV</button>'
       +'<button class="save-btn light" id="pcat-pdf" title="download the visible rows as a landscape A4 PDF">⤓ PDF</button>'
       +'<span class="mut tiny" id="pcat-n" style="margin-left:auto"></span></div>'
       +'<div id="pcat-grid"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div>';
-    var selS=c.querySelector('#pcat-season'), qEl=c.querySelector('#pcat-q'), grid=c.querySelector('#pcat-grid'), nEl=c.querySelector('#pcat-n');
+    var selS=c.querySelector('#pcat-season'), selC=c.querySelector('#pcat-cat'), qEl=c.querySelector('#pcat-q'), grid=c.querySelector('#pcat-grid'), nEl=c.querySelector('#pcat-n');
+    function fillCats(){ var seen={}; ((_pcat.data&&_pcat.data.rows)||[]).forEach(function(r){ if(r.product_type)seen[r.product_type]=1; }); var list=Object.keys(seen).sort(function(a,b){return a.localeCompare(b);});
+      if(_pcat.cat&&!seen[_pcat.cat])_pcat.cat='';   // remembered category not in this season → back to All
+      selC.innerHTML='<option value="">All categories</option>'+list.map(function(s){ return '<option value="'+esc(s)+'"'+(s===_pcat.cat?' selected':'')+'>'+esc(s)+'</option>'; }).join(''); selC.value=_pcat.cat; }
     function fillSeasons(list){ selS.innerHTML='<option value="">All seasons</option>'+(list||[]).map(function(s){ return '<option value="'+esc(s)+'"'+(s===_pcat.season?' selected':'')+'>'+esc(s)+'</option>'; }).join(''); selS.value=_pcat.season; if(selS.value!==_pcat.season){ _pcat.season=''; selS.value=''; } }   // a remembered season no longer in the list → back to All
     function paint(){ if(!document.body.contains(grid))return; var rows=_pcatVisible(), s=_pcat.sort;
       nEl.textContent=rows.length+' row'+(rows.length===1?'':'s')+(rows.length!==((_pcat.data&&_pcat.data.rows)||[]).length?' of '+((_pcat.data&&_pcat.data.rows)||[]).length:'');
@@ -16327,12 +16339,13 @@
     function load(){ var u='/api/product/reports/catalogue'+(_pcat.season?'?season='+encodeURIComponent(_pcat.season):''); _pcat.data=null; paint(); var req=(_pcat.req=(_pcat.req||0)+1);
       fetch(u).then(function(r){return r.json();}).then(function(d){ if(req!==_pcat.req)return;   // a newer season request superseded this one
         if(!d||d.error){ grid.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
-        _pcat.data=d; fillSeasons(d.seasons); paint(); }).catch(function(e){ if(req===_pcat.req)grid.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+        _pcat.data=d; fillSeasons(d.seasons); fillCats(); paint(); }).catch(function(e){ if(req===_pcat.req)grid.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
     selS.onchange=function(){ _pcat.season=selS.value; load(); };
+    selC.onchange=function(){ _pcat.cat=selC.value; paint(); };
     qEl.oninput=function(){ _pcat.q=qEl.value; if(qEl._dt)clearTimeout(qEl._dt); qEl._dt=setTimeout(paint,120); };
     c.querySelector('#pcat-csv').onclick=function(){ var rows=_pcatVisible(); if(!rows.length){ alert('No rows to download.'); return; } downloadCsvStr(_pcatCsv(rows), _pcatFname('csv')); };
     c.querySelector('#pcat-pdf').onclick=function(){ var b=this, rows=_pcatVisible(); if(!rows.length){ alert('No rows to download.'); return; } b.disabled=true; var t=b.textContent; b.textContent='Building…';
-      fetch('/api/product/reports/catalogue/pdf',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({season:_pcat.season||'All seasons',rows:rows.map(function(r){ var o={}; _PCAT_COLS.forEach(function(c){o[c[0]]=r[c[0]];}); return o; })})})
+      fetch('/api/product/reports/catalogue/pdf',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({season:(_pcat.season||'All seasons')+(_pcat.cat?', '+_pcat.cat:''),rows:rows.map(function(r){ var o={}; _PCAT_COLS.forEach(function(c){o[c[0]]=r[c[0]];}); return o; })})})
         .then(function(r){ if(!r.ok)return r.json().then(function(j){ throw new Error((j&&j.error)||('HTTP '+r.status)); }); return r.blob(); })
         .then(function(bl){ var u=URL.createObjectURL(bl), a=document.createElement('a'); a.href=u; a.download=_pcatFname('pdf'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); })
         .catch(function(e){ alert('PDF failed: '+(e&&e.message||e)); }).then(function(){ b.disabled=false; b.textContent=t; }); };
@@ -18295,6 +18308,7 @@
     supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3','#supply-root #config-subs.cfg-flat'],   // v28.135: SUPPLY ▸ CONFIG draws its items flat in #config-subs (cfg-flat), not #config-subs-l3 → rail showed no L3
     demand:['#demand-exceptions-nav','#demand-scenario-nav','#demand-inputs-nav','#demand-analysis-nav','#demand-config-nav'],
     reports:['#perf-subnav'],
+    product:['#product-root #pcfg-subs-l3'],   // v28.157 (Ben): PRODUCT ▸ Reports (Sampling / Approved products / Catalogue) and PRODUCT ▸ Config L3 in the left menu, not on top
     config:['#supply-root #config-subs-l3']   // v28.141: ⚙ CONFIG ▸ Admin/Demand L3 (Email notifications … Ask Claude feedback) — v28.140 hides the in-content L3, so the rail must show it
   };
   function _railText(el){ try{ var c=el.cloneNode(true); c.querySelectorAll('.ex-badge,.rtab-count,.count,.nav-badge,.pilln,.stab-count,.tl-count').forEach(function(x){x.remove();}); return (c.textContent||'').replace(/\s+/g,' ').trim(); }catch(e){ return (el.textContent||'').replace(/\s+/g,' ').trim(); } }
