@@ -16124,6 +16124,47 @@
         l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
       render(''); if(qi){ qi.oninput=function(){var v=this.value; if(qi._dt)clearTimeout(qi._dt); qi._dt=setTimeout(function(){render(v);},250);}; }
     }); }
+  // v28.154 (Ben): searchable WORKSHOP BARCODE picker for the Sizes master grid (replaces the plain <select>). Same shpop
+  // popover as the SKU / assign-shipment pickers: multi-term filter (every space/comma-separated term must match the
+  // barcode digits, status, seq or the assigned ref / SKU / product / colour), arrow keys + Enter + Esc, click-outside
+  // closes, phone bottom sheet via placePop. Saves EXACTLY what the old select saved: POST /api/product/size/:id/barcode
+  // {barcode:'<ean>'|''}. Pool = /api/product/workshop-barcodes, cached per grid paint (renderSizesMaster warms it).
+  var _bcPool=null, _bcPickBtn=null;
+  function loadBcPool(cb,force){ if(_bcPool&&!force)return cb(_bcPool); fetch('/api/product/workshop-barcodes').then(function(r){return r.json();}).then(function(d){ _bcPool=(d&&d.rows)||[]; cb(_bcPool); }).catch(function(){ cb(_bcPool||[]); }); }
+  function bcMiniSvg(code){ try{ var bars=eanBars(code,0,0,1,14,2); return bars?'<svg width="95" height="17" viewBox="0 0 95 17" style="display:block;background:#fff">'+bars+'</svg>':''; }catch(e){ return ''; } }
+  function openBarcodePick(btn,onSaved){ var wasOpen=(document.getElementById('shpop') && _bcPickBtn===btn); closeShPop(); _bcPickBtn=null; if(wasOpen)return;   // re-click the same cell → close (toggle)
+    _bcPickBtn=btn;
+    var id=btn.dataset.id, cur=btn.dataset.cur||'';
+    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop'; pop.style.width='340px';
+    pop.innerHTML='<div class="shpop-h">Assign workshop barcode'+(cur?' <span class="mut">(current <span style="font-family:ui-monospace,Menlo,monospace">'+esc(cur)+'</span>)</span>':'')+'</div><input class="shpop-q" placeholder="search barcode, status, ref, sku…  (space = AND)"><div id="shpop-list"><div class="mut" style="padding:8px 10px">Loading pool…</div></div>';
+    placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    var qi=pop.querySelector('.shpop-q'); if(qi)qi.focus();
+    function set(val){ btn.disabled=true; shipPost('/api/product/size/'+id+'/barcode',{barcode:val},function(j){ btn.disabled=false; if(j&&j.error){ alert(j.error); closeShPop(); if(onSaved)onSaved(null,j); return; } _bcPool=null; closeShPop(); if(onSaved)onSaved(val,j); }); }
+    loadBcPool(function(rows){ if(_bcPickBtn!==btn || !document.getElementById('shpop'))return;   // closed / another opened while loading
+      var opts=[];   // flat list of selectable options for keyboard nav: [{v:'<ean>'|'' (clear)}]
+      function render(q){ q=(q||'').trim(); var html=''; opts=[];
+        if(cur){ html+='<div class="shpop-opt unassign bcp-opt" data-v=""><span class="mut tiny">current</span> <span style="font-family:ui-monospace,Menlo,monospace;color:var(--ink)">'+esc(cur)+'</span> <span style="float:right">✕ clear</span></div>'; opts.push({v:''}); }
+        var free=rows.filter(function(x){ return x.status!=='assigned' && x.barcode!==cur; });   // same pool as the old select (free + used); assigned codes belong to another size
+        if(q) free=free.filter(function(x){ return tokMatch([x.barcode,x.status,'seq'+x.seq,x.assigned_ref,x.assigned_sku,x.product_name,x.colour_name].join(' '), q); });
+        free.sort(function(a,b){ return (a.status==='free'?0:1)-(b.status==='free'?0:1) || (a.seq-b.seq); });
+        var shown=free.slice(0,q?60:30);
+        shown.forEach(function(x){ var used=x.status==='used'; opts.push({v:x.barcode});
+          html+='<div class="shpop-opt bcp-opt" data-v="'+esc(x.barcode)+'" style="display:flex;align-items:center;gap:8px">'+bcMiniSvg(x.barcode)
+            +'<span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;flex:1">'+esc(x.barcode)+'</span>'
+            +'<span class="mut tiny" style="white-space:nowrap">#'+esc(x.seq)+(used?' · <span style="color:var(--amber)">used</span>':'')+'</span></div>'; });
+        if(!shown.length)html+='<div class="mut" style="padding:6px 10px">'+(q?'no match':'no free barcodes in the pool')+'</div>';
+        else if(free.length>shown.length)html+='<div class="mut tiny" style="padding:5px 10px">'+(free.length-shown.length)+' more, type to narrow…</div>';
+        var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html; l._sel=0; paint();
+        l.querySelectorAll('.bcp-opt').forEach(function(o,ix){ o.onclick=function(){ set(o.dataset.v||''); }; o.onmouseenter=function(){ l._sel=ix; paint(); }; }); }
+      function paint(){ var l=document.getElementById('shpop-list'); if(!l)return; l.querySelectorAll('.bcp-opt').forEach(function(o,ix){ o.style.background=(ix===l._sel)?'var(--blue-soft)':''; if(ix===l._sel&&o.scrollIntoView)try{ o.scrollIntoView({block:'nearest'}); }catch(e){} }); }
+      render('');
+      if(qi){ qi.oninput=function(){ render(this.value); };
+        qi.onkeydown=function(ev){ var l=document.getElementById('shpop-list'); if(!l)return;
+          if(ev.key==='ArrowDown'){ ev.preventDefault(); l._sel=Math.min((l._sel||0)+1,opts.length-1); paint(); }
+          else if(ev.key==='ArrowUp'){ ev.preventDefault(); l._sel=Math.max((l._sel||0)-1,0); paint(); }
+          else if(ev.key==='Enter'){ ev.preventDefault(); var o=opts[l._sel||0]; if(o)set(o.v); }
+          else if(ev.key==='Escape'){ ev.preventDefault(); closeShPop(); } }; }
+    }); }
   // Searchable Specification picker — links a spec-linked component to a doc from PRODUCT ▸ Specifications.
   var _specList=null, _specPickBtn=null;
   function loadSpecList(cb){ if(_specList)return cb(_specList); pget('/api/product/specs').then(function(l){ _specList=Array.isArray(l)?l:[]; cb(_specList); }).catch(function(){ cb([]); }); }
@@ -16239,14 +16280,63 @@
   // (avg samples/request, avg samples to approve / to reject) with a per-supplier detail popout + PDF.
   // v27.808 (Ben): PRODUCT ▸ REPORTS now has a sub-nav — Sampling (existing) + PIM waiting room (new). The dispatcher
   // renders the tabs into `c` and delegates the body to the right renderer, so the existing sampling report is untouched.
-  function renderProductReportsTab(c){ var rt=window._prodRepTab; if(rt==='waiting')rt='approved-products'; if(rt!=='approved-products')rt='sampling'; window._prodRepTab=rt;
+  function renderProductReportsTab(c){ var rt=window._prodRepTab; if(rt==='waiting')rt='approved-products'; if(rt!=='approved-products'&&rt!=='catalogue')rt='sampling'; window._prodRepTab=rt;   // v28.154 (Ben): + catalogue
     // v27.811 (Ben): standard blue L3 sub-nav (reuses #pcfg-subs-l3 theme styling) + deep links.
-    var TABS=[['sampling','Sampling'],['approved-products','Approved products']];
+    var TABS=[['sampling','Sampling'],['approved-products','Approved products'],['catalogue','Catalogue']];
     c.innerHTML='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab prodrep-tab'+(t[0]===rt?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div><div id="prodrep-body"></div>';
     c.querySelectorAll('.prodrep-tab').forEach(function(t){ t.onclick=function(){ window._prodRepTab=t.dataset.k; try{ writeHash(['product','reports',t.dataset.k]); }catch(e){} renderProductReportsTab(c); }; });
     var body=c.querySelector('#prodrep-body');
     if(rt==='approved-products') return renderPimWaitingRoom(body);
+    if(rt==='catalogue') return renderProductCatalogue(body);   // v28.154 (Ben)
     return renderProductReports(body);
+  }
+  // v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product size (SKU / colour way / size / product type /
+  // barcode) from /api/product/reports/catalogue. Season filter (server-side), multi-term search (tokMatch, same as the
+  // barcode picker), sortable left-aligned sticky-header grid grouped by product ref when unsorted, CSV (visible rows,
+  // formula-injection guarded) and landscape PDF (server pdf-lib, visible rows posted). Deep link #/product/reports/catalogue.
+  var _pcat={season:'',q:'',sort:{col:'',dir:1},data:null};
+  var _PCAT_COLS=[['season','Season'],['ref','Product ref'],['product_type','Product type'],['colourway','Colour way'],['size_label','Size'],['sku','SKU'],['barcode','Barcode (EAN)'],['components','Component'],['stage','Stage']];
+  function _pcatVisible(){ var rows=((_pcat.data&&_pcat.data.rows)||[]).slice(), q=_pcat.q.trim();
+    if(q) rows=rows.filter(function(r){ return tokMatch(_PCAT_COLS.map(function(c){return r[c[0]];}).concat([r.description,r.product_name,r.subcategory,r.item_type,r.size_status]).join(' '), q); });
+    var s=_pcat.sort; if(s.col){ rows.sort(function(a,b){ var x=String(a[s.col]==null?'':a[s.col]), y=String(b[s.col]==null?'':b[s.col]); var c=x.localeCompare(y,undefined,{numeric:true,sensitivity:'base'}); return (c||String(a.ref).localeCompare(String(b.ref))||((a.size_id||0)-(b.size_id||0)))*s.dir; }); }
+    return rows; }
+  function _pcatFname(ext){ var sea=(_pcat.season||'all').replace(/[^A-Za-z0-9]+/g,'_').toLowerCase(); return 'catalogue_'+sea+'_'+fd(new Date().toISOString().slice(0,10))+'.'+ext; }
+  function _pcatCsv(rows){ var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };   // apostrophe-prefix formula triggers (= + - @)
+    return '﻿'+_PCAT_COLS.map(function(c){return cell(c[1]);}).join(',')+'\n'+rows.map(function(r){ return _PCAT_COLS.map(function(c){return cell(r[c[0]]);}).join(','); }).join('\n')+'\n'; }
+  function renderProductCatalogue(c){
+    c.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px">'
+      +'<select class="fci" id="pcat-season" style="font-size:12px"><option value="">All seasons</option></select>'
+      +'<input class="fci" id="pcat-q" placeholder="search… (space = AND: e.g. towel large 5064)" value="'+esc(_pcat.q)+'" style="font-size:12px;width:280px;max-width:60vw">'
+      +'<button class="save-btn light" id="pcat-csv" title="download the visible rows as CSV">⤓ CSV</button>'
+      +'<button class="save-btn light" id="pcat-pdf" title="download the visible rows as a landscape A4 PDF">⤓ PDF</button>'
+      +'<span class="mut tiny" id="pcat-n" style="margin-left:auto"></span></div>'
+      +'<div id="pcat-grid"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div>';
+    var selS=c.querySelector('#pcat-season'), qEl=c.querySelector('#pcat-q'), grid=c.querySelector('#pcat-grid'), nEl=c.querySelector('#pcat-n');
+    function fillSeasons(list){ selS.innerHTML='<option value="">All seasons</option>'+(list||[]).map(function(s){ return '<option value="'+esc(s)+'"'+(s===_pcat.season?' selected':'')+'>'+esc(s)+'</option>'; }).join(''); selS.value=_pcat.season; if(selS.value!==_pcat.season){ _pcat.season=''; selS.value=''; } }   // a remembered season no longer in the list → back to All
+    function paint(){ if(!document.body.contains(grid))return; var rows=_pcatVisible(), s=_pcat.sort;
+      nEl.textContent=rows.length+' row'+(rows.length===1?'':'s')+(rows.length!==((_pcat.data&&_pcat.data.rows)||[]).length?' of '+((_pcat.data&&_pcat.data.rows)||[]).length:'');
+      var th=_PCAT_COLS.map(function(col){ var on=s.col===col[0]; return '<th class="l pcat-th" data-col="'+col[0]+'" style="position:sticky;top:0;z-index:2;cursor:pointer;user-select:none;text-align:left'+(on?';color:var(--blue)':'')+'" title="sort">'+esc(col[1])+(on?(s.dir>0?' ▲':' ▼'):'')+'</th>'; }).join('');
+      var html='', lastRef=null;
+      rows.forEach(function(r){ if(!s.col&&r.ref!==lastRef){ lastRef=r.ref; html+='<tr class="grp-row pcat-grp"><td class="l" colspan="'+_PCAT_COLS.length+'" style="text-align:left;background:var(--hover);font-weight:700;padding:5px 12px"><span style="font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</span>'+(r.description?' <span class="mut" style="font-weight:400">'+esc(r.description)+'</span>':'')+' <span class="mut tiny" style="font-weight:400">· '+esc(r.season||'')+(r.product_type?' · '+esc(r.product_type):'')+(r.stage?' · '+esc(r.stage):'')+'</span></td></tr>'; }
+        html+='<tr>'+_PCAT_COLS.map(function(col){ var k=col[0], v=r[k]; var mono=(k==='barcode'||k==='sku'||k==='ref'); var cell=v?esc(v):'';
+          if(k==='sku'&&v&&r.sku_kind==='working')cell+=' <span class="mut tiny" title="working SKU (not yet mapped to a planner SKU)">wip</span>';
+          if(k==='barcode'&&v&&r.barcode_src==='planner')cell+=' <span class="mut tiny" title="EAN from the planner SKU (no workshop barcode assigned)">pim</span>';
+          return '<td class="l" style="text-align:left'+(mono?';font-family:ui-monospace,Menlo,monospace':'')+'">'+cell+'</td>'; }).join('')+'</tr>'; });
+      grid.innerHTML='<div class="tw" style="overflow:auto;max-height:calc(100vh - 230px);border:1px solid var(--line2);border-radius:6px"><table class="pr-tbl" style="width:100%"><thead><tr>'+th+'</tr></thead><tbody>'+(html||'<tr><td colspan="'+_PCAT_COLS.length+'" class="mut" style="padding:14px;text-align:left">'+(_pcat.data?'No rows'+(_pcat.q?' match "'+esc(_pcat.q)+'"':'')+'.':'Loading…')+'</td></tr>')+'</tbody></table></div>';
+      grid.querySelectorAll('.pcat-th').forEach(function(h){ h.onclick=function(){ var k=h.dataset.col; if(_pcat.sort.col!==k)_pcat.sort={col:k,dir:1}; else if(_pcat.sort.dir>0)_pcat.sort.dir=-1; else _pcat.sort={col:'',dir:1}; paint(); }; }); }   // off → asc → desc → off (as the PRODUCT grid)
+    function load(){ var u='/api/product/reports/catalogue'+(_pcat.season?'?season='+encodeURIComponent(_pcat.season):''); _pcat.data=null; paint(); var req=(_pcat.req=(_pcat.req||0)+1);
+      fetch(u).then(function(r){return r.json();}).then(function(d){ if(req!==_pcat.req)return;   // a newer season request superseded this one
+        if(!d||d.error){ grid.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
+        _pcat.data=d; fillSeasons(d.seasons); paint(); }).catch(function(e){ if(req===_pcat.req)grid.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+    selS.onchange=function(){ _pcat.season=selS.value; load(); };
+    qEl.oninput=function(){ _pcat.q=qEl.value; if(qEl._dt)clearTimeout(qEl._dt); qEl._dt=setTimeout(paint,120); };
+    c.querySelector('#pcat-csv').onclick=function(){ var rows=_pcatVisible(); if(!rows.length){ alert('No rows to download.'); return; } downloadCsvStr(_pcatCsv(rows), _pcatFname('csv')); };
+    c.querySelector('#pcat-pdf').onclick=function(){ var b=this, rows=_pcatVisible(); if(!rows.length){ alert('No rows to download.'); return; } b.disabled=true; var t=b.textContent; b.textContent='Building…';
+      fetch('/api/product/reports/catalogue/pdf',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({season:_pcat.season||'All seasons',rows:rows.map(function(r){ var o={}; _PCAT_COLS.forEach(function(c){o[c[0]]=r[c[0]];}); return o; })})})
+        .then(function(r){ if(!r.ok)return r.json().then(function(j){ throw new Error((j&&j.error)||('HTTP '+r.status)); }); return r.blob(); })
+        .then(function(bl){ var u=URL.createObjectURL(bl), a=document.createElement('a'); a.href=u; a.download=_pcatFname('pdf'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); })
+        .catch(function(e){ alert('PDF failed: '+(e&&e.message||e)); }).then(function(){ b.disabled=false; b.textContent=t; }); };
+    load();
   }
   // Approved products waiting room — the SKUs pushed from a size's working SKU, held for PIM entry (no Airtable write).
   function renderPimWaitingRoom(c){ c.innerHTML='<div class="count" style="padding:10px 2px">Loading waiting room…</div>';
@@ -17453,7 +17543,7 @@
       // push/pushed cells fill in async, so there's no "Loading" flash. Push works on ANY size (no SKU needed → dev ref).
       var sizes=d.sizes||[];
       var apSel=function(s){ return '<select class="fci szm-ap" data-id="'+s.id+'" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'; };
-      var bcSel=function(s){ var cur=s.barcode||''; var o='<option value="">— none —</option>'; if(cur)o+='<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>'; return '<select class="fci szm-bc" data-id="'+s.id+'" data-cur="'+esc(cur)+'" style="font-family:ui-monospace,Menlo,monospace;font-size:11px;max-width:190px">'+o+'</select>'; };
+      var bcSel=function(s){ var cur=s.barcode||''; return '<button class="cell-pick szm-bc" data-id="'+s.id+'" data-cur="'+esc(cur)+'" title="assign a workshop barcode from the pool">'+(cur?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(cur)+'</b> <span class="mut">▾</span>':'<span class="mut">assign ▾</span>')+'</button>'; };   // v28.154 (Ben): searchable picker (openBarcodePick) replaces the plain select
       var rows=sizes.map(function(s){ return '<tr>'
         +'<td style="padding:4px 8px"><input class="fci szm-lbl" data-id="'+s.id+'" value="'+esc(s.size_label||'')+'" placeholder="e.g. Large (Age 3 to 5) 66x49cm" style="width:100%;min-width:280px;box-sizing:border-box;font-weight:700"></td>'   /* v27.837 (Ben): border-box so the input isn’t clipped in its column */
         +'<td style="padding:4px 8px">'+bcSel(s)+'</td>'
@@ -17484,12 +17574,11 @@
       host.querySelectorAll('.szm-wsku').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{working_sku:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.working_sku=el.value; reRender(); }); }; });
       host.querySelectorAll('.szm-sku').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openSkuPick(b,function(val){ var so=szObj(b.dataset.id); if(so)so.mapped_sku=(val||''); renderSizesMaster(); reRender(); }); }; });   // openSkuPick persists mapped_sku itself
       host.querySelectorAll('.szm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this size? Its barcode is released back to the pool.'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} reloadTab(); }); }; });
-      host.querySelectorAll('.szm-bc').forEach(function(el){ el.onchange=function(){ var id=el.dataset.id, bc=el.value; el.disabled=true; shipPost('/api/product/size/'+id+'/barcode',{barcode:bc},function(j){ el.disabled=false; if(j&&j.error){ alert(j.error); renderSizesMaster(); return; } var so=szObj(id); if(so)so.barcode=bc; renderSizesMaster(); reRender(); }); }; });   // claims/releases a pool barcode → re-render to refresh the free list
+      host.querySelectorAll('.szm-bc').forEach(function(el){ el.onclick=function(e){ e.stopPropagation(); openBarcodePick(el,function(bc){ if(bc===null){ renderSizesMaster(); return; } var so=szObj(el.dataset.id); if(so)so.barcode=bc; renderSizesMaster(); reRender(); }); }; });   // v28.154 (Ben): picker claims/releases a pool barcode (same POST as before) → re-render to refresh the free list
       // async fill: barcode free-list + push/pushed cells (no Loading flash on first paint)
       Promise.all([fetch('/api/product/workshop-barcodes').then(function(r){return r.json();}),fetch('/api/product/pim-waiting-room').then(function(r){return r.json();}).catch(function(){return {rows:[]};})]).then(function(_res){ var pool=_res[0]||{}, _wr=_res[1]||{};
         var pushedSet={}; ((_wr.rows)||[]).forEach(function(x){ if(x.size_id!=null)pushedSet[String(x.size_id)]=1; });
-        var freeCodes=((pool&&pool.rows)||[]).filter(function(x){return x.status!=='assigned';}).map(function(x){return x.barcode;});
-        host.querySelectorAll('.szm-bc').forEach(function(sel){ var cur=sel.dataset.cur||''; freeCodes.forEach(function(c){ if(c===cur)return; var op=document.createElement('option'); op.value=c; op.textContent=c; sel.appendChild(op); }); });
+        if(pool&&Array.isArray(pool.rows))_bcPool=pool.rows;   // v28.154 (Ben): warm the barcode picker's pool cache (was: fill the <select> options)
         host.querySelectorAll('.szm-pimcell').forEach(function(cell){ var id=cell.dataset.id;
           if(pushedSet[String(id)]){ cell.innerHTML='<button class="save-btn" disabled title="already in the Approved products waiting room" style="font-size:10px;padding:2px 8px;margin-right:8px;background:var(--line2);color:var(--muted);border-color:var(--line);cursor:default">✓ Pushed to PIM</button>'; return; }
           cell.innerHTML='<button class="save-btn szm-pim" data-id="'+id+'" title="push into the PIM waiting room (uses the working SKU, or the product dev ref if none)" style="font-size:10px;padding:2px 8px;margin-right:8px;background:var(--violet-bg);color:var(--violet);border-color:var(--violet)">⤴ Push to PIM</button>';
