@@ -1343,6 +1343,16 @@ function applyTierW(){
 function resetTierW(){TIER_W.A=3;TIER_W.B=2;TIER_W.C=1;syncTierW();if(typeof reset3plCache==='function')reset3plCache();if(typeof render==='function')render();}
 function esc(s){return s.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/'/g,"\\'");}
 // v28.151 (review F6): global HTML escaper (the global esc above is a JS-string escaper, not HTML-safe).
+// v28.151 (review F4): visible, non-blocking warning bar (top of page) with an optional Retry action. One bar per id;
+// calling again updates it; Retry/close remove it. Replaces silent console.error on data-load / cold-build failures.
+function hzDataWarn(id,msg,onRetry){ try{ var go=function(){ var b=document.getElementById(id);
+    if(!b){ b=document.createElement('div'); b.id=id; b.className='hz-data-warn'; b.setAttribute('role','alert');
+      b.style.cssText='position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:300001;max-width:min(92vw,640px);background:var(--amber-bg,#fef3c7);color:var(--amber,#92400e);border:1px solid currentColor;border-radius:8px;padding:7px 10px 7px 14px;font:600 12px system-ui,sans-serif;display:flex;align-items:center;gap:10px;box-shadow:0 6px 18px rgba(0,0,0,.18)';
+      document.body.appendChild(b); }
+    b.innerHTML='<span style="flex:1">'+hzEscH(msg)+'</span>'+(onRetry?'<button type="button" class="hz-dw-retry" style="font:600 11px system-ui,sans-serif;padding:3px 10px;border:1px solid currentColor;border-radius:5px;background:var(--card,#fff);color:inherit;cursor:pointer">Retry</button>':'')+'<button type="button" class="hz-dw-x" title="Dismiss" style="border:none;background:none;color:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0 2px">&times;</button>';
+    var r=b.querySelector('.hz-dw-retry'); if(r)r.onclick=function(){ b.remove(); try{ onRetry(); }catch(e){ if(window.console)console.error(e); } };
+    b.querySelector('.hz-dw-x').onclick=function(){ b.remove(); }; };
+  if(document.body)go(); else document.addEventListener('DOMContentLoaded',go); }catch(e){} }
 function hzEscH(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 // (Removed dead safeSend — leftover Claude-artifact postMessage helper, unused on the Vercel host. v25.652)
 const BASE='appT5GoPc8M3iEDdh',TBL='tblISXekbRRv5ZD32';
@@ -1544,7 +1554,7 @@ var BUY_FC_STALE=false;
 // Exceptions / Safety stock / Ship bags / Inventory status / Anomalies / Cash-flow / Auto Forecast render). Same gate BUY already uses.
 // v28.150 (review): every path that changes forecast data in bulk flags demand stale, so hzEnsureDemand / BUY rebuild on next use.
 function hzMarkDemandStale(){ try{ BUY_FC_STALE=true; }catch(e){} try{ AF_FEED=null; }catch(e){} }
-function hzEnsureDemand(){ try{ if(typeof buildLiveDemand!=="function")return; if(!DEMAND_BUILT||(typeof BUY_FC_STALE!=="undefined"&&BUY_FC_STALE)){ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} } }catch(e){} }
+function hzEnsureDemand(){ try{ if(typeof buildLiveDemand!=="function")return; if(!DEMAND_BUILT||(typeof BUY_FC_STALE!=="undefined"&&BUY_FC_STALE)){ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(_){} } }catch(e){ if(window.console)console.error('[HORIZON] demand build FAILED',e); hzDataWarn('hz-build-warn','Demand build failed: forecast and buy numbers may be incomplete.',function(){ DEMAND_BUILT=false; hzEnsureDemand(); }); } }   // v28.151 (review F4): visible warning
 var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
@@ -1860,9 +1870,12 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
 function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
   // v28.147: reuse the request the shell started in <head> (window.__HZ_SKUP); fall back to a fresh fetch if it failed.
-  var _own=function(){ return fetch('/api/demand/sku-data').then(function(r){return r.json();}); };
+  // v28.151 (review F4): check r.ok + payload shape, retry up to 3 times with backoff, visible retry bar on final failure.
+  var _shape=function(d){ if(!d||d.error||!d.sku_raw||typeof d.sku_raw!=='object'||!d.sku_raw.p||!Object.keys(d.sku_raw.p).length)throw new Error((d&&d.error)||'sku-data payload empty or malformed'); return d; };
+  var _one=function(){ return fetch('/api/demand/sku-data').then(function(r){ if(!r.ok)throw new Error('sku-data HTTP '+r.status); return r.json(); }).then(_shape); };
+  var _n=0, _own=function(){ _n++; return _one().catch(function(e){ if(_n>=3)throw e; return new Promise(function(res){ setTimeout(res,700*Math.pow(2,_n-1)); }).then(_own); }); };
   var _early=window.__HZ_SKUP; window.__HZ_SKUP=null;
-  (_early?_early.catch(_own):_own()).then(function(d){ if(!d)return; var raw=d.sku_raw||{};
+  (_early?_early.then(_shape).catch(_own):_own()).then(function(d){ if(!d)return; var b=document.getElementById('hz-sku-warn'); if(b)b.remove(); var raw=d.sku_raw||{};
     if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s); if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi); if(d.fc_outputs)Object.assign(FC_OUTPUTS,d.fc_outputs);
     SKU_DATA_READY=true;
     // v28.125: any demand overlay built before this point was built from the EMPTY lazy maps. Re-arm the build so the
@@ -1874,7 +1887,7 @@ function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
     try{augmentSKUM();}catch(e){if(window.console)console.error('[lazy] augmentSKUM',e);}
     try{buildLiveBpOverlay();}catch(e){if(window.console)console.error('[lazy] buildLiveBpOverlay',e);}
     try{ if(typeof renderMain==='function'){ if(hzDemandOnScreen())renderMain(); } }catch(e){}   // v28.143: off-DEMAND landing → skip; navigating to DEMAND renders it
-  }).catch(function(e){ if(window.console)console.error('[lazy] sku-data',e); }); }
+  }).catch(function(e){ if(window.console)console.error('[lazy] sku-data',e); hzDataWarn('hz-sku-warn','Data failed to load (SKU data). The planner may show empty numbers.',function(){ lazyLoadSkuData(); }); }); }   // v28.151 (review F4)
 if(LAZY_SKU){ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(lazyLoadSkuData,60);}); else setTimeout(lazyLoadSkuData,60); }
 
 // Buy plan compute engine (BP namespace IIFE). Injected from bp_engine.js at build time.
@@ -10102,6 +10115,7 @@ function render(){
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
         if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
         try{ render(); }catch(e){ console.error(e); }
+        if(!_bok)hzDataWarn('hz-build-warn','Demand build failed: buy numbers may be unsettled.',function(){ DEMAND_BUILT=false; try{ render(); }catch(e){} });   // v28.151 (review F4): visible, not console-only
       },160);
       return;
     }
@@ -10128,6 +10142,7 @@ function render(){
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
       if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
       try{ render(); }catch(e){ console.error(e); }
+      if(!_bok)hzDataWarn('hz-build-warn','Demand build failed: forecast numbers may be incomplete.',function(){ DEMAND_BUILT=false; try{ render(); }catch(e){} });   // v28.151 (review F4)
     },160);
     return;
   }
