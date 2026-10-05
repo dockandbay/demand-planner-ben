@@ -1036,6 +1036,7 @@ function requiredCap(method, p) {
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
+  if (p === '/api/product/reports/catalogue/pdf') return null; // v28.154 (Ben): catalogue PDF export is a read (POST only carries the visible rows)
   if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
   if (p.startsWith('/api/supply/received-pos/')) return null; // n8n system trigger — processes the received-POs feed (acts only on rows n8n wrote)
@@ -9565,6 +9566,75 @@ app.get('/api/product/reports/sampling', async (_req, res) => {
     const detail = {}; rows.forEach(r => { const k = r.supplier + '||' + r.season; (detail[k] = detail[k] || []).push({ item_ref: r.item_ref, colour: r.colour, type: r.type, samples: r.samples, outcome: r.status, dev_start: r.dev_start }); });
     Object.keys(detail).forEach(k => detail[k].sort((a, b) => String(a.item_ref).localeCompare(String(b.item_ref))));
     res.json({ big, typeSeason: { seasons, types, cells }, supplierSeason, detail });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product SIZE (barcodes live on sizes, mig 294): season /
+// ref / product type / colour way / size / SKU / EAN / components / stage. Items with no sizes still get one blank-size
+// row so the catalogue is complete. Season and colour way fall back to the ref segments (SEASON-TYPE-COLOURWAY) when the
+// item fields are blank; product type falls back to the planner category of the mapped SKU. Read-only, parameterised.
+// ?season=<season code or ref prefix> narrows; `seasons` is always the full distinct list (drives the filter).
+const CAT_SEASON_SQL = `coalesce(nullif(i.season,''), nullif(split_part(i.ref,'-',1),''), '')`;
+app.get('/api/product/reports/catalogue', async (req, res) => {
+  try {
+    const season = String((req.query && req.query.season) || '').trim() || null;
+    const rows = (await pool.query(`
+      SELECT i.ref, ${CAT_SEASON_SQL} season,
+        coalesce(nullif(i.category,''), nullif(p.category,''), '') product_type,
+        coalesce(nullif(i.colour_name,''), nullif(split_part(i.ref,'-',3),''), '') colourway,
+        coalesce(i.description,'') description, coalesce(nullif(i.type,''),'') item_type,
+        coalesce(nullif(i.stage,''), nullif(i.status,''), '') stage,
+        s.id size_id, coalesce(s.size_label,'') size_label, coalesce(s.approval_status,'') size_status,
+        coalesce(nullif(s.mapped_sku,''), nullif(s.working_sku,''), '') sku,
+        CASE WHEN nullif(s.mapped_sku,'') IS NOT NULL THEN 'planner' WHEN nullif(s.working_sku,'') IS NOT NULL THEN 'working' ELSE '' END sku_kind,
+        coalesce(nullif(s.barcode,''), nullif(p.product_ean,''), '') barcode,
+        CASE WHEN nullif(s.barcode,'') IS NOT NULL THEN 'workshop' WHEN nullif(p.product_ean,'') IS NOT NULL THEN 'planner' ELSE '' END barcode_src,
+        coalesce(p.product_name,'') product_name, coalesce(p.subcategory,'') subcategory,
+        coalesce((SELECT string_agg(c.name, ', ' ORDER BY c.sort, c.id) FROM planner.product_dev_components c WHERE c.item_ref=i.ref), '') components
+      FROM planner.product_dev_items i
+      LEFT JOIN planner.product_dev_sizes s ON s.item_id=i.id
+      LEFT JOIN planner.products p ON p.sku=s.mapped_sku
+      WHERE $1::text IS NULL OR ${CAT_SEASON_SQL}=$1 OR i.ref LIKE $1 || '-%'
+      ORDER BY 2 DESC, i.ref, s.sort NULLS LAST, s.id`, [season])).rows;
+    const seasons = (await pool.query(`SELECT DISTINCT ${CAT_SEASON_SQL} season FROM planner.product_dev_items i ORDER BY 1 DESC`)).rows.map(r => r.season).filter(Boolean);
+    res.json({ ok: true, season, seasons, count: rows.length, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.154 (Ben): landscape A4 PDF of the VISIBLE catalogue rows (client posts what it shows: filtered + sorted). pdf-lib,
+// repeated column headers per page, "Page n of N" footer. Standard fonts are WinAnsi-only, so text is sanitised to
+// Latin-1 (anything else becomes '?'). Max 5,000 rows per call.
+app.post('/api/product/reports/catalogue/pdf', async (req, res) => {
+  try {
+    const b = req.body || {}; const rows = Array.isArray(b.rows) ? b.rows.slice(0, 5000) : [];
+    const season = String(b.season || '').trim() || 'All seasons';
+    const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date(), today = String(now.getDate()).padStart(2, '0') + '-' + MONS[now.getMonth()] + '-' + String(now.getFullYear()).slice(2);
+    const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+    const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold), M = await doc.embedFont(StandardFonts.Courier);
+    const ink = rgb(0.09, 0.13, 0.18), mut = rgb(0.42, 0.46, 0.52), line = rgb(0.85, 0.87, 0.9), accent = rgb(1, 0.34, 0.19);
+    const W = 841.89, H = 595.28, ML = 32, MR = 32; let page, y;
+    const safe = (t) => String(t == null ? '' : t).replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+    const cols = [{ k: 'season', l: 'Season', w: 48 }, { k: 'ref', l: 'Product ref', w: 122 }, { k: 'product_type', l: 'Product type', w: 86 }, { k: 'colourway', l: 'Colour way', w: 88 },
+      { k: 'size_label', l: 'Size', w: 92 }, { k: 'sku', l: 'SKU', w: 108, mono: true }, { k: 'barcode', l: 'Barcode (EAN)', w: 84, mono: true }, { k: 'components', l: 'Component', w: 78 }, { k: 'stage', l: 'Stage', w: 72 }];   // sums to 778 = W - margins
+    let x = ML; cols.forEach(c => { c.x = x; x += c.w; });
+    const fit = (t, f, sz, w) => { t = safe(t); while (t.length && f.widthOfTextAtSize(t, sz) > w - 6) t = t.slice(0, -1); return t; };
+    const draw = (t, xx, yy, f, sz, col) => { if (t) page.drawText(t, { x: xx, y: yy, size: sz, font: f, color: col || ink }); };
+    function header() {
+      page = doc.addPage([W, H]); y = H - 40;
+      draw('Dock & Bay product catalogue', ML, y, B, 15, ink);
+      const sub = safe(season + ', ' + today); draw(sub, W - MR - F.widthOfTextAtSize(sub, 10), y + 2, F, 10, mut);
+      y -= 10; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 1, color: accent }); y -= 16;
+      cols.forEach(c => draw(c.l, c.x + 3, y, B, 7.5, mut)); y -= 5; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 12;
+    }
+    header();
+    for (const r of rows) {
+      if (y < 44) header();
+      cols.forEach(c => draw(fit(r[c.k], c.mono ? M : F, 7.5, c.w), c.x + 3, y, c.mono ? M : F, 7.5, ink));
+      y -= 13;
+    }
+    if (!rows.length) draw('No rows.', ML + 3, y, F, 9, mut);
+    const pages = doc.getPages(); pages.forEach((p, i) => { const t = 'Page ' + (i + 1) + ' of ' + pages.length + '   ' + rows.length + ' rows'; p.drawText(t, { x: W - MR - F.widthOfTextAtSize(t, 7.5), y: 20, size: 7.5, font: F, color: mut }); });
+    const bytes = await doc.save();
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="catalogue_' + season.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() + '_' + today + '.pdf"'); res.send(Buffer.from(bytes));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size', async (req, res) => {
