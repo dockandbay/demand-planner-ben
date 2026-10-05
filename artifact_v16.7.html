@@ -16595,6 +16595,13 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_
   try{ if(typeof zalInit==='function')zalInit(); }catch(e){} try{ if(typeof tikInit==='function')tikInit(); }catch(e){}   // v27.534: allocations must reflect the latest overrides / stock
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
   var lyYearMonths=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12
+  // v28.151 (review A2): the buy window (LIVE_FC_MONTHS) runs off the calendar, CUR_MONTH off the data. When the data lags (e.g.
+  // CUR_MONTH 2026_09 while the window starts 2026_10) the chained LY rule had no value for the gap month (> CUR_YTD_END, not in the
+  // window) and read 0, so e.g. Sep-27 forecast was 0 for every continuing SKU. _bldMonths = gap months + window: gap months are
+  // computed ONLY to feed the chain (never written to demand, never consume run-off stock); the window itself is unchanged.
+  var _inWin={}; LIVE_FC_MONTHS.forEach(function(m){ _inWin[m]=1; });
+  var _bldMonths=(function(){ var w0=LIVE_FC_MONTHS[0], m=(typeof CUR_MONTH==='string')?CUR_MONTH:'', o=[]; if(!m||!w0||m>=w0)return LIVE_FC_MONTHS;
+    while(m<w0&&o.length<24){ o.push(m); var y=+m.slice(0,4), mo=+m.slice(5,7)+1; if(mo>12){mo=1;y++;} m=y+'_'+(mo<10?'0':'')+mo; } return o.concat(LIVE_FC_MONTHS); })();
   var MK=['UK','US','EU','AU','CA'];
   var CHS=[['DTC','d'],['B2B','b'],['FBA','f'],['TIK','t']];
   var subcats={};Object.keys(SKUM).forEach(function(s){var p=SKUM[s];if(p&&p.s)subcats[p.s]=1;});
@@ -16637,7 +16644,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_
           // v28.151 (review A2): the chain reads a RUN-LOCAL map (chFC, like the SETS path), never md.demand[ch][lyM], so a month
           // outside the window (not rebuilt this run) can't feed a stale or folded value into the chain.
           var chFC={};
-          LIVE_FC_MONTHS.forEach(function(fym){
+          _bldMonths.forEach(function(fym){ var _gap=!_inWin[fym];   // v28.151 (review A2): gap month = chain input only
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01';
             var raw;
             if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                        // saved SKU override wins
@@ -16646,8 +16653,9 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_
             else { raw=(fu[fym]||0)*sh; }                                                  // new SKU → subcat cascade × share
             var fc;
             if(launchDate&&ms<launchDate){fc=0;}
-            else if(discDate&&ms>discDate){ var _RA=runoffAlloc(s2,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (ZAL: allocator has no ZAL channel → legacy path)
+            else if(discDate&&ms>discDate){ var _RA=runoffAlloc(s2,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem)); if(!_gap)rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (ZAL: allocator has no ZAL channel → legacy path)
             else{fc=Math.round(raw);}
+            if(_gap){ if(fc>0)chFC[fym]=fc; return; }
             if(fc>0){ md.demand[ch][fym]=fc; chFC[fym]=fc; } else delete md.demand[ch][fym];
           });
         });
@@ -16682,7 +16690,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_
   // 3) Re-fold committed Preorder/KA demand into B2B (pka stays on each market)
   // v28.151 (review A1): fold ONLY months inside LIVE_FC_MONTHS. Ben's rule: past-dated Preorder/KA months are past forecasts,
   // so they never appear in the demand or the buy and never roll forward; months beyond the window are ignored too.
-  var _pkaWin={}; LIVE_FC_MONTHS.forEach(function(m){ _pkaWin[m]=1; });
+  var _pkaWin=_inWin;   // window months only (a lagging CUR_MONTH gap month is NOT in it)
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
@@ -16739,17 +16747,17 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_
           var launchDate=sp.lch&&sp.lch[ctry]?sp.lch[ctry]:null, discDate=sp.disc&&sp.disc[ctry]?sp.disc[ctry]:null;
           var rem=(sp.inv&&sp.inv[skuWh(co,ch)])||0, s2sales=skuSales(setSku,co,ch), s2HasLY=skuHasLY(s2sales);
           var ovMap=FC_OUTPUTS[setSku+'|'+skuWh(co,ch)+'|'+ch]||{}, chFC={};
-          LIVE_FC_MONTHS.forEach(function(fym){
+          _bldMonths.forEach(function(fym){ var _gap=!_inWin[fym];   // v28.151 (review A2): gap month = chain input only (not exploded, no stock draw)
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01', raw;
             if(ovMap[fym]!=null){ raw=ovMap[fym]/_sz; }                                       // saved override wins (stored item-equiv/exploded → ÷setSize = BOXES before component explosion, matching the cascade path below; fixes active-set over-buy)
             else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7); raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(chFC[lyM]||0); }   // continuing set → last-year chain
             else { raw=(subcatFU[fym]||0)*share/_sz; }                                       // new set → subcat cascade × share (item-equiv, Sets%-sized) ÷ setSize = BOXES
             var fc;
             if(launchDate&&ms<launchDate)fc=0;
-            else if(discDate&&ms>discDate){ var _RA=runoffAlloc(setSku,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (build-on-fly SETS block: setSku)
+            else if(discDate&&ms>discDate){ var _RA=runoffAlloc(setSku,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem)); if(!_gap)rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (build-on-fly SETS block: setSku)
             else fc=Math.round(raw);
             if(fym>=CUR_MONTH&&!(launchDate&&ms<launchDate)&&setHasConstrainedComps(setSku,co)){ var _RS=runoffAlloc(setSku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][fym]!=null)fc=_RS.alloc[ch][fym]; }   // v27.545: capped by what the run-off components can build
-            if(fc>0){ chFC[fym]=fc; setFC[fym]=(setFC[fym]||0)+fc; }
+            if(fc>0){ chFC[fym]=fc; if(!_gap)setFC[fym]=(setFC[fym]||0)+fc; }
           });
           cfc[ch]=chFC; cact[ch]=(s2sales[CUR_MONTH]||0);   // stash for the prepack netting (per-channel display + partial current month)
         });
