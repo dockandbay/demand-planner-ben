@@ -1870,6 +1870,11 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
   try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }); }catch(e){}
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
+// v28.151 (review A5): one place that drops every cache derived from SKU / sales / forecast data. Used by the lazy load and both
+// refresh paths (refreshBuyCache, hzRefreshCache), which previously kept CALC_MEMO / _SKUSALES_CACHE / SET_BY_COMP from the old data.
+function hzResetDataMemos(tag){ try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error((tag||'')+' cache reset',e); } }
+// v28.151 (review A5): replace a const SKU map's contents wholesale (Object.assign alone kept keys the server no longer sends).
+function hzReplaceMap(dst,src){ if(!dst||!src)return; Object.keys(dst).forEach(function(k){ if(!Object.prototype.hasOwnProperty.call(src,k))delete dst[k]; }); Object.assign(dst,src); }
 function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
   // v28.147: reuse the request the shell started in <head> (window.__HZ_SKUP); fall back to a fresh fetch if it failed.
   var _own=function(){ return fetch('/api/demand/sku-data').then(function(r){return r.json();}); };
@@ -1882,7 +1887,7 @@ function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
     DEMAND_BUILT=false; _PP_COVER_INIT=false;
     // v28.142: anything computed from the EMPTY lazy maps before this point is wrong — re-sniff the SKUS key format and drop
     // the sales / share / calc caches so the next render recomputes from real data.
-    try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error('[lazy] cache reset',e); }
+    hzResetDataMemos('[lazy]');
     try{augmentSKUM();}catch(e){if(window.console)console.error('[lazy] augmentSKUM',e);}
     try{buildLiveBpOverlay();}catch(e){if(window.console)console.error('[lazy] buildLiveBpOverlay',e);}
     try{ if(typeof renderMain==='function'){ if(hzDemandOnScreen())renderMain(); } }catch(e){}   // v28.143: off-DEMAND landing → skip; navigating to DEMAND renders it
@@ -16583,7 +16588,7 @@ var LIVE_FC_MONTHS=(function(){
   for(var i=0;i<18;i++){var mm=m+i,yy=y;while(mm>12){mm-=12;yy++;}o.push(yy+'_'+(mm<10?'0':'')+mm);}
   return o;
 })();
-function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
+function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null;   // v28.151 (review A5): set-to-component index rebuilt per build (SET_BOM can change)
   // v28.142: wire the TikTok (TIK, UK/US) and EU Zalando (ZAL) channels BEFORE building demand. They were only wired when the
   // DEMAND plan rendered, so the buy plan differed by navigation order (BUY opened first → no TIK/ZAL availability or rows →
   // different demand split). Both are idempotent ("runs once data is ready").
@@ -16708,13 +16713,15 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};
   //    draw components from 3PL too) so it flows into d3DemFn → the buy target. Stash a display-only copy in
   //    md.demand_sets (+ md.demand_sets_src for the buy-popup source tooltip). No set gets a buy line; only components move.
   (function(){
-    if(typeof SET_BOM!=='object'||!SET_BOM)return;
-    var setSkus=Object.keys(SET_BOM); if(!setSkus.length)return;
-    var skips={};
-    Object.keys(PREPACK_COVER).forEach(function(k){ delete PREPACK_COVER[k]; });   // idempotent across rebuilds (prepack netting overlay)
-    // Clear any prior explosion overlay first (idempotent across rebuilds; section 1 already cleared md.demand.DTC forecast months).
+    // v28.151 (review A6): clear the prior overlays BEFORE the SET_BOM early returns, so an emptied BOM can't leave stale
+    // demand_sets / PREPACK_COVER from the last build.
+    try{ Object.keys(PREPACK_COVER).forEach(function(k){ delete PREPACK_COVER[k]; }); }catch(e){}   // idempotent across rebuilds (prepack netting overlay)
+    // Clear any prior explosion overlay first (idempotent across rebuilds; section 1 already cleared md.demand.DTC).
     Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
       Object.keys(mk).forEach(function(co){ delete mk[co].demand_sets; delete mk[co].demand_sets_src; }); });
+    if(typeof SET_BOM!=='object'||!SET_BOM){ BP_DATA.set_explosion_skips={}; return; }
+    var setSkus=Object.keys(SET_BOM); if(!setSkus.length){ BP_DATA.set_explosion_skips={}; return; }
+    var skips={};
     setSkus.forEach(function(setSku){
       var comps=SET_BOM[setSku]; if(!Array.isArray(comps)||!comps.length)return;
       var sp=SKUM[setSku]; if(!sp||sp.vt!=='SET')return;   // only true sets explode
@@ -16847,9 +16854,10 @@ window.refreshBuyCache = async function(btn){
     try{ await fetch('/api/supply/cache/invalidate',{method:'POST'}); }catch(e){}   // reset the server read-cache so PO/on-order-derived numbers are fresh
     var d=await (await fetch('/api/demand/sku-data')).json();
     if(d){ var raw=d.sku_raw||{};
-      if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s);
-      if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi);
+      if(raw.p)hzReplaceMap(SKUM,raw.p); if(raw.s)hzReplaceMap(SKUS,raw.s);   // v28.151 (review A5): wholesale, so deleted SKUs / sales keys drop out
+      if(raw.i||raw.inbound)hzReplaceMap(SKUI,raw.i||raw.inbound||{}); if(raw.oi)hzReplaceMap(SKUOI,raw.oi);   // v28.151: landed shipments / closed POs drop out too
       if(d.fc_outputs){ for(var k in FC_OUTPUTS)delete FC_OUTPUTS[k]; Object.assign(FC_OUTPUTS,d.fc_outputs); }   // replace wholesale so removed/zeroed forecasts drop out too
+      hzResetDataMemos('[refreshBuyCache]');   // v28.151 (review A5): sales / calc / set-component memos were kept from the old data
     }
     try{augmentSKUM();}catch(e){}
     try{buildLiveBpOverlay();}catch(e){}
@@ -16886,9 +16894,10 @@ function hzRefreshCache(btn){
     .then(function(d){
       hzMarkDemandStale();   // v28.150: re-pulled forecasts/SKU data → reports + BUY rebuild on next use
       if(d){ var raw=d.sku_raw||{};
-        if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s);
-        if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi);
-        if(d.fc_outputs){ for(var k in FC_OUTPUTS)delete FC_OUTPUTS[k]; Object.assign(FC_OUTPUTS,d.fc_outputs); } }
+        if(raw.p)hzReplaceMap(SKUM,raw.p); if(raw.s)hzReplaceMap(SKUS,raw.s);   // v28.151 (review A5): wholesale, so deleted SKUs / sales keys drop out
+        if(raw.i||raw.inbound)hzReplaceMap(SKUI,raw.i||raw.inbound||{}); if(raw.oi)hzReplaceMap(SKUOI,raw.oi);   // v28.151: landed shipments / closed POs drop out too
+        if(d.fc_outputs){ for(var k in FC_OUTPUTS)delete FC_OUTPUTS[k]; Object.assign(FC_OUTPUTS,d.fc_outputs); }
+        hzResetDataMemos('[hzRefreshCache]'); }   // v28.151 (review A5): drop memos built from the old data
       try{ augmentSKUM(); }catch(e){}
       try{ buildLiveBpOverlay(); }catch(e){}
       try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
