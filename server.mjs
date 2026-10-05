@@ -18720,7 +18720,7 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
 // Anthropic connect to arbitrary MCP endpoints (SSRF-by-proxy) and nothing legitimate uses it; (b) allowlist the
 // model, falling back to a current default rather than rejecting so the app never breaks; (c) cap max_tokens so a
 // crafted request can't burn the key. Everything else (system/messages/temperature/…) passes through unchanged.
-const AI_ALLOWED_MODELS = new Set(['claude-sonnet-4-20250514', 'claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5-20251001', 'claude-fable-5']);
+const AI_ALLOWED_MODELS = new Set(['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5-20251001', 'claude-fable-5']);   // v28.151 (review F6): retired claude-sonnet-4-20250514 removed (unknown ids fall back to the default)
 const AI_DEFAULT_MODEL = 'claude-sonnet-4-6';
 const AI_MAX_TOKENS_CAP = 8192;
 app.post('/api/ai', async (req, res) => {
