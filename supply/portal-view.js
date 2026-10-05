@@ -1078,9 +1078,10 @@
     ta._hzAtt=api; return api; }
   function hzTlSend(att,text,postOne,done){ function run(ids){ var first=ids.shift(); if(!text&&!first){ done(); return; } postOne(text||('📎 '+first.name), first?first.id:null, function(){ (function extra(){ if(!ids.length){ if(att)att.clear(); done(); return; } var x=ids.shift(); postOne('📎 '+x.name, x.id, extra); })(); }); } if(att&&att.count())att.uploadAll(run); else run([]); }
   function hzTlUploader(kind,ref,extra){ return function(f,fields,cb){ var body=Object.assign({kind:kind,ref:ref},fields,extra||{}); fetch((EP.timelineAttachment||'/api/portal/timeline-attachment'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
-    function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
-      .then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return r.ok?{}:{error:'Server error ('+r.status+')'}; } }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
-      .then(function(j){ if(j&&j.error){ppNotice(j.error);return;} cb&&cb(j); }).catch(function(e){ ppNotice('Failed: '+(e&&e.message||e)); }); }
+    // v28.151 (review C4): optional onErr(msg) runs on every failure path (error JSON, non-2xx, network), so callers can re-enable buttons / tally failures
+    function postJSON(ep,b2,cb,onErr){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
+      .then(function(r){ return r.text().then(function(t){ var j; try{ j=t?JSON.parse(t):{}; }catch(_){ j=r.ok?{}:{error:'Server error ('+r.status+')'}; } if(!r.ok&&!(j&&j.error)) j={error:'Server error ('+r.status+')'}; return j; }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
+      .then(function(j){ if(j&&j.error){ppNotice(j.error);onErr&&onErr(j.error);return;} cb&&cb(j); }).catch(function(e){ var m='Failed: '+(e&&e.message||e); ppNotice(m); onErr&&onErr(m); }); }
     // GET that tolerates empty / non-JSON (404 HTML etc.) — returns [] instead of throwing Safari's "did not match the expected pattern"
     function getJSON(url){ return fetch(url).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):[]; }catch(_){ return []; } }); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
@@ -1666,10 +1667,12 @@
     async function prodApprove(list, btn){ if(!list.length)return;
       var msg=list.length===1?'Approve '+list[0]+'? You’re accepting the SKUs, quantities and dates as shown.':'Approve all '+list.length+' orders in batch '+PORTAL_PROD_BATCH+'? You’re accepting the SKUs, quantities and dates as shown.';
       if(!(await _ppConfirm(msg)))return; btn.disabled=true;
-      var _sid=(_ppData&&_ppData.sid)||sid, _by=by||('preview (acting as '+STATE.supplierName+')'); var i=0;
-      (function next(){ if(i>=list.length){ renderPP(); try{ setPosBadge(); setProdnBadge(); }catch(e){} ppNotice(list.length===1?'Order approved':list.length+' orders approved'); return; } var po=list[i++];
+      var _sid=(_ppData&&_ppData.sid)||sid, _by=by||('preview (acting as '+STATE.supplierName+')'); var i=0, fails=[];
+      // v28.151 (review C4): a failed PO no longer stops the run silently with the button stuck disabled; the rest continue, then re-render + summary
+      (function next(){ if(i>=list.length){ btn.disabled=false; renderPP(); try{ setPosBadge(); setProdnBadge(); }catch(e){} var okN=list.length-fails.length;
+          ppNotice(!fails.length?(list.length===1?'Order approved':list.length+' orders approved'):(okN+' of '+list.length+' approved. Not approved: '+fails.map(function(f){return f.po+' ('+f.msg+')';}).join(', '))); return; } var po=list[i++];
         postJSON(EP.submit,{po:po,supplier_id:_sid,submitted_by:_by,po_confirmed:true},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.supplier_confirmed=_by||'confirmed'; p.supplier_confirmed_by=_by; }
-          var snap={}; (_ppData.lb[po]||[]).forEach(function(l){ snap[l.sku]=Number(l.qty)||0; }); _ppData.approvedByPo=_ppData.approvedByPo||{}; _ppData.approvedByPo[po]=snap; next(); }); })(); }
+          var snap={}; (_ppData.lb[po]||[]).forEach(function(l){ snap[l.sku]=Number(l.qty)||0; }); _ppData.approvedByPo=_ppData.approvedByPo||{}; _ppData.approvedByPo[po]=snap; next(); }, function(m){ fails.push({po:po,msg:m}); next(); }); })(); }
     function prodPivotData(bp){ var qmap={},skuSet={},skus=[]; bp.forEach(function(p){ (_ppData.lb[p.po]||[]).forEach(function(l){ var k=l.sku+'|'+p.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); if(!skuSet[l.sku]){skuSet[l.sku]=1;skus.push(l.sku);} }); }); skus.sort();
       var poList=bp.map(function(p){return p.po;}).sort().reverse(); var attr={}; (_ppData.supSkus||[]).forEach(function(s){ attr[s.sku]=s; }); return {qmap:qmap,skus:skus,poList:poList,attr:attr}; }
     function ppProductions(){
@@ -2948,7 +2951,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true; postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.supplier_confirmed=v?(by||'confirmed'):null; p.supplier_confirmed_by=v?by:null; }
                   // on confirm, re-snapshot approved lines locally (server does the same) so "changes since you approved" + the ORDER PLAN (1) badge clear immediately on both tabs
                   if(v){ var snap={}; (_ppData.lb[po]||[]).forEach(function(l){ snap[l.sku]=Number(l.qty)||0; }); _ppData.approvedByPo=_ppData.approvedByPo||{}; _ppData.approvedByPo[po]=snap; }
-                  refreshRow(row,po); }); }; });
+                  refreshRow(row,po); }, function(){ btn.disabled=false; }); }; });   // v28.151 (review C4): re-enable on failure
               // post a note → refresh just this PO's timeline in place (re-fetch the supplier's notes, stay on TIMELINE)
               scope.querySelectorAll('.pp-note-post').forEach(function(btn){ var _ta=pick('pp-note-body',btn.dataset.po); var att=_ta?hzTlAttach(_ta,{after:_ta.parentNode,upload:hzTlUploader('po',btn.dataset.po),maxWidth:'480px'}):null;   // v27.571: photos / documents on the message
                 btn.onclick=function(){ var ta=_ta||pick('pp-note-body',btn.dataset.po); var v=(ta.value||'').trim(); if(!v&&!(att&&att.count()))return; var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
