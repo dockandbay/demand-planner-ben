@@ -23338,7 +23338,9 @@ app.post('/api/portal/note', portalAuth, async (req, res) => {
 // Supplier escalates a timeline message → routed to a CONFIG internal list by context; link → planner.
 app.post('/api/portal/escalate', portalAuth, async (req, res) => {
   const b = req.body || {}, kind = ['po', 'shipment', 'sample'].includes(b.kind) ? b.kind : 'po';
-  if (kind === 'po' && b.ref && !await portalOwnsPO(req, b.ref)) return portalDeny(res);
+  // v28.151 (review C3): ownership enforced for every kind (was kind=po only), so a supplier cannot flag / note another supplier's shipment or sample
+  const _own = kind === 'shipment' ? portalOwnsShipmentRef : kind === 'sample' ? portalOwnsSampleRef : portalOwnsPO;
+  if (!b.ref || !await _own(req, String(b.ref).trim())) return portalDeny(res);
   try {
     const user = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
     res.json(await escalateCore({ initiator: 'supplier', kind, ref: b.ref, message: b.message, user, setEscalated: !!b.set_escalated, postNote: !!b.post_note }));
@@ -23403,7 +23405,10 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
     await stage('invoice_value', b.invoice_value == null ? null : sanitiseMoney(b.invoice_value), b.invoice_attachment_id);
     if ((b.tracking != null && b.tracking !== '') || (b.carrier != null && b.carrier !== '')) {
       const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
-      const ref = b.shipment_ref || (sh && sh.shipment_ref);
+      // v28.151 (review C2): a client-sent shipment_ref is honoured only if the caller owns that shipment (else the PO's own shipment);
+      // stops a supplier overwriting another supplier's carrier / tracking by naming their shipment ref.
+      const _cref = String(b.shipment_ref || '').trim();
+      const ref = (_cref && await portalOwnsShipmentRef(req, _cref)) ? _cref : (sh && sh.shipment_ref);
       if (ref) {
         const sets = [], vals = []; let i = 1;
         if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
@@ -23428,6 +23433,16 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
       out.applied.push('production status → ' + (st || 'cleared'));
       // master PO marked shipped → its shipment advances to Shipping (master POs only)
       if (st === 'shipped') { const shref = await shipmentShippingFromMasterPO(pool, b.po); if (shref) out.applied.push('shipment ' + shref + ' → Shipping'); }
+    }
+    // v28.151 (review C1): PO confirmation from the portal (Confirm order / Approve / Approve all). Ported from the admin preview route
+    // (/api/supply/portal-submit); this route had no branch for it, so portal confirms returned 200 but never persisted (live had 0
+    // supplier confirmations ever). Ownership is enforced above by portalOwnsPO; confirmed_by = the signed-in portal user, never the client's submitted_by.
+    if (b.po_confirmed != null) {
+      if (b.po_confirmed) { await pool.query(`UPDATE planner.purchase_orders
+          SET supplier_confirmed_at=now(), supplier_confirmed_by=$2,
+              approved_lines=(SELECT jsonb_object_agg(sku, qty) FROM planner.purchase_order_lines WHERE po=$1 AND coalesce(qty,0)>0)
+          WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }   // snapshot the SKUs/qtys the supplier approved, diffed on re-approval
+      else { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
     res.json(out);
