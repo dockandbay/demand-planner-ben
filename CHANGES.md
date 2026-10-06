@@ -1,3 +1,9 @@
+## v28.160 (Ben, branch review-fixes-2026-10-05): Email log navigation-away error
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). Client only.
+
+1. **CONFIG ▸ Admin ▸ Email log** wrote its results into `#el-results` after the fetch returned; if the user had already navigated away (e.g. to App health) the element was gone, `innerHTML` on null threw, and the catch handler threw again, leaving an unhandled rejection. Now bails out if the container is gone, and the catch is null-safe. **First bug caught by the new Health log** (06-Oct 12:11, `#/config/app-health`, ben@).
+
 ## v28.159 (Ben, branch review-fixes-2026-10-05): Health log + weekly health email
 
 **Files:** `server.mjs`, `supply/inject.html`, `supply/hz-health.js` (new), `supply/portal.html`, `supply/client.html`, `migrations/328_app_health_events.sql` (+ package.json, CHANGES.md). **Migration 328.** No new env vars (uses existing `RESEND_API_KEY`, `N8N_WEBHOOK_SECRET`).
