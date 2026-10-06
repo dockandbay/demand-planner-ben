@@ -1,3 +1,11 @@
+## v28.165 (Ben, branch review-fixes-2026-10-05): planner filters
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no new env vars.
+
+- DEMAND plan: read-only "Shown SKUs (N of M)" line under sub-category and category totals while tier / status / core-seasonal / release / from-replacement / filter-rule filters are on, summing only the visible SKUs. Real totals, Smooth, forecast edits and the buy plan are unchanged.
+- New "Search overrides filters" tick box on the DEMAND plan, PO grid, Order plan and Shipments search, saved per screen, defaulting to each screen's previous behaviour (ticked, except Order plan unticked). Unticked, search also respects every filter (including the DEMAND category selection); an empty result shows "N matches hidden by filters".
+- Verified: real totals byte-identical; buy plan 342 rows, 0 differ old vs new back to back (one earlier run showed 2 UK TEATWL rows move, not reproduced; recheck once before deploy).
+
 ## v28.164 (Ben, branch review-fixes-2026-10-05): demand/buy performance batch (perf roadmap items 1, 2, 3, 6)
 
 **Files:** `server.mjs`, `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no new env vars.
