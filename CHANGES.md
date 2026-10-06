@@ -1,3 +1,15 @@
+## v28.164 (Ben, branch review-fixes-2026-10-05): demand/buy performance batch (perf roadmap items 1, 2, 3, 6)
+
+**Files:** `server.mjs`, `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no new env vars.
+
+1. **Payload cache:** `/api/demand/sku-data` and `/api/supply/order-plan` serialise + gzip ONCE per data build (`sendJsonMemo`, WeakMap keyed on the cached data object, so a rebuild or invalidation drops it exactly), strong ETag + 304 on If-None-Match, same cache headers as before. Warm hit 58 ms / 24 ms → 0.5 ms; 304 ~10 ms → 0.4 ms; bodies byte-identical. `kvWriteBlob` gzip is async (was gzipSync of ~12 MB on the request path).
+2. **BUY render:** at most ONE `buildLiveDemand` per render (the not-built / stale / prepack-cover branches were three separate builds). Stale BUY render 2 builds → 1 (3.2 s → 1.6 s).
+3. **Lazy cold builds wait for SKU data** (`hzWhenSkuData` / `hzFlushSkuWait`): DEMAND, BUY & MOVE and REPORTS keep their loading panel up and build once when the SKU data lands, instead of building on empty maps first. On failure they still run and the v28.153 retry bar shows. Waiters skip if the user has moved to SUPPLY (keeps the v28.143 first-click fix). Cold BUY with slow data: 3 builds (2 empty) → 1, usable 6.6 s → 4.8 s; cold DEMAND / REPORTS: 2 empty builds → 1 real.
+4. **Auto Forecast:** opening it before SKU data landed built from empty maps and **cached a 0-row feed (report showed no units)**; now waits behind its panel, 1 build, 433-row feed.
+
+**Verified (sandbox):** combined with v28.163 on the same data: **buy map 342 rows, 0 differ** (direct BUY and DEMAND then BUY), rebuild-identical in all 5 markets; agent run: demand total 1,867,794 on 3 rebuilds before and after, 0 new JS errors.
+**Known, not changed:** direct BUY entry still does 2 real builds (the second picks up Preorder/Key-Account data ~3 s later; waiting for it would delay first paint); a failed sku-data load still caches an empty Auto Forecast feed that a later Retry does not clear (pre-existing).
+
 ## v28.163 (Ben, branch review-fixes-2026-10-05): App health log, 8 new captures + RED ALERT emails
 
 **Files:** `server.mjs`, `supply/hz-health.js`, `supply/inject.html` (Health log page), `artifact_v16.7.html` (one DEMAND hook), `migrations/329_app_health_kinds.sql` (+ package.json, CHANGES.md). **Migration 329.** New route `POST /api/cron/health-checks` (x-webhook-secret). No new env vars (optional `HZ_SLOW_QUERY_MS`, `HZ_HEALTH_CHECKS=0`).
