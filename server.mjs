@@ -169,16 +169,17 @@ pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 
   client.query = function (cfg) {
     if (cfg && typeof cfg.submit === 'function') return oq.apply(this, arguments);   // Cursor / Submittable: untouched
     const t0 = Date.now(), n = arguments.length, cb = n && typeof arguments[n - 1] === 'function' ? arguments[n - 1] : null;
-    let st = null; try { st = _reqStore.getStore(); } catch (_) {}
+    let st = this.__hzSt || null; if (!st) { try { st = _reqStore.getStore(); } catch (_) {} }
     const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query');
       if (ms >= HZ_SLOW_Q_MS) { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;
         hzHealthEvt('slow_query', sql, { path: sql, ms, message: 'Slow SQL ' + ms + 'ms', meta: { example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' } }); } } catch (_) {} };
     if (cb) { const a = Array.prototype.slice.call(arguments); a[n - 1] = function (err) { done(err); return cb.apply(this, arguments); }; return oq.apply(this, a); }
     const p = oq.apply(this, arguments); if (p && typeof p.then === 'function') p.then(() => done(null), done); return p; };
 } catch (_) {} });
-{ const _oc = pool.connect.bind(pool);
-  pool.connect = function (cb) { if (typeof cb === 'function') return _oc(function (err) { if (err) hzDbErr(err, 'connect'); return cb.apply(this, arguments); });
-    const p = _oc(); p.then(null, e => hzDbErr(e, 'connect')); return p; }; }
+{ const _oc = pool.connect.bind(pool);   // also tags the checked-out client with the caller's request (pg-pool may hand it over from another request's async context)
+  pool.connect = function (cb) { let st = null; try { st = _reqStore.getStore() || null; } catch (_) {}
+    if (typeof cb === 'function') return _oc(function (err, client) { if (err) hzDbErr(err, 'connect'); else if (client) client.__hzSt = st; return cb.apply(this, arguments); });
+    const p = _oc(); p.then(c => { if (c) c.__hzSt = st; }, e => hzDbErr(e, 'connect')); return p; }; }
 // Keep one pooled connection WARM. idleTimeoutMillis (8s) closes idle clients, so a request after any short idle gap
 // otherwise pays the remote Supabase pooler's ~8s cold-connect stall — which is what made SUPPLY (Actions etc.) feel
 // slow on the sandbox even with the response caches (every request still runs one small query). A 5s SELECT 1 keeps a
