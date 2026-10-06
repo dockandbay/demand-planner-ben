@@ -1903,8 +1903,11 @@ if(!LAZY_SKU)buildLiveBpOverlay();
 // DEMAND plan render (~1.7 s) and the demand-overlay build (~3 s) on the main thread, so the first menu click waited ~5 s.
 // Only do that work when DEMAND / BUY is on screen; otherwise defer it to the first visit (both build on entry when needed).
 function hzDemandOnScreen(){ return !/^#\/(supply|product|client|config)(\/|$)/.test(location.hash||''); }
+// v28.179 (Ben): an OFF-screen full build is fine when it runs in the Web Worker (v28.178: ~10 ms of main-thread posting), so the
+// SKU-data / Preorder-KA landings and the shell prewarm build in the background on a SUPPLY landing too. No worker → v28.143 rule.
+function hzDemandBgOk(){ try{ return typeof hzDemandWorkerOn==='function'&&hzDemandWorkerOn()&&typeof hzDemandBuildAsync==='function'; }catch(e){ return false; } }
 try{ loadPreorderKA().then(function(){ function _rb(){ try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }
-  try{ if(typeof buildLiveDemand==='function'){ if(hzDemandOnScreen()&&(!LAZY_SKU||SKU_DATA_READY)){ hzDemandBuildAsync('pka').then(_rb,_rb); return; } else DEMAND_BUILT=false; } }catch(e){}   // v28.163: not on the empty lazy maps (the SKU-data landing re-arms + builds); v28.178 (Ben): async build, then the buy grid
+  try{ if(typeof buildLiveDemand==='function'){ if((hzDemandOnScreen()||hzDemandBgOk())&&(!LAZY_SKU||SKU_DATA_READY)){ hzDemandBuildAsync('pka').then(_rb,_rb); return; } else DEMAND_BUILT=false; } }catch(e){}   // v28.179: off-screen too when the worker builds it   // v28.163: not on the empty lazy maps (the SKU-data landing re-arms + builds); v28.178 (Ben): async build, then the buy grid
   _rb(); }); }catch(e){}
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
@@ -10304,11 +10307,11 @@ function render(){
     try{ renderReportView(true); }catch(e){}
     ['report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
     var _rb=document.createElement('div'); _rb.id='report-body'; document.querySelector('.wrap').appendChild(_rb);
-    _rb.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Reports…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
+    _rb.innerHTML='<div data-hz-loading="1" style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Reports…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
     clearTimeout(window.__rpColdT); window.__rpColdT=setTimeout(function(){ hzWhenSkuData('rp',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
-      if(VIEW_MODE!=='exec')return;   // user moved on: don't block them
+      if(VIEW_MODE!=='exec'||!_rb.isConnected)return;   // user moved on: don't block them. v28.179 (Ben): "moved on" = THIS loading panel is no longer on screen
       hzDemandReady(function(){   // v28.178 (Ben): async build (worker / chunked), panel stays up and the page stays responsive meanwhile
-      if(VIEW_MODE!=='exec')return;
+      if(VIEW_MODE!=='exec'||!_rb.isConnected)return;
       try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}
       if(!DEMAND_BUILT)DEMAND_BUILT=true;
       var _x=document.getElementById('report-body'); if(_x)_x.remove();
@@ -10329,16 +10332,18 @@ function render(){
     // the BUY & MOVE tabs + a loading panel first, let the rail expand (its re-render runs at +90 ms), THEN build and render.
     if(VIEW_MODE!=='zalando' && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)) && typeof buildLiveDemand==='function'){
       var _twL=document.getElementById('tw'); if(_twL)_twL.style.display='none'; var _bwL=document.getElementById('buy-wrap'); if(_bwL)_bwL.remove();
-      var _ld=document.createElement('div'); _ld.id='bm-loading'; _ld.style.cssText='margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px';
+      var _ld=document.createElement('div'); _ld.id='bm-loading'; _ld.setAttribute('data-hz-loading','1'); _ld.style.cssText='margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px';
       _ld.innerHTML='<span class="hz-spin" style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Buy &amp; Move…</b><br>Calculating demand for the buy plan (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>';
       var _hostL=document.querySelector('.wrap'); if(_hostL)_hostL.appendChild(_ld);
       renderBuyMoveTabs();
       clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){ hzWhenSkuData('bm',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
         var _stillBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
         if(!_stillBM){ var _l=document.getElementById('bm-loading'); if(_l)_l.remove(); return; }   // user moved on: don't block them
+        if(!_ld.isConnected)return;   // v28.179 (Ben): a newer BUY & MOVE render replaced this panel (it owns the build + render now): no second render
         hzDemandReady(function(_bok){   // v28.178 (Ben): async build (worker / chunked), panel stays up and the page stays responsive meanwhile
         var _still2=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
         if(!_still2){ var _l2=document.getElementById('bm-loading'); if(_l2)_l2.remove(); return; }
+        if(!_ld.isConnected)return;   // v28.179 (Ben): superseded by a newer panel (see above)
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
         if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
         try{ render(); }catch(e){ console.error(e); }
@@ -10363,11 +10368,13 @@ function render(){
     var _twD=document.getElementById('tw'); if(_twD)_twD.style.display='none';
     var _dbD=document.getElementById('demand-body'); if(_dbD)_dbD.remove();
     _dbD=document.createElement('div'); _dbD.id='demand-body'; document.querySelector('.wrap').appendChild(_dbD);
-    _dbD.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
+    _dbD.innerHTML='<div data-hz-loading="1" style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
     clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){ hzWhenSkuData('dm',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
       if(VIEW_MODE!=='planning'){ var _x=document.getElementById('demand-body'); if(_x&&DEMAND_VIEW==='plan')_x.remove(); return; }   // user moved on: don't block them
+      if(!_dbD.isConnected)return;   // v28.179 (Ben): another DEMAND tab replaced this loading panel (e.g. Inputs, which needs no build): never re-render it under the user
       hzDemandReady(function(_bok){   // v28.178 (Ben): async build (worker / chunked), panel stays up and the page stays responsive meanwhile
       if(VIEW_MODE!=='planning'){ var _x2=document.getElementById('demand-body'); if(_x2&&DEMAND_VIEW==='plan')_x2.remove(); return; }
+      if(!_dbD.isConnected)return;   // v28.179: same (the build itself still lands; the next demand view uses it)
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
       if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
       try{ render(); }catch(e){ console.error(e); }
@@ -12921,7 +12928,7 @@ function renderDemandTabs(){
     +'<button class="dnav'+(_cfgActive?' active':'')+'" id="dnav-config-btn" title="Contribution model, Buy plan logic, Discontinued sub-categories">Config</button>'
     +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Key accounts, Calendar, Price changes">Inputs</button>';
   if(_isPlanV){ try{ fillPlanRwSel(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
-  bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode
+  bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(DEMAND_VIEW==='scenario'&&window.scenCur?['demand','scenario',window.scenCur()]:['demand',DEMAND_VIEW]); render(); }; });   // v28.179: Scenario planner keeps its tool in the URL   // a demand sub-tab is a planning view — force planning mode
   // "Inputs" → enter the inputs group (keep the current input view, else default to the first)
   var _ib=document.getElementById('dnav-inputs-btn'); if(_ib)_ib.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; if(INPUTS.indexOf(DEMAND_VIEW)<0)DEMAND_VIEW=INPUTS[0]; if(window.writeHash)window.writeHash(['demand','inputs',DEMAND_VIEW]); render(); };
   // Level-3 (light-blue) nav for the Inputs group — a consistent d3nav shown only while an input view is active;
@@ -16522,7 +16529,7 @@ function renderAutoForecastReport(body){
       fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail); };
     // v28.148: a cold demand build (~3 s) ran before the page could paint. Show what is happening, let it paint, then build.
     var afCold=!AF_FEED && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)||(LAZY_SKU&&!SKU_DATA_READY&&!SKU_DATA_FAILED));
-    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(function(){ hzWhenSkuData('af',function(){ hzDemandReady(afGo); }); },120); }   // v28.163: waits for lazy SKU data (an early open built + cached an EMPTY feed); v28.178 (Ben): then the async demand build
+    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" data-hz-loading="1" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(function(){ hzWhenSkuData('af',function(){ hzDemandReady(afGo); }); },120); }   // v28.163: waits for lazy SKU data (an early open built + cached an EMPTY feed); v28.178 (Ben): then the async demand build
     else afGo();
   }
 }

@@ -1565,7 +1565,7 @@
       if(!Array.isArray(full))return; var same=false; try{ same=!!cache['actions']&&JSON.stringify(cache['actions'])===JSON.stringify(full); }catch(e){} cache['actions']=full;
       try{ setActionsBadgeFrom(full); }catch(e){}
       if(bg&&(same||!hzViewIdle()||Date.now()-_hzLastInteract<60000))return;   // don't re-render under the user
-      if(current==='reports'&&['actions','recommendations','erp-compare'].indexOf(reportTab)>=0&&_actHost)try{ renderActions(full); }catch(e){}   // refresh in place if on a folded-in Actions tab
+      if(current==='reports'&&['actions','recommendations'].indexOf(reportTab)>=0&&_actHost)try{ renderActions(full); }catch(e){}   // refresh in place if on a folded-in Actions tab (v28.179: not ERP Compare, which never reads the Actions rows: it was re-fetched + redrawn under the user)
     }).catch(function(){}); }
   function startActionsWarm(){ if(_actWarmStarted)return; _actWarmStarted=true;
     setInterval(function(){ if(document.hidden)return; prewarmActions(true,true); }, 600000); }   // every 10 min, matching the server cache TTL; v28.151 (review F7): skipped while the tab is hidden
@@ -1582,6 +1582,7 @@
   var _actHost=null;   // when set (BI & Reports Actions/Recommendations/ERP Compare tab), render the Actions view into this container WITHOUT its own sub-nav (the reports L3 provides the tabs)
   var _actErpCount=null;   // ERP-compare "to review" count for the sub-tab badge (lazy)
   var _erpcHideIgnored=true;   // v27.779 (Ben): "Hide ignored" toggle on the ERP COMPARE tab — default ON; shared by the Fulfil + Cin7 compare sections
+  var _erpcLastD=null;   // v28.179 (Ben): last fulfil-compare payload this page loaded (instant repaint on the next ERP Compare open)
   // Which PO detail sub-tab an action should deep-link to (payment issues → PAYMENTS, date issues → DATES,
   // shipping → SHIPMENTS, ERP/order-plan → ORDER PLAN). Null → the default (first) tab.
   var ACT_POTAB={ 'Deposit not paid':'pay','Deposit over-assigned':'pay','Payment invalid':'pay','Payment overdue':'pay','Supplier invoice':'pay','Unpaid — last month':'pay','Aged payment':'pay',
@@ -1636,7 +1637,12 @@
       sb.innerHTML='<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin:2px 0 12px"><input type="checkbox" id="erpc-hideign"'+(_erpcHideIgnored?' checked':'')+'> Hide ignored</label>'
         +'<div id="fulfilc-sec"><div class="count" style="padding:10px 2px">Loading Fulfil compare…</div></div>';
       var _hi=document.getElementById('erpc-hideign'); if(_hi)_hi.onchange=function(){ _erpcHideIgnored=_hi.checked; renderErpTab(sb); };
-      fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(d){ var el=document.getElementById('fulfilc-sec'); if(el)renderFulfilCompare(d, el, function(){ renderErpTab(sb); });
+      // v28.179 (Ben): repaint the last compare this page loaded at once, then the fresh one (identical -> no redraw). After an
+      // Ignore / Import (the _re callback) the last copy is dropped first, so a changed row is never shown in its old state.
+      var _re=function(){ _erpcLastD=null; renderErpTab(sb); };
+      var _lastJ=null; if(_erpcLastD){ var _el0=document.getElementById('fulfilc-sec'); if(_el0){ try{ _lastJ=JSON.stringify(_erpcLastD); renderFulfilCompare(_erpcLastD, _el0, _re); }catch(e){} } }
+      fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(d){ var el=document.getElementById('fulfilc-sec'); var _j=null; try{ _j=JSON.stringify(d); }catch(e){}
+          if(el&&!(_lastJ&&_j===_lastJ))renderFulfilCompare(d, el, _re);
           if(d&&typeof d.count==='number'){ _actErpCount=d.count; var badge=document.querySelector('#act-subnav .act-subtab[data-as="erp-compare"]'); if(badge)badge.innerHTML='⬆ ERP COMPARE'+(_actErpCount>0?' <span class="ex-badge">'+_actErpCount+'</span>':''); try{ _erpcCount=d.count; _erpcAt=Date.now(); paintErpcBadge(); paintReportsL2Badge(); }catch(e){} } })
         .catch(function(){ var el=document.getElementById('fulfilc-sec'); if(el)el.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Fulfil compare</div><div class="mut tiny">Fulfil compare unavailable — the Fulfil API is not configured for this environment.</div>'; }); }
     // KPI tiles (design "Horizon Supply"): open actions · high priority · payment issues · done. Counts come from the loaded set.
@@ -8903,7 +8909,7 @@
         function mins(s){ return Math.round((Number(s)||0)/60)+' min'; }
         function draw2(d){ var k2=d.kpis2; if(!k2)return d.extra_error?'<div class="count" style="color:var(--neg)">New sections failed to load: '+esc(d.extra_error)+' (migration 329?)</div>':'';
           var ra=d.red_alerts||{rows:[]}, msg=function(r){ return '<span style="white-space:pre-wrap">'+esc(r.message||'')+'</span>'; };
-          return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0">'+kpi(k2.freezes,'Freezes',1)+kpi(k2.api_failures,'API failures',1)+kpi(k2.integration_errors,'Integration errors',1)+kpi(k2.data_findings,'Data freshness',1)+kpi(k2.sanity,'Sanity',1)+kpi(k2.db,'DB',1)+'</div>'
+          return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0">'+kpi(k2.freezes,'Freezes',1)+kpi(k2.dead_clicks||0,'Dead clicks',1)+kpi(k2.api_failures,'API failures',1)+kpi(k2.integration_errors,'Integration errors',1)+kpi(k2.data_findings,'Data freshness',1)+kpi(k2.sanity,'Sanity',1)+kpi(k2.db,'DB',1)+'</div>'
             +grid('new','New since '+(d.prev_version||'last deploy')+' (first seen on '+d.version+')',d.new_since||[],[['kind','Kind'],['path','Where',function(r){ return mono((r.path||(r.views||[]).filter(Boolean).join(', '))+(r.status?' ('+r.status+')':'')); }],['message','Message',msg],['n','Count'],['users','Users'],['first_seen','First seen',function(r){ return esc(dt(r.first_seen)); }],['file','Likely file']])
             +'<div class="mut tiny" style="margin-top:12px">Red alerts: one health email per rolling hour (alerts, weekly report and test sends share it). Pending now: <b>'+(ra.pending||0)+'</b> · last sent '+esc(ra.last_sent?dtm(ra.last_sent):'never')+' · next allowed '+esc(ra.next_allowed&&new Date(ra.next_allowed)>new Date()?dtm(ra.next_allowed):'now')+'</div>'
             +grid('red','Red alerts',ra.rows||[],[['ts','Raised',function(r){ return esc(dtm(r.ts)); }],['message','Alert',msg],['n','Events'],['status','Status',function(r){ var m=r.meta||{}; return m.pending_alert?'<span class="tool-badge bg-red">pending</span>':esc('sent '+(m.sent_at?dtm(m.sent_at):'')); }]])
@@ -8912,6 +8918,7 @@
           return grid('sanity','Business sanity',d.sanity||[],[['path','Check',function(r){ return mono(r.path); }],['source','Source'],['message','Finding',msg],['n','Times seen'],['last_seen','Last seen',function(r){ return esc(dtm(r.last_seen)); }]])
             +grid('integ','Integration errors',d.integ||[],[['service','Service'],['path','Call',function(r){ return mono(r.path); }],['status','Status',function(r){ return esc(r.status||'network'); }],['n','Count'],['timeouts','Timeouts'],['max_ms','Max ms'],['message','Last message',msg],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
             +grid('freezes','Freezes (main thread blocked 1s or more)',d.freezes||[],[['path','View',function(r){ return mono(r.path); }],['n','Freezes'],['max_ms','Max ms'],['sum_ms','Total ms'],['users','Users'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }],['file','Likely file']])
+            +grid('dclick','Dead clicks (menu / tab press that did nothing within 1.5 s)',d.dead_clicks||[],[['path','From view',function(r){ return mono(r.path); }],['label','Nav item'],['n','Count'],['users','Users'],['versions','Versions',function(r){ return esc((r.versions||[]).join(', ')); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }],['file','Likely file']])   // v28.179 (Ben)
             +grid('api','API failures seen by browsers',d.api||[],[['path','Endpoint',function(r){ return mono((r.method||'GET')+' '+r.path); }],['status','Status',function(r){ return esc(r.status||'network'); }],['n','Count'],['max_ms','Max ms'],['users','Users'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
             +grid('dbp','Database: pool waits and timeouts',d.db_pool||[],[['message','What',msg],['n','Count'],['max_waiting','Max waiting'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
             +grid('sq','Database: slow queries (2s or more)',d.slow_q||[],[['sql','SQL (literals stripped)',function(r){ return mono(r.sql); }],['n','Count'],['p95','p95 ms'],['max_ms','Max ms'],['example','Example route',function(r){ return mono(r.example||''); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
@@ -12569,7 +12576,7 @@
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',po,POTAB_SLUG[tab]||tab]); }   // #/supply/purchase-orders/<PO>/<tab-slug>
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
-    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','accuracy','fcanom','snapshots','trends','safetystock','shipbags']; var _dcfg=['contribmodel','buyplan','runoffsubs']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:(_dcfg.indexOf(_dv)>=0?['demand','config',_dv]:['demand',_dv]))); }   // input/analysis/config → #/demand/<group>/<slug>
+    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','accuracy','fcanom','snapshots','trends','safetystock','shipbags']; var _dcfg=['contribmodel','buyplan','runoffsubs']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:(_dcfg.indexOf(_dv)>=0?['demand','config',_dv]:(_dv==='scenario'&&window.scenCur?['demand','scenario',window.scenCur()]:['demand',_dv])))); }   // v28.179: the scenario tool stays in the URL (was cut to #/demand/scenario, so health rows split one page in two)   // input/analysis/config → #/demand/<group>/<slug>
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
@@ -12693,6 +12700,10 @@
     if(rk!=='actions'&&typeof prewarmActions==='function') prewarmActions();   // keep the high-priority actions count fresh in the background
     if(rk==='actions'||rk==='recommendations'||rk==='erp-compare'){   // folded-in Actions views → render into rep-body without the act-subnav
       actSub=rk; _actHost=document.getElementById('rep-body');
+      // v28.179 (Ben: "ERP compare not fast"): ERP Compare reads only /api/supply/bi/fulfil-compare, but it was drawn by the Actions
+      // pipeline: lookups -> (cold) the full Actions build -> /api/supply/cashflow -> only then the compare fetch (3 hops in series,
+      // slow_view 3.95 s). Draw it straight away; the Actions set keeps warming in the background (prewarmActions above).
+      if(rk==='erp-compare'){ try{ actBuild(cache['actions']||[],_actHost,true); }catch(e){} return; }
       if(cache['actions']){ try{ renderActions(cache['actions']); }catch(e){} } else { renderActionsProgressive(_actHost,_tk); } return; }
     var done=function(d){
       if(_tk!==_navToken)return;   // navigated away (or to another report) before this resolved → don't overwrite the newer view
@@ -13234,7 +13245,7 @@
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
   // v27.779 (Ben): Fulfil compare — open Fulfil POs missing from the planner, with the linked sales order + its company,
   // an Ignore toggle, and an "Import to Horizon" button (reuses the po-import-fulfil flow). Rendered above Cin7 compare.
-  function renderFulfilCompare(d,_cont,_re){ var b=_cont; if(!b)return; d=d||{}; var all=d.rows||[];
+  function renderFulfilCompare(d,_cont,_re){ var b=_cont; if(!b)return; d=d||{}; var all=d.rows||[]; if(d.ok&&Array.isArray(d.rows))_erpcLastD=d;   // v28.179: last good payload (instant repaint, see renderErpTab)
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Fulfil compare — open Fulfil POs missing from the planner</div>'
       +'<div class="mut tiny" style="margin-bottom:12px">Open purchase orders in <b>Fulfil</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner. Shows any linked Fulfil <b>sales order</b> &amp; its company. <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.'
@@ -14363,6 +14374,7 @@
     if(CATS_CACHE)fillCats(); else fetch('/api/supply/skus').then(function(r){return r.json();}).then(function(rows){var s={};rows.forEach(function(x){if(x.category)s[x.category]=1;});CATS_CACHE=Object.keys(s).sort();fillCats();});
     function run(){ var skus=(document.getElementById('pd-skus').value||'').split(/[\s,]+/).map(function(x){return x.trim();}).filter(Boolean);
       var cat=document.getElementById('pd-cat').value||'';
+      var _pg=document.getElementById('pd-grid'); if(_pg&&!_pg.innerHTML)_pg.innerHTML='<div class="count">Loading Prime Day stock…</div>';   // v28.179 (Ben): first open showed an empty grid for the whole request (and the App health log could not time it)
       fetch('/api/scenario/prime-day',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({skus:skus,category:cat,country:st.co})})
         .then(function(r){return r.json();}).then(pdRender).catch(function(e){var g=document.getElementById('pd-grid'); if(g)g.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
     document.getElementById('pd-run').onclick=run;
@@ -18560,7 +18572,11 @@
           return '<button class="rl2'+(it.active?' on':'')+'" data-l2="'+i+'">'+esc(it.label)+_railBadgeHtml(it.count)+'</button>'+((sub&&sub.length)?('<div class="rl3wrap">'+sub.map(function(s,j){return '<button class="rl3'+(s.active?' on':'')+'" data-l3="'+j+'">'+esc(s.label)+_railBadgeHtml(s.count)+'</button>';}).join('')+'</div>'):''); }).join('')+'</div>';
       } }
     });
-    list.innerHTML=html;
+    // v28.179 (Ben: "Demand plan > Inputs: all needed 2 clicks"): the rail used to rewrite its list on EVERY call, and its own rewrite
+    // re-triggered the nav observer below (#hz-leftrail is in RAIL_NAV_SEL), so the list was rebuilt every ~270 ms forever. A click
+    // whose press (mousedown -> mouseup) spanned a rebuild landed on a detached button and was dropped by the browser. Now an
+    // unchanged list is never rewritten (the click handlers read window._railL2c / _railL3c at click time, refreshed above).
+    if(list._hzHtml!==html){ list.innerHTML=html; list._hzHtml=html; }
     // hide ONLY the content L3 nav we actually mirrored (so a section whose L3 we can't read never loses its tabs)
     if(window._railL3hidden && window._railL3hidden!==l3hide){ try{window._railL3hidden.classList.remove('hz-l3-mirrored');}catch(e){} }
     if(l3hide){ l3hide.classList.add('hz-l3-mirrored'); window._railL3hidden=l3hide; } else window._railL3hidden=null;
@@ -18580,13 +18596,22 @@
       document.body.appendChild(r);
       try{ if(localStorage.getItem('hzRailMin')==='1')document.body.classList.add('hz-rail-min'); }catch(e){}   // restore collapsed state
       var mb=document.getElementById('hz-rl-min'); if(mb)mb.onclick=function(e){ e.stopPropagation(); var on=document.body.classList.toggle('hz-rail-min'); try{localStorage.setItem('hzRailMin',on?'1':'');}catch(_){} };
+      // v28.179 (Ben): a press that started on a rail item whose list was legitimately re-rendered before the release (a badge count
+      // or an async L2/L3 arriving) gets no click from the browser (the pressed node is gone). If the release lands on the item that
+      // replaced it (same level, index and label), run that item's action on mouseup. Only then: a normal click never gets here.
+      var _rlKey=function(b){ if(!b)return ''; var lab=b.querySelector('.lab'), t=lab?lab.textContent:Array.prototype.filter.call(b.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');   // label without the count badge
+        return (b.className||'').split(' ')[0]+'|'+(b.dataset.k||b.dataset.l2||b.dataset.l3||'')+'|'+String(t||'').trim(); }, _rlDown=null;
+      r.addEventListener('mousedown',function(e){ var b=e.button===0&&e.target&&e.target.closest?e.target.closest('#hz-rl-list .rl1,#hz-rl-list .rl2,#hz-rl-list .rl3'):null; _rlDown=b?{b:b,k:_rlKey(b),t:Date.now()}:null; },true);
+      r.addEventListener('mouseup',function(e){ var d=_rlDown; _rlDown=null; if(!d||d.b.isConnected||Date.now()-d.t>2000)return;
+        var b=e.target&&e.target.closest?e.target.closest('#hz-rl-list .rl1,#hz-rl-list .rl2,#hz-rl-list .rl3'):null;
+        if(b&&b!==d.b&&_rlKey(b)===d.k&&typeof b.onclick==='function'){ try{ b.onclick(); }catch(_){} } },true);
       window.addEventListener('hashchange',function(){ try{railSync();_railSoon();}catch(e){} });
       // keep the rail's L2/L3 in sync as each module renders its sub-nav async (debounced; renderRailList is cheap)
       // v28.084 (perf Sprint D): the observer still watches the body (module roots are re-created wholesale, so the nav
       // containers can't be observed directly) but only re-renders when a mutation touches a nav container: its target
       // sits inside one, or a node added/removed is/contains one. Grid repaints (hundreds of row mutations) no longer count.
       if(!window._railMO){ var RAIL_NAV_SEL='#supply-subnav,#prod-subtabs,#rep-subnav,#config-subs-l3,#demand-tabs,#buymove-tabs,#report-tabs,#product-subnav,#client-subnav,#config-subs,#demand-exceptions-nav,#demand-scenario-nav,#demand-inputs-nav,#demand-analysis-nav,#demand-config-nav,#perf-subnav,#hz-leftrail';
-        var _railRel=function(muts){ try{ for(var i=0;i<muts.length;i++){ var m=muts[i], t=m.target; if(t&&t.nodeType===1&&t.closest&&t.closest(RAIL_NAV_SEL))return true;
+        var _railRel=function(muts){ try{ for(var i=0;i<muts.length;i++){ var m=muts[i], t=m.target; if(t&&t.nodeType===1&&t.closest&&t.closest(RAIL_NAV_SEL)&&!t.closest('#hz-leftrail'))return true;   // v28.179 (Ben): the rail's OWN re-render is not a nav change (it looped every ~270 ms)
             var lists=[m.addedNodes,m.removedNodes]; for(var a=0;a<2;a++){ var L=lists[a]; if(!L)continue; for(var j=0;j<L.length;j++){ var n=L[j]; if(n.nodeType!==1)continue; if((n.matches&&n.matches(RAIL_NAV_SEL))||(n.querySelector&&n.querySelector(RAIL_NAV_SEL)))return true; } } }
           return false; }catch(e){ return true; } };
         window._railMO=new MutationObserver(function(muts){ if(!_railRel(muts))return; clearTimeout(window._railMOT); window._railMOT=setTimeout(function(){ try{renderRailList();}catch(e){} },260); }); try{ window._railMO.observe(document.body,{childList:true,subtree:true}); }catch(e){} }
@@ -18613,7 +18638,10 @@
   (function(){ var done=false, tries=0;
     // v28.143: the prewarm is a ~3 s main-thread block; started while the user is on a SUPPLY / PRODUCT / CLIENT / CONFIG page it froze
     // their first menu click (live 01-Oct: PO click at 6.4 s painted at 9.5 s). Stand down there — DEMAND / BUY build on first visit.
-    function warm(){ try{ if(typeof window.hzDemandOnScreen==='function' && !window.hzDemandOnScreen())return; if(!window.DEMAND_BUILT){ if(typeof window.hzDemandBuildAsync==='function')window.hzDemandBuildAsync('prewarm').catch(function(){}); else if(typeof window.buildLiveDemand==='function')window.buildLiveDemand(); } }catch(e){} }   // v28.178 (Ben): async (worker / chunked), no ~3 s main-thread block
+    // v28.179 (Ben: BUY & MOVE > Actions "not fast"): with the Web Worker build (v28.178) the prewarm costs the page ~10 ms of
+    // posting, so it now also runs on a SUPPLY / PRODUCT / CLIENT / CONFIG landing; the first DEMAND / BUY & MOVE / REPORTS visit
+    // then finds the overlay built. Without a worker (CSP, ?worker=0, failed) it keeps the v28.143 stand-down off DEMAND.
+    function warm(){ try{ if(typeof window.hzDemandOnScreen==='function' && !window.hzDemandOnScreen() && !(typeof window.hzDemandBgOk==='function' && window.hzDemandBgOk()))return; if(!window.DEMAND_BUILT){ if(typeof window.hzDemandBuildAsync==='function')window.hzDemandBuildAsync('prewarm').catch(function(){}); else if(typeof window.buildLiveDemand==='function')window.buildLiveDemand(); } }catch(e){} }   // v28.178 (Ben): async (worker / chunked), no ~3 s main-thread block
     var iv=setInterval(function(){ if(done)return;
       if(++tries>120){ done=true; clearInterval(iv); return; }                       // give up after ~60s
       if(window.DEMAND_BUILT){ done=true; clearInterval(iv); return; }               // already built (user opened DEMAND, or a load-time pass) → nothing to do
