@@ -21586,7 +21586,8 @@ async function hzHealthReportExtra(days) {
       'new_since', (SELECT coalesce(json_agg(x ORDER BY x.n DESC), '[]') FROM (SELECT * FROM (SELECT kind, CASE WHEN kind IN ('client_error', 'console_error') THEN '' WHEN kind = 'integration_error' THEN coalesce(path, '') ELSE coalesce(method || ' ', '') || coalesce(path, '') END path, status, split_part(coalesce(message, ''), E'\\n', 1) message,
         sum(count)::int n, count(DISTINCT user_email)::int users, min(ts) first_seen, max(ts) last_seen, (array_agg(app_version ORDER BY ts))[1] first_ver, (array_agg(DISTINCT path))[1:3] views
         FROM planner.app_health_events WHERE kind = ANY($3::text[]) GROUP BY 1, 2, 3, 4) g WHERE first_ver = $2 ORDER BY n DESC LIMIT 30) x),
-      'prev_version', (SELECT app_version FROM planner.app_health_events WHERE app_version IS NOT NULL AND app_version <> $2 ORDER BY ts DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
+      'prev_version', (SELECT app_version FROM (SELECT app_version, min(ts) f FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1) v   -- the release deployed before this one (not a newer branch build writing to the same DB)
+        WHERE f < coalesce((SELECT min(ts) FROM planner.app_health_events WHERE app_version = $2), now()) ORDER BY f DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
   for (const k in x.kpis2) x.kpis2[k] = Number(x.kpis2[k]) || 0;
   x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
   x.integ.forEach(r => { r.file = HZ_INTEG_FILE[r.service] || 'server.mjs _fetchT callers'; });
