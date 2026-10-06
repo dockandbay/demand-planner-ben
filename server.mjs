@@ -112,10 +112,34 @@ async function _rollback(client) {
 // 300s function limit. AbortSignal.timeout covers headers AND body; a caller's own signal is still honoured. The abort
 // surfaces as an Error naming the host so the existing catch blocks report it. No retries added (existing ones unchanged).
 async function _fetchT(url, opts, ms) {
-  const o = Object.assign({}, opts || {}); const t = AbortSignal.timeout(ms || 20000);
+  const o = Object.assign({}, opts || {}); const t = AbortSignal.timeout(ms || 20000); const t0 = Date.now();
   o.signal = o.signal ? AbortSignal.any([o.signal, t]) : t;
-  try { return await fetch(url, o); }
-  catch (e) { if (e && (e.name === 'TimeoutError' || (e.name === 'AbortError' && t.aborted))) { let h = ''; try { h = new URL(String(url)).host; } catch (_) {} const x = new Error('Timed out after ' + Math.round((ms || 20000) / 1000) + 's calling ' + h); x.code = 'FETCH_TIMEOUT'; throw x; } throw e; }
+  try { const r = await fetch(url, o); if (!r.ok) hzIntegNote(url, o, r.status, Date.now() - t0, false, null); return r; }   // v28.162 (Ben): health log integration_error on non-2xx
+  catch (e) { if (e && (e.name === 'TimeoutError' || (e.name === 'AbortError' && t.aborted))) { let h = ''; try { h = new URL(String(url)).host; } catch (_) {} const x = new Error('Timed out after ' + Math.round((ms || 20000) / 1000) + 's calling ' + h); x.code = 'FETCH_TIMEOUT'; hzIntegNote(url, o, 0, Date.now() - t0, true, x.message); throw x; }
+    hzIntegNote(url, o, 0, Date.now() - t0, false, (e && e.message) || String(e)); throw e; }
+}
+// v28.162 (Ben): INTEGRATION HEALTH. Every outbound call above goes through _fetchT, so ONE hook covers Fulfil, Xero (incl. the
+// identity.xero.com token refresh), Flexport, DHL, FedEx, BLADE, Anthropic (/api/ai + Ask Claude), Resend and KV. A non-2xx, a
+// network error or a timeout is noted into the health buffer as integration_error (no DB round trip; flushed with the rest),
+// grouped by service + method + normalised path + status. Logged: host-derived service, method, path with ids replaced by :id and
+// NO query string (DHL puts the tracking number there, keys never travel in our URLs but a query is dropped regardless), status,
+// ms, timeout flag, and for KV the command name only. Never headers or bodies. DHL 404 = "tracking number not found" (normal).
+const HZ_INTEG_HOSTS = [[/fulfil\.io$/, 'fulfil'], [/^identity\.xero\.com$/, 'xero-token'], [/xero\.com$/, 'xero'], [/flexport\.com$/, 'flexport'], [/dhl\.com$/, 'dhl'], [/fedex\.com$/, 'fedex'],
+  [/bladepro\.io$/, 'blade'], [/anthropic\.com$/, 'anthropic'], [/resend\.com$/, 'resend'], [/upstash\.io$/, 'kv'], [/drivehq\.com$/, 'drivehq'], [/dearsystems\.com$|cin7\.com$/, 'cin7']];
+const hzIdSeg = s => (/^(v\d{1,2}|\d{1,2}\.\d{1,2})$/.test(s)) ? s : (s.length > 24 || /^\d+$/.test(s) || (/\d/.test(s) && s.length >= 5)) ? ':id' : s;   // ids -> :id; keeps API versions (v1, 2.0) and short names (3pl, b2b)
+function hzIntegNote(url, o, status, ms, timeout, msg) {
+  try {
+    let u; try { u = new URL(String(url)); } catch (_) { return; }
+    let svc = null; for (const [re, s] of HZ_INTEG_HOSTS) if (re.test(u.host)) { svc = s; break; }
+    if (!svc && KV_URL && String(url).startsWith(KV_URL)) svc = 'kv'; if (!svc) svc = u.host.slice(0, 60);
+    if (svc === 'dhl' && status === 404) return;
+    const method = String((o && o.method) || 'GET').toUpperCase();
+    let op = u.pathname.split('/').map(hzIdSeg).join('/').slice(0, 160) || '/';
+    if (svc === 'kv') { try { const c = JSON.parse(String(o.body || '')); if (Array.isArray(c) && typeof c[0] === 'string') op = c[0].slice(0, 20); } catch (_) {} }
+    const message = msg ? String(msg).replace(/\?[^\s]*/g, '').slice(0, 300) : (svc + ' HTTP ' + status);
+    hzHealthEvt('integration_error', svc + '|' + method + '|' + op + '|' + status + '|' + (timeout ? 1 : 0), { path: svc + ' ' + method + ' ' + op, method, status: status || null, ms, message,
+      meta: { service: svc, op, status: status || 0, timeout: !!timeout } });
+  } catch (_) { /* measurement must never throw */ }
 }
 // v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
 // only read at call time) gets s.q incremented on every pool.query; the finish-hook logs it. Behaviour otherwise identical.
@@ -127,6 +151,35 @@ async function _fetchT(url, opts, ms) {
     if (_QLOG && p && typeof p.then === 'function') { const t0 = Date.now(); const sql = String((arguments[0] && arguments[0].text) || arguments[0] || '').replace(/\s+/g, ' ').slice(0, 110); const path = (s && s.req) ? (s.req.method + ' ' + String(s.req.originalUrl || s.req.url || '').split('?')[0]) : '-';
       p.then(() => { const ms = Date.now() - t0; if (ms >= _QLOG) console.log('[q ' + ms + 'ms] ' + path + ' :: ' + sql); }, () => {}); }
     return p; }; }
+// v28.162 (Ben): DB HEALTH for the health log. (1) Every physical client gets its query() wrapped ONCE (pool 'connect' event) and
+// timed: a statement >= HZ_SLOW_QUERY_MS (default 2000) is noted as slow_query, grouped by its first 160 chars with string and
+// number literals replaced by ? (never parameters or data). This times EXECUTION only (pool.query reaches client.query with a
+// callback after the checkout), so a pool wait never shows up as a slow statement; waits are db_pool below. (2) pool.connect is
+// wrapped (pool.query uses it internally) and any client query error is checked: the v28.152 fail-fast errors (connect
+// "timeout exceeded when trying to connect", query_timeout "Query read timeout", server statement_timeout) are noted as db_pool.
+// Cost per query: one Date.now() + one closure; the note itself only fires on a slow / failed statement. All via the buffer.
+const HZ_SLOW_Q_MS = Math.max(200, Number(process.env.HZ_SLOW_QUERY_MS || 2000));
+function hzSqlNorm(sql) { return String(sql || '').replace(/'(?:[^']|'')*'/g, '?').replace(/(?<![$\w])\d+(?:\.\d+)?/g, '?').replace(/\s+/g, ' ').trim().slice(0, 160); }
+function hzDbErr(e, op) { try { const m = String((e && e.message) || e || '');
+  if (!/timeout exceeded when trying to connect|Query read timeout|statement timeout|Connection terminated due to connection timeout|ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients reached/i.test(m)) return;
+  const kind = /ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients/i.test(m) ? 'pooler_saturated' : /connect/i.test(m) ? 'connect_timeout' : /statement timeout/i.test(m) ? 'statement_timeout' : 'query_timeout';   // pooler_saturated = Supabase pooler out of sessions / checkouts
+  hzHealthEvt('db_pool', kind, { path: 'db ' + kind.replace('_', ' '), message: m.slice(0, 300), meta: { op, error: kind, max_waiting: pool.waitingCount, total: pool.totalCount, idle: pool.idleCount } });
+} catch (_) {} }
+pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 1; const oq = client.query;
+  client.query = function (cfg) {
+    if (cfg && typeof cfg.submit === 'function') return oq.apply(this, arguments);   // Cursor / Submittable: untouched
+    const t0 = Date.now(), n = arguments.length, cb = n && typeof arguments[n - 1] === 'function' ? arguments[n - 1] : null;
+    let st = this.__hzSt || null; if (!st) { try { st = _reqStore.getStore(); } catch (_) {} }
+    const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query');
+      if (ms >= HZ_SLOW_Q_MS) { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;
+        hzHealthEvt('slow_query', sql, { path: sql, ms, message: 'Slow SQL ' + ms + 'ms', meta: { example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' } }); } } catch (_) {} };
+    if (cb) { const a = Array.prototype.slice.call(arguments); a[n - 1] = function (err) { done(err); return cb.apply(this, arguments); }; return oq.apply(this, a); }
+    const p = oq.apply(this, arguments); if (p && typeof p.then === 'function') p.then(() => done(null), done); return p; };
+} catch (_) {} });
+{ const _oc = pool.connect.bind(pool);   // also tags the checked-out client with the caller's request (pg-pool may hand it over from another request's async context)
+  pool.connect = function (cb) { let st = null; try { st = _reqStore.getStore() || null; } catch (_) {}
+    if (typeof cb === 'function') return _oc(function (err, client) { if (err) hzDbErr(err, 'connect'); else if (client) client.__hzSt = st; return cb.apply(this, arguments); });
+    const p = _oc(); p.then(c => { if (c) c.__hzSt = st; }, e => hzDbErr(e, 'connect')); return p; }; }
 // Keep one pooled connection WARM. idleTimeoutMillis (8s) closes idle clients, so a request after any short idle gap
 // otherwise pays the remote Supabase pooler's ~8s cold-connect stall — which is what made SUPPLY (Actions etc.) feel
 // slow on the sandbox even with the response caches (every request still runs one small query). A 5s SELECT 1 keeps a
@@ -793,14 +846,31 @@ const _perfRing = []; const PERF_RING_MAX = 300;
 // handling (start + finish), never a DB round trip per request. On Vercel there is no timer; the long-lived local server also
 // has an unref'd 30s tick. A flush error is console.warn'd and dropped (a missing table backs off for 10 min). Never blocks
 // or fails a request. Health routes, the App health sweep's own self-timed calls (x-hz-health-sweep) and non-/api paths are skipped.
-const HZ_HEALTH_SKIP = /^\/api\/(health\/|cron\/health-weekly|config\/health-check)/;
+const HZ_HEALTH_SKIP = /^\/api\/(health\/|cron\/health-(weekly|checks)|config\/health-check|portal\/health\/|cp\/health\/)/;   // v28.162: + health-checks cron + portal capture posts
 const _hzHB = new Map(); let _hzHBn = 0, _hzHBlast = Date.now(), _hzHBbusy = null, _hzHBoffUntil = 0;
 function hzHealthNote(kind, method, path, status, ms, msg, example) {
   const k = kind + '|' + method + '|' + path + '|' + status; let e = _hzHB.get(k);
   if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: null }; _hzHB.set(k, e); }
   e.count++; _hzHBn++; if (ms > e.ms) e.ms = ms; if (msg) e.message = String(msg).slice(0, 1000); e.ts = new Date().toISOString();
   if (example && example !== e.path) e.meta = { example: String(example).slice(0, 300) };
+  if (kind === 'server_error') _hzAlertDirty = true;
 }
+// v28.162 (Ben): generic buffered event for the new server kinds (integration_error, db_pool, slow_query). Same buffer, same
+// one-INSERT flush, same 1000-key cap. `key` groups occurrences; meta merges (max_* fields keep the max); ms keeps the max.
+const HZ_ALERT_KINDS = new Set(['server_error', 'db_pool', 'integration_error']);
+let _hzAlertDirty = false, _hzAlertEvalAt = 0;
+function hzHealthEvt(kind, key, f) { try { f = f || {};
+  const k = kind + '|' + key; let e = _hzHB.get(k);
+  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method: f.method || null, path: String(f.path == null ? key : f.path).slice(0, 300), status: f.status == null ? null : f.status, ms: 0, count: 0, message: null, meta: null }; _hzHB.set(k, e); }
+  e.count += (f.count || 1); _hzHBn++; if ((f.ms || 0) > e.ms) e.ms = Math.min(2147483647, Math.round(f.ms)); if (f.message) e.message = String(f.message).slice(0, 1000); e.ts = new Date().toISOString();
+  if (f.meta) { const m = e.meta || (e.meta = {}); for (const x in f.meta) m[x] = (/^max_/.test(x) && typeof m[x] === 'number') ? Math.max(m[x], f.meta[x]) : f.meta[x]; }
+  if (HZ_ALERT_KINDS.has(kind)) _hzAlertDirty = true;
+} catch (_) {} }
+// v28.162 (Ben): per-route call / 5xx counts for the red-alert "route mostly failing" trigger, in fixed 10-minute windows, in memory
+// (per instance: the app-wide 5xx count comes from the DB instead). O(1) per request, capped at 500 routes.
+let _hzRoute = new Map(), _hzRouteT = Date.now(), _hzPoolT = 0;
+function hzRouteCount(route, is5xx) { const now = Date.now(); if (now - _hzRouteT > 600000) { _hzRoute = new Map(); _hzRouteT = now; }
+  let r = _hzRoute.get(route); if (!r) { if (_hzRoute.size >= 500) return; r = { n: 0, e: 0, first: now, last: now }; _hzRoute.set(route, r); } r.n++; if (is5xx) { r.e++; r.last = now; _hzAlertDirty = true; } }
 const HZ_HEALTH_INSERT = `INSERT INTO planner.app_health_events (ts, kind, source, path, method, status, ms, message, stack, user_email, app_version, user_agent, count, meta)
   SELECT coalesce(x.ts, now()), x.kind, x.source, x.path, x.method, x.status, x.ms, x.message, x.stack, x.user_email, x.app_version, x.user_agent, coalesce(x.count, 1), x.meta
   FROM jsonb_to_recordset($1::jsonb) AS x(ts timestamptz, kind text, source text, path text, method text, status int, ms int, message text, stack text, user_email text, app_version text, user_agent text, count int, meta jsonb)`;
@@ -811,7 +881,7 @@ function hzHealthFlush(force) {
     if (now < _hzHBoffUntil) return null;
     const rows = Array.from(_hzHB.values(), e => Object.assign({ app_version: APP_VERSION }, e)); _hzHB.clear(); _hzHBn = 0; _hzHBlast = now;
     _hzHBbusy = _reqStore.exit(() => pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]))   // exit(): not counted against the triggering request
-      .then(() => null, e => { console.warn('[health] flush of ' + rows.length + ' row(s) failed: ' + (e && e.message)); if (e && e.code === '42P01') _hzHBoffUntil = Date.now() + 600000; })
+      .then(() => { hzAlertMaybeEval(); return null; }, e => { console.warn('[health] flush of ' + rows.length + ' row(s) failed: ' + (e && e.message)); if (e && e.code === '42P01') _hzHBoffUntil = Date.now() + 600000; })
       .finally(() => { _hzHBbusy = null; });
     return _hzHBbusy;
   } catch (e) { console.warn('[health] flush error: ' + (e && e.message)); return null; }
@@ -819,11 +889,15 @@ function hzHealthFlush(force) {
 if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), 30000).unref?.();
 app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
   if (_hzHB.size) hzHealthFlush(false);   // v28.159: due flush rides an active request (Vercel has no background time)
+  // v28.162 (Ben): DB pool sample at most once per 10s (three integer reads); noted only when requests are queued for a connection.
+  try { const now = Date.now(); if (now - _hzPoolT >= 10000) { _hzPoolT = now; const w = pool.waitingCount;
+    if (w > 0) hzHealthEvt('db_pool', 'waiting', { path: 'db pool waiting', message: 'Requests queued for a DB connection (pool max ' + ((pool.options && pool.options.max) || '?') + ')', meta: { max_waiting: w, total: pool.totalCount, idle: pool.idleCount } }); } } catch (_) {}
   res.on('finish', () => { try { const s = _reqStore.getStore(); const ms = Date.now() - ((s && s.t0) || Date.now()); const q = (s && s.q) || 0;
     const path = String(req.originalUrl || req.url || '').split('?')[0];
     if (!path.startsWith('/api/')) return;   // page/static loads aren't what we're measuring
     _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
     if (ms >= HZ_SLOW_MS) console.log('[slow ' + ms + 'ms ' + q + 'q] ' + req.method + ' ' + path + ' ' + res.statusCode);
+    if (!HZ_HEALTH_SKIP.test(path)) hzRouteCount(req.method + ' ' + ((req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path), res.statusCode >= 500);   // v28.162: red-alert route ratio
     // v28.159 (Ben): health log. Group by the matched route pattern (/api/supply/po/:po) so ids don't fragment the report.
     if ((ms >= HZ_SLOW_MS || res.statusCode >= 500) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
       const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
@@ -1023,7 +1097,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
-      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly'   // v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks'   // v28.162 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -3262,7 +3336,9 @@ async function fulfilPushLines(po, completion) {
       if (_reconfirm) {   // v27.840 (Ben): restore the PO to confirmed after the edit · v28.151 (review D1): also after a failed edit
         try { if ((await fulfilPOState(fulfilId)) !== 'confirmed') await fulfilPOButton(fulfilId, 'confirm', 'confirmed'); }
         catch (e) { const m = 'PO reverted to draft for the edit but could NOT be re-confirmed (' + (e && e.message) + '): confirm it in Fulfil by hand';
-          console.error('[fulfil push] ' + po + ': ' + m); _upProblems.push(m); if (_upErr) _upErr.message += '. ALSO: ' + m; }
+          console.error('[fulfil push] ' + po + ': ' + m); _upProblems.push(m); if (_upErr) _upErr.message += '. ALSO: ' + m;
+          hzIntegFatal('fulfil', 'reconfirm_failed', 'Fulfil PO ' + po + ' left in DRAFT: ' + m, { po: String(po), fulfil_id: fulfilId });   // v28.162 (Ben): health log + red alert
+        }
       }
     }
     try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }   // v27.738: keep the drift mirror fresh on push
@@ -4576,6 +4652,7 @@ async function _xeroRefresh(region, store) {
       catch (e2) { if (!(e2.code === 400 && e2.oauthError === 'invalid_grant')) throw e2; store = fresh; }
     }
     console.error('[xero] ' + region.toUpperCase() + ' refresh token rejected (invalid_grant): dropping the stored connection; reconnect needed');
+    hzIntegFatal('xero', 'disconnected_' + region, 'Xero ' + region.toUpperCase() + ' disconnected: refresh token rejected (invalid_grant). An admin must reconnect (SUPPLY ▸ CONFIG ▸ Payments)', { region });   // v28.162 (Ben): health log + red alert
     await pool.query(`DELETE FROM planner.app_settings WHERE key=$1 AND (CASE WHEN key=$1 THEN (value::jsonb)->>'refresh_token' END) = $2`, ['xero_oauth_' + region, store.refresh_token]).catch(() => {});
     _xeroTok[region] = { token: null, exp: 0 };
     return null;
@@ -21391,7 +21468,10 @@ app.get('/hz-health.js', (req, res) => { res.set('Content-Type', 'application/ja
 // (csid). Trade-off: errors on the portal LOGIN screens (no session yet) are not captured, which is acceptable vs an open
 // write hole. Limits: <= 50 events a request, per (source, IP, user) 60 events a minute and per IP 200 a minute (excess dropped
 // with 202), fields truncated (message 500, stack 2000), identical events in one batch collapsed to a count, one INSERT.
-const HZ_CE_KINDS = new Set(['client_error', 'console_error', 'slow_view']);
+// v28.162 (Ben): + long_task / api_failure / page_view / sanity / metric. These arrive PRE-AGGREGATED by hz-health.js, so a row's
+// `count` (1..10000) is honoured instead of counting 1 per row.
+const HZ_CE_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'long_task', 'api_failure', 'page_view', 'sanity', 'metric']);
+const HZ_CE_AGG = new Set(['long_task', 'api_failure', 'page_view', 'metric']);
 const _hzCeRate = new Map();   // key -> { t, n } fixed one-minute windows
 function hzCeAllow(key, max, want) { const now = Date.now(); let r = _hzCeRate.get(key);
   if (!r || now - r.t > 60000) { r = { t: now, n: 0 }; _hzCeRate.set(key, r); }
@@ -21408,9 +21488,10 @@ async function hzClientEvents(req, res, source, email) {
       if (!e || typeof e !== 'object' || !HZ_CE_KINDS.has(e.kind)) continue;
       const message = clip(e.message, 500); if (!message) continue;
       const path = clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
-      const ex = agg.get(k); if (ex) { ex.count++; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
+      const cnt = HZ_CE_AGG.has(e.kind) ? Math.max(1, Math.min(10000, Math.round(Number(e.count) || 1))) : 1;
+      const ex = agg.get(k); if (ex) { ex.count += cnt; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
       let meta = null; if (e.meta && typeof e.meta === 'object') { try { const j = JSON.stringify(e.meta); if (j.length <= 1000) meta = e.meta; } catch (_) {} }
-      agg.set(k, { kind: e.kind, source, path, ms, message, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: 1, meta });
+      agg.set(k, { kind: e.kind, source, path, ms, message, method: e.kind === 'api_failure' ? clip(e.method, 10) : null, status: (e.kind === 'api_failure' && e.status != null && Number.isInteger(Number(e.status)) && Number(e.status) >= 0 && Number(e.status) < 1000) ? Number(e.status) : null, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: cnt, meta });   // v28.162: client api_failure carries method + status
     }
     let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
     const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
@@ -21418,6 +21499,7 @@ async function hzClientEvents(req, res, source, email) {
     rows = rows.slice(0, n); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
     await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]);
     res.status(202).json({ ok: true, accepted: rows.length });
+    if (rows.some(r => r.kind === 'client_error' || r.kind === 'console_error')) { _hzAlertDirty = true; hzAlertMaybeEval(); }   // v28.162: red alert "same error, 3+ users" (at most one eval a minute)
   } catch (e) { console.warn('[health] client-events insert failed: ' + (e && e.message)); res.status(202).json({ ok: false }); }   // never a 500 (the page would log it again)
 }
 const _hzText = express.text({ type: 'text/plain', limit: '256kb' });   // sendBeacon(string) arrives as text/plain
@@ -21464,8 +21546,59 @@ async function hzHealthReport(daysIn) {
   d.slow.forEach(r => { r.file = hzLikelyFile(r.path); }); d.errors.forEach(r => { r.file = hzLikelyFile(r.path); });
   d.browser.forEach(r => { r.file = hzLikelyFile((r.views || [])[0], (r.sources || [])[0]); r.users_short = (r.user_list || []).map(hzShortUser); delete r.user_list; });
   d.views.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); });
-  d.days = days; d.version = APP_VERSION; d.slow_ms = HZ_SLOW_MS; d.markdown = hzHealthMarkdown(d);
+  d.days = days; d.version = APP_VERSION; d.slow_ms = HZ_SLOW_MS;
+  try { Object.assign(d, await hzHealthReportExtra(days)); } catch (e) { d.extra_error = e.message; console.warn('[health] report extras failed: ' + e.message); }   // v28.162: never lose the v28.159 report
+  d.markdown = hzHealthMarkdown(d);
   return d;
+}
+// v28.162 (Ben): likely file per integration service (the .md is written for Claude Code).
+const HZ_INTEG_FILE = { fulfil: 'server.mjs fulfilFetch / fulfilFetchCfg (+ the PO push)', xero: 'server.mjs xeroFetch', 'xero-token': 'server.mjs xeroExchange / _xeroRefresh / xeroToken', flexport: 'server.mjs flexportFetch',
+  dhl: 'server.mjs dhlLookupOne (tracking poller)', fedex: 'server.mjs fedexToken / FedEx track', blade: 'server.mjs bladeLogin / bladeVariations / bladeStocks', anthropic: 'server.mjs POST /api/ai proxy + Ask Claude (/api/assistant)',
+  resend: 'server.mjs sendResendEmail (+ the direct Resend calls)', kv: 'server.mjs kvCmd (KV data cache)', drivehq: 'server.mjs 3PL DriveHQ stock fetch', cin7: 'server.mjs Cin7 calls' };
+// v28.162 (Ben): the new sections, ONE query. New since last deploy = error groups (kind + path + message; browser errors by
+// message) whose FIRST-EVER row (whole table, 60-day retention) carries the current app_version.
+async function hzHealthReportExtra(days) {
+  const x = (await pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int))
+    SELECT json_build_object(
+      'kpis2', (SELECT json_build_object('freezes', coalesce(sum(count) FILTER (WHERE kind = 'long_task'), 0), 'api_failures', coalesce(sum(count) FILTER (WHERE kind = 'api_failure'), 0),
+        'integration_errors', coalesce(sum(count) FILTER (WHERE kind = 'integration_error'), 0), 'data_findings', count(DISTINCT kind || path) FILTER (WHERE kind IN ('etl_stale', 'etl_flat', 'etl_drop', 'data_lag')),
+        'sanity', count(DISTINCT path) FILTER (WHERE kind = 'sanity'), 'db', coalesce(sum(count) FILTER (WHERE kind IN ('db_pool', 'slow_query')), 0), 'red_alerts', count(*) FILTER (WHERE kind = 'red_alert')) FROM ev),
+      'freezes', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, max(ms) max_ms, sum(coalesce((meta->>'sum_ms')::numeric, ms))::bigint sum_ms, count(DISTINCT user_email)::int users, array_agg(DISTINCT source) sources, max(ts) last_seen
+        FROM ev WHERE kind = 'long_task' GROUP BY path ORDER BY sum_ms DESC NULLS LAST LIMIT 25) x),
+      'api', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT method, path, status, sum(count)::int n, max(ms) max_ms, count(DISTINCT user_email)::int users, (array_agg(message ORDER BY ts DESC))[1] message, max(ts) last_seen
+        FROM ev WHERE kind = 'api_failure' GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 25) x),
+      'integ', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT meta->>'service' service, path, status, sum(count)::int n, coalesce(sum(count) FILTER (WHERE meta->>'timeout' = 'true'), 0)::int timeouts, max(ms) max_ms,
+        (array_agg(message ORDER BY ts DESC))[1] message, min(ts) first_seen, max(ts) last_seen FROM ev WHERE kind = 'integration_error' GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 25) x),
+      'data', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC), '[]') FROM (SELECT DISTINCT ON (kind, path) kind, path, message, count n, ts first_seen, coalesce((meta->>'last_seen')::timestamptz, ts) last_seen, meta
+        FROM ev WHERE kind IN ('etl_stale', 'etl_flat', 'etl_drop', 'data_lag') ORDER BY kind, path, ts DESC) x),
+      'sanity', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC), '[]') FROM (SELECT DISTINCT ON (path, source) path, source, message, count n, ts first_seen, coalesce((meta->>'last_seen')::timestamptz, ts) last_seen, user_email
+        FROM ev WHERE kind = 'sanity' ORDER BY path, source, ts DESC) x),
+      'db_pool', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, max((meta->>'max_waiting')::int) max_waiting, (array_agg(message ORDER BY ts DESC))[1] message, max(ts) last_seen FROM ev WHERE kind = 'db_pool' GROUP BY path ORDER BY n DESC) x),
+      'slow_q', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path sql, sum(count)::int n, max(ms) max_ms, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, (array_agg(meta->>'example' ORDER BY ts DESC))[1] example, max(ts) last_seen
+        FROM ev WHERE kind = 'slow_query' GROUP BY path ORDER BY max_ms DESC LIMIT 25) x),
+      'pages', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, array_agg(DISTINCT source) sources, sum(coalesce((meta->>'visits')::int, count))::int visits, count(DISTINCT user_email)::int users, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s
+        FROM ev WHERE kind = 'page_view' GROUP BY path ORDER BY visits DESC LIMIT 30) x),
+      'page_users', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT user_email, sum(coalesce((meta->>'visits')::int, count))::int visits, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s, count(DISTINCT path)::int pages, max(ts) last_seen
+        FROM ev WHERE kind = 'page_view' AND user_email IS NOT NULL GROUP BY 1 ORDER BY active_s DESC LIMIT 30) x),
+      'unvisited', (SELECT coalesce(json_agg(DISTINCT a.path), '[]') FROM planner.app_health_events a WHERE a.kind = 'page_view' AND a.ts >= now() - interval '60 days' AND NOT EXISTS (SELECT 1 FROM ev WHERE ev.kind = 'page_view' AND ev.path = a.path)),
+      'red', (SELECT coalesce(json_agg(x ORDER BY x.ts DESC), '[]') FROM (SELECT id, ts, path, message, count n, meta FROM planner.app_health_events WHERE kind = 'red_alert' AND (ts >= now() - make_interval(days => $1::int) OR meta->>'pending_alert' = 'true') ORDER BY ts DESC LIMIT 50) x),
+      'per_version', (SELECT coalesce(json_agg(x ORDER BY x.first_seen DESC), '[]') FROM (SELECT app_version, coalesce(sum(count) FILTER (WHERE kind = ANY($3::text[])), 0)::int errors, coalesce(sum(count) FILTER (WHERE kind = 'server_error'), 0)::int server, coalesce(sum(count) FILTER (WHERE kind IN ('client_error', 'console_error')), 0)::int browser,
+        coalesce(sum(count) FILTER (WHERE kind = 'api_failure'), 0)::int api, coalesce(sum(count) FILTER (WHERE kind = 'integration_error'), 0)::int integ, min(ts) first_seen, max(ts) last_seen FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1 ORDER BY min(ts) DESC LIMIT 12) x),
+      'new_since', (SELECT coalesce(json_agg(x ORDER BY x.n DESC), '[]') FROM (SELECT * FROM (SELECT kind, CASE WHEN kind IN ('client_error', 'console_error') THEN '' WHEN kind = 'integration_error' THEN coalesce(path, '') ELSE coalesce(method || ' ', '') || coalesce(path, '') END path, status, split_part(coalesce(message, ''), E'\\n', 1) message,
+        sum(count)::int n, count(DISTINCT user_email)::int users, min(ts) first_seen, max(ts) last_seen, (array_agg(app_version ORDER BY ts))[1] first_ver, (array_agg(DISTINCT path))[1:3] views
+        FROM planner.app_health_events WHERE kind = ANY($3::text[]) GROUP BY 1, 2, 3, 4) g WHERE first_ver = $2 ORDER BY n DESC LIMIT 30) x),
+      'prev_version', (SELECT app_version FROM (SELECT app_version, min(ts) f FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1) v   -- the release deployed before this one (not a newer branch build writing to the same DB)
+        WHERE f < coalesce((SELECT min(ts) FROM planner.app_health_events WHERE app_version = $2), now()) ORDER BY f DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
+  for (const k in x.kpis2) x.kpis2[k] = Number(x.kpis2[k]) || 0;
+  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
+  x.integ.forEach(r => { r.file = HZ_INTEG_FILE[r.service] || 'server.mjs _fetchT callers'; });
+  x.new_since.forEach(r => { r.file = r.kind === 'integration_error' ? (HZ_INTEG_FILE[String(r.path).split(' ')[0]] || 'server.mjs') : hzLikelyFile(r.path ? String(r.path).replace(/^[A-Z]+ /, '') : (r.views || [])[0], r.path ? null : 'staff'); });
+  x.page_users.forEach(r => { r.user = hzShortUser(r.user_email); delete r.user_email; });
+  x.sanity.forEach(r => { r.user = r.user_email ? hzShortUser(r.user_email) : null; delete r.user_email; });
+  const pend = x.red.filter(r => r.meta && r.meta.pending_alert === true), slot = await hzEmailSlot();
+  x.red_alerts = { rows: x.red, pending: pend.length, pending_ids: pend.map(r => Number(r.id)), last_sent: slot.last_sent, next_allowed: slot.next_allowed }; delete x.red;
+  x.unvisited_note = 'Pages seen in the last 60 days with zero visits in this period. The menu itself (RAIL_L1 / RAIL_L2) is built from the live DOM, so a page nobody has opened in 60 days cannot be listed.';
+  return x;
 }
 function hzHealthMarkdown(d) {
   const k = d.kpis, F = ddMonYy(String(d.from)), T = ddMonYy(String(d.to)), L = [];
@@ -21473,7 +21606,15 @@ function hzHealthMarkdown(d) {
   L.push(`# HORIZON health report: ${F} to ${T} (${d.version})`, '');
   L.push('How to use: upload this to Claude Code in the horizon-demand-and-supply-planner repo and ask it to work through the sections in order (server errors first). Each item gives counts, a concrete example and the likely file. Reproduce locally (`PORT=8124 node server.mjs`), fix, verify, and note each fix in CHANGES.md.', '');
   L.push(`Source: planner.app_health_events, last ${d.days} days (slow request = ${d.slow_ms}ms or more; slow view = over 3s to render). Generated ${dt(new Date().toISOString())}.`, '');
-  L.push('## Summary', '', '| Metric | Count |', '|---|---|', `| Server errors (5xx) | ${k.server_errors} |`, `| Slow requests | ${k.slow_requests} |`, `| Browser errors | ${k.browser_errors} |`, `| Slow views | ${k.slow_views} |`, `| Distinct users affected (browser) | ${k.users} |`, '');
+  L.push('## Summary', '', '| Metric | Count |', '|---|---|', `| Server errors (5xx) | ${k.server_errors} |`, `| Slow requests | ${k.slow_requests} |`, `| Browser errors | ${k.browser_errors} |`, `| Slow views | ${k.slow_views} |`, `| Distinct users affected (browser) | ${k.users} |`);
+  const k2 = d.kpis2 || {}; if (d.kpis2) L.push(`| Freezes (main thread >= 1s) | ${k2.freezes} |`, `| API failures (seen by browsers) | ${k2.api_failures} |`, `| Integration errors | ${k2.integration_errors} |`, `| Data freshness findings | ${k2.data_findings} |`, `| Sanity findings | ${k2.sanity} |`, `| DB pool / slow query events | ${k2.db} |`, `| Red alerts | ${k2.red_alerts} |`);
+  L.push('');
+  if (d.extra_error) L.push(`> The v28.162 sections failed to load: ${hzMdCode(d.extra_error)} (is migration 329 applied?)`, '');
+  // v28.162 (Ben): New since last deploy goes FIRST: these are what the latest release broke.
+  if (d.new_since) { L.push(`## New since ${d.prev_version || 'the previous version'} (first seen on ${d.version})`, '');
+    if (!d.new_since.length) L.push('Nothing new: every error in the log was already seen on an earlier version.', '');
+    else { L.push('| # | Kind | Where | Message | Count | Users | First seen | Likely file |', '|---|---|---|---|---|---|---|---|');
+      d.new_since.forEach((r, i) => L.push(`| ${i + 1} | ${r.kind} | ${hzMdCell(r.path || (r.views || []).filter(Boolean).join(', '))}${r.status ? ' (' + r.status + ')' : ''} | ${hzMdCell(String(r.message || '').slice(0, 160))} | ${r.n} | ${r.users} | ${dt(r.first_seen)} | ${hzMdCell(r.file)} |`)); L.push(''); } }
   L.push('## 1. Server errors (fix first)', '');
   if (!d.errors.length) L.push('None logged.', '');
   d.errors.slice(0, 20).forEach((r, i) => { L.push(`### 1.${i + 1} ${r.method} ${r.path} returned ${r.status} (${r.n}x)`, '');
@@ -21496,8 +21637,33 @@ function hzHealthMarkdown(d) {
   if (!d.views.length) L.push('None logged.', '');
   else { L.push('| # | View | Source | Count | p95 ms | Max ms | Users | Last seen | Likely file |', '|---|---|---|---|---|---|---|---|---|');
     d.views.forEach((r, i) => L.push(`| ${i + 1} | ${hzMdCell(r.path)} | ${hzMdCell((r.sources || []).join(', '))} | ${r.n} | ${r.p95} | ${r.max_ms} | ${r.users} | ${dt(r.last_seen)} | ${hzMdCell(r.file)} |`)); L.push(''); }
+  // v28.162 (Ben): new sections.
+  const tbl = (title, note, heads, rows) => { L.push(title, ''); if (note) L.push(note, ''); if (!rows.length) { L.push('None logged.', ''); return; }
+    L.push('| ' + heads.join(' | ') + ' |', '|' + heads.map(() => '---').join('|') + '|'); rows.forEach(r => L.push('| ' + r.map(hzMdCell).join(' | ') + ' |')); L.push(''); };
+  if (d.kpis2) {
+    tbl('## 5. Data freshness (ETL + actuals)', 'From runHealthChecks (planner.etl_runs, sales_actuals, inbound_shipments). Fix in the n8n workflow named in the path, or the source sheet / Cin7 sync. All findings listed.', ['Kind', 'Job / table', 'Finding', 'Times seen', 'Last seen'],
+      d.data.map(r => [r.kind, r.path, r.message, r.n, dt(r.last_seen)]));
+    tbl('## 6. Business sanity', 'Server checks (runHealthChecks) and browser checks (artifact_v16.7.html: demand rebuild idempotency). A "demand rebuild not idempotent" row means buildLiveDemand() gave a different total for unchanged inputs: diff two rebuilds in artifact_v16.7.html.', ['Check', 'Source', 'Finding', 'Times seen', 'Last seen'],
+      d.sanity.map(r => [r.path, r.source, r.message, r.n, dt(r.last_seen)]));
+    tbl('## 7. Integration errors', 'Non-2xx, network errors and timeouts from outbound calls (all through _fetchT in server.mjs).', ['Service', 'Call', 'Status', 'Count', 'Timeouts', 'Max ms', 'Last message', 'Last seen', 'Likely file'],
+      d.integ.map(r => [r.service, r.path, r.status || 'network', r.n, r.timeouts, r.max_ms, String(r.message || '').slice(0, 160), dt(r.last_seen), r.file]));
+    tbl('## 8. Freezes (main thread blocked >= 1s)', 'Long tasks seen by browsers, per view. Profile the view in Chrome DevTools Performance; the likely file maps the view as in section 4.', ['View', 'Freezes', 'Max ms', 'Total ms', 'Users', 'Last seen', 'Likely file'],
+      d.freezes.map(r => [r.path, r.n, r.max_ms, r.sum_ms, r.users, dt(r.last_seen), r.file]));
+    tbl('## 9. API failures seen by browsers', 'Client-observed: 5xx, 408 / 429 / 504, network errors (status 0) and responses slower than 10s. Includes Vercel 504s that never reach the server log.', ['Endpoint', 'Status', 'Count', 'Max ms', 'Users', 'Last seen', 'Likely file'],
+      d.api.map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.max_ms, r.users, dt(r.last_seen), r.file]));
+    tbl('## 10. Database', 'db_pool = requests queued for a connection (pool max 4 on Vercel) or connect / query timeouts. Slow queries = one statement >= 2s, literals stripped; find it by its text in server.mjs.', ['Kind', 'What', 'Count', 'Max ms / waiting', 'Example route', 'Last seen'],
+      d.db_pool.map(r => ['db_pool', r.message || r.path, r.n, r.max_waiting == null ? '' : r.max_waiting + ' waiting', '', dt(r.last_seen)]).concat(d.slow_q.map(r => ['slow_query', r.sql, r.n, r.max_ms + ' ms', r.example || '', dt(r.last_seen)])));
+    const ra = d.red_alerts || {}; tbl('## 11. Red alerts', `Immediate alert emails (one health email per rolling hour, enforced in the DB). Pending now: ${ra.pending || 0}. Next allowed send: ${ra.next_allowed ? hzSydney(ra.next_allowed) + ' Sydney' : 'now'}.`, ['Raised', 'Alert', 'Events', 'Status'],
+      (ra.rows || []).map(r => [hzSydney(r.ts), r.message, r.n, r.meta && r.meta.pending_alert ? 'pending' : 'sent ' + (r.meta && r.meta.sent_at ? hzSydney(r.meta.sent_at) : '')]));
+    tbl('## 12. Page usage', null, ['View', 'Visits', 'Users', 'Active time'], d.pages.map(r => [r.path, r.visits, r.users, Math.round((r.active_s || 0) / 60) + ' min']));
+    tbl('### Per user', null, ['User', 'Visits', 'Pages', 'Active time', 'Last seen'], d.page_users.map(r => [r.user, r.visits, r.pages, Math.round((r.active_s || 0) / 60) + ' min', dt(r.last_seen)]));
+    L.push('### Pages with zero visits this period', '', d.unvisited_note, '', (d.unvisited || []).length ? d.unvisited.map(v => '- `' + hzMdCode(v) + '`').join('\n') : 'None.', '');
+    tbl('## 13. Errors per version', null, ['Version', 'Errors', 'Server', 'Browser', 'API', 'Integration', 'First seen', 'Last seen'], d.per_version.map(r => [r.app_version, r.errors, r.server, r.browser, r.api, r.integ, dt(r.first_seen), dt(r.last_seen)]));
+  }
   L.push('## Suggested next steps', '');
   const s = [];
+  if (d.new_since && d.new_since[0]) s.push(`Start with what ${d.version} introduced: ${d.new_since[0].kind} "${hzMdCode(d.new_since[0].message).slice(0, 120)}" (${d.new_since[0].n}x) in ${d.new_since[0].file}. Diff against ${d.prev_version || 'the previous release'} (git log -p) around that code.`);   // v28.162
+  if (d.data && d.data[0]) s.push(`Data freshness: ${hzMdCode(d.data[0].message).slice(0, 160)}. Check the n8n execution log for that job before touching app code.`);
   if (d.errors[0]) s.push(`Fix the top server error: ${d.errors[0].method} ${d.errors[0].path} (${d.errors[0].n}x, "${hzMdCode(d.errors[0].message).slice(0, 120)}"). Search server.mjs for the route and add a guard or fix the query; the local log prints "[500] ${d.errors[0].method} ${d.errors[0].path}".`);
   if (d.browser[0]) s.push(`Fix the top browser error "${hzMdCode(d.browser[0].message).slice(0, 120)}" (${d.browser[0].n}x) in ${d.browser[0].file}; use the stack sample and view to reproduce.`);
   if (d.slow[0]) s.push(`Profile ${d.slow[0].method} ${d.slow[0].path} (p95 ${d.slow[0].p95}ms): run with HZ_QLOG=200 to print slow queries, then cut round trips or add it to the response cache.`);
@@ -21533,10 +21699,21 @@ async function hzHealthEmail(days, to) {
   const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;max-width:760px">`
     + `<h2 style="font-size:17px;margin:0 0 4px">HORIZON weekly health</h2><div style="font-size:12px;color:#64748b;margin-bottom:12px">${E(F)} to ${E(T)} · ${E(d.version)}</div>`
     + `<table style="border-collapse:separate;border-spacing:8px 0"><tr>${tile(k.server_errors, 'Server errors', 1)}${tile(k.slow_requests, 'Slow requests', 0)}${tile(k.browser_errors, 'Browser errors', 1)}${tile(k.slow_views, 'Slow views', 0)}</tr></table>`
-    + tbl('Server errors', ['Endpoint', 'Status', 'Count', 'Message', 'Last seen'], d.errors.slice(0, 5).map(r => [r.method + ' ' + r.path, r.status, r.n, String(r.message || '').slice(0, 140), dt(r.last_seen)]))
+    // v28.162 (Ben): second KPI row, then New since last deploy FIRST, data freshness in full, top 5 of every other section.
+    + (d.kpis2 ? `<table style="border-collapse:separate;border-spacing:8px 0;margin-top:8px"><tr>${tile(d.kpis2.freezes, 'Freezes', 1)}${tile(d.kpis2.api_failures, 'API failures', 1)}${tile(d.kpis2.integration_errors, 'Integration errors', 1)}${tile(d.kpis2.data_findings, 'Data freshness', 1)}${tile(d.kpis2.sanity, 'Sanity', 1)}${tile(d.kpis2.db, 'DB', 1)}</tr></table>`
+      + tbl('New since ' + (d.prev_version || 'last deploy') + ' (first seen on ' + d.version + ')', ['Kind', 'Where', 'Message', 'Count', 'Users'], d.new_since.slice(0, 5).map(r => [r.kind, (r.path || (r.views || []).filter(Boolean).join(', ')) + (r.status ? ' (' + r.status + ')' : ''), String(r.message || '').slice(0, 140), r.n, r.users]))
+      + ((d.red_alerts || {}).pending ? tbl('Red alerts held by the hourly cap (now delivered)', ['Raised', 'Alert', 'Events'], d.red_alerts.rows.filter(r => r.meta && r.meta.pending_alert).map(r => [hzSydney(r.ts) + ' Sydney', r.message, r.n])) : '')
+      + tbl('Data freshness', ['Kind', 'Job / table', 'Finding', 'Last seen'], d.data.map(r => [r.kind, r.path, r.message, dt(r.last_seen)])) : '')
+    + tbl('Server errors',['Endpoint', 'Status', 'Count', 'Message', 'Last seen'], d.errors.slice(0, 5).map(r => [r.method + ' ' + r.path, r.status, r.n, String(r.message || '').slice(0, 140), dt(r.last_seen)]))
     + tbl('Browser errors', ['Message', 'Count', 'Users', 'Views', 'Last seen'], d.browser.slice(0, 5).map(r => [String(r.message || '').slice(0, 140), r.n, (r.users_short || []).join(', ') || r.users, (r.views || []).slice(0, 2).join(', '), dt(r.last_seen)]))
     + tbl('Slowest endpoints', ['Endpoint', 'Count', 'p50 ms', 'p95 ms', 'Max ms'], d.slow.slice(0, 5).map(r => [r.method + ' ' + r.path, r.n, r.p50, r.p95, r.max_ms]))
     + tbl('Slow views', ['View', 'Count', 'p95 ms', 'Max ms'], d.views.slice(0, 5).map(r => [r.path, r.n, r.p95, r.max_ms]))
+    + (d.kpis2 ? tbl('Sanity', ['Check', 'Finding', 'Last seen'], d.sanity.slice(0, 5).map(r => [r.path, String(r.message || '').slice(0, 160), dt(r.last_seen)]))
+      + tbl('Integration errors', ['Service', 'Call', 'Status', 'Count', 'Last seen'], d.integ.slice(0, 5).map(r => [r.service, r.path, r.status || 'network', r.n, dt(r.last_seen)]))
+      + tbl('Freezes (>= 1s)', ['View', 'Freezes', 'Max ms', 'Users'], d.freezes.slice(0, 5).map(r => [r.path, r.n, r.max_ms, r.users]))
+      + tbl('API failures seen by browsers', ['Endpoint', 'Status', 'Count', 'Users'], d.api.slice(0, 5).map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.users]))
+      + tbl('Database', ['What', 'Count', 'Max'], d.db_pool.slice(0, 3).map(r => [r.message || r.path, r.n, (r.max_waiting || 0) + ' waiting']).concat(d.slow_q.slice(0, 5 - Math.min(3, d.db_pool.length)).map(r => [r.sql, r.n, r.max_ms + ' ms'])))
+      + tbl('Top pages', ['View', 'Visits', 'Users', 'Active min'], d.pages.slice(0, 5).map(r => [r.path, r.visits, r.users, Math.round((r.active_s || 0) / 60)])) : '')
     + `<p style="font-size:13px;margin-top:18px;padding:10px 12px;background:#eff6ff;border-radius:8px">Full details attached: upload the .md to Claude Code.</p></div>`;
   const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html,
     attachments: [{ filename, content: Buffer.from(d.markdown, 'utf8').toString('base64') }] };
@@ -21552,12 +21729,16 @@ app.post('/api/cron/health-weekly', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try {
     const b = req.body || {}, dry = b.dry_run === true || b.dry_run === 'true';
-    const to = (dry && hzEmailList(b.to).length) ? hzEmailList(b.to) : await hzHealthRecipients();   // a caller's `to` is honoured ONLY on a dry run
+    // v28.162 (Ben): fresh data-freshness / sanity findings first (dry run: computed only). noSend: alerts raised here are stored as
+    // pending and ride THIS weekly email instead of spending the hourly slot on their own.
+    let checks = null; try { checks = await runHealthChecks({ dry, noSend: true }); } catch (e) { console.warn('[health] weekly pre-checks failed: ' + e.message); }
+    if (!dry) return res.json(Object.assign(await hzWeeklySend(b.days || 7, 'cron'), { checks: checks ? { findings: (checks.findings || []).length, written: checks.written || 0 } : null }));
+    const to = hzEmailList(b.to).length ? hzEmailList(b.to) : await hzHealthRecipients();   // a caller's `to` is honoured ONLY on a dry run
     const { payload, report } = await hzHealthEmail(b.days || 7, to);
-    if (dry) return res.json({ ok: true, dry_run: true, payload, md: report.markdown, kpis: report.kpis, purge: 'skipped (dry run)' });
-    const purged = await hzHealthPurge();
-    const r = await hzHealthSend(payload, 'cron');
-    res.json({ ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject, attachment: payload.attachments[0].filename, purged });
+    if (dry) { const slot = await hzEmailSlot(); return res.json({ ok: true, dry_run: true, payload, md: report.markdown, kpis: report.kpis, kpis2: report.kpis2 || null, purge: 'skipped (dry run)', would_throttle: !!(slot.next_allowed && Date.parse(slot.next_allowed) > Date.now()), next_allowed: slot.next_allowed }); }
+    // v28.162 (Ben): cap-aware. Inside the hour after another health email it is held (app_settings health_weekly_pending) and the
+    // next POST /api/cron/health-checks after the hour sends it. Recipients are always the configured list on a real send.
+    res.json(await hzWeeklySend(b.days || 7, 'cron'));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Local verification only: HZ_HEALTH_TEST=1 on a non-Vercel server exposes a deliberately slow / failing route. Never on prod.
@@ -21572,10 +21753,268 @@ app.post('/api/health/send-test', async (req, res) => {
     const email = me.email || authUser(req); if (!email) return res.status(400).json({ error: 'No signed-in email to send to' });
     const b = req.body || {}, { payload, report } = await hzHealthEmail(b.days || 7, [String(email).toLowerCase()]);
     if (b.dry_run === true) return res.json({ ok: true, dry_run: true, payload, kpis: report.kpis });
+    // v28.162 (Ben): the one-health-email-per-hour cap covers the test send too (it would otherwise be a way round it).
+    if (!(await hzEmailClaim())) { const slot = await hzEmailSlot(); return res.json({ ok: false, throttled: true, error: 'Health emails are capped at one per hour. Next allowed ' + (slot.next_allowed ? hzSydney(slot.next_allowed) + ' Sydney' : 'soon') + '.', next_allowed: slot.next_allowed }); }
     const r = await hzHealthSend(payload, email);
     res.json({ ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.162 (Ben): HEALTH CHECKS (data freshness, ETL, business sanity, daily metrics) + RED ALERT emails with a DB-enforced cap of
+// ONE health email per rolling hour across every health email (red alerts, weekly report, send-test).
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ETL rules (planner.etl_runs). A job is checked when ACTIVE: >= 3 runs in the last 60 days and not excluded. Cadence = median gap
+// of its last 20 runs. etl_stale: last run older than max(2 x cadence, 2h), or the latest status is not 'success' (a 'running' /
+// 'pending' row younger than 2h is allowed). etl_flat: rows_affected identical on >= 4 consecutive successful runs, ONLY for
+// daily-or-slower jobs (cadence >= 20h: the 02..05-Oct n8n_sync_sales_sheets 91,693 x4 incident); hourly snapshot jobs
+// (n8n_sync_products 2868, n8n_sync_flexport 152, cin7_inbound_direct) legitimately repeat and are below that cadence.
+// etl_drop: latest rows_affected < 60% of the median of the previous 10 successful runs. Calibrated on live etl_runs 06-Oct-26.
+const HZ_ETL = {
+  exclude: /^(ui_|supply_erp_push$)/,                                     // UI saves + event-driven ERP staging: not schedules
+  retired: new Set(['n8n_sync_inbound', 'n8n_sync_sales']),                 // replaced by cin7_inbound_direct / n8n_sync_sales_sheets
+  flat_ok: new Set(['n8n_sync_categories_subcategories', 'n8n_sync_key_account_fc', 'n8n_sync_preorders']),   // reference / committed data that can legitimately repeat
+  flat_ok_msg: /no change|unchanged|nothing to (do|sync)/i,                 // a job that says so in its message is not "flat"
+  core: /sales|products|inbound/,                                           // red alert on a failed status
+  active_days: 60, min_runs: 3, flat_runs: 4, flat_min_cadence_h: 20, drop_ratio: 0.6, drop_hist: 10, min_stale_h: 2,
+};
+// RED ALERT triggers (one place). Evaluated (1) in the health-buffer flush path, request-driven, at most once per 60s and only
+// after an alert-relevant event was noted; (2) in runHealthChecks (cron / hourly local timer); (3) immediately for a Fulfil
+// reconfirm_failed or a Xero disconnect. A condition re-alerts at most once per 24h unless its count has doubled.
+const HZ_RA = {
+  s5xx_total: 20, win_min: 10,                    // (a) >= 20 server 5xx app-wide in 10 min (DB, across instances)
+  route_ratio: 0.5, route_min_calls: 10,          // (a) >= 50% 5xx on one route with >= 10 calls in the current 10-min window (per instance, in memory)
+  db_timeouts: 5, db_win_min: 5,                  // (b) >= 5 connect / query timeouts in 5 min; or the DB unreachable in runHealthChecks
+  inbound_drop: 0.4,                              // (c) inbound_shipments empty, or total units down > 40% vs the last metric snapshot
+  sales_job: 'n8n_sync_sales_sheets', sales_max_h: 36,   // (c) the sales sync's last success older than 36h
+  fulfil_auth: 5,                                 // (d) >= 5 Fulfil 401/403 in 10 min (plus reconfirm_failed + Xero disconnect, immediate)
+  client_users: 3,                                // (e) the same browser error message from >= 3 distinct users in 10 min
+  realert_h: 24, throttle_min: 60, eval_every_ms: 60000,
+};
+const HZ_EMAIL_KEY = 'health_email_last_sent_at', HZ_WEEKLY_PENDING_KEY = 'health_weekly_pending';
+const HZ_ERR_KINDS = ['server_error', 'client_error', 'console_error', 'api_failure', 'integration_error'];
+const _hzMedian = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const _hzMon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function hzSydney(v) { try { const p = {}; new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: '2-digit', month: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  .formatToParts(new Date(v)).forEach(x => { p[x.type] = x.value; }); return p.day + '-' + _hzMon[(+p.month) - 1] + '-' + p.year + ' ' + p.hour + ':' + p.minute; } catch (_) { return String(v || ''); } }
+const _hzH = ms => ms >= 172800000 ? Math.round(ms / 86400000) + ' days' : Math.round(ms / 3600000) + 'h';
+// Pure ETL evaluator (unit-testable): jobs = [{ job, runs: [{ t (ms), s (status), r (rows_affected), m (message) }] newest first }].
+function hzEtlEval(jobs, now) {
+  const F = [], H = 3600000;
+  for (const j of jobs || []) {
+    const runs = (j.runs || []).slice().sort((a, b) => b.t - a.t); if (!runs.length || HZ_ETL.exclude.test(j.job) || HZ_ETL.retired.has(j.job)) continue;
+    if (runs.filter(r => now - r.t <= HZ_ETL.active_days * 86400000).length < HZ_ETL.min_runs) continue;
+    const last = runs[0], age = now - last.t, g = []; for (let i = 0; i + 1 < Math.min(runs.length, 20); i++) g.push(runs[i].t - runs[i + 1].t);
+    const cad = _hzMedian(g) || 24 * H, meta = { job: j.job, last_run: new Date(last.t).toISOString(), cadence_h: +(cad / H).toFixed(1), age_h: +(age / H).toFixed(1), status: last.s, rows: last.r };
+    if (last.s !== 'success' && !(/^(running|pending|started)$/i.test(last.s) && age < 2 * H))
+      F.push({ kind: 'etl_stale', path: j.job, message: `${j.job}: latest run status "${last.s}"${last.m ? ' (' + String(last.m).slice(0, 160) + ')' : ''}`, meta: Object.assign({ failed: true, core: HZ_ETL.core.test(j.job) }, meta) });
+    else if (age > Math.max(2 * cad, HZ_ETL.min_stale_h * H))
+      F.push({ kind: 'etl_stale', path: j.job, message: `${j.job}: no run for ${_hzH(age)} (normally every ${_hzH(cad)})`, meta });
+    const ok = runs.filter(r => r.s === 'success' && Number.isFinite(Number(r.r)));
+    if (ok.length && now - ok[0].t < 7 * 86400000) {
+      let streak = 1; while (streak < ok.length && Number(ok[streak].r) === Number(ok[0].r)) streak++;
+      if (cad >= HZ_ETL.flat_min_cadence_h * H && streak >= HZ_ETL.flat_runs && Number(ok[0].r) > 0 && !HZ_ETL.flat_ok.has(j.job) && !ok.slice(0, streak).some(r => HZ_ETL.flat_ok_msg.test(r.m || '')))
+        F.push({ kind: 'etl_flat', path: j.job, message: `${j.job}: rows_affected identical (${Number(ok[0].r).toLocaleString('en-GB')}) on ${streak} consecutive runs: the source may have stopped changing`, meta: Object.assign({ streak }, meta) });
+      const prev = ok.slice(1, 1 + HZ_ETL.drop_hist).map(r => Number(r.r)), med = _hzMedian(prev);
+      if (prev.length >= 5 && med > 0 && Number(ok[0].r) < HZ_ETL.drop_ratio * med)
+        F.push({ kind: 'etl_drop', path: j.job, message: `${j.job}: latest rows_affected ${Number(ok[0].r).toLocaleString('en-GB')} is ${Math.round(Number(ok[0].r) / med * 100)}% of the recent median ${Math.round(med).toLocaleString('en-GB')}`, meta: Object.assign({ median: med }, meta) });
+    }
+  }
+  return F;
+}
+const HZ_CHECKS_SQL = `SELECT json_build_object(
+  'etl', (SELECT coalesce(json_agg(j), '[]') FROM (SELECT job, json_agg(json_build_object('t', floor(extract(epoch FROM ran_at) * 1000), 's', status, 'r', rows_affected, 'm', left(coalesce(message, ''), 200)) ORDER BY ran_at DESC) runs
+      FROM (SELECT job, status, rows_affected, message, ran_at, row_number() OVER (PARTITION BY job ORDER BY ran_at DESC) rn FROM planner.etl_runs WHERE ran_at >= now() - interval '120 days') x WHERE rn <= 25 GROUP BY job) j),
+  'sales_max', (SELECT to_char(max(month), 'YYYY-MM') FROM planner.sales_actuals),
+  'sales_months', (SELECT coalesce(json_agg(x ORDER BY m), '[]') FROM (SELECT to_char(month, 'YYYY-MM') m, sum(units)::float8 u FROM planner.sales_actuals WHERE month >= (date_trunc('month', now()) - interval '14 months')::date GROUP BY 1) x),
+  'inb', (SELECT json_build_object('n', count(*), 'units', coalesce(sum(quantity), 0)::float8, 'loaded', max(loaded_at)) FROM planner.inbound_shipments),
+  'nocat', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku ORDER BY sku))[1:8]) FROM planner.products WHERE in_planning_scope AND coalesce(trim(product_category), '') = ''),
+  'neg', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku || ' @ ' || warehouse || ' = ' || available ORDER BY available))[1:8]) FROM planner.v_product_inventory WHERE available < 0),
+  'metric', (SELECT coalesce(json_object_agg(path, json_build_object('v', (meta->>'value')::float8, 'ts', ts)), '{}') FROM (SELECT DISTINCT ON (path) path, meta, ts FROM planner.app_health_events WHERE kind = 'metric' AND source = 'server' ORDER BY path, ts DESC) m),
+  'metric_today', (SELECT coalesce(json_agg(DISTINCT path), '[]') FROM planner.app_health_events WHERE kind = 'metric' AND source = 'server' AND ts >= date_trunc('day', now())),
+  'now', now()) d`;
+// One finding = one event. Same kind + path within 24h updates that row (count + 1, latest message / meta) instead of inserting.
+const HZ_FINDINGS_UPSERT = `WITH f AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(kind text, path text, message text, meta jsonb, count int)),
+  up AS (UPDATE planner.app_health_events e SET count = e.count + 1, message = f.message, meta = coalesce(e.meta, '{}'::jsonb) || f.meta || jsonb_build_object('last_seen', now())
+    FROM f WHERE e.id = (SELECT id FROM planner.app_health_events WHERE kind = f.kind AND path = f.path AND ts >= now() - interval '24 hours' ORDER BY ts DESC LIMIT 1) RETURNING f.kind, f.path)
+  INSERT INTO planner.app_health_events (kind, source, path, message, meta, count, app_version)
+  SELECT f.kind, 'server', f.path, f.message, f.meta, coalesce(f.count, 1), $2 FROM f WHERE NOT EXISTS (SELECT 1 FROM up WHERE up.kind = f.kind AND up.path = f.path)`;
+function hzIsConnErr(e) { return /timeout exceeded when trying to connect|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|Connection terminated|max clients|too many clients|getaddrinfo/i.test(String((e && e.message) || e)); }
+async function runHealthChecks(opt) {
+  opt = opt || {}; const dry = !!opt.dry, t0 = Date.now(), F = [], alerts = [], metrics = [];
+  let d; try { d = (await pool.query(HZ_CHECKS_SQL)).rows[0].d; }
+  catch (e) {
+    if (!hzIsConnErr(e)) throw e;
+    await new Promise(r => setTimeout(r, 2000)); try { d = (await pool.query(HZ_CHECKS_SQL)).rows[0].d; } catch (e2) {   // one retry, then it is "unreachable"
+      const f = { key: 'db:unreachable', trigger: 'db', title: 'Database unreachable from the app', n: 1, first: new Date().toISOString(), last: new Date().toISOString(), examples: [String(e2.message).slice(0, 200)], file: 'server.mjs pool config (connectionTimeoutMillis / max) + Supabase status' };
+      let ra = null; if (!dry) { try { ra = await hzRedAlert([f]); } catch (_) {} }   // best effort: the claim needs the DB too, so the n8n error workflow is the real backstop
+      return { ok: false, unreachable: true, error: e2.message, alerts: [f], red_alert: ra, ms: Date.now() - t0 };
+    }
+  }
+  const now = Date.parse(d.now) || Date.now(), H = 3600000;
+  // 1. ETL
+  const etl = hzEtlEval(d.etl, now); F.push(...etl);
+  for (const f of etl) if (f.kind === 'etl_stale' && f.meta.failed && f.meta.core) alerts.push({ key: 'etl:failed:' + f.path, trigger: 'data', title: 'ETL job failed: ' + f.path, n: 1, examples: [f.message], file: 'n8n workflow for ' + f.path + ' (n8n.dockandbay.com) + planner.etl_runs' });
+  const sj = (d.etl || []).find(j => j.job === HZ_RA.sales_job);
+  if (sj) { const ls = (sj.runs || []).filter(r => r.s === 'success').sort((a, b) => b.t - a.t)[0], age = ls ? now - ls.t : Infinity;
+    if (age > HZ_RA.sales_max_h * H) alerts.push({ key: 'etl:sales_stale', trigger: 'data', title: 'Sales sync stale: ' + HZ_RA.sales_job + ' last success ' + (ls ? _hzH(age) + ' ago' : 'never'), n: 1, examples: [ls ? 'last success ' + hzSydney(ls.t) + ' Sydney' : 'no successful run'], file: 'n8n workflow ' + HZ_RA.sales_job }); }
+  // 2. data lag
+  const curYm = new Date(now).toISOString().slice(0, 7), dom = new Date(now).getUTCDate();
+  if (d.sales_max && d.sales_max < curYm && dom > 3) F.push({ kind: 'data_lag', path: 'sales_actuals:current_month', message: `sales_actuals latest month is ${d.sales_max}; ${curYm} should have partial actuals by day 4`, meta: { latest: d.sales_max, expected: curYm } });
+  const sm = {}; (d.sales_months || []).forEach(x => { sm[x.m] = Number(x.u) || 0; });
+  const ymAdd = (ym, k) => { const y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + k, dt = new Date(Date.UTC(y, m, 1)); return dt.toISOString().slice(0, 7); };
+  const lastFull = ymAdd(curYm, -1), prev3 = [ymAdd(curYm, -2), ymAdd(curYm, -3), ymAdd(curYm, -4)].map(m => sm[m]).filter(v => v != null);
+  if (prev3.length === 3) { const mean = (prev3[0] + prev3[1] + prev3[2]) / 3, lv = sm[lastFull] || 0;
+    if (mean > 0 && lv < 0.5 * mean) F.push({ kind: 'data_lag', path: 'sales_actuals:last_month_partial', message: `sales_actuals ${lastFull} units ${Math.round(lv).toLocaleString('en-GB')} are ${Math.round(lv / mean * 100)}% of the 3-month mean ${Math.round(mean).toLocaleString('en-GB')}: actuals may be partial (the Sep-26 incident)`, meta: { month: lastFull, units: lv, mean3: Math.round(mean) } }); }
+  const inb = d.inb || {}, inbAge = inb.loaded ? now - Date.parse(inb.loaded) : Infinity;
+  if (!Number(inb.n)) F.push({ kind: 'data_lag', path: 'inbound_shipments:empty', message: 'inbound_shipments has 0 rows', meta: { rows: 0 } });
+  else if (inbAge > 24 * H) F.push({ kind: 'data_lag', path: 'inbound_shipments:stale', message: `inbound_shipments last loaded ${_hzH(inbAge)} ago (${hzSydney(inb.loaded)} Sydney)`, meta: { loaded_at: inb.loaded, age_h: Math.round(inbAge / H) } });
+  // 3. business sanity
+  const prevInb = d.metric && d.metric.inbound_total, units = Number(inb.units) || 0;
+  if (!Number(inb.n)) { F.push({ kind: 'sanity', path: 'inbound_total:empty', message: 'Inbound shipments table is empty', meta: { value: 0 } });
+    alerts.push({ key: 'sanity:inbound_empty', trigger: 'data', title: 'Inbound shipments table is EMPTY', n: 1, examples: ['planner.inbound_shipments count = 0'], file: 'n8n / cin7_inbound_direct sync + planner.inbound_shipments' }); }
+  else if (prevInb && prevInb.v > 0 && units < (1 - HZ_RA.inbound_drop) * prevInb.v) { const pct = Math.round((1 - units / prevInb.v) * 100);
+    F.push({ kind: 'sanity', path: 'inbound_total:drop', message: `Inbound units down ${pct}% (${Math.round(prevInb.v).toLocaleString('en-GB')} on ${hzSydney(prevInb.ts)} to ${Math.round(units).toLocaleString('en-GB')})`, meta: { value: units, previous: prevInb.v, prev_ts: prevInb.ts } });
+    alerts.push({ key: 'sanity:inbound_drop', trigger: 'data', title: `Inbound units dropped ${pct}%`, n: 1, examples: [`${Math.round(prevInb.v)} to ${Math.round(units)}`], file: 'cin7_inbound_direct sync + planner.inbound_shipments' }); }
+  const months = Object.keys(sm).filter(m => m >= ymAdd(curYm, -13)).sort();
+  if (months.length) { const miss = []; for (let m = months[0]; m < months[months.length - 1]; m = ymAdd(m, 1)) if (sm[m] == null) miss.push(m);
+    if (miss.length) F.push({ kind: 'sanity', path: 'sales_actuals:missing_months', message: 'sales_actuals has no rows for ' + miss.join(', '), meta: { missing: miss } }); }
+  if (d.nocat && Number(d.nocat.n)) F.push({ kind: 'sanity', path: 'products:scope_no_category', message: `${d.nocat.n} in-planning-scope product(s) have no product_category (e.g. ${(d.nocat.ex || []).join(', ')})`, meta: { n: Number(d.nocat.n), examples: d.nocat.ex } });
+  if (d.neg && Number(d.neg.n)) F.push({ kind: 'sanity', path: 'inventory:negative_on_hand', message: `${d.neg.n} SKU/warehouse row(s) with negative on-hand in v_product_inventory (e.g. ${(d.neg.ex || []).slice(0, 4).join('; ')})`, meta: { n: Number(d.neg.n), examples: d.neg.ex } });
+  // 4. daily metric snapshots (once per calendar day per path) for week-on-week compares
+  const today = new Set(d.metric_today || []);
+  const mv = { inbound_total: units, inbound_rows: Number(inb.n) || 0, sales_last_month_units: sm[lastFull] || 0, scope_no_category: Number((d.nocat || {}).n) || 0, negative_on_hand_rows: Number((d.neg || {}).n) || 0 };
+  for (const k in mv) if (!today.has(k)) metrics.push({ kind: 'metric', path: k, message: 'daily metric ' + k, meta: { value: mv[k] }, count: 1 });
+  const out = { ok: true, dry_run: dry, findings: F, alerts, metrics: Object.assign({}, mv), ms: 0 };
+  if (!dry) {
+    const rows = F.map(f => ({ kind: f.kind, path: f.path, message: f.message, meta: f.meta || {}, count: 1 })).concat(metrics);
+    if (rows.length) await pool.query(HZ_FINDINGS_UPSERT, [JSON.stringify(rows), APP_VERSION]);
+    out.written = rows.length;
+    let wPend = false; try { wPend = (await pool.query(`SELECT 1 FROM planner.app_settings WHERE key = $1`, [HZ_WEEKLY_PENDING_KEY])).rowCount > 0; } catch (_) {}   // a held weekly goes first and carries the alerts
+    try { out.red_alert = await hzRedAlert(alerts.concat(await hzAlertCollect()), { noSend: !!opt.noSend || wPend }); } catch (e) { out.red_alert = { error: e.message }; }
+    if (!opt.noSend) { try { out.pending = await hzHealthPendingSends(); } catch (e) { out.pending = { error: e.message }; } }
+  } else { try { out.red_alert = await hzRedAlert(alerts.concat(await hzAlertCollect()), { dry: true }); } catch (e) { out.red_alert = { error: e.message }; } }
+  out.ms = Date.now() - t0; return out;
+}
+// Request-driven trigger evaluation (flush path + client-event posts): at most once per 60s, only after an alert-relevant event.
+function hzAlertMaybeEval() { try { const now = Date.now(); if (!_hzAlertDirty || now - _hzAlertEvalAt < HZ_RA.eval_every_ms) return; _hzAlertEvalAt = now; _hzAlertDirty = false;
+  _reqStore.exit(() => hzAlertCollect().then(f => f.length ? hzRedAlert(f) : null)).catch(e => console.warn('[health] alert eval failed: ' + (e && e.message))); } catch (_) {} }
+// Triggers (a) (b) (d) (e) from the last 10 minutes of events (ONE query) + the in-memory route ratio.
+async function hzAlertCollect() {
+  const out = [], d = (await pool.query(`WITH ev AS (SELECT kind, path, method, status, message, count, ts, user_email, meta FROM planner.app_health_events
+      WHERE ts >= now() - make_interval(mins => $1::int) AND kind IN ('server_error','db_pool','integration_error','client_error','console_error'))
+    SELECT json_build_object(
+      's5', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT coalesce(method || ' ', '') || path p, split_part(coalesce(message, ''), E'\\n', 1) m, sum(count)::int n FROM ev WHERE kind = 'server_error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 3) x)) FROM ev WHERE kind = 'server_error'),
+      'db', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT left(coalesce(message, ''), 160))) FROM ev WHERE kind = 'db_pool' AND meta ? 'error' AND ts >= now() - make_interval(mins => $2::int)),
+      'fa', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT path)) FROM ev WHERE kind = 'integration_error' AND meta->>'service' = 'fulfil' AND status IN (401, 403)),
+      'cu', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT message, count(DISTINCT user_email)::int users, sum(count)::int n, min(ts) first, max(ts) last, (array_agg(DISTINCT path))[1:3] views
+        FROM ev WHERE kind IN ('client_error', 'console_error') AND user_email IS NOT NULL GROUP BY message HAVING count(DISTINCT user_email) >= $3 ORDER BY 2 DESC LIMIT 5) x)) d`, [HZ_RA.win_min, HZ_RA.db_win_min, HZ_RA.client_users])).rows[0].d;
+  const s5 = d.s5 || {}; if (Number(s5.n) >= HZ_RA.s5xx_total) out.push({ key: 'srv:5xx', trigger: 'server', title: `${s5.n} server errors (5xx) in ${HZ_RA.win_min} min`, n: Number(s5.n), first: s5.first, last: s5.last, examples: (s5.ex || []).map(x => `${x.p} (${x.n}x): ${x.m}`), file: hzLikelyFile(((s5.ex || [])[0] || {}).p ? String(s5.ex[0].p).replace(/^\S+ /, '') : '') });
+  for (const [route, r] of _hzRoute) if (r.n >= HZ_RA.route_min_calls && r.e / r.n >= HZ_RA.route_ratio) out.push({ key: 'srv:route:' + route, trigger: 'server', title: `${route} failing: ${r.e} of ${r.n} calls returned 5xx`, n: r.e, first: new Date(r.first).toISOString(), last: new Date(r.last).toISOString(), examples: [route + ' ' + Math.round(r.e / r.n * 100) + '% 5xx in the current 10-min window (this instance)'], file: hzLikelyFile(route.replace(/^\S+ /, '')) });
+  const db = d.db || {}; if (Number(db.n) >= HZ_RA.db_timeouts) out.push({ key: 'db:timeouts', trigger: 'db', title: `${db.n} DB connection / query timeouts in ${HZ_RA.db_win_min} min`, n: Number(db.n), first: db.first, last: db.last, examples: (db.ex || []).slice(0, 3), file: 'server.mjs pool config (max 4, connectionTimeoutMillis, query_timeout) + the slow_query list' });
+  const fa = d.fa || {}; if (Number(fa.n) >= HZ_RA.fulfil_auth) out.push({ key: 'integ:fulfil_auth', trigger: 'integration', title: `Fulfil rejecting our API key: ${fa.n} 401/403 in ${HZ_RA.win_min} min`, n: Number(fa.n), first: fa.first, last: fa.last, examples: (fa.ex || []).slice(0, 3), file: 'server.mjs fulfilFetch / fulfilConfigFor (FULFIL_*_API_KEY)' });
+  for (const c of d.cu || []) out.push({ key: 'client:' + crypto.createHash('sha1').update(String(c.message)).digest('hex').slice(0, 16), trigger: 'client', title: `Browser error hitting ${c.users} users: ${String(c.message).slice(0, 80)}`, n: c.n, first: c.first, last: c.last, examples: [String(c.message).slice(0, 200)].concat((c.views || []).filter(Boolean).map(v => 'view ' + v)), file: hzLikelyFile((c.views || [])[0], 'staff') });
+  return out;
+}
+// Throttle: claim the single "health email" slot for this rolling hour, atomically, in the DB (holds across Vercel instances).
+// ON CONFLICT .. DO UPDATE .. WHERE locks the row: of two concurrent callers exactly one gets the RETURNING row.
+async function hzEmailClaim() {
+  const r = await pool.query(`INSERT INTO planner.app_settings AS s (key, value, updated_by, updated_at) VALUES ($1, now()::text, 'health', now())
+    ON CONFLICT (key) DO UPDATE SET value = now()::text, updated_by = 'health', updated_at = now()
+    WHERE (CASE WHEN s.value ~ '^\\d{4}-' THEN s.value::timestamptz ELSE '-infinity'::timestamptz END) < now() - make_interval(mins => $2::int) RETURNING value`, [HZ_EMAIL_KEY, HZ_RA.throttle_min]);
+  return r.rowCount === 1;
+}
+async function hzEmailSlot() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key = $1`, [HZ_EMAIL_KEY])).rows[0];
+  const last = r && /^\d{4}-/.test(r.value) ? new Date(r.value) : null; return { last_sent: last ? last.toISOString() : null, next_allowed: last ? new Date(last.getTime() + HZ_RA.throttle_min * 60000).toISOString() : null }; } catch (_) { return { last_sent: null, next_allowed: null }; } }
+async function hzPendingAlerts() { return (await pool.query(`SELECT id, ts, path, message, count, meta FROM planner.app_health_events WHERE kind = 'red_alert' AND meta->>'pending_alert' = 'true' ORDER BY ts LIMIT 50`)).rows; }
+async function hzMarkAlertsSent(ids, by) { if (ids.length) await pool.query(`UPDATE planner.app_health_events SET meta = coalesce(meta, '{}'::jsonb) || jsonb_build_object('pending_alert', false, 'sent_at', now(), 'sent_by', $2::text) WHERE id = ANY($1::bigint[])`, [ids, by]); }
+function hzRedAlertPayload(rows, to) {
+  const E = escHtml, n = rows.reduce((s, r) => s + (Number(r.count) || 0), 0), first = rows[0] || {};
+  const short = String(first.message || 'alert').slice(0, 70) + (rows.length > 1 ? ' +' + (rows.length - 1) + ' more' : '');
+  const subject = `RED ALERT: HORIZON ${short} (${n} event${n === 1 ? '' : 's'}, ${hzSydney(Date.now())} Sydney)`;
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;max-width:760px"><h2 style="font-size:17px;margin:0 0 6px;color:#dc2626">RED ALERT: HORIZON</h2>`
+    + `<div style="font-size:12px;color:#64748b;margin-bottom:10px">${E(APP_VERSION)} · ${rows.length} alert${rows.length === 1 ? '' : 's'} · health emails are capped at one per hour, so anything held back is included here</div>`
+    + rows.map(r => { const m = r.meta || {}; return `<div style="border:1px solid #fecaca;background:#fef2f2;border-radius:8px;padding:10px 12px;margin:8px 0;text-align:left">`
+      + `<div style="font-weight:700;font-size:14px">${E(r.message)}</div><div style="font-size:12px;color:#64748b;margin:3px 0">Trigger: ${E(m.trigger || '')} · ${E(r.count)} event(s) · first seen ${E(hzSydney(m.first_seen || r.ts))} · last seen ${E(hzSydney(m.last_seen || r.ts))} Sydney${m.held_since ? ' · held by the hourly cap since ' + E(hzSydney(m.held_since)) : ''}</div>`
+      + ((m.examples || []).length ? '<ul style="margin:4px 0 4px 18px;padding:0;font-size:12px">' + m.examples.slice(0, 3).map(x => `<li>${E(String(x).slice(0, 240))}</li>`).join('') + '</ul>' : '')
+      + `<div style="font-size:12px">Likely file: ${E(m.file || 'server.mjs')}</div></div>`; }).join('')
+    + `<p style="font-size:13px;margin-top:14px">Full log: CONFIG ▸ Admin ▸ Health log</p></div>`;
+  return { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html };
+}
+// Raise alerts: drop those already alerted in the last 24h (unless the count doubled), store the rest as PENDING red_alert rows,
+// then try to send everything pending. A throttled alert stays pending and rides the next allowed health email. No retries.
+async function hzRedAlert(findings, opt) {
+  opt = opt || {}; if (!findings || !findings.length) return { fired: [], skipped: [] };
+  const keys = findings.map(f => f.key), prev = new Map((await pool.query(`SELECT path, max(count)::int n FROM planner.app_health_events WHERE kind = 'red_alert' AND ts >= now() - make_interval(hours => $2::int) AND path = ANY($1::text[]) GROUP BY path`, [keys, HZ_RA.realert_h])).rows.map(r => [r.path, r.n]));
+  const fire = [], skipped = [];
+  for (const f of findings) { const p = prev.get(f.key); if (p != null && !((Number(f.n) || 1) >= 2 * p)) skipped.push(f.key); else fire.push(f); }
+  const rows = fire.map(f => ({ kind: 'red_alert', source: 'server', path: f.key, message: String(f.title).slice(0, 300), count: Math.max(1, Number(f.n) || 1), app_version: APP_VERSION,
+    meta: { pending_alert: true, trigger: f.trigger, first_seen: f.first || null, last_seen: f.last || null, examples: (f.examples || []).slice(0, 3).map(x => String(x).slice(0, 300)), file: f.file || null } }));
+  if (opt.dry) { const slot = await hzEmailSlot(), pend = await hzPendingAlerts();
+    return { fired: fire.map(f => f.key), skipped, would_send: !slot.next_allowed || Date.parse(slot.next_allowed) <= Date.now(), next_allowed: slot.next_allowed, pending_before: pend.length,
+      payload: rows.length || pend.length ? hzRedAlertPayload(pend.concat(rows.map(r => Object.assign({ ts: new Date().toISOString() }, r))), await hzHealthRecipients()) : null }; }
+  if (rows.length) await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]);
+  const sent = opt.noSend ? { sent: 0, held_for: 'weekly' } : await hzAlertSendPending('alert');
+  return { fired: fire.map(f => f.key), skipped, sent };
+}
+async function hzAlertSendPending(by) {
+  const pend = await hzPendingAlerts(); if (!pend.length) return { sent: 0, pending: 0 };
+  if (!(await hzEmailClaim())) { const slot = await hzEmailSlot(); await pool.query(`UPDATE planner.app_health_events SET meta = meta || jsonb_build_object('held_since', coalesce(meta->>'held_since', now()::text)) WHERE id = ANY($1::bigint[])`, [pend.map(r => r.id)]).catch(() => {});
+    return { sent: 0, throttled: true, pending: pend.length, next_allowed: slot.next_allowed }; }
+  const p = hzRedAlertPayload(pend, await hzHealthRecipients());
+  const r = await sendResendEmail({ to: p.to, subject: p.subject, html: p.html, kind: 'health-alert', ref: 'red-alert', by: by || 'health' });   // no retry on failure (the slot is spent; pending rows wait for the next slot)
+  if (r.error) return { sent: 0, error: r.error, pending: pend.length };
+  await hzMarkAlertsSent(pend.map(x => x.id), by || 'alert');
+  return { sent: r.sent || 0, sandbox: !!r.sandbox, alerts: pend.length, subject: p.subject };
+}
+// Cap-aware weekly send (cron + the pending-weekly retry). Throttled ⇒ remembered in app_settings and sent by the next
+// health-checks run after the hour. Pending red alerts ride along (listed in the report) and are marked sent.
+async function hzWeeklySend(days, by) {
+  if (!(await hzEmailClaim())) { const slot = await hzEmailSlot();
+    await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ($1, $2, 'health', now()) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`, [HZ_WEEKLY_PENDING_KEY, JSON.stringify({ days: days || 7, at: new Date().toISOString(), by })]);
+    return { ok: true, sent: 0, throttled: true, pending_weekly: true, next_allowed: slot.next_allowed }; }
+  const { payload, report } = await hzHealthEmail(days || 7, await hzHealthRecipients());
+  const purged = await hzHealthPurge();
+  const r = await hzHealthSend(payload, by);
+  await pool.query(`DELETE FROM planner.app_settings WHERE key = $1`, [HZ_WEEKLY_PENDING_KEY]).catch(() => {});   // never loop: a failed send is not re-queued
+  if (!r.error) await hzMarkAlertsSent((report.red_alerts || {}).pending_ids || [], 'weekly');
+  return { ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject, attachment: payload.attachments[0].filename, purged };
+}
+// Called by every health-checks run: a weekly report held back by the cap goes first; otherwise held red alerts.
+async function hzHealthPendingSends() {
+  const w = (await pool.query(`SELECT value FROM planner.app_settings WHERE key = $1`, [HZ_WEEKLY_PENDING_KEY])).rows[0];
+  if (w) { let o = {}; try { o = JSON.parse(w.value); } catch (_) {} return { weekly: await hzWeeklySend(o.days || 7, 'cron-retry') }; }
+  return { alerts: await hzAlertSendPending('cron') };
+}
+// Fatal integration events (Fulfil PO left in draft, Xero disconnected): health row via the buffer + an immediate red alert.
+function hzIntegFatal(service, op, message, meta) {
+  try { hzHealthEvt('integration_error', service + '|' + op, { path: service + ' ' + op, message, meta: Object.assign({ service, op, status: 0, timeout: false }, meta || {}) });
+    _reqStore.exit(() => hzRedAlert([{ key: 'integ:' + service + ':' + op + (meta && meta.po ? ':' + meta.po : ''), trigger: 'integration', title: String(message).slice(0, 200), n: 1, first: new Date().toISOString(), last: new Date().toISOString(), examples: [message],
+      file: service === 'xero' ? 'server.mjs _xeroRefresh / xeroToken (SUPPLY ▸ CONFIG ▸ Payments to reconnect)' : 'server.mjs fulfil push (fulfilPOButton / reconfirm finally) + the PO in Fulfil' }])).catch(e => console.warn('[health] red alert failed: ' + (e && e.message)));
+  } catch (_) {}
+}
+// POST /api/cron/health-checks (x-webhook-secret). { dry_run: true } returns findings + the alert payload without writing or sending.
+// PROD SCHEDULE (recommended): n8n every 15 min (on Vercel nothing runs without requests, so this is also what delivers alerts
+// held by the hourly cap and a weekly report that was throttled). Minimum: daily 07:00 Australia/Sydney. The long-lived local
+// server also runs it hourly (unref'd timer; HZ_HEALTH_CHECKS=0 turns that off).
+app.post('/api/cron/health-checks', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+if (!process.env.VERCEL && process.env.HZ_HEALTH_CHECKS !== '0') {
+  const _hc = () => runHealthChecks({}).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
+  setTimeout(_hc, 180000).unref?.(); setInterval(_hc, 3600000).unref?.();
+}
+// Local verification only (HZ_HEALTH_TEST=1, never on Vercel): a slow statement, a synthetic red alert, the claim race.
+if (process.env.HZ_HEALTH_TEST === '1' && !process.env.VERCEL) {
+  app.get('/api/dev/health-slowq', async (req, res) => { try { const s = Math.min(5, Number(req.query.s) || 2.1); await pool.query('SELECT pg_sleep($1::float8), 42 AS answer', [s]); res.json({ ok: true, s }); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/dev/health-alert', async (req, res) => { try { const b = req.body || {};
+    const f = { key: 'test:' + String(b.key || 'synthetic').slice(0, 40), trigger: 'test', title: String(b.title || 'Synthetic red alert (test)').slice(0, 200), n: Number(b.n) || 1, first: new Date().toISOString(), last: new Date().toISOString(), examples: ['synthetic test event'], file: 'n/a (test)' };
+    res.json(await hzRedAlert([f], { dry: b.dry_run === true })); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/dev/health-claim', async (req, res) => { try { const n = Math.min(10, Number((req.body || {}).n) || 2); const r = await Promise.all(Array.from({ length: n }, () => hzEmailClaim())); res.json({ claims: r, winners: r.filter(Boolean).length }); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/dev/health-evaluate', async (req, res) => { try { res.json({ etl: hzEtlEval((req.body || {}).jobs, Number((req.body || {}).now) || Date.now()) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+}
 
 // ── config (portal-wide settings live in app_settings under cp_*) ──
 const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to'];

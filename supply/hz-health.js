@@ -38,7 +38,47 @@
       setTimeout(tick,300); })(); }
   window.addEventListener('hashchange',function(){ watch(Date.now(),false); });
   watch(0,true);
+  // v28.162 (Ben): AGGREGATED captures, kept in memory and sent as one row per group every 60s and on pagehide / tab hidden:
+  //  long_task  : main-thread tasks >= 1s (PerformanceObserver 'longtask', buffered), per normalised view: count, max, sum; <= 10 a minute.
+  //  api_failure: same-origin /api calls seen by THIS browser that failed: network error, timeout, status >= 500, 408 / 429, or
+  //               slower than 10s; per method + normalised path + status. Health posts and /hz-health.js are never recorded.
+  //  page_view  : visits + active seconds (visible tab only) per normalised view; ids in the hash become :id.
+  // window.fetch is wrapped HERE, i.e. innermost: this script runs first in <head>, so the shell's own wrappers (memo / in-flight
+  // sharing, the activity counter and __hzBg, the 403/401 handler) wrap this one and keep working unchanged; init is passed through
+  // untouched. Memo hits never reach the network, so they are (correctly) not seen. Cost per fetch: one performance.now() + one then().
+  var LT={}, ltT=0, ltN=0, API={}, PV={}, curV=null, curT=0, vis=document.visibilityState!=='hidden', AGG_MS=60000;
+  var API_SKIP=/^\/(api\/(health\/|portal\/health\/|cp\/health\/)|hz-health\.js)/;
+  function nv(h){ return String(h||'').split('?')[0].split('/').map(function(s){ return /^v\d{1,2}$/.test(s)?s:(s.length>24||/^\d+$/.test(s)||(/\d/.test(s)&&s.length>=5))?':id':s; }).join('/').slice(0,200); }
+  function nview(){ return nv(view()); }
+  function ltNote(ms,v){ try{ if(!(ms>=1000))return false; var now=Date.now(); if(now-ltT>60000){ltT=now;ltN=0;} if(++ltN>10)return false;
+    v=v||nview(); var a=LT[v]||(LT[v]={n:0,max:0,sum:0}); a.n++; a.sum+=ms; if(ms>a.max)a.max=ms; return true; }catch(e){ return false; } }
+  try{ if(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes&&PerformanceObserver.supportedEntryTypes.indexOf('longtask')>=0)
+    new PerformanceObserver(function(l){ try{ var es=l.getEntries(); for(var i=0;i<es.length;i++)if(es[i].duration>=1000)ltNote(es[i].duration); }catch(_){} }).observe({type:'longtask',buffered:true}); }catch(e){}
+  function apiPath(u){ var s=String(u||''); if(/^https?:/i.test(s)){ if(s.indexOf(location.origin+'/')!==0)return null; s=s.slice(location.origin.length); }
+    if(s.indexOf('/api/')!==0||API_SKIP.test(s))return null; return nv(s); }
+  function apiNote(m,p,st,ms,err){ var k=m+' '+p+' '+st, a=API[k]; if(!a){ if(Object.keys(API).length>=40)return; a=API[k]={m:m,p:p,s:st,n:0,max:0,err:null}; } a.n++; if(ms>a.max)a.max=ms; if(err)a.err=err; }
+  if(typeof _fetch==='function'){ window.fetch=function(input,init){
+    var t0=0, u='', m='GET'; try{ t0=performance.now(); u=(typeof input==='string')?input:((input&&input.url)||String(input||'')); m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase(); }catch(e){}
+    var p=_fetch.apply(window,arguments);
+    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000)apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?'slow':null); }catch(_){} },
+      function(e){ try{ var n=e&&e.name; if(n==='AbortError')return; apiNote(m,path,0,Math.round(performance.now()-t0),n==='TimeoutError'?'timeout':'network'); }catch(_){} }); }catch(e){}
+    return p; }; }
+  function pvAccrue(){ var now=Date.now(); if(curV&&vis&&curT){ var a=PV[curV]||(PV[curV]={n:0,s:0}); a.s+=(now-curT)/1000; } curT=now; }
+  function pvEnter(){ try{ pvAccrue(); curV=nview(); var a=PV[curV]||(PV[curV]={n:0,s:0}); a.n++; }catch(e){} }
+  function aggFlush(){ try{ pvAccrue(); var k, a, rows=[];
+    for(k in PV){ a=PV[k]; if(a.n||a.s>=1)rows.push({kind:'page_view',message:'page view',path:k,count:Math.max(1,a.n),v:VER,meta:{visits:a.n,active_s:Math.round(a.s)}}); } PV={};
+    for(k in LT){ a=LT[k]; rows.push({kind:'long_task',message:'Main thread blocked >= 1s',path:k,ms:Math.round(a.max),count:a.n,v:VER,meta:{sum_ms:Math.round(a.sum)}}); } LT={};
+    for(k in API){ a=API[k]; rows.push({kind:'api_failure',message:(a.s?'HTTP '+a.s:a.err)+' '+a.m+' '+a.p+(a.err==='slow'?' (> 10s)':''),path:a.p,method:a.m,status:a.s||null,ms:a.max,count:a.n,v:VER,meta:{err:a.err}}); } API={};
+    for(var i=0;i<rows.length&&i<60;i++)q.push(rows[i]); return rows.length; }catch(e){ return 0; } }
+  window.addEventListener('hashchange',pvEnter); pvEnter();
+  document.addEventListener('visibilitychange',function(){ pvAccrue(); vis=document.visibilityState!=='hidden'; });
+  // Hook for the apps (owned transport): hzHealthMetric('sanity', message, meta) or hzHealthMetric('metric', name, meta, path).
+  window.hzHealthMetric=function(kind,message,meta,path){ try{
+    if(kind==='sanity'){ var sk='sanity|'+message; if(seen[sk])return; seen[sk]=1; q.push({kind:'sanity',message:String(message||'').slice(0,500),path:String(path||'client:'+nview()).slice(0,200),v:VER,meta:meta||null}); }   // once per message per page session
+    else if(kind==='metric')q.push({kind:'metric',message:String(message||'metric').slice(0,500),path:String(path||message||'').slice(0,200),count:1,v:VER,meta:meta||null}); }catch(e){} };
+  window.__hzHealth._t={ltNote:ltNote,aggFlush:aggFlush,nv:nv,apiPath:apiPath,state:function(){ return {LT:LT,API:API,PV:PV}; }};   // unit tests
   setInterval(function(){ flush(false); },10000);
-  window.addEventListener('pagehide',function(){ flush(true); });
-  document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')flush(true); });
+  setInterval(function(){ if(aggFlush())flush(false); },AGG_MS);
+  window.addEventListener('pagehide',function(){ aggFlush(); flush(true); });
+  document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden'){ aggFlush(); flush(true); } });
 })();
