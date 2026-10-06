@@ -14,6 +14,8 @@ sources:
   - server.mjs :: cashflowResponse, shipFreightSrv, seaEstSrv
   - server.mjs :: computeXeroRunPlan, /api/supply/payments/xero-post, /api/supply/xero/deposit-credit-note, _poXeroRegion
   - server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues, _xeroErrMsg
+  - server.mjs :: xeroContactFor, xeroContactLookup, xeroContactTarget, xeroContactDefault, supplierByXeroContactIndex, sweepSupplierPaymentBills, /api/supply/xero/contact-check, /api/supply/xero/migrate-au-bill, /api/supply/xero/push-queue/:id/push
+  - migrations/330_supplier_xero_contacts.sql :: planner.suppliers.xero_contact_uk/au
   - server.mjs :: /api/supply/tpl/data, /api/supply/tpl/goods-in, _tplGridSummary, _tplConsumablesInside (3PL invoices)
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
@@ -43,13 +45,23 @@ fingerprints:
   server.mjs::cashflowResponse: a33d79c9e949
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
-  server.mjs::computeXeroRunPlan: 3d757cd12805
-  server.mjs::/api/supply/payments/xero-post: 0300806e8848
-  server.mjs::/api/supply/xero/deposit-credit-note: 228458d70f2f
+  server.mjs::computeXeroRunPlan: 7ccd8b7a145a
+  server.mjs::/api/supply/payments/xero-post: 94d51dc9543e
+  server.mjs::/api/supply/xero/deposit-credit-note: 9c4c7b55ed0a
   server.mjs::_poXeroRegion: 844d7ad9c549
   server.mjs::/api/supply/payments/xero-preflight: 0e54d381e8ff
-  server.mjs::_xeroPlanIssues: 1d924c6936f8
+  server.mjs::_xeroPlanIssues: f890b66f2b6e
   server.mjs::_xeroErrMsg: 6b79e9488cf7
+  server.mjs::xeroContactFor: 874272a2feb3
+  server.mjs::xeroContactLookup: a7f17b379f1d
+  server.mjs::xeroContactTarget: c7ec57390326
+  server.mjs::xeroContactDefault: 19163f96774d
+  server.mjs::supplierByXeroContactIndex: ebc499aa574e
+  server.mjs::sweepSupplierPaymentBills: d6dac345b0a0
+  server.mjs::/api/supply/xero/contact-check: d27e4561e3b2
+  server.mjs::/api/supply/xero/migrate-au-bill: 86e68548273c
+  server.mjs::/api/supply/xero/push-queue/:id/push: 058e648ad1e0
+  migrations/330_supplier_xero_contacts.sql::planner.suppliers.xero_contact_uk/au: 24539d65c216
   server.mjs::/api/supply/tpl/data: a80126dd517b
   server.mjs::/api/supply/tpl/goods-in: 015c39460dba
   server.mjs::_tplGridSummary: 0e93f4ce0c66
@@ -89,7 +101,7 @@ fingerprints:
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
   supply/inject.html::upfxDownload: 0924ecaf4755
-verified_version: v28.175
+verified_version: v28.177
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -182,9 +194,12 @@ verified_version: v28.175
 - Bill line coding. Same-org deposit: P58+ (and all AU) goes to Stock Deposits (602) with Production tracking P<n>; pre-P58 goes to the production account. Same-org completion/balance: P58+ (and AU) goes to Supplier Payments 602.1; pre-P58 to the production account (for example 620.37 P57). Cross-org completion/balance goes to the paying org's 901 intercompany loan. (source: server.mjs :: computeXeroRunPlan)
 - Settlement against the linked PO bill comes from the same account the line is coded to (602.1 or the production account), at the supplier-payment bill's currency rate. A pre-P58 deposit uses deposits.xero_fx. A cross-org line settles in the home org from that org's 901 loan, at Xero's own daily rate. (source: server.mjs :: xero-post)
 - P58+ deposits post no payment: they draw down by credit note (ACCPAYCREDIT to 602, tagged with the production). Deposits never cross orgs: a cross-org deposit is blocked, and deposits from two orgs in one run are blocked. (source: server.mjs :: computeXeroRunPlan, deposit-credit-note)
-- The post is refused if: a payment exceeds the bill's AmountDue; an account is missing, archived or not payments-enabled; or the run already has a non-voided bill (unless re-post is confirmed). Admin and confirm are required. (source: server.mjs :: xero-post)
-- Preflight badges (from v28.173): on the Payments Report, each unposted run that shows the XERO button gets a badge from the same plan and checks as the Create in Xero popup, read only (Xero GETs only, nothing written). Red "⚠ N" = N problems that stop the post: a cross-org or mixed-org deposit, a payment above the bill's AmountDue, a settle account that is missing, archived or not payments-enabled, a missing 901 loan account, or a line with no account mapped. Amber "⚠" = warnings only: a P58+ deposit (credit note, no payment), no linked Xero bill (payment skipped), a bill amount due that could not be read, a cross-org line settling via loan 901, or a warn-level check. A faint tick = all clear; "?" = the check could not read Xero; nothing when Xero is not connected or the run has nothing to post. Posted ("done") rows show no badge. Results are cached 10 minutes per run and line set; any post or deposit credit note clears the cache. Xero calls are paced to 30 a minute per org, one batch at a time. (source: server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues)
+- The post is refused if: the supplier's Xero contact is not found in the paying org (v28.177); a payment exceeds the bill's AmountDue; an account is missing, archived or not payments-enabled; or the run already has a non-voided bill (unless re-post is confirmed). Admin and confirm are required. (source: server.mjs :: xero-post)
+- Preflight badges (from v28.173): on the Payments Report, each unposted run that shows the XERO button gets a badge from the same plan and checks as the Create in Xero popup, read only (Xero GETs only, nothing written). Red "⚠ N" = N problems that stop the post: the supplier's Xero contact not found in the paying org (from v28.177), a cross-org or mixed-org deposit, a payment above the bill's AmountDue, a settle account that is missing, archived or not payments-enabled, a missing 901 loan account, or a line with no account mapped. Amber "⚠" = warnings only: a P58+ deposit (credit note, no payment), no linked Xero bill (payment skipped), a bill amount due that could not be read, a cross-org line settling via loan 901, or a warn-level check. A faint tick = all clear; "?" = the check could not read Xero; nothing when Xero is not connected or the run has nothing to post. Posted ("done") rows show no badge. Results are cached 10 minutes per run and line set; any post or deposit credit note clears the cache. Xero calls are paced to 30 a minute per org, one batch at a time. (source: server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues)
 - A failed Xero call reports Xero's own validation messages (every ValidationErrors entry, including nested ones) rather than the generic "A validation exception occurred". (source: server.mjs :: _xeroErrMsg)
+- Supplier Xero contact (from v28.177): every supplier bill and credit note HORIZON posts (supplier-payment bill, deposit credit note, push-queue bill or credit note, AU bill migration) references the supplier's Xero contact by ContactID, never by name, because Xero silently creates a new contact when a posted name does not match. The contact name is suppliers.xero_contact_uk or xero_contact_au for that org (SUPPLY ▸ CONFIG ▸ Suppliers, and the Manage supplier drawer); when blank it is "<name> - <code>" for a kind=supplier row with a code (Fulfil's convention, e.g. "Nice Look - NL"), otherwise the supplier name. It is looked up by exact name among ACTIVE contacts in that org (GET only); found contacts are cached 10 minutes per org, misses 1 minute, and the post itself re-checks fresh. (source: server.mjs :: xeroContactFor, xeroContactLookup, xeroContactTarget, xeroContactDefault)
+- If the contact is not found nothing is posted (no bill, payment, credit note or tracking option) and the error says "Xero contact '<name>' not found in <UK|AU>: create or merge it in Xero, or change the supplier's Xero contact in SUPPLY > CONFIG > Suppliers". HORIZON never creates a supplier contact in Xero (the old AU-migration auto-create was removed). The Create in Xero popup shows "Supplier: <name> → Xero: <contact>" and disables the post when it is missing; the preflight badge counts it as a blocking problem. Each contact field has a read-only "check" button. Commission (rep group) and 3PL bills still post by contact name. (source: server.mjs :: computeXeroRunPlan, _xeroPlanIssues, xero-post, deposit-credit-note, /api/supply/xero/contact-check)
+- Matching Xero bills back to suppliers by contact name treats "<name>", "<name> - <code>" (or any "<name> - <suffix>"), "<name> (<person>)" and the configured contact names as the same supplier, plus the AU alias Jinmatex (Merry) = Jinma (Merry). (source: server.mjs :: supplierByXeroContactIndex, sweepSupplierPaymentBills)
 
 ## Universal Partners FX USD statement (from v28.174)
 - Why: Xero's API cannot create bank statement lines, so HORIZON builds a statement file for the Universal Partners FX USD bank account (UK org; account id in app_settings up_fx_bank_account_id) that someone imports in Xero (the account > Manage Account > Import a Statement). Each in/out then has a statement line to reconcile against. Read only: Xero GET calls only. (source: server.mjs :: buildUpfxStatement, upfxConfig)
