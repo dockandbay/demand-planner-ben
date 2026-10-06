@@ -170,7 +170,7 @@ pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 
     if (cfg && typeof cfg.submit === 'function') return oq.apply(this, arguments);   // Cursor / Submittable: untouched
     const t0 = Date.now(), n = arguments.length, cb = n && typeof arguments[n - 1] === 'function' ? arguments[n - 1] : null;
     let st = this.__hzSt || null; if (!st) { try { st = _reqStore.getStore(); } catch (_) {} }
-    const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query'); _hzDbTot.n++; _hzDbTot.ms += ms;   // v28.167 (Ben): process-wide DB execution totals (GET /api/perf/recent)
+    const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query'); _hzDbTot.n++; _hzDbTot.ms += ms; if (st) st.dbms = (st.dbms || 0) + ms;   // v28.167 (Ben): process-wide DB execution totals (GET /api/perf/recent). v28.175 (Ben): + DB ms per request (ring row `db`)
       if (ms >= HZ_SLOW_Q_MS) { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;
         hzHealthEvt('slow_query', sql, { path: sql, ms, message: 'Slow SQL ' + ms + 'ms', meta: { example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' } }); } } catch (_) {} };
     if (cb) { const a = Array.prototype.slice.call(arguments); a[n - 1] = function (err) { done(err); return cb.apply(this, arguments); }; return oq.apply(this, a); }
@@ -898,7 +898,7 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
   res.on('finish', () => { try { const s = _reqStore.getStore(); const ms = Date.now() - ((s && s.t0) || Date.now()); const q = (s && s.q) || 0;
     const path = String(req.originalUrl || req.url || '').split('?')[0];
     if (!path.startsWith('/api/')) return;   // page/static loads aren't what we're measuring
-    _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
+    _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q, db: (s && s.dbms) || 0 }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
     if (ms >= HZ_SLOW_MS) console.log('[slow ' + ms + 'ms ' + q + 'q] ' + req.method + ' ' + path + ' ' + res.statusCode);
     if (!HZ_HEALTH_SKIP.test(path)) hzRouteCount(req.method + ' ' + ((req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path), res.statusCode >= 500);   // v28.162: red-alert route ratio
     // v28.159 (Ben): health log. Group by the matched route pattern (/api/supply/po/:po) so ids don't fragment the report.
@@ -1278,22 +1278,56 @@ app.use(async (req, res, next) => {
   res.on('close', () => { delete _respCacheInflight[key]; });   // aborted before json() → release the flag
   next();
 });
-// After any supplier-portal WRITE, drop the cached portal bootstraps so the supplier's next load reflects their edit
-// (tracking, notes, completion, invoice, cost submit…). Cheap — the map holds one entry per active supplier set.
-// v27.879 (Ben, portal perf): scoped to the supplier who wrote — every other supplier keeps their cached bootstrap — and the
-// writer's bootstrap is rebuilt in the background straight away, so their next load is served from cache (the old
-// clear-everything made every supplier's next load a full cold build after any one supplier's tick).
-app.use((req, res, next) => {
-  if (req.method === 'POST' && (req.path.startsWith('/api/portal/') || req.path.startsWith('/api/supply/price-list'))) {
-    res.on('finish', () => { try { if (res.statusCode >= 400) return;
-      const names = req.portal && Array.isArray(req.portal.suppliers) ? req.portal.suppliers : null;
-      if (!names) { _portalCache.clear(); _portalInflight.clear(); _plCache.clear(); return; }   // admin price-list write: no portal identity → clear all
-      const pref = names.slice().sort().join('|');
-      for (const k of Array.from(_portalCache.keys())) if (k === pref || k.startsWith(pref + '|')) { _portalCache.delete(k); _portalInflight.delete(k); }
-      _plCache.delete(pref);
-      portalBootstrapPrewarm(names, req.portal.supplierIds || [], false);
-    } catch (e) { /* ignore */ } });
+// After any supplier-portal WRITE, the supplier's next load must reflect their edit (tracking, notes, completion, invoice, cost
+// submit…). v27.879: scoped to the writer + a background rebuild of their payload.
+// v28.175 (Ben, perf roadmap #5): portal / client-portal / CLIENT-admin writes now go through the v28.167 cache machinery. The hook
+// wraps res.end, so the marks land AFTER the handler's write and BEFORE the response leaves (the hz_rw read-your-writes cookie can
+// still be set). Only a successful (< 400) write marks anything. Classes:
+//  - portal OWN (the writer's notes / read markers / spec acknowledgements): local mark of the writer's own payloads only, no shared
+//    epoch bump (shipment-note ones mark every supplier's payload locally: a shipment can be shared). Read-your-writes for the writer.
+//  - portal SHARED (anything else that writes: PO / line / cost / shipment / sample / product / onboarding): invalidateSupplyCaches('portal-po').
+//  - client portal order (POST /api/cp/order) and the Fulfil sales import: 'client-order'; any other CLIENT-module admin write: 'client'.
+//  - supplier price list (portal submit or admin /api/supply/price-list*): the price-list payload memo (_plCache), as before.
+const HZ_PORTAL_W_SKIP = new Set(['health', 'storage', 'parse-invoice', 'request-link', 'logout', 'asset', 'img']);
+const HZ_PORTAL_W_OWN = new Set(['note', 'note-read', 'note-delete', 'sample-note-delete', 'product-notes-read', 'product-note', 'sample-note-read',
+  'sample-note', 'spec-approve', 'quality-doc', 'price-list', 'onboarding']);   // price list / onboarding: not in the payload (own endpoints); onboarding handlers mark what they need
+const HZ_PORTAL_W_SHIPNOTE = new Set(['shipment-note', 'shipment-notes-read', 'shipment-note-delete']);   // own, but a shipment's unread badge is shared
+const HZ_CLIENT_W_SKIP = /^\/api\/client\/(threads|preview|users\/[^/]+\/(magic|invite)|price-preview)/;
+function _hzWriteKind(req) {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return null;
+  const p = String(req.path || '');
+  if (p.startsWith('/api/portal/')) { const seg = p.split('/')[3] || '';
+    if (HZ_PORTAL_W_SKIP.has(seg)) return null; if (HZ_PORTAL_W_SHIPNOTE.has(seg)) return 'portal-shipnote'; return HZ_PORTAL_W_OWN.has(seg) ? 'portal-own' : 'portal-po'; }
+  if (p.startsWith('/api/supply/price-list')) return 'price-list';
+  if (p === '/api/cp/order') return 'client-order';
+  if (p === '/api/cron/client-sales' || p === '/api/client/fulfil/import-sales') return 'client-order';
+  if (p.startsWith('/api/client/') && !HZ_CLIENT_W_SKIP.test(p)) return 'client';
+  return null;
+}
+function _hzOnWrite(req, kind) {
+  const names = req.portal && Array.isArray(req.portal.suppliers) ? req.portal.suppliers : null;
+  if (kind === 'price-list') { _plCache.clear(); return; }
+  if (kind === 'client-order' || kind === 'client') { invalidateSupplyCaches(kind); return; }
+  if (!names) return;                                                   // a portal route that never authenticated (no identity) wrote nothing
+  _plCache.delete(names.slice().sort().join('|'));
+  if (kind === 'portal-own') _lcInvalidateLocal(_pbNames({ names }));
+  else if (kind === 'portal-shipnote') _lcInvalidateLocal(_pbNames({}));
+  else invalidateSupplyCaches('portal-po');
+  // long-lived server: rebuild the writer's payload(s) right behind the write so their next load is warm (v27.879 prewarm). Not on
+  // Vercel: a timer after the response may run in a frozen container (stranded pooled connections, Diviyaj 01-Sep); there the
+  // writer's next load waits for the rebuild (read-your-writes) instead.
+  if (!process.env.VERCEL && process.env.PORTAL_PREWARM !== '0') {
+    const st0 = _pbNames({ names }); const store = _reqStore.getStore();
+    setTimeout(() => { for (const n of st0) { const st = _lc.get(n); if (st && st.dirty.length && !st.job) _reqStore.run(store, () => _lcJob(st, 0, null)); } }, 250).unref?.();
   }
+}
+app.use((req, res, next) => {
+  const kind = _hzWriteKind(req); if (!kind) return next();
+  const store = _reqStore.getStore(), _end = res.end; let done = false;
+  res.end = function () {
+    if (!done) { done = true; if (res.statusCode < 400) { try { if (store) _reqStore.run(store, () => _hzOnWrite(req, kind)); else _hzOnWrite(req, kind); } catch (e) { /* cache marks must never fail a write */ } } }
+    return _end.apply(this, arguments);
+  };
   next();
 });
 
@@ -7239,10 +7273,18 @@ function _rwSessGet(sid) { let me = _rwSess.get(sid);
   if (!me) { if (_rwSess.size > 5000) { const old = Date.now() - 3600000; for (const [k, v] of _rwSess) if (v.seen < old && !v.inflight) _rwSess.delete(k); }
     me = { gen: 0, T: 0, inflight: 0, uncovered: false, covered: 0, wroteAt: 0, seen: 0 }; _rwSess.set(sid, me); }
   me.seen = Date.now(); return me; }
-function _lcNew(name, builder, ttl) { const st = { name, builder, ttl, entry: null, dirty: [], job: null, lastStart: 0 }; _lc.set(name, st); return st; }
+// v28.175 (Ben): opts.hard = hard max age (ms). An entry older than that is never served stale-while-revalidate: the request waits
+// for a rebuild (per-user / portal caches, so a long-idle portal never shows hours-old data once). 0 = no cap (admin caches).
+// opts.strict = an invalidated entry is never served stale to anyone (the next request waits for the rebuild): for cheap builds
+// (client-portal caches, one query) where showing an admin's price / setting change on the very next load beats SWR.
+function _lcNew(name, builder, ttl, opts) { const st = { name, builder, ttl, hard: (opts && opts.hard) || 0, strict: !!(opts && opts.strict), entry: null, dirty: [], job: null, lastStart: 0, lastGet: Date.now() }; _lc.set(name, st); return st; }
+// v28.175 (Ben): a scope Set may hold prefix entries ending in '*' ('pb:*' = every supplier-portal payload, 'cpu:orders:*' = every
+// client-portal orders cache). Per-identity caches are created on demand, so CACHE_DEPS can only name them by prefix.
+function _lcInScope(names, name) { if (!names || names.has(name)) return true;
+  for (const n of names) if (n.charCodeAt(n.length - 1) === 42 && name.startsWith(n.slice(0, -1))) return true; return false; }
 function _lcMark(names) {             // names: Set of cache names, null = all. Marks only; never builds. Returns the new generation.
   const gen = ++_lcGen;
-  for (const st of _lc.values()) if ((!names || names.has(st.name)) && (st.entry || st.job)) {
+  for (const st of _lc.values()) if (_lcInScope(names, st.name) && (st.entry || st.job)) {
     st.dirty.push(gen); if (st.dirty.length > 2000) { st.entry = null; st.dirty = []; }   // pathological backlog: drop (next request builds cold)
   }
   return gen;
@@ -7269,21 +7311,24 @@ function _lcJob(st, mode, need) {     // one build of st. mode 0 = background (q
   if (mode === 2 || _lcRunning < LC_MAX) job.run(); else if (mode === 1) _lcQ.unshift(job); else _lcQ.push(job);
   return job;
 }
-function _lcNeed(st) {                // this caller's freshness bar: null = may be served stale, else { gen, at } the value must be built from
-  let gen = 0, at = 0;
+function _lcNeed(st, extra) {         // this caller's freshness bar: null = may be served stale, else { gen, at } the value must be built from
+  let gen = (extra && extra.gen) || 0, at = (extra && extra.at) || 0;   // v28.175: extra = a caller-forced bar (portal ?fresh=1)
+  if (st.hard && st.entry && Date.now() - st.entry.at > st.hard && st.entry.t0 + 1 > at) at = st.entry.t0 + 1;   // v28.175: past the hard max age → wait for a newer build
+  if (st.strict && st.dirty.length && st.dirty[st.dirty.length - 1] > gen) gen = st.dirty[st.dirty.length - 1];   // v28.175: strict → every pending invalidation
   const b = _lcBuildCtx.getStore();
-  if (b) { if (st.dirty.length && st.dirty[0] <= b.gen) gen = b.gen; at = b.at || 0; }
+  if (b) { if (st.dirty.length && st.dirty[0] <= b.gen && b.gen > gen) gen = b.gen; if ((b.at || 0) > at) at = b.at; }   // v28.175: max with the bars above (was a plain overwrite)
   let s = null; try { s = _reqStore.getStore(); } catch (_) {}
   if (s && s.sid) { const me = _rwSess.get(s.sid);
     if (me && me.gen > gen && st.dirty.length && st.dirty[0] <= me.gen) gen = me.gen;     // an invalidation this session made is still pending here
     if (s.rwT && (!me || s.rwT > me.T) && s.rwT > at) at = s.rwT; }                      // this user edited on another instance (scope unknown)
   return (gen || at) ? { gen, at } : null;
 }
-async function _lcGet(st) {
+async function _lcGet(st, extra) {
   try { await currentSupplyEpoch(); } catch (_) {}   // notices another instance's edit (stales everything, lazily)
+  st.lastGet = Date.now();
   const nested = !!_lcBuildCtx.getStore(); let fails = 0, lastErr = null;
   for (let i = 0; i < 4; i++) {
-    const need = _lcNeed(st), e = st.entry;
+    const need = _lcNeed(st, extra), e = st.entry;
     if (e && (!need || (e.gen >= need.gen && e.t0 >= need.at))) {
       if (!st.job && ((st.dirty.length && Date.now() - st.lastStart >= SUPPLY_REBUILD_MIN_MS) || Date.now() - e.at >= st.ttl)) _lcJob(st, 0, null);   // stale: serve now, revalidate behind
       return e.v;
@@ -7298,7 +7343,7 @@ async function _lcGet(st) {
       if (!need) { if (e) return e.v; throw err; }   // cold: the error; (a caller allowed stale never gets here with a value)
       if (++fails >= 2) throw err; }                 // the editor: one retry, then an error, never their pre-edit value
   }
-  if (st.entry && !_lcNeed(st)) return st.entry.v;
+  if (st.entry && !_lcNeed(st, extra)) return st.entry.v;
   throw lastErr || new Error('cache ' + st.name + ' still rebuilding');
 }
 function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
@@ -7349,41 +7394,61 @@ function _sectionRecompute(sec) { const st = _secCache(sec); return (st.job || _
 if (!process.env.VERCEL) {   // boot warm (long-lived server only — on Vercel a frozen container must never open a backend with no request in flight)
   setTimeout(() => { Object.keys(SECTION_CACHE_TTL_MAP).forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 1500).unref?.()); }, 4000).unref?.();
 }
-// Supplier-portal bootstrap cache — per supplier-set + includeArchived. The portal is the one heavy PO-calc path
-// with no cache (POS_SQL_PORTAL live + 8 follow-on queries every load → ~8s on the sandbox pooler). Keyed, 10-min
-// TTL, single-flight; cleared by invalidateSupplyCaches (admin edits) and after any portal POST (the supplier's own
-// write — so their next load reflects it).
-const _portalCache = new Map();      // key -> { v, at, epoch }
-const _portalInflight = new Map();   // key -> in-flight build promise (single-flight)
-// v27.880 (Ben, portal perf phase 2): admin edits no longer DELETE the cached portal payloads. Each entry remembers the
-// supply epoch it was built at; a bootstrap request whose entry is behind the epoch (or past TTL) is answered with that
-// stale payload at once + an `X-HZ-Stale: 1` header, and the portal page re-fetches `?fresh=1` and repaints in place.
-// Product-module writes don't bump the epoch, so they mark every entry stale explicitly (portalCacheMarkStale).
-// Net effect: a supplier never waits for a build that an admin's edit triggered; the fresh data lands ~1.5s later.
-// v27.894 (Ben, perf item 2): optional supplier scope — a product-module write that belongs to ONE supplier (a development
-// request / its notes) only marks THAT supplier's cached portal payloads stale; every other supplier keeps serving from cache
-// with no revalidate round-trip. No supplier (or unknown) → every entry, as before. Keys are the sorted supplier names
-// joined by '|' plus the archived flag (see _pbKey), so a case-insensitive name match on the key parts is exact.
-function portalCacheMarkStale(supplier) {
-  const s = String(supplier || '').trim().toLowerCase();
-  for (const [k, e] of _portalCache.entries()) {
-    if (!s || String(k).toLowerCase().split('|').slice(0, -1).indexOf(s) >= 0) e.epoch = -1;
-  }
+// Supplier-portal bootstrap cache, per supplier-set + includeArchived (history: v27.879 own Map + single-flight; v27.880 served
+// stale with `X-HZ-Stale: 1`, the page re-fetches `?fresh=1` and repaints in place; v27.894 a product-module write for ONE
+// supplier marks only that supplier's payloads stale).
+// v28.175 (Ben, perf roadmap #5): the payloads are now caches in the v28.167 machinery ('pb:<names>#<ids>#<arch>', see
+// _pbCache): lazy stale-while-revalidate, single-flight, the HZ_MAX_REBUILDS cap, read-your-writes (hz_sid / hz_rw) and the
+// cross-instance epoch, instead of the parallel Map + epoch stamp. Every supply invalidation type lists 'pb:*' in CACHE_DEPS
+// (same "every edit marks the portal stale" rule as before), and the heavy global parts of a build come from shared base caches
+// ('portal:pos', 'portal:lines', 'sec:shipment-plan') filtered per supplier, so a rebuild is one round of small keyed queries.
+const PB_TTL_MS = SUPPLY_CACHE_TTL_MS, PB_HARD_MS = 60 * 60 * 1000;   // SWR inside 10 min, never older than 1 h (an idle supplier's first load waits)
+function _pbKeyParts(names, ids, inclArch) { return names.slice().sort().join('|') + '#' + (ids || []).map(String).sort().join('|') + '#' + (inclArch ? '1' : '0'); }
+function _pbCache(names, ids, inclArch) {
+  const name = 'pb:' + _pbKeyParts(names, ids, inclArch);
+  return _lc.get(name) || _lcNew(name, () => portalBootstrapBuild(names.slice(), (ids || []).slice(), !!inclArch), PB_TTL_MS, { hard: PB_HARD_MS });
 }
-function portalBootstrapRun(key, builder, ep) {   // single-flight build → cache (concurrent callers await the same build)
-  const inflight = _portalInflight.get(key); if (inflight) return inflight;
-  const p = Promise.resolve().then(builder).then((v) => { _portalCache.set(key, { v, at: Date.now(), epoch: ep }); return v; }).finally(() => { _portalInflight.delete(key); });
-  _portalInflight.set(key, p); return p;
+// The pb: cache names of one supplier set (both archived variants), or of every set containing `supplier` (case-insensitive).
+function _pbNames(opt) {
+  const out = new Set(), s = String((opt && opt.supplier) || '').trim().toLowerCase(), pref = opt && opt.names ? 'pb:' + opt.names.slice().sort().join('|') + '#' : null;
+  for (const k of _lc.keys()) { if (!k.startsWith('pb:')) continue;
+    if (pref) { if (k.startsWith(pref)) out.add(k); }
+    else if (!s || k.slice(3, k.indexOf('#')).toLowerCase().split('|').indexOf(s) >= 0) out.add(k); }
+  return out;
 }
+// Product-module / onboarding writes (no epoch bump): mark this supplier's portal payloads stale, or all of them (no supplier).
+function portalCacheMarkStale(supplier) { const n = _pbNames({ supplier }); if (n.size) _lcMark(n); }
+// v28.175: per-identity caches (pb:, cpu:) are created on demand; drop the ones nobody read for idleMs, and the oldest beyond max.
+function _lcSweep(prefix, idleMs, max) {
+  const now = Date.now(), mine = [];
+  for (const st of _lc.values()) if (st.name.startsWith(prefix) && !st.job) { if (now - st.lastGet > idleMs) _lc.delete(st.name); else mine.push(st); }
+  if (mine.length > max) mine.sort((a, b) => a.lastGet - b.lastGet).slice(0, mine.length - max).forEach((st) => _lc.delete(st.name));
+}
+// v28.175: true when the value a get just returned is still marked stale (an invalidation it has not absorbed, or past TTL).
+function _lcIsStale(st, v) { const e = st.entry; return !!(e && e.v === v && (st.dirty.length || Date.now() - e.at >= st.ttl)); }
+// v28.175: the freshness bar for "give me a fresh value" (portal ?fresh=1): every invalidation so far, and a build newer than a past-TTL entry.
+function _lcFreshNeed(st) { const e = st.entry; if (!e) return null;
+  return { gen: st.dirty.length ? st.dirty[st.dirty.length - 1] : 0, at: Date.now() - e.at >= st.ttl ? e.t0 + 1 : 0 }; }
+// v28.175: record read-your-writes for the current request's session (shared by invalidateSupplyCaches and the local-only portal marks).
+function _rwRecord(gen) {
+  try { const s = _reqStore.getStore(); if (s && s.sid) { s.inv = true; const me = _rwSessGet(s.sid); if (gen > me.gen) me.gen = gen; me.T = Date.now(); me.covered++;
+    const res = s.req && s.req.res; if (res && !res.headersSent) res.append('Set-Cookie', 'hz_rw=' + me.T + '; Path=/; Max-Age=' + Math.round(RW_COOKIE_MS / 1000) + '; HttpOnly; SameSite=Lax' + (_reqHttps(s.req) ? '; Secure' : '')); } } catch (_) {}
+}
+// v28.175: a portal write that only changes the writer's own payload (their notes, read markers): mark those caches locally and give
+// the writer read-your-writes (same instance: generation; other instances: the hz_rw cookie), with NO shared epoch bump, so a
+// supplier ticking messages read never stales every cache on every instance.
+function _lcInvalidateLocal(names) { if (!names || !names.size) return 0; const gen = _lcMark(names); _rwRecord(gen); return gen; }
 // v28.167 (Ben): which server caches each kind of edit can change. Derived from the write routes that invalidate and from the
 // tables each build reads (PO_ROWS_SQL: purchase_orders, lines, v_po_finance, shipments, deposits via finance, prod_numbers,
 // key_accounts, payment_likely_dates, portal costs/notes; ORDER_PLAN / OP_EXC: POs, lines, ERP lines, branches, availability;
 // cashflow / payments-report / deposits / bi / shipments / pipeline / manufacturing / actions: POs, lines, deposits, shipments,
 // payments, suppliers, branches). When unsure the type is 'all'. Unknown types and a bare invalidateSupplyCaches() = 'all'.
-// Every invalidation, whatever its scope, also bumps the shared epoch, drops the shell memo and marks the 'sup:' badge memos and
-// the portal bootstraps stale (all already lazy / request-driven).
+// Every invalidation, whatever its scope, also bumps the shared epoch, drops the shell memo and marks the 'sup:' badge memos stale
+// (all already lazy / request-driven). v28.175: the supplier-portal payloads ('pb:*') are listed in every supply type below (same
+// "every supply edit stales the portal" rule as before, now through the scope); the client-portal types only touch 'cp:' / 'cpu:'.
 const _CD_PO = ['po-rows', 'po-kids', 'order-plan', 'order-plan-exceptions', 'actions', 'sec:cashflow', 'sec:bi', 'sec:manufacturing',
-  'sec:payments-report', 'sec:shipments', 'sec:deposits', 'sec:payments-by-supplier', 'sec:shipment-plan', 'sec:pipeline', 'sec:upcoming'];   // every build that reads purchase_orders / its lines
+  'sec:payments-report', 'sec:shipments', 'sec:deposits', 'sec:payments-by-supplier', 'sec:shipment-plan', 'sec:pipeline', 'sec:upcoming',
+  'portal:pos', 'portal:lines', 'pb:*'];   // every build that reads purchase_orders / its lines (v28.175: + the supplier-portal PO / line bases and payloads)
 const CACHE_DEPS = {
   'po-fields': _CD_PO,                                    // PO header field that cannot move the open-PO picker: dates, payment plan, refs, deposit / shipment link, packing, notes (patch on purchase_orders, Fulfil date sync)
   po: _CD_PO.concat('lookups'),                           // PO created / imported / status / master link: + lookups (lists open, non-child POs)
@@ -7393,8 +7458,16 @@ const CACHE_DEPS = {
   payment: _CD_PO.concat('sec:remittances', 'sec:payment-emails'),   // likely dates, payment_fx, payment_transactions, Xero bills: PO rows, cashflow, payments-report + the remittance / email lists
   production: _CD_PO.concat('lookups'),                   // prod_numbers / batches: PO rows, payments-report, bi, actions; lookups lists batches + active prod numbers
   'key-account': _CD_PO.concat('sec:suppliers'),          // key_accounts: PO_ROWS_SQL joins them; the suppliers section lists them
-  sample: ['sec:payments-report'],                        // sample_requests: the only cached build reading them is payments-report (the samples grid is live)
-  'portal-user': [],                                      // supplier_portal_users: no cached build reads it (portal bootstraps are marked stale on every invalidation)
+  sample: ['sec:payments-report', 'pb:*'],               // sample_requests: payments-report + the supplier-portal payloads (Samples tab); the samples grid is live
+  'portal-user': ['pb:*'],                                // supplier_portal_users: no admin build reads it; the portal payloads keep the "every edit" rule
+  // v28.175 (Ben): supplier-portal write that can change another supplier's view or an admin build (PO / line / shipment / sample /
+  // product / onboarding writes from /api/portal/*): every PO-derived build + lookups + all portal payloads. The writer's own notes
+  // and read markers do not come here (local marks, no epoch bump: see _hzPortalWrite).
+  'portal-po': _CD_PO.concat('lookups'),
+  // v28.175 (Ben): client portal. 'client-order' = an order placed in the portal or a Fulfil sales import (the per-user orders
+  // caches); 'client' = any admin edit in the CLIENT module (clients, users, config / settings, price lists, commission, imports).
+  'client-order': ['cpu:orders:*'],
+  client: ['cp:*', 'cpu:*'],
   all: null,                                              // suppliers, products, rate cards / branches / config, unknown, the bare call, another instance's edit
 };
 function _lcScope(types) {            // -> Set of cache names, or null = every cache
@@ -7405,14 +7478,13 @@ function _lcScope(types) {            // -> Set of cache names, or null = every 
 }
 function invalidateSupplyCaches(types) {   // v28.167: types = a CACHE_DEPS key (or array); none = every cache. Marks stale only, never rebuilds.
   const _epochBump = bumpSupplyEpoch();                          // shared epoch → every OTHER instance stales its caches too (cross-instance)
-  try { shellMemoDrop(); } catch (_) {}                          // v28.081: the shell's fresh-builder memo too
-  const gen = _lcMark(_lcScope(types));                          // v28.167: mark the affected caches stale; nothing rebuilds until someone asks
-  swrStale('sup:');                                                    // badge counts (dtc / reallocations / product unread): serve stale once, refresh behind
-  portalCacheMarkStale();                                              // portal bootstraps: served stale once + revalidated by the page (v27.880), not dropped
+  const _cpOnly = types != null && [].concat(types).every((t) => /^client/.test(t));   // v28.175: client-portal types leave the admin shell / badges alone
+  if (!_cpOnly) try { shellMemoDrop(); } catch (_) {}            // v28.081: the shell's fresh-builder memo too
+  const gen = _lcMark(_lcScope(types));                          // v28.167: mark the affected caches stale; nothing rebuilds until someone asks (v28.175: incl. the portal payloads, 'pb:*')
+  if (!_cpOnly) swrStale('sup:');                                // badge counts (dtc / reallocations / product unread): serve stale once, refresh behind
   // v28.167 read-your-writes: remember that THIS session made the edit (its next reads of the marked caches wait for a rebuild),
-  // and hand the browser hz_rw=<edit ms> so another instance can do the same for this user.
-  try { const s = _reqStore.getStore(); if (s && s.sid) { s.inv = true; const me = _rwSessGet(s.sid); me.gen = gen; me.T = Date.now(); me.covered++;
-    const res = s.req && s.req.res; if (res && !res.headersSent) res.append('Set-Cookie', 'hz_rw=' + me.T + '; Path=/; Max-Age=' + Math.round(RW_COOKIE_MS / 1000) + '; HttpOnly; SameSite=Lax' + (_reqHttps(s.req) ? '; Secure' : '')); } } catch (_) {}
+  // and hand the browser hz_rw=<edit ms> so another instance can do the same for this user. (v28.175: shared helper _rwRecord.)
+  _rwRecord(gen);
   if (LC_LOG) console.log('[cache] invalidate ' + (types == null ? 'all' : [].concat(types).join('+')) + ' gen ' + gen);
   return _epochBump;   // v28.127: callers that re-read straight away (e.g. deposit-create) can await the epoch bump; others ignore it
 }
@@ -20171,8 +20243,11 @@ app.post('/api/assistant/conversations/:id/message', async (req, res) => {
 // another supplier's POs. Exempt from the planner-key gate (see middleware above).
 // ════════════════════════════════════════════════════════════════════════════
 // Scoped PO calc for the portal — same date/payment logic as the admin purchase-orders endpoint
-// (so the figures match exactly), filtered to the supplier ($1 = supplier names[]). Landed-cost /
-// duty / freight / ERP fields the portal renderer doesn't use are omitted.
+// (so the figures match exactly). Landed-cost / duty / freight / ERP fields the portal renderer doesn't use are omitted.
+// v28.175 (Ben): no supplier filter in SQL any more: this builds the shared 'portal:pos' base (every supplier's non-FUTURE POs,
+// once), and portalBootstrapBuild filters it to the session's suppliers. Payload trim: value_est, start_pct, completion_pct,
+// balance_pct, start_calc, completion_calc, client_deadline and dtc_entered_by are no longer selected (portal-view.js / portal.html
+// never read them; ~9% of the PO rows). completion / balance_owing still use completion_calc inside the view, unchanged.
 const POS_SQL_PORTAL = `
   -- Supplier-facing subset of the SHARED payment view (planner.v_po_finance, migration 123) — the SAME source
   -- admin reads, so every payment figure matches exactly. Supplier-scoped by $1 (supplier names[]); landed-cost /
@@ -20184,15 +20259,14 @@ const POS_SQL_PORTAL = `
     to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
     to_char(end_production_overide,'YYYY-MM-DD') prod_completion_date,   -- production completion (was aliased 'completion_date', shadowed by the payment one below)
     to_char(eff_ship,'YYYY-MM-DD') ship,
-    flexport_reference, flex_id, value_est,
+    flexport_reference, flex_id,
     round(supplier_invoice_total,2) final_invoice, round(val,2) value_used,
-    sp start_pct, cp completion_pct, greatest(100-sp-cp,0) balance_pct,
     start_paid start_dep,
     CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
     CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
     round(coalesce(credit_amount,0),2) credit_amount,   -- additional charge added to the invoice/amount due (portal shows it as a line)
-    start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
-    completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
+    round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
+    round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
     round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
     to_char(bal_due_date,'YYYY-MM-DD') balance_due,
     coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
@@ -20212,7 +20286,7 @@ const POS_SQL_PORTAL = `
     coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
     coalesce(branch,'') branch, coalesce(nullif(country_code,''), branch_country, '') country,
     coalesce(calc4.client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
-    to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(client_po_ref,'') client_po_ref,
+    coalesce(client_po_ref,'') client_po_ref,
     -- Forwarder contact details (live from the matching key account, by client name)
     coalesce(ka.forwarder_name,'') forwarder_name, coalesce(ka.forwarder_email,'') forwarder_email, coalesce(ka.forwarder_phone,'') forwarder_phone,
     -- Packing & Labelling (migration 086) + Direct to Client details approval
@@ -20226,14 +20300,38 @@ const POS_SQL_PORTAL = `
     (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
     -- DTC shipment details (supplier-entered in portal ▸ SHIPMENT; migration 127)
     dsd.cartons dtc_cartons, dsd.cbm dtc_cbm, dsd.gross_weight_kg dtc_weight, coalesce(dsd.dimensions,'') dtc_dimensions,
-    to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at, coalesce(dsd.entered_by,'') dtc_entered_by,
+    to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at,
     -- PO confirmation (portal confirm / withdraw banner) — was missing here, so the button never rendered
     to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
     coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=calc4.prod_no),false) require_confirmation
   FROM planner.v_po_finance calc4
   LEFT JOIN planner.dtc_shipment_details dsd ON dsd.po = calc4.po
   LEFT JOIN planner.key_accounts ka ON lower(trim(ka.name)) = lower(trim(calc4.client))
-  WHERE supplier_name = ANY($1) AND coalesce(status,'') NOT ILIKE '%future%' ORDER BY calc4.po`;   // FUTURE POs are hidden from the supplier portal
+  WHERE coalesce(status,'') NOT ILIKE '%future%' ORDER BY calc4.po`;   // FUTURE POs are hidden from the supplier portal
+// v28.175 (Ben): PO lines + the supplier-default cost for EVERY PO (shared 'portal:lines' base; the build keeps the session's POs).
+// Same SQL as the per-supplier query it replaces, minus `l.po = ANY($1)`; ORDER BY l.po, l.sku keeps the per-supplier order.
+const PORTAL_LINES_SQL = `SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty,   -- v28.151 (review C5): erp_qty dropped, the portal never reads it (internal ERP state)
+      -- product default cost for the PO's supplier (cost_<code>, e.g. LX→cost_lx), fallback general cost.
+      -- The order-plan Est. cost when the line has no negotiated cost_price: mirrors admin (po-detail sku_cost).
+      coalesce(
+        CASE lower((SELECT s.code FROM planner.suppliers s JOIN planner.purchase_orders pp
+                      ON (s.id=pp.supplier_id OR s.name=pp.supplier_name) WHERE pp.po=l.po LIMIT 1))
+          WHEN 'lx' THEN pr.cost_lx WHEN 'xr' THEN pr.cost_xr END,
+        pr.cost) sku_cost
+    FROM planner.purchase_order_lines l
+    LEFT JOIN planner.products pr ON pr.sku=l.sku
+    ORDER BY l.po, l.sku`;
+// v28.175 (Ben): shared supplier-portal bases (lazy, no boot warm / timer; CACHE_DEPS lists them in every PO-derived type).
+// They hold every supplier's rows and are NEVER sent as-is: portalBootstrapBuild filters them by the authenticated supplier set.
+const _portalPosSt = _lcNew('portal:pos', async () => (await pool.query(POS_SQL_PORTAL)).rows, SUPPLY_CACHE_TTL_MS);
+const _portalLinesSt = _lcNew('portal:lines', async () => (await pool.query(PORTAL_LINES_SQL)).rows, SUPPLY_CACHE_TTL_MS);
+// archivedSql('calc4', cutoff) in JS, with SQL three-valued logic: the old query kept a row only when NOT(<archived>) was TRUE, i.e.
+// <archived> FALSE. status NULL: ILIKE is NULL, so the AND is FALSE only when the prod_no test is FALSE (else NULL: row dropped).
+function portalPoArchived(r, cutoff) {
+  const a = r.status == null ? null : /complete/i.test(String(r.status));
+  const pn = String(r.prod_no == null ? '' : r.prod_no), b = (/^[0-9]+$/.test(pn) ? parseInt(pn, 10) : 999999) < cutoff;
+  return !(a === false || b === false);   // true = drop (archived, or SQL NULL)
+}
 function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
 const PORTAL_PAGE = DEV ? null : loadPortalPage();
 const portalToken = () => crypto.randomBytes(24).toString('hex');
@@ -21828,8 +21926,9 @@ app.get('/api/client/price-preview', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // order_origin: before the Cin7 cut-off → cin7 · from the Fulfil start → fulfil · in between → the imported Cin7 list decides.
-async function cpOriginRule() {
-  return { cin7Until: await cpSetting('cp_cutover_cin7_until', '2026-09-06'), fulfilFrom: await cpSetting('cp_cutover_fulfil_from', '2026-10-01') };
+async function cpOriginRule(cached) {   // v28.175 (Ben): cached = read through the portal settings cache (portal path only; admin stays live)
+  const g = cached ? cpSettingC : cpSetting;
+  return { cin7Until: await g('cp_cutover_cin7_until', '2026-09-06'), fulfilFrom: await g('cp_cutover_fulfil_from', '2026-10-01') };
 }
 
 // ── admin gate: every /api/client/* needs CLIENT access (sandbox = open); /api/client/commission* needs COMMISSIONS ──
@@ -22843,7 +22942,7 @@ function cpVisibilitySql(client, user, params) {
 }
 async function cpOrders(opts) {
   const { client, user, q, from, to, status } = opts || {};
-  const rule = await cpOriginRule(); const params = []; const where = [];
+  const rule = await cpOriginRule(!!(opts && opts.cachedRule)); const params = []; const where = [];
   if (client) where.push(cpVisibilitySql(client, user, params));
   if (from) { params.push(from); where.push(`s.sale_date >= $${params.length}::date`); }
   if (to) { params.push(to); where.push(`s.sale_date <= $${params.length}::date`); }
@@ -23163,6 +23262,33 @@ async function cpNotifyOpsMessage(threadId, client, req) {
 }
 
 // ═════════════════════════════════════ PORTAL (client-facing) ═════════════════════════════════════
+// v28.175 (Ben, perf roadmap #5): client-portal caches, all in the v28.167 machinery (lazy SWR, single-flight, rebuild cap,
+// read-your-writes, cross-instance epoch) with a hard max age, no boot warm, no timers:
+//  - SHARED BASES (identity-free, never sent as-is): 'cp:settings' (the cp_* app settings, one query), 'cp:prod:<dims>:<hs>' (the line
+//    sheet product rows per market layout), 'cp:stock' (v_product_inventory, every warehouse), 'cp:rt' (retail columns for tier
+//    pricing), 'cp:pl:<code>' (one legacy price list). Each response is a per-client transform of these (cpProducts / prices),
+//    memoised on (the base objects, a signature of EVERY client field the transform reads), so it is serialised + gzipped once
+//    (sendJsonMemo: strong ETag, 304). Two clients with the same signature get byte-identical output, exactly as the uncached path did.
+//  - PER-USER: 'cpu:orders:<sha1>' (cpOrders for one client + user + visibility + filters, 90 s) and 'cpu:comm:<rep group>:<month>'.
+//  - Busted by CACHE_DEPS 'client-order' (portal order, Fulfil sales import) and 'client' (any CLIENT-module admin write), see
+//    _hzWriteKind; product / stock data (ETL-fed) refresh on TTL (or any 'all' invalidation).
+// Scoping: a cache key or memo signature is built ONLY from req.cp (the csid session lookup), never from a header or the query string
+// (filters are part of the per-user key, not a different identity).
+const CP_TTL = { settings: 60000, prod: 5 * 60000, stock: 2 * 60000, rt: 5 * 60000, pl: 2 * 60000, orders: 90000, comm: 2 * 60000 };
+function _cpCache(name, ttl, hard, builder) { return _lc.get(name) || _lcNew(name, builder, ttl, { hard, strict: true }); }   // strict: an edit is never served stale
+async function cpSettingsMap() {
+  return _lcGet(_cpCache('cp:settings', CP_TTL.settings, 5 * 60000, async () => {
+    const m = {}; (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key LIKE 'cp\\_%'`)).rows.forEach(r => { m[r.key] = r.value; }); return m; }));
+}
+// cpSetting through the cache (portal read paths only; admin pages keep reading live). Same fallback rules as cpSetting.
+async function cpSettingC(key, def) { try { const m = await cpSettingsMap(); const v = m[key]; return (v != null && v !== '') ? v : def; } catch (e) { return def; } }
+const _cpMemoM = new Map();   // sig -> { parts: [base objects], v }: valid only while every base object is the one it was built from
+function _cpMemo(sig, parts, fn) {
+  const h = _cpMemoM.get(sig); if (h && h.parts.length === parts.length && h.parts.every((x, i) => x === parts[i])) return h.v;
+  const v = fn(); _cpMemoM.set(sig, { parts, v }); if (_cpMemoM.size > 500) _cpMemoM.delete(_cpMemoM.keys().next().value); return v;
+}
+const _cpSig = (...a) => JSON.stringify(a);
+const _cpHash = (x) => crypto.createHash('sha1').update(x).digest('base64url').slice(0, 24);
 const _cpAuthMemo = new Map(); const CP_AUTH_TTL_MS = 60000;
 async function cpAuth(req, res, next) {
   try {
@@ -23226,25 +23352,42 @@ app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cook
 app.get('/api/cp/me', cpAuth, async (req, res) => {
   try { const c = req.cp.client; const unread = (await pool.query(`SELECT count(*)::int n FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=$1 AND m.sender_kind='ops' AND m.read_by_client_at IS NULL`, [c.id])).rows[0].n;
     const stockScope = c.stock_scope || { mode: 'default' }; const wh = c.warehouse_code || CP_MARKETS[c.market].wh;
-    res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSetting('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSetting('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
+    res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSettingC('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSettingC('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Line sheet + stock: one product layer, two views. Market drives dims / HS / currency; stock is banded (default scope) or
 // exact (custom scope, key accounts) — never shown to distributors in order entry.
-async function cpProducts(client, opts) {
-  const mk = CP_MARKETS[client.market] || CP_MARKETS.UK; const d = mk.dims; const hs = mk.hs;
-  const rows = (await pool.query(`SELECT p.sku, coalesce(nullif(p.product_name_final,''), p.product_name) name, coalesce(nullif(p.category_name_final,''), p.category) category, coalesce(nullif(p.subcategory_name_final,''), p.subcategory) subcategory,
+// v28.175 (Ben): the product rows come from the shared 'cp:prod:<dims>:<hs>' base (same SQL), stock from the shared 'cp:stock'
+// base summed over this client's warehouses (same as the per-client query), bands from the settings cache. The transform below is
+// unchanged. cpProductsMemo serves one memoised result per (bases, client signature).
+function cpProdBase(d, hs) { return _lcGet(_cpCache('cp:prod:' + d + ':' + hs, CP_TTL.prod, 30 * 60000, async () => (await pool.query(cpProdSql(d, hs))).rows)); }
+function cpStockBase() {   // { warehouse: [[sku, qty], …] } in row order
+  return _lcGet(_cpCache('cp:stock', CP_TTL.stock, 5 * 60000, async () => { const by = {};
+    (await pool.query(`SELECT sku, warehouse, available::int qty FROM planner.v_product_inventory`)).rows.forEach(r => { (by[r.warehouse] = by[r.warehouse] || []).push([r.sku, r.qty]); });
+    return by; }));
+}
+function cpProdSql(d, hs) {
+  return `SELECT p.sku, coalesce(nullif(p.product_name_final,''), p.product_name) name, coalesce(nullif(p.category_name_final,''), p.category) category, coalesce(nullif(p.subcategory_name_final,''), p.subcategory) subcategory,
       p.colour_long colour, coalesce(nullif(p.size_short,''), p.size) size, p.size_long, p.release_window season, upper(coalesce(p.status,'')) status, p.discontinue_date_final disc_us, p.discontinue_date_au_final disc_au, p.discontinue_date_ca disc_ca, p.product_ean ean, p.asin, p.carton_qty, p.case_pack_size inner_qty, p.sku_barcode, p.carton_barcode,
       p.${hs} hs, p.${d}_prod_length pl, p.${d}_prod_width pw, p.${d}_prod_height ph, p.${d}_prod_weight pwt, p.${d}_carton_length cl, p.${d}_carton_width cw, p.${d}_carton_height chh, p.${d}_carton_weight cwt, p.grs_material_product material,
       coalesce(nullif(p.variant_image_url_final,''), nullif(p.colour_swatch_url,'')) image, p.parent_p1 parent, p.marketing_category_final mcat, p.launch_date_ws, p.polybags, p.clearance
-    FROM planner.products p WHERE coalesce(p.in_planning_scope,false) AND upper(coalesce(p.status,'')) NOT IN ('CLOSED') AND p.sku NOT IN (${NON_SKU_LIST}) ORDER BY category, subcategory, p.sku`)).rows;
+    FROM planner.products p WHERE coalesce(p.in_planning_scope,false) AND upper(coalesce(p.status,'')) NOT IN ('CLOSED') AND p.sku NOT IN (${NON_SKU_LIST}) ORDER BY category, subcategory, p.sku`;
+}
+async function cpProductsMemo(client, opts) {
+  const mk = CP_MARKETS[client.market] || CP_MARKETS.UK; const wantStock = !!(client.features.view_stock || opts.forOrder);
+  const [rows, stockBy, settings] = await Promise.all([cpProdBase(mk.dims, mk.hs), wantStock ? cpStockBase() : Promise.resolve(null), cpSettingsMap().catch(() => null)]);
+  const sig = _cpSig('prod', client.market, client.currency, client.type, client.warehouse_code || null, client.stock_scope || null, !!client.features.view_stock, !!opts.forOrder, !!opts.stockOnly);
+  return _cpMemo(sig, [rows, stockBy, settings], () => cpProductsFrom(client, opts, rows, stockBy, settings));
+}
+function cpProductsFrom(client, opts, rows, stockBy, settings) {   // pure: the old cpProducts body after its queries
+  const mk = CP_MARKETS[client.market] || CP_MARKETS.UK; const d = mk.dims;
   const scope = client.stock_scope || { mode: 'default' }; const wh = client.warehouse_code || mk.wh;
   let stock = {}; const exact = scope.mode === 'custom' && scope.exact !== false; const skuLimit = scope.mode === 'custom' && Array.isArray(scope.sku_list) && scope.sku_list.length ? new Set(scope.sku_list.map(s => String(s).toUpperCase())) : null;
   if (client.features.view_stock || opts.forOrder) {
     const whs = scope.mode === 'custom' && scope.region === 'us_all' ? ['us_3pl', 'us_fba'] : scope.mode === 'custom' && scope.region === 'market_all' ? [mk.wh, mk.wh.replace('_3pl', '_fba')] : [wh];
-    (await pool.query(`SELECT sku, warehouse, available::int qty FROM planner.v_product_inventory WHERE warehouse = ANY($1)`, [whs])).rows.forEach(r => { stock[r.sku] = (stock[r.sku] || 0) + (Number(r.qty) || 0); });
+    [...new Set(whs)].forEach(w => (stockBy[w] || []).forEach(([sku, qty]) => { stock[sku] = (stock[sku] || 0) + (Number(qty) || 0); }));   // = WHERE warehouse = ANY($1) (a warehouse listed twice still matches its rows once)
   }
-  const bands = await cpStockBands();
+  const bands = cpParseBands(settings ? ((settings.cp_stock_bands != null && settings.cp_stock_bands !== '') ? settings.cp_stock_bands : '') : '');
   const discMkt = String((client.stock_scope && client.stock_scope.disc_market) || client.market || 'UK').toUpperCase();
   const out = rows.filter(p => !skuLimit || skuLimit.has(String(p.sku).toUpperCase()) || !opts.stockOnly).map(p => {
     const disc = discMkt === 'AU' ? p.disc_au : discMkt === 'CA' ? p.disc_ca : p.disc_us;   // v28.020: per the client account's discontinue-date market (default = client market)
@@ -23256,27 +23399,45 @@ async function cpProducts(client, opts) {
   });
   return { products: out, market: client.market, currency: client.currency, warehouse: wh, warehouse_label: scope.mode === 'custom' ? (scope.region === 'us_all' ? 'All US warehouses' : scope.region === 'market_all' ? 'All ' + client.market + ' warehouses' : (CP_WAREHOUSES[wh] || wh)) + ' · custom report' : (CP_WAREHOUSES[wh] || wh), stock_exact: exact, custom_sku_count: skuLimit ? skuLimit.size : null };
 }
-app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_line_sheet) return res.status(403).json({ error: 'line sheet not enabled for this account' }); res.set('Cache-Control', 'no-store').json(await cpProducts(req.cp.client, {})); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
-app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_stock) return res.status(403).json({ error: 'stock availability not enabled for this account' }); const r = await cpProducts(req.cp.client, { stockOnly: true }); r.products = r.products.filter(p => p.stock != null); res.set('Cache-Control', 'no-store').json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.175 (Ben): memoised per (bases, client signature) + sendJsonMemo (gzip once, strong ETag, 304). Cache-Control is now
+// `private, no-cache` (browser may keep it but must revalidate every time, so a 304 replaces the ~60 KB gzip body; never stale).
+app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_line_sheet) return res.status(403).json({ error: 'line sheet not enabled for this account' }); const v = await cpProductsMemo(req.cp.client, {}); sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_stock) return res.status(403).json({ error: 'stock availability not enabled for this account' }); const r = await cpProductsMemo(req.cp.client, { stockOnly: true });
+  const v = _cpMemo('stock|' + _cpSig(req.cp.client.market, req.cp.client.currency, req.cp.client.type, req.cp.client.warehouse_code || null, req.cp.client.stock_scope || null, !!req.cp.client.features.view_stock), [r], () => Object.assign({}, r, { products: r.products.filter(p => p.stock != null) }));   // copy: the memoised line-sheet object is never mutated
+  sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/cp/prices', cpAuth, async (req, res) => {
   try { const c = req.cp.client;
     // v28.102 (Ben): computed tier pricing — when the client has a price_tier, price every SKU from the product retail
     // (RT → ex-tax → WS → distributor). Falls back to the legacy hand-maintained price_list when no tier is set.
+    // v28.175 (Ben): prices are a pure function of (tier, market, method, currency) over the shared 'cp:rt' base (every SKU's
+    // retail columns, same non-discontinued filter; the old `<col> IS NOT NULL AND <col> > 0` is cpTierPrice's own null rule), or of
+    // (list code, currency) over 'cp:pl:<code>'. Memoised + sendJsonMemo.
     if (c.price_tier) {
       const mkt = String(c.market || '').toUpperCase(); const col = CP_RT_COL[mkt];
       if (!col) return res.set('Cache-Control', 'no-store').json({ code: c.price_tier, tier: c.price_tier, prices: {}, currency: c.currency });
-      const offers = await cpDistOffers();
-      const rows = (await pool.query(`SELECT sku, ${col} FROM planner.products WHERE coalesce(status,'') NOT ILIKE '%discontinued%' AND ${col} IS NOT NULL AND ${col} > 0`)).rows;
-      const m = {}; const method = c.price_method || 'fob';
-      rows.forEach(r => { const p = cpTierPrice(r, mkt, c.price_tier, method, offers); if (p != null) m[r.sku] = p; });
-      const code = c.price_tier === 'dist' ? (mkt + ' Distributor ' + method.toUpperCase()) : (mkt + ' ' + c.price_tier.toUpperCase());
-      return res.set('Cache-Control', 'no-store').json({ code, tier: c.price_tier, method: c.price_tier === 'dist' ? method : null, prices: m, currency: c.currency });
+      const [offers, rows] = await Promise.all([cpDistOffers(), _lcGet(_cpCache('cp:rt', CP_TTL.rt, 30 * 60000, async () => (await pool.query(`SELECT sku, ${Object.values(CP_RT_COL).join(', ')} FROM planner.products WHERE coalesce(status,'') NOT ILIKE '%discontinued%'`)).rows))]);
+      const method = c.price_method || 'fob';
+      const v = _cpMemo(_cpSig('tier', c.price_tier, mkt, method, c.currency), [rows, offers], () => {
+        const m = {}; rows.forEach(r => { if (!(Number(r[col]) > 0)) return; const p = cpTierPrice(r, mkt, c.price_tier, method, offers); if (p != null) m[r.sku] = p; });
+        const code = c.price_tier === 'dist' ? (mkt + ' Distributor ' + method.toUpperCase()) : (mkt + ' ' + c.price_tier.toUpperCase());
+        return { code, tier: c.price_tier, method: c.price_tier === 'dist' ? method : null, prices: m, currency: c.currency }; });
+      return sendJsonMemo(req, res, v, () => v);
     }
     if (!c.price_list) return res.json({ code: null, prices: {}, currency: c.currency });
-    const rows = (await pool.query(`SELECT sku, price, currency FROM planner.client_price_lists WHERE code=$1`, [c.price_list])).rows; const m = {}; rows.forEach(r => { m[r.sku] = Number(r.price); });
-    res.set('Cache-Control', 'no-store').json({ code: c.price_list, prices: m, currency: (rows[0] && rows[0].currency) || c.currency }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    const rows = await _lcGet(_cpCache('cp:pl:' + c.price_list, CP_TTL.pl, 10 * 60000, async () => (await pool.query(`SELECT sku, price, currency FROM planner.client_price_lists WHERE code=$1`, [c.price_list])).rows));
+    const v = _cpMemo(_cpSig('list', c.price_list, c.currency), [rows], () => { const m = {}; rows.forEach(r => { m[r.sku] = Number(r.price); }); return { code: c.price_list, prices: m, currency: (rows[0] && rows[0].currency) || c.currency }; });
+    sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/cp/orders', cpAuth, async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ orders: await cpOrders({ client: req.cp.client, user: req.cp.user, q: req.query.q, from: req.query.from, to: req.query.to, status: req.query.status }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.175 (Ben): per-user cache. Key = sha1 of every input cpOrders reads: the client (id, name, channel, visibility), the user (id,
+// scope, email) and the filters. Busted by 'client-order' (an order placed here: the placer gets read-your-writes) and 'client'.
+app.get('/api/cp/orders', cpAuth, async (req, res) => { try {
+  const c = req.cp.client, u = req.cp.user, f = { q: req.query.q || '', from: req.query.from || '', to: req.query.to || '', status: req.query.status || '' };
+  const key = 'cpu:orders:' + _cpHash(_cpSig(c.id, c.name, c.fulfil_channel || null, c.visibility || null, u.id, u.scope || null, u.email || null, f.q, f.from, f.to, f.status));
+  _lcSweep('cpu:', 30 * 60000, 1000);
+  const opts = { client: c, user: u, q: req.query.q, from: req.query.from, to: req.query.to, status: req.query.status, cachedRule: true };
+  const orders = await _lcGet(_cpCache(key, CP_TTL.orders, 3 * 60000, () => cpOrders(opts)));
+  const v = _cpMemo('orders|' + key, [orders], () => ({ orders }));
+  sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Order submission: validate (unknown / closed SKUs, partial cartons) → record → Fulfil draft (gated) → two emails.
 async function cpCreateFulfilDraft(client, order, lines) {
   const env = await activeFulfilEnv(); const cfg = fulfilConfigFor(env); if (!cfg.configured) return { ok: false, reason: 'Fulfil not configured' };
@@ -23335,10 +23496,15 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
 });
 app.get('/api/cp/commission', cpAuth, async (req, res) => {
   try { const c = req.cp.client; if (!c.features.view_commission) return res.status(403).json({ error: 'commission report not enabled for this account' }); if (!c.rep_group_id) return res.json({ runs: [], rows: [], note: 'no rep group assigned to this account' });
-    const runs = (await pool.query(`SELECT id, month, status, total, to_char(finalised_at,'YYYY-MM-DD') finalised_at, to_char(paid_at,'YYYY-MM-DD') paid_at FROM planner.commission_runs WHERE rep_group_id=$1 AND status IN ('finalised','paid') ORDER BY month DESC LIMIT 24`, [c.rep_group_id])).rows;
-    const month = req.query.month || (runs[0] && runs[0].month); const run = runs.find(r => r.month === month);
-    const rows = run ? (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, status FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [run.id])).rows : [];
-    res.set('Cache-Control', 'no-store').json({ group: c.rep_group_name, runs, month, run, rows, currency: c.currency }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    // v28.175 (Ben): per rep group + month cache (finalised / paid runs only change through CLIENT-module admin writes → 'client').
+    const qm = String(req.query.month || ''), gid = c.rep_group_id;
+    const base = await _lcGet(_cpCache('cpu:comm:' + gid + ':' + _cpHash(qm), CP_TTL.comm, 10 * 60000, async () => {
+      const runs = (await pool.query(`SELECT id, month, status, total, to_char(finalised_at,'YYYY-MM-DD') finalised_at, to_char(paid_at,'YYYY-MM-DD') paid_at FROM planner.commission_runs WHERE rep_group_id=$1 AND status IN ('finalised','paid') ORDER BY month DESC LIMIT 24`, [gid])).rows;
+      const month = qm || (runs[0] && runs[0].month); const run = runs.find(r => r.month === month);
+      const rows = run ? (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, status FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [run.id])).rows : [];
+      return { runs, month, run, rows }; }));
+    const v = _cpMemo(_cpSig('comm', gid, qm, c.rep_group_name || null, c.currency), [base], () => ({ group: c.rep_group_name, runs: base.runs, month: base.month, run: base.run, rows: base.rows, currency: c.currency }));
+    sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/cp/threads', cpAuth, async (req, res) => { try { if (!req.cp.client.features.messaging) return res.status(403).json({ error: 'messaging not enabled' }); res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.cp.client.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/cp/threads/:id', cpAuth, async (req, res) => {
@@ -24089,21 +24255,11 @@ app.post('/api/supply/onb/products/:id/status', async (req, res) => { const st =
 // supplier(s). The PO rows reuse the admin purchase-orders calc verbatim (so figures are identical),
 // with a supplier filter; everything else is filtered to those POs / supplier ids.
 // v27.879 (Ben, portal perf): the bootstrap build is its own function so (a) the route can serve it through the cache and
-// (b) a portal write can rebuild the writer's payload in the background (portalBootstrapPrewarm) so their next load is warm.
+// (b) a portal write can rebuild the writer's payload in the background (v28.175: _hzOnWrite) so their next load is warm.
 // Shape of the build: the ~20 queries used to run as ~14 sequential round trips (+ an N+1 over the spec list) = ~9.5s cold
 // on the remote pooler. Now everything that needs only the supplier names/ids starts at once; the PO-keyed follow-ons run as
 // one round after the PO rows land. 3 round trips end to end, same payload.
-const _pbKey = (names, inclArch) => names.slice().sort().join('|') + '|' + (inclArch ? '1' : '0');
-function portalBootstrapPrewarm(names, ids, inclArch) {
-  // NOT on Vercel: a timer that fires after the response has gone out runs in a container that may already be frozen
-  // (stranded pooled connections — Diviyaj 01-Sep). There the writer's next load builds inline (~1.5s) instead.
-  if (process.env.VERCEL || process.env.PORTAL_PREWARM === '0') return;
-  try {
-    const key = _pbKey(names, inclArch);
-    if (_portalInflight.get(key)) return;
-    setTimeout(() => { currentSupplyEpoch().then((ep) => portalBootstrapRun(key, () => portalBootstrapBuild(names, ids, inclArch), ep)).catch(() => {}); }, 250);   // small debounce: a burst of ticks → one rebuild
-  } catch (e) { /* best-effort */ }
-}
+// v28.175 (Ben): the cache key (_pbCache) and the post-write prewarm (_hzOnWrite) moved next to the cache machinery.
 // specSupplierSet per spec is a products scan; the portal build asks it for every non-directed active spec. Memoised for
 // 5 minutes per scope (specs change rarely; a new spec appears on the next TTL — the admin side never reads this memo).
 const _specSupMemo = new Map();
@@ -24117,16 +24273,16 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
   try {
     // Hide archived (completed, pre-cutoff) POs by default — same cutoff as the admin grid — to keep the portal
     // payload small; ?includeArchived=1 reveals them (portal "Show archived" toggle).
-    const _inclArch = String(req.query.includeArchived || '') === '1';
-    // Per-supplier-set bootstrap cache: serve fresh (or serve stale while one request rebuilds). Cleared on admin edits
-    // (invalidateSupplyCaches); after the supplier's own portal POST only THEIR key is dropped and rebuilt (middleware above).
-    const _pkey = _pbKey(names, _inclArch), _fresh = String(req.query.fresh || '') === '1';
-    const _ep = await currentSupplyEpoch();   // ~free: polled at most every 5s per instance
-    const _phit = _portalCache.get(_pkey);
-    const _ok = !!(_phit && _phit.epoch === _ep && Date.now() - _phit.at < SUPPLY_CACHE_TTL_MS);
-    if (_phit && (_ok || (!_fresh && _portalInflight.get(_pkey)))) return res.json(_phit.v);   // fresh, or a rebuild is already running → last payload
-    if (_phit && !_fresh) { res.set('X-HZ-Stale', '1'); return res.json(_phit.v); }   // v27.880: stale → instant paint; the page re-fetches ?fresh=1 and repaints in place
-    res.json(await portalBootstrapRun(_pkey, () => portalBootstrapBuild(names, ids, _inclArch), _ep));
+    const _inclArch = String(req.query.includeArchived || '') === '1', _fresh = String(req.query.fresh || '') === '1';
+    // v28.175 (Ben): per-supplier-set cache in the v28.167 machinery, keyed ONLY by the authenticated identity (req.portal from the
+    // psid session, never a header): names + ids + archived flag. Stale (an edit not absorbed yet, or past TTL) → served at once with
+    // `X-HZ-Stale: 1` and revalidated behind; the page re-fetches ?fresh=1 (which waits for a fresh build) and repaints in place
+    // (v27.880 protocol unchanged). The writer of a portal edit gets read-your-writes (waits for the rebuild, never the old payload).
+    _lcSweep('pb:', 30 * 60 * 1000, 300);
+    const st = _pbCache(names, ids, _inclArch);
+    const v = await _lcGet(st, _fresh ? _lcFreshNeed(st) : null);
+    if (!_fresh && _lcIsStale(st, v)) res.set('X-HZ-Stale', '1');
+    sendJsonMemo(req, res, v, () => v);   // serialised + gzipped once per build; strong ETag → 304 on an unchanged payload
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function portalBootstrapBuild(names, ids, _inclArch) {
@@ -24216,8 +24372,11 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
     // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
     // Unread Dock&Bay (internal) shipment-note counts are attached as soon as the plan lands (powers the badges).
     const nameSet = new Set(names.map(n => String(n).toLowerCase()));
-    const pShipPlan = buildShipmentPlan().then(async (all) => {
-      const shipmentPlan = all.filter(s => (s.suppliers || []).some(n => nameSet.has(String(n).toLowerCase())));
+    // v28.175 (Ben): the plan comes from the shared 'sec:shipment-plan' cache (= buildShipmentPlan(), same builder the admin tab
+    // uses) instead of a fresh full build per supplier. Rows are copied before the per-supplier unread badge is attached, so the
+    // shared cached rows are never mutated (no cross-supplier field can leak through them).
+    const pShipPlan = _lcGet(_secCache('shipment-plan')).then(async (all) => {
+      const shipmentPlan = all.filter(s => (s.suppliers || []).some(n => nameSet.has(String(n).toLowerCase()))).map(s => JSON.parse(JSON.stringify(s)));
       const shipRefs = shipmentPlan.filter(s => s.shipment_ref).map(s => s.shipment_ref);
       if (shipRefs.length) {
         const un = await q(`SELECT shipment_ref, count(*)::int unread FROM planner.shipment_notes
@@ -24280,29 +24439,17 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
     })();
     [pDeps, pNotes, pSubs, pSupSkus, pSamples, pPayments, pShipPlan, pProductEnabled, pProducts, pSpecs].forEach(p => p.catch(() => {}));   // if the PO query throws first, none of these may surface as an unhandled rejection
     // ── PO rows (needs the archive cutoff), then Round B: everything keyed by the PO list, in one go.
-    const _cutoff = await pCutoff;
-    let _posSql = POS_SQL_PORTAL, _posParams = [names];
-    if (_cutoff && !_inclArch) {
-      // NB function replacement — the injected SQL contains `$2` and `$'` (regex anchor), which a string
-      // replacement would misinterpret as replace-patterns. A function returns it verbatim.
-      const _cond = `AND NOT (${archivedSql('calc4', '$2')}) ORDER BY calc4.po`;
-      _posSql = POS_SQL_PORTAL.replace('ORDER BY calc4.po', () => _cond); _posParams = [names, _cutoff];
-    }
-    const pos = await q(_posSql, _posParams);   // same calc as admin /api/supply/purchase-orders, filtered
-    const poList = pos.map(p => p.po);
+    // v28.175 (Ben): the PO rows and their lines come from the shared bases ('portal:pos' = POS_SQL_PORTAL for every supplier,
+    // 'portal:lines' = PORTAL_LINES_SQL for every PO), filtered here to THIS supplier set: exact supplier_name match (the SQL's
+    // `supplier_name = ANY($1)`) and the archive cutoff (portalPoArchived = archivedSql in JS, same NULL handling). Rows are
+    // copied (the build adds barcode_projects), so the shared base rows are never mutated.
+    const [_cutoff, _allPos, _allLines] = await Promise.all([pCutoff, _lcGet(_portalPosSt), _lcGet(_portalLinesSt)]);
+    const _nameSet = new Set(names);
+    const pos = _allPos.filter(r => _nameSet.has(r.supplier_name) && !(_cutoff && !_inclArch && portalPoArchived(r, _cutoff))).map(r => Object.assign({}, r));
+    const poList = pos.map(p => p.po), _poSet = new Set(poList);
     const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
-    const [lines, lc, xd, ac, _ap, drows, bps] = await Promise.all([
-      grab(`SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty,   -- v28.151 (review C5): erp_qty dropped, the portal never reads it (internal ERP state)
-              -- product default cost for the PO's supplier (cost_<code>, e.g. LX→cost_lx), fallback general cost.
-              -- The order-plan Est. cost when the line has no negotiated cost_price — mirrors admin (po-detail sku_cost).
-              coalesce(
-                CASE lower((SELECT s.code FROM planner.suppliers s JOIN planner.purchase_orders pp
-                              ON (s.id=pp.supplier_id OR s.name=pp.supplier_name) WHERE pp.po=l.po LIMIT 1))
-                  WHEN 'lx' THEN pr.cost_lx WHEN 'xr' THEN pr.cost_xr END,
-                pr.cost) sku_cost
-            FROM planner.purchase_order_lines l
-            LEFT JOIN planner.products pr ON pr.sku=l.sku
-            WHERE l.po = ANY($1) ORDER BY l.po, l.sku`),
+    const lines = _allLines.filter(l => _poSet.has(l.po)).map(l => Object.assign({}, l));
+    const [lc, xd, ac, _ap, drows, bps] = await Promise.all([
       grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
       grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
       grab(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
@@ -24364,11 +24511,13 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
   try {
     // Payment-confirmed events appear only for a user who has opted in (receive_payment_notification). A payment is
     // "confirmed" when its run carries a bank amount + currency (applied in the Payments Report).
-    const wantPay = (await pool.query(`SELECT bool_or(receive_payment_notification) f FROM planner.supplier_portal_users WHERE lower(email)=lower($1) AND active=true`, [req.portal.email])).rows[0]?.f === true;
-    const payUnion = wantPay ? `
+    // v28.175 (Ben): the opt-in check is now part of the one query (EXISTS an active row with the flag on = the old
+    // bool_or(...) = true), so the drawer costs one round trip instead of two. Same rows.
+    const payUnion = `
         UNION ALL SELECT coalesce(updated_at, run_date::timestamp) ts, 'payment' typ,
           'Payment confirmed — '||to_char(round(paid_amount),'FM999,999,999')||' '||paid_currency||' ('||to_char(run_date,'DD Mon YY')||')' label, '' ref
-          FROM planner.payment_fx WHERE supplier = ANY($1) AND paid_amount IS NOT NULL AND coalesce(paid_currency,'')<>''` : '';
+          FROM planner.payment_fx WHERE supplier = ANY($1) AND paid_amount IS NOT NULL AND coalesce(paid_currency,'')<>''
+            AND EXISTS (SELECT 1 FROM planner.supplier_portal_users pu WHERE lower(pu.email)=lower($2) AND pu.active=true AND pu.receive_payment_notification)`;
     res.json((await pool.query(`
       SELECT to_char(ts,'YYYY-MM-DD HH24:MI') at, typ, label, ref FROM (
         -- "New purchase order" fires only once the PO is portal-visible (not FUTURE) — i.e. set to Production —
@@ -24387,7 +24536,7 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
                           AND (po.status ILIKE 'production%' OR po.status ILIKE 'ready%' OR po.status ILIKE 'shipping%'))${payUnion}
         UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
           FROM planner.sample_requests WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
-      ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names])).rows);
+      ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names, req.portal.email])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal "Inbox" drawer — the actual UNREAD Dock & Bay messages for THIS supplier across every thread type

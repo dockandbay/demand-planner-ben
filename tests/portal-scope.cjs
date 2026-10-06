@@ -1,0 +1,87 @@
+// v28.175 (Ben): portal data scoping guard for the shared portal caches (perf roadmap #5).
+// The supplier / client portals now serve per-identity transforms of SHARED base caches. This test proves two different portal
+// users get disjoint, correctly scoped data, warm or cold, and that a cached payload never crosses identities (incl. via ETag/304).
+// Needs a running server (sandbox) and two session cookies per portal (rows in planner.portal_sessions / planner.client_sessions):
+//   HZ_TEST_BASE=http://127.0.0.1:8152 HZ_TEST_PSID_A=… HZ_TEST_PSID_B=… HZ_TEST_CSID_A=… HZ_TEST_CSID_B=… node tests/portal-scope.cjs
+// Supplier A and B must be linked to different suppliers; client A and B to different client accounts. Read-only (GETs only).
+const http = require('http'), zlib = require('zlib');
+const BASE = new URL(process.env.HZ_TEST_BASE || 'http://127.0.0.1:8152');
+const PA = process.env.HZ_TEST_PSID_A, PB = process.env.HZ_TEST_PSID_B, CA = process.env.HZ_TEST_CSID_A, CB = process.env.HZ_TEST_CSID_B;
+if (!PA || !PB || !CA || !CB) { console.error('set HZ_TEST_PSID_A / _B and HZ_TEST_CSID_A / _B (see header)'); process.exit(2); }
+let fails = 0, passes = 0;
+const ok = (cond, msg) => { if (cond) passes++; else { fails++; console.log('FAIL: ' + msg); } };
+function get(path, headers) {
+  return new Promise((res, rej) => {
+    const r = http.request({ host: BASE.hostname, port: BASE.port, path, headers: Object.assign({ 'accept-encoding': 'gzip' }, headers || {}) }, (resp) => {
+      const ch = []; resp.on('data', (c) => ch.push(c)); resp.on('end', () => {
+        let b = Buffer.concat(ch); if (resp.headers['content-encoding'] === 'gzip' && b.length) b = zlib.gunzipSync(b);
+        let j = null; try { j = b.length ? JSON.parse(b.toString('utf8')) : null; } catch (_) {}
+        res({ status: resp.statusCode, json: j, text: b.toString('utf8'), etag: resp.headers.etag || null });
+      });
+    });
+    r.on('error', rej); r.setTimeout(180000, () => r.destroy(new Error('timeout'))); r.end();
+  });
+}
+const sub = (a, b) => [...a].every((x) => b.has(x));
+const disjoint = (a, b) => [...a].every((x) => !b.has(x));
+function checkSupplierPayload(tag, d, names) {
+  const nm = new Set(names);
+  ok(d && Array.isArray(d.pos), tag + ': payload has pos');
+  if (!d || !Array.isArray(d.pos)) return new Set();
+  const pos = new Set(d.pos.map((p) => p.po));
+  ok(d.pos.every((p) => nm.has(p.supplier_name)), tag + ': every PO belongs to the session suppliers');
+  ok(d.supplierName === names.join(', '), tag + ': supplierName is the session\'s own');
+  for (const k of ['lb', 'costsByPo', 'xdByPo', 'addByPo', 'approvedByPo', 'docsByPo'])   // PO-keyed follow-ons: only the payload's own POs
+    ok(sub(new Set(Object.keys(d[k] || {})), pos), tag + ': ' + k + ' keyed only by own POs');
+  // notesByPo / subsByPo are fetched by supplier id (they also carry product refs / FUTURE POs): checked against the OTHER user's POs below
+  const lower = new Set(names.map((n) => String(n).toLowerCase()));
+  ok((d.shipmentPlan || []).every((s) => (s.suppliers || []).some((n) => lower.has(String(n).toLowerCase()))), tag + ': shipment plan only shipments the supplier is on');
+  ok((d.samples || []).every((s) => !s.supplier_name || nm.has(s.supplier_name)), tag + ': samples are own');
+  ok((d.products || []).every((p) => nm.has(p.supplier)), tag + ': product requests are own');
+  return pos;
+}
+(async () => {
+  // ── supplier portal ──
+  const meA = await get('/api/portal/me', { cookie: 'psid=' + PA }), meB = await get('/api/portal/me', { cookie: 'psid=' + PB });
+  ok(meA.status === 200 && meB.status === 200, 'supplier sessions valid');
+  const nA = (meA.json && meA.json.suppliers) || [], nB = (meB.json && meB.json.suppliers) || [];
+  ok(nA.length && nB.length && disjoint(new Set(nA), new Set(nB)), 'precondition: the two supplier users are linked to different suppliers');
+  for (const q of ['', '?includeArchived=1']) {
+    const a1 = await get('/api/portal/bootstrap' + q, { cookie: 'psid=' + PA });
+    const b1 = await get('/api/portal/bootstrap' + q, { cookie: 'psid=' + PB });
+    const a2 = await get('/api/portal/bootstrap' + q, { cookie: 'psid=' + PA });   // warm, after B was built from the same shared bases
+    const posA = checkSupplierPayload('A' + q, a1.json, nA), posB = checkSupplierPayload('B' + q, b1.json, nB);
+    checkSupplierPayload('A warm' + q, a2.json, nA);
+    ok(disjoint(posA, posB), 'supplier PO sets are disjoint' + q);
+    for (const k of ['notesByPo', 'subsByPo']) {
+      ok(disjoint(new Set(Object.keys((a1.json && a1.json[k]) || {})), posB), 'A ' + k + ' never holds a B PO' + q);
+      ok(disjoint(new Set(Object.keys((b1.json && b1.json[k]) || {})), posA), 'B ' + k + ' never holds an A PO' + q);
+    }
+    ok(a1.text === a2.text, 'A cold and warm payloads identical' + q);
+    if (a1.etag && a1.text !== b1.text) { const x = await get('/api/portal/bootstrap' + q, { cookie: 'psid=' + PB, 'if-none-match': a1.etag }); ok(x.status === 200 && x.text === b1.text, 'B presenting A\'s ETag gets B\'s own 200, never a 304' + q); }
+  }
+  // no session / forged session / proxy identity headers never authenticate
+  const em = (meA.json && meA.json.email) || 'factory@lixin.test';
+  for (const [h, why] of [[{}, 'no cookie'], [{ cookie: 'psid=forged-token-1234567890' }, 'forged psid'],
+    [{ 'x-portal-email': em, 'x-user-email': em, 'x-forwarded-email': em, 'x-auth-request-email': em }, 'proxy email headers']]) {
+    const r = await get('/api/portal/bootstrap', h); ok(r.status === 401, 'supplier bootstrap rejects ' + why + ' (got ' + r.status + ')');
+  }
+  // ── client portal ──
+  const cA = await get('/api/cp/me', { cookie: 'csid=' + CA }), cB = await get('/api/cp/me', { cookie: 'csid=' + CB });
+  ok(cA.status === 200 && cB.status === 200, 'client sessions valid');
+  const clA = cA.json && cA.json.client, clB = cB.json && cB.json.client;
+  ok(clA && clB && clA.id !== clB.id, 'precondition: the two client users belong to different client accounts');
+  for (const p of ['/api/cp/orders', '/api/cp/prices', '/api/cp/line-sheet', '/api/cp/stock', '/api/cp/commission']) {
+    const a1 = await get(p, { cookie: 'csid=' + CA }), b1 = await get(p, { cookie: 'csid=' + CB }), a2 = await get(p, { cookie: 'csid=' + CA });
+    ok(a1.status === a2.status && a1.text === a2.text, p + ': A is served A\'s own payload again after B (no cross-identity cache hit)');
+    if (a1.status === 200 && b1.status === 200 && a1.text !== b1.text && a1.etag) { const x = await get(p, { cookie: 'csid=' + CB, 'if-none-match': a1.etag }); ok(x.status === 200 && x.text === b1.text, p + ': B presenting A\'s ETag gets B\'s own 200'); }
+    if (p === '/api/cp/orders' && a1.json && b1.json) { const ia = new Set(a1.json.orders.map((o) => String(o.id))), ib = new Set(b1.json.orders.map((o) => String(o.id))); ok(disjoint(ia, ib), p + ': order ids disjoint between the two clients'); }
+    if (p === '/api/cp/prices' && a1.json) ok(a1.json.currency === clA.currency || (a1.json.code && a1.json.code === clA.price_list), p + ': A gets its own price list / currency');
+    if (p === '/api/cp/line-sheet' && a1.json && a1.status === 200) ok(a1.json.market === clA.market && a1.json.currency === clA.currency, p + ': A gets its own market / currency');
+  }
+  for (const [h, why] of [[{}, 'no cookie'], [{ cookie: 'csid=forged-token-1234567890' }, 'forged csid'], [{ 'x-client-email': 'x@y.z', 'x-user-email': 'x@y.z' }, 'proxy email headers']]) {
+    const r = await get('/api/cp/orders', h); ok(r.status === 401, 'client orders rejects ' + why + ' (got ' + r.status + ')');
+  }
+  console.log((fails ? 'FAILED' : 'OK') + ': ' + passes + ' checks passed, ' + fails + ' failed');
+  process.exit(fails ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

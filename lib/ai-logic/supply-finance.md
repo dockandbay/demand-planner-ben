@@ -28,7 +28,7 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: 98e39c2c85c0
-  server.mjs::POS_SQL_PORTAL: 6a1b8142a512
+  server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
   server.mjs::propagateShippingToPOs: f730be62e59b
@@ -68,7 +68,7 @@ fingerprints:
   server.mjs::/api/supply/po-line-accept: 073111cc8cb5
   server.mjs::/api/supply/po-line-reject: e6636f5d3d7e
   server.mjs::cpTierPrice: a2b9b629bb4a
-  server.mjs::/api/cp/prices: c3175d293f6a
+  server.mjs::/api/cp/prices: 1445d08c02f9
   server.mjs::/api/cp/order: d604b61b8633
   server.mjs::cpCreateFulfilDraft: 5117a7608ab4
   server.mjs::/api/client/commission/runs/build: 9f79554f891a
@@ -89,7 +89,7 @@ fingerprints:
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
   supply/inject.html::upfxDownload: 0924ecaf4755
-verified_version: v28.174
+verified_version: v28.175
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
