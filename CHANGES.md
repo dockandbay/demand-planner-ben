@@ -1,3 +1,16 @@
+## v28.168 (Ben, branch review-fixes-2026-10-05): FBA consistency (SSM FBA cover, in-flight at startup, Fulfil-only daily refresh, excluded warehouses, drawer)
+
+**Files:** `artifact_v16.7.html`, `server.mjs`, `supply/inject.html`, `lib/ai-logic/` (transfers, urgent-ssm-complex-rules, buy-plan, reports re-verified) (+ package.json, CHANGES.md). No migrations. Env: `HZ_FBA_INFLIGHT_CRON=0` (local opt-out of the daily timer), `HZ_FBA_INFLIGHT_STUB` (local test only, ignored on Vercel).
+
+1. **SSM drives FBA cover:** when SSM FBA is on for a market, its cover wins over the FBA target box (box = fallback; note shown on the box). One FBA cover (`fbaCoverWks`) drives the buy, both transfer sizers, the popup and Inventory Status. Was: every caller passed the box, so SSM FBA never applied.
+2. **Buy no longer depends on navigation:** in-flight transfers and AWD/NonGRS pools load at startup (5 retries with backoff, never block first paint; buy cache cleared and a visible grid re-rendered once if numbers change). Was: BUY-first vs FBA-tab-first gave 22 SKU x market differences.
+3. **In-flight refresh is Fulfil-only** (Cin7 pull removed; old Cin7 rows ignored and deleted on first refresh). Refresh bumps the supply epoch. Source warehouses in `app_settings.inflight_excluded_warehouses` are excluded (default UKILG-OLD, OPTEST, ILGW, COUGH; case-insensitive; AUCOGHLANS can never be excluded; admin-editable from the drawer). Inbound / PO receipts are NOT filtered.
+4. **Daily cron:** `POST /api/cron/fba-inflight-refresh` (header `x-webhook-secret: N8N_WEBHOOK_SECRET`), logged to etl_runs job `fba_inflight_refresh`; local unref'd timer off Vercel.
+5. **Drawer:** the in-flight list is a scrollable right-side drawer (sticky headers, Esc / backdrop / x close, last refreshed, excluded shipments summary). Help texts and tooltips say Fulfil, not Cin7.
+
+**Buy impact (sandbox, jsdom):** SSM FBA off: same as old FBA-tab-first except 3 SKUs from AWD/NonGRS now loading. SSM FBA on, box 12: 75 SKU x market lower (UK 36, US 17, EU 8, AU 14). Box 8: ~no change (SSM FBA capped at 8 weeks). Excluding the UK ILG - Old BOT transfers (20 shipments, 61,074u) raises UK on 21 SKUs (tx +1,560, b3 +150, future +2,820).
+**Diviyaj:** n8n daily 06:00 Europe/London `POST /api/cron/fba-inflight-refresh` with the webhook secret header, body `{}`; mirror the gate bypass for that path. On live the 61k phantom BOT units stay counted until the first refresh after deploy, so run it once by hand after deploying.
+
 ## v28.167 (Ben, branch review-fixes-2026-10-05): lazy, scoped server cache invalidation (perf roadmap #4, review E4)
 
 **Files:** `server.mjs`, `lib/ai-logic/reports.md` + `supply-finance.md` (fingerprints re-verified, cache plumbing only) (+ package.json, CHANGES.md). No migration. Optional env: `HZ_MAX_REBUILDS` (default 2), `HZ_CACHE_LOG=1`; `SUPPLY_REBUILD_MIN_MS` default 30 s → 10 s.
