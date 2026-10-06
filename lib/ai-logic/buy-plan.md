@@ -15,9 +15,9 @@ sources:
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.166
+verified_version: v28.168
 fingerprints:
-  artifact_v16.7.html::project: 63cc8f0cfc13
+  artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
   artifact_v16.7.html::discCutoffMo: 5e942f8dd917
   artifact_v16.7.html::fwdDemand: 508dc05213e1
@@ -71,7 +71,7 @@ fingerprints:
   - range without a window: cover to the end of range_to, active from range_from.
   - range WITH a window: one up-front block buy placed in the first orderable month inside the window, sized to all DTC+B2B+FBA demand from range_from to range_to (or the SSM season end if later), plus SSM safety, minus on hand + inbound by then, rounded UP to cartons. [project]
   - launch_ramp: for ramp_months after launch, cover floor = SSM cover at an elevated service level (ramp_sl) decaying to normal. [project]
-- FBA target = products.target_cover_weeks_<mkt>_fba (or SSM FBA cover when opted in). [buildPROD_CONST, project]
+- FBA cover weeks (v28.168) = SSM FBA cover when SSM is opted in for that market's FBA pool and computes a positive cover (capped at 8 by default), else the Buy Plan Settings "FBA target" box (default 8; last value off the BUY page). products.target_cover_weeks_<mkt>_fba is no longer used by the engine. The same value sizes the FBA buy target inside Buy 3PL and the 3PL to FBA transfers. [project, fbaCoverWks]
 
 ## Inbound and stock
 - Stock on hand = v_product_inventory.available for <mkt>_3pl and <mkt>_fba (can be negative). [buildSKURAW]

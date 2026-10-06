@@ -58,7 +58,7 @@ fingerprints:
   artifact_v16.7.html::renderOtbReport: 3d410f502fdd
   artifact_v16.7.html::renderStockAvailability: a9e61219d5ac
   artifact_v16.7.html::renderInvStatus: ba1fccbb71eb
-  artifact_v16.7.html::statusMetrics: 86a4a2e8fd13
+  artifact_v16.7.html::statusMetrics: aad255d3ba05
   artifact_v16.7.html::renderTrendsView: ba92239c7585
   artifact_v16.7.html::renderAccuracyView: ed20d484765e
   artifact_v16.7.html::renderForecastAnomaliesView: 1dbfc6251b6c
@@ -91,7 +91,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.167
+verified_version: v28.168
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -248,7 +248,7 @@ verified_version: v28.167
 - Pools: 3PL if DTC, B2B or TikTok is available; FBA if FBA is available.
 - Weekly demand = next 3 full forecast months / 13, skipping the current month.
 - Cover weeks = (on hand + on order) / weekly demand.
-- Targets: 3PL 12 weeks and FBA 8 weeks by default (CA 4), unless overridden. (source: artifact_v16.7.html :: statusMetrics)
+- Targets: 3PL = products 3PL cover (default 12 weeks). FBA = the buy engine's FBA cover (v28.168): SSM FBA cover when SSM FBA is opted in for the market, else the Buy Plan Settings "FBA target" box (default 8). (source: artifact_v16.7.html :: statusMetrics)
 - Scope: not FUTURE, already launched, and not discontinued, unless "Show discontinued" is on.
 - Each location is classified once, in priority order:
   1. Backorder: on hand < 0.
