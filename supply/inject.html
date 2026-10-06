@@ -10948,7 +10948,8 @@
     ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); _payRows=Array.isArray(_res[0])?_res[0]:((_res[0]&&(_res[0].rows||_res[0].payments))||[]); var rows=_payRows;   // tolerate a non-array response (error/shape) instead of crashing the page; keep rows in a shared ref so payRefreshState can update it
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
-        +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / PO / amount…" value="'+esc(PAY_Q)+'" style="width:200px;background:var(--blue-soft);border-color:#93c5fd" title="search by supplier name, PO reference or amount — overrides the date filter (spans all history). A PO match opens its run and highlights the line."> <span class="tiny mut">supplier, PO or amount (spans all dates)</span></div><div id="pay-rep"></div>';
+        +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / PO / amount…" value="'+esc(PAY_Q)+'" style="width:200px;background:var(--blue-soft);border-color:#93c5fd" title="search by supplier name, PO reference or amount — overrides the date filter (spans all history). A PO match opens its run and highlights the line."> <span class="tiny mut">supplier, PO or amount (spans all dates)</span>'
+        +'<button class="save-btn light" id="pay-upfx" style="margin-left:auto" title="Universal Partners FX USD: unreconciled ins/outs as a Xero statement file. Import in Xero: Universal Partners FX USD > Manage Account > Import a Statement.">UP FX Statement</button></div><div id="pay-rep"></div>';   // v28.175 (Ben): Xero bank statement CSV for the Universal Partners FX USD account
       bindFastTips(b);   // fast (120ms) tooltips on all payments-report icons — delegated, covers re-rendered rows
       function draw(){ var q=(PAY_Q||'').trim().toLowerCase();
         var f=_payRows.filter(function(r){
@@ -10972,8 +10973,19 @@
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); if(window._payTod)clearTimeout(window._payTod); window._payTod=setTimeout(draw,250); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
       document.getElementById('pay-q').oninput=function(){ PAY_Q=this.value; draw(); };
+      document.getElementById('pay-upfx').onclick=function(){ upfxDownload(this); };   // v28.175 (Ben)
       _payDraw=draw; draw(); })
       .catch(function(e){b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
+  // v28.175 (Ben): UP FX Statement. Downloads the unreconciled Universal Partners FX USD lines as a Xero statement CSV (live
+  // Xero read, server side). The server names the file "UP FX Statement dd-mmm-yy.csv"; a failure shows the server's message.
+  var UPFX_URL='/api/supply/xero/up-fx-statement.csv';
+  function upfxDownload(btn){ if(btn){ btn.disabled=true; btn._t=btn.textContent; btn.textContent='Reading Xero…'; }
+    var done=function(){ if(btn){ btn.disabled=false; btn.textContent=btn._t||'UP FX Statement'; } };
+    fetch(UPFX_URL,{cache:'no-store'}).then(function(r){
+      if(!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error((j&&j.error)||('HTTP '+r.status)); });
+      var cd=r.headers.get('content-disposition')||'', m=/filename="([^"]+)"/.exec(cd), n=r.headers.get('x-statement-lines');
+      return r.text().then(function(csv){ downloadCsvStr(csv,(m&&m[1])||('UP FX Statement '+fd(new Date().toISOString())+'.csv')); if(n==='0')alert('No unreconciled Universal Partners FX USD lines: the file has the header only.'); }); })
+      .catch(function(e){ alert('UP FX Statement failed: '+(e.message||e)); }).then(done); }
   var PAY_CCY=['','GBP','EUR','AUD','USD'];
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
   // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
