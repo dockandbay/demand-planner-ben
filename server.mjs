@@ -22195,7 +22195,7 @@ const HZ_CHECKS_SQL = `SELECT json_build_object(
   'sales_max', (SELECT to_char(max(month), 'YYYY-MM') FROM planner.sales_actuals),
   'sales_months', (SELECT coalesce(json_agg(x ORDER BY m), '[]') FROM (SELECT to_char(month, 'YYYY-MM') m, sum(units)::float8 u FROM planner.sales_actuals WHERE month >= (date_trunc('month', now()) - interval '14 months')::date GROUP BY 1) x),
   'inb', (SELECT json_build_object('n', count(*), 'units', coalesce(sum(quantity), 0)::float8, 'loaded', max(loaded_at)) FROM planner.inbound_shipments),
-  'nocat', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku ORDER BY sku))[1:8]) FROM planner.products WHERE in_planning_scope AND coalesce(trim(product_category), '') = ''),
+  'nocat', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku ORDER BY sku))[1:8]) FROM planner.products WHERE in_planning_scope AND coalesce(nullif(trim(category_name_final), ''), trim(category), '') = ''),   // v28.169 (Ben): same category the app uses (category_name_final, else category); product_category is not refreshed by the n8n products sync, so it flagged 92 false positives
   'neg', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku || ' @ ' || warehouse || ' = ' || available ORDER BY available))[1:8]) FROM planner.v_product_inventory WHERE available < 0),
   'metric', (SELECT coalesce(json_object_agg(path, json_build_object('v', (meta->>'value')::float8, 'ts', ts)), '{}') FROM (SELECT DISTINCT ON (path) path, meta, ts FROM planner.app_health_events WHERE kind = 'metric' AND source = 'server' ORDER BY path, ts DESC) m),
   'metric_today', (SELECT coalesce(json_agg(DISTINCT path), '[]') FROM planner.app_health_events WHERE kind = 'metric' AND source = 'server' AND ts >= date_trunc('day', now())),
@@ -22246,7 +22246,7 @@ async function runHealthChecks(opt) {
   const months = Object.keys(sm).filter(m => m >= ymAdd(curYm, -13)).sort();
   if (months.length) { const miss = []; for (let m = months[0]; m < months[months.length - 1]; m = ymAdd(m, 1)) if (sm[m] == null) miss.push(m);
     if (miss.length) F.push({ kind: 'sanity', path: 'sales_actuals:missing_months', message: 'sales_actuals has no rows for ' + miss.join(', '), meta: { missing: miss } }); }
-  if (d.nocat && Number(d.nocat.n)) F.push({ kind: 'sanity', path: 'products:scope_no_category', message: `${d.nocat.n} in-planning-scope product(s) have no product_category (e.g. ${(d.nocat.ex || []).join(', ')})`, meta: { n: Number(d.nocat.n), examples: d.nocat.ex } });
+  if (d.nocat && Number(d.nocat.n)) F.push({ kind: 'sanity', path: 'products:scope_no_category', message: `${d.nocat.n} in-planning-scope product(s) have no category (e.g. ${(d.nocat.ex || []).join(', ')})`, meta: { n: Number(d.nocat.n), examples: d.nocat.ex } });
   if (d.neg && Number(d.neg.n)) F.push({ kind: 'sanity', path: 'inventory:negative_on_hand', message: `${d.neg.n} SKU/warehouse row(s) with negative on-hand in v_product_inventory (e.g. ${(d.neg.ex || []).slice(0, 4).join('; ')})`, meta: { n: Number(d.neg.n), examples: d.neg.ex } });
   // 4. daily metric snapshots (once per calendar day per path) for week-on-week compares
   const today = new Set(d.metric_today || []);

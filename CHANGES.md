@@ -1,3 +1,11 @@
+## v28.169 (Ben, branch review-fixes-2026-10-05): health check "no category" false positives
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- The health-checks sanity rule `products:scope_no_category` read `product_category`, which the n8n products sync does not refresh for newer SKUs (e.g. PICNIC-DES-LG-BRNCLB has it set in Airtable SKU_CHILD but null in planner.products). It flagged 92 in-scope SKUs; now it checks the category the app actually uses (`category_name_final`, else `category`): 15 on live today.
+- Of those 15: 5 active SKUs no longer exist in Airtable SKU_CHILD (orphans the sync never removes, incl. a trailing-space duplicate); 10 are Last Season SKUs with no category in Airtable.
+- **Diviyaj:** the n8n products sync (map v3.3) leaves `category_name_final`, `subcategory_name_final` and `product_category` stale or null for newer SKUs (233 in scope have category_name_final null; the app falls back to `category`, so planning is unaffected). Worth adding them to the map. Orphan SKUs are not removed when deleted or renamed in Airtable.
+
 ## v28.168 (Ben, branch review-fixes-2026-10-05): FBA consistency (SSM FBA cover, in-flight at startup, Fulfil-only daily refresh, excluded warehouses, drawer)
 
 **Files:** `artifact_v16.7.html`, `server.mjs`, `supply/inject.html`, `lib/ai-logic/` (transfers, urgent-ssm-complex-rules, buy-plan, reports re-verified) (+ package.json, CHANGES.md). No migrations. Env: `HZ_FBA_INFLIGHT_CRON=0` (local opt-out of the daily timer), `HZ_FBA_INFLIGHT_STUB` (local test only, ignored on Vercel).
