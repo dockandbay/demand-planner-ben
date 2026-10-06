@@ -13004,7 +13004,7 @@
     var _prev=chrono.length?(Number(chrono[chrono.length-1].total_our)||0):(Number(cur.total_our)||0), _d=(Number(cur.total_our)||0)-_prev;
     var _dChip=(_d===0?'◆ flat':((_d<0?'▼ '+Math.abs(_d):'▲ +'+_d)+' vs last wk')), _dSty=(_d<=0?'color:#7ee2a8;background:rgba(17,138,78,.25)':'color:#fca5a5;background:rgba(220,38,38,.25)');
     // LEFT: dark scoreboard card (caption sits at its foot, per the by-category brief).
-    var scoreCard='<div style="background:var(--nav);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);position:sticky;top:8px">'
+    var scoreCard='<div style="background:var(--nav);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);position:sticky;top:var(--hz-sticky-top,8px)">'
         +'<div style="font-size:11px;font-weight:800;letter-spacing:.09em;color:var(--nav-dim)">OPEN ACTIONS SCOREBOARD</div>'
         +'<div style="display:flex;align-items:baseline;gap:12px;margin-top:10px"><span style="font-size:44px;font-weight:800;color:#fff;line-height:1;font-variant-numeric:tabular-nums">'+(cur.total_our||0)+'</span>'
           +(_tv.length>=2?'<span style="font-size:12px;font-weight:800;'+_dSty+';padding:3px 9px;border-radius:999px">'+_dChip+'</span>':'')+'</div>'

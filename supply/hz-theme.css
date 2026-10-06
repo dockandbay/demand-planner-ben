@@ -60,6 +60,22 @@ html body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink)
 #app #view-tabs-row{display:flex;align-items:center;gap:2px;height:52px;padding:0 20px;background:var(--nav);border-radius:0;margin:0 -10px 6px}   /* v27.659: top -8px removed — it was neutralised by the flex wrapper; the wrapper is pulled up instead (below) */
 /* v27.659: pull the header wrapper up over #app's 8px padding-top so the dark bar sits flush to the top (no white line above it). Desktop only — on phone the bar is a fixed #hz-topbar and .wrap has padding-top:52px. */
 @media (min-width:641px){ #app .hz-topwrap{margin-top:-8px} }
+/* v28.162 (Ben): the black top bar stays put while the page scrolls (desktop only; phone keeps its own fixed #hz-topbar).
+   position:sticky can't work here: the bar sits inside .hz-topwrap (with the country tabs + DEMAND filters), and a sticky box
+   can't outlive its parent. So it is FIXED, aligned to #app's left edge (0 / 240px full rail / 76px collapsed rail, mirroring the
+   .wrap#app margin rules in inject.html), and .hz-topwrap gets an equal spacer (52px bar + its old 6px margin + 4px flex gap =
+   62px) so nothing below moves. z-index 950: under the rail (1000), popovers (100000+) and the Ask drawer (100051). */
+@media (min-width:641px){
+  #app #view-tabs-row{position:fixed;top:0;left:0;right:0;z-index:950;margin:0;box-shadow:0 1px 4px rgba(13,22,38,.25)}
+  #app .hz-topwrap{padding-top:62px}
+  :root{--hz-sticky-top:70px}   /* page-level sticky offsets (e.g. Performance scorecard) clear the bar */
+  html{scroll-padding-top:62px}   /* anchors / scrollIntoView land below the bar, not under it */
+  #app #product-root .smp-rail{top:62px}   /* page-level sticky that used top:8px would now slide under the bar */
+}
+@media (min-width:900px){
+  body.hz-rail #app #view-tabs-row{left:240px}
+  body.hz-rail.hz-rail-min #app #view-tabs-row,body.hz-rail-min #app #view-tabs-row{left:76px}
+}
 #app #view-tabs-row .hz-brand{display:flex;align-items:center;gap:9px;margin-right:14px;color:#fff;font-weight:700;font-size:17px;letter-spacing:.03em;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;user-select:none}
 #app #view-tabs-row .hz-brand svg{display:block}
 #app #view-tabs-row .view-toggle{display:inline-flex;align-items:center;height:36px;padding:0 13px;font-size:12px;font-weight:700;letter-spacing:.09em;color:var(--nav-dim);background:transparent;border:0;border-radius:var(--r-sm);transition:color .15s,background .15s}

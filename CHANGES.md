@@ -1,3 +1,12 @@
+## v28.162 (Ben, branch review-fixes-2026-10-05): black top bar stays fixed on desktop
+
+**Files:** `supply/hz-theme.css`, `supply/inject.html` (one inline offset) (+ package.json, CHANGES.md). CSS only.
+
+1. **Desktop (>= 641 px): the black top bar (`#view-tabs-row`) stays at the top while the page scrolls.** `position:sticky` cannot work (the bar shares `.hz-topwrap` with the country tabs and DEMAND filters, and a sticky box cannot outlive its parent), so the bar is `position:fixed`, aligned to `#app`'s left edge: 0, 240 px with the full left rail, 76 px with the collapsed rail (>= 900 px, mirroring the `.wrap#app` margins). `.hz-topwrap` gets a 62 px spacer (52 px bar + its old 6 px margin + 4 px flex gap) so nothing below shifts. z-index 950: under the left rail (1000), every popover (100000+) and the Ask Claude drawer (100051). Phones unchanged (they keep the fixed `#hz-topbar`).
+2. Things that previously stuck to the top of the window now clear the bar: anchor / scrollIntoView targets (`scroll-padding-top:62px`), PRODUCT ▸ SAMPLING side rail (`top:62px`), Performance scorecard (`top:var(--hz-sticky-top)` = 70 px desktop, 8 px phone).
+
+**Verify (visual, Ben):** scroll a long page (SUPPLY ▸ Purchase Orders, DEMAND plan) with the rail open, collapsed (hamburger) and at a narrow desktop width (< 900 px, no rail); check popovers/menus still open above the bar.
+
 ## v28.161 (Ben, branch review-fixes-2026-10-05): Catalogue "Hide products without barcode"
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). Client only.
