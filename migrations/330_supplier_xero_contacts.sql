@@ -16,3 +16,14 @@ UPDATE planner.suppliers
  WHERE coalesce(kind, 'supplier') = 'supplier'
    AND coalesce(trim(code), '') <> '' AND coalesce(trim(name), '') <> ''
    AND (xero_contact_uk IS NULL OR xero_contact_au IS NULL);
+-- v28.177 (Ben): Fulfil builds the Xero contact from ITS party name + code, and three differ from HORIZON (checked in Fulfil
+-- 06-Oct-26): MQ "MQ Print" (HORIZON "MQ Print (Sherry)"), JM "Jinma (merry)" (HORIZON "Jinma (Merry)"), and Huzhou Double Qing
+-- (Ribbon) has code HDQ in Fulfil but none in HORIZON. Point those at the contact Fulfil creates. Only replaces NULL or the
+-- plain name || ' - ' || code default above, so a value edited in CONFIG is kept; safe to re-run.
+UPDATE planner.suppliers s SET
+       xero_contact_uk = CASE WHEN s.xero_contact_uk IS NULL OR s.xero_contact_uk = trim(s.name) || ' - ' || coalesce(trim(s.code), '') THEN v.contact ELSE s.xero_contact_uk END,
+       xero_contact_au = CASE WHEN s.xero_contact_au IS NULL OR s.xero_contact_au = trim(s.name) || ' - ' || coalesce(trim(s.code), '') THEN v.contact ELSE s.xero_contact_au END
+  FROM (VALUES ('code', 'MQ', 'MQ Print - MQ'),
+               ('code', 'JM', 'Jinma (merry) - JM'),
+               ('name', 'Huzhou Double Qing (Ribbon)', 'Huzhou Double Qing (Ribbon) - HDQ')) v(k, key, contact)
+ WHERE (v.k = 'code' AND trim(s.code) = v.key) OR (v.k = 'name' AND trim(s.name) = v.key);

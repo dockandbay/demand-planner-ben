@@ -1,3 +1,12 @@
+## v28.177 (Ben, branch review-fixes-2026-10-05): Xero contact defaults follow Fulfil's supplier names
+
+**Files:** `migrations/330_supplier_xero_contacts.sql` (amended, not yet on prod) (+ package.json, CHANGES.md).
+
+- Fulfil names Xero supplier contacts from ITS party name + code. Checked in Fulfil 06-Oct-26: three differ from HORIZON. MQ = "MQ Print" (HORIZON "MQ Print (Sherry)") -> "MQ Print - MQ"; JM = "Jinma (merry)" (HORIZON "Jinma (Merry)") -> "Jinma (merry) - JM"; Huzhou Double Qing (Ribbon) has code HDQ in Fulfil (none in HORIZON) -> "Huzhou Double Qing (Ribbon) - HDQ". Migration 330 now seeds those; only replaces NULL or the plain default, idempotent.
+- Fulfil suppliers today: Lixin LX, XR Textile XR, Weierken WK, Jinma (merry) JM, Bright Eagle (Rebecca) BE, Ballast BL, Nice Look NL, MQ Print MQ, Shaoxing Fengying (Belinda) FY, Spectas SP, Huzhou Double Qing (Ribbon) HDQ. NOT in Fulfil: Chilly Bottles CB, Foamie FM, Forming Reality FR, Kangxun (Doris) KX, Zhongshan Huiming (POS) ZH.
+- HORIZON live suppliers missing their Fulfil link (suppliers.fulfil_id): Ballast 70521, Jinma 70518, MQ Print 70522 (data fix, see note).
+- **Diviyaj:** apply migration 330 as amended (it supersedes the v28.176 version; same file).
+
 ## v28.176 (Ben, branch review-fixes-2026-10-05): Xero supplier contacts by ContactID, never auto-created
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, new `migrations/330_supplier_xero_contacts.sql` (+ package.json, CHANGES.md). No new env vars.
