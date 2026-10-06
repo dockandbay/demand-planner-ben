@@ -2042,36 +2042,57 @@
   var PO_LINK_META={xero:{label:'Xero',hint:'bill'},fulfil:{label:'Fulfil',hint:'PO'},flexport:{label:'Flexport',hint:'shipment'},dhl:{label:'DHL',hint:'tracking'}};
   // v28.172 (Ben): Xero bill picker: search the synced Xero bills (number / reference / supplier), pick one to (re)link this PO.
   // Shows status, date, total and due, and which other PO a bill is already linked to (confirm before double-linking).
+  // v28.183 (Ben): when the list opens it is RE-CHECKED LIVE in Xero (POST /api/supply/xero/bills/verify: the listed bills +
+  // this PO's current bill, batched GETs; the cache is updated). Voided / deleted bills are struck through and can't be picked;
+  // a voided current link is marked "⚠ voided".
   function xeroBillPicker(po,done){
     var old=document.getElementById('xbl-bg'); if(old)old.remove();
     var bg=document.createElement('div'); bg.id='xbl-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100100;display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto';
-    bg.innerHTML='<style>#xbl-bg table{table-layout:auto!important;border-collapse:collapse;width:100%}#xbl-bg th,#xbl-bg td{padding:6px 8px!important;overflow:visible!important;text-align:left!important;vertical-align:top;border-top:1px solid var(--line)}#xbl-bg tr.xbl-row{cursor:pointer}#xbl-bg tr.xbl-row:hover td{background:var(--hover)}#xbl-bg .xbl-num{font-family:ui-monospace,Menlo,monospace;font-weight:700;white-space:nowrap}</style>'
+    bg.innerHTML='<style>#xbl-bg table{table-layout:auto!important;border-collapse:collapse;width:100%}#xbl-bg th,#xbl-bg td{padding:6px 8px!important;overflow:visible!important;text-align:left!important;vertical-align:top;border-top:1px solid var(--line)}#xbl-bg tr.xbl-row{cursor:pointer}#xbl-bg tr.xbl-row:hover td{background:var(--hover)}#xbl-bg .xbl-num{font-family:ui-monospace,Menlo,monospace;font-weight:700;white-space:nowrap}#xbl-bg tr.xbl-dead{cursor:not-allowed;opacity:.62}#xbl-bg tr.xbl-dead .xbl-num,#xbl-bg tr.xbl-dead .xbl-amt{text-decoration:line-through}</style>'
       +'<div style="background:var(--card);border-radius:12px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
-      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Link Xero bill → '+esc(po)+'</b><button id="xbl-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Link Xero bill → '+esc(po)+'</b><span id="xbl-live" class="mut tiny"></span><button id="xbl-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
       +'<div style="padding:14px 18px"><input id="xbl-q" class="fci" placeholder="Search bill number, reference or supplier…" style="width:100%;text-align:left;font-size:13px;padding:7px 10px" value="'+esc(po)+'">'
-      +'<div class="mut tiny" style="margin:6px 0 8px">Searches the Xero bills HORIZON syncs (UK + AU, not deleted or voided). Click a bill to link it. Not there? Run <b>↻ Find / refresh links</b> or wait for the next bill sync.</div>'
+      +'<div class="mut tiny" style="margin:6px 0 8px">Searches the Xero bills HORIZON syncs (UK + AU); the bills listed are re-checked live in Xero. Voided or deleted bills are struck through and can’t be linked. Click a bill to link it. Not there? Run <b>↻ Find / refresh links</b> or wait for the next bill sync.</div>'
       +'<div id="xbl-res" style="max-height:52vh;overflow:auto"></div></div></div>';
     document.body.appendChild(bg);
     function close(){ bg.remove(); }
     bg.onclick=function(ev){ if(ev.target===bg)close(); }; document.getElementById('xbl-x').onclick=close;
-    var q=document.getElementById('xbl-q'), res=document.getElementById('xbl-res'), t=null, seq=0;
+    var q=document.getElementById('xbl-q'), res=document.getElementById('xbl-res'), live=document.getElementById('xbl-live'), t=null, seq=0, vt=null, L=[], LIVE={}, CUR=null;
+    function isDead(b){ var s=String(b.status||'').toUpperCase(); return s==='VOIDED'||s==='DELETED'; }
+    function apply(){ L.forEach(function(b){ var f=LIVE[b.id]; if(f){ b.status=f.status; b.due=f.due; b.total=f.total; b.live=1; } b.dead=isDead(b); }); }
+    function draw(){
+      if(!L.length){ res.innerHTML='<div class="mut tiny">No matching bills.</div>'; return; }
+      apply();
+      res.innerHTML='<table style="font-size:12.5px"><thead><tr><th>Bill</th><th>Supplier</th><th>Date</th><th>Status</th><th style="text-align:right!important">Total</th><th style="text-align:right!important">Due</th><th></th></tr></thead><tbody>'
+        +L.map(function(b,i){ var other=(b.linked_pos||[]).length?('<div class="tiny" style="color:var(--amber)">already linked to '+b.linked_pos.map(esc).join(', ')+'</div>'):'';
+          var cur=b.this_po?(b.dead?'<div class="tiny" style="color:var(--neg);font-weight:700">⚠ voided (current link): choose another bill</div>':'<div class="tiny" style="color:var(--pos)">current link</div>'):'';
+          var st=b.dead?'<b style="color:var(--neg)">'+esc(String(b.status||'').toUpperCase())+'</b>':'<span class="mut tiny">'+esc(b.status||'')+'</span>';
+          return '<tr class="xbl-row'+(b.dead?' xbl-dead':'')+'" data-i="'+i+'"'+(b.dead?' title="'+esc(String(b.status||'').toUpperCase())+' in Xero: cannot be linked"':'')+'><td><span class="xbl-num">'+esc(b.number||'(no number)')+'</span>'+(b.reference?'<div class="mut tiny">'+esc(b.reference)+'</div>':'')+other+cur+'</td>'
+            +'<td>'+esc(b.contact||'')+' <span class="tool-badge" style="font-size:9.5px">'+esc(b.region||'')+'</span></td><td style="white-space:nowrap">'+esc(fd(b.date)||'')+'</td><td>'+st+(b.live?' <span class="mut tiny" title="re-checked live in Xero">✓</span>':'')+'</td>'
+            +'<td class="xbl-amt" style="text-align:right!important;white-space:nowrap">'+money(b.total)+' '+esc(b.currency||'')+'</td><td class="xbl-amt" style="text-align:right!important;white-space:nowrap">'+money(b.due)+'</td>'
+            +'<td><a href="'+esc(b.url)+'" target="_blank" rel="noopener" class="xbl-open" style="color:var(--blue);white-space:nowrap">Xero ↗</a></td></tr>'; }).join('')+'</tbody></table>';
+      res.querySelectorAll('.xbl-open').forEach(function(a){ a.onclick=function(ev){ ev.stopPropagation(); }; });
+      res.querySelectorAll('tr.xbl-row').forEach(function(tr){ tr.onclick=function(){ var b=L[+tr.dataset.i]; if(b.dead)return; if(b.this_po){ close(); return; }
+        if((b.linked_pos||[]).length && !confirm(b.number+' is already linked to '+b.linked_pos.join(', ')+'. Link it to '+po+' as well?'))return;
+        if(!confirm('Link Xero bill '+(b.number||b.id)+' ('+(b.contact||'')+', '+money(b.total)+' '+(b.currency||'')+') to '+po+'?'))return;
+        fetch('/api/supply/po/'+encodeURIComponent(po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'xero',external_id:b.id,external_ref:b.number||b.id,url:b.url})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); close(); if(done)done(); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
+    }
+    var QD={};   // search texts already looked up live
+    function verify(){ var ids=L.map(function(b){return b.id;}).filter(function(id){ return !LIVE[id]; }), qv=q.value.trim(), qk=qv.toLowerCase(); if(!ids.length&&CUR&&QD[qk])return;
+      live.textContent='checking Xero…'; QD[qk]=1;
+      fetch('/api/supply/xero/bills/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ids:ids,q:qv})}).then(function(r){return r.json();}).then(function(j){
+        if(!document.getElementById('xbl-bg'))return;
+        Object.keys((j&&j.bills)||{}).forEach(function(id){ LIVE[id]=j.bills[id]; }); CUR=(j&&j.current)||CUR||{};
+        if(j&&j.added>0&&q.value.trim().toLowerCase()===qk){ run(); }   // bills Xero has that the sync hasn't brought in yet: list them
+        live.innerHTML=(j&&j.ok)?('checked live in Xero '+esc(String(new Date().toTimeString()).slice(0,5))+(CUR&&CUR.dead?' · <b style="color:var(--neg)">current bill '+esc(String(CUR.status||'').toUpperCase())+'</b>':'')):('<span style="color:var(--amber)">live check failed: '+esc((j&&j.error)||'')+' (showing synced status)</span>');
+        draw(); })
+        .catch(function(e){ live.innerHTML='<span style="color:var(--amber)">live check failed (showing synced status)</span>'; }); }
     function run(){ var v=q.value.trim(); if(v.length<2){ res.innerHTML='<div class="mut tiny">Type at least 2 characters.</div>'; return; }
       var my=++seq; res.innerHTML='<div class="mut tiny">Searching…</div>';
       fetch('/api/supply/xero/bills/search?q='+encodeURIComponent(v)+'&po='+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){ if(my!==seq)return;
-        if(j&&j.error)throw new Error(j.error); var L=(j&&j.bills)||[];
-        if(!L.length){ res.innerHTML='<div class="mut tiny">No matching bills.</div>'; return; }
-        res.innerHTML='<table style="font-size:12.5px"><thead><tr><th>Bill</th><th>Supplier</th><th>Date</th><th>Status</th><th style="text-align:right!important">Total</th><th style="text-align:right!important">Due</th><th></th></tr></thead><tbody>'
-          +L.map(function(b,i){ var other=(b.linked_pos||[]).length?('<div class="tiny" style="color:var(--amber)">already linked to '+b.linked_pos.map(esc).join(', ')+'</div>'):'';
-            return '<tr class="xbl-row" data-i="'+i+'"><td><span class="xbl-num">'+esc(b.number||'(no number)')+'</span>'+(b.reference?'<div class="mut tiny">'+esc(b.reference)+'</div>':'')+other+(b.this_po?'<div class="tiny" style="color:var(--pos)">current link</div>':'')+'</td>'
-              +'<td>'+esc(b.contact||'')+' <span class="tool-badge" style="font-size:9.5px">'+esc(b.region||'')+'</span></td><td style="white-space:nowrap">'+esc(fd(b.date)||'')+'</td><td><span class="mut tiny">'+esc(b.status||'')+'</span></td>'
-              +'<td style="text-align:right!important;white-space:nowrap">'+money(b.total)+' '+esc(b.currency||'')+'</td><td style="text-align:right!important;white-space:nowrap">'+money(b.due)+'</td>'
-              +'<td><a href="'+esc(b.url)+'" target="_blank" rel="noopener" class="xbl-open" style="color:var(--blue);white-space:nowrap">Xero ↗</a></td></tr>'; }).join('')+'</tbody></table>';
-        res.querySelectorAll('.xbl-open').forEach(function(a){ a.onclick=function(ev){ ev.stopPropagation(); }; });
-        res.querySelectorAll('tr.xbl-row').forEach(function(tr){ tr.onclick=function(){ var b=L[+tr.dataset.i]; if(b.this_po){ close(); return; }
-          if((b.linked_pos||[]).length && !confirm(b.number+' is already linked to '+b.linked_pos.join(', ')+'. Link it to '+po+' as well?'))return;
-          if(!confirm('Link Xero bill '+(b.number||b.id)+' ('+(b.contact||'')+', '+money(b.total)+' '+(b.currency||'')+') to '+po+'?'))return;
-          fetch('/api/supply/po/'+encodeURIComponent(po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'xero',external_id:b.id,external_ref:b.number||b.id,url:b.url})})
-            .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); close(); if(done)done(); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
+        if(j&&j.error)throw new Error(j.error); L=(j&&j.bills)||[]; draw();
+        clearTimeout(vt); vt=setTimeout(verify,400);
       }).catch(function(e){ if(my===seq)res.innerHTML='<div class="mut tiny" style="color:var(--neg)">Search failed: '+esc(e&&e.message||e)+'</div>'; }); }
     q.oninput=function(){ clearTimeout(t); t=setTimeout(run,250); }; q.focus(); q.select(); run();
   }
@@ -2082,24 +2103,26 @@
   function renderPoLinks(el,d){
     if(!d||d.error){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load linkages'+(d&&d.error?': '+esc(d.error):'')+'</div>'; return; }
     var po=d.po;
-    var acts=(d.actions||[]).map(function(a){ return '<div style="background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);border-radius:6px;padding:7px 9px;margin-bottom:8px;font-weight:600">⚠ '+esc(a.msg)+'</div>'; }).join('');
+    var acts=(d.actions||[]).map(function(a){ return '<div style="background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);border-radius:6px;padding:7px 9px;margin-bottom:8px;font-weight:600">⚠ '+esc(a.msg)+'</div>'; }).join('')
+      +(d.healed||[]).map(function(h){ return '<div class="annot" style="margin-bottom:8px">Relinked the Xero bill to <b>'+esc(h.to_ref||h.to)+'</b> ('+esc(String(h.region||'').toUpperCase())+'): the previously linked bill '+esc(h.from_ref||h.from)+' was voided in Xero.</div>'; }).join('');   // v28.183 (Ben)
     var hasData=(d.systems||[]).some(function(s){return s.status&&s.status!=='none';});
     var rows=(d.systems||[]).map(function(s){
       var m=PO_LINK_META[s.system]||{label:s.system,hint:''};
       var linked=s.status==='linked';
-      var badge=linked?'<span class="tool-badge bg-green">✓ linked</span>':(s.status==='action'?'<span class="tool-badge bg-red">⚠ action</span>':'<span class="tool-badge bg-amber">—</span>');
-      var link=(linked&&s.url)?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600;white-space:nowrap">open '+esc(m.label)+' ↗</a>':'<span class="mut tiny">'+esc(s.note||'not found')+'</span>';
-      var idTxt=s.external_ref||s.external_id||'';
-      var manual=(s.found_by==='manual')?' <span class="mut tiny">(manual)</span>':'';
+      var voided=s.system==='xero'&&s.status==='action'&&/^linked bill voided/.test(s.note||'');   // v28.183 (Ben): linked bill voided in Xero, no single replacement
+      var badge=linked?'<span class="tool-badge bg-green">✓ linked</span>':(voided?'<span class="tool-badge bg-red" title="'+esc(s.note||'')+'">⚠ voided</span>':(s.status==='action'?'<span class="tool-badge bg-red">⚠ action</span>':'<span class="tool-badge bg-amber">—</span>'));
+      var link=(linked&&s.url)?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600;white-space:nowrap">open '+esc(m.label)+' ↗</a>':'<span class="mut tiny">'+esc(voided?'bill voided in Xero: choose a bill':(s.note||'not found'))+'</span>';
+      var idTxt=voided?'<s>'+esc(s.external_ref||s.external_id||'')+'</s>':esc(s.external_ref||s.external_id||'');
+      var manual=(s.found_by==='manual')?' <span class="mut tiny">(manual)</span>':(s.found_by==='auto-heal'?' <span class="mut tiny" title="'+esc(s.note||'')+'">(auto-relinked: previous bill voided)</span>':'');
       // v28.172 (Ben): Xero bill can be CHANGED (search picker) or unlinked; other systems keep the paste-a-link prompt, now also as "change" once linked
       var add=s.system==='xero'
-        ?('<button class="lnk-btn poln-xsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Xero bills by number, reference or supplier">'+(linked?'✎ change bill':'🔍 link bill')+'</button>'
+        ?('<button class="lnk-btn poln-xsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Xero bills by number, reference or supplier">'+((linked||voided)?'✎ change bill':'🔍 link bill')+'</button>'
           +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="xero" style="color:var(--neg);white-space:nowrap" title="remove the manual link (the auto-resolver can find it again)">unlink</button>':''))
         :('<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">'+(linked?'✎ change':'＋ add link')+'</button>');
       return '<tr style="border-top:1px solid #eef2f7">'
         +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
         +'<td style="padding:6px 10px;white-space:nowrap;vertical-align:top">'+badge+'</td>'
-        +'<td style="padding:6px 10px;font-variant-numeric:tabular-nums;word-break:break-word;vertical-align:top">'+esc(idTxt)+manual+'</td>'
+        +'<td style="padding:6px 10px;font-variant-numeric:tabular-nums;word-break:break-word;vertical-align:top">'+idTxt+manual+'</td>'
         +'<td style="padding:6px 0 6px 10px;vertical-align:top;white-space:nowrap">'+link+(add?'<div style="margin-top:'+(link?'3px':'0')+'">'+add+'</div>':'')+'</td></tr>';
     }).join('');
     el.innerHTML=acts
@@ -9469,12 +9492,40 @@
           var bound=cur.code?('<span class="mut tiny">code '+esc(cur.code)+'</span>'):(role.code_hint?'<span class="mut tiny">expected code '+esc(role.code_hint)+'</span>':'');
           return '<div class="xcombo" data-kind="acct" data-role="'+esc(role.key)+'" style="position:relative;display:inline-block;vertical-align:middle;min-width:300px"><input class="fci xcombo-in" autocomplete="off" value="'+esc(lbl)+'" placeholder="— search account / select —" style="width:300px;text-align:left"><div class="xcombo-list" hidden style="position:absolute;left:0;top:100%;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;max-height:240px;overflow:auto;min-width:340px;box-shadow:0 8px 20px rgba(15,23,42,.15);margin-top:2px"></div></div> '+bound; }
         function exbFor(){ return EXB.filter(function(rl){ return (rl.regions||['uk','au']).indexOf(REG)>=0; }); }
+        // v28.183 (Ben): XERO BILLS CACHE (planner.xero_bills, both orgs): rows / voided / last sync per org, "↻ Sync now"
+        // (incremental, changes since the last sync) and "Resync all bills" (full re-read of every bill, both orgs, in the
+        // background: the page polls progress; nothing cached is deleted unless Xero's complete set was read).
+        var _xbPoll=null;
+        function xbTs(iso){ if(!iso)return 'never'; var d=new Date(iso); if(isNaN(d))return 'never'; var p=function(n){return (n<10?'0':'')+n;}; return fd(d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()))+' '+p(d.getHours())+':'+p(d.getMinutes()); }
+        function billsBox(){ var el=document.getElementById('xcfg-bills'); if(!el)return;
+          fetch('/api/supply/xero/bills-resync-all/status').then(function(r){return r.json();}).then(function(s){ el=document.getElementById('xcfg-bills'); if(!el)return;
+            if(!s||s.error){ el.innerHTML='<span style="color:var(--neg)">Could not read the bills cache: '+esc((s&&s.error)||'')+'</span>'; return; }
+            var st=s.state, by={}; (s.cache||[]).forEach(function(c){ by[String(c.region||'').toLowerCase()]=c; });
+            var prog=''; if(st){ var orgs=st.orgs||{};
+              var parts=['uk','au'].filter(function(r){return orgs[r];}).map(function(r){ var o=orgs[r]; return r.toUpperCase()+' '+(o.seen||0).toLocaleString('en-GB')+(o.total!=null?' / '+Number(o.total).toLocaleString('en-GB'):'')+(o.pages?' (page '+o.page+' of '+o.pages+')':'')+(o.complete?' ✓ complete':'')+(o.pruned?', pruned '+o.pruned:'')+(o.error?' <span style="color:var(--neg)">'+esc(o.error)+'</span>':''); });
+              prog='<div style="margin-top:6px">'+(st.status==='running'?'<b>Full resync running…</b> ':st.status==='done'?'<b style="color:var(--pos)">Last full resync done</b> ':st.status==='stalled'?'<b style="color:var(--amber)">Last full resync stopped (no progress for 3 min)</b> ':'<b style="color:var(--neg)">Last full resync failed</b> ')
+                +'<span class="mut tiny">started '+esc(xbTs(st.started_at))+(st.finished_at?', finished '+esc(xbTs(st.finished_at)):'')+(st.by?' by '+esc(String(st.by).split('@')[0]+'@'):'')+(st.calls?' · '+st.calls+' Xero calls':'')+'</span><div class="mut tiny">'+parts.join(' · ')+(st.status!=='running'&&st.healed!=null?' · links healed '+st.healed+', need a choice '+(st.flagged||0):'')+'</div></div>'; }
+            el.innerHTML='<div class="mut tiny" style="max-width:760px;margin:0 0 8px">HORIZON keeps a copy of every Xero bill (both orgs) for PO links, payment runs and the Exceptions check. The hourly sync reads bills changed since the last sync; <b>Resync all bills</b> re-reads every bill (use after a deploy or if a bill looks missing or a void isn’t showing). Read-only from Xero.</div>'
+              +'<div class="tw" style="max-width:640px"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Org</th><th class="l" style="text-align:right">Bills</th><th class="l" style="text-align:right">Voided / deleted</th><th class="l">Last synced</th></tr></thead><tbody>'
+              +['uk','au'].map(function(r){ var c=by[r]||{}; return '<tr><td class="l"><b>'+r.toUpperCase()+'</b></td><td class="l" style="text-align:right">'+Number(c.n||0).toLocaleString('en-GB')+'</td><td class="l" style="text-align:right">'+Number(c.voided||0).toLocaleString('en-GB')+'</td><td class="l">'+esc(xbTs(s.last&&s.last[r]))+'</td></tr>'; }).join('')
+              +'</tbody></table></div>'
+              +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn light" id="xb-sync"'+(s.sync_running?' disabled':'')+'>'+(s.sync_running?'syncing…':'↻ Sync now')+'</button><button class="save-btn" id="xb-resync"'+(s.running?' disabled style="opacity:.6"':' style="background:var(--blue);color:#fff;border-color:var(--blue)"')+'>'+(s.running?'Resync running…':'Resync all bills')+'</button><span id="xb-st" class="mut tiny"></span></div>'+prog;
+            var sy=document.getElementById('xb-sync'); if(sy)sy.onclick=function(){ sy.disabled=true; sy.textContent='syncing…';
+              fetch('/api/supply/xero/bills-sync',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); var x=document.getElementById('xb-st'); if(x)x.textContent='✓ synced: '+(j.changed||0)+' bill(s) changed'+(j.healed?', '+j.healed+' link(s) healed':'')+(j.flagged?', '+j.flagged+' need a choice':''); billsBox(); })
+                .catch(function(e){ sy.disabled=false; sy.textContent='↻ Sync now'; alert('Sync failed: '+(e.message||e)); }); };
+            var rs=document.getElementById('xb-resync'); if(rs&&!s.running)rs.onclick=function(){ if(!confirm('Re-read EVERY Xero bill in both orgs now? Read-only from Xero; takes about a minute and runs in the background.'))return;
+              rs.disabled=true; rs.textContent='Resync running…';
+              fetch('/api/supply/xero/bills-resync-all',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)alert('Resync: '+j.error); billsBox(); }).catch(function(){ billsBox(); });
+              setTimeout(billsBox,1500); };
+            clearTimeout(_xbPoll); if(s.running)_xbPoll=setTimeout(billsBox,2500);
+          }).catch(function(e){ var el2=document.getElementById('xcfg-bills'); if(el2)el2.innerHTML='<span style="color:var(--neg)">Could not read the bills cache: '+esc(e.message||e)+'</span>'; }); }
         function draw(){ var rr=STATUS&&STATUS.regions&&STATUS.regions[REG]||{}; var conn=rr.connected; var EXBR=exbFor();
           var missBanks=EXBR.filter(function(rl){ return !((cfgBankSel(REG)[rl.key]||{}).account_id); });
           b.innerHTML='<div class="annot"><b>CONFIG ▸ Xero.</b> The finance registries the HORIZON payment run needs before it can post to Xero. Pick the org, then bind each <b>payment-source bank</b> to its real Xero Bank Account and map the <b>COA accounts</b> (Stock, Stock Deposits, Supplier Payments, Loan). Read-only from Xero; nothing is written here. <span id="xcfg-save-st" style="margin-left:8px;font-weight:600"></span></div>'
             +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'+orgPills()+'</div>'
             +'<div class="sect-h" style="margin-top:14px">Connection</div><div style="margin:0 0 6px">'+connBox()+'</div>'
             +(!conn?'<div class="annot" style="border-left:3px solid var(--amber);background:var(--amber-bg)">This org isn’t connected, so its live accounts can’t be listed. Connect it first (Custom Connection credentials in the environment), then reload.</div>':'')
+            +'<div class="sect-h" style="margin-top:16px">Xero bills cache</div><div id="xcfg-bills" class="mut tiny">Loading…</div>'   // v28.183 (Ben)
             +'<div class="sect-h" style="margin-top:16px">Bank registry — payment sources</div>'
             +'<div class="mut tiny" style="max-width:760px;margin:0 0 8px">Each bank HORIZON can pay a supplier from. Bind it to the real Xero bank account so the payment run has its Bank Account ID. '
               +'<b>Universal Partners FX USD</b> and <b>Gentium FX USD</b> must first be added as real bank accounts in Xero — until then they won’t appear in the dropdown.</div>'
@@ -9512,6 +9563,7 @@
               :'<div class="mut tiny">connect the org to manage tracking categories</div>')
             +'<div style="margin-top:12px" class="mut tiny">'+(missBanks.length?('⚠ '+missBanks.length+' payment source'+(missBanks.length>1?'s':'')+' still unbound for '+REG.toUpperCase()+' — the payment run can’t use '+missBanks.map(function(m){return m.label;}).join(', ')+' yet.'):'✓ all payment sources bound for '+REG.toUpperCase())+'</div>';
           // bind
+          billsBox();
           b.querySelectorAll('.xcfg-org').forEach(function(p){ p.onclick=function(){ window._xeroCfgReg=p.dataset.rg; SUBS['xero'](); }; });
           var tc=document.getElementById('xtrk-create'); if(tc)tc.onclick=function(){ var nm=(document.getElementById('xtrk-name').value||'').trim(); var raw=(document.getElementById('xtrk-opts').value||'');
             var opts=raw.split(/[\n,]+/).map(function(x){return x.trim();}).filter(Boolean); var st=document.getElementById('xtrk-st');
@@ -10983,7 +11035,7 @@
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
         +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / PO / amount…" value="'+esc(PAY_Q)+'" style="width:200px;background:var(--blue-soft);border-color:#93c5fd" title="search by supplier name, PO reference or amount — overrides the date filter (spans all history). A PO match opens its run and highlights the line."> <span class="tiny mut">supplier, PO or amount (spans all dates)</span>'
-        +'<button class="save-btn light" id="pay-upfx" style="margin-left:auto" title="Universal Partners FX USD: unreconciled ins/outs as a Xero statement file. Import in Xero: Universal Partners FX USD > Manage Account > Import a Statement.">UP FX Statement</button></div><div id="pay-rep"></div>';   // v28.174 (Ben): Xero bank statement CSV for the Universal Partners FX USD account
+        +'<button class="save-btn light" id="pay-upfx" style="margin-left:auto" title="Universal Partners FX USD: unreconciled ins/outs as a Xero statement file. Import in Xero: Universal Partners FX USD > Manage Account > Import a Statement.">UP FX Statement</button><span style="margin-left:10px">'+xbsNote()+'</span></div><div id="pay-rep"></div>';   // v28.174 (Ben): Xero bank statement CSV for the Universal Partners FX USD account
       bindFastTips(b);   // fast (120ms) tooltips on all payments-report icons — delegated, covers re-rendered rows
       function draw(){ var q=(PAY_Q||'').trim().toLowerCase();
         var f=_payRows.filter(function(r){
@@ -11008,7 +11060,8 @@
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
       document.getElementById('pay-q').oninput=function(){ PAY_Q=this.value; draw(); };
       document.getElementById('pay-upfx').onclick=function(){ upfxDownload(this); };   // v28.174 (Ben)
-      _payDraw=draw; draw(); })
+      _payDraw=draw; draw();
+      xbsVisit(function(){ PAY_XPF={}; _xpfQ=[]; if(_payDraw)_payDraw(); }); })   // v28.183 (Ben): background bill sync (12 h) + "Sync now"; fresh preflight badges when bills changed
       .catch(function(e){b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
   // v28.174 (Ben): UP FX Statement. Downloads the unreconciled Universal Partners FX USD lines as a Xero statement CSV (live
   // Xero read, server side). The server names the file "UP FX Statement dd-mmm-yy.csv"; a failure shows the server's message.
@@ -11024,6 +11077,28 @@
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
   // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
   var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null, _payRows=[];
+  // v28.183 (Ben): XERO BILLS SYNC NOTE on the Payments Report + Xero payments. Opening either page fires a background
+  // incremental bill sync when the last one is older than 12 h (server-throttled + single-flight, the page never waits);
+  // "↻ Sync now" (admin) always syncs at once (joins a run already going). Rows / badges refresh when bills changed.
+  var XBS={last:null,running:false,err:'',visitAt:0,onChanged:null}, XBS_MAX_AGE=12*3600*1000;
+  function xbsFmt(iso){ if(!iso)return ''; var d=new Date(iso); if(isNaN(d))return ''; var p=function(n){return (n<10?'0':'')+n;};
+    return fd(d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()))+' '+p(d.getHours())+':'+p(d.getMinutes()); }   // dd-mmm-yy hh:mm, local time
+  function xbsNote(){ return '<span class="xbs-note mut tiny" style="white-space:nowrap"></span>'; }
+  function xbsPaint(){ document.querySelectorAll('.xbs-note').forEach(function(el){ var at=XBS.last&&XBS.last.oldest;
+    el.innerHTML=(XBS.running?'syncing Xero bills…':(at?'Xero bills synced '+esc(xbsFmt(at)):(XBS.last?'Xero bills not synced yet':'')))
+      +(XBS.err?' <span style="color:var(--amber)" title="'+esc(XBS.err)+'">⚠ sync problem</span>':'')
+      +((ME&&ME.is_admin)?' · <button class="lnk-btn xbs-now" style="color:var(--blue)"'+(XBS.running?' disabled':'')+' title="Sync the Xero bills changed since the last sync now">↻ Sync now</button>':'');
+    var bt=el.querySelector('.xbs-now'); if(bt)bt.onclick=function(){ xbsSync(true); }; }); }
+  function xbsSync(force){ if(XBS.running&&!force)return; XBS.running=true; XBS.err=''; xbsPaint();
+    fetch(force?'/api/supply/xero/bills-sync':'/api/supply/xero/bills-sync-visit',{method:'POST'}).then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error((j&&j.error)||('HTTP '+r.status)); return j; }); })
+      .then(function(j){ XBS.running=false; if(j.last)XBS.last=j.last;
+        XBS.err=(j.errors||['uk','au'].filter(function(g){return j[g]&&j[g].error;}).map(function(g){return g.toUpperCase()+': '+j[g].error;})).join('; '); xbsPaint();
+        if((force||j.ran)&&(force||j.changed||j.healed||j.flagged)&&typeof XBS.onChanged==='function'){ try{ XBS.onChanged(); }catch(_){} } })
+      .catch(function(e){ XBS.running=false; XBS.err=e.message||String(e); xbsPaint(); if(force)alert('Xero bill sync failed: '+XBS.err); }); }
+  function xbsVisit(onChanged){ XBS.onChanged=onChanged; xbsPaint(); var now=Date.now(); if(now-XBS.visitAt<60000)return; XBS.visitAt=now;
+    fetch('/api/supply/xero/bills-sync/status').then(function(r){return r.json();}).then(function(s){ if(!s||s.error)return; XBS.last=s.last||XBS.last;
+      var o=XBS.last&&XBS.last.oldest, due=!o||(Date.now()-Date.parse(o)>XBS_MAX_AGE);
+      if(due||s.running)xbsSync(false); else xbsPaint(); }).catch(function(){}); }
   var _xbRow=null;   // v28.170 (Ben): the Payments Report row whose Create in Xero popup is open, so a successful post can flip its button to "done" at once
   function payRunKey(r){ return r.run_key||((r.dt||'')+'|'+(r.supplier||'')); }
   // v28.136 (Ben): Xero column. Already in Xero (a recorded supplier-payment bill, or anything before 21-Sep-26) → "done",
@@ -11217,7 +11292,8 @@
     function load(){ b.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/xero/push-queue?status=all').then(function(r){return r.json();})
         .then(function(q){ _xpqQueue=q; draw(q);   // page is usable immediately
-          if(!_xpqExc)loadExceptions(false); })   // then fill exceptions in the background (memoised across re-opens)
+          if(!_xpqExc)loadExceptions(false);   // then fill exceptions in the background (memoised across re-opens)
+          xbsVisit(function(){ loadExceptions(false); }); })   // v28.183 (Ben): background bill sync (12 h) + "Sync now"; re-read exceptions after
         .catch(function(e){ b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
     function drawExceptions(){
       if(_xpqExcPending&&!_xpqExc){ return '<div class="mut tiny" style="margin:0 0 6px">An exception = a PO whose Xero bill amount-due / payments / <b>due date</b> don’t match Horizon’s.</div>'
@@ -11266,9 +11342,10 @@
         :'<div class="tw" style="max-width:1100px"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Supplier</th><th class="l">Detail</th><th class="l" style="text-align:right">Amount</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'
           +(list.length?list.map(row).join(''):'<tr><td colspan="5" class="l mut" style="padding:10px">No '+esc((XPQ_KIND[_xpqTab]||{}).label||_xpqTab).toLowerCase()+'s queued.</td></tr>')+'</tbody></table></div>';
       b.innerHTML='<div class="annot"><b>PAYMENTS ▸ Xero payments.</b> The manual push queue + live reconciliation (replaces Xero Compare). Marking a run <b>PAID</b> enqueues the supplier-payment <b>bill</b> + a <b>payment</b> per linked PO bill; a starting-deposit <b>credit note</b> is added from the PO. Nothing reaches Xero until you press <b>Push</b>. '
-        +'<b>'+(counts.pending||0)+'</b> pending · '+(counts.pushed||0)+' pushed'+(counts.error?' · <span style="color:var(--neg)">'+counts.error+' error</span>':'')+((_xpqExcPending&&!_xpqExc)?' · <span class="mut tiny">checking Xero…</span>':(excN?' · <span style="color:var(--neg)">'+excN+' exception'+(excN>1?'s':'')+'</span>':''))+'. <button class="lnk-btn" id="xpq-refresh" style="color:var(--blue)">↻ refresh</button> · <button class="lnk-btn" id="xpq-aumig" style="color:var(--blue)" title="Recreate AU PO bills that sit in Xero UK as identical AU bills (code 625)">AU bill migration →</button></div>'
+        +'<b>'+(counts.pending||0)+'</b> pending · '+(counts.pushed||0)+' pushed'+(counts.error?' · <span style="color:var(--neg)">'+counts.error+' error</span>':'')+((_xpqExcPending&&!_xpqExc)?' · <span class="mut tiny">checking Xero…</span>':(excN?' · <span style="color:var(--neg)">'+excN+' exception'+(excN>1?'s':'')+'</span>':''))+'. <button class="lnk-btn" id="xpq-refresh" style="color:var(--blue)">↻ refresh</button> · <button class="lnk-btn" id="xpq-aumig" style="color:var(--blue)" title="Recreate AU PO bills that sit in Xero UK as identical AU bills (code 625)">AU bill migration →</button> · '+xbsNote()+'</div>'
         +'<div style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 10px;flex-wrap:wrap">'+tabbar+'</div>'
         +bodyHtml;
+      xbsPaint();   // v28.183 (Ben)
       var rf=document.getElementById('xpq-refresh'); if(rf)rf.onclick=load;
       var aum=document.getElementById('xpq-aumig'); if(aum)aum.onclick=xeroAuMigrateModal;
       b.querySelectorAll('.xpq-tab').forEach(function(t){ t.onclick=function(){ _xpqTab=t.dataset.kind; draw(_xpqQueue||j); }; });
