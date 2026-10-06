@@ -1,7 +1,7 @@
 # For Diviyaj: products category_name_final seed + n8n products sync gap (06-Oct-26)
 
-## Ask
-Please run `docs/deploy notes/SEED_2026-10-06_products_category_name_final.sql` on prod (`oolwklahstnvocaugryg`). It is one transaction with a backup table, a preview count, the update and a check. Rollback SQL is at the bottom of the file.
+## Status
+**Already run on prod by Ben, 06-Oct-26.** Verified read-only: 1,209 rows changed against the backup `planner._bak_products_catfinal_20261006` (keep it until you're happy, then drop it); 765 products still have `category_name_final` NULL (no category in Airtable, or not in SKU_CHILD). The SQL and rollback are in `docs/deploy notes/SEED_2026-10-06_products_category_name_final.sql`. Nothing for you to run; the n8n fixes below are the ask.
 
 ## What it does
 - Fills `planner.products.category_name_final` and `subcategory_name_final` from Ben's Airtable SKU_CHILD export of 06-Oct-26 (2,868 SKUs, 2,158 with a category).
