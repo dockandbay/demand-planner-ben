@@ -1,3 +1,15 @@
+## v28.183 (Ben, branch review-fixes-2026-10-05): Xero bill links stay correct when bills are voided; sync on visit + resync
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- **Change-bill picker** re-checks bills live in Xero when it opens (`POST /api/supply/xero/bills/verify`, batches of 50 per org): voided/deleted bills struck through and unpickable, current link shows "⚠ voided", bills created since the last sync appear. Linking a voided bill is refused (409).
+- **Auto-heal:** a PO linked to a voided bill is relinked to its single live replacement (same supplier family, either org, number/reference starts with the PO; another PO's token never counts), `found_by='auto-heal'`, logged as health `xero:link_healed`. None or several candidates: "linked bill voided: choose a bill" and the payment run is blocked for that PO (`XERO_BILL_VOIDED`) until chosen. Payment previews, preflight and posts re-read linked bills live first. "Find / refresh links" no longer picks voided bills.
+- **Sync:** every status requested explicitly, 1000 bills per page, 5-minute watermark overlap, resumes instead of skipping when a run hits the page cap (latent bug). Payments Report and Xero payments sync in the background when the last sync is over 12 h old, show "Xero bills synced dd-mmm-yy hh:mm", and give admins "↻ Sync now" (single-flight). SUPPLY ▸ CONFIG ▸ Xero: "Xero bills cache" panel with "Resync all bills" (prunes only on a complete read and never a linked bill; etl_runs `xero_bills_full_resync`).
+- **Health:** `xero:links_to_voided_bills` finding after each sync and in the weekly report.
+- **Root cause of 06-Oct:** the live hourly sync was working (Lixin bill created in Xero 05:02 UTC, cached 05:20; void at 09:08 cached 09:20). The gap was the up-to-an-hour window plus decisions trusting the cache.
+- **Verified** with real Xero GETs on sandbox (0 PUT/POST): picker, heal (single / several / cross-supplier), incremental + full resync (UK 8717/8717, AU 1214/1214, 11 GETs, 79 s), sync-on-visit throttle and single-flight, render 0 JS errors.
+- **Diviyaj:** after deploy, run SUPPLY ▸ CONFIG ▸ Xero ▸ **Resync all bills** once (~11 Xero calls, ~1 min). Keep the hourly `/api/cron/xero-bills-sync`.
+
 ## v28.182 (Ben, branch review-fixes-2026-10-05): Key Accounts forecast grid works like a spreadsheet
 
 **Files:** `artifact_v16.7.html` (renderKeyAccountsView), `server.mjs` (POST /api/supply/ka-forecast-cells), `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migrations, no env vars.
