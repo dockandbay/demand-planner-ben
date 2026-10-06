@@ -1059,6 +1059,23 @@ app.use((req, res, next) => {
   };
   next();
 });
+// v28.164 (Ben): serialise-once memo for the two heaviest JSON GETs (sku-data ~3.6 MB, order-plan ~5.3 MB). The middleware above
+// re-ran JSON.stringify + sha1 (+ gzip) on EVERY hit, 304s included. Keyed on the cached data object itself (WeakMap): a rebuild /
+// invalidation swaps in a new object, so the memo dies exactly with its data and a stale body can never be served. Holds the
+// string, a strong content ETag and the gzip buffer (built once, async, shared by concurrent hits). Same headers + 304 as above.
+const _jsonMemo = new WeakMap();
+function sendJsonMemo(req, res, key, mk) {
+  let m = _jsonMemo.get(key);
+  if (!m) { const str = JSON.stringify(mk()); m = { str, h: crypto.createHash('sha1').update(str).digest('base64url').slice(0, 27), gz: null }; _jsonMemo.set(key, m); }
+  const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.setHeader('Vary', 'Accept-Encoding');
+  if (!res.getHeader('Cache-Control')) res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('ETag', '"' + m.h + (gz ? '-gz"' : '"'));   // strong, per encoding; a match on the content hash is a 304 either way
+  if (String(req.headers['if-none-match'] || '').includes(m.h)) { res.status(304); return res.end(); }
+  if (!gz) return res.end(m.str);
+  if (!m.gz) m.gz = new Promise((ok, ko) => zlib.gzip(m.str, (e, b) => (e ? ko(e) : ok(b))));
+  m.gz.then((b) => { res.setHeader('Content-Encoding', 'gzip'); res.end(b); }, () => { m.gz = null; res.setHeader('ETag', '"' + m.h + '"'); res.end(m.str); });
+}
 
 // v28.104 (Ben): client portal on its own subdomain (client.dockandbay.com).
 // When a request arrives on the client host we serve ONLY the portal surface — the admin shell
@@ -1280,7 +1297,7 @@ async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command
   return (await r.json()).result;
 }
 async function kvWriteBlob(vals) {   // store the built 14-tuple as gzip+base64 chunks + a meta record
-  const b64 = zlib.gzipSync(Buffer.from(JSON.stringify(vals))).toString('base64');
+  const b64 = (await new Promise((ok, ko) => zlib.gzip(Buffer.from(JSON.stringify(vals)), (e, b) => (e ? ko(e) : ok(b))))).toString('base64');   // v28.163: async gzip (~12 MB; was gzipSync, blocking the event loop after every rebuild)
   const n = Math.ceil(b64.length / KV_CHUNK);
   for (let i = 0; i < n; i++) await kvCmd(['SET', KV_KEY + ':' + i, b64.slice(i * KV_CHUNK, (i + 1) * KV_CHUNK)]);
   await kvCmd(['SET', KV_KEY + ':meta', JSON.stringify({ n, at: Date.now(), len: b64.length })]);
@@ -1605,7 +1622,7 @@ const _INV_BRANCH_MAP = {
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
 app.get('/api/demand/sku-data', async (req, res) => {
-  try { const v = await getDataVals(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
+  try { const v = await getDataVals(); sendJsonMemo(req, res, v, () => ({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} })); }   // v28.163: serialised + gzipped once per data build
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── DEMAND ▸ Analysis ▸ Stock cover — weeks-of-cover per warehouse per month from the monthly inventory snapshots ──
@@ -7403,7 +7420,7 @@ supplySectionHandler = async (req, res, next) => {
           return res.json((await queryCapped(ORDER_PLAN_SELECT + ` WHERE coalesce(p.supplier_name,'')=$1 ORDER BY l.po, l.sku`, [req.query.supplier])).rows);
         if (req.query.includeArchived)
           return res.json((await queryCapped(ORDER_PLAN_SELECT + ' ORDER BY l.po, l.sku')).rows);
-        return res.json(await orderPlanCache.get());
+        { const rows = await orderPlanCache.get(); return sendJsonMemo(req, res, rows, () => rows); }   // v28.163: serialised + gzipped once per cache build (never patched in place)
       }
       case 'shipments': {
         // Editable shipment records (planner.shipments) joined to the POs aboard them. A shipment's
