@@ -9589,7 +9589,7 @@ app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
 // v27.579: bulk twin of ka-forecast-cell — one transaction for a whole import / column clear (the per-cell route cost ~1.6s a cell
 // through the pooler, so a 45 SKU × 18 month file took ~20 minutes). Body: {client, warehouse, cells:[{sku, month:'YYYY-MM', quantity}]};
 // quantity '' / null / 0 = clear that month. Same semantics as the per-cell route: delete the month's rows, insert the new qty.
-// v28.183 (Ben): the Excel-style Key Accounts grid (paste / clear / undo) writes through here too. Each cell may carry its own
+// v28.182 (Ben): the Excel-style Key Accounts grid (paste / clear / undo) writes through here too. Each cell may carry its own
 // {client, sku, warehouse, month, quantity}; a cell without client / warehouse falls back to body.client / body.warehouse (the
 // v27.579 import + column-clear shape above still works). quantity: '' / null / 0 = clear, else a whole number >= 0 (thousands
 // separators stripped). Each cell is validated on its own (a bad one is reported, the rest still save); a repeated
@@ -9601,7 +9601,7 @@ app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
 // Caches: no server cache reads planner.key_account_forecasts (/api/preorders-ka and the ka-forecasts section are live and
 // no-store), so there is no CACHE_DEPS type to stale; the browser re-pulls the Preorder / KA map itself (kafPkaRefresh).
 const KA_CELLS_CHUNK = 200;
-function kaCellQty(v) {   // v28.183 (Ben): '' / null / 0 -> 0 (clear); whole number >= 0 -> n; anything else -> {err}
+function kaCellQty(v) {   // v28.182 (Ben): '' / null / 0 -> 0 (clear); whole number >= 0 -> n; anything else -> {err}
   if (v === '' || v == null) return { q: 0 };
   const s = String(v).replace(/[,\s]/g, '');
   if (s === '') return { q: 0 };

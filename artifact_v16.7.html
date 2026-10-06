@@ -11312,15 +11312,15 @@ function renderSummaryView(body){
   else draw();
 }
 var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
-// v28.183 (Ben): Excel-style Key Accounts grid. KAF_UNDO = bulk-operation undo stack (paste / clear / edit / fill), newest last,
+// v28.182 (Ben): Excel-style Key Accounts grid. KAF_UNDO = bulk-operation undo stack (paste / clear / edit / fill), newest last,
 // KAF_UNDO_MAX deep; each entry {label, cells:[{cl, cv, sku, wh, m, prev, next}]} (cv = client as stored, '' for "(no client)").
 // Lives outside the view so it survives a country-pill switch. _KAF_Q chains the grid's writes so they reach the server in order.
 var KAF_UNDO=[], KAF_UNDO_MAX=50, _KAF_Q=Promise.resolve(), KAF_SAVING=0, _KAF_UP=null;   // KAF_SAVING = grid writes in flight; _KAF_UP = the grid's document-level drag listeners
-// v28.183 (Ben): after any Key Accounts write (grid edit / paste / clear / undo / import / column or SKU clear) re-pull the
+// v28.182 (Ben): after any Key Accounts write (grid edit / paste / clear / undo / import / column or SKU clear) re-pull the
 // Preorder / KA map (loadPreorderKA -> attachPKA rewrites md.pka) and mark demand stale (hzMarkDemandStale), so the buy plan folds
 // the new KA quantities in on its next render through the same gate as a DEMAND forecast edit: the rebuild is the v28.171
 // incremental one (only md.pka moved), and an async build already in flight catches up through v28.181. Debounced, so a burst of
-// writes is one re-pull. (Before v28.183 a KA edit reached the buy plan only after a page reload or BUY > Refresh cache.)
+// writes is one re-pull. (Before v28.182 a KA edit reached the buy plan only after a page reload or BUY > Refresh cache.)
 var _KAF_PKA_T=null, KAF_PKA_P=null;
 function kafPkaRefresh(){ clearTimeout(_KAF_PKA_T); _KAF_PKA_T=setTimeout(function(){ _KAF_PKA_T=null;
   var w=(typeof _PKA_INFLIGHT!=='undefined'&&_PKA_INFLIGHT)||Promise.resolve();   // a load already in flight may predate this write: re-pull after it
@@ -11374,7 +11374,7 @@ function renderKeyAccountsView(body){
   var SKUS=Object.keys(SKUM).sort();
   var rows=[];                 // raw ka-forecasts
   var pendClients=[], pendSkus={};   // transient: client/skus added in the UI before any qty is saved (per current country)
-  // v28.183 (Ben): Excel-style grid state. G = coordinates of the drawn grid (rows = SKU rows only, cols = months; idx 'client|sku|month'
+  // v28.182 (Ben): Excel-style grid state. G = coordinates of the drawn grid (rows = SKU rows only, cols = months; idx 'client|sku|month'
   // -> [r, c]; sig = rows + months, so a redraw of the same grid keeps the selection), VAL 'r,c' -> shown qty, SS = selection,
   // ED = the open in-place editor, TDS[r][c] = the cell elements.
   var G={rows:[],cols:[],idx:{},sig:''}, VAL={}, SS={sel:{},base:{},anchor:null,ext:null,drag:false}, ED=null, TDS=[];
@@ -11414,17 +11414,17 @@ function renderKeyAccountsView(body){
   function flash(m,bad){ var el=host.querySelector('#kaf-msg'); if(el){ el.style.color=bad?'var(--neg)':'var(--pos)'; el.textContent=m; clearTimeout(el._t); el._t=setTimeout(function(){el.textContent='';},1600); } }
   // v27.579: batched writes (one request per ≤800 cells) for imports / column clears / SKU clears — the per-cell route stays for inline edits
   function saveCells(client,cells,cb,prog){ var i=0, done=0, out={deleted:0,inserted:0};
-    (function nx(){ if(i>=cells.length){ kafPkaRefresh(); if(cb)cb(null,out); return; } var chunk=cells.slice(i,i+800); i+=chunk.length; if(prog)prog(i,cells.length);   // v28.183 (Ben): + buy-plan KA refresh
+    (function nx(){ if(i>=cells.length){ kafPkaRefresh(); if(cb)cb(null,out); return; } var chunk=cells.slice(i,i+800); i+=chunk.length; if(prog)prog(i,cells.length);   // v28.182 (Ben): + buy-plan KA refresh
       fetch('/api/supply/ka-forecast-cells',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,warehouse:KAF_CTRY,cells:chunk})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); out.deleted+=j.deleted||0; out.inserted+=j.inserted||0; done+=chunk.length; nx(); }).catch(function(err){ kafPkaRefresh(); if(cb)cb(err,out); }); })(); }   // a failed chunk may follow saved ones
-  function draw(){ if(ED)commitEdit(true);   // v28.183 (Ben): an open cell edit is saved before the grid is redrawn
+  function draw(){ if(ED)commitEdit(true);   // v28.182 (Ben): an open cell edit is saved before the grid is redrawn
     var m=monthList(), d=build(), q=KAF_Q.trim().toLowerCase();
     var STY='<style>#kafc table{border-collapse:separate;border-spacing:0;font-size:12px}'
       +'#kafc th{padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;background:var(--hover);position:sticky;top:0;z-index:2}'
       +'#kafc th.lbl{text-align:left}#kafc th.mcur{color:var(--blue-ink)}#kafc th.mpast{color:var(--amber);background:var(--amber-bg)}'
       +'#kafc td{padding:2px 5px;border-bottom:1px solid var(--line2);white-space:nowrap}#kafc td.lbl{position:sticky;left:0;background:var(--card);z-index:1;min-width:150px;text-align:left;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
       +'#kafc tr.clihdr td{background:var(--hover);font-weight:700;color:var(--ink-soft);border-top:1px solid var(--line)}#kafc tr.clihdr td.lbl{background:var(--hover)}'
-      // v28.183 (Ben): Excel-style cells: a td per client x SKU x month (selectable), value in .kaf-v (same box as the old input), the
+      // v28.182 (Ben): Excel-style cells: a td per client x SKU x month (selectable), value in .kaf-v (same box as the old input), the
       // in-place editor .kaf-ed sits in the same spot; selected = tinted, active = outlined; status bar sticky at the bottom.
       +'#kafc table.kaf-grid{outline:none}#kafc td.kaf-cell{cursor:cell;user-select:none;-webkit-user-select:none}#kafc table.kaf-grid.kaf-dragging,#kafc table.kaf-grid.kaf-dragging *{user-select:none;-webkit-user-select:none;cursor:cell}#kafc .kaf-v,#kafc .kaf-ed{display:block;width:58px;min-height:16px;line-height:16px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent;color:inherit}'
       +'#kafc .kaf-ed{border-color:#93c5fd;background:var(--card);outline:none;margin:0}#kafc td.kaf-cell.past{color:var(--amber)}#kafc td.kaf-cell.kaf-sel{background:var(--blue-soft)}#kafc td.kaf-cell.kaf-act{box-shadow:inset 0 0 0 2px var(--blue)}#kafc table.kaf-grid:not(:focus-within) td.kaf-cell.kaf-act{box-shadow:inset 0 0 0 2px var(--line)}'
@@ -11435,7 +11435,7 @@ function renderKeyAccountsView(body){
       +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}#kafc .kaf-drop{position:fixed;z-index:100000;width:300px;max-height:220px;overflow-y:auto;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:var(--blue-soft)}#kafc th.lbl{position:sticky;left:0;z-index:3}#kafc .kaf-cdl,#kafc .kaf-cup{border:1px solid var(--line);background:var(--card);border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;line-height:1.6;color:var(--ink-soft)}#kafc .kaf-cdl:hover,#kafc .kaf-cup:hover{border-color:var(--blue);color:var(--blue)}#kafc .kaf-colx{border:none;background:transparent;color:var(--faint);cursor:pointer;font-size:10px;padding:0 3px;line-height:1}#kafc .kaf-colx:hover{color:var(--neg)}#kafc .kaf-cell.kaf-flash{animation:kafFlash 2.6s ease-out}@keyframes kafFlash{0%{background:var(--pos-bg)}60%{background:var(--pos-bg)}100%{background:transparent}}</style>';
     var head='<tr><th class="lbl">Client / SKU</th>'+m.map(function(x){return '<th class="'+(x.cur?'mcur':x.past?'mpast':'')+'">'+x.label+'</th>';}).join('')+'<th></th></tr>';
     var bodyH='';
-    var nG={rows:[],cols:m.map(function(x){ return x.key; }),idx:{},sig:''}; VAL={};   // v28.183 (Ben): grid coordinates (SKU rows x months only)
+    var nG={rows:[],cols:m.map(function(x){ return x.key; }),idx:{},sig:''}; VAL={};   // v28.182 (Ben): grid coordinates (SKU rows x months only)
     d.clients.forEach(function(cl){
       var cliMatch=!q||cl.toLowerCase().indexOf(q)>=0;
       var allSks=d.skusBy[cl]||[];
@@ -11446,7 +11446,7 @@ function renderKeyAccountsView(body){
       sks.forEach(function(sk){ var r=nG.rows.length; nG.rows.push({cl:cl,sku:sk});
         bodyH+='<tr role="row" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl" role="rowheader"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div></td>'
           +m.map(function(x,c){ var v=(d.C[cl]&&d.C[cl][sk]&&d.C[cl][sk][x.key]!=null)?d.C[cl][sk][x.key]:''; nG.idx[cl+'|'+sk+'|'+x.key]=[r,c]; if(v!=='')VAL[r+','+c]=Number(v)||0;
-            return '<td class="kaf-cell'+(x.past?' past':'')+'" role="gridcell" aria-selected="false" id="kaf-c'+r+'-'+c+'" data-r="'+r+'" data-c="'+c+'" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'"><span class="kaf-v">'+e(v)+'</span></td>'; }).join('')   // v28.183 (Ben): selectable cell, edited in place
+            return '<td class="kaf-cell'+(x.past?' past':'')+'" role="gridcell" aria-selected="false" id="kaf-c'+r+'-'+c+'" data-r="'+r+'" data-c="'+c+'" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'"><span class="kaf-v">'+e(v)+'</span></td>'; }).join('')   // v28.182 (Ben): selectable cell, edited in place
           +'<td><button class="kaf-del" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" title="clear this SKU across all shown months">✕</button></td></tr>';
       });
       // add-SKU affordance for this client
@@ -11457,7 +11457,7 @@ function renderKeyAccountsView(body){
     if(nG.sig!==G.sig){ SS={sel:{},base:{},anchor:null,ext:null,drag:false}; } G=nG;   // same rows + months: the selection survives a redraw
     host.innerHTML=STY+(d.clients.length?'<table class="kaf-grid" role="grid" aria-multiselectable="true" aria-label="Key Accounts forecast" tabindex="0"><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>':'<div style="color:var(--faint);font-size:12px;padding:10px 2px">No forecasts for '+e(({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY])+(q?' matching “'+e(KAF_Q)+'”':'')+' yet — add a client below or import.</div>')
       +'<div style="margin-top:12px;display:flex;align-items:center;gap:8px"><input id="kaf-newcli" placeholder="new client / account…" style="padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:220px"><button id="kaf-addcli" style="border:1px solid var(--line);background:var(--hover);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer">+ Add client</button><span id="kaf-msg" style="font-size:11px"></span></div>'
-      +(d.clients.length?'<div class="kaf-sb" id="kaf-sb"><span id="kaf-sbt" role="status" aria-live="polite"></span><span class="kaf-sbsp"></span><span id="kaf-saving"></span><span id="kaf-toast" role="alert"></span>'   // v28.183 (Ben): status bar
+      +(d.clients.length?'<div class="kaf-sb" id="kaf-sb"><span id="kaf-sbt" role="status" aria-live="polite"></span><span class="kaf-sbsp"></span><span id="kaf-saving"></span><span id="kaf-toast" role="alert"></span>'   // v28.182 (Ben): status bar
         +'<button id="kaf-sb-copy" title="Copy the selection (Ctrl/Cmd+C) as tab-separated rows">Copy</button><button id="kaf-sb-clear" title="Clear the selected cells (Delete)">Clear</button><button id="kaf-sb-undo" title="Undo the last change (Ctrl/Cmd+Z)">Undo</button></div>'
         +'<textarea id="kaf-clip" tabindex="-1" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0"></textarea>':'');
     wire(); gridWire(_hadFocus);
@@ -11495,7 +11495,7 @@ function renderKeyAccountsView(body){
   function applyFlash(){ if(!_flash)return; var ks=_flash; _flash=null; var first=null; host.querySelectorAll('.kaf-cell').forEach(function(i){ if(ks[i.dataset.cl+'|'+i.dataset.sku+'|'+i.dataset.m]){ i.classList.add('kaf-flash'); if(!first)first=i; } });
     if(first){ try{ first.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } setTimeout(function(){ host.querySelectorAll('.kaf-cell.kaf-flash').forEach(function(i){ i.classList.remove('kaf-flash'); }); },2700); }
   function reload(){ fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); applyFlash(); }); }
-  // ── v28.183 (Ben): Excel-style grid (approved "Excel-style core") ──
+  // ── v28.182 (Ben): Excel-style grid (approved "Excel-style core") ──
   // Selection = a set of 'r,c' keys over SKU rows x month columns (client header / add-SKU rows are not grid rows, so a block can
   // span clients). Click = one cell; drag / Shift+click = rectangle from the anchor; Ctrl/Cmd+click toggles cells (multi-range).
   // SS.base = what was selected before the current anchor (Ctrl adds and Shift / drag extend on top of it). Keyboard: arrows

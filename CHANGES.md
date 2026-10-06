@@ -1,3 +1,14 @@
+## v28.182 (Ben, branch review-fixes-2026-10-05): Key Accounts forecast grid works like a spreadsheet
+
+**Files:** `artifact_v16.7.html` (renderKeyAccountsView), `server.mjs` (POST /api/supply/ka-forecast-cells), `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- DEMAND ▸ Key Accounts: click-and-drag selects a block (across months and clients, auto-scroll at the edge, no text highlight); Shift+click extends, Ctrl/Cmd+click toggles, Ctrl/Cmd+A all. Sticky status bar: Selected N · Sum · Count · Avg, with Copy, Clear N cells, Undo.
+- Keyboard: arrows / Shift+arrows, Tab, Enter / F2 / typing a digit edits (Enter saves and moves down, Esc cancels), Delete clears the selection, Ctrl/Cmd+C copies TSV for Excel/Sheets, Ctrl/Cmd+V pastes a block at the active cell (one value fills a multi-cell selection; text cells skipped and cells past the edge ignored, with a message), Ctrl/Cmd+Z undo up to 50 steps.
+- Pastes, fills, clears and undos save in ONE request: `POST /api/supply/ka-forecast-cells` now takes per-cell {client, sku, warehouse, month, quantity}, validates each (whole numbers >= 0), writes 200 cells per statement, returns per-cell results; old body shape still works (import / clear buttons), single-cell route unchanged. 450 cells save in ~1.1 s.
+- KA edits now reach the buy plan without a reload (Preorder/KA re-read after every save; only changed SKUs rebuild). Before, a KA edit only reached BUY after a reload or Refresh cache.
+- **Verified (jsdom, sandbox):** 74/74 checks incl. real pointer drag tests; paste 3x4 = exactly 12 DB cells; Clear + Undo restores DB values; buy plan moves by exactly the pasted delta, identical to typing the same values cell by cell, and back to identical after Undo (0 rows differ). Sandbox KA table restored exactly.
+- **Note:** the bulk endpoint now rejects negative / decimal quantities (the import used to accept negatives). Ctrl/Cmd+V paste needs a real-browser check (Chrome / Safari, Excel on Mac).
+
 ## v28.181 (Ben, branch review-fixes-2026-10-05): DEMAND ▸ Actions faster + live action status + mid-build catch-up
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `lib/ai-logic/actions.md` + `demand-engine.md` (+ package.json, CHANGES.md). No migrations, no env vars.
