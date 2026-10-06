@@ -71,20 +71,30 @@
   // already the active one, after which neither the route nor the active nav item changes and no loading panel appears within
   // 1.5 s. Aggregated per view + label like long_task (count, <= 10 a minute). Clicks on anything else are never looked at.
   var DC={}, dcT=0, dcN=0, dcPend=null, DEAD_MS=1500;
-  var NAVSEL='#hz-leftrail .rl1,#hz-leftrail .rl2,#hz-leftrail .rl3,#view-tabs-row .view-toggle,.hz-l2 .dnav,.d3nav .d3tab,#supply-subnav .stab,#rep-subnav .rtab,#act-subnav .rtab,#product-subnav .stab,#client-subnav .stab,#config-subs .rtab,#config-subs-l3 .rtab,#perf-subnav .rtab';
-  function navLabel(el){ try{ var l=el.querySelector('.lab'), t=l?l.textContent:Array.prototype.filter.call(el.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');
-    return String(t||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60); }catch(e){ return '?'; } }
+  var NAVSEL='#hz-leftrail .rl1,#hz-leftrail .rl2,#hz-leftrail .rl3,#view-tabs-row .view-toggle,.hz-l2 .dnav,.d3nav .d3tab,#supply-subnav .stab,#rep-subnav .rtab,#act-subnav .rtab,#product-subnav .stab,#client-subnav .stab,#config-subs .rtab,#config-subs-l3 .rtab,#perf-subnav .rtab'
+    +',#hz-drawer .hz-nav,#prod-subtabs .rtab,#pcfg-subs-l3 .rtab,#client-l3 .rtab,#tpl-subnav .dnav3';   // v28.184 (Ben): + the phone drawer tree (L1 / L2 / L3) and the L3 bars the drawer mirrors
+  function navLabel(el){ try{ var l=el.querySelector('.lab,.hz-lab'), t=l?l.textContent:Array.prototype.filter.call(el.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');
+    return String(t||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60); }catch(e){ return '?'; } }   // v28.184 (Ben): .hz-lab = drawer row label (without its count badge)
   function navOn(el){ var c=el.classList; return !!(c&&(c.contains('active')||c.contains('on'))); }
   function navSig(){ var s=String(location.hash||''); try{ var els=document.querySelectorAll(NAVSEL); for(var i=0;i<els.length;i++)if(navOn(els[i]))s+='|'+navLabel(els[i]); }catch(e){} return s; }
   function dcNote(label,v){ try{ var now=Date.now(); if(now-dcT>60000){dcT=now;dcN=0;} if(++dcN>10)return false;
     var k=v+'|'+label, a=DC[k]||(DC[k]={n:0,label:label,path:v}); a.n++; return true; }catch(e){ return false; } }
-  if(SRC==='staff')document.addEventListener('mousedown',function(e){ try{ if(e.button!==0||!e.target||!e.target.closest)return; var el=e.target.closest(NAVSEL); if(!el||navOn(el))return;
+  function dcPress(el){ if(!el||navOn(el))return;
     var o=dcPend, sig=navSig(); if(o&&o.sig===sig&&!loading()&&Date.now()-o.t>=400)dcNote(o.label,o.path);   // clicked again because the previous press did nothing: that one was dead
     var p={label:navLabel(el),path:nview(),sig:sig,t:Date.now()}; dcPend=p;
     (function chk(){ if(dcPend!==p)return;   // a newer nav press supersedes this one
       if(navSig()!==p.sig||loading()){ dcPend=null; return; }
       if(Date.now()-p.t>=DEAD_MS){ dcPend=null; dcNote(p.label,p.path); return; }
-      setTimeout(chk,250); })(); }catch(_){} },true);
+      setTimeout(chk,250); })(); }
+  // v28.184 (Ben): phones. A tap is taken at touchend (a drag / scroll of the drawer is not a press); the compatibility mousedown the
+  // browser fires right after the same tap is then ignored, so one tap never counts twice (which would read as "pressed again: dead").
+  var dcTouch=null, dcTouchAt=0;
+  if(SRC==='staff'){
+    document.addEventListener('mousedown',function(e){ try{ if(e.button!==0||!e.target||!e.target.closest)return; if(Date.now()-dcTouchAt<1000)return; dcPress(e.target.closest(NAVSEL)); }catch(_){} },true);
+    document.addEventListener('touchstart',function(e){ try{ var t=e.touches&&e.touches[0]; dcTouch=(e.touches&&e.touches.length===1&&e.target&&e.target.closest)?{el:e.target.closest(NAVSEL),x:t?t.clientX:0,y:t?t.clientY:0,moved:false}:null; }catch(_){ dcTouch=null; } },{capture:true,passive:true});
+    document.addEventListener('touchmove',function(e){ try{ var t=e.touches&&e.touches[0]; if(dcTouch&&t&&(Math.abs(t.clientX-dcTouch.x)>10||Math.abs(t.clientY-dcTouch.y)>10))dcTouch.moved=true; }catch(_){} },{capture:true,passive:true});
+    document.addEventListener('touchend',function(){ try{ var d=dcTouch; dcTouch=null; if(!d||d.moved||!d.el)return; dcTouchAt=Date.now(); dcPress(d.el); }catch(_){} },{capture:true,passive:true});
+  }
   function pvAccrue(){ var now=Date.now(); if(curV&&vis&&curT){ var a=PV[curV]||(PV[curV]={n:0,s:0}); a.s+=(now-curT)/1000; } curT=now; }
   function pvEnter(){ try{ pvAccrue(); curV=nview(); var a=PV[curV]||(PV[curV]={n:0,s:0}); a.n++; }catch(e){} }
   function aggFlush(){ try{ pvAccrue(); var k, a, rows=[];

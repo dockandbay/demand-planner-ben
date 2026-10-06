@@ -329,6 +329,27 @@
  body.hz-rail:not(.hz-rail-min) #perf-subnav{display:none!important}
  body.hz-rail .ver:not(.rl-ver){display:none!important}   /* the rail foot shows the version now — drop the in-content badge */
 }
+/* v28.184 (Ben: "ALL level 3 menus on mobile should be in the side menu"): on a phone the hamburger drawer now carries every L3 (same
+   model as the desktop rail), so the in-page L3 strips are redundant there. body.hz-navtree is set only once the drawer tree model is
+   live (artifact drawer build), so without it the in-page strips stay. Phone only: the desktop rule set above is untouched. */
+@media(max-width:640px){
+ body.hz-navtree #supply-root #prod-subtabs,
+ body.hz-navtree #supply-root #rep-subnav,
+ body.hz-navtree #supply-root #config-subs-l3,
+ body.hz-navtree #demand-exceptions-nav,
+ body.hz-navtree #demand-scenario-nav,
+ body.hz-navtree #demand-inputs-nav,
+ body.hz-navtree #demand-analysis-nav,
+ body.hz-navtree #demand-config-nav,
+ body.hz-navtree #perf-subnav,
+ body.hz-navtree #product-root #pcfg-subs-l3,
+ body.hz-navtree #demand-body > .d3nav,
+ body.hz-navtree #inventory-wrap > .d3nav,
+ body.hz-navtree #tpl-subnav,
+ body.hz-navtree #client-root #client-l3,
+ body.hz-navtree #client-root #client-subnav,
+ body.hz-navtree .hz-l3-mirrored{display:none!important}
+}
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
 #tl-drop .tl-acts{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
@@ -18661,6 +18682,27 @@
     list.querySelectorAll('.rl2').forEach(function(b){ b.onclick=function(){ var it=(window._railL2c||[])[+b.dataset.l2]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
     list.querySelectorAll('.rl3').forEach(function(b){ b.onclick=function(){ var it=(window._railL3c||[])[+b.dataset.l3]; if(it&&it.el){try{it.el.click();}catch(e){}} _railSoon(); }; });
   }
+  // v28.184 (Ben: "On mobile, cannot access the main CONFIG menu ... ALL level 3 menus on mobile should be in the side menu"): the phone
+  // drawer (#hz-drawer, artifact) now builds its L1 > L2 > L3 tree from THIS model, the same RAIL_L1 / RAIL_L2 / RAIL_L3MAP the desktop
+  // rail uses, so a new L2 / L3 shows on mobile automatically. DRAWER_L3_EXTRA = L3 strips the desktop rail does not mirror yet (they stay
+  // in-page on desktop, unchanged); each is tied to its L2 route so a stale hidden strip from another page is never picked up.
+  var DRAWER_L3_EXTRA={
+    demand:[{sel:'#demand-body > .d3nav',hash:/^#\/demand\/actions(\/|$)/}],             // DEMAND > Actions: Actions / Insights / Trend Gaps / Weather
+    buy:[{sel:'#inventory-wrap > .d3nav',hash:/^#\/buy-move\/inventory(\/|$)/}],         // BUY & MOVE > Inventory: Status Report / Manage 3PL / Manage FBA / FBA Aged
+    reports:[{sel:'#tpl-subnav',hash:/^#\/reports\/3pl-invoicing(\/|$)/}],               // REPORTS > 3PL & Invoicing: per-3PL tabs
+    client:[{sel:'#client-root #client-l3',hash:/^#\/client\/(commission|config)(\/|$)/}] // CLIENT > Commissions / Config
+  };
+  function _drawerL3items(mod){ var r=_railL3items(mod); if(r)return r; var ex=DRAWER_L3_EXTRA[mod]; if(!ex)return null; var h=location.hash||'';
+    for(var i=0;i<ex.length;i++){ if(!ex[i].hash.test(h))continue; var cont=document.querySelector(ex[i].sel); if(!cont)continue;
+      var els=cont.querySelectorAll('.rtab,.stab,.d3tab,.dnav3'); var out=[];
+      Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el,count:_railCount(el)}); }); if(out.length)return {items:out,el:cont}; } return null; }
+  try{ window.__hzNavModel={
+    l1:function(){ return RAIL_L1.filter(function(m){ if(m.k!=='client')return true; var cb=document.getElementById('client-btn'); return !!(cb&&cb.style.display!=='none'); }); },   // CLIENT only for users who can see it
+    active:function(){ return railActiveKey(); },
+    l2:function(mod){ return _railL2items(mod); },
+    l3:function(mod){ return _drawerL3items(mod); },
+    l3sel:function(){ var s=[]; Object.keys(RAIL_L3MAP).forEach(function(k){ s=s.concat(RAIL_L3MAP[k]); }); Object.keys(DRAWER_L3_EXTRA).forEach(function(k){ DRAWER_L3_EXTRA[k].forEach(function(x){ s.push(x.sel); }); }); return s; },
+    soon:function(){ _railSoon(); } }; }catch(e){}
   function railSync(){ renderRailList(); }
   function _railSoon(){ [90,300,700,1400].forEach(function(d){ setTimeout(renderRailList,d); }); }   // re-render as the module's L2/L3 render async
   function ensureRail(){
