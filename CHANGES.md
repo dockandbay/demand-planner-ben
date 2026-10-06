@@ -1,3 +1,12 @@
+## v28.180 (Ben, branch review-fixes-2026-10-05): Ask Claude: rename conversations, livelier "working" indicator
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). Client only; uses the existing `POST /api/assistant/conversations/:id {title}`. No migrations, no env vars.
+
+- **Rename:** a ✎ next to each conversation in the Conversations list renames it inline (Enter or click away saves, Esc cancels, blank = "New chat").
+- **"Claude is working":** an animated orange spark (spins and pulses; still for reduced-motion users), an elapsed-seconds counter ("still going, bigger questions take longer" after 20 s), and a rotating joke every 7 s: 100 beach / travel / shipping / demand-planning dad jokes plus Dock & Bay ones, random with no repeat until all are used.
+- **Fix:** a new chat's history load no longer wipes a question sent before it finished (your question disappeared until the answer came back), nor paints over a different chat.
+- Verified in Chrome on sandbox: rename saved and persisted; indicator shows timer + joke and clears on answer; question visible immediately.
+
 ## v28.179 (Ben, branch review-fixes-2026-10-05): first-click fix, faster ERP Compare and BUY & MOVE first entry, dead-click + slow-view captures
 
 **Files:** `supply/inject.html`, `supply/hz-health.js`, `artifact_v16.7.html`, `server.mjs`, `lib/ai-logic/actions.md` + `supply-finance.md` (fingerprints; actions adds the cache note), new `migrations/331_app_health_dead_click.sql` (+ package.json, CHANGES.md). No new env vars.

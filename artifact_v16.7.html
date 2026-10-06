@@ -19716,6 +19716,7 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
    +'.ask-row:hover{background:var(--hover,#f1f5f9)}'
    +'.ask-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}'
    +'.ask-row .x{color:var(--neg,#dc2626);opacity:.5;font-size:15px;padding:0 4px}.ask-row .x:hover{opacity:1}'
+   +'.ask-row .ren{color:var(--muted,#64748b);opacity:.45;font-size:13px;padding:0 4px}.ask-row .ren:hover{opacity:1;color:var(--blue,#2563eb)}.ask-row input.ask-ren{flex:1;min-width:0;font:inherit;font-weight:600;padding:3px 6px;border:1px solid var(--blue,#2563eb);border-radius:6px;background:var(--card,#fff);color:inherit}'   // v28.180 (Ben): rename a conversation
    +'.ask-empty{color:var(--muted,#64748b);text-align:center;padding:40px 20px;line-height:1.6}'
    +'.ask-msg{max-width:88%;padding:9px 12px;border-radius:12px;margin-bottom:9px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}'
    +'.ask-msg.me{margin-left:auto;background:#fff2ec;border:1px solid #ffd9c7}'
@@ -19735,7 +19736,13 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
    +'.ask-send{background:linear-gradient(135deg,#ff8a1a,#ff5630);color:#fff;border:none;border-radius:10px;width:40px;height:38px;cursor:pointer;font-size:16px;flex:0 0 auto}'
    +'.ask-send:disabled{opacity:.5;cursor:default}'
    +'.ask-clip{border:1px solid var(--line,#e6e9ef);background:var(--card,#fff);border-radius:10px;width:40px;height:38px;cursor:pointer;color:var(--muted,#64748b);font-size:16px;flex:0 0 auto}'
-   +'.ask-typing{color:var(--muted,#64748b);font-style:italic;padding:2px 4px 8px}'
+   +'.ask-typing{display:flex;gap:10px;align-items:flex-start;color:var(--muted,#64748b);padding:6px 4px 10px}'
+   // v28.180 (Ben): "show it's still working, some Claude animation, funny Dock & Bay jokes": spinning/pulsing spark, elapsed timer, rotating jokes
+   +'.ask-spark{flex:0 0 auto;width:22px;height:22px;margin-top:1px;color:#ff6a1a;animation:askSpin 2.4s linear infinite,askPulse 1.2s ease-in-out infinite}'
+   +'@keyframes askSpin{to{transform:rotate(360deg)}}@keyframes askPulse{0%,100%{opacity:.55;filter:drop-shadow(0 0 0 rgba(255,106,26,0))}50%{opacity:1;filter:drop-shadow(0 0 6px rgba(255,106,26,.6))}}'
+   +'.ask-typing b{color:var(--ink,#0f172a);font-style:normal}.ask-typing .el{font-variant-numeric:tabular-nums;margin-left:4px;font-size:12px}'
+   +'.ask-joke{font-style:italic;font-size:12.5px;margin-top:3px;transition:opacity .35s ease;min-height:1.3em}'
+   +'@media (prefers-reduced-motion:reduce){.ask-spark{animation:none}}'
    +'.ask-hint{color:var(--faint,#94a3b8);font-size:11px;margin-top:6px;text-align:center}';
     document.head.appendChild(st); }
   function build(){ css(); if(document.getElementById('ask-dw')) return;
@@ -19760,14 +19767,24 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
   function showList(){ ST.view='list'; ST.conv=null; foot(false); var b=document.getElementById('ask-body'); b.innerHTML='<div class="ask-empty">Loading…</div>';
     api('/conversations').then(function(j){ var cs=j.conversations||[]; if(!cs.length){ b.innerHTML='<div class="ask-empty"><b>Ask me anything.</b><br>Questions, analysis, or upload a file (CSV, spreadsheet, PDF, image) and I will work with it. I can hand back a file too.<br><br>Your chats are private to you and saved here.<br><br><button class="ask-new" id="ask-new2">+ New chat</button></div>'; var n=document.getElementById('ask-new2'); if(n)n.onclick=newChat; return; }
       var groups={},order=[]; cs.forEach(function(c){ var g=dayLabel(c.updated_at); if(!groups[g]){groups[g]=[];order.push(g);} groups[g].push(c); });
-      b.innerHTML=order.map(function(g){ return '<div class="ask-dgrp">'+esc(g)+'</div>'+groups[g].map(function(c){ return '<div class="ask-row" data-id="'+c.id+'"><span class="t">'+esc(c.title||'New chat')+'</span><span class="x" data-del="'+c.id+'" title="Delete">&times;</span></div>'; }).join(''); }).join('');
-      b.querySelectorAll('.ask-row').forEach(function(r){ r.onclick=function(e){ if(e.target.dataset.del)return; openConv(r.dataset.id); }; });
+      b.innerHTML=order.map(function(g){ return '<div class="ask-dgrp">'+esc(g)+'</div>'+groups[g].map(function(c){ return '<div class="ask-row" data-id="'+c.id+'"><span class="t">'+esc(c.title||'New chat')+'</span><span class="ren" data-ren="'+c.id+'" title="Rename">&#9998;</span><span class="x" data-del="'+c.id+'" title="Delete">&times;</span></div>'; }).join(''); }).join('');
+      b.querySelectorAll('.ask-row').forEach(function(r){ r.onclick=function(e){ if(e.target.dataset.del||e.target.dataset.ren||e.target.classList.contains('ask-ren'))return; openConv(r.dataset.id); }; });
+      // v28.180 (Ben): inline rename. Enter or click away saves (blank = back to "New chat"), Esc cancels.
+      b.querySelectorAll('.ren[data-ren]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); var row=x.closest('.ask-row'), t=row&&row.querySelector('.t'); if(!t||row.querySelector('input.ask-ren'))return;
+        var old=t.textContent==='New chat'?'':t.textContent, inp=document.createElement('input'); inp.className='ask-ren'; inp.value=old; inp.maxLength=120; t.style.display='none'; row.insertBefore(inp,t); inp.focus(); inp.select();
+        var done=false; function finish(save){ if(done)return; done=true; var v=inp.value.trim();
+          if(!save||v===old){ inp.remove(); t.style.display=''; return; }
+          inp.disabled=true; api('/conversations/'+x.dataset.ren,{method:'POST',body:{title:v}}).then(function(){ t.textContent=v||'New chat'; inp.remove(); t.style.display=''; if(ST.conv&&String(ST.conv.id)===String(x.dataset.ren))ST.conv.title=v; })
+            .catch(function(er){ alert('Rename failed: '+er.message); inp.remove(); t.style.display=''; }); }
+        inp.onkeydown=function(ev){ if(ev.key==='Enter'){ev.preventDefault();finish(true);} else if(ev.key==='Escape'){ev.preventDefault();finish(false);} ev.stopPropagation(); };
+        inp.onblur=function(){ finish(true); }; inp.onclick=function(ev){ ev.stopPropagation(); }; }; });
       b.querySelectorAll('.x[data-del]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); if(!confirm('Delete this conversation?'))return; api('/conversations/'+x.dataset.del+'/delete',{method:'POST'}).then(showList); }; });
     }).catch(function(e){ b.innerHTML='<div class="ask-empty" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
   function newChat(cb){ api('/conversations',{method:'POST'}).then(function(j){ ST.atts=[]; openConv(j.conversation.id, j.conversation); if(typeof cb==='function')setTimeout(cb,0); }).catch(function(e){ alert(e.message); }); }
+  // v28.180 (Ben): the history fetch below never wipes a message sent while it loads, nor paints over a different chat
   function openConv(id, seed){ ST.view='chat'; foot(true); renderComposer();
     if(seed){ ST.conv=seed; ST.msgs=[]; paint(); }
-    api('/conversations/'+id).then(function(j){ ST.conv=j.conversation; ST.msgs=j.messages||[]; paint(); }).catch(function(e){ var b=document.getElementById('ask-body'); b.innerHTML='<div class="ask-empty" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
+    api('/conversations/'+id).then(function(j){ if(!ST.conv||String(ST.conv.id)!==String(id))return; ST.conv=j.conversation; if(ST.sending||ST.msgs.length>(j.messages||[]).length)return; ST.msgs=j.messages||[]; paint(); }).catch(function(e){ var b=document.getElementById('ask-body'); b.innerHTML='<div class="ask-empty" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
   function fileHtml(files){ if(!files||!files.length)return ''; return '<div>'+files.map(function(f){ return '<a class="ask-file" href="/api/assistant/file/'+f.id+'" target="_blank" rel="noopener">'+(f.direction==='out'?'&#11015; ':'&#128206; ')+esc(f.filename)+'</a>'; }).join('')+'</div>'; }
   // v28.140 (Ben: "lots of empty lines … rich format, tables and headings, not markdown"): render the answer's Markdown as
   // real HTML — headings, bullet / numbered lists, tables (numbers right-aligned), bold / italic, inline code, code blocks,
@@ -19833,8 +19850,127 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
       inp.onkeydown=function(e){ if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); s.click(); } else if(e.key==='Escape'){ sk.click(); } }; setTimeout(function(){ try{inp.focus();}catch(_){} },0); }
     if(sk)sk.onclick=function(){ ST.fbOpen=null; ST.fbReason=''; paint(); };
   }); }
+  // v28.180 (Ben): "Claude is thinking" shows it is still working: animated spark, elapsed seconds, and a rotating Dock & Bay joke.
+  // 100 beach / travel / shipping / demand-planning dad jokes + Dock & Bay ones, shown at random with no repeat until all are used (Ben)
+  var ASK_JOKES=["Why don't seagulls fly over the bay? Because then they'd be bagels.",
+    "What did the ocean say to the beach? Nothing, it just waved.",
+    "Why did the towel go to the beach? It needed to unwind.",
+    "What's a beach's favourite drink? Sandgria.",
+    "Why are fish so smart? They live in schools.",
+    "How do you cut the sea in half? With a sea-saw.",
+    "Why did the sand blush? Because the sea weed.",
+    "What do you call a sleeping crab on holiday? A beach napper.",
+    "Why do crabs never give to charity? They're shellfish.",
+    "How does the beach keep its secrets? It just shore-ly won't tell.",
+    "What did the sand say when the tide came in? Long time no sea.",
+    "Why did the sun go to school? To get brighter.",
+    "What do you call a lazy kangaroo at the beach? A pouch potato.",
+    "Why did the dolphin cross the beach? To get to the other tide.",
+    "Where do surfers learn to surf? At boarding school.",
+    "What do you call a fish with no eyes? A fsh.",
+    "Why was the beach towel so popular? It had great absorb-ability.",
+    "How do you make a beach party better? You sea it through.",
+    "What did one tide pool say to the other? Show me your mussels.",
+    "Why don't oysters share their pearls? They're shellfish too. It runs in the family.",
+    "What kind of music do beach towels like? Wrap.",
+    "Why did the umbrella stay home? It was feeling under the weather.",
+    "What's the best day to go to the beach? Sunday, obviously.",
+    "Why did the whale cross the ocean? To get to the other tide.",
+    "What do you call a towel that tells jokes? Punny dry humour.",
+    "I used to hate packing for trips. Now I've folded.",
+    "Why did the suitcase go to therapy? It had too much emotional baggage.",
+    "I told my suitcase there'd be no holiday this year. Now I'm dealing with emotional baggage.",
+    "What do you call a dinosaur on holiday? A tour-a-saurus.",
+    "Why don't mountains get cold? They wear snow caps.",
+    "What's a passport's favourite dance? The stamp.",
+    "Why did the plane get sent to its room? Bad altitude.",
+    "I'm reading a book about anti-gravity. It's impossible to put down.",
+    "Why did the traveller bring a ladder? They heard the hotel had great stories.",
+    "What do you call a nervous hotel? Inn-secure.",
+    "Why don't maps ever win at cards? They always fold.",
+    "What did the map say to the GPS? You're so directional.",
+    "I asked the pilot if he had a good landing. He said it was plane sailing.",
+    "What do you call a rental car with a sense of humour? A joke-swagen.",
+    "Why did the camera get the window seat? It wanted a good shot.",
+    "What did the jet lag say? I'll be there in a minute. Or eight hours.",
+    "Why are airport goodbyes so short? Nobody wants to terminal-ate the conversation.",
+    "What's the best thing about Switzerland? I don't know, but the flag is a big plus.",
+    "Why did the hotel cross the road? To get to the other suite.",
+    "I booked a holiday to Germany for my doctor. He needs the Berlin.",
+    "Why did the backpack break up with the suitcase? It needed more space.",
+    "What did one flight attendant say to the other? Cabin you believe this weather.",
+    "How do trees get online on holiday? They log in.",
+    "Why was the luggage late for work? It got carried away.",
+    "Why don't train drivers win arguments? They always get sidetracked.",
+    "Why did the shipping container break up? It needed more space.",
+    "What do you call a pallet that tells jokes? A pun-alet.",
+    "Why was the cargo ship so calm? It had a lot on its plate, but it kept its deck in order.",
+    "How do ships say hello? They wave.",
+    "Why did the parcel go to school? To get a little more boxed in on the basics.",
+    "What did the forklift say to the pallet? I've got you.",
+    "Why did the container go to the gym? To work on its core cargo.",
+    "What's a sailor's favourite letter? You'd think it's R, but their first love is the C.",
+    "Why did the tracking number feel lost? It had no sense of direction.",
+    "What do you call a ship that shares everything? A partner-ship.",
+    "Why are freight forwarders great at parties? They always deliver.",
+    "What did the port say to the ship? Dock and roll.",
+    "Why was the box so good at secrets? It was sealed.",
+    "How does a ship stay in touch? Sea-mail.",
+    "Why did the warehouse go to therapy? Too much stock-ed up emotion.",
+    "What did the label say to the carton? I'm stuck on you.",
+    "Why did the anchor feel left out? It never got to go anywhere.",
+    "What's a pallet's favourite type of joke? A wooden one, it never cracks.",
+    "Why did the courier bring a ladder? The parcel was going up a level.",
+    "Why don't ships ever get lonely? They're always in a fleet.",
+    "What did the customs officer say to the comedian? Declare your best jokes.",
+    "Why was the shipment always calm under pressure? It was well packed.",
+    "How do containers get to sleep? They count sheep-ments.",
+    "Why did the bubble wrap get promoted? It handled pressure well.",
+    "What do you call a late shipment that apologises? Sorry for the de-lay.",
+    "My forecast and I have a lot in common. We both look good on paper.",
+    "Why did the spreadsheet go to the doctor? It had too many cells.",
+    "I asked the demand plan for a date. It said maybe in Q3.",
+    "Why don't forecasts ever get lonely? They're always being revised.",
+    "What's a planner's favourite exercise? Running the numbers.",
+    "Why was the safety stock so confident? It always had a buffer.",
+    "I told a joke about lead times. It took eight weeks to land.",
+    "Why did the forecast bring a jacket? It saw a cold month coming.",
+    "What do you call a forecast that's always right? Fiction.",
+    "Why did the buy plan go to art school? It wanted to draw better conclusions.",
+    "Why was the demand planner calm during peak season? They'd seen it coming.",
+    "What did the actual say to the forecast? You were close, but not that close.",
+    "Why don't SKUs play hide and seek? They always turn up in the count.",
+    "Why did the stock count go to therapy? It had trust issues with the system.",
+    "What did the reorder point say to the inventory? We need to talk.",
+    "I'm on a seafood diet. I see food, I forecast more food.",
+    "Why did the planner bring a pencil to the meeting? In case they needed to draw a trend.",
+    "What's the planner's favourite season? Whichever one is in the forecast.",
+    "Why was the spreadsheet so relaxed? It had everything in cells.",
+    "How does a forecast apologise? It says it was just an estimate.",
+    "Why did the buy plan cross the road? It was already rounded up to the next carton.",
+    "Why did the demand plan go to the gym? To build its core range.",
+    "Why are pivot tables great friends? They always see things from your angle.",
+    "What did the overstock say to the stockout? Can't we meet in the middle?",
+    "Why do planners love the beach? It's the only place they're happy with a sand-bagged forecast.",
+    "Why did the Dock & Bay towel get promoted? It always soaks up the pressure.",
+    "Our towels are sand-free. Our forecasts are stress-free. One of those is true.",
+    "A Dock & Bay towel walks into a bar. It dries out in record time.",
+    "How many recycled bottles does it take to make a towel? Enough to stop the ocean asking for them back.",
+    "Quick-dry towels, slow-dry spreadsheets. Working on the second one.",
+    "Sand-free towels: the only thing on the beach that never brings the beach home.",
+    "Why did the poncho refuse to forecast? Too many hood-ies to account for.",
+    "Checking the numbers twice so the towels only have to fold once.",
+    "Somewhere a pallet of Cabana Navy is wondering if it is core or seasonal. So am I."];
+  function nextJoke(){ if(!ST.jokeBag||!ST.jokeBag.length){ ST.jokeBag=ASK_JOKES.map(function(_,i){return i;}); for(var i=ST.jokeBag.length-1;i>0;i--){ var k=Math.floor(Math.random()*(i+1)), t=ST.jokeBag[i]; ST.jokeBag[i]=ST.jokeBag[k]; ST.jokeBag[k]=t; } } return ST.jokeBag.pop(); }
+  function thinkingHtml(){ var sec=ST.sendStart?Math.floor((Date.now()-ST.sendStart)/1000):0;
+    return '<div class="ask-typing" id="ask-typing"><svg class="ask-spark" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><path d="M12 1.5l1.6 6.9L20.5 7l-5.3 4.9 5.3 4.9-6.9-1.4L12 22.5l-1.6-6.9L3.5 17l5.3-4.9L3.5 7l6.9 1.4z"/></g></svg>'
+      +'<div><b>Claude is working</b><span class="el" id="ask-el">'+(sec?sec+'s':'')+'</span>'+(sec>=20?'<span class="el"> · still going, bigger questions take longer</span>':'')
+      +'<div class="ask-joke" id="ask-joke">'+esc(ASK_JOKES[(ST.jokeIx||0)%ASK_JOKES.length])+'</div></div></div>'; }
+  function thinkingTick(){ if(!ST.sending){ clearInterval(ST._tk); ST._tk=null; return; }
+    var sec=Math.floor((Date.now()-ST.sendStart)/1000), el=document.getElementById('ask-el'); if(el)el.textContent=sec+'s'+(sec>=20?' · still going, bigger questions take longer':'');
+    if(sec>0&&sec%7===0){ var j=document.getElementById('ask-joke'); ST.jokeIx=nextJoke(); if(j){ j.style.opacity='0'; setTimeout(function(){ j.textContent=ASK_JOKES[ST.jokeIx]; j.style.opacity='1'; },350); } } }
   function paint(){ var b=document.getElementById('ask-body'); if(!b)return;
-    b.innerHTML=(ST.msgs.length?ST.msgs.map(function(m){ var cls=m.role==='assistant'?'ai':'me'; return '<div class="ask-msg '+cls+'">'+(m.role==='assistant'?mdlite(m.content):esc(m.content))+fileHtml(m.files)+'</div>'+fbHtml(m); }).join(''):'<div class="ask-empty">New chat. Type a question or attach a file to begin.</div>')+(ST.sending?'<div class="ask-typing" id="ask-typing">Claude is thinking…</div>':'');
+    b.innerHTML=(ST.msgs.length?ST.msgs.map(function(m){ var cls=m.role==='assistant'?'ai':'me'; return '<div class="ask-msg '+cls+'">'+(m.role==='assistant'?mdlite(m.content):esc(m.content))+fileHtml(m.files)+'</div>'+fbHtml(m); }).join(''):'<div class="ask-empty">New chat. Type a question or attach a file to begin.</div>')+(ST.sending?thinkingHtml():'');
     bindFb(b); b.scrollTop=b.scrollHeight; }
   function renderComposer(){ var f=document.getElementById('ask-foot'); if(!f)return;
     f.innerHTML='<div class="ask-atts" id="ask-atts"></div><div class="ask-inrow"><button class="ask-clip" id="ask-clip" title="Attach a file">&#128206;</button><input type="file" id="ask-file" multiple style="display:none"><textarea class="ask-ta" id="ask-ta" rows="1" placeholder="Ask anything, or attach a file…"></textarea><button class="ask-send" id="ask-send" title="Send">&#10148;</button></div><div class="ask-hint">Private to you. Claude can read CSV, spreadsheets, PDF, images and text.</div>';
@@ -19849,7 +19985,7 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
   function send(){ if(ST.sending||!ST.conv)return; var ta=document.getElementById('ask-ta'); var text=(ta.value||'').trim(); if(!text&&!ST.atts.length)return;
     var atts=ST.atts.slice(); ST.atts=[]; renderAtts();
     ST.msgs.push({role:'user',content:text,files:atts.map(function(a){return {filename:a.filename,direction:'in',id:null};})});
-    ST.sending=true; ta.value=''; ta.style.height='auto'; paint();
+    ST.sending=true; ST.sendStart=Date.now(); ST.jokeIx=nextJoke(); clearInterval(ST._tk); ST._tk=setInterval(thinkingTick,1000); ta.value=''; ta.style.height='auto'; paint();
     api('/conversations/'+ST.conv.id+'/message',{method:'POST',body:{text:text,attachments:atts}}).then(function(j){ ST.sending=false;
       // attach real ids to the just-sent user files
       if(j.user_message&&j.user_message.files&&ST.msgs.length){ ST.msgs[ST.msgs.length-1].files=j.user_message.files.map(function(f){return {id:f.id,filename:f.filename,direction:'in'};}); }
