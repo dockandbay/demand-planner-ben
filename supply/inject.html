@@ -2034,6 +2034,41 @@
   // v28.029 (Ben): LINKED RECORDS — how this PO maps to Xero (bill), Fulfil (PO), Flexport (shipment), DHL (tracking).
   // Container only; loaded lazily when the MASTER DATA & DOCS tab is opened (loadPoLinks) — the Xero lookup is live.
   var PO_LINK_META={xero:{label:'Xero',hint:'bill'},fulfil:{label:'Fulfil',hint:'PO'},flexport:{label:'Flexport',hint:'shipment'},dhl:{label:'DHL',hint:'tracking'}};
+  // v28.172 (Ben): Xero bill picker: search the synced Xero bills (number / reference / supplier), pick one to (re)link this PO.
+  // Shows status, date, total and due, and which other PO a bill is already linked to (confirm before double-linking).
+  function xeroBillPicker(po,done){
+    var old=document.getElementById('xbl-bg'); if(old)old.remove();
+    var bg=document.createElement('div'); bg.id='xbl-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100100;display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto';
+    bg.innerHTML='<style>#xbl-bg table{table-layout:auto!important;border-collapse:collapse;width:100%}#xbl-bg th,#xbl-bg td{padding:6px 8px!important;overflow:visible!important;text-align:left!important;vertical-align:top;border-top:1px solid var(--line)}#xbl-bg tr.xbl-row{cursor:pointer}#xbl-bg tr.xbl-row:hover td{background:var(--hover)}#xbl-bg .xbl-num{font-family:ui-monospace,Menlo,monospace;font-weight:700;white-space:nowrap}</style>'
+      +'<div style="background:var(--card);border-radius:12px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Link Xero bill → '+esc(po)+'</b><button id="xbl-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
+      +'<div style="padding:14px 18px"><input id="xbl-q" class="fci" placeholder="Search bill number, reference or supplier…" style="width:100%;text-align:left;font-size:13px;padding:7px 10px" value="'+esc(po)+'">'
+      +'<div class="mut tiny" style="margin:6px 0 8px">Searches the Xero bills HORIZON syncs (UK + AU, not deleted or voided). Click a bill to link it. Not there? Run <b>↻ Find / refresh links</b> or wait for the next bill sync.</div>'
+      +'<div id="xbl-res" style="max-height:52vh;overflow:auto"></div></div></div>';
+    document.body.appendChild(bg);
+    function close(){ bg.remove(); }
+    bg.onclick=function(ev){ if(ev.target===bg)close(); }; document.getElementById('xbl-x').onclick=close;
+    var q=document.getElementById('xbl-q'), res=document.getElementById('xbl-res'), t=null, seq=0;
+    function run(){ var v=q.value.trim(); if(v.length<2){ res.innerHTML='<div class="mut tiny">Type at least 2 characters.</div>'; return; }
+      var my=++seq; res.innerHTML='<div class="mut tiny">Searching…</div>';
+      fetch('/api/supply/xero/bills/search?q='+encodeURIComponent(v)+'&po='+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){ if(my!==seq)return;
+        if(j&&j.error)throw new Error(j.error); var L=(j&&j.bills)||[];
+        if(!L.length){ res.innerHTML='<div class="mut tiny">No matching bills.</div>'; return; }
+        res.innerHTML='<table style="font-size:12.5px"><thead><tr><th>Bill</th><th>Supplier</th><th>Date</th><th>Status</th><th style="text-align:right!important">Total</th><th style="text-align:right!important">Due</th><th></th></tr></thead><tbody>'
+          +L.map(function(b,i){ var other=(b.linked_pos||[]).length?('<div class="tiny" style="color:var(--amber)">already linked to '+b.linked_pos.map(esc).join(', ')+'</div>'):'';
+            return '<tr class="xbl-row" data-i="'+i+'"><td><span class="xbl-num">'+esc(b.number||'(no number)')+'</span>'+(b.reference?'<div class="mut tiny">'+esc(b.reference)+'</div>':'')+other+(b.this_po?'<div class="tiny" style="color:var(--pos)">current link</div>':'')+'</td>'
+              +'<td>'+esc(b.contact||'')+' <span class="tool-badge" style="font-size:9.5px">'+esc(b.region||'')+'</span></td><td style="white-space:nowrap">'+esc(fd(b.date)||'')+'</td><td><span class="mut tiny">'+esc(b.status||'')+'</span></td>'
+              +'<td style="text-align:right!important;white-space:nowrap">'+money(b.total)+' '+esc(b.currency||'')+'</td><td style="text-align:right!important;white-space:nowrap">'+money(b.due)+'</td>'
+              +'<td><a href="'+esc(b.url)+'" target="_blank" rel="noopener" class="xbl-open" style="color:var(--blue);white-space:nowrap">Xero ↗</a></td></tr>'; }).join('')+'</tbody></table>';
+        res.querySelectorAll('.xbl-open').forEach(function(a){ a.onclick=function(ev){ ev.stopPropagation(); }; });
+        res.querySelectorAll('tr.xbl-row').forEach(function(tr){ tr.onclick=function(){ var b=L[+tr.dataset.i]; if(b.this_po){ close(); return; }
+          if((b.linked_pos||[]).length && !confirm(b.number+' is already linked to '+b.linked_pos.join(', ')+'. Link it to '+po+' as well?'))return;
+          if(!confirm('Link Xero bill '+(b.number||b.id)+' ('+(b.contact||'')+', '+money(b.total)+' '+(b.currency||'')+') to '+po+'?'))return;
+          fetch('/api/supply/po/'+encodeURIComponent(po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'xero',external_id:b.id,external_ref:b.number||b.id,url:b.url})})
+            .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); close(); if(done)done(); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
+      }).catch(function(e){ if(my===seq)res.innerHTML='<div class="mut tiny" style="color:var(--neg)">Search failed: '+esc(e&&e.message||e)+'</div>'; }); }
+    q.oninput=function(){ clearTimeout(t); t=setTimeout(run,250); }; q.focus(); q.select(); run();
+  }
   function linkedRecordsPanel(po){
     return '<div class="sect-h">Linked records <span class="mut tiny">— how this PO maps to Xero, Fulfil, Flexport &amp; DHL. Any SHIPPED PO must have a Xero bill.</span></div>'
       +'<div class="po-links-ctx" data-po="'+esc(po)+'"><div class="mut tiny">Open to load linkages…</div></div>';
@@ -2050,7 +2085,11 @@
       var link=(linked&&s.url)?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600;white-space:nowrap">open '+esc(m.label)+' ↗</a>':'<span class="mut tiny">'+esc(s.note||'not found')+'</span>';
       var idTxt=s.external_ref||s.external_id||'';
       var manual=(s.found_by==='manual')?' <span class="mut tiny">(manual)</span>':'';
-      var add=linked?'':'<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">＋ add link</button>';
+      // v28.172 (Ben): Xero bill can be CHANGED (search picker) or unlinked; other systems keep the paste-a-link prompt, now also as "change" once linked
+      var add=s.system==='xero'
+        ?('<button class="lnk-btn poln-xsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Xero bills by number, reference or supplier">'+(linked?'✎ change bill':'🔍 link bill')+'</button>'
+          +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="xero" style="color:var(--neg);white-space:nowrap" title="remove the manual link (the auto-resolver can find it again)">unlink</button>':''))
+        :('<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">'+(linked?'✎ change':'＋ add link')+'</button>');
       return '<tr style="border-top:1px solid #eef2f7">'
         +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
         +'<td style="padding:6px 10px;white-space:nowrap;vertical-align:top">'+badge+'</td>'
@@ -2071,6 +2110,10 @@
   }
   function wirePoLinks(el){
     el.querySelectorAll('.poln-refresh').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='↻ Finding…'; loadPoLinks(el,true); }; });
+    el.querySelectorAll('.poln-xsearch').forEach(function(b){ b.onclick=function(){ xeroBillPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); }); }; });
+    el.querySelectorAll('.poln-unlink').forEach(function(b){ b.onclick=function(){ if(!confirm('Unlink the Xero bill from '+b.dataset.po+'?'))return;
+      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'xero'})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); el._loaded=0; loadPoLinks(el,false); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
     el.querySelectorAll('.poln-add').forEach(function(b){ b.onclick=function(){ var sys=b.dataset.sys, p=b.dataset.po;
       var url=prompt('Paste the '+sys.toUpperCase()+' link (URL) for PO '+p+':'); if(url==null)return; url=(url||'').trim(); if(!url)return;
       var id=(prompt('Optional — the '+sys.toUpperCase()+' id / reference (leave blank to skip):')||'').trim();

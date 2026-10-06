@@ -56,7 +56,7 @@ if (process.env.VERCEL) {
 // Environment marker: show a SANDBOX banner unless we're pointed at the PRODUCTION Supabase (ref oolwklahstnvocaugryg).
 // Keyed off the real prod DB ref so it's correct wherever it runs — live never shows it, any non-prod DB does.
 const IS_SANDBOX = !String(CONN).includes('oolwklahstnvocaugryg');
-const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar{top:20px!important}#hz-leftrail{top:20px!important}[id$="-drawer"]{top:20px!important;max-height:calc(100% - 20px)!important}</style>';
+const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar,#hz-leftrail,#hz-drawer,#app #view-tabs-row,[id$="-drawer"],[id$="-bg"],#insights-panel,#narrative-panel,#ask-dw,[style*="position:fixed;top:0"],[style*="position:fixed;inset:0"]{top:20px!important}[id$="-drawer"],#hz-drawer,#ask-dw,#insights-panel,#narrative-panel,[style*="position:fixed;top:0"]{max-height:calc(100% - 20px)!important}@media (min-width:641px){:root{--hz-sticky-top:90px}html{scroll-padding-top:82px}#app #product-root .smp-rail{top:82px}}html body #sbx-banner{top:0!important;max-height:none!important}</style>';   // v28.172 (Ben): EVERYTHING fixed sits below the sandbox banner (top bar, rail, drawers, popups, backdrops, sticky offsets)
 // Sandbox favicon: the normal app logo (favicon.png) wrapped in an orange border, so sandbox tabs are visually
 // distinct from live. Served at /favicon-sbx.svg and swapped into the page only when IS_SANDBOX.
 const FAVICON_SBX_SVG = (() => {
@@ -4930,6 +4930,28 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
       [po, sys, eid, eref, url]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// v28.172 (Ben): search Xero bills to (re)link a PO (PO drawer ▸ MASTER DATA & DOCS ▸ Linked records ▸ change). Reads the
+// LOCAL planner.xero_bills cache (kept fresh by syncXeroBills), never live Xero. Matches bill number / reference / supplier;
+// each hit says which PO(s) it is already linked to, so a relink can't silently double-link a bill. Excludes DELETED/VOIDED.
+app.get('/api/supply/xero/bills/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim(), po = String(req.query.po || '').trim();
+    if (q.length < 2) return res.json({ ok: true, bills: [] });
+    const terms = q.split(/\s+/).filter(Boolean).slice(0, 5).map(t => '%' + t.replace(/[%_\\]/g, m => '\\' + m) + '%');
+    const where = terms.map((_, i) => `(b.invoice_number ILIKE $${i + 1} OR b.reference ILIKE $${i + 1} OR b.contact_name ILIKE $${i + 1})`).join(' AND ');
+    const rows = (await pool.query(
+      `SELECT b.invoice_id, b.region, b.invoice_number, b.reference, b.contact_name, b.total, b.amount_due, b.currency_code, b.status, to_char(b.invoice_date,'YYYY-MM-DD') invoice_date,
+              (SELECT array_agg(l.po ORDER BY l.po) FROM planner.po_links l WHERE l.system='xero' AND l.external_id=b.invoice_id AND l.status='linked') linked_pos
+         FROM planner.xero_bills b
+        WHERE upper(coalesce(b.status,'')) NOT IN ('DELETED','VOIDED') AND ${where}
+        ORDER BY (b.invoice_number ILIKE $${terms.length + 1} OR b.reference ILIKE $${terms.length + 1}) DESC, b.invoice_date DESC NULLS LAST LIMIT 40`,
+      [...terms, '%' + (po || q) + '%'])).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, bills: rows.map(r => ({ id: r.invoice_id, region: String(r.region || '').toUpperCase(), number: r.invoice_number, reference: r.reference,
+      contact: r.contact_name, total: Number(r.total) || 0, due: Number(r.amount_due) || 0, currency: r.currency_code, status: r.status, date: r.invoice_date,
+      url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.invoice_id, linked_pos: (r.linked_pos || []).filter(x => x !== po), this_po: (r.linked_pos || []).includes(po) })) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════

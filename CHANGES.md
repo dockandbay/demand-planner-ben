@@ -1,3 +1,12 @@
+## v28.172 (Ben, branch review-fixes-2026-10-05): change / search the Xero bill linked to a PO; sandbox banner layout
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- **PO drawer ▸ MASTER DATA & DOCS ▸ Linked records:** the Xero row now has "🔍 link bill" (when none) or "✎ change bill" (when linked), plus "unlink" for a manual link. It opens a search picker over the synced Xero bills (UK + AU, not deleted/voided) by bill number, reference or supplier, showing supplier, date, status, total, amount due, an "open in Xero" link, and which other PO a bill is already linked to (confirm before double-linking). Was: a linked bill could not be changed at all. Other systems get "✎ change" (paste link) once linked.
+- New read-only `GET /api/supply/xero/bills/search?q=&po=` (reads `planner.xero_bills`, never live Xero).
+- **Sandbox only:** every fixed element (top bar, left rail, drawers, popups, backdrops, sticky offsets) sits below the orange SANDBOX banner. Prod never gets the banner.
+- Verified on sandbox in Chrome: picker opens above the drawer, search returns bills with status/total/due; banner at top, top bar and rail at 20px.
+
 ## v28.171 (Ben, branch review-fixes-2026-10-05): perf #7.1 incremental demand rebuild
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` + `buy-plan.md` (re-verified) (+ package.json, CHANGES.md). Client only. No migrations, no env vars.
