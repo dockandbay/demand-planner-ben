@@ -1910,7 +1910,7 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
 function hzResetDataMemos(tag){ try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error((tag||'')+' cache reset',e); } }
 // v28.151 (review A5): replace a const SKU map's contents wholesale (Object.assign alone kept keys the server no longer sends).
 function hzReplaceMap(dst,src){ if(!dst||!src)return; Object.keys(dst).forEach(function(k){ if(!Object.prototype.hasOwnProperty.call(src,k))delete dst[k]; }); Object.assign(dst,src); }
-// v28.163 (Ben): cold demand builds (DEMAND / BUY & MOVE / REPORTS / Auto Forecast) used to run on the EMPTY lazy maps before
+// v28.164 (Ben): cold demand builds (DEMAND / BUY & MOVE / REPORTS / Auto Forecast) used to run on the EMPTY lazy maps before
 // /api/demand/sku-data landed, then again once it did. They now park here (one per key, latest wins) with their loading panel
 // up and run when the data lands; on final failure they run anyway (as before) so a panel is never stuck, and the retry bar shows.
 var SKU_DATA_FAILED=false, _HZ_SKU_WAIT={};
@@ -2828,7 +2828,7 @@ function render(){
   // over-explode into its components — the "COOL-CAB-3SET flashes huge, clears when you visit DEMAND" symptom.
   // Force one demand build up front so shares are always settled before any buy quantity is computed.
   // First demand-plan render: build the prepack cover once so the rail "PP" badge shows without opening the buy plan.
-  // v28.163 (Ben): ONE build per render for all three reasons (not built / forecast stale / PP cover pending). The !DEMAND_BUILT
+  // v28.164 (Ben): ONE build per render for all three reasons (not built / forecast stale / PP cover pending). The !DEMAND_BUILT
   // branch never cleared BUY_FC_STALE, so a render could run buildLiveDemand() up to 3 times (~1.5 s each) on identical inputs.
   try{ var _ppNeed=(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length);
     if(typeof buildLiveDemand==='function' && ((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) || (typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE) || _ppNeed)){ buildLiveDemand(); BUY_FC_STALE=false; if(_ppNeed)_PP_COVER_INIT=true; } }catch(e){}

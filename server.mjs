@@ -985,7 +985,7 @@ app.use((req, res, next) => {
   };
   next();
 });
-// v28.163 (Ben): serialise-once memo for the two heaviest JSON GETs (sku-data ~3.6 MB, order-plan ~5.3 MB). The middleware above
+// v28.164 (Ben): serialise-once memo for the two heaviest JSON GETs (sku-data ~3.6 MB, order-plan ~5.3 MB). The middleware above
 // re-ran JSON.stringify + sha1 (+ gzip) on EVERY hit, 304s included. Keyed on the cached data object itself (WeakMap): a rebuild /
 // invalidation swaps in a new object, so the memo dies exactly with its data and a stale body can never be served. Holds the
 // string, a strong content ETag and the gzip buffer (built once, async, shared by concurrent hits). Same headers + 304 as above.
