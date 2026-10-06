@@ -1,3 +1,14 @@
+## v28.178 (Ben, branch review-fixes-2026-10-05): perf #7.2/7.3 full demand build off the main thread
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html` (prewarm), `lib/ai-logic/demand-engine.md` + `buy-plan.md` + `supply-finance.md` (re-verified; supply-finance also records the Fulfil contact names from v28.177), new `scripts/dev/demand-worker-closure.cjs` (+ package.json, CHANGES.md). Client only. No migrations, no env vars.
+
+- The full demand build (load, Preorder/KA landing, prewarm, cold DEMAND / BUY & MOVE / REPORTS / Auto Forecast entry, Refresh cache) runs in a Web Worker built from the engine's own source (Blob URL, one copy of the logic), inputs posted in slices. Fallback: the same engine chunked on the main thread (12 ms slices). Kill switches `?worker=0` / `window.HZ_DEMAND_WORKER=false`; `?chunk=0&worker=0` = old synchronous behaviour.
+- Results go to a shadow copy and are published in one step only when complete; if an input changes mid-build the result is discarded and rebuilt; a synchronous caller cancels an in-flight async build and its waiters get the sync result. Edit (incremental) builds and other synchronous callers are unchanged. The buy engine stays on the main thread (3-24 ms per market).
+- Worker errors / timeouts log a health `sanity` event ("demand worker failed, chunked main-thread build used") and fall back; one `metric` row per session records real-device build timings. `?buildcheck=1` diffs every async build against a synchronous one.
+- **Measured (jsdom):** forced full rebuild was one 375-463 ms main-thread task; now no task >= 50 ms (chunked worst slice ~15 ms; worker ~11 ms posting, ~4.4 MB in 35 posts ~9 ms total, worker compute ~450 ms off-thread). `?lazysku=0` load: blocked time 1,253 -> 873 ms. Remaining load tasks are script parse/eval and boot renders.
+- **Verified:** async vs sync 0 differences (2,996 demand rows, 3,605 buy rows; worker, chunked, mid-build edit, both fallbacks; lazy and `?lazysku=0`); final demand, buy quantities and buyplanItems identical to v28.175 (0 differ); incremental edits on a worker-built base 0 differences; cold BUY / DEMAND / REPORTS render. Not yet run in a real browser (Ben's check).
+- **Diviyaj:** if the prod shell adds a Content-Security-Policy, allow `worker-src blob:` (otherwise every build runs chunked, logged once per session).
+
 ## v28.177 (Ben, branch review-fixes-2026-10-05): Xero contact defaults follow Fulfil's supplier names
 
 **Files:** `migrations/330_supplier_xero_contacts.sql` (amended, not yet on prod) (+ package.json, CHANGES.md).
