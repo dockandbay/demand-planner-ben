@@ -16347,10 +16347,11 @@
   // barcode) from /api/product/reports/catalogue. Season filter (server-side), multi-term search (tokMatch, same as the
   // barcode picker), sortable left-aligned sticky-header grid grouped by product ref when unsorted, CSV (visible rows,
   // formula-injection guarded) and landscape PDF (server pdf-lib, visible rows posted). Deep link #/product/reports/catalogue.
-  var _pcat={season:'',cat:'',q:'',sort:{col:'',dir:1},data:null};   // v28.157 (Ben): + cat (product category filter, client-side over the loaded season)
+  var _pcat={season:'',cat:'',q:'',nobc:false,sort:{col:'',dir:1},data:null};   // v28.161 (Ben): + nobc (hide products without a barcode)   // v28.157 (Ben): + cat (product category filter, client-side over the loaded season)
   var _PCAT_COLS=[['season','Season'],['ref','Product ref'],['product_type','Product type'],['colourway','Colour way'],['size_label','Size'],['sku','SKU'],['barcode','Barcode (EAN)'],['stage','Stage']];   // v28.156 (Ben): Component column dropped (barcodes live on sizes; the item's component list just repeated per size row)
   function _pcatVisible(){ var rows=((_pcat.data&&_pcat.data.rows)||[]).slice(), q=_pcat.q.trim();
     if(_pcat.cat) rows=rows.filter(function(r){ return (r.product_type||'')===_pcat.cat; });
+    if(_pcat.nobc) rows=rows.filter(function(r){ return String(r.barcode||'').trim()!==''; });   // v28.161 (Ben): hide rows with no barcode (workshop or planner EAN)
     if(q) rows=rows.filter(function(r){ return tokMatch(_PCAT_COLS.map(function(c){return r[c[0]];}).concat([r.description,r.product_name,r.subcategory,r.item_type,r.size_status]).join(' '), q); });
     var s=_pcat.sort; if(s.col){ rows.sort(function(a,b){ var x=String(a[s.col]==null?'':a[s.col]), y=String(b[s.col]==null?'':b[s.col]); var c=x.localeCompare(y,undefined,{numeric:true,sensitivity:'base'}); return (c||String(a.ref).localeCompare(String(b.ref))||((a.size_id||0)-(b.size_id||0)))*s.dir; }); }
     return rows; }
@@ -16363,6 +16364,7 @@
       +'<select class="fci" id="pcat-season" title="season" style="font-size:12px;width:auto;flex:0 0 auto;max-width:140px"><option value="">All seasons</option></select>'
       +'<select class="fci" id="pcat-cat" title="product category" style="font-size:12px;width:auto;flex:0 0 auto;max-width:190px"><option value="">All categories</option></select>'
       +'<input class="fci" id="pcat-q" placeholder="search… (space = AND: e.g. towel large 5064)" value="'+esc(_pcat.q)+'" style="font-size:12px;width:280px;flex:0 1 280px;min-width:160px;max-width:60vw">'
+      +'<label style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="only show sizes that have a barcode (workshop or planner EAN)"><input type="checkbox" id="pcat-nobc"'+(_pcat.nobc?' checked':'')+'> Hide products without barcode</label>'
       +'<button class="save-btn light" id="pcat-csv" title="download the visible rows as CSV">⤓ CSV</button>'
       +'<button class="save-btn light" id="pcat-pdf" title="download the visible rows as a landscape A4 PDF">⤓ PDF</button>'
       +'<span class="mut tiny" id="pcat-n" style="margin-left:auto"></span></div>'
@@ -16389,6 +16391,7 @@
         _pcat.data=d; fillSeasons(d.seasons); fillCats(); paint(); }).catch(function(e){ if(req===_pcat.req)grid.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
     selS.onchange=function(){ _pcat.season=selS.value; load(); };
     selC.onchange=function(){ _pcat.cat=selC.value; paint(); };
+    c.querySelector('#pcat-nobc').onchange=function(){ _pcat.nobc=this.checked; paint(); };   // v28.161 (Ben)
     qEl.oninput=function(){ _pcat.q=qEl.value; if(qEl._dt)clearTimeout(qEl._dt); qEl._dt=setTimeout(paint,120); };
     c.querySelector('#pcat-csv').onclick=function(){ var rows=_pcatVisible(); if(!rows.length){ alert('No rows to download.'); return; } downloadCsvStr(_pcatCsv(rows), _pcatFname('csv')); };
     c.querySelector('#pcat-pdf').onclick=function(){ var b=this, rows=_pcatVisible(); if(!rows.length){ alert('No rows to download.'); return; } b.disabled=true; var t=b.textContent; b.textContent='Building…';

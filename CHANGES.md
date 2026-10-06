@@ -1,3 +1,9 @@
+## v28.161 (Ben, branch review-fixes-2026-10-05): Catalogue "Hide products without barcode"
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). Client only.
+
+1. **PRODUCT ▸ Reports ▸ Catalogue:** new tick box **Hide products without barcode** on the toolbar row (after the search box). When ticked, sizes with no barcode (neither a workshop code nor a planner EAN) are hidden; works with Season / Category / search; CSV and PDF follow the visible rows; the row count shows "N rows of M". Sandbox: 5 rows → 2 rows of 5 (the two with 5064135998941 / ...958), unticked → 5 rows, 0 JS errors.
+
 ## v28.160 (Ben, branch review-fixes-2026-10-05): Email log navigation-away error
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). Client only.
