@@ -1,3 +1,12 @@
+## v28.173 (Ben, branch review-fixes-2026-10-05): Xero problems shown next to the XERO button; real Xero error reasons
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- **Payments Report:** each unposted run with a XERO button gets a badge: red "⚠ N" = N problems that would stop the post (payment over the bill's amount due, deposit from the wrong org or two orgs, settle account missing/archived/not payments-enabled, missing 901 loan, unmapped account); amber "⚠" = warnings only (P58+ deposit by credit note, no linked bill, amount due unreadable, cross-org via loan 901); faint tick = all clear; "?" = couldn't read Xero. Hover lists each issue with its PO. Badges fill in after the page renders; hidden if Xero isn't connected; posted rows show none.
+- New read-only `POST /api/supply/payments/xero-preflight` (GETs only): one batch at a time, Xero GETs paced to 30/min per org, results cached 10 min per run + lines signature, cleared by any Xero post or deposit credit note.
+- **Real reasons:** a failed Xero call now shows Xero's ValidationErrors (e.g. "Payment amount exceeds the amount outstanding") instead of "A validation exception occurred" (live: PO-57AUNL1 on SUPPLIER-PAYMENT-NL-2026-09-25).
+- Known: the badge can be red (unmapped account / missing 901) while the popup's post button is still enabled; xero-post refuses those anyway.
+
 ## v28.172 (Ben, branch review-fixes-2026-10-05): change / search the Xero bill linked to a PO; sandbox banner layout
 
 **Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
