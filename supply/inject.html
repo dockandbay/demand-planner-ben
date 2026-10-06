@@ -1332,6 +1332,12 @@
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
   function effQ(q){ q=nrm(q); if(q.length<2)return ''; if(/^po-?$/.test(q))return ''; return q; }
+  // v28.165 (Ben): shared "Search overrides filters" tick box (PO grid / Order plan / Shipments). The control + per-screen
+  // localStorage live in the DEMAND artifact (window.hzSrchOvr); without it the box is omitted and each screen keeps its old behaviour.
+  function _soBox(k,def,id){ return window.hzSrchOvr?window.hzSrchOvr.box(k,def,id):''; }
+  function _soGet(k,def){ return window.hzSrchOvr?window.hzSrchOvr.get(k,def):def; }
+  function _soBind(id,k,cb){ if(window.hzSrchOvr)window.hzSrchOvr.bind(id,k,cb); }
+  function _soHintHtml(n){ var t=window.hzSrchOvr?window.hzSrchOvr.hint(n):''; return t?'<div class="mut tiny hz-srch-hint" style="padding:6px 2px;font-style:italic">'+esc(t)+'</div>':''; }
 
   function editCell(ep,field,val,kind,extra){
     if(kind==='date') return dateField(val,{attrs:'data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):'')});
@@ -2858,7 +2864,7 @@
     }
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
+    if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,qSeed:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // v28.165 (Ben): qSeed = a link-seeded PO search always overrides the filters, even with the tick box off   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
     else if(!_poState){ var _posv=hzFilterLoad('po'); _poState=(_posv&&typeof _posv==='object')?_posv:{f:{production:1},q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};
       _poState.q=''; _poState.f=_poState.f||{}; _poState.act=_poState.act||{}; _poState.ctry=_poState.ctry||{}; }   // restore persisted filters (sliding 1h TTL); never restore the free-text search
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
@@ -2902,7 +2908,7 @@
     var _poSkuSet=null;   // SUG-0012: set of PO refs matching the SKU filter (null = no SKU filter active)
     c.innerHTML=annot('purchase-orders')+poSubNav()
       +'<div class="bar" id="po-prog">'
-      +'<input class="flt" id="sup-search" placeholder="🔍 Filter PO / supplier…" value="'+esc(state.q||'')+'">'
+      +'<input class="flt" id="sup-search" placeholder="🔍 Filter PO / supplier…" value="'+esc(state.q||'')+'">'+_soBox('po',true,'po-srch-ovr')   // v28.165 (Ben)
       +'<span id="po-sku-wrap" style="position:relative;display:inline-flex;align-items:center;gap:3px;margin-left:6px"><input class="flt" id="po-sku-search" placeholder="Filter by SKU(s)…" value="'+esc(state.sku||'')+'" title="show only POs whose order plan contains any of these SKUs — comma-separate for an OR search" style="width:160px;background:var(--pos-bg);border-color:var(--pos-bg)">'
       +'<button class="save-btn" id="po-sku-exp" title="expand — paste many SKUs" style="padding:2px 7px;background:var(--pos-bg);border:1px solid var(--pos-bg);color:var(--pos)">⤢</button>'
       +'<div id="po-sku-pop" style="display:none;position:absolute;top:100%;left:0;z-index:70;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:10px;width:340px"><div class="tiny mut" style="margin-bottom:4px">SKUs — comma / space / newline separated (OR search, partial match)</div><textarea id="po-sku-ta" rows="6" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left" placeholder="TOWLB-…, PONCHK-…"></textarea><div style="margin-top:6px;display:flex;justify-content:flex-end;gap:6px"><button class="save-btn light" id="po-sku-clear2">Clear</button><button class="save-btn" id="po-sku-apply" style="background:var(--pos-bg);color:var(--pos);border-color:var(--pos)">Apply</button></div></div></span>'
@@ -2972,9 +2978,13 @@
       if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
-    function view(){ try{hzFilterSave('po',Object.assign({},state,{q:'',sku:''}));}catch(e){}   // persist filters (not the search / SKU box)
-      var q=effQ(state.q); var f=q ? filt(rows,q) : cur(); var fuzzy=false;
-      if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
+    // v28.165 (Ben): ticked "Search overrides filters" (default) = old behaviour; unticked = the search only looks inside cur()
+    function poSrchOvr(){ return _soGet('po',true)||(!!state.qSeed&&state.q===state.qSeed); }
+    function poSearchBase(){ return poSrchOvr()?rows:cur(); }
+    function view(){ try{hzFilterSave('po',Object.assign({},state,{q:'',sku:'',qSeed:''}));}catch(e){}   // persist filters (not the search / SKU box)
+      var q=effQ(state.q), _base=q?poSearchBase():null; var f=q ? filt(_base,q) : cur(); var fuzzy=false;
+      if(q && !f.length){ var ff=fuzzyFilt(_base,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
+      var _poHid=(q&&!f.length&&!poSrchOvr())?(filt(rows,q).length||fuzzyFilt(rows,state.q).length):0;   // v28.165 (Ben): matches the filters are hiding
       if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
       f=poGridSort(f);   // status-priority + PROD#-desc BEFORE paging, so the lazy-loaded first 50 surface production/shipping/ready-to-ship/future and push complete to the end
       _poShowClient=!!(state.ctry&&state.ctry['OTHER'])||!!state.directOnly;   // OTHER or DIRECT → reveal Client name + sales ref columns
@@ -2987,7 +2997,7 @@
       // Load-more lives INSIDE the grid table (footer row) so it's in the same scroll box as the rows — no second
       // scroll to reach it. Sticky-left keeps the buttons visible when the wide grid is scrolled sideways.
       var _footRow=(shown.length<f.length)?'<tr class="po-loadmore-row"><td colspan="20" style="text-align:center;padding:10px;background:var(--hover);border-top:1px solid var(--line);position:sticky;left:0"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span> <button class="save-btn light" id="po-loadmore" style="margin-left:8px">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button> <button class="save-btn light" id="po-showall" style="margin-left:6px">Show all '+f.length+'</button></td></tr>':'';
-      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp,_footRow);   // a search spans all statuses → group under status sub-labels (Production ▸ Shipping ▸ Ready to ship ▸ Future ▸ Complete)
+      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp,_footRow)+_soHintHtml(_poHid);   // a search spans all statuses → group under status sub-labels (Production ▸ Shipping ▸ Ready to ship ▸ Future ▸ Complete). v28.165: + hidden-matches hint
       var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
@@ -3138,6 +3148,7 @@
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;selHi(this,!!this.value);view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
+    _soBind('po-srch-ovr','po',function(){ _poShowAll=false; if(effQ(state.q))view(); });   // v28.165 (Ben)
     (function(){ var _pat=document.getElementById('po-arch-toggle'); if(_pat)_pat.onclick=function(){ _poInclArch=!_poInclArch; delete cache['purchase-orders']; showPoSub('plan'); }; })();
     if(actMob()){ try{ var _pat2=document.getElementById('po-arch-toggle'), _pact=document.getElementById('po-act'); if(_pat2&&_pact){ var _w=document.createElement('span'); _w.className='po-filt-item'; _w.appendChild(_pat2); _pact.appendChild(_w); }
       ['po-impexp-toggle','po-shipplan-btn'].forEach(function(bid){ var el=document.getElementById(bid); if(el&&_pact){ var w2=document.createElement('span'); w2.className='po-filt-item'; w2.appendChild(el); _pact.appendChild(w2); } }); }catch(e){} }   // v27.520/523 phone: Show archived + Import/Export + Plan Shipments live under Filters (handlers already bound on the nodes)
@@ -3155,7 +3166,7 @@
     if(String(state.sku||'').trim())runSku();   // re-hydrate the match set after a full re-render
     var _ft=document.getElementById('po-filt-toggle'); if(_ft)_ft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     var _ie=document.getElementById('po-impexp-toggle'); if(_ie)_ie.onclick=function(){ var pb=document.getElementById('po-impexp-bar'); if(!pb)return; var on=(pb.style.display==='none'||!pb.style.display); pb.style.display=on?'flex':'none'; this.textContent=on?'⇅ Import/Export ▴':'⇅ Import/Export'; };
-    document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
+    document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(poSearchBase(),q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};   // v28.165 (Ben): export follows the tick box
     document.getElementById('po-new').onclick=openPoCreate;
     document.getElementById('po-upload').onclick=openPoUpload;
     var _erpBtn=document.getElementById('po-erp-compare'); if(_erpBtn)_erpBtn.onclick=function(){ openErpDrawer(); };   // v28.144
@@ -5334,7 +5345,7 @@
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
         +'<span class="pill-lbl" style="margin-left:14px" title="View quantities as units or whole cartons (qty ÷ carton qty). Cartons view is read-only — switch to Units to edit.">View</span><span class="pill'+(st.disp!=='cartons'?' active':'')+'" data-disp="units">Units</span><span class="pill'+(st.disp==='cartons'?' active':'')+'" data-disp="cartons">Cartons</span>'
         +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
-        +'<input class="flt" id="op-q" placeholder="filter SKU / colour…" style="width:140px;background:var(--pos-bg);border-color:#86efac">'
+        +'<input class="flt" id="op-q" placeholder="filter SKU / colour…" style="width:140px;background:var(--pos-bg);border-color:#86efac">'+_soBox('oplan',false,'op-srch-ovr')   // v28.165 (Ben): default OFF = this screen's existing behaviour (the SKU search already ANDs with every filter)
         +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:var(--blue);color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button></div>'
       +'<div class="bar"><span class="pill-lbl">Action items</span>'
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:var(--neg);font-weight:700"></span></span>'
@@ -5372,7 +5383,10 @@
     // decide which SKU rows show, NOT which POs (columns) appear. So PO columns are built from curLines(true).
     // search box matches SKU OR the SKU's colour long
     function qMatch(sku){ var q=nrm(st.q); if(!q)return true; if(nrm(sku).indexOf(q)>=0)return true; var a=skuAttr[sku]; return !!(a&&a.colour&&nrm(a.colour).indexOf(q)>=0); }
-    function curLines(skipCat){ var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(), poqOn=!!String(st.poq||'').trim(); return lines.filter(function(l){
+    // v28.165 (Ben): "Search overrides filters" ticked → the SKU / colour search ignores status / country / PO / PROD# / batch / supplier / category / release / risk pills
+    function opSrchOvr(){ return !!nrm(st.q)&&_soGet('oplan',false); }
+    function curLines(skipCat){ if(opSrchOvr())return lines.filter(function(l){ return qMatch(l.sku); });
+      var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(), poqOn=!!String(st.poq||'').trim(); return lines.filter(function(l){
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
@@ -5382,9 +5396,10 @@
       // which risk pill happens to be active, so the pill restrictions below are skipped while searching a PO.
       return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(poqOn||((!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))))&&qMatch(l.sku); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
+      var _ovr=opSrchOvr();   // v28.165 (Ben): search override also lifts the category / release filters on the extra master rows
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
-        if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
-        if(st.rw!=='All'&&s.release_window!==st.rw)return; if(!qMatch(s.sku))return;
+        if(!_ovr){ if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
+        if(st.rw!=='All'&&s.release_window!==st.rw)return; } if(!qMatch(s.sku))return;
         set[s.sku]=1;list.push(s.sku); }); }
       if(!st.partials){ if(st.scope==='allskus') addMaster(false); else if(st.scope==='all'&&st.cat!=='All') addMaster(true); }
       // ALSO include SKUs the supplier submitted a quantity for (amended qty or an added SKU) on the POs in view —
@@ -5413,7 +5428,9 @@
     var _opShowAllPos=false, _opLimit=OP_POCAP;
     function viewReset(){ _opShowAllPos=false; _opLimit=OP_POCAP; view(); }   // any filter/search change re-caps the PO columns to the first page
     function view(){ try{hzFilterSave('oplan',{statuses:Array.from(st.statuses),countries:Array.from(st.countries),prod:st.prod,cat:st.cat,batch:st.batch,supplier:st.supplier,scope:st.scope,rw:st.rw,disp:st.disp,partials:st.partials,erpdiff:st.erpdiff,suprisk:st.suprisk,disc:st.disc,notmkt:st.notmkt,focus:st.focus});}catch(e){}   // persist filters (not the search boxes)
-      var cl=curLines(); var poCl=curLines(true); var _poExc=buildPoExcMap(); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos,_opLimit,_poExc); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
+      var cl=curLines(); var poCl=curLines(true); var _poExc=buildPoExcMap(); var _opRows=rowsFor(cl);
+      var _opHid=0; if(!_opRows.length&&nrm(st.q)&&!opSrchOvr()){ var _hs={}; lines.forEach(function(l){ if(qMatch(l.sku))_hs[l.sku]=1; }); _opHid=Object.keys(_hs).length; }   // v28.165 (Ben): SKUs the filters are hiding
+      document.getElementById('op-grid').innerHTML=pivot(poCl,_opRows,skuCat,plcMap,skuAttr,skuRW,_opShowAllPos,_opLimit,_poExc)+_soHintHtml(_opHid); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
       document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
         if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
         if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();   // build #buy-wrap/#ov lazily if BUY view never rendered
@@ -5580,6 +5597,7 @@
       }).catch(function(e){ b.disabled=false; b.textContent=_lbl; alert('Could not build the report: '+(e&&e.message||e)); }); };
     document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},350);
     document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},350);
+    _soBind('op-srch-ovr','oplan',function(){ if(nrm(st.q))viewReset(); });   // v28.165 (Ben)
     // mobile: collapse/expand the whole filter panel behind the "⚙ Filters" button to save screen space
     var _oft=document.getElementById('op-filt-toggle'); if(_oft)_oft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('op-filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     var _odt=document.getElementById('op-dl-top'); if(_odt)_odt.onclick=function(){ var b=document.getElementById('op-dl'); if(b)b.click(); };   // mobile header Download → reuse the report handler
@@ -6778,16 +6796,17 @@
       +'<select class="flt" id="ship-br" style="width:auto'+(state.br?SEL_ON:'')+'"><option value="">All branches</option>'+brList.map(function(b){return '<option>'+esc(b)+'</option>';}).join('')+'</select>'
       +'<select class="flt" id="ship-mode" style="width:auto'+(state.mode?SEL_ON:'')+'"><option value="">All modes</option><option value="sea">Sea</option><option value="air">Air</option><option value="fob">FOB</option></select>'
       +'</span>'
-      +'<input class="flt" id="sup-search" placeholder="Filter shipment / PO…">'
+      +'<input class="flt" id="sup-search" placeholder="Filter shipment / PO…">'+_soBox('ships',true,'ship-srch-ovr')   // v28.165 (Ben)
       +'<button class="tool-badge bg-blue" id="ship-new" style="cursor:pointer;border:none">+ New shipment</button>'
       +'<span class="count" id="sup-count"></span></div><div id="sup-grid"></div>';
-    function cur(){ var q=effQ(state.q), searching=!!q; return ships.filter(function(s){
+    // v28.165 (Ben): forceOvr → behave as if "Search overrides filters" were ticked (used to count the matches the filters hide)
+    function cur(forceOvr){ var q=effQ(state.q), searching=!!q, ovr=searching&&(forceOvr||_soGet('ships',true)); return ships.filter(function(s){
       if(state.ctry && (s.market||'')!==state.ctry)return false;
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
       if(state.mode && (s.mode_eff||'')!==state.mode)return false;   // mode filter: sea / air / fob (blank = all)
       if(!searching && s.no_pos)return false;   // empty shipments (no POs — e.g. an orphaned self-shipment) are hidden from the grid; still findable via search
       if(state.orphans)return !!s.is_orphan;   // Orphans filter: dangling self-shipments only (overrides status)
-      if(searching)return true;   // a shipment / PO search overrides the status filter (find it whatever its status)
+      if(ovr)return true;   // a shipment / PO search overrides the status filter (find it whatever its status). v28.165: only while the tick box is on (default)
       var complete=(s.status==='Complete'||s.status==='Completed');
       if(state.focus)return (s.starred || s.escalated) && !complete;   // Focus = starred OR escalated, active only (overrides status)
       if(state.recent && complete && !(shipRecentDate(s)>=RECENT_CUT))return false;   // completed default: last 12 months
@@ -6796,9 +6815,10 @@
       return !complete && s.status!=='Shipping'; }); }   // planned (default) = active, not yet shipping
     function view(){ try{hzFilterSave('ships',{f:state.f,ctry:state.ctry,br:state.br,mode:state.mode,focus:state.focus,recent:state.recent});}catch(e){}   // persist filters (not the search)
       var q=effQ(state.q); var f=filt(cur(),q);
+      var _shHid=(q&&!f.length&&!_soGet('ships',true))?filt(cur(true),q).length:0;   // v28.165 (Ben): matches the status filters are hiding
       var shown=(_shipShowAll||f.length<=SHIP_CAP)?f:f.slice(0,SHIP_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+ships.length+' shipments';
-      document.getElementById('sup-grid').innerHTML=shipTable(shown)
+      document.getElementById('sup-grid').innerHTML=shipTable(shown)+_soHintHtml(_shHid)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="ship-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('ship-showall'); if(sa)sa.onclick=function(){ _shipShowAll=true; view(); };
       hzFillTrackPills(document.getElementById('sup-grid'));   // v27.721: DHL pills on the Carrier-ref cells
@@ -6833,6 +6853,7 @@
       fetch('/api/supply/shipment/'+encodeURIComponent(ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({starred:nv})}).then(function(r){return r.json();}).catch(function(){});
       if(state.focus)view(); }; }); }
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_shipShowAll=false;view();},350);
+    _soBind('ship-srch-ovr','ships',function(){ _shipShowAll=false; if(effQ(state.q))view(); });   // v28.165 (Ben)
     document.getElementById('ship-ctry').onchange=function(){state.ctry=this.value;this.style.cssText='width:auto'+(this.value?SEL_ON:'');_shipShowAll=false;view();};
     document.getElementById('ship-br').onchange=function(){state.br=this.value;this.style.cssText='width:auto'+(this.value?SEL_ON:'');_shipShowAll=false;view();};
     document.getElementById('ship-mode').onchange=function(){state.mode=this.value;this.style.cssText='width:auto'+(this.value?SEL_ON:'');_shipShowAll=false;view();};
