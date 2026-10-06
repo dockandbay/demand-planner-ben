@@ -13,6 +13,7 @@ sources:
   - server.mjs :: case 'deposits', case 'productions', case 'payments-report', PAY_REGION_SPLIT_FROM
   - server.mjs :: cashflowResponse, shipFreightSrv, seaEstSrv
   - server.mjs :: computeXeroRunPlan, /api/supply/payments/xero-post, /api/supply/xero/deposit-credit-note, _poXeroRegion
+  - server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues, _xeroErrMsg
   - server.mjs :: /api/supply/tpl/data, /api/supply/tpl/goods-in, _tplGridSummary, _tplConsumablesInside (3PL invoices)
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
@@ -41,10 +42,13 @@ fingerprints:
   server.mjs::cashflowResponse: a33d79c9e949
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
-  server.mjs::computeXeroRunPlan: f15b214d5c13
-  server.mjs::/api/supply/payments/xero-post: 72d85a8859fb
-  server.mjs::/api/supply/xero/deposit-credit-note: 9bfbca642608
+  server.mjs::computeXeroRunPlan: 3d757cd12805
+  server.mjs::/api/supply/payments/xero-post: 0300806e8848
+  server.mjs::/api/supply/xero/deposit-credit-note: 228458d70f2f
   server.mjs::_poXeroRegion: 844d7ad9c549
+  server.mjs::/api/supply/payments/xero-preflight: 0e54d381e8ff
+  server.mjs::_xeroPlanIssues: 1d924c6936f8
+  server.mjs::_xeroErrMsg: 6b79e9488cf7
   server.mjs::/api/supply/tpl/data: a80126dd517b
   server.mjs::/api/supply/tpl/goods-in: 015c39460dba
   server.mjs::_tplGridSummary: 0e93f4ce0c66
@@ -76,7 +80,7 @@ fingerprints:
   supply/inject.html::prodStatusException: dedfa68a3f75
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
-verified_version: v28.167
+verified_version: v28.173
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -170,6 +174,8 @@ verified_version: v28.167
 - Settlement against the linked PO bill comes from the same account the line is coded to (602.1 or the production account), at the supplier-payment bill's currency rate. A pre-P58 deposit uses deposits.xero_fx. A cross-org line settles in the home org from that org's 901 loan, at Xero's own daily rate. (source: server.mjs :: xero-post)
 - P58+ deposits post no payment: they draw down by credit note (ACCPAYCREDIT to 602, tagged with the production). Deposits never cross orgs: a cross-org deposit is blocked, and deposits from two orgs in one run are blocked. (source: server.mjs :: computeXeroRunPlan, deposit-credit-note)
 - The post is refused if: a payment exceeds the bill's AmountDue; an account is missing, archived or not payments-enabled; or the run already has a non-voided bill (unless re-post is confirmed). Admin and confirm are required. (source: server.mjs :: xero-post)
+- Preflight badges (from v28.173): on the Payments Report, each unposted run that shows the XERO button gets a badge from the same plan and checks as the Create in Xero popup, read only (Xero GETs only, nothing written). Red "⚠ N" = N problems that stop the post: a cross-org or mixed-org deposit, a payment above the bill's AmountDue, a settle account that is missing, archived or not payments-enabled, a missing 901 loan account, or a line with no account mapped. Amber "⚠" = warnings only: a P58+ deposit (credit note, no payment), no linked Xero bill (payment skipped), a bill amount due that could not be read, a cross-org line settling via loan 901, or a warn-level check. A faint tick = all clear; "?" = the check could not read Xero; nothing when Xero is not connected or the run has nothing to post. Posted ("done") rows show no badge. Results are cached 10 minutes per run and line set; any post or deposit credit note clears the cache. Xero calls are paced to 30 a minute per org, one batch at a time. (source: server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues)
+- A failed Xero call reports Xero's own validation messages (every ValidationErrors entry, including nested ones) rather than the generic "A validation exception occurred". (source: server.mjs :: _xeroErrMsg)
 
 ## 3PL invoices
 - Four 3PLs: uk_ilg, us_geneva, eu_ifulfilment, au_coghlans. Bill number: FULFILLMENT-<region>-<period end>. For Coghlans the bill date is the file's period end and the invoice number is added. (source: server.mjs :: TPL_KEYS, tpl/xero-bill)

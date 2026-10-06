@@ -4741,8 +4741,20 @@ async function xeroFetch(region, path, opts) {
     break;
   }
   const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch (e) { j = { raw: text }; }
-  if (!r.ok) { const msg = (j && (j.Detail || j.Message || (j.Elements && j.Elements[0] && j.Elements[0].ValidationErrors && j.Elements[0].ValidationErrors.map(v => v.Message).join('; ')))) || ('Xero ' + r.status); const e = new Error(String(msg).slice(0, 400)); e.code = r.status; e.body = j; throw e; }
+  if (!r.ok) { const msg = _xeroErrMsg(j, r.status); const e = new Error(String(msg).slice(0, 400)); e.code = r.status; e.body = j; throw e; }
   return j;
+}
+// v28.173 (Ben): Xero's real reason lives in Elements[].ValidationErrors (also nested, e.g. Payments[].ValidationErrors or
+// Invoice.ValidationErrors); Message is only "A validation exception occurred". Prefer the joined validation messages
+// (deduped, any element), fall back to Detail / Message.
+function _xeroErrMsg(j, status) {
+  const ve = [];
+  const walk = (x, d) => { if (!x || typeof x !== 'object' || d > 5) return;
+    if (Array.isArray(x)) { x.forEach(y => walk(y, d + 1)); return; }
+    if (Array.isArray(x.ValidationErrors)) x.ValidationErrors.forEach(v => { const m = v && (v.Message || v.message); if (m && !ve.includes(String(m))) ve.push(String(m)); });
+    for (const k of Object.keys(x)) if (k !== 'ValidationErrors' && x[k] && typeof x[k] === 'object') walk(x[k], d + 1); };
+  if (j && typeof j === 'object') walk(j.Elements, 0);
+  return ve.join('; ') || (j && (j.Detail || j.Message)) || ('Xero ' + status);
 }
 const _xeroStates = new Map();   // CSRF state → { region, exp }
 app.get('/api/supply/xero/connect', async (req, res) => {
@@ -5053,11 +5065,11 @@ function _xeroFinanceCfg() {
 }
 // Payments aren't bank-reconciled, so the exact bank doesn't matter — only the currency. Return a bank AccountID for a
 // currency: a registry bank of that currency if bound, else any live BANK account with that CurrencyCode in the org.
-async function _xeroBankForCurrency(region, ccy) {
+async function _xeroBankForCurrency(region, ccy, xget) {
   ccy = String(ccy || 'USD').toUpperCase();
   const cfg = await _xeroFinanceCfg(); const banks = (cfg.banks && cfg.banks[region]) || {};
   for (const k of Object.keys(banks)) { const b = banks[k]; if (b && b.account_id && String(b.currency || '').toUpperCase() === ccy) return { account_id: b.account_id, name: b.name, currency: ccy, source: 'registry' }; }
-  try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'));
+  try { const ac = await (xget || xeroFetch)(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'));   // v28.173 (Ben): xget = preflight's paced, memoised GET
     // v28.105 (Ben): never auto-pick a wallet (PayPal / Payoneer / Wise / Airwallex / Stripe) as the pay-from bank — it
     // is not a real bank and misreports the source. If no registry bank is bound and no real bank matches, return null so
     // the preview shows "no bank bound" (a posting blocker) rather than silently paying from a wallet.
@@ -5069,13 +5081,13 @@ async function _xeroBankForCurrency(region, ccy) {
 // Resolve the intercompany-loan (901) account for an org: the registry `loan` role if bound, else the org's account
 // with Code 901. Cached ~10 min per org. Used for cross-org supplier payments (paying org's bill line + home org's payment).
 const _loanAcctMemo = {};
-async function _xeroLoanAcct(region) {
+async function _xeroLoanAcct(region, xget) {
   region = xeroRegion(region);
   const m = _loanAcctMemo[region];
   if (m && m.at > Date.now() - 10 * 60 * 1000) return m.v;
   let v = null;
   try { const cfg = await _xeroFinanceCfg(); const a = ((cfg.accounts && cfg.accounts[region]) || {}).loan; if (a && a.id) v = { code: a.code || '901', name: a.name || 'Loan (intercompany)', id: a.id }; } catch (e) {}
-  if (!v) { try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Code=="901"')); const hit = ((ac && ac.Accounts) || [])[0]; if (hit) v = { code: hit.Code || '901', name: hit.Name || 'Loan (intercompany)', id: hit.AccountID }; } catch (e) {} }
+  if (!v) { try { const ac = await (xget || xeroFetch)(region, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Code=="901"')); const hit = ((ac && ac.Accounts) || [])[0]; if (hit) v = { code: hit.Code || '901', name: hit.Name || 'Loan (intercompany)', id: hit.AccountID }; } catch (e) {} }
   _loanAcctMemo[region] = { v, at: Date.now() };
   return v;
 }
@@ -5084,7 +5096,8 @@ async function _xeroLoanAcct(region) {
 // lives. Completion/balance lines whose home org differs from the paying org settle via the intercompany LOAN (901):
 // the supplier-payment bill line codes to the paying org's 901, and the settlement payment posts in the home org from
 // the home org's 901. Deposits never cross orgs — a cross-org deposit is flagged RED, deposits from two orgs BRIGHT RED.
-async function computeXeroRunPlan(run) {
+async function computeXeroRunPlan(run, ctx) {
+  const _xget = (ctx && ctx.xget) || ((org, path) => xeroFetch(org, path));   // v28.173 (Ben): preflight passes a paced, memoised GET; preview/post unchanged
   const lines = Array.isArray(run.lines) ? run.lines : [];
   const payLines = lines.filter(l => l && /deposit|completion|balance|final/i.test(String(l.type || '')));   // exclude "other"
   if (!payLines.length) return { ok: false, error: 'No deposit/completion/balance lines in this run to post.' };
@@ -5104,15 +5117,15 @@ async function computeXeroRunPlan(run) {
   const accts = (cfg.accounts && cfg.accounts[paying]) || {};
   const usdBankRole = paying === 'au' ? 'gentium_usd' : 'universal_partners_usd';
   let bank = banks[usdBankRole] || null;
-  if (!bank) { try { bank = await _xeroBankForCurrency(paying, 'USD'); } catch (e) {} }
+  if (!bank) { try { bank = await _xeroBankForCurrency(paying, 'USD', ctx && ctx.xget); } catch (e) {} }
   // Loan (901) account for every org this run touches — the paying org (cross-org bill lines) and each home org.
   const orgsNeeded = new Set([paying]); payLines.forEach(l => orgsNeeded.add(homeOfLine(l)));
-  const loanByOrg = {}; for (const o of orgsNeeded) loanByOrg[o] = await _xeroLoanAcct(o);
+  const loanByOrg = {}; for (const o of orgsNeeded) loanByOrg[o] = await _xeroLoanAcct(o, ctx && ctx.xget);
   const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
   const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
   // Production tracking options live in the PAYING org (the supplier-payment bill is there; only same-org deposits carry tracking).
   let trackOpts = new Set(); let trackOk = true;
-  try { const t = await xeroFetch(paying, '/api.xro/2.0/TrackingCategories');
+  try { const t = await _xget(paying, '/api.xro/2.0/TrackingCategories');
     const cat = ((t && t.TrackingCategories) || []).find(c => String(c.Name).toLowerCase() === 'production' && c.Status === 'ACTIVE');
     if (cat) (cat.Options || []).forEach(o => trackOpts.add(String(o.Name).toUpperCase())); else trackOk = false;
   } catch (e) { trackOk = null; }
@@ -5163,7 +5176,7 @@ async function computeXeroRunPlan(run) {
   // production's mapped account (prod_numbers.xero_account_code, e.g. 620.37 P57). The bank pays the supplier-payment bill;
   // these accounts are the clearing side (all have "Enable payments to this account" on in Xero, checked 01-Oct-26).
   const acctByCode = {};
-  try { const ja = await xeroFetch(paying, '/api.xro/2.0/Accounts');
+  try { const ja = await _xget(paying, '/api.xro/2.0/Accounts');
     ((ja && ja.Accounts) || []).forEach(a => { acctByCode[String(a.Code || '').trim().toUpperCase()] = { id: a.AccountID, code: a.Code, name: a.Name, pay: !!a.EnablePaymentsToAccount, active: a.Status === 'ACTIVE' }; });
   } catch (e) { /* unreadable chart → settle_account_id stays null → the line is flagged, nothing posts from a wrong account */ }
   outLines.forEach(l => {
@@ -5198,7 +5211,7 @@ async function computeXeroRunPlan(run) {
     const ids = [...byOrgIds[org]];
     for (let i = 0; i < ids.length; i += 40) {
       const chunk = ids.slice(i, i + 40);
-      try { const jb = await xeroFetch(org, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
+      try { const jb = await _xget(org, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
     }
   }
   outLines.forEach(l => {
@@ -5243,6 +5256,80 @@ async function computeXeroRunPlan(run) {
 }
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
   try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.173 (Ben): XERO PREFLIGHT for the Payments Report badges. Same plan + checks as the preview, for a batch of unposted
+// runs, READ ONLY (GETs only; nothing is written to Xero). Per run: block[] = what stops the post (the popup's disabled
+// button: overpay / blocked deposit / settle account unresolved, plus what xero-post refuses: unmapped account, missing
+// loan 901); warn[] = warn-level checks and lines skipped by design. Rate: one batch at a time server-wide, every GET
+// paced to XPF_PER_MIN per org (half Xero's 60/min), chart / tracking / bank reads memoised 2 min, so N runs ~ N bill
+// reads + ~2 per org. Result cached 10 min per run key + line signature; a post / credit note clears the cache.
+function _xeroPlanIssues(plan) {
+  const block = [], warn = [], add = (a, m) => { if (m && !a.includes(m)) a.push(m); };
+  const _n = v => (Number(v) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  (plan.lines || []).forEach(l => {
+    const po = l.reference || '(no ref)', isDep = /deposit/i.test(String(l.type || ''));
+    if (l.blocked) add(block, po + ': ' + l.blocked);
+    if (l.pay_ok === false) add(block, po + ': payment ' + _n(l.amount) + ' exceeds bill amount due ' + _n(l.bill_due));
+    if (l.will_pay && !l.settle_account_id) add(block, po + ': ' + (l.settle_from === 'loan' ? 'no intercompany loan (901) account in Xero ' + String(l.settle_org || '').toUpperCase() : 'cannot settle, ' + (l.settle_problem || 'no settle account')));
+    if (Math.abs(Number(l.amount) || 0) > 0.005 && !(l.account && l.account.code)) add(block, po + ': no Xero account mapped (' + (l.account_role === 'loan' ? 'intercompany loan 901' : String(l.account_role || '').replace('_', ' ')) + ')');
+    if (l.blocked) return;
+    if (isDep && !l.legacy) add(warn, po + ': P58+ deposit, no payment posted (draws down via a credit note)');
+    else if (!(l.linked_bill && l.linked_bill.id)) add(warn, po + ': no linked Xero bill, payment will be skipped');
+    else if (l.will_pay && l.pay_ok == null) add(warn, po + ': could not read the bill amount due in Xero');
+    if (l.cross && !isDep) add(warn, po + ': cross-org, settles in ' + String(l.home_org || '').toUpperCase() + ' via the intercompany loan (901)');
+  });
+  (plan.checks || []).filter(c => c.level === 'warn' && !/no linked Xero bill/i.test(c.msg || '')).forEach(c => add(warn, c.msg));
+  return { block, warn };
+}
+const XPF_PER_MIN = 30, XPF_TTL = 10 * 60 * 1000;
+const _xpfCache = new Map();   // run key -> { at, sig, out }
+const _xpfMemo = new Map();    // org|path -> { at, p } (chart / tracking / bank reads, 2 min)
+const _xpfCalls = {};          // org -> GET timestamps in the last minute
+let _xpfGen = 0, _xpfChain = Promise.resolve();
+const xeroPreflightBust = () => { _xpfCache.clear(); _xpfMemo.clear(); _xpfGen++; };
+async function _xpfPace(org) {
+  const w = _xpfCalls[org] || (_xpfCalls[org] = []);
+  for (;;) { const now = Date.now(); while (w.length && w[0] < now - 60000) w.shift();
+    if (w.length < XPF_PER_MIN) { w.push(now); return; }
+    await new Promise(r => setTimeout(r, w[0] + 60000 - now + 50)); }
+}
+app.post('/api/supply/payments/xero-preflight', async (req, res) => {
+  const runs = (Array.isArray(req.body && req.body.runs) ? req.body.runs : []).slice(0, 10);
+  const job = async () => {
+    const out = {}, gen = _xpfGen; let connected = true;
+    for (const it of runs) {
+      const k = String((it && it.k) || ''), run = (it && it.run) || {}; if (!k) continue;
+      const rk = String(run.run_key || ((run.dt || '') + '|' + (run.supplier || ''))) + '|' + String(run.paying_org || '');
+      const sig = crypto.createHash('sha1').update(JSON.stringify([run.dt, run.supplier, run.supplier_code, run.region, run.base_ccy, run.paying_org,
+        (run.lines || []).map(l => [l.reference, l.type, l.amount, l.prod_no, l.deposit_ref, l.account_code])])).digest('hex');
+      const c = _xpfCache.get(rk);
+      if (c && c.sig === sig && Date.now() - c.at < XPF_TTL) { out[k] = Object.assign({ cached: true }, c.out); continue; }
+      const errs = [];
+      const xget = async (org, path) => {   // GET only: preflight never passes a method / body
+        const mk = org + '|' + path, memo = !/Invoices\?IDs=/.test(path);
+        const m = memo && _xpfMemo.get(mk); if (m && Date.now() - m.at < 120000) return m.p;
+        await _xpfPace(xeroRegion(org));
+        const p = xeroFetch(org, path).catch(e => { errs.push({ org, code: e.code, msg: e.message }); if (memo) _xpfMemo.delete(mk); throw e; });
+        if (memo) _xpfMemo.set(mk, { at: Date.now(), p });
+        return p;
+      };
+      let r;
+      try {
+        const plan = await computeXeroRunPlan(run, { xget });
+        if (!plan.ok) r = { status: 'skip' };
+        else if (errs.some(e => e.code === 503 || e.code === 502)) { r = { status: 'not_connected' }; connected = false; }
+        else if (errs.length) r = { status: 'error', error: 'Could not read Xero: ' + errs[0].msg };
+        else r = Object.assign({ status: 'ok' }, _xeroPlanIssues(plan));
+      } catch (e) { r = { status: 'error', error: e.message }; }
+      if (r.status === 'ok' || r.status === 'skip') { if (gen === _xpfGen) _xpfCache.set(rk, { at: Date.now(), sig, out: r }); }
+      out[k] = r;
+      if (!connected) break;   // Xero not connected: stop, the client shows nothing
+    }
+    for (const [key, v] of _xpfCache) if (Date.now() - v.at > XPF_TTL) _xpfCache.delete(key);
+    return { ok: true, connected, results: out };
+  };
+  try { const p = _xpfChain.then(job, job); _xpfChain = p.catch(() => {}); res.set('Cache-Control', 'no-store').json(await p); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create the supplier-payment BILL and post the PAYMENTS against the linked PO bills in ONE action (from the Payments
@@ -5317,6 +5404,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference + (l.cross ? ' (cross-org via loan, USD ' + (Math.round(l.amount * 100) / 100) + ')' : ''), Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
     const billBody = { Type: 'ACCPAY', Contact: { Name: plan.supplier || 'Supplier' }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: plan.currency || 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: billLines };
     const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
+    xeroPreflightBust();   // v28.173 (Ben): the run is posted + bill amounts due move: drop the preflight badges' cache
     const binv = br && br.Invoices && br.Invoices[0];
     out.bill = { id: binv && binv.InvoiceID, number: binv && binv.InvoiceNumber, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + binv.InvoiceID) : null };
     // v28.136 (Ben): keep the supplier-payment bill reference against this payment (migration 324) → Payments Report "done" link.
@@ -5382,6 +5470,7 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     const cnBody = { Type: 'ACCPAYCREDIT', Contact: { Name: poRow.supplier || 'Supplier' }, Date: new Date().toISOString().slice(0, 10), CreditNoteNumber: 'DEPOSIT-' + po, Reference: 'DEPOSIT-' + po, CurrencyCode: 'USD', Status: 'AUTHORISED', LineAmountTypes: 'NoTax',
       LineItems: [{ Description: 'Starting-deposit draw-down ' + po, Quantity: 1, UnitAmount: amount, AccountCode: acct.code, Tracking: trackOption ? [{ Name: 'Production', Option: trackOption }] : [] }] };
     const cr = await xeroFetch(region, '/api.xro/2.0/CreditNotes', { method: 'POST', body: { CreditNotes: [cnBody] } });
+    xeroPreflightBust();   // v28.173 (Ben): the allocation changes the bill's amount due
     const cn = cr && cr.CreditNotes && cr.CreditNotes[0];
     let allocated = false, allocErr = null, _recErr = null;
     if (cn && cn.CreditNoteID) {
