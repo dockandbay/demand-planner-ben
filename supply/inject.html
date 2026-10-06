@@ -7665,8 +7665,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','ask-feedback'];   // v28.141: + Ask Claude feedback
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','ask-feedback':'Ask Claude feedback'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','ask-feedback'];   // v28.141: + Ask Claude feedback. v28.159: + Health log
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','ask-feedback':'Ask Claude feedback'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -7677,9 +7677,9 @@
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
     // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
-    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback'].indexOf(CONFIG_SUB)>=0){
+    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback','health-log'].indexOf(CONFIG_SUB)>=0){
       c.innerHTML='<div class="count">Loading…</div>'; fetchMe(function(){ if(current==='config')renderConfig(d); }); return; }
-    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
+    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback'||CONFIG_SUB==='health-log')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
@@ -8802,6 +8802,52 @@
             if(!d||d.error){ stat.innerHTML='<span style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</span>'; return; }
             stat.textContent='Done in '+((Date.now()-t0)/1000).toFixed(1)+'s'; drawHC(d);
           }).catch(function(e){ runBtn.disabled=false; stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); };
+      };
+      // v28.159 (Ben): CONFIG ▸ Admin ▸ Health log. The persistent log behind the weekly health email (migration 328): server 5xx +
+      // slow requests and browser errors + slow views, aggregated by GET /api/health/weekly?days=N. Download the .md for Claude Code,
+      // or email it to yourself (admin only, only to the signed-in address). Tables are sortable (click a header), sticky headers.
+      SUBS['health-log']=function(){
+        var st={days:7}, D=null, SORT={};
+        function shortU(e){ return String(e||'').replace(/@.*$/,'@'); }
+        function dt(s){ s=String(s||''); return s?fd(s.slice(0,10)):''; }
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Health log.</b> What actually went wrong for users: server errors and slow requests (logged by the server), browser errors and slow screens (logged from staff, supplier portal and client portal browsers). The same report is emailed every Monday with the .md attached for Claude Code.</div>'
+          +'<div class="bar" style="gap:8px;align-items:center"><span class="pill-lbl">Period</span><select class="flt" id="hl-days" style="width:130px"><option value="7" selected>Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option></select>'
+          +'<button class="save-btn light" id="hl-md">⤓ Download .md</button><button class="save-btn light" id="hl-send">✉ Send test (to me)</button><span class="count" id="hl-status" style="align-self:center"></span></div>'
+          +'<div id="hl-body"><div class="count">Loading…</div></div>';
+        var stat=document.getElementById('hl-status');
+        function kpi(n,l,bad){ return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--card);text-align:left"><b style="display:block;font-size:22px;color:'+(n&&bad?'var(--neg)':n?'var(--amber)':'var(--pos)')+'">'+n+'</b><span class="mut tiny">'+esc(l)+'</span></div>'; }
+        // cols: [key, label, render?]. Left-aligned, sticky header, click a header to sort (toggles asc/desc).
+        function grid(id,title,rows,cols){ var s=SORT[id];
+          if(s){ rows=rows.slice().sort(function(a,c){ var x=a[s.k], y=c[s.k]; if(Array.isArray(x))x=x.join(','); if(Array.isArray(y))y=y.join(',');
+            var nx=Number(x), ny=Number(y), r=(x!=null&&y!=null&&x!==''&&y!==''&&!isNaN(nx)&&!isNaN(ny))?nx-ny:String(x==null?'':x).localeCompare(String(y==null?'':y)); return s.d*r; }); }
+          var th='position:sticky;top:0;background:var(--band);z-index:2;cursor:pointer;white-space:nowrap;text-align:left';
+          return '<div class="sect-h" style="margin-top:14px">'+esc(title)+' <span class="mut tiny">('+rows.length+')</span></div>'
+            +(rows.length?'<div class="tw" style="max-height:42vh;overflow:auto"><table class="pay-tbl hl-grid" data-g="'+id+'" style="width:100%;font-size:12px;border-collapse:separate;border-spacing:0"><thead><tr>'
+            +cols.map(function(c){ return '<th class="l" data-k="'+esc(c[0])+'" style="'+th+'">'+esc(c[1])+(s&&s.k===c[0]?(s.d>0?' ▲':' ▼'):'')+'</th>'; }).join('')+'</tr></thead><tbody>'
+            +rows.map(function(r){ return '<tr>'+cols.map(function(c){ var v=c[2]?c[2](r):esc(r[c[0]]==null?'':r[c[0]]); return '<td class="l" style="vertical-align:top;text-align:left">'+v+'</td>'; }).join('')+'</tr>'; }).join('')
+            +'</tbody></table></div>':'<div class="mut tiny" style="padding:6px 0">None logged in this period.</div>'); }
+        var mono=function(v){ return '<span style="font-family:ui-monospace,Menlo,monospace">'+esc(v)+'</span>'; };
+        function draw(){ var d=D, k=d.kpis;
+          var h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0">'+kpi(k.server_errors,'Server errors',1)+kpi(k.slow_requests,'Slow requests',0)+kpi(k.browser_errors,'Browser errors',1)+kpi(k.slow_views,'Slow views',0)+'</div>'
+            +'<div class="mut tiny">'+esc(dt(d.from))+' to '+esc(dt(d.to))+' · '+esc(d.version)+' · slow request = '+d.slow_ms+'ms or more · slow view = over 3s</div>'
+            +grid('slow','Slowest endpoints',d.slow,[['path','Endpoint',function(r){ return mono(r.method+' '+r.path); }],['n','Count'],['p50','p50 ms'],['p95','p95 ms'],['max_ms','Max ms'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }],['file','Likely file']])
+            +grid('errors','Server errors',d.errors,[['path','Endpoint',function(r){ return mono(r.method+' '+r.path); }],['status','Status'],['n','Count'],['message','Message',function(r){ return '<span style="white-space:pre-wrap">'+esc(r.message||'')+'</span>'; }],['first_seen','First seen',function(r){ return esc(dt(r.first_seen)); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }],['versions','Versions',function(r){ return esc((r.versions||[]).join(', ')); }]])
+            +grid('browser','Browser errors',d.browser,[['message','Message',function(r){ return '<span style="white-space:pre-wrap"'+(r.stack?' title="'+esc(String(r.stack).slice(0,1200))+'"':'')+'>'+esc(r.message||'')+'</span>'; }],['kind','Kind',function(r){ return esc(r.kind==='console_error'?'console.error':'error'); }],['n','Count'],['users','Users',function(r){ return esc((r.users_short||[]).join(', ')||String(r.users||0)); }],['views','Views',function(r){ return mono((r.views||[]).filter(Boolean).slice(0,3).join(', ')); }],['sources','Source',function(r){ return esc((r.sources||[]).join(', ')); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
+            +grid('views','Slow views',d.views,[['path','View',function(r){ return mono(r.path); }],['sources','Source',function(r){ return esc((r.sources||[]).join(', ')); }],['n','Count'],['p95','p95 ms'],['max_ms','Max ms'],['users','Users'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]]);
+          var body=document.getElementById('hl-body'); body.innerHTML=h;
+          body.querySelectorAll('.hl-grid th').forEach(function(t){ t.onclick=function(){ var g=t.closest('table').dataset.g, kk=t.dataset.k, s=SORT[g]; SORT[g]={k:kk,d:(s&&s.k===kk)?-s.d:-1}; draw(); }; }); }
+        function load(){ document.getElementById('hl-body').innerHTML='<div class="count">Loading…</div>'; stat.textContent='';
+          fetch('/api/health/weekly?days='+st.days).then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error){ document.getElementById('hl-body').innerHTML='<div class="count" style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</div>'; return; } D=d; draw(); })
+            .catch(function(e){ document.getElementById('hl-body').innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
+        document.getElementById('hl-days').onchange=function(){ st.days=Number(this.value)||7; load(); };
+        document.getElementById('hl-md').onclick=function(){ if(!D)return; var a=document.createElement('a'), blob=new Blob([D.markdown],{type:'text/markdown'});
+          a.href=URL.createObjectURL(blob); a.download='horizon-health-'+String(D.to||'').slice(0,10)+'.md'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },500); };
+        document.getElementById('hl-send').onclick=function(){ var btn=this; btn.disabled=true; stat.textContent='Sending…';
+          fetch('/api/health/send-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:st.days})}).then(function(r){ return r.json(); }).then(function(j){ btn.disabled=false;
+            if(!j||j.error){ stat.innerHTML='<span style="color:var(--neg)">'+esc((j&&j.error)||'failed')+'</span>'; return; }
+            stat.textContent=j.sandbox?('Email stubbed (no RESEND_API_KEY): would send to '+shortU((j.to||[])[0])):('Sent to '+shortU((j.to||[])[0])); })
+            .catch(function(e){ btn.disabled=false; stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); };
+        load();
       };
       // v28.141 (Ben): CONFIG ▸ Admin ▸ Ask Claude feedback — totals, 12-week trend, top 👎 reasons, the 👎 list; a row opens
       // a popup with the full question / answer / comment. Data: GET /api/assistant/feedback (admin), migration 326.
@@ -12358,7 +12404,7 @@
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0?[poSub==='paydue'?'payments-due':poSub]:[]));   // v28.129 (Ben): the default sub-page gets its own deep link too (#/supply/payments/payments-due)
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
-      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','ask-feedback'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','ask-feedback','health-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
     }
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }

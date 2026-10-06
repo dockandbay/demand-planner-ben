@@ -165,6 +165,11 @@ function loadHTML() {
 const HTML = loadHTML();
 // SUPPLY tab (Production Planner) UI — injected before </body>. Optional; empty if file absent.
 function loadInject() { try { return readFileSync(new URL('./supply/inject.html', import.meta.url), 'utf8'); } catch { return ''; } }
+// v28.159 (Ben): shared browser health capture (supply/hz-health.js). Staff shell gets it INLINE at the top of <head> (sees
+// artefact boot errors, no extra request); the supplier + client portal shells load /hz-health.js. Re-read per call in DEV.
+let _hzHealthJs = null;
+function hzHealthJs() { if (_hzHealthJs == null || process.env.NODE_ENV !== 'production') { try { _hzHealthJs = readFileSync(new URL('./supply/hz-health.js', import.meta.url), 'utf8'); } catch { _hzHealthJs = ''; } } return _hzHealthJs; }
+function hzHealthTag(src) { const js = hzHealthJs(); return js ? '<script data-hz-src="' + src + '" data-hz-ver="' + APP_VERSION + '">' + js.replace(/<\/script/gi, '<\\/script') + '</script>' : ''; }
 // Zalando forecast is no longer baked — it lives in Supabase (forecast_inputs/outputs, channel ZAL). `temp files/zalando_data.json`
 // remains only as the source for migration 203 (the one-time seed). The old baked `ZAL_DATA` reader was removed (v26.751).
 // USD→GBP rate for the report GBP columns (CF_GBP/AF_GBP defaults). Legacy app_settings.usd_gbp_rate takes
@@ -774,6 +779,7 @@ function safeEq(got, want) { try { const a = Buffer.from(String(got || '')), b =
 // works even in helpers that don't have `req` in scope (e.g. patch()). Call log500(e) before every res.status(500).
 const _reqStore = new AsyncLocalStorage();
 function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
+  if (s) s.err = String((e && e.message) || e || '').split('\n')[0].slice(0, 500);   // v28.159 (Ben): the health log records this message with the 500
   console.error('[500] ' + ((r && r.method) || '?') + ' ' + ((r && (r.originalUrl || r.url)) || '?') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
 // v27.886 (Ben, perf phase 4 — measurement): every request carries a start time + a DB-query counter (pool.query is
 // wrapped below to bump it). On finish, anything slower than HZ_SLOW_MS (default 750ms) is logged as
@@ -781,12 +787,50 @@ function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
 // GET /api/perf/recent so a slow path can be found without tailing logs. Zero cost on the hot path beyond a Date.now().
 const HZ_SLOW_MS = Math.max(0, Number(process.env.HZ_SLOW_MS || 750));
 const _perfRing = []; const PERF_RING_MAX = 300;
+// v28.159 (Ben): persistent health log (migration 328, planner.app_health_events). Slow requests (>= HZ_SLOW_MS) and every
+// status >= 500 are aggregated IN MEMORY per (kind, method, route, status): count, max ms, last log500 message. The buffer is
+// flushed with ONE multi-row INSERT when it holds >= 25 occurrences or the last flush was > 60s ago, checked from request
+// handling (start + finish), never a DB round trip per request. On Vercel there is no timer; the long-lived local server also
+// has an unref'd 30s tick. A flush error is console.warn'd and dropped (a missing table backs off for 10 min). Never blocks
+// or fails a request. Health routes, the App health sweep's own self-timed calls (x-hz-health-sweep) and non-/api paths are skipped.
+const HZ_HEALTH_SKIP = /^\/api\/(health\/|cron\/health-weekly|config\/health-check)/;
+const _hzHB = new Map(); let _hzHBn = 0, _hzHBlast = Date.now(), _hzHBbusy = null, _hzHBoffUntil = 0;
+function hzHealthNote(kind, method, path, status, ms, msg, example) {
+  const k = kind + '|' + method + '|' + path + '|' + status; let e = _hzHB.get(k);
+  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: null }; _hzHB.set(k, e); }
+  e.count++; _hzHBn++; if (ms > e.ms) e.ms = ms; if (msg) e.message = String(msg).slice(0, 1000); e.ts = new Date().toISOString();
+  if (example && example !== e.path) e.meta = { example: String(example).slice(0, 300) };
+}
+const HZ_HEALTH_INSERT = `INSERT INTO planner.app_health_events (ts, kind, source, path, method, status, ms, message, stack, user_email, app_version, user_agent, count, meta)
+  SELECT coalesce(x.ts, now()), x.kind, x.source, x.path, x.method, x.status, x.ms, x.message, x.stack, x.user_email, x.app_version, x.user_agent, coalesce(x.count, 1), x.meta
+  FROM jsonb_to_recordset($1::jsonb) AS x(ts timestamptz, kind text, source text, path text, method text, status int, ms int, message text, stack text, user_email text, app_version text, user_agent text, count int, meta jsonb)`;
+function hzHealthFlush(force) {
+  try {
+    if (_hzHBbusy) return _hzHBbusy; if (!_hzHB.size) return null; const now = Date.now();
+    if (!force && _hzHBn < 25 && now - _hzHBlast < 60000) return null;
+    if (now < _hzHBoffUntil) return null;
+    const rows = Array.from(_hzHB.values(), e => Object.assign({ app_version: APP_VERSION }, e)); _hzHB.clear(); _hzHBn = 0; _hzHBlast = now;
+    _hzHBbusy = _reqStore.exit(() => pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]))   // exit(): not counted against the triggering request
+      .then(() => null, e => { console.warn('[health] flush of ' + rows.length + ' row(s) failed: ' + (e && e.message)); if (e && e.code === '42P01') _hzHBoffUntil = Date.now() + 600000; })
+      .finally(() => { _hzHBbusy = null; });
+    return _hzHBbusy;
+  } catch (e) { console.warn('[health] flush error: ' + (e && e.message)); return null; }
+}
+if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), 30000).unref?.();
 app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
+  if (_hzHB.size) hzHealthFlush(false);   // v28.159: due flush rides an active request (Vercel has no background time)
   res.on('finish', () => { try { const s = _reqStore.getStore(); const ms = Date.now() - ((s && s.t0) || Date.now()); const q = (s && s.q) || 0;
     const path = String(req.originalUrl || req.url || '').split('?')[0];
     if (!path.startsWith('/api/')) return;   // page/static loads aren't what we're measuring
     _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
     if (ms >= HZ_SLOW_MS) console.log('[slow ' + ms + 'ms ' + q + 'q] ' + req.method + ' ' + path + ' ' + res.statusCode);
+    // v28.159 (Ben): health log. Group by the matched route pattern (/api/supply/po/:po) so ids don't fragment the report.
+    if ((ms >= HZ_SLOW_MS || res.statusCode >= 500) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
+      const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
+      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path);
+      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path);
+      hzHealthFlush(false);
+    }
   } catch (_) { /* measurement must never throw */ } });
   next();
 }));
@@ -952,7 +996,7 @@ function reqHost(req) { return String(req.headers['x-forwarded-host'] || req.hea
 // Portal-safe paths: the page, its script, shared theme + fonts + vendor assets, the client API, the version probe.
 const CP_HOST_OK = (p) => (
   p === '/client' || p === '/client-view.js' || p === '/hz-theme.css'
-  || p === '/favicon.ico' || p === '/api/version'
+  || p === '/favicon.ico' || p === '/api/version' || p === '/hz-health.js'   // v28.159: shared browser health capture
   || p.startsWith('/api/cp/') || p.startsWith('/fonts/') || p.startsWith('/vendor/')
 );
 app.use((req, res, next) => {
@@ -979,6 +1023,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
+      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly'   // v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -2042,7 +2087,7 @@ app.get('/', async (req, res) => {
     // v28.147 perf: in lazy mode start the sku-data download from <head>, in parallel with the app bundles (was only after
     // they downloaded + ran). lazyLoadSkuData() consumes window.__HZ_SKUP and falls back to its own fetch if this one failed.
     const EARLY_SKU = _lazy ? '<script>try{window.__HZ_SKUP=fetch("/api/demand/sku-data").then(function(r){if(!r.ok)throw new Error("sku-data "+r.status);return r.json();});window.__HZ_SKUP.catch(function(){});}catch(e){}</script>' : '';
-    html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH + G_JS + EARLY_SKU);   // G_JS in <head>: the data must exist before the first (static) body script runs
+    html = html.replace('<head>', () => '<head>' + hzHealthTag('staff') + HEAD_NOFLASH + G_JS + EARLY_SKU);   // G_JS in <head>: the data must exist before the first (static) body script runs. v28.159: health capture first, so boot errors are caught
     if (IS_SANDBOX) {
       html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
@@ -21261,7 +21306,7 @@ async function _selfTime(base, path, cookie, timeoutMs) {
   const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), timeoutMs);
   const t0 = Date.now();
   try {
-    const r = await fetch(base + path, { headers: cookie ? { cookie } : {}, signal: ctrl.signal, redirect: 'manual' });
+    const r = await fetch(base + path, { headers: Object.assign({ 'x-hz-health-sweep': '1' }, cookie ? { cookie } : {}), signal: ctrl.signal, redirect: 'manual' });   // v28.159: sweep calls are not logged as real slow requests
     const buf = await r.arrayBuffer();   // drain so timing includes the full body
     return { ms: Date.now() - t0, status: r.status, kb: Math.round(buf.byteLength / 1024) };
   } catch (e) { return { ms: Date.now() - t0, status: (e && e.name === 'AbortError') ? 0 : -1, kb: 0, err: (e && e.name === 'AbortError') ? 'timeout' : (e && e.message) }; }
@@ -21335,6 +21380,200 @@ app.get('/api/config/health-check', async (req, res) => {
       counts: { total: targets.length, errors: errors.length, slow: slow.length, moderate: mid.length },
       portals: { supplier: !!psid, client: !!csid },
       results, report });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── v28.159 (Ben): HEALTH LOG (migration 328): browser capture endpoints, the weekly report, the Health log UI data and the
+// weekly health email. Server-side capture lives in the perf middleware (hzHealthNote / hzHealthFlush).
+app.get('/hz-health.js', (req, res) => { res.set('Content-Type', 'application/javascript; charset=utf-8').set('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache').send(hzHealthJs() || '/* hz-health.js missing */'); });
+// Browser events: one shared handler behind three AUTHENTICATED routes, never an anonymous write. Staff = the normal /api gate
+// (planner key cookie under PLANNER_KEY; identity via authUser); supplier portal = portalAuth (psid); client portal = cpAuth
+// (csid). Trade-off: errors on the portal LOGIN screens (no session yet) are not captured, which is acceptable vs an open
+// write hole. Limits: <= 50 events a request, per (source, IP, user) 60 events a minute and per IP 200 a minute (excess dropped
+// with 202), fields truncated (message 500, stack 2000), identical events in one batch collapsed to a count, one INSERT.
+const HZ_CE_KINDS = new Set(['client_error', 'console_error', 'slow_view']);
+const _hzCeRate = new Map();   // key -> { t, n } fixed one-minute windows
+function hzCeAllow(key, max, want) { const now = Date.now(); let r = _hzCeRate.get(key);
+  if (!r || now - r.t > 60000) { r = { t: now, n: 0 }; _hzCeRate.set(key, r); }
+  if (_hzCeRate.size > 5000) for (const [k, v] of _hzCeRate) if (now - v.t > 60000) _hzCeRate.delete(k);
+  const ok = Math.max(0, Math.min(want, max - r.n)); r.n += ok; return ok; }
+async function hzClientEvents(req, res, source, email) {
+  try {
+    let arr = req.body; if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (_) { arr = null; } }
+    if (!Array.isArray(arr)) return res.status(400).json({ error: 'expected a JSON array of events' });
+    const clip = (v, n) => (v == null || v === '') ? null : String(v).slice(0, n);
+    const ua = clip(req.get('user-agent'), 300), em = email ? String(email).toLowerCase().slice(0, 200) : null;
+    const agg = new Map();
+    for (const e of arr.slice(0, 50)) {
+      if (!e || typeof e !== 'object' || !HZ_CE_KINDS.has(e.kind)) continue;
+      const message = clip(e.message, 500); if (!message) continue;
+      const path = clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
+      const ex = agg.get(k); if (ex) { ex.count++; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
+      let meta = null; if (e.meta && typeof e.meta === 'object') { try { const j = JSON.stringify(e.meta); if (j.length <= 1000) meta = e.meta; } catch (_) {} }
+      agg.set(k, { kind: e.kind, source, path, ms, message, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: 1, meta });
+    }
+    let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
+    const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
+    let n = hzCeAllow('ip|' + ip, 200, rows.length); n = hzCeAllow('u|' + source + '|' + ip + '|' + (em || ''), 60, n);
+    rows = rows.slice(0, n); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
+    await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]);
+    res.status(202).json({ ok: true, accepted: rows.length });
+  } catch (e) { console.warn('[health] client-events insert failed: ' + (e && e.message)); res.status(202).json({ ok: false }); }   // never a 500 (the page would log it again)
+}
+const _hzText = express.text({ type: 'text/plain', limit: '256kb' });   // sendBeacon(string) arrives as text/plain
+app.post('/api/health/client-events', _hzText, (req, res) => hzClientEvents(req, res, 'staff', authUser(req)));
+app.post('/api/portal/health/client-events', _hzText, portalAuth, (req, res) => hzClientEvents(req, res, 'portal', req.portal && req.portal.email));
+app.post('/api/cp/health/client-events', _hzText, cpAuth, (req, res) => hzClientEvents(req, res, 'client_portal', req.cp && req.cp.user && req.cp.user.email));
+
+// Likely file for a path / view, so the .md tells Claude Code where to start.
+function hzLikelyFile(path, source) {
+  const p = String(path || '');
+  if (source === 'portal' || p.startsWith('/api/portal')) return 'server.mjs (supplier portal /api/portal routes) + supply/portal-view.js';
+  if (source === 'client_portal' || p.startsWith('/api/cp')) return 'server.mjs (client portal /api/cp routes) + supply/client-view.js';
+  if (/^\/api\/(demand|forecast|save-|kpi|scenario|preorders|price-changes|buy-|auto-forecast|trading-calendar|filter-rules)/.test(p)) return 'server.mjs + artifact_v16.7.html (DEMAND)';
+  if (/^\/api\/(supply|config|product|client|me|inbox)/.test(p)) return 'server.mjs + supply/inject.html';
+  if (p.startsWith('/api/')) return 'server.mjs';
+  if (/^#\/?(planning|demand|buy|fba|exec|reports)(\/|$)/.test(p)) return 'artifact_v16.7.html (DEMAND views) + supply/inject.html (shell)';
+  return 'supply/inject.html';
+}
+const hzMdCell = v => String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+const hzMdCode = v => String(v == null ? '' : v).replace(/`/g, "'");
+const hzShortUser = e => String(e || '').replace(/@.*$/, '@');
+async function hzHealthReport(daysIn) {
+  const days = Math.min(90, Math.max(1, Math.round(Number(daysIn) || 7)));
+  try { await hzHealthFlush(true); } catch (_) {}   // include this instance's unflushed buffer
+  const d = (await pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int))
+    SELECT json_build_object('from', now() - make_interval(days => $1::int), 'to', now(),
+      'kpis', (SELECT json_build_object('server_errors', coalesce(sum(count) FILTER (WHERE kind='server_error'),0), 'slow_requests', coalesce(sum(count) FILTER (WHERE kind='slow_request'),0),
+        'browser_errors', coalesce(sum(count) FILTER (WHERE kind IN ('client_error','console_error')),0), 'slow_views', coalesce(sum(count) FILTER (WHERE kind='slow_view'),0),
+        'users', count(DISTINCT user_email) FILTER (WHERE kind <> 'slow_request' AND kind <> 'server_error'), 'rows', count(*)) FROM ev),
+      'slow', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT method, path, sum(count)::int n, round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ms))::int p50,
+        round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, max(ms) max_ms, max(ts) last_seen, (array_agg(meta->>'example' ORDER BY ts DESC) FILTER (WHERE meta ? 'example'))[1] example
+        FROM ev WHERE kind='slow_request' GROUP BY method, path ORDER BY p95 DESC NULLS LAST, n DESC LIMIT 25) x),
+      'errors', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT method, path, status, split_part(coalesce(message,''), E'\\n', 1) message, sum(count)::int n, min(ts) first_seen, max(ts) last_seen,
+        array_remove(array_agg(DISTINCT app_version), NULL) versions, (array_agg(meta->>'example' ORDER BY ts DESC) FILTER (WHERE meta ? 'example'))[1] example
+        FROM ev WHERE kind='server_error' GROUP BY 1,2,3,4 ORDER BY n DESC, last_seen DESC LIMIT 50) x),
+      'browser', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT kind, message, sum(count)::int n, count(DISTINCT user_email)::int users, array_remove(array_agg(DISTINCT user_email), NULL) user_list,
+        (array_agg(DISTINCT path))[1:8] views, array_agg(DISTINCT source) sources, min(ts) first_seen, max(ts) last_seen, (array_agg(stack ORDER BY ts DESC) FILTER (WHERE stack IS NOT NULL))[1] stack,
+        array_remove(array_agg(DISTINCT app_version), NULL) versions FROM ev WHERE kind IN ('client_error','console_error') GROUP BY kind, message ORDER BY n DESC, last_seen DESC LIMIT 50) x),
+      'views', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, array_agg(DISTINCT source) sources, sum(count)::int n, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95,
+        max(ms) max_ms, count(DISTINCT user_email)::int users, max(ts) last_seen FROM ev WHERE kind='slow_view' GROUP BY path ORDER BY p95 DESC NULLS LAST, n DESC LIMIT 25) x)) d`, [days])).rows[0].d;
+  const by = (k) => (a, b) => (Number(b[k]) || 0) - (Number(a[k]) || 0);
+  d.slow.sort(by('p95')); d.errors.sort(by('n')); d.browser.sort(by('n')); d.views.sort(by('p95'));
+  for (const k of ['server_errors', 'slow_requests', 'browser_errors', 'slow_views', 'users', 'rows']) d.kpis[k] = Number(d.kpis[k]) || 0;
+  d.slow.forEach(r => { r.file = hzLikelyFile(r.path); }); d.errors.forEach(r => { r.file = hzLikelyFile(r.path); });
+  d.browser.forEach(r => { r.file = hzLikelyFile((r.views || [])[0], (r.sources || [])[0]); r.users_short = (r.user_list || []).map(hzShortUser); delete r.user_list; });
+  d.views.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); });
+  d.days = days; d.version = APP_VERSION; d.slow_ms = HZ_SLOW_MS; d.markdown = hzHealthMarkdown(d);
+  return d;
+}
+function hzHealthMarkdown(d) {
+  const k = d.kpis, F = ddMonYy(String(d.from)), T = ddMonYy(String(d.to)), L = [];
+  const dt = v => v ? ddMonYy(String(v)) : '';
+  L.push(`# HORIZON health report: ${F} to ${T} (${d.version})`, '');
+  L.push('How to use: upload this to Claude Code in the horizon-demand-and-supply-planner repo and ask it to work through the sections in order (server errors first). Each item gives counts, a concrete example and the likely file. Reproduce locally (`PORT=8124 node server.mjs`), fix, verify, and note each fix in CHANGES.md.', '');
+  L.push(`Source: planner.app_health_events, last ${d.days} days (slow request = ${d.slow_ms}ms or more; slow view = over 3s to render). Generated ${dt(new Date().toISOString())}.`, '');
+  L.push('## Summary', '', '| Metric | Count |', '|---|---|', `| Server errors (5xx) | ${k.server_errors} |`, `| Slow requests | ${k.slow_requests} |`, `| Browser errors | ${k.browser_errors} |`, `| Slow views | ${k.slow_views} |`, `| Distinct users affected (browser) | ${k.users} |`, '');
+  L.push('## 1. Server errors (fix first)', '');
+  if (!d.errors.length) L.push('None logged.', '');
+  d.errors.slice(0, 20).forEach((r, i) => { L.push(`### 1.${i + 1} ${r.method} ${r.path} returned ${r.status} (${r.n}x)`, '');
+    L.push(`- Message: \`${hzMdCode(r.message || '(no log500 message: the route did not call log500, or Express caught it)')}\``);
+    if (r.example && r.example !== r.path) L.push(`- Example URL: \`${hzMdCode(r.example)}\``);
+    L.push(`- First seen ${dt(r.first_seen)}, last seen ${dt(r.last_seen)}; versions ${(r.versions || []).join(', ') || 'n/a'}`, `- Likely file: ${r.file}`, ''); });
+  L.push('## 2. Browser errors', '');
+  if (!d.browser.length) L.push('None logged.', '');
+  d.browser.slice(0, 20).forEach((r, i) => { L.push(`### 2.${i + 1} ${hzMdCode(r.message).slice(0, 160)} (${r.n}x, ${r.users} user${r.users === 1 ? '' : 's'})`, '');
+    L.push(`- Kind: ${r.kind === 'console_error' ? 'console.error' : 'uncaught error / unhandled rejection'}; source: ${(r.sources || []).join(', ')}`);
+    L.push(`- Views: ${(r.views || []).filter(Boolean).map(v => '`' + hzMdCode(v) + '`').join(', ') || 'n/a'}`);
+    L.push(`- First seen ${dt(r.first_seen)}, last seen ${dt(r.last_seen)}; versions ${(r.versions || []).join(', ') || 'n/a'}`, `- Likely file: ${r.file}`);
+    if (r.stack) L.push('- Stack sample:', '', '```', String(r.stack).split('\n').slice(0, 8).join('\n').replace(/```/g, "'''"), '```');
+    L.push(''); });
+  L.push('## 3. Slowest endpoints', '');
+  if (!d.slow.length) L.push('None logged.', '');
+  else { L.push('| # | Endpoint | Count | p50 ms | p95 ms | Max ms | Last seen | Likely file |', '|---|---|---|---|---|---|---|---|');
+    d.slow.forEach((r, i) => L.push(`| ${i + 1} | ${hzMdCell(r.method + ' ' + r.path)} | ${r.n} | ${r.p50} | ${r.p95} | ${r.max_ms} | ${dt(r.last_seen)} | ${hzMdCell(r.file)} |`)); L.push(''); }
+  L.push('## 4. Slow views', '');
+  if (!d.views.length) L.push('None logged.', '');
+  else { L.push('| # | View | Source | Count | p95 ms | Max ms | Users | Last seen | Likely file |', '|---|---|---|---|---|---|---|---|---|');
+    d.views.forEach((r, i) => L.push(`| ${i + 1} | ${hzMdCell(r.path)} | ${hzMdCell((r.sources || []).join(', '))} | ${r.n} | ${r.p95} | ${r.max_ms} | ${r.users} | ${dt(r.last_seen)} | ${hzMdCell(r.file)} |`)); L.push(''); }
+  L.push('## Suggested next steps', '');
+  const s = [];
+  if (d.errors[0]) s.push(`Fix the top server error: ${d.errors[0].method} ${d.errors[0].path} (${d.errors[0].n}x, "${hzMdCode(d.errors[0].message).slice(0, 120)}"). Search server.mjs for the route and add a guard or fix the query; the local log prints "[500] ${d.errors[0].method} ${d.errors[0].path}".`);
+  if (d.browser[0]) s.push(`Fix the top browser error "${hzMdCode(d.browser[0].message).slice(0, 120)}" (${d.browser[0].n}x) in ${d.browser[0].file}; use the stack sample and view to reproduce.`);
+  if (d.slow[0]) s.push(`Profile ${d.slow[0].method} ${d.slow[0].path} (p95 ${d.slow[0].p95}ms): run with HZ_QLOG=200 to print slow queries, then cut round trips or add it to the response cache.`);
+  if (d.views[0]) s.push(`Investigate the slow view ${hzMdCode(d.views[0].path)} (p95 ${d.views[0].p95}ms): check which endpoints it waits on in the Slowest endpoints table.`);
+  if (!s.length) s.push('Nothing logged in this period. No action needed.');
+  else s.push('After fixing, run CONFIG ▸ Admin ▸ App health to confirm, and check next week\'s report shows the counts falling.');
+  s.forEach((x, i) => L.push(`${i + 1}. ${x}`)); L.push('');
+  return L.join('\n');
+}
+async function hzAdminOnly(req, res) { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return null; } return me; }
+app.get('/api/health/weekly', async (req, res) => {
+  try { if (!(await hzAdminOnly(req, res))) return; res.set('Cache-Control', 'no-store').json(Object.assign({ ok: true }, await hzHealthReport(req.query.days))); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Weekly email. Recipients = app_settings 'health_report_recipients' (JSON array) or the default three. Subject carries the
+// counts; HTML = KPIs + top 5 of each section; the full .md is attached for Claude Code. dry_run returns the exact Resend
+// payload instead of sending. PROD SCHEDULE: n8n, Monday 08:00 Australia/Sydney (DST-safe there), POST /api/cron/health-weekly
+// with x-webhook-secret; NOT a Vercel cron (UTC only, so it would drift an hour across Sydney DST).
+const HZ_HEALTH_RECIPIENTS = ['ben@dockandbay.com', 'diviyaj@dockandbay.com', 'sarah@dockandbay.com'];
+async function hzHealthRecipients() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='health_report_recipients'`)).rows[0];
+    const a = r && JSON.parse(r.value); if (Array.isArray(a)) { const v = a.map(x => String(x || '').trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)); if (v.length) return v; } } catch (_) {}
+  return HZ_HEALTH_RECIPIENTS.slice();
+}
+async function hzHealthEmail(days, to) {
+  const d = await hzHealthReport(days), k = d.kpis, F = ddMonYy(String(d.from)), T = ddMonYy(String(d.to));
+  const subject = `HORIZON weekly health: ${F} to ${T} (${k.server_errors + k.browser_errors} errors, ${k.slow_requests + k.slow_views} slow)`;
+  const filename = 'horizon-health-' + String(d.to).slice(0, 10) + '.md';
+  const E = escHtml, th = 'text-align:left;padding:4px 8px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#64748b', td = 'text-align:left;padding:4px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;vertical-align:top';
+  const tile = (n, l, bad) => `<td style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:8px;text-align:left"><div style="font-size:22px;font-weight:700;color:${n && bad ? '#dc2626' : '#0f172a'}">${n}</div><div style="font-size:12px;color:#64748b">${E(l)}</div></td>`;
+  const tbl = (title, heads, rows) => `<h3 style="font-size:14px;margin:18px 0 6px">${E(title)}</h3>` + (rows.length ? `<table style="border-collapse:collapse;width:100%"><tr>${heads.map(h => `<th style="${th}">${E(h)}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map(c => `<td style="${td}">${E(c)}</td>`).join('')}</tr>`).join('')}</table>` : '<div style="font-size:12px;color:#64748b">None logged.</div>');
+  const dt = v => v ? ddMonYy(String(v)) : '';
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;max-width:760px">`
+    + `<h2 style="font-size:17px;margin:0 0 4px">HORIZON weekly health</h2><div style="font-size:12px;color:#64748b;margin-bottom:12px">${E(F)} to ${E(T)} · ${E(d.version)}</div>`
+    + `<table style="border-collapse:separate;border-spacing:8px 0"><tr>${tile(k.server_errors, 'Server errors', 1)}${tile(k.slow_requests, 'Slow requests', 0)}${tile(k.browser_errors, 'Browser errors', 1)}${tile(k.slow_views, 'Slow views', 0)}</tr></table>`
+    + tbl('Server errors', ['Endpoint', 'Status', 'Count', 'Message', 'Last seen'], d.errors.slice(0, 5).map(r => [r.method + ' ' + r.path, r.status, r.n, String(r.message || '').slice(0, 140), dt(r.last_seen)]))
+    + tbl('Browser errors', ['Message', 'Count', 'Users', 'Views', 'Last seen'], d.browser.slice(0, 5).map(r => [String(r.message || '').slice(0, 140), r.n, (r.users_short || []).join(', ') || r.users, (r.views || []).slice(0, 2).join(', '), dt(r.last_seen)]))
+    + tbl('Slowest endpoints', ['Endpoint', 'Count', 'p50 ms', 'p95 ms', 'Max ms'], d.slow.slice(0, 5).map(r => [r.method + ' ' + r.path, r.n, r.p50, r.p95, r.max_ms]))
+    + tbl('Slow views', ['View', 'Count', 'p95 ms', 'Max ms'], d.views.slice(0, 5).map(r => [r.path, r.n, r.p95, r.max_ms]))
+    + `<p style="font-size:13px;margin-top:18px;padding:10px 12px;background:#eff6ff;border-radius:8px">Full details attached: upload the .md to Claude Code.</p></div>`;
+  const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html,
+    attachments: [{ filename, content: Buffer.from(d.markdown, 'utf8').toString('base64') }] };
+  return { payload, report: d };
+}
+async function hzHealthPurge() { try { const r = await pool.query(`DELETE FROM planner.app_health_events WHERE ts < now() - interval '60 days'`); return r.rowCount || 0; } catch (e) { console.warn('[health] purge failed: ' + e.message); return null; } }
+async function hzHealthSend(payload, by) {
+  const r = await sendResendEmail({ to: payload.to, subject: payload.subject, html: payload.html, kind: 'health-weekly', ref: payload.attachments[0].filename, by, attachments: payload.attachments });
+  return r;
+}
+const hzEmailList = (a) => (Array.isArray(a) ? a : []).map(x => String(x || '').trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).slice(0, 20);
+app.post('/api/cron/health-weekly', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const b = req.body || {}, dry = b.dry_run === true || b.dry_run === 'true';
+    const to = (dry && hzEmailList(b.to).length) ? hzEmailList(b.to) : await hzHealthRecipients();   // a caller's `to` is honoured ONLY on a dry run
+    const { payload, report } = await hzHealthEmail(b.days || 7, to);
+    if (dry) return res.json({ ok: true, dry_run: true, payload, md: report.markdown, kpis: report.kpis, purge: 'skipped (dry run)' });
+    const purged = await hzHealthPurge();
+    const r = await hzHealthSend(payload, 'cron');
+    res.json({ ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject, attachment: payload.attachments[0].filename, purged });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Local verification only: HZ_HEALTH_TEST=1 on a non-Vercel server exposes a deliberately slow / failing route. Never on prod.
+if (process.env.HZ_HEALTH_TEST === '1' && !process.env.VERCEL) app.get('/api/dev/health-fault', async (req, res) => {
+  const ms = Math.min(5000, Number(req.query.ms) || 0); if (ms) await new Promise(r => setTimeout(r, ms));
+  if (req.query.fail) { const e = new Error('health-fault test failure ' + String(req.query.fail).slice(0, 40)); log500(e); return res.status(500).json({ error: e.message }); }
+  res.json({ ok: true, ms });
+});
+// Health log ▸ "Send test (to me)": admin only, and ONLY to the signed-in admin's own address (never a client-supplied list).
+app.post('/api/health/send-test', async (req, res) => {
+  try { const me = await hzAdminOnly(req, res); if (!me) return;
+    const email = me.email || authUser(req); if (!email) return res.status(400).json({ error: 'No signed-in email to send to' });
+    const b = req.body || {}, { payload, report } = await hzHealthEmail(b.days || 7, [String(email).toLowerCase()]);
+    if (b.dry_run === true) return res.json({ ok: true, dry_run: true, payload, kpis: report.kpis });
+    const r = await hzHealthSend(payload, email);
+    res.json({ ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
