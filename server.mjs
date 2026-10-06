@@ -1252,7 +1252,7 @@ const RESP_CACHE = {
   '/api/product/specs': 120000, '/api/product/timeline-config': 120000, '/api/product/spec-scope-options': 120000,
   '/api/product/spec-suppliers': 120000, '/api/product/skus': 120000,
   // demand/kpi/client-derived → short TTL (edits show within the window; no supply-epoch link)
-  '/api/demand/stock-cover': 90000, '/api/demand/forecast-anomalies': 90000, '/api/demand-actions': 90000,
+  '/api/demand/stock-cover': 90000, '/api/demand/forecast-anomalies': 90000,   // v28.181 (Ben): '/api/demand-actions' moved to its own lazy cache (base cached, lifecycle state live), see _daBaseSt
   '/api/kpi/forecast-accuracy': 90000, '/api/kpi/stockout-risk': 90000,
   // v28.116 (review S4): /api/client/orders REMOVED — a cache hit returned before cpAdminGate (mounted later) ran, leaking to any key holder.
   // v28.116 (review S29): po-suppliers is a param-free full-table (po, supplier) read — cache it like the other stable supply reads.
@@ -1299,6 +1299,7 @@ function _hzWriteKind(req) {
   if (p.startsWith('/api/portal/')) { const seg = p.split('/')[3] || '';
     if (HZ_PORTAL_W_SKIP.has(seg)) return null; if (HZ_PORTAL_W_SHIPNOTE.has(seg)) return 'portal-shipnote'; return HZ_PORTAL_W_OWN.has(seg) ? 'portal-own' : 'portal-po'; }
   if (p.startsWith('/api/supply/price-list')) return 'price-list';
+  if (p.startsWith('/api/trading-calendar')) return 'demand-cal';   // v28.181 (Ben): calendar events feed DEMAND > Actions ('Event approaching')
   if (p === '/api/cp/order') return 'client-order';
   if (p === '/api/cron/client-sales' || p === '/api/client/fulfil/import-sales') return 'client-order';
   if (p.startsWith('/api/client/') && !HZ_CLIENT_W_SKIP.test(p)) return 'client';
@@ -1307,6 +1308,7 @@ function _hzWriteKind(req) {
 function _hzOnWrite(req, kind) {
   const names = req.portal && Array.isArray(req.portal.suppliers) ? req.portal.suppliers : null;
   if (kind === 'price-list') { _plCache.clear(); return; }
+  if (kind === 'demand-cal') { _lcInvalidateLocal(new Set(['demand-actions'])); return; }   // v28.181: local mark + the editor's read-your-writes (no shared epoch bump)
   if (kind === 'client-order' || kind === 'client') { invalidateSupplyCaches(kind); return; }
   if (!names) return;                                                   // a portal route that never authenticated (no identity) wrote nothing
   _plCache.delete(names.slice().sort().join('|'));
@@ -1786,24 +1788,33 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
     const from = /^\d{4}-\d{2}$/.test(String(q0.from || '')) ? q0.from : null;
     const to = /^\d{4}-\d{2}$/.test(String(q0.to || '')) ? q0.to : null;
     let cfg = { slLow: 99, slMed: 95, slHigh: 90, cvMed: 0.45, cvHi: 0.7, halfLifeMo: 6 };   // halfLifeMo=0 → equal weight
-    try { const cr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_backtest_cfg'`)).rows[0]; if (cr && cr.value) { const o = JSON.parse(cr.value); ['slLow', 'slMed', 'slHigh', 'cvMed', 'cvHi'].forEach(k => { const v = Number(o[k]); if (Number.isFinite(v) && v > 0) cfg[k] = v; }); if (Number.isFinite(Number(o.halfLifeMo)) && Number(o.halfLifeMo) >= 0) cfg.halfLifeMo = Number(o.halfLifeMo); } } catch (e) {}
-    const target = (() => { const t = Number(q0.target); return Number.isFinite(t) && t >= 50 && t < 100 ? t : cfg.slMed; })();
-    const inWin = m => (!from || m >= from) && (!to || m <= to);
-    const sohRows = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM') m, upper(split_part(warehouse,'_',1)) co,
+    // v28.181 (Ben, perf): the six reads below are independent, so all go out at once (were six serial round trips, ~2.7 s on the
+    // sandbox); each is awaited where it was, so the processing and the output are unchanged.
+    const _qCfg = pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_backtest_cfg'`);
+    const _qSoh = pool.query(`SELECT to_char(snapshot_date,'YYYY-MM') m, upper(split_part(warehouse,'_',1)) co,
         CASE WHEN warehouse LIKE '%fba' THEN 'FBA' ELSE '3PL' END pool, sum(available)::float oh
-      FROM planner.inventory_snapshots GROUP BY 1,2,3`)).rows.filter(r => inWin(r.m));
-    const demRows = (await pool.query(`SELECT to_char(month,'YYYY-MM') m, upper(country) co,
+      FROM planner.inventory_snapshots GROUP BY 1,2,3`);
+    const _qDem = pool.query(`SELECT to_char(month,'YYYY-MM') m, upper(country) co,
         CASE WHEN channel='FBA' THEN 'FBA' ELSE '3PL' END pool, sum(units)::float u
-      FROM planner.sales_actuals GROUP BY 1,2,3`)).rows;
-    const lead = {};
-    (await pool.query(`SELECT 'UK' co, avg(china_to_uk_lead_time_weeks) l FROM planner.products WHERE in_planning_scope
+      FROM planner.sales_actuals GROUP BY 1,2,3`);
+    const _qLead = pool.query(`SELECT 'UK' co, avg(china_to_uk_lead_time_weeks) l FROM planner.products WHERE in_planning_scope
       UNION ALL SELECT 'US', avg(china_to_us_lead_time_weeks) FROM planner.products WHERE in_planning_scope
       UNION ALL SELECT 'EU', avg(china_to_eu_lead_time_weeks) FROM planner.products WHERE in_planning_scope
-      UNION ALL SELECT 'AU', avg(china_to_au_lead_time_weeks) FROM planner.products WHERE in_planning_scope`)).rows
+      UNION ALL SELECT 'AU', avg(china_to_au_lead_time_weeks) FROM planner.products WHERE in_planning_scope`);
+    const _qCost = pool.query(`SELECT upper(sa.country) co, sum(sa.units*coalesce(p.cost,0))/nullif(sum(sa.units),0) c
+        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku WHERE coalesce(p.cost,0)>0 GROUP BY 1`);
+    const _qDates = pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`);
+    [_qCfg, _qSoh, _qDem, _qLead, _qCost, _qDates].forEach((p) => p.catch(() => {}));   // failures surface through the awaits below
+    try { const cr = (await _qCfg).rows[0]; if (cr && cr.value) { const o = JSON.parse(cr.value); ['slLow', 'slMed', 'slHigh', 'cvMed', 'cvHi'].forEach(k => { const v = Number(o[k]); if (Number.isFinite(v) && v > 0) cfg[k] = v; }); if (Number.isFinite(Number(o.halfLifeMo)) && Number(o.halfLifeMo) >= 0) cfg.halfLifeMo = Number(o.halfLifeMo); } } catch (e) {}
+    const target = (() => { const t = Number(q0.target); return Number.isFinite(t) && t >= 50 && t < 100 ? t : cfg.slMed; })();
+    const inWin = m => (!from || m >= from) && (!to || m <= to);
+    const sohRows = (await _qSoh).rows.filter(r => inWin(r.m));
+    const demRows = (await _qDem).rows;
+    const lead = {};
+    (await _qLead).rows
       .forEach(r => { lead[r.co] = Number(r.l) || 9; });
     const cost = {};   // demand-weighted avg unit cost per market (for the £ working-capital estimate)
-    try { (await pool.query(`SELECT upper(sa.country) co, sum(sa.units*coalesce(p.cost,0))/nullif(sum(sa.units),0) c
-        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku WHERE coalesce(p.cost,0)>0 GROUP BY 1`)).rows
+    try { (await _qCost).rows
       .forEach(r => { cost[r.co] = Number(r.c) || 0; }); } catch (e) {}
     const dm = {}; demRows.forEach(r => { dm[r.co + '|' + r.pool + '|' + r.m] = r.u; });
     const g = {};   // co|pool -> {covers:[], dem:[]}
@@ -1835,7 +1846,7 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
       const flag = avgCov > tgtOpt.coverWks * 1.5 ? 'overstocked' : (minCov < tgtOpt.coverWks ? 'tight' : 'ok');
       out.push({ co, pool, months: n, from: o.months[0], to: o.months[n - 1], avgCover: Math.round(avgCov * 10) / 10, minCover: Math.round(minCov * 10) / 10, maxCover: Math.round(maxCov * 10) / 10,
         weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, unitCost: Math.round(cu * 100) / 100, overstockMonths, riskOptions, suggestedSl: Math.round(suggestedSl * 10) / 10, recSl: Math.round(suggestedSl * 10) / 10, recCoverWks: recOpt.coverWks, targetSl: target, targetCoverWks: tgtOpt.coverWks, flag }); });
-    const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows.map(r => r.d);
+    const dates = (await _qDates).rows.map(r => r.d);
     res.json({ ok: true, rows: out, snapshotDates: dates, cfg, window: { from, to }, target });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -2235,7 +2246,11 @@ app.get('/', async (req, res) => {
     // v28.147 perf: in lazy mode start the sku-data download from <head>, in parallel with the app bundles (was only after
     // they downloaded + ran). lazyLoadSkuData() consumes window.__HZ_SKUP and falls back to its own fetch if this one failed.
     const EARLY_SKU = _lazy ? '<script>try{window.__HZ_SKUP=fetch("/api/demand/sku-data").then(function(r){if(!r.ok)throw new Error("sku-data "+r.status);return r.json();});window.__HZ_SKUP.catch(function(){});}catch(e){}</script>' : '';
-    html = html.replace('<head>', () => '<head>' + hzHealthTag('staff') + HEAD_NOFLASH + G_JS + EARLY_SKU);   // G_JS in <head>: the data must exist before the first (static) body script runs. v28.159: health capture first, so boot errors are caught
+    // v28.181 (Ben, perf): a load straight onto DEMAND > Actions (reload / deep link) starts its two reads here too, in parallel with
+    // the bundles and the sku-data (they used to start only after the bundles ran and the shell routed, ~4 s into a cold boot).
+    // daFetchData() consumes window.__HZ_DAP (same [rows, state] shape) and falls back to its own fetch if this one failed.
+    const EARLY_DA = '<script>try{if(/^#\\/demand\\/actions(\\/|$)/.test(location.hash||"")){window.__HZ_DAP=Promise.all([fetch("/api/demand-actions").then(function(r){return r.json();}),fetch("/api/demand-actions/state").then(function(r){return r.json();}).catch(function(){return {state:{}};})]);window.__HZ_DAP.catch(function(){});}}catch(e){}</script>';
+    html = html.replace('<head>', () => '<head>' + hzHealthTag('staff') + HEAD_NOFLASH + G_JS + EARLY_SKU + EARLY_DA);   // G_JS in <head>: the data must exist before the first (static) body script runs. v28.159: health capture first, so boot errors are caught
     if (IS_SANDBOX) {
       html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
@@ -7530,7 +7545,7 @@ function _lcInvalidateLocal(names) { if (!names || !names.size) return 0; const 
 // "every supply edit stales the portal" rule as before, now through the scope); the client-portal types only touch 'cp:' / 'cpu:'.
 const _CD_PO = ['po-rows', 'po-kids', 'order-plan', 'order-plan-exceptions', 'actions', 'sec:cashflow', 'sec:bi', 'sec:manufacturing',
   'sec:payments-report', 'sec:shipments', 'sec:deposits', 'sec:payments-by-supplier', 'sec:shipment-plan', 'sec:pipeline', 'sec:upcoming',
-  'portal:pos', 'portal:lines', 'pb:*'];   // every build that reads purchase_orders / its lines (v28.175: + the supplier-portal PO / line bases and payloads)
+  'portal:pos', 'portal:lines', 'pb:*', 'demand-actions'];   // every build that reads purchase_orders / its lines (v28.175: + the supplier-portal PO / line bases and payloads; v28.181: + DEMAND > Actions base, avg PO line cost per category)
 const CACHE_DEPS = {
   'po-fields': _CD_PO,                                    // PO header field that cannot move the open-PO picker: dates, payment plan, refs, deposit / shipment link, packing, notes (patch on purchase_orders, Fulfil date sync)
   po: _CD_PO.concat('lookups'),                           // PO created / imported / status / master link: + lookups (lists open, non-child POs)
@@ -19227,7 +19242,8 @@ const TARGET_MARKETS = ['UK', 'US', 'EU', 'AU'];
 // Season-to-date sell-through per category × market = sold ÷ (sold + on-hand). Season starts 1 Mar
 // (FY Mar–Feb); on-hand pools AWD into US. A monthly-data proxy (no opening/intake history). Used by Demand Actions.
 async function stActuals() {
-  const act = (await pool.query(`
+  // v28.181 (Ben): the two reads are independent, so both go out at once (was two serial round trips).
+  const _pAct = pool.query(`
     WITH ss AS (SELECT make_date(extract(year from current_date)::int - CASE WHEN extract(month from current_date)<3 THEN 1 ELSE 0 END, 3, 1) d),
     sold AS (SELECT p.category, upper(sa.country) market, sum(sa.units)::numeric u
       FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, ss
@@ -19237,14 +19253,17 @@ async function stActuals() {
       FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku WHERE p.category IS NOT NULL GROUP BY 1,2)
     SELECT coalesce(sold.category,oh.category) category, coalesce(sold.market,oh.market) market,
       coalesce(sold.u,0) sold, coalesce(oh.u,0) onhand
-    FROM sold FULL OUTER JOIN oh ON sold.category=oh.category AND sold.market=oh.market`)).rows;
+    FROM sold FULL OUTER JOIN oh ON sold.category=oh.category AND sold.market=oh.market`);
   // last full month units per category × market = the run rate for cover
-  const runMap = {};
-  (await pool.query(`
+  const _pRun = pool.query(`
     WITH lc AS (SELECT (date_trunc('month',current_date) - interval '1 month')::date m)
     SELECT p.category, upper(sa.country) market, sum(sa.units)::numeric u
     FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, lc
-    WHERE sa.month=lc.m AND p.category IS NOT NULL GROUP BY 1,2`)).rows
+    WHERE sa.month=lc.m AND p.category IS NOT NULL GROUP BY 1,2`);
+  _pRun.catch(() => {});   // a failure surfaces through the await below (never an unhandled rejection while act is awaited)
+  const act = (await _pAct).rows;
+  const runMap = {};
+  (await _pRun).rows
     .forEach(r => { runMap[r.category + '|' + r.market] = Number(r.u) || 0; });
   const actuals = {};
   act.forEach(r => { const s = Number(r.sold), o = Number(r.onhand); if (s + o > 0 && TARGET_MARKETS.includes(r.market)) {
@@ -19255,8 +19274,19 @@ async function stActuals() {
 }
 // DEMAND ▸ Actions — demand-side exceptions (category × market): sell-through vs target (markdown / stock
 // signals) and trading vs last year. Monthly data; season-to-date ST + last complete month YoY.
-app.get('/api/demand-actions', async (req, res) => {
-  try {
+// v28.181 (Ben, perf): split into a cached BASE (every row, sorted, WITHOUT lifecycle status: sell-through, LY, calendar, PO cost;
+// the 7 reads above) and the lifecycle state, read live on every request (ONE query, today + demand_action_state) and laid over
+// a copy of the base rows. So a dismiss / snooze / done / restore shows on the very next load on any instance (the old v28.089
+// RESP_CACHE entry cached the status too and served a just-dismissed action as open for up to 90 s). The base is a v28.167 lazy
+// cache ('demand-actions' in CACHE_DEPS): built on the first request (no boot warm, no timer), TTL 90 s like the old entry, and
+// never served past 90 s (hard = ttl: that request waits for a rebuild, so the data is never older than before). Marked stale by
+// PO line / PO edits (avg PO cost per category, the old supply-epoch bust), trading-calendar writes (+ read-your-writes for the
+// editor) and another instance's edit (shared epoch). It reads no forecast or SKU override data, so forecast saves need no mark.
+// Output is byte-identical to the uncached route (same rows, key order, sort; status / snooze_until appended last as before).
+const DEMAND_ACTIONS_TTL_MS = 90000;
+const _daBaseSt = _lcNew('demand-actions', _demandActionsBase, DEMAND_ACTIONS_TTL_MS, { hard: DEMAND_ACTIONS_TTL_MS });
+async function _demandActionsBase() {
+  {
     // fire every independent query at once (none depends on another) → collapses ~7 serial round-trips into
     // one parallel wave (~2.6s → ~0.7s); the processing below is unchanged.
     const _pTargets = Promise.resolve({ rows: [] });   // Sell-through targets decommissioned (Ben 17-Aug-26) — no targets; Demand Actions shows ST% without a target comparison
@@ -19280,8 +19310,7 @@ app.get('/api/demand-actions', async (req, res) => {
       WHERE event_date IS NOT NULL AND event_date >= current_date
         AND event_date <= current_date + interval '42 days'
       ORDER BY event_date`);
-    const _pToday = pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`);
-    const _pState = pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.demand_action_state`);
+    [_pSt, _pCost, _pLy, _pCal].forEach((p) => p.catch(() => {}));   // v28.181: a failure surfaces through its await below (no unhandled rejection meanwhile)
     const tmap = {}, ctmap = {};
     (await _pTargets)
       .rows.forEach(t => { var k = t.category + '|' + t.market;
@@ -19338,15 +19367,31 @@ app.get('/api/demand-actions', async (req, res) => {
         pushCal('info', cat || 'ALL', mkt || 'ALL', e.id, e.title + ' ' + when + upTxt + tail + ' — review cover', 0);
       }
     });
-    // attach lifecycle state (dismissed / snoozed / done); snooze expires back to open
-    const today = (await _pToday).rows[0].d;
-    const state = {};
-    (await _pState).rows.forEach(s => { state[s.action_key] = s; });
-    out.forEach(o => { const s = state[o.key]; o.status = 'open'; o.snooze_until = null;
-      if (s) { if (s.status === 'snoozed' && (!s.snooze_until || s.snooze_until >= today)) { o.status = 'snoozed'; o.snooze_until = s.snooze_until; }
-        else if (s.status !== 'snoozed') o.status = s.status; } });
+    // v28.181: the sort reads severity / impact / cat only (never the status), so sorting the base gives the old order.
     const rank = { high: 0, amber: 1, info: 2 };
     out.sort((a, b) => (rank[a.severity] - rank[b.severity]) || (b.impact - a.impact) || (a.cat < b.cat ? -1 : 1));
+    return out;
+  }
+}
+// v28.181 (Ben): today + the whole lifecycle state map in ONE round trip (was two queries; today comes back even with no rows).
+async function _demandActionState() {
+  const r = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') today,
+      (SELECT coalesce(json_agg(json_build_object('action_key', action_key, 'status', status, 'snooze_until', to_char(snooze_until,'YYYY-MM-DD'))), '[]'::json)
+       FROM planner.demand_action_state) rows`)).rows[0];
+  return { today: r.today, rows: r.rows || [] };
+}
+app.get('/api/demand-actions', async (req, res) => {
+  try {
+    const _pS = _demandActionState(); _pS.catch(() => {});   // live state, in parallel with the (usually cached) base
+    const base = await _lcGet(_daBaseSt);
+    // attach lifecycle state (dismissed / snoozed / done); snooze expires back to open. Onto COPIES: the cached base is shared.
+    const st = await _pS, today = st.today;
+    const state = {};
+    st.rows.forEach(s => { state[s.action_key] = s; });
+    const out = base.map(b => { const o = Object.assign({}, b), s = state[o.key]; o.status = 'open'; o.snooze_until = null;
+      if (s) { if (s.status === 'snoozed' && (!s.snooze_until || s.snooze_until >= today)) { o.status = 'snoozed'; o.snooze_until = s.snooze_until; }
+        else if (s.status !== 'snoozed') o.status = s.status; }
+      return o; });
     res.json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -19369,10 +19414,9 @@ app.post('/api/demand-actions/state', async (req, res) => {
 // done/snooze/dismiss status). Snoozes past their date read back as 'open'.
 app.get('/api/demand-actions/state', async (req, res) => {
   try {
-    const today = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
+    const st = await _demandActionState(), today = st.today;   // v28.181 (Ben): one round trip (was two serial queries)
     const state = {};
-    (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.demand_action_state`))
-      .rows.forEach(s => {
+    st.rows.forEach(s => {
         let status = s.status, snooze_until = null;
         if (s.status === 'snoozed') { if (!s.snooze_until || s.snooze_until >= today) { snooze_until = s.snooze_until; } else status = 'open'; }
         if (status !== 'open') state[s.action_key] = { status, snooze_until };
