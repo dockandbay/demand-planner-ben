@@ -2250,7 +2250,7 @@
             ov.innerHTML='<div style="position:absolute;top:14px;right:18px;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.9);color:var(--nav);font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer" title="close">✕</div><img src="'+src+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">'; ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
           function isImgMime(m){ return /^image\//i.test(String(m||'')); }
           // One document/photo row: image → thumbnail (click to enlarge) + download; other → download link.
-          function docRow(x){ var att=(EP.attachImgBase||'/api/supply/portal-attachment/')+x.id, dl='/api/product/doc/'+x.id, kb=Math.max(1,Math.round((x.byte_size||0)/1024));
+          function docRow(x){ var att=(EP.attachImgBase||'/api/supply/portal-attachment/')+x.id, dl=EP.productDocBase?(EP.productDocBase+x.id+'?download=1'):('/api/product/doc/'+x.id), kb=Math.max(1,Math.round((x.byte_size||0)/1024));
             var gutter=isImgMime(x.mime)?'<img class="pp-doc-img" data-src="'+att+'" src="'+att+'" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;flex:none" title="click to enlarge">':'<div style="width:46px;height:46px;border-radius:6px;border:1px solid var(--line2);background:#fafbfc;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--line);flex:none">📄</div>';
             return '<div style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid #f4f4f5">'+gutter+'<div style="min-width:0"><a href="'+dl+'" download style="color:var(--blue);text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a> <span style="color:var(--faint)" title="download">⤓</span><div class="mut tiny">'+kb+' KB · '+esc(x.uploaded_at||'')+'</div></div></div>'; }
           function ppProdDocs(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
@@ -3130,7 +3130,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 function v(f){ var el=scope.querySelector('.pp-dtc[data-po="'+CSS.escape(po)+'"][data-f="'+f+'"]'); return el?el.value.trim():''; }
                 var payload={po:po,cartons:v('cartons'),cbm:v('cbm'),gross_weight_kg:v('gross_weight_kg'),dimensions:v('dimensions'),entered_by:by};
                 btn.disabled=true; var row=btn.closest('tr[id^="pp-"]');
-                postJSON('/api/supply/dtc-shipment',payload,function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;}
+                postJSON(EP.dtcShipment||'/api/supply/dtc-shipment',payload,function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;}
                   var p=_ppData.pos.filter(function(x){return x.po===po;})[0];
                   if(p){ p.dtc_cartons=payload.cartons===''?null:parseInt(payload.cartons,10); p.dtc_cbm=payload.cbm===''?null:Number(payload.cbm); p.dtc_weight=payload.gross_weight_kg===''?null:Number(payload.gross_weight_kg); p.dtc_dimensions=payload.dimensions; if(!p.dtc_entered_at)p.dtc_entered_at='just now'; }
                   refreshRow(row,po); }); }; });

@@ -1158,6 +1158,62 @@ app.use((req, res, next) => {
   res.set('content-type', 'text/html').send(`<!doctype html><meta charset=utf8><title>Dock & Bay — Demand Planner</title><style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}form{background:#1e293b;padding:36px 40px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.4);text-align:center}h1{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:#94a3b8;margin:0 0 4px}h2{font-size:20px;margin:0 0 22px}input{padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#fff;width:200px;text-align:center}button{margin-left:8px;padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}</style><form method=get><h1>Dock &amp; Bay</h1><h2>Demand Planner</h2><input name=key type=password placeholder="Access key" autofocus><button>Enter</button></form>`);
 });
 
+// v28.186 (Ben, deep dive C2): explicit staff-only guard for the staff routes the supplier portal used to call (portal-attachment,
+// product swatch / doc / thumb, dtc-shipment). The portal now has its own scoped twins under /api/portal/*; these never accept a
+// portal session. Under PLANNER_KEY the outer staff gate has already run; a request that ALSO carries a portal session (psid) must
+// carry a staff credential too (planner key header / pk cookie, or the prod harness's signed login cookie via authUser), so a gate
+// that lets portal traffic through (prod login-gate exemptions) still can not hand these routes to a supplier. Staff requests
+// without a psid are left to the gate exactly as before. Without a GATE (local / sandbox, where every staff route is open by
+// design) a request carrying a psid that does not come from a staff page (same-origin Referer outside /portal) is refused.
+function _hzStaffReferer(req) { try { const u = new URL(String(req.get('referer') || '')); return u.host === String(req.get('host') || '') && !u.pathname.startsWith('/portal'); } catch (_) { return false; } }
+function staffOnly(req, res, next) {
+  if (GATE) {
+    if (!cookieVal(req, 'psid') || safeEq(req.get('x-planner-key'), GATE) || safeEq(cookieVal(req, 'pk'), GATE) || authUser(req)) return next();
+    hzSecurityNote(req, 401, 'portal session on a staff route');
+    return res.status(401).json({ error: 'unauthorised' });
+  }
+  if (cookieVal(req, 'psid') && !_hzStaffReferer(req)) { hzSecurityNote(req, 403, 'portal session on a staff route'); return res.status(403).json({ error: 'staff only' }); }
+  next();
+}
+// v28.186 (Ben): portal access refusals in the App health log (kind api_failure, source server). Aggregated per route + supplier
+// ids + reason; no email, ids or file names of the target, so the log shows attempted access without sensitive detail.
+function hzSecurityNote(req, status, reason) { try {
+  const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : String(req.path || '');
+  const sids = (req.portal && Array.isArray(req.portal.supplierIds)) ? req.portal.supplierIds.slice(0, 5).join(',') : '';
+  hzHealthEvt('api_failure', 'sec|' + req.method + '|' + route + '|' + status + '|' + sids + '|' + reason, { method: req.method, path: route, status,
+    message: 'access refused: ' + String(reason || '').slice(0, 120) + (sids ? ' (supplier id ' + sids + ')' : ''), meta: { security: true, supplier_ids: sids || null, reason: String(reason || '').slice(0, 120) } });
+  hzHealthFlush(false);
+} catch (_) {} }
+
+// v28.186 (Ben, deep dive M6): suppliers never see raw error text. On /api/portal/* any 5xx body, and any 4xx whose message looks
+// internal (SQL / pg / stack / file path), is replaced with a generic message plus a short reference; the original is logged
+// server-side with that reference (log500 has already logged the stack for handlers that call it). Every 403 is noted in the
+// App health log (hzSecurityNote) with the supplier id and the refusal reason.
+const PORTAL_ERR_GENERIC = 'Something went wrong on our side. Please try again; if it keeps happening, contact Dock & Bay and quote ref ';
+const _PORTAL_INTERNAL_RE = /(relation "|column "|syntax error|violates|duplicate key|invalid input syntax|null value in column|does not exist|ECONN|file:\/\/|\/Users\/|\/var\/task|node_modules|\n\s+at |TypeError|ReferenceError|Cannot read propert)/i;
+app.use((req, res, next) => {
+  if (!String(req.path || '').startsWith('/api/portal/')) return next();
+  const _json = res.json.bind(res), _send = res.send.bind(res);
+  const _ref = () => crypto.randomBytes(3).toString('hex').toUpperCase();
+  const _log = (r, msg) => { try { console.error('[portal-err ' + r + '] ' + req.method + ' ' + String(req.originalUrl || req.url || '').split('?')[0] + ' ' + res.statusCode + ' - ' + String(msg || '').split('\n')[0].slice(0, 500)); } catch (_) {} };
+  res.json = function (body) {
+    try {
+      const st = res.statusCode;
+      if (st >= 400 && body && typeof body === 'object' && typeof body.error === 'string') {
+        if (st === 403) res._hzErr = body.error;
+        if (st >= 500 || _PORTAL_INTERNAL_RE.test(body.error)) { const r = _ref(); _log(r, body.error); res._hzPortalSan = true; body = { error: PORTAL_ERR_GENERIC + r + '.', ref: r }; }
+      }
+    } catch (_) {}
+    return _json(body);
+  };
+  res.send = function (body) {
+    try { if (!res._hzPortalSan && res.statusCode >= 500 && typeof body === 'string' && !/^\s*[{[]/.test(body)) { const r = _ref(); _log(r, body); res._hzPortalSan = true; body = 'Something went wrong (ref ' + r + ')'; } } catch (_) {}
+    return _send(body);
+  };
+  res.on('finish', () => { if (res.statusCode === 403) hzSecurityNote(req, 403, res._hzErr || 'forbidden'); });
+  next();
+});
+
 // v28.116 (review S1): the sign-upload routes were registered BEFORE the access gate → reachable with no key at all.
 // Now below it: the admin route is planner-key gated; the portal route keeps its magic-link session (exempt via /api/portal/*).
 app.post('/api/storage/sign-upload', signUploadHandler);
@@ -1288,7 +1344,7 @@ app.use(async (req, res, next) => {
 //  - portal SHARED (anything else that writes: PO / line / cost / shipment / sample / product / onboarding): invalidateSupplyCaches('portal-po').
 //  - client portal order (POST /api/cp/order) and the Fulfil sales import: 'client-order'; any other CLIENT-module admin write: 'client'.
 //  - supplier price list (portal submit or admin /api/supply/price-list*): the price-list payload memo (_plCache), as before.
-const HZ_PORTAL_W_SKIP = new Set(['health', 'storage', 'parse-invoice', 'request-link', 'logout', 'asset', 'img']);
+const HZ_PORTAL_W_SKIP = new Set(['health', 'storage', 'parse-invoice', 'request-link', 'logout', 'redeem', 'asset', 'img']);   // v28.186: + redeem (magic-link sign-in, no data write)
 const HZ_PORTAL_W_OWN = new Set(['note', 'note-read', 'note-delete', 'sample-note-delete', 'product-notes-read', 'product-note', 'sample-note-read',
   'sample-note', 'spec-approve', 'quality-doc', 'price-list', 'onboarding']);   // price list / onboarding: not in the payload (own endpoints); onboarding handlers mark what they need
 const HZ_PORTAL_W_SHIPNOTE = new Set(['shipment-note', 'shipment-notes-read', 'shipment-note-delete']);   // own, but a shipment's unread badge is shared
@@ -9386,9 +9442,9 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     if (!u) return res.status(404).json({ error: 'no such portal user' });
     if (!u.active) return res.status(400).json({ error: 'user is inactive — activate before issuing a link' });
     const token = crypto.randomBytes(24).toString('hex');
-    await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [token, u.email]);
+    await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [token, u.email, PORTAL_LINK_HOURS]);   // v28.186 (Ben): 24 h link life (was 7 days)
     const base = portalLinkBase(req);   // v28.151 (review B5)
-    res.json({ email: u.email, url: base + '/portal?token=' + token, expires_days: 7 });
+    res.json({ email: u.email, url: base + '/portal?token=' + token, expires_hours: PORTAL_LINK_HOURS, expires_days: Math.round(PORTAL_LINK_HOURS / 24 * 10) / 10 });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
@@ -10506,16 +10562,20 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
     res.json({ sizes, samples, components: compsR.rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/product/swatch/:ref', async (req, res) => {
-  try { let r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
-    if (r && !r.swatch) {   // v27.708: no uploaded swatch → the latest ADMIN file's thumbnail (explicit "latest" pick first, else newest with a thumb)
-      const t = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE po=$1 AND category='product' AND coalesce(uploader_kind,'internal')<>'supplier' AND thumb IS NOT NULL ORDER BY (is_latest IS TRUE) DESC, uploaded_at DESC LIMIT 1`, [req.params.ref])).rows[0];
-      if (t) r = { swatch: t.thumb, swatch_mime: t.thumb_mime || 'image/png' }; }
-    if (!r || !r.swatch) return res.status(404).end();
-    // The client always requests with ?t=<updated_at>, so a re-uploaded swatch is a new URL — safe to cache hard.
-    // (Was 'no-cache', which forced a full re-download of the image on every render → the Product grid felt slow.)
-    res.setHeader('Content-Type', r.swatch_mime || 'image/png'); res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); res.end(r.swatch);
-  } catch (e) { log500(e); res.status(500).end(); }
+// v28.186 (Ben): shared by the staff route and the portal twin /api/portal/product-swatch/:ref (ownership checked there).
+async function serveProductSwatch(res, ref) {
+  let r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
+  if (r && !r.swatch) {   // v27.708: no uploaded swatch → the latest ADMIN file's thumbnail (explicit "latest" pick first, else newest with a thumb)
+    const t = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE po=$1 AND category='product' AND coalesce(uploader_kind,'internal')<>'supplier' AND thumb IS NOT NULL ORDER BY (is_latest IS TRUE) DESC, uploaded_at DESC LIMIT 1`, [ref])).rows[0];
+    if (t) r = { swatch: t.thumb, swatch_mime: t.thumb_mime || 'image/png' }; }
+  if (!r || !r.swatch) return res.status(404).end();
+  // The client always requests with ?t=<updated_at>, so a re-uploaded swatch is a new URL; safe to cache hard.
+  // (Was 'no-cache', which forced a full re-download of the image on every render → the Product grid felt slow.)
+  // v28.186: 'private' (was public): a gated / session-scoped image is never stored by a shared cache.
+  res.setHeader('Content-Type', safeMime(r.swatch_mime || 'image/png')); res.setHeader('Cache-Control', 'private, max-age=31536000, immutable'); res.end(r.swatch);
+}
+app.get('/api/product/swatch/:ref', staffOnly, async (req, res) => {
+  try { return await serveProductSwatch(res, req.params.ref); } catch (e) { log500(e); res.status(500).end(); }
 });
 app.post('/api/product/item', async (req, res) => {
   const b = req.body || {};
@@ -10947,7 +11007,7 @@ app.post('/api/product/doc', async (req, res) => {
     try { await pool.query(`UPDATE planner.product_dev_items SET updated_at=now() WHERE ref=$1`, [ref]); } catch (e) {}   // busts the ?t= swatch cache when the auto swatch changes
     res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize, version: v, has_thumb: !!thumb }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/product/doc/:id/thumb', async (req, res) => {   // v27.708 the small PNG rendered at upload (shown in the Documents tab; also the auto swatch)
+app.get('/api/product/doc/:id/thumb', staffOnly, async (req, res) => {   // v27.708 the small PNG rendered at upload (shown in the Documents tab; also the auto swatch)
   try { const r = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
     if (!r || !r.thumb) return res.status(404).end(); res.setHeader('Content-Type', r.thumb_mime || 'image/png'); res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); res.end(r.thumb);
   } catch (e) { log500(e); res.status(500).end(); }
@@ -10961,7 +11021,7 @@ app.post('/api/product/doc/:id/latest', async (req, res) => {
     try { await logProductChange(d.po, 'Latest version → ' + ((await pool.query(`SELECT filename FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0] || {}).filename, null, authUser(req) || 'Dock & Bay'); } catch (e) {}
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/product/doc/:id', async (req, res) => {
+app.get('/api/product/doc/:id', staffOnly, async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     return serveStored(res, r);
@@ -12045,6 +12105,7 @@ async function deleteLatestNote(res, table, keyCol, id, opts) {
         return res.status(403).json({ error: 'can only delete your own messages' });
     }
     if (opts.ownsKey && !(await opts.ownsKey(row.k))) return res.status(403).json({ error: 'not your thread' });
+    if (opts.ownsAuthor && !(await opts.ownsAuthor(row.author_email))) return res.status(403).json({ error: 'can only delete your own messages' });   // v28.186 (Ben): shared shipments
     const latest = (await pool.query(`SELECT id FROM planner.${table} WHERE ${keyCol}=$1 ORDER BY created_at DESC, id DESC LIMIT 1`, [row.k])).rows[0];
     if (!latest || String(latest.id) !== String(id)) return res.status(409).json({ error: 'only the most recent message can be deleted' });
     await pool.query(`DELETE FROM planner.${table} WHERE id=$1`, [id]);
@@ -12712,13 +12773,15 @@ app.get('/api/portal/asn-labels/:po', portalAuth, async (req, res) => {
 });
 // DTC shipment details (supplier-entered in portal ▸ SHIPMENT). Upsert + a supplier timeline note so it shows on
 // the PO timeline and lights the admin ✉ bell. entered_by/entered_at are kept from the first entry; updated_at moves.
-app.post('/api/supply/dtc-shipment', async (req, res) => {
-  const b = req.body || {}, po = (b.po || '').trim();
-  if (!po) return res.status(400).json({ error: 'po required' });
+// v28.186 (Ben, C2): the save is shared with the portal twin POST /api/portal/dtc-shipment (own PO only, entered_by = session).
+async function dtcShipmentSave(po, b, by) {
   const num = numOrNull;
   const cartons = (b.cartons === '' || b.cartons == null) ? null : parseInt(b.cartons, 10);
-  const cbm = num(b.cbm), wt = num(b.gross_weight_kg), dims = (b.dimensions || '').trim() || null, by = (b.entered_by || '').trim() || null;
-  try {
+  if (cartons != null && (!Number.isFinite(cartons) || cartons < 0)) throw Object.assign(new Error('Cartons must be a whole number.'), { status: 400 });
+  const cbm = num(b.cbm), wt = num(b.gross_weight_kg), dims = String(b.dimensions || '').trim().slice(0, 200) || null;
+  if ((cbm != null && cbm < 0) || (wt != null && wt < 0)) throw Object.assign(new Error('CBM and weight cannot be negative.'), { status: 400 });
+  by = String(by || '').trim() || null;
+  {
     const existed = (await pool.query(`SELECT 1 FROM planner.dtc_shipment_details WHERE po=$1`, [po])).rowCount > 0;
     await pool.query(`INSERT INTO planner.dtc_shipment_details (po, cartons, cbm, gross_weight_kg, dimensions, entered_by, entered_at, updated_at)
       VALUES ($1,$2,$3,$4,$5,$6,now(),now())
@@ -12734,8 +12797,13 @@ app.post('/api/supply/dtc-shipment', async (req, res) => {
     const sr = await pool.query(`SELECT s.id FROM planner.purchase_orders po JOIN planner.suppliers s ON s.name=po.supplier_name WHERE po.po=$1`, [po]);
     const sid = (sr.rows[0] && sr.rows[0].id) || null;
     await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [po, sid, by, noteBody]);
-    res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  }
+}
+app.post('/api/supply/dtc-shipment', staffOnly, async (req, res) => {   // admin portal preview (acting as a supplier)
+  const b = req.body || {}, po = (b.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  try { await dtcShipmentSave(po, b, b.entered_by); res.json({ ok: true }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
@@ -12841,10 +12909,10 @@ app.post('/api/supply/report-note/:id/delete', async (req, res) => {
 // One file per call, 4MB cap (413 above it), stored in portal_attachments with po = the timeline's ref (PO ref /
 // shipment ref / sample SR ref) and category 'timeline'; the note carrying it points at attachment_id (mig 269).
 const TL_ATT_MAX = 4 * 1024 * 1024;
-async function tlAttachInsert(ref, b, by, uploaderKind) {
+async function tlAttachInsert(ref, b, by, uploaderKind, supplierId) {
   const up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 });   // throws {status,message}
-  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,'timeline',$8) RETURNING id`,
-    [ref, String(b.filename || 'file').slice(0, 200), safeMime(b.mime), up.byteSize, up.buf, up.storagePath, by || null, uploaderKind]);
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind, supplier_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'timeline',$8,$9) RETURNING id`,
+    [ref, String(b.filename || 'file').slice(0, 200), safeMime(b.mime), up.byteSize, up.buf, up.storagePath, by || null, uploaderKind, supplierId || null]);   // v28.186: supplier_id = the portal uploader (null = Dock & Bay)
   return { id: r.rows[0].id, filename: b.filename || 'file', mime: safeMime(b.mime), byte_size: up.byteSize };
 }
 async function tlAttachRef(b) {   // kind + ref (or sample_id for the sample timeline) → the ref the file is keyed on
@@ -13560,7 +13628,7 @@ app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
   try { await pool.query(`UPDATE planner.supplier_submissions SET status='dismissed' WHERE id=$1`, [req.params.id]); res.json({ dismissed: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/supply/portal-attachment/:id', async (req, res) => {
+app.get('/api/supply/portal-attachment/:id', staffOnly, async (req, res) => {   // v28.186 (Ben, C2): staff only; the portal uses /api/portal/attachment/:id
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
@@ -20867,7 +20935,7 @@ const portalSuppliers = (email) => pool.query(
 async function sendMagicEmail(email, url) {
   // Uses the shared best-effort Resend sender (same method escalation now uses).
   await sendResendEmail({ kind: 'magic-link', ref: email, to: email, subject: 'Your Dock & Bay supplier portal link',
-    html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
+    html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid ${PORTAL_LINK_HOURS} hours, single use):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
 // SUG-0019 P3: notify each directed supplier of a new spec needing confirmation, with an auto-login portal link.
 async function emailSpecToSuppliers(names, specType, base) {
@@ -20880,7 +20948,7 @@ async function emailSpecToSuppliers(names, specType, base) {
     for (const email of recips) {
       if (done.has(email)) continue; done.add(email);
       let url = base + '/portal';
-      try { const tok = portalToken(); await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, email]); url = base + '/portal?token=' + tok; } catch (e) {}
+      try { const tok = portalToken(); await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tok, email, PORTAL_LINK_HOURS]); url = base + '/portal?token=' + tok; } catch (e) {}   // v28.186 (Ben): 24 h link life
       await sendResendEmail({ kind: 'spec-approval', ref: name, to: email,
         subject: 'New ' + specType + ' specification to confirm — Dock & Bay',
         html: `<p>Hi,</p><p>Dock &amp; Bay has published a new <b>${specType}</b> specification that requires your confirmation.</p><p>Please review and confirm it under <b>Specifications</b> in your supplier portal:</p><p><a href="${url}">${url}</a></p>` });
@@ -24233,22 +24301,86 @@ async function portalOwnsPO(req, po) {
   const r = (await pool.query(`SELECT supplier_name FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
   return !!(r && req.portal.suppliers.includes(r.supplier_name));
 }
+// v28.186 (Ben): ONE shipment ownership rule for every portal shipment route (notes, charges, tracking, shipment plan, status).
+// 'master' = the caller supplies the shipment's master PO (shipments.master_po, else the ref itself when it is a PO number; the
+// consolidator the Shipment Plan shows, e.g. PO-55EUWK3), 'rider' = the caller has a PO aboard (purchase_orders.shipment_ref = ref),
+// null = not theirs. The ref must be a real shipment (a shipments row or a PO aboard), so a bare PO number is not a shipment.
+// Only the master may change shipment-level fields (status / dates / carrier / tracking); riders read and add their own notes / files.
+async function portalShipmentRole(req, ref) {
+  ref = String(ref || '').trim(); const sups = (req.portal && req.portal.suppliers) || [];
+  if (!ref || !sups.length) return null;
+  const r = (await pool.query(`SELECT
+      EXISTS (SELECT 1 FROM planner.shipments sh WHERE sh.shipment_ref=$1) OR EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1) real_ship,
+      EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce((SELECT nullif(sh.master_po,'') FROM planner.shipments sh WHERE sh.shipment_ref=$1), $1) AND mp.supplier_name = ANY($2)) is_master,
+      EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1 AND p.supplier_name = ANY($2)) is_rider`, [ref, sups])).rows[0];
+  if (!r || !r.real_ship) return null;
+  return r.is_master ? 'master' : r.is_rider ? 'rider' : null;
+}
+async function portalOwnsShipmentRef(req, ref) { return !!(await portalShipmentRole(req, ref)); }
+// v28.186 (Ben, deep dive C1 / M8): may this portal session read portal_attachments row `id`? One rule for the file route and for
+// every note that references an attachment. Own = the file's PO is the caller's, or it hangs off the caller's sample request,
+// product-dev item (request-level for sample versions), or it is a SHIPMENT-TIMELINE file (category 'timeline' attached to a note
+// on that shipment, or uploaded by the caller) on a shipment the caller is on. A shared shipment never opens another supplier's PO
+// documents (invoices, packing lists, POs, specs, costs). Onboarding files have their own routes and are never served here.
+async function portalCanReadAttachment(req, id) {
+  const n = Number(id); if (!Number.isSafeInteger(n) || n <= 0) return false;
+  const a = (await pool.query(`SELECT id, po, coalesce(category,'') category, supplier_id FROM planner.portal_attachments WHERE id=$1`, [n])).rows[0];
+  if (!a || !a.po) return false;
+  if (/^onboarding/.test(a.category)) return false;
+  if (await portalOwnsPO(req, a.po)) return true;
+  if ((a.category === 'sample' || a.category === 'timeline') && await portalOwnsSampleRef(req, a.po)) return true;
+  if (a.category === 'product' && await portalOwnsProduct(req, a.po)) return true;
+  if (a.category === 'product_sample' && /^PSAMPLE-\d+$/.test(a.po)) {
+    const sid = a.po.slice(8);
+    const s = (await pool.query(`SELECT ps.item_ref, (SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id) req_sup FROM planner.product_dev_samples ps WHERE ps.id=$1`, [sid])).rows[0];
+    if (!s) return false;
+    if (s.req_sup) return (req.portal.suppliers || []).includes(s.req_sup);   // request-level: never a competing supplier's sample files
+    return portalOwnsProduct(req, s.item_ref);
+  }
+  if (a.category === 'product_dim' && /^PDIM-\d+$/.test(a.po)) {
+    const it = (await pool.query(`SELECT i.ref FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id JOIN planner.product_dev_items i ON i.id=s.item_id WHERE sd.id=$1`, [a.po.slice(5)])).rows[0];
+    return !!(it && await portalOwnsProduct(req, it.ref));
+  }
+  if (a.category === 'timeline' && await portalOwnsShipmentRef(req, a.po)) {
+    const ids = (req.portal.supplierIds || []).map(Number);
+    if (a.supplier_id != null && ids.includes(Number(a.supplier_id))) return true;   // the caller's own upload
+    return (await pool.query(`SELECT 1 FROM planner.shipment_notes WHERE attachment_id=$1 AND shipment_ref=$2 LIMIT 1`, [n, a.po])).rowCount > 0;
+  }
+  return false;
+}
+// Notes may carry an attachment id: blank = none; otherwise it must be a file the caller may read (same rule as the file route).
+async function portalAttachmentOk(req, v) { if (v == null || v === '' || v === 0 || v === '0') return true; return portalCanReadAttachment(req, v); }
+// The author of a shipment note is one of the caller's people (this session's email or another portal user of the same supplier).
+async function portalOwnsAuthor(req, email) {
+  const e = String(email || '').trim().toLowerCase(); if (!e) return false;
+  if (e === String(req.portal.email || '').toLowerCase()) return true;
+  return (await pool.query(`SELECT 1 FROM planner.supplier_portal_users WHERE lower(email)=$1 AND (supplier_name = ANY($2) OR supplier_id = ANY($3::bigint[])) LIMIT 1`,
+    [e, req.portal.suppliers || [], (req.portal.supplierIds || []).map(Number)])).rowCount > 0;
+}
 
+// v28.186 (Ben, deep dive M5): magic links. (a) A plain GET never consumes the token: corporate mail scanners pre-fetch links,
+// which used to burn them (supplier saw "expired") or receive the session. GET shows a "Continue to portal" page; its button POSTs
+// the token to /api/portal/redeem. (b) Redeem is ONE atomic UPDATE ... WHERE used_at IS NULL RETURNING, so two parallel clicks can
+// never mint two sessions. (c) Links live PORTAL_LINK_HOURS (default 24 h, was 7 days). The session itself still lasts 7 days.
+const PORTAL_LINK_HOURS = Math.max(1, Math.min(168, Number(process.env.PORTAL_LINK_HOURS) || 24));
+const PORTAL_TOKEN_RE = /^[0-9a-f]{32,128}$/;
+function portalContinuePage(token) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex">
+<title>Dock &amp; Bay supplier portal</title><style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh;display:flex;align-items:center;justify-content:center}
+form{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 8px 30px rgba(15,23,42,.06);padding:34px 36px;width:380px;max-width:92vw;box-sizing:border-box;text-align:center}
+h1{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#64748b;margin:0 0 2px}h2{font-size:21px;margin:0 0 6px}p{color:#64748b;margin:0 0 18px;font-size:14px}
+button{width:100%;border:0;border-radius:8px;padding:11px 13px;font-weight:600;cursor:pointer;font-size:15px;background:#2563eb;color:#fff}</style></head>
+<body><form method="post" action="/api/portal/redeem"><h1>Dock &amp; Bay</h1><h2>Supplier Portal</h2><p>Press the button to sign in. 点击按钮登录。</p>
+<input type="hidden" name="token" value="${_eh(token)}"><button type="submit">Continue to portal / 进入门户</button></form></body></html>`;
+}
 app.get('/portal', async (req, res) => {
   try {
     if (req.query.token) {
-      const t = (await pool.query(`SELECT email FROM planner.portal_magic_tokens WHERE token=$1 AND expires_at>now() AND used_at IS NULL`, [String(req.query.token)])).rows[0];
-      if (t) {
-        await pool.query(`UPDATE planner.portal_magic_tokens SET used_at=now() WHERE token=$1`, [String(req.query.token)]);
-        const sups = await portalSuppliers(t.email);
-        const psid = portalToken();
-        await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '7 days')`,
-          [psid, t.email, sups[0] ? sups[0].supplier_id : null]);
-        const secure = req.headers['x-forwarded-proto'] === 'https';
-        res.setHeader('Set-Cookie', `psid=${psid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${secure ? '; Secure' : ''}`);
-        return res.redirect('/portal');   // strip the token from the URL
-      }
-      return res.redirect('/portal?e=expired');
+      const tok = String(req.query.token);
+      const ok = PORTAL_TOKEN_RE.test(tok) && (await pool.query(`SELECT 1 FROM planner.portal_magic_tokens WHERE token=$1 AND expires_at>now() AND used_at IS NULL`, [tok])).rowCount > 0;
+      if (!ok) return res.redirect('/portal?e=expired');
+      res.set('content-type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex');
+      return res.send(portalContinuePage(tok));   // read-only: the token is consumed only by the POST below
     }
     var _pp = (DEV ? loadPortalPage() : PORTAL_PAGE).split('__APP_VERSION__').join(APP_VERSION);   // stamp version for the auto-update poll
     _pp = _pp.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());   // HORIZON theme (tokens + font) — __HZ_THEME__
@@ -24259,28 +24391,53 @@ app.get('/portal', async (req, res) => {
   } catch (e) { log500(e); res.status(500).send('portal error'); }
 });
 
+// v28.186 (Ben): redeem a magic link (the POST from the "Continue to portal" page). Atomic single use; a used / expired / unknown
+// token lands on the login page with "That link expired". Form-encoded (no JS needed) or JSON.
+app.post('/api/portal/redeem', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+  const tok = String((req.body && req.body.token) || '');
+  const wantsJson = /json/i.test(String(req.headers['content-type'] || ''));
+  const fail = () => wantsJson ? res.status(410).json({ error: 'link expired' }) : res.redirect(303, '/portal?e=expired');
+  try {
+    if (!PORTAL_TOKEN_RE.test(tok)) return fail();
+    const t = (await pool.query(`UPDATE planner.portal_magic_tokens SET used_at=now() WHERE token=$1 AND used_at IS NULL AND expires_at>now() RETURNING email`, [tok])).rows[0];
+    if (!t) return fail();
+    const sups = await portalSuppliers(t.email);
+    if (!sups.length) return fail();   // the user was deactivated after the link went out
+    const psid = portalToken();
+    await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '7 days')`, [psid, t.email, sups[0].supplier_id]);
+    res.setHeader('Set-Cookie', `psid=${psid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
+    return wantsJson ? res.json({ ok: true }) : res.redirect(303, '/portal');
+  } catch (e) { log500(e); return wantsJson ? res.status(500).json({ error: 'error' }) : res.redirect(303, '/portal?e=expired'); }
+});
+
+// v28.186 (Ben, deep dive M5d): request-link answers the same body at the same time whether or not the email is registered. The
+// lookup + token + email run, and the response waits for a fixed window (1.8 s plus up to 0.3 s jitter) whichever finishes first,
+// so the known path (insert + email send) cannot be told apart by timing. Work still running at the deadline carries on (the
+// long-lived server always completes it; on Vercel an email send slower than the window may be cut, which only ever costs a resend).
+const PORTAL_LINK_WINDOW_MS = 1800;
 app.post('/api/portal/request-link', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   // v28.151 (review B5): same rate limit as /api/cp/request-link (20/h per IP, 5/h per email); separate key prefix
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
   if (_cpRateLimited('pip:' + ip, 20, 3600000) || (email && _cpRateLimited('pem:' + email, 5, 3600000))) return res.status(429).json({ error: 'too many requests, please wait a few minutes and try again' });
-  try {
-    if (email) {
-      const sups = await portalSuppliers(email);
-      if (sups.length) {
-        const tok = portalToken();
-        await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, email]);
-        const base = portalLinkBase(req);   // v28.151 (review B5)
-        await sendMagicEmail(email, base + '/portal?token=' + tok);
-      }
-    }
-    res.json({ ok: true });   // always ok — never reveal whether an email is registered
-  } catch (e) { res.json({ ok: true }); }
+  const deadline = new Promise((ok) => setTimeout(ok, PORTAL_LINK_WINDOW_MS + Math.floor(Math.random() * 300)));
+  const work = (async () => {
+    if (!email || email.length > 254) return;
+    const sups = await portalSuppliers(email);
+    if (!sups.length) return;
+    const tok = portalToken();
+    await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tok, email, PORTAL_LINK_HOURS]);
+    const base = portalLinkBase(req);   // v28.151 (review B5)
+    await sendMagicEmail(email, base + '/portal?token=' + tok);
+  })().catch((e) => { log500(e); });
+  await Promise.all([deadline, Promise.race([work, deadline])]);
+  res.json({ ok: true });   // always ok, never reveal whether an email is registered
 });
 
-app.post('/api/portal/logout', portalAuth, async (req, res) => {
-  try { const psid = cookieVal(req, 'psid'); if (psid) { _portalAuthMemo.delete(psid); await pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [psid]); } } catch {}
-  res.setHeader('Set-Cookie', 'psid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax');
+// v28.186 (Ben, M5e): Sign out. No portalAuth: an expired session must still be able to clear its cookie. Deletes the session row.
+app.post('/api/portal/logout', async (req, res) => {
+  try { const psid = cookieVal(req, 'psid'); if (psid) { _portalAuthMemo.delete(psid); await pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [psid]); } } catch (e) { log500(e); }
+  res.setHeader('Set-Cookie', `psid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
   res.json({ ok: true });
 });
 
@@ -24490,17 +24647,38 @@ app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
 // Portal: delete the most recent timeline message — the supplier's OWN latest note only, on a thread they own.
 app.post('/api/portal/note-delete/:id', portalAuth, (req, res) =>
   deleteLatestNote(res, 'supplier_notes', 'po', req.params.id, { supplierOnly: true, ownsKey: (po) => portalOwnsPO(req, po) }));
+// v28.186 (Ben, M9): on a shared shipment a supplier may delete only a message written by their own people, never another supplier's.
 app.post('/api/portal/shipment-note-delete/:id', portalAuth, (req, res) =>
-  deleteLatestNote(res, 'shipment_notes', 'shipment_ref', req.params.id, { supplierOnly: true, ownsKey: (ref) => portalOwnsShipmentRef(req, ref) }));
+  deleteLatestNote(res, 'shipment_notes', 'shipment_ref', req.params.id, { supplierOnly: true, ownsKey: (ref) => portalOwnsShipmentRef(req, ref), ownsAuthor: (em) => portalOwnsAuthor(req, em) }));
 app.post('/api/portal/sample-note-delete/:id', portalAuth, (req, res) =>
   deleteLatestNote(res, 'sample_notes', 'sample_id', req.params.id, { supplierOnly: true, ownsKey: async (sid) => !!(await portalOwnsSample(req, sid)) }));
-// Serve an uploaded invoice/doc — only if its PO belongs to the session's supplier.
+// Serve an uploaded file to the portal. v28.186 (Ben, C1 + C2): the ONE portal file route. Ownership via portalCanReadAttachment
+// (own PO / sample / product item / shipment-timeline file on a shipment the caller is on). It also serves the note images,
+// product documents and sample photos the portal used to load from the staff-only /api/supply/portal-attachment and
+// /api/product/doc routes. ?download=1 forces a download (product Documents list).
 app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   try {
-    const r = (await pool.query(`SELECT po, filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
-    if (!r || !(await portalOwnsPO(req, r.po) || await portalOwnsSampleRef(req, r.po) || await portalOwnsShipmentRef(req, r.po))) return res.status(403).send('forbidden');   // v27.571: shipment-timeline files are keyed by shipment ref
+    if (!/^\d{1,12}$/.test(String(req.params.id)) || !(await portalCanReadAttachment(req, req.params.id))) return res.status(403).send('forbidden');
+    const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).send('not found');
+    if (req.query.download) return serveStored(res, r);
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
   } catch (e) { log500(e); res.status(500).send('error'); }
+});
+// v28.186 (Ben, C2): product swatch for the portal (was the staff-only /api/product/swatch). Only for the caller's own product-dev items.
+app.get('/api/portal/product-swatch/:ref', portalAuth, async (req, res) => {
+  const ref = String(req.params.ref || '');
+  try { if (!(await portalOwnsProduct(req, ref))) return res.status(403).end(); return serveProductSwatch(res, ref); }
+  catch (e) { log500(e); res.status(500).end(); }
+});
+// v28.186 (Ben, C2): Direct to Client shipment details from the portal (was the staff-only POST /api/supply/dtc-shipment).
+// Own PO only; whitelisted fields; entered_by = the signed-in portal user (never the client's value).
+app.post('/api/portal/dtc-shipment', portalAuth, async (req, res) => {
+  const b = req.body || {}, po = String(b.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  if (!(await portalOwnsPO(req, po))) return res.status(403).json({ error: 'not your PO' });
+  try { await dtcShipmentSave(po, { cartons: b.cartons, cbm: b.cbm, gross_weight_kg: b.gross_weight_kg, dimensions: b.dimensions }, req.portal.email || null); res.json({ ok: true }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: 'error' }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -24729,11 +24907,11 @@ app.post('/api/supply/onb/requests/:id/approve', async (req, res) => {
     const invites = [];
     for (const c of (f.contacts || [])) { const em = (c && c.portal && c.email) ? String(c.email).trim().toLowerCase() : ''; if (!em) continue;
       const ex = (await client.query(`SELECT id FROM planner.supplier_portal_users WHERE lower(email)=$1`, [em])).rows[0];
-      if (!ex) { await client.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name) VALUES ($1,$2,$3,$4)`, [em, sid, r.supplier_name, c.name || null]); const tok = portalToken(); await client.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [tok, em]); invites.push({ email: em, name: c.name || '', url: PORTAL_URL + '?token=' + tok }); } }
+      if (!ex) { await client.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name) VALUES ($1,$2,$3,$4)`, [em, sid, r.supplier_name, c.name || null]); const tok = portalToken(); await client.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tok, em, PORTAL_LINK_HOURS]); invites.push({ email: em, name: c.name || '', url: PORTAL_URL + '?token=' + tok }); } }
     const log = onbLogPush(r, 'Approved by ' + by + ' · supplier record updated' + (nProd ? ' · ' + nProd + ' product(s) queued for the PIM' : '') + (invites.length ? ' · ' + invites.length + ' portal invite(s) sent' : ''), by);
     await client.query(`UPDATE planner.supplier_onboarding_requests SET status='approved', decided_by=$2, decided_at=now(), log=$3::jsonb, updated_at=now() WHERE id=$1`, [r.id, by, JSON.stringify(log)]);
     await client.query('COMMIT'); client.release(); var _released = true;   // v28.116 (review S10): hoisted flag — the emails below run AFTER release; a throw there must not rollback/release again
-    for (const inv of invites) await sendResendEmail({ to: inv.email, subject: 'Your Dock & Bay supplier portal access', html: '<p>Hello ' + escHtml(inv.name) + ',</p><p>You now have access to the Dock & Bay supplier portal for ' + escHtml(r.supplier_name) + '. Use this link to sign in (valid 7 days; you can request a new one from the portal afterwards):</p><p><a href="' + inv.url + '">' + inv.url + '</a></p>', kind: 'portal-invite', ref: r.ref, by });
+    for (const inv of invites) await sendResendEmail({ to: inv.email, subject: 'Your Dock & Bay supplier portal access', html: '<p>Hello ' + escHtml(inv.name) + ',</p><p>You now have access to the Dock & Bay supplier portal for ' + escHtml(r.supplier_name) + '. Use this link to sign in (valid ' + PORTAL_LINK_HOURS + ' hours; you can request a new one from the portal afterwards):</p><p><a href="' + inv.url + '">' + inv.url + '</a></p>', kind: 'portal-invite', ref: r.ref, by });
     const contact = (f.contacts || []).find(c => c && c.email) || {}; const supTo = r.submitted_by || contact.email;
     if (supTo) await sendResendEmail({ to: supTo, subject: '[Dock & Bay] Your supplier profile is approved (' + r.ref + ')', html: '<p>Hello,</p><p>Your ' + (r.type === 'change' ? 'profile changes are' : 'supplier profile is') + ' approved and now live in Horizon.' + (nProd ? ' Your ' + nProd + ' product entries are with our product team.' : '') + ' You can update your profile at any time from the portal; changes go through the same review.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by });
     await onbNotifyTeam('[Horizon] ' + r.ref + ' approved · ' + escHtml(r.supplier_name), '<p>' + escHtml(by) + ' approved ' + r.ref + ' (' + escHtml(r.supplier_name) + '). Supplier record updated' + (nProd ? ', ' + nProd + ' product submission(s) pending in the PIM queue' : '') + '.</p>', r.ref);
@@ -24999,7 +25177,10 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
       grab(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at,
           coalesce(approval_status,'draft') approval_status, coalesce(review_notes,'') review_notes,
           to_char(reviewed_at,'YYYY-MM-DD') reviewed_at FROM planner.portal_attachments
-          WHERE po = ANY($1) AND coalesce(category,'') <> 'client' ORDER BY uploaded_at DESC`),
+          WHERE po = ANY($1) AND coalesce(category,'') <> 'client'
+            AND NOT (coalesce(category,'') = 'timeline' AND (EXISTS (SELECT 1 FROM planner.shipment_notes sn WHERE sn.attachment_id = portal_attachments.id)
+              OR (supplier_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p JOIN planner.suppliers su ON su.name = p.supplier_name WHERE p.po = portal_attachments.po AND su.id = portal_attachments.supplier_id))))
+          ORDER BY uploaded_at DESC`),   // v28.186 (Ben, C1): shipment-timeline files (and another supplier's uploads keyed on this PO) are not this PO's documents
       grab(`SELECT bp.id, bp.name, coalesce(bp.batch,'') batch, x.po, (SELECT count(*) FROM jsonb_object_keys(coalesce(bp.overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects bp, unnest(bp.pos) x(po) WHERE bp.pos && $1::text[]`).catch(() => null),   // v27.570 fix: the portal reads this payload, not po-detail; null = mig 268 not applied → no buttons
     ]);
     const [deps, notes, subs, supSkus, samples, payments, shipmentPlan, productEnabled, productsAll, specs] = await Promise.all([pDeps, pNotes, pSubs, pSupSkus, pSamples, pPayments, pShipPlan, pProductEnabled, pProducts, pSpecs]);
@@ -25294,6 +25475,9 @@ app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // sup
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.186 (Ben, H3): SQL twin of portalShipmentRole for a shipments row `sh`; $1 = the caller's supplier names, lower-cased.
+const PORTAL_SHIP_MINE_SQL = `EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref) AND lower(mp.supplier_name) = ANY($1))
+  OR EXISTS (SELECT 1 FROM planner.purchase_orders rp WHERE rp.shipment_ref = sh.shipment_ref AND lower(rp.supplier_name) = ANY($1))`;
 // v27.726: read-only DHL tracking status for the supplier portal — SCOPED to numbers on the signed-in
 // supplier's own samples/shipments (never the admin /api/tracking/status). Reads the cache only.
 app.get('/api/portal/tracking-status', portalAuth, async (req, res) => {
@@ -25308,10 +25492,9 @@ app.get('/api/portal/tracking-status', portalAuth, async (req, res) => {
         WHERE (supplier_id = ANY($1) OR lower(supplier_name) = ANY($2))
           AND (tracking_code = ANY($3) OR tracking_code_2 = ANY($3))`,
       [ids.length ? ids : [-1], sups.length ? sups : [''], nums])).rows.forEach(r => { if (r.tracking_code) owned.add(r.tracking_code); if (r.tracking_code_2) owned.add(r.tracking_code_2); });
-    // and this supplier's shipment carrier refs (shipment -> master PO -> supplier)
+    // and the carrier refs of shipments this supplier is on (v28.186 (Ben, H3): master / consolidator OR rider, same rule as portalShipmentRole)
     (await pool.query(`SELECT sh.carrier_ref FROM planner.shipments sh
-        JOIN planner.purchase_orders po ON po.po = coalesce(sh.master_po, sh.shipment_ref)
-        WHERE lower(po.supplier_name) = ANY($1) AND sh.carrier_ref = ANY($2)`,
+        WHERE sh.carrier_ref = ANY($2) AND (${PORTAL_SHIP_MINE_SQL})`,
       [sups.length ? sups : [''], nums])).rows.forEach(r => { if (r.carrier_ref) owned.add(r.carrier_ref); });
     const allow = nums.filter(n => owned.has(n));
     if (!allow.length) return res.json({ ok: true, tracking: {} });
@@ -25329,8 +25512,8 @@ app.get('/api/portal/tracking-detail', portalAuth, async (req, res) => {
     const ids = (req.portal.supplierIds || []);
     const owns = (await pool.query(`SELECT 1 FROM planner.sample_requests WHERE (supplier_id = ANY($1) OR lower(supplier_name) = ANY($2)) AND $3 IN (tracking_code, tracking_code_2) LIMIT 1`,
         [ids.length ? ids : [-1], sups.length ? sups : [''], number])).rows[0]
-      || (await pool.query(`SELECT 1 FROM planner.shipments sh JOIN planner.purchase_orders po ON po.po = coalesce(sh.master_po, sh.shipment_ref) WHERE lower(po.supplier_name) = ANY($1) AND sh.carrier_ref = $2 LIMIT 1`,
-        [sups.length ? sups : [''], number])).rows[0];
+      || (await pool.query(`SELECT 1 FROM planner.shipments sh WHERE sh.carrier_ref = $2 AND (${PORTAL_SHIP_MINE_SQL}) LIMIT 1`,
+        [sups.length ? sups : [''], number])).rows[0];   // v28.186 (Ben, H3): master or rider
     if (!owns) return res.json({ ok: true, row: null });
     const r = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at, events FROM planner.carrier_tracking WHERE tracking_number=$1`, [number])).rows[0];
     res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null });
@@ -25339,6 +25522,7 @@ app.get('/api/portal/tracking-detail', portalAuth, async (req, res) => {
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.body) return res.status(400).json({ error: 'body required' });
+    if (!await portalAttachmentOk(req, b.attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
     const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body, attachment_id) VALUES ($1::bigint,'supplier',$2,$3,$4) RETURNING id`, [s.id, req.portal.email||null, String(b.body), Number(b.attachment_id) || null]); res.json({ id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-charge', portalAuth, async (req, res) => {   // supplier creates a charge → admin accepts → Other Payment
@@ -25370,18 +25554,13 @@ app.post('/api/portal/shipment-notes-read', portalAuth, async (req, res) => {
   const ref = ((req.body && req.body.shipment_ref) || '').trim();
   if (!ref) return res.status(400).json({ error: 'shipment_ref required' });
   try {
-    const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name = ANY($2) LIMIT 1`, [ref, req.portal.suppliers])).rows[0];
-    if (!own) return res.status(403).json({ error: 'not your shipment' });
+    if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });   // v28.186 (Ben, H3): master or rider
     await pool.query(`UPDATE planner.shipment_notes SET read_at=now() WHERE shipment_ref=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
-// The supplier must be on the shipment (has a PO with that shipment_ref) to see/add its timeline notes.
-async function portalOwnsShipmentRef(req, ref) {
-  if (!ref) return false;
-  return !!(await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name = ANY($2) LIMIT 1`, [ref, req.portal.suppliers])).rows[0];
-}
+// v28.186 (Ben, H3): portalOwnsShipmentRef / portalShipmentRole (next to portalOwnsPO) = master (consolidator) or rider on the shipment.
 app.get('/api/portal/shipment-notes/:ref', portalAuth, async (req, res) => {   // supplier: a shipment's timeline notes
   try {
     if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
@@ -25394,6 +25573,7 @@ app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // sup
   if (!ref || !b.body) return res.status(400).json({ error: 'shipment_ref and body required' });
   try {
     if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });
+    if (!await portalAttachmentOk(req, b.attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body, attachment_id)
       VALUES ($1,'supplier',$2,$3,$4) RETURNING id`, [ref, req.portal.email || null, String(b.body), Number(b.attachment_id) || null]);
     res.json({ id: r.rows[0].id });
@@ -25408,7 +25588,11 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
   const ALLOW = { carrier: 'text', carrier_ref: 'text', status: 'text', departure_date: 'date' };
   const STATUSES = ['Planned', 'Shipping'];   // suppliers can only move a shipment to Shipping; 'Completed' is Dock & Bay-only
   try {
-    if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });
+    // v28.186 (Ben, H3 + M9): shipment-level fields (status / ship date / carrier / tracking) belong to the MASTER PO's supplier.
+    // Setting Shipping moves every PO aboard (other suppliers' too), so a rider is read-only here.
+    const role = await portalShipmentRole(req, ref);
+    if (!role) return res.status(403).json({ error: 'not your shipment' });
+    if (role !== 'master') return res.status(403).json({ error: 'only the consolidating supplier (master PO) can update this shipment' });
     if (b.status != null && b.status !== '' && !STATUSES.includes(b.status)) return res.status(400).json({ error: 'invalid status' });
     // detect a ship-date change so we can drop a timeline note
     const prev = (await pool.query(`SELECT to_char(departure_date,'YYYY-MM-DD') d FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
@@ -25436,15 +25620,14 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
 });
 app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
   const names = req.portal.suppliers||[];
-  try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name=ANY($2) LIMIT 1`, [req.params.ref, names])).rows[0];
-    if(!own) return res.status(403).json({ error: 'not your shipment' });
-    res.json((await pool.query(`SELECT id, freight_cost, product_cost, coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
+  // v28.186 (Ben, H3): master or rider may open it; each supplier sees only the charges raised by its own supplier(s), never another supplier's costs
+  try { if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
+    res.json((await pool.query(`SELECT id, freight_cost, product_cost, coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 AND supplier_name = ANY($2) ORDER BY created_at`, [req.params.ref, names])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/shipment-charge', portalAuth, async (req, res) => {   // supplier creates a charge on a shipment
   const b = req.body||{}, names = req.portal.suppliers||[];
   if(!b.shipment_ref) return res.status(400).json({ error: 'shipment_ref required' });
-  try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name=ANY($2) LIMIT 1`, [b.shipment_ref, names])).rows[0];
-    if(!own) return res.status(403).json({ error: 'not your shipment' });
+  try { if (!await portalOwnsShipmentRef(req, b.shipment_ref)) return res.status(403).json({ error: 'not your shipment' });   // v28.186 (Ben, H3): master (consolidator) or rider
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, names[0]||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -25631,13 +25814,14 @@ app.post('/api/portal/timeline-attachment', portalAuth, async (req, res) => {   
   try { const { kind, ref } = await tlAttachRef(b); if (!ref) return res.status(400).json({ error: 'ref required' });
     const ok = kind === 'po' ? await portalOwnsPO(req, ref) : kind === 'shipment' ? await portalOwnsShipmentRef(req, ref) : await portalOwnsSampleRef(req, ref);
     if (!ok) return res.status(403).json({ error: 'not on your account' });
-    res.json(await tlAttachInsert(ref, b, req.portal.email || 'supplier', 'supplier')); }
+    res.json(await tlAttachInsert(ref, b, req.portal.email || 'supplier', 'supplier', (req.portal.supplierIds || [])[0] || null)); }   // v28.186 (Ben, C1): record the uploading supplier
   catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/note', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try {
+    if (!await portalAttachmentOk(req, b.attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
     const sid = req.portal.supplierIds[0] || null;
     await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body,attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
       [b.po, sid, req.portal.email, String(b.body).trim(), Number(b.attachment_id) || null]);
@@ -25700,6 +25884,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
   if (b.invoice_value != null && String(b.invoice_value).trim() !== '' && sanitiseMoney(b.invoice_value) == null) return res.status(400).json({ error: 'Invoice value must be a number (no currency symbols or letters).' });
   const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   try {
+    if (!await portalAttachmentOk(req, b.invoice_attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
     const stage = async (kind, value, attId) => {
       if (value == null || value === '') return;
       await pool.query(`UPDATE planner.supplier_submissions SET status='superseded' WHERE po=$1 AND kind=$2 AND status='pending'`, [b.po, kind]);
@@ -25716,8 +25901,11 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
       const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
       // v28.151 (review C2): a client-sent shipment_ref is honoured only if the caller owns that shipment (else the PO's own shipment);
       // stops a supplier overwriting another supplier's carrier / tracking by naming their shipment ref.
+      // v28.186 (Ben, H3): carrier / tracking are shipment-level fields, so they apply directly only for the MASTER (consolidating)
+      // supplier; a rider's entry is staged as a pending submission for Dock & Bay instead of overwriting the shared shipment.
       const _cref = String(b.shipment_ref || '').trim();
-      const ref = (_cref && await portalOwnsShipmentRef(req, _cref)) ? _cref : (sh && sh.shipment_ref);
+      const ref0 = (_cref && await portalOwnsShipmentRef(req, _cref)) ? _cref : (sh && sh.shipment_ref);
+      const ref = (ref0 && (await portalShipmentRole(req, ref0)) === 'master') ? ref0 : null;
       if (ref) {
         const sets = [], vals = []; let i = 1;
         if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
@@ -25728,8 +25916,8 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
           [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
         out.applied.push('tracking → ' + ref);
       } else {
-        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id,po,kind,value,status,submitted_by,note) VALUES ($1,$2,'tracking',$3,'pending',$4,'no shipment assigned yet')`,
-          [sid, b.po, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
+        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id,po,shipment_ref,kind,value,status,submitted_by,note) VALUES ($1,$2,$3,'tracking',$4,'pending',$5,$6)`,
+          [sid, b.po, ref0 || null, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by, ref0 ? 'shared shipment: set by the consolidating supplier' : 'no shipment assigned yet']);
         out.staged.push('tracking');
       }
     }

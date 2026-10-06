@@ -60,6 +60,24 @@ function checkSupplierPayload(tag, d, names) {
     ok(a1.text === a2.text, 'A cold and warm payloads identical' + q);
     if (a1.etag && a1.text !== b1.text) { const x = await get('/api/portal/bootstrap' + q, { cookie: 'psid=' + PB, 'if-none-match': a1.etag }); ok(x.status === 200 && x.text === b1.text, 'B presenting A\'s ETag gets B\'s own 200, never a 304' + q); }
   }
+  // v28.186 (Ben, deep dive C1 / C2): the portal's own file + swatch routes serve only the caller's records, and the staff routes
+  // the portal used to call refuse a portal session (with or without a /portal referer).
+  {
+    const bA = await get('/api/portal/bootstrap', { cookie: 'psid=' + PA }), bB = await get('/api/portal/bootstrap', { cookie: 'psid=' + PB });
+    const ids = (d) => [].concat(...Object.values((d && d.docsByPo) || {})).map((x) => x.id).filter(Boolean).slice(0, 6);
+    const idsA = ids(bA.json), idsB = ids(bB.json);
+    for (const [mine, theirs, who, ck] of [[idsA, idsB, 'A', PA], [idsB, idsA, 'B', PB]]) {
+      for (const id of mine.slice(0, 3)) ok((await get('/api/portal/attachment/' + id, { cookie: 'psid=' + ck })).status === 200, who + ' opens own PO document ' + id);
+      for (const id of theirs.slice(0, 3)) ok((await get('/api/portal/attachment/' + id, { cookie: 'psid=' + ck })).status === 403, who + ' is refused the other supplier\'s document ' + id);
+    }
+    const prods = (d) => ((d && d.products) || []).map((p) => p.ref).filter(Boolean).slice(0, 3);
+    for (const ref of prods(bA.json)) { const a = await get('/api/portal/product-swatch/' + encodeURIComponent(ref), { cookie: 'psid=' + PA }); ok(a.status === 200 || a.status === 404, 'A own product swatch ' + ref + ' (got ' + a.status + ')');
+      if (!prods(bB.json).includes(ref)) ok((await get('/api/portal/product-swatch/' + encodeURIComponent(ref), { cookie: 'psid=' + PB })).status === 403, 'B is refused A\'s product swatch ' + ref); }
+    const anyId = idsA[0] || idsB[0] || 1;
+    for (const p of ['/api/supply/portal-attachment/' + anyId, '/api/product/doc/' + anyId, '/api/product/swatch/X'])
+      for (const h of [{ cookie: 'psid=' + PA }, { cookie: 'psid=' + PA, referer: BASE.origin + '/portal' }]) {
+        const r = await get(p, h); ok(r.status === 401 || r.status === 403, 'staff route ' + p.split('/').slice(0, 4).join('/') + ' refuses a portal session' + (h.referer ? ' (portal referer)' : '') + ' (got ' + r.status + ')'); }
+  }
   // no session / forged session / proxy identity headers never authenticate
   const em = (meA.json && meA.json.email) || 'factory@lixin.test';
   for (const [h, why] of [[{}, 'no cookie'], [{ cookie: 'psid=forged-token-1234567890' }, 'forged psid'],
