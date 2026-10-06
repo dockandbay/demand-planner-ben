@@ -9589,35 +9589,68 @@ app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
 // v27.579: bulk twin of ka-forecast-cell — one transaction for a whole import / column clear (the per-cell route cost ~1.6s a cell
 // through the pooler, so a 45 SKU × 18 month file took ~20 minutes). Body: {client, warehouse, cells:[{sku, month:'YYYY-MM', quantity}]};
 // quantity '' / null / 0 = clear that month. Same semantics as the per-cell route: delete the month's rows, insert the new qty.
+// v28.183 (Ben): the Excel-style Key Accounts grid (paste / clear / undo) writes through here too. Each cell may carry its own
+// {client, sku, warehouse, month, quantity}; a cell without client / warehouse falls back to body.client / body.warehouse (the
+// v27.579 import + column-clear shape above still works). quantity: '' / null / 0 = clear, else a whole number >= 0 (thousands
+// separators stripped). Each cell is validated on its own (a bad one is reported, the rest still save); a repeated
+// client / sku / warehouse / month keeps the LAST value. Writes go in chunks of KA_CELLS_CHUNK cells, each chunk ONE multi-row
+// statement (delete + insert via unnest in one CTE, atomic per chunk, one round trip): no long transaction, no per-cell round trips.
+// A failed chunk is reported per cell and the other chunks still save.
+// Response {ok, deleted, inserted, cells, failed, results:[{ok, error?}]}, results aligned to the request's cells; `error` is set
+// whenever any cell failed (the v27.579 callers check it). Status 200 unless every cell failed (400 invalid / 500 database).
+// Caches: no server cache reads planner.key_account_forecasts (/api/preorders-ka and the ka-forecasts section are live and
+// no-store), so there is no CACHE_DEPS type to stale; the browser re-pulls the Preorder / KA map itself (kafPkaRefresh).
+const KA_CELLS_CHUNK = 200;
+function kaCellQty(v) {   // v28.183 (Ben): '' / null / 0 -> 0 (clear); whole number >= 0 -> n; anything else -> {err}
+  if (v === '' || v == null) return { q: 0 };
+  const s = String(v).replace(/[,\s]/g, '');
+  if (s === '') return { q: 0 };
+  if (!/^\d+$/.test(s)) return { err: 'quantity must be a whole number >= 0' };
+  const n = Number(s); if (n > 2147483647) return { err: 'quantity too large' };
+  return { q: n };
+}
 app.post('/api/supply/ka-forecast-cells', async (req, res) => {
   const b = req.body || {};
-  const client = (b.client || '').trim(), warehouse = (b.warehouse || '').trim();
+  const dClient = b.client == null ? '' : String(b.client).trim(), dWh = String(b.warehouse == null ? '' : b.warehouse).trim();
   const cells = Array.isArray(b.cells) ? b.cells : [];
-  if (!warehouse) return res.status(400).json({ error: 'warehouse required' });
-  if (!cells.length) return res.json({ ok: true, deleted: 0, inserted: 0 });
+  if (!cells.length) return res.json({ ok: true, deleted: 0, inserted: 0, cells: 0, failed: 0, results: [] });
   if (cells.length > 5000) return res.status(413).json({ error: 'max 5000 cells per request' });
-  const skus = [], firsts = [], iSku = [], iFirst = [], iQty = [];
-  for (const c of cells) {
-    const sku = String(c.sku || '').trim(), month = String(c.month || '').trim();
-    if (!sku || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'each cell needs sku + month YYYY-MM' });
-    const first = month + '-01'; skus.push(sku); firsts.push(first);
-    const qty = (c.quantity === '' || c.quantity == null) ? null : parseInt(c.quantity, 10);
-    if (qty != null && !isNaN(qty) && qty !== 0) { iSku.push(sku); iFirst.push(first); iQty.push(qty); }
+  const results = new Array(cells.length), work = new Map();
+  cells.forEach((c0, i) => {
+    const c = (c0 && typeof c0 === 'object') ? c0 : {};
+    const client = (c.client != null ? String(c.client) : dClient).trim(), wh = String(c.warehouse != null ? c.warehouse : dWh).trim();
+    const sku = String(c.sku == null ? '' : c.sku).trim(), month = String(c.month == null ? '' : c.month).trim();
+    if (!/^[A-Za-z0-9_]{1,40}$/.test(wh)) { results[i] = { ok: false, error: 'warehouse required' }; return; }
+    if (!sku || sku.length > 120) { results[i] = { ok: false, error: 'sku required' }; return; }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { results[i] = { ok: false, error: 'month must be YYYY-MM' }; return; }
+    if (client.length > 200) { results[i] = { ok: false, error: 'client too long' }; return; }
+    const q = kaCellQty(c.quantity); if (q.err) { results[i] = { ok: false, error: q.err }; return; }
+    const k = client + '\u0001' + sku + '\u0001' + wh + '\u0001' + month, w = work.get(k);
+    if (w) { w.q = q.q; w.idx.push(i); } else work.set(k, { client, sku, wh, first: month + '-01', q: q.q, idx: [i] });
+  });
+  const list = Array.from(work.values());
+  let deleted = 0, inserted = 0, dbErr = null;
+  for (let a = 0; a < list.length; a += KA_CELLS_CHUNK) {
+    const ch = list.slice(a, a + KA_CELLS_CHUNK);
+    try {   // ONE statement per chunk (atomic on its own, one round trip): the DELETE and the INSERT share the statement's snapshot, so the delete never sees the new rows
+      const r = (await pool.query(`WITH u AS (SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::date[], $5::int[]) AS u(client, sku, wh, first, qty)),
+        d AS (DELETE FROM planner.key_account_forecasts k USING u
+          WHERE coalesce(k.client,'')=u.client AND k.warehouse=u.wh AND k.sku=u.sku
+            AND k.ship_date >= u.first AND k.ship_date < (u.first + interval '1 month') RETURNING 1),
+        i AS (INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
+          SELECT u.client, u.sku, u.wh, u.first, u.qty, 'manual', now() FROM u WHERE u.qty > 0 RETURNING 1)
+        SELECT (SELECT count(*) FROM d)::int deleted, (SELECT count(*) FROM i)::int inserted`,
+        [ch.map(w => w.client), ch.map(w => w.sku), ch.map(w => w.wh), ch.map(w => w.first), ch.map(w => w.q)])).rows[0];
+      deleted += r.deleted; inserted += r.inserted;
+      ch.forEach(w => w.idx.forEach(i => { results[i] = { ok: true }; }));
+    } catch (e) {
+      log500(e); dbErr = dbErr || e.message;
+      ch.forEach(w => w.idx.forEach(i => { results[i] = { ok: false, error: 'save failed: ' + e.message }; }));
+    }
   }
-  const client2 = await pool.connect();
-  try {
-    await client2.query('BEGIN');
-    const d = await client2.query(`DELETE FROM planner.key_account_forecasts k
-      USING unnest($1::text[], $2::date[]) AS u(sku, first)
-      WHERE coalesce(k.client,'')=$3 AND k.warehouse=$4 AND k.sku=u.sku
-        AND k.ship_date >= u.first AND k.ship_date < (u.first + interval '1 month')`, [skus, firsts, client, warehouse]);
-    let ins = 0;
-    if (iSku.length) { const r = await client2.query(`INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
-      SELECT $1, u.sku, $2, u.first, u.qty, 'manual', now() FROM unnest($3::text[], $4::date[], $5::int[]) AS u(sku, first, qty)`, [client, warehouse, iSku, iFirst, iQty]); ins = r.rowCount; }
-    await client2.query('COMMIT');
-    res.json({ ok: true, deleted: d.rowCount, inserted: ins, cells: cells.length });
-  } catch (e) { try { await client2.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
-  finally { client2.release(); }
+  const bad = results.filter(r => !r.ok), out = { ok: !bad.length, deleted, inserted, cells: cells.length, failed: bad.length, results };
+  if (bad.length) out.error = bad.length + ' of ' + cells.length + ' cell' + (cells.length === 1 ? '' : 's') + ' not saved: ' + bad[0].error;
+  res.status(bad.length < cells.length ? 200 : dbErr ? 500 : 400).json(out);
 });
 app.post('/api/supply/ka-forecast-cell', async (req, res) => {
   const b = req.body || {};

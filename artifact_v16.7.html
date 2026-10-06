@@ -11312,6 +11312,19 @@ function renderSummaryView(body){
   else draw();
 }
 var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
+// v28.183 (Ben): Excel-style Key Accounts grid. KAF_UNDO = bulk-operation undo stack (paste / clear / edit / fill), newest last,
+// KAF_UNDO_MAX deep; each entry {label, cells:[{cl, cv, sku, wh, m, prev, next}]} (cv = client as stored, '' for "(no client)").
+// Lives outside the view so it survives a country-pill switch. _KAF_Q chains the grid's writes so they reach the server in order.
+var KAF_UNDO=[], KAF_UNDO_MAX=50, _KAF_Q=Promise.resolve(), KAF_SAVING=0, _KAF_UP=null;   // KAF_SAVING = grid writes in flight; _KAF_UP = the grid's document-level drag listeners
+// v28.183 (Ben): after any Key Accounts write (grid edit / paste / clear / undo / import / column or SKU clear) re-pull the
+// Preorder / KA map (loadPreorderKA -> attachPKA rewrites md.pka) and mark demand stale (hzMarkDemandStale), so the buy plan folds
+// the new KA quantities in on its next render through the same gate as a DEMAND forecast edit: the rebuild is the v28.171
+// incremental one (only md.pka moved), and an async build already in flight catches up through v28.181. Debounced, so a burst of
+// writes is one re-pull. (Before v28.183 a KA edit reached the buy plan only after a page reload or BUY > Refresh cache.)
+var _KAF_PKA_T=null, KAF_PKA_P=null;
+function kafPkaRefresh(){ clearTimeout(_KAF_PKA_T); _KAF_PKA_T=setTimeout(function(){ _KAF_PKA_T=null;
+  var w=(typeof _PKA_INFLIGHT!=='undefined'&&_PKA_INFLIGHT)||Promise.resolve();   // a load already in flight may predate this write: re-pull after it
+  KAF_PKA_P=w.then(function(){ return loadPreorderKA(); }).then(function(){ try{ hzMarkDemandStale(); }catch(e){} }); },300); }
 function renderReplacementsView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function nm(sku){ var p=SKUM[sku]; return p&&p.n?p.n:''; }
@@ -11361,6 +11374,10 @@ function renderKeyAccountsView(body){
   var SKUS=Object.keys(SKUM).sort();
   var rows=[];                 // raw ka-forecasts
   var pendClients=[], pendSkus={};   // transient: client/skus added in the UI before any qty is saved (per current country)
+  // v28.183 (Ben): Excel-style grid state. G = coordinates of the drawn grid (rows = SKU rows only, cols = months; idx 'client|sku|month'
+  // -> [r, c]; sig = rows + months, so a redraw of the same grid keeps the selection), VAL 'r,c' -> shown qty, SS = selection,
+  // ED = the open in-place editor, TDS[r][c] = the cell elements.
+  var G={rows:[],cols:[],idx:{},sig:''}, VAL={}, SS={sel:{},base:{},anchor:null,ext:null,drag:false}, ED=null, TDS=[];
   function ym(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2); }
   function monthList(){ var out=[], now=new Date(), base=new Date(now.getFullYear(),now.getMonth(),1);
     for(var i=(KAF_PAST?-12:0);i<18;i++){ var d=new Date(base.getFullYear(),base.getMonth()+i,1);
@@ -11397,23 +11414,28 @@ function renderKeyAccountsView(body){
   function flash(m,bad){ var el=host.querySelector('#kaf-msg'); if(el){ el.style.color=bad?'var(--neg)':'var(--pos)'; el.textContent=m; clearTimeout(el._t); el._t=setTimeout(function(){el.textContent='';},1600); } }
   // v27.579: batched writes (one request per ≤800 cells) for imports / column clears / SKU clears — the per-cell route stays for inline edits
   function saveCells(client,cells,cb,prog){ var i=0, done=0, out={deleted:0,inserted:0};
-    (function nx(){ if(i>=cells.length){ if(cb)cb(null,out); return; } var chunk=cells.slice(i,i+800); i+=chunk.length; if(prog)prog(i,cells.length);
+    (function nx(){ if(i>=cells.length){ kafPkaRefresh(); if(cb)cb(null,out); return; } var chunk=cells.slice(i,i+800); i+=chunk.length; if(prog)prog(i,cells.length);   // v28.183 (Ben): + buy-plan KA refresh
       fetch('/api/supply/ka-forecast-cells',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,warehouse:KAF_CTRY,cells:chunk})}).then(function(r){return r.json();})
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); out.deleted+=j.deleted||0; out.inserted+=j.inserted||0; done+=chunk.length; nx(); }).catch(function(err){ if(cb)cb(err,out); }); })(); }
-  function saveCell(client,sku,month,qty){ fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:sku,warehouse:KAF_CTRY,month:month,quantity:qty})})
-      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); flash('Saved ✓'); }).catch(function(){ flash('Save failed',1); }); }
-  function draw(){ var m=monthList(), d=build(), q=KAF_Q.trim().toLowerCase();
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); out.deleted+=j.deleted||0; out.inserted+=j.inserted||0; done+=chunk.length; nx(); }).catch(function(err){ kafPkaRefresh(); if(cb)cb(err,out); }); })(); }   // a failed chunk may follow saved ones
+  function draw(){ if(ED)commitEdit(true);   // v28.183 (Ben): an open cell edit is saved before the grid is redrawn
+    var m=monthList(), d=build(), q=KAF_Q.trim().toLowerCase();
     var STY='<style>#kafc table{border-collapse:separate;border-spacing:0;font-size:12px}'
       +'#kafc th{padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;background:var(--hover);position:sticky;top:0;z-index:2}'
       +'#kafc th.lbl{text-align:left}#kafc th.mcur{color:var(--blue-ink)}#kafc th.mpast{color:var(--amber);background:var(--amber-bg)}'
       +'#kafc td{padding:2px 5px;border-bottom:1px solid var(--line2);white-space:nowrap}#kafc td.lbl{position:sticky;left:0;background:var(--card);z-index:1;min-width:150px;text-align:left;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
       +'#kafc tr.clihdr td{background:var(--hover);font-weight:700;color:var(--ink-soft);border-top:1px solid var(--line)}#kafc tr.clihdr td.lbl{background:var(--hover)}'
-      +'#kafc .kaf-cell{width:58px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent}#kafc .kaf-cell:focus{border-color:#93c5fd;background:var(--card);outline:none}#kafc td.past .kaf-cell{color:var(--amber)}'
+      // v28.183 (Ben): Excel-style cells: a td per client x SKU x month (selectable), value in .kaf-v (same box as the old input), the
+      // in-place editor .kaf-ed sits in the same spot; selected = tinted, active = outlined; status bar sticky at the bottom.
+      +'#kafc table.kaf-grid{outline:none}#kafc td.kaf-cell{cursor:cell;user-select:none;-webkit-user-select:none}#kafc table.kaf-grid.kaf-dragging,#kafc table.kaf-grid.kaf-dragging *{user-select:none;-webkit-user-select:none;cursor:cell}#kafc .kaf-v,#kafc .kaf-ed{display:block;width:58px;min-height:16px;line-height:16px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent;color:inherit}'
+      +'#kafc .kaf-ed{border-color:#93c5fd;background:var(--card);outline:none;margin:0}#kafc td.kaf-cell.past{color:var(--amber)}#kafc td.kaf-cell.kaf-sel{background:var(--blue-soft)}#kafc td.kaf-cell.kaf-act{box-shadow:inset 0 0 0 2px var(--blue)}#kafc table.kaf-grid:not(:focus-within) td.kaf-cell.kaf-act{box-shadow:inset 0 0 0 2px var(--line)}'
+      +'#kafc .kaf-sb{position:sticky;bottom:0;left:0;z-index:4;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding:6px 10px;background:var(--card);border-top:1px solid var(--line);font-size:12px;color:var(--ink-soft);box-shadow:0 -2px 4px -2px rgba(15,23,42,.12)}#kafc .kaf-sb b{font-weight:600;color:var(--ink)}#kafc .kaf-sb .kaf-sbsp{flex:1}'
+      +'#kafc .kaf-sb button{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:3px 10px;border-radius:6px;font-size:12px;cursor:pointer}#kafc .kaf-sb button:hover:not(:disabled){border-color:var(--blue);color:var(--blue)}#kafc .kaf-sb button:disabled{opacity:.45;cursor:default}#kafc #kaf-saving{color:var(--muted)}#kafc #kaf-toast{color:var(--amber)}#kafc #kaf-toast.bad{color:var(--neg)}#kafc #kaf-toast.ok{color:var(--pos)}'
       +'#kafc .kaf-skunm{font-size:10px;color:var(--faint);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kafc .kaf-del{border:none;background:transparent;color:var(--neg);cursor:pointer;font-size:12px}'
       +'.kaf-pill{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font-size:12px;padding:4px 14px;border-radius:14px;cursor:pointer;font-weight:600}.kaf-pill.on{background:var(--nav);color:#fff;border-color:var(--nav)}'
       +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}#kafc .kaf-drop{position:fixed;z-index:100000;width:300px;max-height:220px;overflow-y:auto;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:var(--blue-soft)}#kafc th.lbl{position:sticky;left:0;z-index:3}#kafc .kaf-cdl,#kafc .kaf-cup{border:1px solid var(--line);background:var(--card);border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;line-height:1.6;color:var(--ink-soft)}#kafc .kaf-cdl:hover,#kafc .kaf-cup:hover{border-color:var(--blue);color:var(--blue)}#kafc .kaf-colx{border:none;background:transparent;color:var(--faint);cursor:pointer;font-size:10px;padding:0 3px;line-height:1}#kafc .kaf-colx:hover{color:var(--neg)}#kafc .kaf-cell.kaf-flash{animation:kafFlash 2.6s ease-out}@keyframes kafFlash{0%{background:var(--pos-bg)}60%{background:var(--pos-bg)}100%{background:transparent}}</style>';
     var head='<tr><th class="lbl">Client / SKU</th>'+m.map(function(x){return '<th class="'+(x.cur?'mcur':x.past?'mpast':'')+'">'+x.label+'</th>';}).join('')+'<th></th></tr>';
     var bodyH='';
+    var nG={rows:[],cols:m.map(function(x){ return x.key; }),idx:{},sig:''}; VAL={};   // v28.183 (Ben): grid coordinates (SKU rows x months only)
     d.clients.forEach(function(cl){
       var cliMatch=!q||cl.toLowerCase().indexOf(q)>=0;
       var allSks=d.skusBy[cl]||[];
@@ -11421,17 +11443,24 @@ function renderKeyAccountsView(body){
       if(q && !cliMatch && !sks.length) return;   // filtering + nothing in this client matches → skip the group
       bodyH+='<tr class="clihdr"><td class="lbl"><span style="display:inline-flex;align-items:center;gap:6px">'+e(cl)+' <button class="kaf-cdl" data-cl="'+e(cl)+'" title="Download this client\'s forecast (SKU × future months) as CSV">⬇</button><button class="kaf-cup" data-cl="'+e(cl)+'" title="Upload a CSV for this client (same layout as the download; blank cells clear)">⬆</button></span></td>'
         +m.map(function(x){ return '<td style="text-align:center">'+(x.past?'':'<button class="kaf-colx" data-cl="'+e(cl)+'" data-m="'+x.key+'" title="Clear '+e(x.label)+' for every SKU of '+e(cl)+'">✕</button>')+'</td>'; }).join('')+'<td></td></tr>';   // v27.578
-      sks.forEach(function(sk){
-        bodyH+='<tr data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div></td>'
-          +m.map(function(x){ var v=(d.C[cl]&&d.C[cl][sk]&&d.C[cl][sk][x.key]!=null)?d.C[cl][sk][x.key]:''; return '<td class="'+(x.past?'past':'')+'"><input class="kaf-cell" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'" inputmode="numeric" value="'+e(v)+'"></td>'; }).join('')
+      sks.forEach(function(sk){ var r=nG.rows.length; nG.rows.push({cl:cl,sku:sk});
+        bodyH+='<tr role="row" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl" role="rowheader"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div></td>'
+          +m.map(function(x,c){ var v=(d.C[cl]&&d.C[cl][sk]&&d.C[cl][sk][x.key]!=null)?d.C[cl][sk][x.key]:''; nG.idx[cl+'|'+sk+'|'+x.key]=[r,c]; if(v!=='')VAL[r+','+c]=Number(v)||0;
+            return '<td class="kaf-cell'+(x.past?' past':'')+'" role="gridcell" aria-selected="false" id="kaf-c'+r+'-'+c+'" data-r="'+r+'" data-c="'+c+'" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'"><span class="kaf-v">'+e(v)+'</span></td>'; }).join('')   // v28.183 (Ben): selectable cell, edited in place
           +'<td><button class="kaf-del" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" title="clear this SKU across all shown months">✕</button></td></tr>';
       });
       // add-SKU affordance for this client
       bodyH+='<tr class="kaf-addrow" data-cl="'+e(cl)+'"><td class="lbl kaf-addsku"><input class="kaf-skuin" data-cl="'+e(cl)+'" placeholder="+ add SKU…" autocomplete="off"><div class="kaf-drop"></div></td><td colspan="'+(m.length+1)+'"></td></tr>';
     });
-    host.innerHTML=STY+(d.clients.length?'<table><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>':'<div style="color:var(--faint);font-size:12px;padding:10px 2px">No forecasts for '+e(({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY])+(q?' matching “'+e(KAF_Q)+'”':'')+' yet — add a client below or import.</div>')
-      +'<div style="margin-top:12px;display:flex;align-items:center;gap:8px"><input id="kaf-newcli" placeholder="new client / account…" style="padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:220px"><button id="kaf-addcli" style="border:1px solid var(--line);background:var(--hover);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer">+ Add client</button><span id="kaf-msg" style="font-size:11px"></span></div>';
-    wire();
+    var _hadFocus=!!(document.activeElement&&host.contains(document.activeElement)&&document.activeElement.classList.contains('kaf-grid'));
+    nG.sig=KAF_CTRY+'#'+nG.cols.join(',')+'#'+nG.rows.map(function(x){ return x.cl+'|'+x.sku; }).join('\n');
+    if(nG.sig!==G.sig){ SS={sel:{},base:{},anchor:null,ext:null,drag:false}; } G=nG;   // same rows + months: the selection survives a redraw
+    host.innerHTML=STY+(d.clients.length?'<table class="kaf-grid" role="grid" aria-multiselectable="true" aria-label="Key Accounts forecast" tabindex="0"><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>':'<div style="color:var(--faint);font-size:12px;padding:10px 2px">No forecasts for '+e(({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY])+(q?' matching “'+e(KAF_Q)+'”':'')+' yet — add a client below or import.</div>')
+      +'<div style="margin-top:12px;display:flex;align-items:center;gap:8px"><input id="kaf-newcli" placeholder="new client / account…" style="padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:220px"><button id="kaf-addcli" style="border:1px solid var(--line);background:var(--hover);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer">+ Add client</button><span id="kaf-msg" style="font-size:11px"></span></div>'
+      +(d.clients.length?'<div class="kaf-sb" id="kaf-sb"><span id="kaf-sbt" role="status" aria-live="polite"></span><span class="kaf-sbsp"></span><span id="kaf-saving"></span><span id="kaf-toast" role="alert"></span>'   // v28.183 (Ben): status bar
+        +'<button id="kaf-sb-copy" title="Copy the selection (Ctrl/Cmd+C) as tab-separated rows">Copy</button><button id="kaf-sb-clear" title="Clear the selected cells (Delete)">Clear</button><button id="kaf-sb-undo" title="Undo the last change (Ctrl/Cmd+Z)">Undo</button></div>'
+        +'<textarea id="kaf-clip" tabindex="-1" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0"></textarea>':'');
+    wire(); gridWire(_hadFocus);
   }
   function wire(){
     // v27.578: per-client column clear, per-client download + upload
@@ -11442,8 +11471,6 @@ function renderKeyAccountsView(body){
       var out=[['SKU'].concat(fut.map(function(x){return x.key;}))]; Object.keys(cm).sort().forEach(function(sk){ out.push([sk].concat(fut.map(function(x){ var v=cm[sk][x.key]; return (v==null||v==='')?'':v; }))); });
       var mk=({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY]; dlCsv('ka_'+mk+'_'+String(cl).replace(/[^a-z0-9]+/gi,'_')+'_forecast.csv',out); }; });
     host.querySelectorAll('.kaf-cup').forEach(function(b){ b.onclick=function(){ var box=body.querySelector('#kaf-imp'); if(!box.innerHTML)toggleImport(); var ci=box.querySelector('#kaf-icli'); if(ci)ci.value=(b.dataset.cl==='(no client)'?'':b.dataset.cl); try{ box.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){} var fi=box.querySelector('#kaf-ifile'); if(fi)fi.click(); }; });
-    host.querySelectorAll('.kaf-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); var qty=v===''?'':parseInt(v,10); if(v!==''&&isNaN(qty)){ inp.value=''; return; }
-      saveCell(inp.dataset.cl==='(no client)'?'':inp.dataset.cl, inp.dataset.sku, inp.dataset.m, v===''?'':qty); }; });
     host.querySelectorAll('.kaf-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Clear '+b.dataset.sku+' across all shown months for this client?'))return;
       var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; saveCells(cl, monthList().map(function(x){ return {sku:b.dataset.sku,month:x.key,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flashKeys(cl, monthList().map(function(x){ return {sku:b.dataset.sku,month:x.key}; })); flash('Cleared ✓'); reload(); }); }; });   // v27.579: one batched write
     host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop'); var cl=inp.dataset.cl;
@@ -11468,6 +11495,196 @@ function renderKeyAccountsView(body){
   function applyFlash(){ if(!_flash)return; var ks=_flash; _flash=null; var first=null; host.querySelectorAll('.kaf-cell').forEach(function(i){ if(ks[i.dataset.cl+'|'+i.dataset.sku+'|'+i.dataset.m]){ i.classList.add('kaf-flash'); if(!first)first=i; } });
     if(first){ try{ first.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } setTimeout(function(){ host.querySelectorAll('.kaf-cell.kaf-flash').forEach(function(i){ i.classList.remove('kaf-flash'); }); },2700); }
   function reload(){ fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); applyFlash(); }); }
+  // ── v28.183 (Ben): Excel-style grid (approved "Excel-style core") ──
+  // Selection = a set of 'r,c' keys over SKU rows x month columns (client header / add-SKU rows are not grid rows, so a block can
+  // span clients). Click = one cell; drag / Shift+click = rectangle from the anchor; Ctrl/Cmd+click toggles cells (multi-range).
+  // SS.base = what was selected before the current anchor (Ctrl adds and Shift / drag extend on top of it). Keyboard: arrows
+  // (Shift = extend), Tab, Enter / F2 / a digit edits, Delete / Backspace clears the selection, Ctrl/Cmd+C copies TSV, Ctrl/Cmd+V
+  // pastes a TSV / CSV block at the active cell (one value into a multi-cell selection fills it), Ctrl/Cmd+Z undoes.
+  // Writes are optimistic (shown at once, reverted per cell on failure) and go out in order (_KAF_Q): one typed cell = the
+  // per-cell route, anything bulk (paste / fill / clear / undo) = ONE /api/supply/ka-forecast-cells request.
+  function TD(r,c){ return (TDS[r]&&TDS[r][c])||null; }
+  function tbl(){ return host.querySelector('table.kaf-grid'); }
+  function nR(){ return G.rows.length; } function nC(){ return G.cols.length; }
+  function clampR(r){ return Math.max(0,Math.min(nR()-1,r)); } function clampC(c){ return Math.max(0,Math.min(nC()-1,c)); }
+  function val(r,c){ var v=VAL[r+','+c]; return v==null?null:v; }
+  function selKeys(){ return Object.keys(SS.sel); }
+  function rc(k){ var p=String(k).split(','); return {r:+p[0],c:+p[1]}; }
+  function cp(o){ var x={}; for(var k in o)x[k]=1; return x; }
+  function rectInto(o,a,b){ var r0=Math.min(a.r,b.r), r1=Math.max(a.r,b.r), c0=Math.min(a.c,b.c), c1=Math.max(a.c,b.c);
+    for(var r=r0;r<=r1;r++)for(var c=c0;c<=c1;c++)o[r+','+c]=1; return o; }
+  function focusGrid(){ var t=tbl(); if(t&&document.activeElement!==t){ try{ t.focus({preventScroll:true}); }catch(e){ t.focus(); } } }
+  function setActive(r,c){ if(!nR()||!nC())return; SS.sel={}; SS.sel[r+','+c]=1; SS.base={}; SS.anchor={r:r,c:c}; SS.ext={r:r,c:c}; paintSel(true); }
+  function extendTo(r,c){ if(!SS.anchor)return setActive(r,c); SS.ext={r:r,c:c}; SS.sel=rectInto(cp(SS.base),SS.anchor,SS.ext); paintSel(true,true); }
+  function paintSel(scroll,toExt){ var t=tbl(); if(!t)return; var a=SS.anchor;
+    for(var r=0;r<TDS.length;r++){ var R=TDS[r]; if(!R)continue; for(var c=0;c<R.length;c++){ var td=R[c]; if(!td)continue; var on=!!SS.sel[r+','+c], act=!!(a&&a.r===r&&a.c===c);
+      if(td.classList.contains('kaf-sel')!==on){ td.classList.toggle('kaf-sel',on); td.setAttribute('aria-selected',on?'true':'false'); }
+      if(td.classList.contains('kaf-act')!==act)td.classList.toggle('kaf-act',act); } }
+    if(a)t.setAttribute('aria-activedescendant','kaf-c'+a.r+'-'+a.c); else t.removeAttribute('aria-activedescendant');
+    if(scroll){ var p=toExt?SS.ext:a, td2=p&&TD(p.r,p.c); if(td2&&td2.scrollIntoView){ try{ td2.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } }
+    sbUpdate(); }
+  function fmtN(v){ return String(Math.round(v*10)/10); }   // same plain number format as the cells
+  function sbUpdate(){ var el=host.querySelector('#kaf-sbt'); if(!el)return; var ks=selKeys(), n=ks.length, cnt=0, sum=0;
+    ks.forEach(function(k){ var v=VAL[k]; if(v!=null){ cnt++; sum+=v; } });
+    el.innerHTML=n?('Selected <b>'+n+'</b> cell'+(n===1?'':'s')+' &nbsp; Sum <b>'+fmtN(sum)+'</b> &nbsp; Count <b>'+cnt+'</b> &nbsp; Avg <b>'+(cnt?fmtN(sum/cnt):'')+'</b>')
+      :'Click a cell to select. Drag, Shift or Ctrl/Cmd+click to select more.';
+    var cb=host.querySelector('#kaf-sb-clear'); if(cb){ cb.textContent='Clear '+n+' cell'+(n===1?'':'s'); cb.disabled=!cnt; }
+    var cpb=host.querySelector('#kaf-sb-copy'); if(cpb)cpb.disabled=!n;
+    var ub=host.querySelector('#kaf-sb-undo'), u=KAF_UNDO[KAF_UNDO.length-1]; if(ub){ ub.disabled=!u; ub.title=u?('Undo '+u.label.toLowerCase()+' ('+u.cells.length+' cell'+(u.cells.length===1?'':'s')+'), Ctrl/Cmd+Z'):'Nothing to undo'; }
+    var sv=host.querySelector('#kaf-saving'); if(sv)sv.textContent=KAF_SAVING?'Saving…':''; }
+  function toast(msg,kind){ var el=host.querySelector('#kaf-toast'); if(!el){ flash(msg,kind==='bad'); return; }
+    el.className=kind||''; el.textContent=msg; clearTimeout(el._t); el._t=setTimeout(function(){ el.textContent=''; },kind==='bad'?9000:4500); }
+  // values: whole numbers >= 0, thousands separators / spaces stripped; blank or 0 = clear (null); anything else = {bad}
+  function parseQty(s){ var t=String(s==null?'':s).replace(/^\s*"([\s\S]*)"\s*$/,'$1').replace(/[,\s ]/g,''); if(t==='')return {v:null};
+    if(/^\d+(\.0+)?$/.test(t)){ var n=parseInt(t,10); return {v:n>0?n:null}; } return {bad:true}; }
+  function splitCsv(line){ if(/^\s*\d{1,3}(,\d{3})+(\.\d+)?\s*$/.test(line))return [line];   // one number with thousands separators, not several cells
+    var out=[], cur='', q=false; for(var i=0;i<line.length;i++){ var ch=line[i];
+      if(q){ if(ch==='"'){ if(line[i+1]==='"'){ cur+='"'; i++; } else q=false; } else cur+=ch; }
+      else if(ch==='"')q=true; else if(ch===','){ out.push(cur); cur=''; } else cur+=ch; }
+    out.push(cur); return out; }
+  function parseClip(t){ t=String(t==null?'':t).replace(/\r\n?/g,'\n'); if(t.slice(-1)==='\n')t=t.slice(0,-1); var tab=t.indexOf('\t')>=0;   // Excel / Sheets end a copy with a newline
+    return t.split('\n').map(function(l){ return tab?l.split('\t'):splitCsv(l); }); }
+  function mkOp(r,c,next){ var x=G.rows[r], cl=x.cl; return {cl:cl, cv:cl==='(no client)'?'':cl, sku:x.sku, wh:KAF_CTRY, m:G.cols[c], prev:val(r,c), next:next}; }
+  function pushOp(ops,r,c,next){ if(val(r,c)===next)return; ops.push(mkOp(r,c,next)); }
+  // local model (rows) + shown value, mirroring the server's per-cell rule: the month's rows go, one row at month-01 if qty > 0
+  function setVal(o,v){ if(!(v>0))v=null;
+    rows=rows.filter(function(x){ return !(x.warehouse===o.wh&&(x.client||'')===o.cv&&x.sku===o.sku&&String(x.ship_date||'').slice(0,7)===o.m); });
+    if(v!=null)rows.push({id:null,client:o.cv,sku:o.sku,warehouse:o.wh,ship_date:o.m+'-01',quantity:v});
+    if(o.wh!==KAF_CTRY)return; var p=G.idx[o.cl+'|'+o.sku+'|'+o.m]; if(!p)return; var k=p[0]+','+p[1];
+    if(v==null)delete VAL[k]; else VAL[k]=v;
+    var td=TD(p[0],p[1]); if(td){ var sp=td.querySelector('.kaf-v'); if(sp)sp.textContent=v==null?'':String(v); } }
+  function postJ(url,body){ return fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }); }); }
+  // ops = [{cl, cv, sku, wh, m, prev, next}]; undoOf = the undo entry being reversed (an undo is not itself pushed)
+  function applyOp(ops,label,undoOf,note){ if(!ops.length){ toast(note||'No changes'); return Promise.resolve(); }
+    ops.forEach(function(o){ setVal(o,o.next); }); KAF_SAVING++; sbUpdate();
+    var single=ops.length===1&&!undoOf;
+    function cellOut(o){ return {client:o.cv, sku:o.sku, warehouse:o.wh, month:o.m, quantity:o.next==null?'':o.next}; }
+    var p=_KAF_Q.then(function(){
+      if(single)return postJ('/api/supply/ka-forecast-cell',cellOut(ops[0])).then(function(j){ return [j&&!j.error?{ok:true}:{ok:false,error:(j&&j.error)||'save failed'}]; });
+      return postJ('/api/supply/ka-forecast-cells',{cells:ops.map(cellOut)}).then(function(j){
+        if(j&&Array.isArray(j.results)&&j.results.length===ops.length)return j.results; throw new Error((j&&j.error)||'save failed'); });
+    }).then(function(res){ var ok=[], bad=[], badIx=[], err='';
+      ops.forEach(function(o,i){ if(res[i]&&res[i].ok)ok.push(o); else { bad.push(o); badIx.push(i); if(!err)err=(res[i]&&res[i].error)||'save failed'; } });
+      bad.forEach(function(o){ setVal(o,o.prev); });
+      if(ok.length){ if(!undoOf){ KAF_UNDO.push({label:label,cells:ok}); if(KAF_UNDO.length>KAF_UNDO_MAX)KAF_UNDO.shift(); } kafPkaRefresh(); }
+      if(undoOf&&bad.length)KAF_UNDO.push({label:undoOf.label,cells:badIx.map(function(i){ return undoOf.cells[i]; })});   // what could not be undone stays undoable
+      var n=ops.length, s=function(k){ return k+' cell'+(k===1?'':'s'); };
+      if(bad.length)toast(bad.length+' of '+s(n)+' not saved, reverted: '+err,'bad');
+      else toast((undoOf?'Undone: '+undoOf.label.toLowerCase()+', '+s(n):'Saved '+s(n))+(note?'. '+note:''),note?'':'ok');
+    },function(e){ ops.forEach(function(o){ setVal(o,o.prev); }); if(undoOf)KAF_UNDO.push(undoOf);
+      toast('Save failed, '+ops.length+' cell'+(ops.length===1?'':'s')+' reverted: '+(e&&e.message||e),'bad'); })
+    .then(function(){ KAF_SAVING=Math.max(0,KAF_SAVING-1); sbUpdate(); });
+    _KAF_Q=p; return p; }
+  function undo(){ if(KAF_SAVING){ _KAF_Q.then(function(){ undo(); }); return; }   // let the write in flight land (and join the stack) first
+    var u=KAF_UNDO.pop(); if(!u){ toast('Nothing to undo'); sbUpdate(); return; }
+    var ops=u.cells.map(function(o){ return {cl:o.cl, cv:o.cv, sku:o.sku, wh:o.wh, m:o.m, prev:o.next, next:o.prev}; }), sel={}, first=null;
+    ops.forEach(function(o){ if(o.wh!==KAF_CTRY)return; var p=G.idx[o.cl+'|'+o.sku+'|'+o.m]; if(p){ sel[p[0]+','+p[1]]=1; if(!first)first={r:p[0],c:p[1]}; } });
+    if(first){ SS.sel=sel; SS.base={}; SS.anchor={r:first.r,c:first.c}; SS.ext={r:first.r,c:first.c}; paintSel(true); }
+    applyOp(ops,'Undo',u); }
+  function clearSel(){ var ops=[]; selKeys().forEach(function(k){ var x=rc(k); pushOp(ops,x.r,x.c,null); }); if(!ops.length){ toast('Nothing to clear'); return; } applyOp(ops,'Clear'); }
+  function copyText(){ var ks=selKeys(); if(!ks.length)return ''; var rs={}, cs={}; ks.forEach(function(k){ var p=rc(k); rs[p.r]=1; cs[p.c]=1; });
+    function nums(o){ return Object.keys(o).map(Number).sort(function(a,b){ return a-b; }); }
+    var R=nums(rs), C=nums(cs);   // multi-range: the selected rows x selected columns, unselected cells blank
+    return R.map(function(r){ return C.map(function(c){ var v=SS.sel[r+','+c]?VAL[r+','+c]:null; return v==null?'':String(v); }).join('\t'); }).join('\n'); }
+  function copySel(){ var n=selKeys().length; if(!n)return; var txt=copyText(), s=n+' cell'+(n===1?'':'s');
+    function viaTa(){ var ta=host.querySelector('#kaf-clip'); if(!ta)return false; ta.value=txt; ta.focus(); ta.select(); var ok=false; try{ ok=document.execCommand('copy'); }catch(e){} ta.value=''; focusGrid(); return ok; }
+    function done(){ toast('Copied '+s,'ok'); }
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,function(){ if(viaTa())done(); else toast('The browser blocked the copy','bad'); });
+    else if(viaTa())done(); else toast('The browser blocked the copy','bad'); }
+  function pasteText(txt){ var a=SS.anchor; if(!a||!nR()||!nC())return; var B=parseClip(txt), ks=selKeys(), ops=[], bad=0, out=0, w=0, fill=(B.length===1&&B[0].length===1&&ks.length>1);
+    if(fill){ var p=parseQty(B[0][0]); if(p.bad){ toast('1 cell skipped: not a number'); return; } ks.forEach(function(k){ var x=rc(k); pushOp(ops,x.r,x.c,p.v); }); }
+    else { B.forEach(function(row,i){ if(row.length>w)w=row.length; row.forEach(function(cell,j){ var r=a.r+i, c=a.c+j;
+        if(r>=nR()||c>=nC()){ out++; return; } var q=parseQty(cell); if(q.bad){ bad++; return; } pushOp(ops,r,c,q.v); }); });
+      var end={r:Math.min(nR()-1,a.r+B.length-1), c:Math.min(nC()-1,a.c+Math.max(1,w)-1)};
+      SS.sel=rectInto({},a,end); SS.base={}; SS.ext=end; paintSel(); }
+    var msg=[]; if(bad)msg.push(bad+' cell'+(bad===1?'':'s')+' skipped: not a number'); if(out)msg.push(out+' cell'+(out===1?'':'s')+' outside the grid ignored');
+    applyOp(ops,fill?'Fill':'Paste',null,msg.join('; ')); }
+  function startEdit(r,c,mode,ch){ if(ED)commitEdit(true); var td=TD(r,c); if(!td)return;
+    if(!(SS.anchor&&SS.anchor.r===r&&SS.anchor.c===c))setActive(r,c);
+    var sp=td.querySelector('.kaf-v'), inp=document.createElement('input'), cur=val(r,c);
+    inp.className='kaf-ed'; inp.setAttribute('inputmode','numeric'); inp.setAttribute('aria-label',G.rows[r].sku+' '+G.cols[c]+' quantity');
+    inp.value=ch!=null?ch:(cur==null?'':String(cur)); if(sp)sp.style.display='none'; td.appendChild(inp); ED={r:r,c:c,td:td,inp:inp,mode:mode};
+    inp.focus(); try{ if(ch!=null)inp.setSelectionRange(inp.value.length,inp.value.length); else inp.select(); }catch(e){}
+    inp.onkeydown=function(ev){ var k=ev.key; ev.stopPropagation();
+      if(k==='Enter'){ ev.preventDefault(); commitEdit(); moveBy(ev.shiftKey?-1:1,0); }
+      else if(k==='Tab'){ ev.preventDefault(); commitEdit(); moveBy(0,ev.shiftKey?-1:1); }
+      else if(k==='Escape'){ ev.preventDefault(); endEdit(); focusGrid(); }
+      else if(ED&&ED.mode==='enter'&&/^Arrow(Up|Down|Left|Right)$/.test(k)){ ev.preventDefault(); commitEdit(); moveBy(k==='ArrowUp'?-1:k==='ArrowDown'?1:0,k==='ArrowLeft'?-1:k==='ArrowRight'?1:0); } };   // typed-over cell: arrows commit + move (F2 / Enter edit: arrows move the caret)
+    inp.onblur=function(){ if(ED&&ED.inp===inp)commitEdit(true); };
+  }
+  function endEdit(){ var E=ED; ED=null; if(!E)return null; var sp=E.td.querySelector('.kaf-v'); if(sp)sp.style.display=''; if(E.inp.parentNode)E.inp.parentNode.removeChild(E.inp); return E; }
+  function commitEdit(fromBlur){ var E=ED; if(!E)return; var raw=E.inp.value; endEdit(); if(!fromBlur)focusGrid();   // ED cleared before the input goes, so its blur cannot commit twice
+    var p=parseQty(raw); if(p.bad){ toast('Not saved: "'+String(raw).slice(0,20)+'" is not a whole number','bad'); return; }
+    if(p.v===val(E.r,E.c))return; applyOp([mkOp(E.r,E.c,p.v)],'Edit'); }
+  function moveBy(dr,dc){ var a=SS.anchor||{r:0,c:0}; setActive(clampR(a.r+dr),clampC(a.c+dc)); }
+  function cellOf(t){ var td=t&&t.closest?t.closest('td.kaf-cell'):null; return (td&&td.dataset.r!=null)?{r:+td.dataset.r,c:+td.dataset.c,td:td}:null; }
+  // Click-and-drag (a MUST, Ben 06-Oct): mousedown on a cell anchors (preventDefault: no text selection, no editor, no save);
+  // every mousemove / pointermove / mouseover while the button is held extends the rectangle to the cell under the pointer (from
+  // the event target, else elementFromPoint), so leaving the grid and re-entering, or crossing a client header row, just keeps
+  // extending. Near the edge of the scrolling grid box it auto-scrolls. Release anywhere (mouseup / pointerup / pointercancel /
+  // window blur) ends the drag. A mousedown INSIDE the open editor places the caret; dragging out of it commits the edit first.
+  var DRAG={x:0,y:0,dx:0,dy:0,timer:null};
+  function cellAt(ev){ var x=cellOf(ev.target); if(x)return x;
+    if(document.elementFromPoint&&ev.clientX!=null){ try{ return cellOf(document.elementFromPoint(ev.clientX,ev.clientY)); }catch(e){} } return null; }
+  // document-level listeners exist only while a drag is live, bound to THIS view instance (a re-render creates a new closure; listeners
+  // bound once per draw could end up pointing at a detached earlier instance, which never ended the live grid's drag)
+  function dragBind(){ dragUnbind(); _KAF_UP=[['mousemove',dragMove],['pointermove',dragMove],['mouseup',dragEnd],['pointerup',dragEnd],['pointercancel',dragEnd],['blur',dragEnd]];
+    _KAF_UP.forEach(function(h){ (h[0]==='blur'?window:document).addEventListener(h[0],h[1]); }); }
+  function dragUnbind(){ if(_KAF_UP)_KAF_UP.forEach(function(h){ (h[0]==='blur'?window:document).removeEventListener(h[0],h[1]); }); _KAF_UP=null; }
+  function dragStart(){ SS.drag=true; dragBind(); var t=tbl(); if(t)t.classList.add('kaf-dragging'); try{ var s=window.getSelection&&window.getSelection(); if(s&&s.removeAllRanges)s.removeAllRanges(); }catch(e){} }
+  function dragEnd(){ SS.drag=false; SS.edDrag=null; if(DRAG.timer){ clearInterval(DRAG.timer); DRAG.timer=null; } dragUnbind(); var t=tbl(); if(t)t.classList.remove('kaf-dragging'); }
+  function autoScroll(){ var b; try{ b=host.getBoundingClientRect(); }catch(e){ return; } if(!b||!(b.height>0))return; var E=32;
+    DRAG.dy=DRAG.y<b.top+E?-1:DRAG.y>b.bottom-E?1:0; DRAG.dx=DRAG.x<b.left+E?-1:DRAG.x>b.right-E?1:0;
+    if(!DRAG.dx&&!DRAG.dy){ if(DRAG.timer){ clearInterval(DRAG.timer); DRAG.timer=null; } return; }
+    if(DRAG.timer)return;
+    DRAG.timer=setInterval(function(){ if(!SS.drag||(!DRAG.dx&&!DRAG.dy)){ clearInterval(DRAG.timer); DRAG.timer=null; return; }
+      host.scrollTop+=DRAG.dy*24; host.scrollLeft+=DRAG.dx*24;
+      var x=null; try{ if(document.elementFromPoint)x=cellOf(document.elementFromPoint(DRAG.x,DRAG.y)); }catch(e){}
+      if(x&&!(SS.ext&&SS.ext.r===x.r&&SS.ext.c===x.c))extendTo(x.r,x.c); },40); }
+  function onDown(ev){ if(ev.button!==0)return; var x=cellOf(ev.target); if(!x)return;
+    if(ED&&ED.td===x.td){ SS.edDrag={r:x.r,c:x.c}; dragBind(); return; }   // inside the editor: let the caret move; a drag out of it commits (dragMove)
+    if(ED)commitEdit(true); ev.preventDefault(); var k=x.r+','+x.c;
+    if(ev.shiftKey&&SS.anchor){ extendTo(x.r,x.c); dragStart(); }
+    else if((ev.ctrlKey||ev.metaKey)&&SS.anchor){
+      if(SS.sel[k]&&selKeys().length>1){ delete SS.sel[k]; SS.base=cp(SS.sel); if(SS.anchor.r===x.r&&SS.anchor.c===x.c){ var f=rc(selKeys()[0]); SS.anchor={r:f.r,c:f.c}; SS.ext={r:f.r,c:f.c}; } paintSel(); }   // toggle off
+      else { SS.base=cp(SS.sel); SS.sel[k]=1; SS.anchor={r:x.r,c:x.c}; SS.ext={r:x.r,c:x.c}; dragStart(); paintSel(); } }   // toggle on (drag from here adds a block)
+    else { setActive(x.r,x.c); dragStart(); }
+    focusGrid(); }
+  function dragMove(ev){
+    if(SS.edDrag){ if(ev.buttons===0){ dragEnd(); return; } var y=cellAt(ev), o=SS.edDrag; if(!y||(y.r===o.r&&y.c===o.c))return;
+      SS.edDrag=null; commitEdit(); setActive(o.r,o.c); dragStart(); extendTo(y.r,y.c); return; }
+    if(!SS.drag)return; if(ev.buttons===0){ dragEnd(); return; }   // released outside the window
+    if(ev.clientX!=null){ DRAG.x=ev.clientX; DRAG.y=ev.clientY; autoScroll(); }
+    var x=cellAt(ev); if(!x)return; if(SS.ext&&SS.ext.r===x.r&&SS.ext.c===x.c)return; extendTo(x.r,x.c); }
+  function onKey(ev){ if(ED)return; var k=ev.key, mod=(ev.ctrlKey||ev.metaKey)&&!ev.altKey;
+    if(mod){ var kl=String(k||'').toLowerCase();
+      if(kl==='c'){ ev.preventDefault(); copySel(); return; }
+      if(kl==='v'){ var ta=host.querySelector('#kaf-clip'); if(ta){ ta.value=''; ta.focus(); setTimeout(function(){ if(document.activeElement===ta)focusGrid(); },60); } return; }   // the native paste lands in the hidden textarea (its paste handler takes it)
+      if(kl==='z'&&!ev.shiftKey){ ev.preventDefault(); undo(); return; }
+      if(kl==='a'&&nR()&&nC()){ ev.preventDefault(); SS.anchor=SS.anchor||{r:0,c:0}; SS.base={}; SS.ext={r:nR()-1,c:nC()-1}; SS.sel=rectInto({},{r:0,c:0},SS.ext); paintSel(); }
+      return; }
+    if(!SS.anchor){ if(/^(Arrow|Enter|F2)/.test(k)&&nR()&&nC()){ ev.preventDefault(); setActive(0,0); } return; }
+    var a=SS.anchor, dr=k==='ArrowUp'?-1:k==='ArrowDown'?1:0, dc=k==='ArrowLeft'?-1:k==='ArrowRight'?1:0;
+    if(dr||dc){ ev.preventDefault(); if(ev.shiftKey){ var x=SS.ext||a; extendTo(clampR(x.r+dr),clampC(x.c+dc)); } else setActive(clampR(a.r+dr),clampC(a.c+dc)); return; }
+    if(k==='Tab'){ var nc=a.c+(ev.shiftKey?-1:1); if(nc<0||nc>=nC())return; ev.preventDefault(); setActive(a.r,nc); return; }   // at the grid's edge Tab leaves the grid
+    if(k==='Enter'||k==='F2'){ ev.preventDefault(); startEdit(a.r,a.c,'edit'); return; }
+    if(k==='Delete'||k==='Backspace'){ ev.preventDefault(); clearSel(); return; }
+    if(k==='Escape'){ setActive(a.r,a.c); return; }
+    if(!ev.altKey&&k&&k.length===1&&/[0-9]/.test(k)){ ev.preventDefault(); startEdit(a.r,a.c,'enter',k); } }
+  function gridWire(hadFocus){ TDS=[]; var t=tbl(); if(!t)return;
+    t.querySelectorAll('td.kaf-cell').forEach(function(td){ var r=+td.dataset.r, c=+td.dataset.c; (TDS[r]||(TDS[r]=[]))[c]=td; });
+    t.addEventListener('mousedown',onDown); t.addEventListener('mouseover',dragMove); t.addEventListener('keydown',onKey);
+    t.addEventListener('dragstart',function(ev){ ev.preventDefault(); });   // never a native drag-and-drop of cell text
+    t.addEventListener('dblclick',function(ev){ var x=cellOf(ev.target); if(x&&!(ED&&ED.td===x.td))startEdit(x.r,x.c,'edit'); });
+    t.addEventListener('focus',function(){ if(!SS.anchor&&nR()&&nC()){ SS.sel={'0,0':1}; SS.base={}; SS.anchor={r:0,c:0}; SS.ext={r:0,c:0}; paintSel(); } });
+    var ta=host.querySelector('#kaf-clip');
+    if(ta){ ta.addEventListener('paste',function(ev){ var cd=ev.clipboardData||window.clipboardData, txt=cd?(cd.getData('text/plain')||cd.getData('text')):null; if(txt==null)return;
+        ev.preventDefault(); ta.value=''; focusGrid(); pasteText(txt); });
+      ta.addEventListener('input',function(){ var v=ta.value; ta.value=''; focusGrid(); if(v)pasteText(v); }); }   // browsers that paste without a readable clipboardData
+    var b1=host.querySelector('#kaf-sb-copy'), b2=host.querySelector('#kaf-sb-clear'), b3=host.querySelector('#kaf-sb-undo');
+    if(b1)b1.onclick=function(){ copySel(); }; if(b2)b2.onclick=function(){ clearSel(); focusGrid(); }; if(b3)b3.onclick=function(){ undo(); focusGrid(); };
+    paintSel(); if(hadFocus)focusGrid(); }
   // ── Import / paste panel ──
   function toggleImport(){ var box=body.querySelector('#kaf-imp'); if(box.innerHTML){ box.innerHTML=''; return; }
     var mo=monthList(); var moOpts=mo.map(function(x){return '<option value="'+x.key+'"'+(x.cur?' selected':'')+'>'+x.label+'</option>';}).join('');
