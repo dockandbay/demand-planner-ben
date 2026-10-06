@@ -1137,7 +1137,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/api/cron/up-fx-statement'   // v28.175 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -4825,7 +4825,7 @@ app.get('/api/supply/xero/bills', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// v28.175 (Ben): UNIVERSAL PARTNERS FX USD bank STATEMENT CSV. Xero's public API cannot create bank statement lines, so
+// v28.174 (Ben): UNIVERSAL PARTNERS FX USD bank STATEMENT CSV. Xero's public API cannot create bank statement lines, so
 // HORIZON builds a statement file (one line per in/out on that account) that someone imports in Xero (Universal
 // Partners FX USD > Manage Account > Import a Statement), so every payment / transfer there can be reconciled.
 // READ ONLY: GET calls to the UK org only. Sources: (1) Payments on the account (AUTHORISED; DELETED/VOIDED skipped),

@@ -1,3 +1,14 @@
+## v28.174 (Ben, branch review-fixes-2026-10-05): UP FX Statement (Xero bank statement file for Universal Partners FX USD) + weekly email
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no new env vars.
+
+- Xero's API can't create bank statement lines, so HORIZON builds a precoded statement CSV (`*Date,*Amount,Payee,Description,Reference,Check Number`, dd/mm/yyyy, signed amounts) of the account's UNRECONCILED ins and outs, read-only from the UK org: AUTHORISED payments (deleted/voided excluded), spend/receive money (transfer legs excluded), bank transfers (USD from this account's own leg). In = "FX Transfer In", out = "FX Payment Out".
+- `GET /api/supply/xero/up-fx-statement.csv` and `GET /api/supply/xero/up-fx-statement` (JSON preview), admin-only, `from` / `to` / `all=1`.
+- Button **"UP FX Statement"** on SUPPLY ▸ Payments ▸ Payments Report.
+- Weekly email `POST /api/cron/up-fx-statement` (x-webhook-secret) to rita@ + accounts@, sent ONLY when there are new unreconciled lines; attaches the NEW-lines CSV (the one to import) plus the full unreconciled CSV; emailed ids tracked in app_settings `up_fx_statement_emailed`; `?dry=1` previews; logged to etl_runs `up_fx_statement`.
+- Live today (read-only): 25/09/2026 -8,160.42 Nice Look "FX Payment Out" SUPPLIER-PAYMENT-NL-2026-09-25; 29/09/2026 +8,160.42 #7060 Lloyds "FX Transfer In". 4 deleted Bright Eagle payments excluded.
+- **Diviyaj:** n8n weekly Monday 08:00 Europe/London POST `/api/cron/up-fx-statement` with header `x-webhook-secret: N8N_WEBHOOK_SECRET`; mirror the gate bypass for that path. Optional app_settings: `up_fx_bank_account_id`, `up_fx_statement_recipients`. About 8 to 12 Xero GETs per run.
+
 ## v28.173 (Ben, branch review-fixes-2026-10-05): Xero problems shown next to the XERO button; real Xero error reasons
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
