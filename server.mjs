@@ -161,8 +161,8 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
 const HZ_SLOW_Q_MS = Math.max(200, Number(process.env.HZ_SLOW_QUERY_MS || 2000));
 function hzSqlNorm(sql) { return String(sql || '').replace(/'(?:[^']|'')*'/g, '?').replace(/(?<![$\w])\d+(?:\.\d+)?/g, '?').replace(/\s+/g, ' ').trim().slice(0, 160); }
 function hzDbErr(e, op) { try { const m = String((e && e.message) || e || '');
-  if (!/timeout exceeded when trying to connect|Query read timeout|statement timeout|Connection terminated due to connection timeout/i.test(m)) return;
-  const kind = /connect/i.test(m) ? 'connect_timeout' : /statement timeout/i.test(m) ? 'statement_timeout' : 'query_timeout';
+  if (!/timeout exceeded when trying to connect|Query read timeout|statement timeout|Connection terminated due to connection timeout|ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients reached/i.test(m)) return;
+  const kind = /ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients/i.test(m) ? 'pooler_saturated' : /connect/i.test(m) ? 'connect_timeout' : /statement timeout/i.test(m) ? 'statement_timeout' : 'query_timeout';   // pooler_saturated = Supabase pooler out of sessions / checkouts
   hzHealthEvt('db_pool', kind, { path: 'db ' + kind.replace('_', ' '), message: m.slice(0, 300), meta: { op, error: kind, max_waiting: pool.waitingCount, total: pool.totalCount, idle: pool.idleCount } });
 } catch (_) {} }
 pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 1; const oq = client.query;
