@@ -1,3 +1,12 @@
+## v28.158 (Ben, branch review-fixes-2026-10-05): trend figures and AI Insights relative to today
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env vars, no server change.
+
+1. **1-month / 3-month trends on the grand-total and category rows were hardcoded to May** (May-26 vs May-25, Mar–May). New `hzTrendSums(a)`: 1-month = the last COMPLETE month (CUR_YTD_END, the current month is partial) vs the same month last year; 3-month = the 3 complete months ending there vs the same 3 a year earlier. This is the rule the SKU rows already used, so totals now agree with their rows. Today: Sep-26 vs Sep-25 and Jul–Sep 26 vs Jul–Sep 25. Crosses the year correctly (Jan-27 → Dec-26 / Oct–Dec 26).
+2. **AI Insights payload + prompt relative to today** (`hzInsightsPeriods()`): actuals = last calendar year (was fixed 2025); year to date = completed months this year plus the same months last year (was fixed Jan–May 2026, so Jun–Sep were missing); forecast = current month onward, 19 months; new-SKU "recent units" = last 6 complete months (was fixed Dec-25..May-26). **Bug fixed:** the forecast filter `!ACTUAL_MONTHS.indexOf(k)>=0` was always true, so months already in the past were sent to the AI as forecast. Prompt TYPE 4 / TYPE 7 now name the actual periods, and a PERIODS line tells the model the as-of month and every window.
+
+**Verified:** unit test of both helpers with stubbed data at Oct-26, Jan-27, Feb-27 (windows and year rollover correct); artifact inline scripts compile, 0 errors. In-browser render check pending the sandbox DB restart.
+
 ## v28.157 (Ben, branch review-fixes-2026-10-05): Jan-27 year-agnostic DEMAND UI + Catalogue toolbar / category filter + PRODUCT L3 in the left menu + barcode picker shows assigned codes
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars, no server change.

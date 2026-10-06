@@ -1566,6 +1566,13 @@ function hzCurYear(){ return (typeof CUR_MONTH==='string'&&CUR_MONTH)?+CUR_MONTH
 function hzLyYear(){ return hzCurYear()-1; }       // calendar year before it (2025 today)
 // Completed months of the calendar year to date = Jan..CUR_YTD_END of CUR_YTD_END's year (== ACTUAL_MONTHS minus the partial
 // CUR_MONTH while CUR_MONTH isn't January; in Jan-27 it is Jan..Dec-26 instead of an empty list).
+// v28.158 (Ben): 1-month / 3-month trend windows, relative to today: the last COMPLETE month (CUR_YTD_END; the current
+// month is partial) and the 3 complete months ending there, each compared with the same months a year earlier. Same rule
+// the SKU rows already use, so grand-total / category trend cells now agree with the rows (were hardcoded to May).
+function hzTrendSums(a){ var e=String(CUR_YTD_END||''); if(!/^\d{4}_\d{2}$/.test(e))return {m1:0,m1ly:0,m3:0,m3ly:0};
+  var ly=function(k){var p=pa(k);return ym(p.y-1,p.mo);}, u=function(k){return (a&&a[k])?(a[k][0]||0):0;};
+  var k3=[prevMonthKey(prevMonthKey(e)),prevMonthKey(e),e];
+  return { m1:u(e), m1ly:u(ly(e)), m3:k3.reduce(function(t,k){return t+u(k);},0), m3ly:k3.reduce(function(t,k){return t+u(ly(k));},0) }; }
 function hzYtdDoneMonths(){ var e=String(CUR_YTD_END||''), y=e.slice(0,4), m=+e.slice(5,7), o=[]; for(var i=1;i<=m;i++)o.push(y+'_'+(i<10?'0':'')+i); return o; }
 // Dock & Bay FY naming: FY runs Mar..Feb and is named by the year it ENDS (FY27 = Mar-26..Feb-27). startY = fiscal start year (CUR_FY_START).
 function hzFyName(startY){ return 'FY'+String(startY+1).slice(2); }
@@ -9572,8 +9579,7 @@ function buildBody(){
       gt24u+=fyU(a,CUR_FY_START-2);gt25u+=fyU(a,CUR_FY_START-1);gt24r+=fyR(a,CUR_FY_START-2);gt25r+=fyR(a,CUR_FY_START-1);
       var _gtPrevEnd=ym(pa(CUR_YTD_END).y-1,pa(CUR_YTD_END).mo);
       gty25u+=fyToDateU(a,CUR_FY_START-1,_gtPrevEnd);gty26u+=fyToDateU(a,CUR_FY_START,CUR_YTD_END);gty26r+=fyToDateR(a,CUR_FY_START,CUR_YTD_END);
-      gtm1_25+=(a['2025_05']||[0])[0];gtm1_26+=(a['2026_05']||[0])[0];
-      gtm3_25+=sumUT(a,2025,5)-sumUT(a,2025,2);gtm3_26+=sumUT(a,2026,5)-sumUT(a,2026,2);
+      var _gtT=hzTrendSums(a); gtm1_25+=_gtT.m1ly;gtm1_26+=_gtT.m1; gtm3_25+=_gtT.m3ly;gtm3_26+=_gtT.m3;   // v28.158 (Ben): relative to today, not May
       var rk2=r.s+'|'+CUR+'|'+r.ch;
       var cr2=calc(r.s,CUR,r.ch);var fu2=cr2.fu;
       var sp2=aspF(r.s,CUR,r.ch);
@@ -9743,8 +9749,7 @@ function _makeCatTotRow(cat){
       c24u+=fyU(a,CUR_FY_START-2);c24r+=fyR(a,CUR_FY_START-2);c25u+=fyU(a,CUR_FY_START-1);c25r+=fyR(a,CUR_FY_START-1);
       var _cPrevEnd=ym(pa(CUR_YTD_END).y-1,pa(CUR_YTD_END).mo);
       cy26u+=fyToDateU(a,CUR_FY_START,CUR_YTD_END);cy26r+=fyToDateR(a,CUR_FY_START,CUR_YTD_END);cy25u+=fyToDateU(a,CUR_FY_START-1,_cPrevEnd);
-      cm1_25+=(a['2025_05']||[0])[0];cm1_26+=(a['2026_05']||[0])[0];
-      cm3_25+=sumUT(a,2025,5)-sumUT(a,2025,2);cm3_26+=sumUT(a,2026,5)-sumUT(a,2026,2);
+      var _cT=hzTrendSums(a); cm1_25+=_cT.m1ly;cm1_26+=_cT.m1; cm3_25+=_cT.m3ly;cm3_26+=_cT.m3;   // v28.158 (Ben): relative to today, not May
       const rk2=r.s+'|'+CUR+'|'+r.ch;
       const fu2=fu_cache[rk2]||calc(r.s,CUR,r.ch).fu;fu_cache[rk2]=fu2;   // store the .fu MAP (was storing the whole {fu,reasons} → fyFC read undefined→0, and poisoned the cache for the per-month rollup)
       const sp2=aspF(r.s,CUR,r.ch);
@@ -17617,26 +17622,40 @@ function closeInsightsPanel(){
 }
 
 // Build compact data for current country to send to Claude
+// v28.158 (Ben): every period is relative to today (was fixed 2025 / Jan-May 2026 / Dec-25..May-26). Periods:
+//   last_year      = the full calendar year before CUR_MONTH's year (hzLyMonths)
+//   ytd            = completed months of this year (hzYtdDoneMonths: Jan..CUR_YTD_END), compared in the prompt with the same months last year
+//   forecast       = the current month onward, 19 months (was also sending past months: `!ACTUAL_MONTHS.indexOf(k)>=0` is always true)
+//   recent 6 mo    = the 6 complete months ending CUR_YTD_END
+function hzInsightsPeriods(){
+  var ly=hzLyMonths(), ytd=hzYtdDoneMonths(), e=String(CUR_YTD_END||''), r6=[e];
+  for(var i=0;i<5;i++)r6.unshift(prevMonthKey(r6[0]));
+  var fc=FM.filter(function(k){return k>=CUR_MONTH;}).slice(0,19);
+  var _MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], nm=function(k){return k?(_MN[(+k.slice(5,7))-1]||k.slice(5,7))+' '+k.slice(0,4):'';};
+  return { last_year:ly, ytd:ytd, ytd_ly:ytd.map(function(k){return (+k.slice(0,4)-1)+k.slice(4);}), forecast:fc, recent6:r6,
+    label:{ last_year:String(ly[0]||'').slice(0,4), ytd:ytd.length?(nm(ytd[0])+' to '+nm(ytd[ytd.length-1])):'none', ytd_ly_year:String(+String(ytd[0]||e).slice(0,4)-1),
+      forecast:fc.length?(nm(fc[0])+' to '+nm(fc[fc.length-1])):'none', recent6:nm(r6[0])+' to '+nm(r6[5]) } };
+}
 function buildInsightsData(){
-  var data={country:CUR,subcategories:[],skus:[]};
-  // Per subcat × channel: actuals 2024+2025 + YTD2026 + forecast
+  var P=hzInsightsPeriods();
+  var data={country:CUR,as_of:CUR_MONTH,periods:P.label,subcategories:[],skus:[]};
+  // Per subcat × channel: last year's actuals + this year's completed months + forecast from the current month
   var subs=DATA.filter(function(r){return r.co===CUR;});
   subs.forEach(function(r){
     var a=r.m;
     var cr=calc(r.s,CUR,r.ch);
     var fu=cr.fu;
-    // Compact: only actuals 2025 (12) + ytd 2026 (5) + forecast Jun26-Dec27 (19)
-    var actuals2025={};
-    for(var m=1;m<=12;m++){var k='2025_'+String(m).padStart(2,'0');if(a[k])actuals2025[k]=a[k][0];}
-    var ytd2026={};
-    ['2026_01','2026_02','2026_03','2026_04','2026_05'].forEach(function(k){if(a[k])ytd2026[k]=a[k][0];});
-    var forecast={};
-    FM.forEach(function(k){if(!ACTUAL_MONTHS.indexOf(k)>=0&&fu[k])forecast[k]=Math.round(fu[k]);});
+    var actualsLY={}, ytd={}, ytdLY={}, forecast={};
+    P.last_year.forEach(function(k){if(a[k])actualsLY[k]=a[k][0];});
+    P.ytd.forEach(function(k){if(a[k])ytd[k]=a[k][0];});
+    P.ytd_ly.forEach(function(k){if(a[k])ytdLY[k]=a[k][0];});
+    P.forecast.forEach(function(k){if(fu[k])forecast[k]=Math.round(fu[k]);});
     var growthInput=IV[gk(r.s,CUR,r.ch)]||null;
     data.subcategories.push({
       subcat:r.s,channel:r.ch,category:r.c,
-      actuals_2025:actuals2025,
-      ytd_2026:ytd2026,
+      actuals_last_year:actualsLY,
+      ytd_this_year:ytd,
+      ytd_same_months_last_year:ytdLY,
       forecast:forecast,
       growth_assumption:growthInput
     });
@@ -17654,8 +17673,8 @@ function buildInsightsData(){
     var wh=ctry+'_3pl';
     var sk=SKUS[sku+'|'+wh]||{};
     var totalB2B=0;
-    // crude: total units in last 6 months
-    ['2025_12','2026_01','2026_02','2026_03','2026_04','2026_05'].forEach(function(m){totalB2B+=(sk[m]||0);});
+    // crude: total units in the last 6 complete months (v28.158: relative to today, was fixed Dec-25..May-26)
+    P.recent6.forEach(function(m){totalB2B+=(sk[m]||0);});
     if(totalB2B>50){
       data.skus.push({sku:sku,subcat:p.s,launched:lch,recent_units:totalB2B,tier:p.ti});
     }
@@ -17681,9 +17700,9 @@ async function getInsights(){
       +'Use sibling subcats with established DTC:FBA ratios to estimate the missing channel size.\n\n'
     +'TYPE 3 — Cross-category correlation: Subcategories with strongly correlated historical monthly sales (>0.8 correlation) '
       +'should have similar growth assumptions. Flag pairs where growth assumptions diverge by >20%.\n\n'
-    +'TYPE 4 — Seasonality anomalies: Compare each subcat\'s 2025 monthly distribution (% of annual) to the current forecast distribution. '
+    +'TYPE 4 — Seasonality anomalies: Compare each subcat\'s last-year ('+data.periods.last_year+', actuals_last_year) monthly distribution (% of annual) to the current forecast distribution. '
       +'Flag months where the forecast deviates >30% from historical seasonal share.\n\n'
-    +'TYPE 7 — YTD reality check: Compare YTD 2026 (Jan-May) vs YTD 2025 for each subcat. If implied annual growth differs >15% from forecast assumption, flag.\n\n'
+    +'TYPE 7 — YTD reality check: Compare this year to date ('+data.periods.ytd+', ytd_this_year) vs the same months of '+data.periods.ytd_ly_year+' (ytd_same_months_last_year) for each subcat. If implied annual growth differs >15% from forecast assumption, flag.\n\n'
     +'TYPE 8 — B2B preorder signal: New SKUs (launched <12 months) with strong B2B sales suggest retail demand. '
       +'Boost the SUBCAT DTC+FBA forecast for the first season (next 3 months) proportional to existing DTC:FBA mix.\n\n'
     +'Return JSON only, no markdown, no preamble. Format: '
@@ -17693,6 +17712,7 @@ async function getInsights(){
     +'suggested_values:{YYYY_MM:integer_units OR percent_string like "+15%" OR null}, '
     +'reasoning:"one-sentence why this matters"}].\n\n'
     +'Be specific with numbers from the data. Avoid vague recommendations. Skip rows with insufficient data (< 6 months actuals).\n\n'
+    +'PERIODS (as of '+data.as_of+'; the current month is partial): last year = '+data.periods.last_year+'; year to date = '+data.periods.ytd+'; forecast = '+data.periods.forecast+'; "recent_units" on new SKUs = '+data.periods.recent6+'.\n\n'   // v28.158 (Ben): periods relative to today
     +'DATA:\n'+JSON.stringify(data);
 
   try{
