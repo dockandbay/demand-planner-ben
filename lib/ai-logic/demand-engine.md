@@ -67,6 +67,8 @@ sources:
   - artifact_v16.7.html :: aspAdjFactor
   - artifact_v16.7.html :: buildBody
   - artifact_v16.7.html :: _makeCatTotRow
+  - artifact_v16.7.html :: renderKeyAccountsView, kafPkaRefresh, loadPreorderKA
+  - server.mjs :: /api/supply/ka-forecast-cells, /api/supply/ka-forecast-cell, kaCellQty
 fingerprints:
   migrations/248_planning_scope_status_gate.sql::set_in_planning_scope: b1b7fa248f49
   server.mjs::buildDATA: b1b365e09434
@@ -132,7 +134,13 @@ fingerprints:
   artifact_v16.7.html::aspAdjFactor: 719869ba1e05
   artifact_v16.7.html::buildBody: a57f1a107abd
   artifact_v16.7.html::_makeCatTotRow: 5d3d82f1593e
-verified_version: v28.181
+  artifact_v16.7.html::renderKeyAccountsView: 5069b6e693fe
+  artifact_v16.7.html::kafPkaRefresh: 49573b9de89e
+  artifact_v16.7.html::loadPreorderKA: 8ba07ccbbabc
+  server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
+  server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
+  server.mjs::kaCellQty: dc82b5bfdbca
+verified_version: v28.183
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -211,6 +219,10 @@ verified_version: v28.181
 
 ## Preorder, Key Account, TikTok, Zalando
 - Preorder and Key-Account quantities are folded into B2B demand only for months inside the 18-month window. Past-dated months are past forecasts: ignored, never rolled forward. A record with no date lands in the window's first month. (source: buildLiveDemand, _pkaIngest)
+- DEMAND ▸ Key Accounts Forecast grid (v28.183): one cell = client x SKU x warehouse (UK / US / EU 3PL pill) x month. Saving a cell deletes every row for that client / SKU / warehouse inside the month and inserts one row dated the 1st with the new quantity; blank or 0 clears the month. Quantities must be whole numbers of 0 or more (thousands separators are stripped); anything else is rejected and not saved. (source: renderKeyAccountsView, /api/supply/ka-forecast-cell, /api/supply/ka-forecast-cells, kaCellQty)
+- The grid works like a spreadsheet: click, drag, Shift+click and Ctrl/Cmd+click select cells (client header rows are skipped, so a block can span clients); the status bar shows Selected, Sum, Count (non-blank) and Avg of the selection. Arrows / Tab move, Enter / F2 / a digit edits, Delete clears the selection, Ctrl/Cmd+C copies it as tab-separated rows, Ctrl/Cmd+V pastes a block from Excel / Sheets starting at the active cell (one value pasted into a multi-cell selection fills it), Ctrl/Cmd+Z undoes the last change (up to 50 steps). Pasted cells that are not numbers, or fall outside the shown rows / months, are skipped and counted in a message. Past (tinted) months stay editable as before. (source: renderKeyAccountsView)
+- A typed single cell saves through /api/supply/ka-forecast-cell; a paste, fill, clear or undo saves in ONE request to /api/supply/ka-forecast-cells, which applies the same per-cell rule in batches of 200 cells (one database statement per batch). Each cell is checked on its own: a rejected or failed cell is reported and put back on screen, the others still save. The import panel and the column / SKU clear buttons use the same bulk endpoint. (source: /api/supply/ka-forecast-cells, renderKeyAccountsView)
+- After any Key Accounts save the app re-reads the Preorder / KA quantities and marks demand stale, so the buy plan includes the change the next time it is shown (only the changed SKUs are rebuilt). Before v28.183 a Key Accounts edit only reached the buy plan after a reload or BUY ▸ Refresh cache. (source: kafPkaRefresh, loadPreorderKA)
 - TikTok is forecast as its own channel (UK, US) then folded into DTC demand (same 3PL pool); a display copy is kept for the buy popup. (source: buildLiveDemand)
 - Zalando (EU) adds EU 3PL demand only when a Zalando stock file has been uploaded: override, else subcategory forecast x share; no last-year chain and no launch/discontinue gating. (source: buildLiveDemand)
 
