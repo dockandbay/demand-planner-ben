@@ -19205,7 +19205,7 @@ const AI_TEXT_MIMES = /^(text\/|application\/(json|csv|xml|x-ndjson|x-yaml|yaml)
 const AI_TEXT_EXT = /\.(csv|tsv|txt|json|md|markdown|log|xml|yaml|yml|html?|js|ts|sql|py)$/i;
 const AI_MAX_FILE_TEXT = 200000;   // chars of a text/xlsx file passed to the model (keeps token cost sane)
 const AI_MAX_UPLOAD_BYTES = 12 * 1024 * 1024;   // per message, across all attachments
-// v28.167 (Ben): APP LOGIC library. Every lib/ai-logic/*.md file documents one area of HORIZON's logic (front matter: topic, title,
+// v28.166 (Ben): APP LOGIC library. Every lib/ai-logic/*.md file documents one area of HORIZON's logic (front matter: topic, title,
 // covers, sources, verified_version, fingerprints; body = plain-language rules citing their source functions). Loaded once at boot;
 // the index goes into AI_SYSTEM and the app_logic tool returns a file body. scripts/ai-logic-check.cjs flags a file whose source
 // functions changed since it was last verified.
@@ -19305,16 +19305,16 @@ const AI_TOOLS = [
     input_schema: { type: 'object', properties: { table: { type: 'string', description: 'optional: a planner table or view name (e.g. products, sales_actuals, purchase_orders, inbound_shipments, forecasts)' } } } },
   { name: 'query_horizon', description: "Run a READ-ONLY SQL SELECT against HORIZON's planner schema and get the rows back. This reaches ALL of HORIZON's data (products, sales, forecasts, purchase orders, shipments, payments, key accounts, preorders, clients, buy plan, and more). SELECT or WITH only; a single statement; capped at 500 rows. Unqualified table names resolve to the planner schema. Call describe_data first if unsure of table or column names.",
     input_schema: { type: 'object', properties: { sql: { type: 'string', description: 'a single read-only SELECT (or WITH ... SELECT) against planner tables' } }, required: ['sql'] } },
-  // v28.167 (Ben): explain one SKU x market buy, and read the documented app logic (lib/ai-logic/*.md)
+  // v28.166 (Ben): explain one SKU x market buy, and read the documented app logic (lib/ai-logic/*.md)
   { name: 'explain_buy', description: "Everything behind ONE SKU x market buy-plan number, read-only: the latest buy_plan_latest row (+ computed_at, app_version), 18-month forecast by month and channel, stock on hand, open inbound / on-order with arrival dates, product buy params (carton, lead weeks, target cover, tier, release window, launch and discontinue dates), matching Complex Rules, SSM flag, and derived facts (discontinue cutoff month, sellable window, forecast inside vs outside it, earliest month a Buy 3PL placed now can land, total buy = buy_3pl + urgent + future_qty and its carton count). Call this FIRST for any why-is-the-buy question.",
     input_schema: { type: 'object', properties: { sku: { type: 'string', description: 'exact SKU code' }, market: { type: 'string', enum: AI_MARKETS, description: 'market' } }, required: ['sku', 'market'] } },
   { name: 'app_logic', description: "HORIZON's documented logic (how numbers, reports and actions are calculated), maintained alongside the code. With no topic, returns the topic index (topic, title, covers). With a topic slug (e.g. buy-plan), returns that topic's rules, each citing its source function. Call before explaining any HORIZON number, rule or calculation.",
     input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'optional: topic slug from the index, e.g. buy-plan' } } } },
 ];
-// v28.167 (Ben): mirrors discCutoffMo (artifact): disc day > 15 cuts the NEXT month, else that month. Returns 'YYYY-MM' or null.
+// v28.166 (Ben): mirrors discCutoffMo (artifact): disc day > 15 cuts the NEXT month, else that month. Returns 'YYYY-MM' or null.
 function aiDiscCutoff(d) { if (!/^\d{4}-\d{2}-\d{2}/.test(String(d || ''))) return null; let y = +d.slice(0, 4), mo = +d.slice(5, 7); if (+d.slice(8, 10) > 15) { mo++; if (mo > 12) { mo = 1; y++; } } return y + '-' + String(mo).padStart(2, '0'); }
 function aiYmAdd(ym, n) { let y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + n; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return y + '-' + String(m + 1).padStart(2, '0'); }
-// v28.167 (Ben): server-side, read-only gather of everything behind one SKU x market buy (same sources + mappings as the buy
+// v28.166 (Ben): server-side, read-only gather of everything behind one SKU x market buy (same sources + mappings as the buy
 // engine: buildPROD_CONST params, buildSKURAW launch/disc/stock/on-order, forecast_outputs <mkt>_3pl DTC/B2B/TIK/ZAL + <mkt>_fba FBA,
 // preorders/KA folded into B2B). Derived facts let the assistant show the arithmetic instead of guessing.
 async function aiExplainBuy(sku, market) {
@@ -19520,7 +19520,7 @@ async function aiRunTool(name, input) {
     if (name === 'sku_availability') return await aiSkuAvailability(input && input.skus, input && input.market);
     if (name === 'describe_data') return await aiDescribeData(input && input.table);
     if (name === 'query_horizon') return await aiQueryHorizon(input && input.sql);
-    if (name === 'explain_buy') return await aiExplainBuy(input && input.sku, input && input.market);   // v28.167 (Ben)
+    if (name === 'explain_buy') return await aiExplainBuy(input && input.sku, input && input.market);   // v28.166 (Ben)
     if (name === 'app_logic') return aiAppLogic(input && input.topic);
     return { error: 'unknown tool ' + name };
   } catch (e) { return { error: e.message }; }

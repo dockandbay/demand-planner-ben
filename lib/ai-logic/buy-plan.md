@@ -15,7 +15,7 @@ sources:
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.167
+verified_version: v28.166
 fingerprints:
   artifact_v16.7.html::project: 63cc8f0cfc13
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae

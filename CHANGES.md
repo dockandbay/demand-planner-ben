@@ -1,3 +1,14 @@
+## v28.166 (Ben, branch review-fixes-2026-10-05): Ask Claude knows the app logic
+
+**Files:** `server.mjs` (Ask Claude only, plus `readdirSync` import), `lib/ai-logic/*.md` (7 new), `scripts/ai-logic-check.cjs` (new), package.json (`ai-logic:check` script), CHANGES.md. No migrations, no new env vars. `lib/**` is already in vercel.json includeFiles.
+
+- New app-logic library `lib/ai-logic/`: buy-plan, demand-engine, urgent-ssm-complex-rules, transfers, reports, actions, supply-finance. Each file lists its source functions with fingerprints and is loaded at boot; the topic index goes into the Ask Claude prompt and a new `app_logic(topic)` tool returns a file.
+- New read-only `explain_buy(sku, market)` tool: buy row, 18-month forecast, stock, inbound (counted / not counted), product parameters, Complex Rules, SSM flag, discontinue cutoff and carton arithmetic.
+- Honesty rules: show the arithmetic, never assume a rounding direction, `future_qty` is not inbound, never substitute another tool's numbers for `explain_buy`.
+- `npm run ai-logic:check` flags any logic file whose source functions changed since it was verified (STALE blocks the push). Handles functions, routes, `case` blocks, SQL consts and migration files.
+- Found, not fixed: buy_plan_latest `inbound` column is always 0 (client converts a list to a number). Documented in buy-plan.md.
+- Eval on sandbox (TOWLH-CLB-XL-PEPPNCH UK): used explain_buy, SSM cover (not 12 weeks), 501 units after the 1-Sep-27 cutoff, 500 = 200 + 300 = 25 cartons, "no rounding at all".
+
 ## v28.165 (Ben, branch review-fixes-2026-10-05): planner filters
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no new env vars.
