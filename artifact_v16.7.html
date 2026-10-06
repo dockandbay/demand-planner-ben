@@ -1909,7 +1909,8 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
 // v28.151 (review A5): one place that drops every cache derived from SKU / sales / forecast data. Used by the lazy load and both
 // refresh paths (refreshBuyCache, hzRefreshCache), which previously kept CALC_MEMO / _SKUSALES_CACHE / SET_BY_COMP from the old data.
-function hzResetDataMemos(tag){ try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error((tag||'')+' cache reset',e); } }
+// v28.171 (Ben): a data reload also forces the next demand build to be FULL (HZ_DEMAND_FULLREQ is in the incremental env signature).
+function hzResetDataMemos(tag){ try{ HZ_DEMAND_FULLREQ++; HZ_SHARE_MEMO={}; }catch(e){} try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error((tag||'')+' cache reset',e); } }
 // v28.151 (review A5): replace a const SKU map's contents wholesale (Object.assign alone kept keys the server no longer sends).
 function hzReplaceMap(dst,src){ if(!dst||!src)return; Object.keys(dst).forEach(function(k){ if(!Object.prototype.hasOwnProperty.call(src,k))delete dst[k]; }); Object.assign(dst,src); }
 // v28.164 (Ben): cold demand builds (DEMAND / BUY & MOVE / REPORTS / Auto Forecast) used to run on the EMPTY lazy maps before
@@ -7682,7 +7683,7 @@ function setDemandRaw(setSku,co){ var key=setSku+'|'+co; if(SETDEM_MEMO[key])ret
     var ctry=String(co).toLowerCase(), av=(sp.av||{})[ctry]||'', chans=[]; if(av.indexOf('d')>=0)chans.push('DTC'); if(av.indexOf('f')>=0)chans.push('FBA'); if(!chans.length){ SETDEM_MEMO[key]=out; return out; }
     var _sz=Math.max(1,_setSize(setSku)), launchDate=(sp.lch&&sp.lch[ctry])||null, cact={};
     chans.forEach(function(ch){ var subcat=sp.s||'', fu={}, share=0, chKey=(ch==='DTC'?'d':'f'); try{ fu=(calc(subcat,co,ch)||{}).fu||{}; }catch(e){}
-      try{ var subSkus=Object.keys(SKUM).filter(function(s2){var q=SKUM[s2];return q&&q.s===subcat&&(((q.av||{})[ctry]||'').indexOf(chKey)>=0);}); share=(buildSkuShares(subSkus,co,ch,RUNOFF_LYYM)||{})[setSku]||0; }catch(e){}
+      try{ share=(hzSubShares(subcat,co,ch,chKey,RUNOFF_LYYM).shares()||{})[setSku]||0; }catch(e){}   // v28.171 (Ben): memoised
       var sales=skuSales(setSku,co,ch), hasLY=skuHasLY(sales), ov=FC_OUTPUTS[setSku+'|'+skuWh(co,ch)+'|'+ch]||{}, chFC={};
       FM_CALC.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', raw; if(ov[m]!=null)raw=ov[m]; else if(hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); raw=(lyM<=CUR_YTD_END)?(sales[lyM]||0):(chFC[lyM]||0); } else raw=(fu[m]||0)*share/_sz;
         var fc=(launchDate&&ms<launchDate)?0:Math.round(raw); if(fc>0){ chFC[m]=fc; out.tot[m]=(out.tot[m]||0)+fc; } });
@@ -7696,6 +7697,15 @@ function setLoadOnComp(sku,co){ var res={tot:{},by:{}}; setsForComp(sku).forEach
 // how many boxes of this set its discontinued (run-off) components can still supply in month m — Infinity when nothing constrains
 function setBuildCap(setSku,co,m){ var cap=Infinity; try{ var ctry=String(co).toLowerCase(), ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01'; (SET_BOM[setSku]||[]).forEach(function(c){ if(!c||!c.sku)return; var cp=SKUM[c.sku]; if(!cp)return; var cd=(cp.disc||{})[ctry]; if(!cd||!(ms>cd))return;
     var A=runoffAlloc(c.sku,co), tot=(A.extra&&A.extra[m])||0, mine=(A.setBy&&A.setBy[m]&&A.setBy[m][setSku])||0; if(tot<=0||mine<=0)return; var got=((A.alloc.SET&&A.alloc.SET[m])||0)*mine/tot; cap=Math.min(cap,Math.floor(got/Math.max(1,Number(c.qty)||1))); }); }catch(e){} return cap; }
+// v28.171 (Ben): share memo (perf #7.1). SKU shares depend only on data (sales, SKUM, Sets% / tier weights), never on a forecast
+// edit, but were recomputed per subcat x channel in §2, per set in §4 / setDemandRaw and per discontinued SKU in runoffAlloc (the
+// same pool every time). Memoised here; dropped on a full demand build, a data reload (hzResetDataMemos) and whenever the
+// contribution model / tier weights / SKU count change (hzShareMemoCheck, also run by the data-changing renders).
+var HZ_SHARE_MEMO={}, _hzShareSig=null;
+function hzShareMemoCheck(){ var s; try{ s=JSON.stringify(CONTRIB_MODEL)+'|'+JSON.stringify(TIER_W)+'|'+(SKU_ACT_MONTHS||[]).join(',')+'|'+Object.keys(SKUM).length; }catch(e){ s='x'+Math.random(); } if(s!==_hzShareSig){ _hzShareSig=s; HZ_SHARE_MEMO={}; } }
+function hzSubShares(subcat,co,ch,chKey,lyM){ var k='S|'+subcat+'|'+co+'|'+ch+'|'+chKey+'|'+lyM.join(','), m=HZ_SHARE_MEMO[k]; if(m)return m;   // {skus (SKUM order), shares()}
+  var ctry=String(co).toLowerCase(), sh=null, skus=Object.keys(SKUM).filter(function(s2){var q=SKUM[s2];return q&&q.s===subcat&&(((q.av||{})[ctry]||'').indexOf(chKey)>=0);});
+  return HZ_SHARE_MEMO[k]={skus:skus, shares:function(){ return sh||(sh=buildSkuShares(skus,co,ch,lyM)); }}; }
 // v28.151 (review A3): share pool for runoffAlloc with NO UI state: same subcat + permanent-activity + channel-availability rules
 // as filteredSkus(s,co,ch,true) with no filter applied (closed lyo SKUs excluded, TIK activity judged by the SKU's market, not CUR).
 function runoffPoolSkus(s,co,ch){ var ctry=String(co).toLowerCase(), c=String(ch).toLowerCase(), chKey=c==='dtc'?'d':c==='fba'?'f':c==='zal'?'z':c==='tik'?'t':'b';
@@ -7710,7 +7720,8 @@ function runoffAlloc(sku,co,extra){ var key=sku+'|'+co+(extra?'|X':''); if(RUNOF
   if(isSet&&SET_BOM&&SET_BOM[sku]&&SET_BOM[sku].length)pool3=0;   // v27.545: a build-on-fly set has no 3PL stock of its own (its "3PL" figure is a derived buildable count) → 3PL demand is served by component build capacity only; FBA set stock is real and stays
   var st={}; chs.forEach(function(ch){ var sales=skuSales(sku,co,ch), fu={}, sh=0;
     try{ fu=(calc(p.s,co,ch)||{}).fu||{}; }catch(e){}
-    try{ var all=runoffPoolSkus(p.s,co,ch); if(all.indexOf(sku)<0)all=all.concat([sku]); sh=(buildSkuShares(all,co,ch,RUNOFF_LYYM)||{})[sku]||0; }catch(e){}   // v28.151 (review A3): data-only pool (was filteredSkus, which applied FR_ACTIVE / PLAN_SKU_QRY / PLAN_RW, so the buy moved with DEMAND screen filters)
+    try{ var _pk='P|'+p.s+'|'+co+'|'+ch, _pm=HZ_SHARE_MEMO[_pk]; if(!_pm){ var _all=runoffPoolSkus(p.s,co,ch), _ix={}; _all.forEach(function(x){ _ix[x]=1; }); _pm=HZ_SHARE_MEMO[_pk]={all:_all,ix:_ix,sh:null}; }   // v28.171 (Ben): memoised pool
+      if(_pm.ix[sku]){ if(!_pm.sh)_pm.sh=buildSkuShares(_pm.all,co,ch,RUNOFF_LYYM)||{}; sh=_pm.sh[sku]||0; } else sh=(buildSkuShares(_pm.all.concat([sku]),co,ch,RUNOFF_LYYM)||{})[sku]||0; }catch(e){}   // v28.151 (review A3): data-only pool (was filteredSkus, which applied FR_ACTIVE / PLAN_SKU_QRY / PLAN_RW, so the buy moved with DEMAND screen filters)
     st[ch]={sales:sales,hasLY:skuHasLY(sales),fu:fu,sh:sh,fc:{}}; res.alloc[ch]={}; res.out[ch]={}; res.cap[ch]={}; });
   function raw(ch,m){ var x=st[ch]; var fo=skuOutFC(sku,co,ch,m); if(fo!=null)return isSet?fo/Math.max(1,_setSize(sku)):fo; if(x.hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); return (lyM<=CUR_YTD_END)?(x.sales[lyM]||0):(x.fc[lyM]||0); } return Math.round((x.fu[m]||0)*x.sh/(isSet?Math.max(1,_setSize(sku)):1)); }   // sets: everything here is BOXES — override stored item-equiv ÷setSize, LY actuals already boxes, cascade ÷setSize. runoffAlloc's pool math + buy explosion both need boxes (display consumers ×setSize back to item-equiv).
   FM_CALC.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', live=(m>=CUR_MONTH);
@@ -10034,7 +10045,7 @@ function remapExpanded(dim,newVal){
 }
 function renderMain(viewOnly){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
-  if(!viewOnly){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // v27.876 (perf): view-only callers pass true and keep the memos; data-changing callers (auto-smooth apply/cancel, undo, scope flags, cell-sheet) leave it unset → clear as before
+  if(!viewOnly){ try{ hzShareMemoCheck(); }catch(e){} CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // v27.876 (perf): view-only callers pass true and keep the memos; data-changing callers (auto-smooth apply/cancel, undo, scope flags, cell-sheet) leave it unset → clear as before
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
@@ -10236,7 +10247,7 @@ function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
   var _vo=_VIEW_ONLY_RENDER; _VIEW_ONLY_RENDER=false;   // v27.876 (perf): consume the view-only flag here so it never leaks to a later edit
-  if(!_vo){ CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
+  if(!_vo){ try{ hzShareMemoCheck(); }catch(e){} CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; try{ hzRowCacheClear(); }catch(e){} }   // fresh forecast memo on DATA-changing renders; a pure filter / tab / toggle change keeps it (memos are keyed subcat|country|channel, so a market switch is collision-safe — the new market computes once, switching back is instant)
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   // v28.146: not for BUY & MOVE views; there the cold build is deferred behind a loading panel (see the _inBM branch below).
   var _bmV=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
@@ -16827,13 +16838,112 @@ try{ setInterval(function(){ try{ if(typeof window.hzHealthMetric!=='function'||
   for(var key in C){ var i=key.lastIndexOf('|'), q=C[key]; co=key.slice(i+1); if(!q||!P[key.slice(0,i)])continue; have[co]=(have[co]||0)+1; var x=sum[co]||(sum[co]={b3:0,b3u:0,bf:0}); x.b3+=q.b3||0; x.b3u+=q.b3u||0; x.bf+=q.bf||0; }
   for(co in need)if(have[co]>=need[co]){ out[co]={b3:Math.round(sum[co].b3),b3u:Math.round(sum[co].b3u),bf:Math.round(sum[co].bf)}; n++; }
   if(!n)return; window.hzHealthMetric('metric','buy totals per market',{markets:out},'client:buy_totals'); try{ localStorage.setItem(K,day); }catch(e){} }catch(e){} },600000); }catch(e){}
+// v28.171 (Ben): INCREMENTAL demand rebuild (perf #7.1). A forecast edit used to re-run the whole build (~1.5-3 s main thread).
+// Now each successful build snapshots its inputs (IV, FC_OUTPUTS per key, md.pka per SKU x market) plus an "environment"
+// signature (data maps by identity, sizes, months, TIK/ZAL scope, contribution model, tier weights, a full-request counter bumped
+// by every data reload). In-flight FBA transfers / AWD / NonGRS (v28.168) feed only the buy engine, never this build, and their
+// loaders already drop the whole BUY_CACHE when they land, so they need no demand rebuild. The next build diffs the inputs: changed IV keys give dirty subcat x
+// country, changed FC_OUTPUTS / pka keys give dirty SKU x country. Dirty SKUs = the dirty subcats' SKUs + those SKUs, closed over
+// the set BOM in that country (sets containing a dirty SKU, components of a dirty set, repeated: run-off pools and the explosion
+// cross the BOM both ways). Only those SKU x country slices are cleared and rebuilt (same code paths, scoped); every other slice is
+// already what a full build would write. Anything else (env changed, not built yet, lazy maps, unparseable key, an exception) =
+// the old full build. ?incr=0 (or window.HZ_DEMAND_INCR=false) forces full; ?incrcheck=1 (or window.HZ_INCR_CHECK=true) re-runs a
+// full build after every incremental one and diffs demand + buy quantities (window.HZ_INCR_LOG; console; health log on a mismatch).
+var _HZ_DINC=null, HZ_DEMAND_FULLREQ=0, HZ_DEMAND_LAST=null, HZ_INCR_LOG=[];
+function hzDemandNeedFull(){ HZ_DEMAND_FULLREQ++; }   // v28.171 (Ben): next build is a full one (data reload / anything not diffable)
+function _hzDemEnv(){ function g(f){ try{ return f(); }catch(e){ return '?'; } }
+  var P=BP_DATA.products, nm=0; for(var s in P){ var mk=P[s]&&P[s].mkts; if(mk)for(var c in mk)nm++; }
+  return [P, Object.keys(P).length, nm, SKUM, Object.keys(SKUM).length, g(function(){return SET_BOM;}), g(function(){return PREPACK_MAP;}), g(function(){return PREPACK_STOCK;}),
+    g(function(){return ZAL_STOCK;}), g(function(){return ZAL_STOCK?Object.keys(ZAL_STOCK).length:0;}), g(function(){return ZAL_SKUS;}), g(function(){return ZAL_SKUS.join(',');}),
+    g(function(){return TIK_COUNTRIES.join(',');}), CUR_MONTH, g(function(){return CUR_YTD_END;}), LIVE_FC_MONTHS.join(','), g(function(){return SKU_ACT_MONTHS.join(',');}),
+    !!SKU_DATA_READY, !!LAZY_SKU, g(function(){return JSON.stringify(CONTRIB_MODEL);}), g(function(){return JSON.stringify(TIER_W);}), IV, FC_OUTPUTS,
+    RUNOFF_TAIL_MAX, HZ_DEMAND_FULLREQ, g(function(){return BP_DATA.set_explosion_skips;})]; }
+function hzDemandSnap(){ var iv={}, fc={}, pk={}, k, P=BP_DATA.products; for(k in IV)iv[k]=IV[k]; for(k in FC_OUTPUTS)fc[k]=JSON.stringify(FC_OUTPUTS[k]);
+  for(var s in P){ var mk=P[s]&&P[s].mkts; if(mk)for(var co in mk){ if(mk[co]&&mk[co].pka)pk[s+'|'+co]=JSON.stringify(mk[co].pka); } }
+  _HZ_DINC={env:_hzDemEnv(), iv:iv, fc:fc, pk:pk, sub:null}; }
+function hzDemandIncrOn(){ try{ if(window.HZ_DEMAND_INCR===false||/[?&]incr=0\b/.test(location.search))return false; }catch(e){} return true; }
+// v28.171 (Ben): {full:true,why} or {co:{CO:{a:{sku:1},subs:{subcat:1},dsub:{subcat:1}}},n}. Conservative: any doubt → full.
+function hzDemandScope(){ var D=_HZ_DINC; if(!hzDemandIncrOn())return {full:true,why:'off'}; if(!D||!DEMAND_BUILT)return {full:true,why:D?'not built':'no base'};
+  if(LAZY_SKU&&!SKU_DATA_READY)return {full:true,why:'lazy maps empty'};
+  var e=_hzDemEnv(); for(var i=0;i<e.length;i++)if(e[i]!==D.env[i])return {full:true,why:'env '+i};
+  var MKS={UK:1,US:1,EU:1,AU:1,CA:1}, seed={}, dsub={}, bad=null, k;
+  function sk(co,sku){ (seed[co]||(seed[co]={}))[sku]=1; }
+  function ivk(key){ var p=String(key).split('|'), s, co; if(p[0]==='__g'&&p.length>=4){ co=p[p.length-2]; s=p.slice(1,p.length-2).join('|'); } else if(p.length>=4){ co=p[p.length-3]; s=p.slice(0,p.length-3).join('|'); } else { bad='iv '+key; return; }
+    if(!MKS[co]){ bad='iv '+key; return; } (dsub[co]||(dsub[co]={}))[s]=1; }
+  for(k in IV)if(IV[k]!==D.iv[k])ivk(k); for(k in D.iv)if(!(k in IV))ivk(k);
+  function fck(key){ var p=String(key).split('|'), co=String(p[1]||'').split('_')[0].toUpperCase(); if(MKS[co])sk(co,p[0]); else Object.keys(MKS).forEach(function(c){ sk(c,p[0]); }); }
+  for(k in FC_OUTPUTS)if(JSON.stringify(FC_OUTPUTS[k])!==D.fc[k])fck(k); for(k in D.fc)if(!(k in FC_OUTPUTS))fck(k);
+  var P=BP_DATA.products, pkNow={};
+  for(var s in P){ var mk=P[s]&&P[s].mkts; if(mk)for(var co in mk){ if(mk[co]&&mk[co].pka){ var j=JSON.stringify(mk[co].pka); pkNow[s+'|'+co]=1; if(j!==D.pk[s+'|'+co])sk(co,s); } } }
+  for(k in D.pk)if(!pkNow[k]){ var i2=k.lastIndexOf('|'); sk(k.slice(i2+1),k.slice(0,i2)); }
+  if(bad)return {full:true,why:bad};
+  if(!D.sub){ D.sub={}; Object.keys(SKUM).forEach(function(x){ var p=SKUM[x]; if(p&&p.s)(D.sub[p.s]||(D.sub[p.s]={}))[x]=1; }); }   // subcat → SKUs (SKUM order)
+  var out={}, n=0;
+  Object.keys(MKS).forEach(function(co){ var A={}, R={}, q=[], subs={}, ctry=co.toLowerCase(); if(!seed[co]&&!dsub[co])return;
+    Object.keys(dsub[co]||{}).forEach(function(s){ Object.keys(D.sub[s]||{}).forEach(function(x){ q.push(x); }); });
+    Object.keys(seed[co]||{}).forEach(function(x){ q.push(x); });
+    var q2=q.slice();
+    // A = slices to clear + rewrite. BOM closure, BOTH directions: a set explodes onto all its components, and a rebuilt
+    // component's DTC is cleared, so EVERY set exploding onto it must re-run (which writes onto all of that set's components).
+    while(q.length){ var x=q.pop(); if(A[x])continue; A[x]=1;
+      var b=SET_BOM&&(SET_BOM[x]||SET_BOM[String(x).toUpperCase()]); if(Array.isArray(b))b.forEach(function(c){ if(c&&c.sku&&!A[c.sku])q.push(c.sku); });
+      setsForComp(x).forEach(function(y){ if(!A[y.set])q.push(y.set); }); }
+    // R ⊆ A = SKUs whose run-off / set-demand MEMOS can change (who READS a changed forecast): a set's raw demand feeds its
+    // components' run-off pools (→ add its components); a discontinued SKU's pool caps every set containing it (→ add those sets).
+    // A plain continuing SKU's forecast is read by nothing else, so the rest of A keeps its memos (most of the scoped cost).
+    while(q2.length){ var y2=q2.pop(); if(R[y2])continue; R[y2]=1; var p2=SKUM[y2]||{};
+      var b2=SET_BOM&&(SET_BOM[y2]||SET_BOM[String(y2).toUpperCase()]); if(Array.isArray(b2))b2.forEach(function(c){ if(c&&c.sku&&!R[c.sku])q2.push(c.sku); });
+      if((p2.disc&&p2.disc[ctry])||(p2.lyo&&p2.dsc))setsForComp(y2).forEach(function(z){ if(!R[z.set])q2.push(z.set); }); }
+    Object.keys(A).forEach(function(x){ var p=SKUM[x]; if(p&&p.s)subs[p.s]=1; n++; });
+    out[co]={a:A, r:R, subs:subs, dsub:dsub[co]||{}}; });
+  return {co:out, n:n}; }
+// v28.171 (Ben): canonical (sorted-key) dump of everything buildLiveDemand writes, per SKU x market, + the buy quantities.
+function _hzStable(v){ if(v===null||typeof v!=='object')return JSON.stringify(v); if(Array.isArray(v))return '['+v.map(_hzStable).join(',')+']';
+  return '{'+Object.keys(v).sort().map(function(k){ return JSON.stringify(k)+':'+_hzStable(v[k]); }).join(',')+'}'; }
+function _hzDemOut(){ var o={}, P=BP_DATA.products; Object.keys(P).forEach(function(s){ var mk=P[s]&&P[s].mkts; if(mk)Object.keys(mk).forEach(function(co){ var m=mk[co];
+    o[s+'|'+co]=_hzStable({d:m.demand||null,t:m.demand_tik||null,s:m.demand_sets||null,r:m.demand_sets_src||null}); }); });
+  o._pp=_hzStable(PREPACK_COVER); o._sk=_hzStable(BP_DATA.set_explosion_skips||null); return o; }
+function _hzBuyMap(){ var o={}; if(typeof BP==='undefined'||!BP||!BP.getBuyQtys)return o; var saved=BP.CUR;
+  try{ ['UK','US','EU','AU','CA'].forEach(function(m){ BP.CUR=m; for(var c in BP.BUY_CACHE)delete BP.BUY_CACHE[c];
+    Object.keys(BP_DATA.products).forEach(function(s){ var q=BP.getBuyQtys(s,m)||{}; o[s+'|'+m]=[q.b3||0,q.b3u||0,q.bf||0,q.tx||0,q.zx||0,q.futQty||0].join(','); }); }); }
+  finally{ BP.CUR=saved; for(var c2 in BP.BUY_CACHE)delete BP.BUY_CACHE[c2]; } return o; }
+function hzIncrCheckOn(){ try{ return window.HZ_INCR_CHECK===true||/[?&]incrcheck=1\b/.test(location.search); }catch(e){ return false; } }
+// v28.171 (Ben): verification: current (incremental) state vs a fresh full build (all memos dropped). Leaves the full result in place.
+function hzIncrCheck(){ var a=_hzDemOut(), ba=_hzBuyMap();
+  CALC_MEMO={}; _hzBuildDemandCore(null); hzDemandSnap();
+  var b=_hzDemOut(), bb=_hzBuyMap(), dk=[], bk=[], k;
+  Object.keys(b).forEach(function(x){ if(a[x]!==b[x])dk.push(x); }); Object.keys(a).forEach(function(x){ if(!(x in b))dk.push(x); });
+  Object.keys(bb).forEach(function(x){ if(ba[x]!==bb[x])bk.push(x); }); Object.keys(ba).forEach(function(x){ if(!(x in bb))bk.push(x); });
+  var r={at:Date.now(), last:HZ_DEMAND_LAST, demandRows:Object.keys(b).length, demandDiff:dk.length, buyRows:Object.keys(bb).length, buyDiff:bk.length, sample:dk.slice(0,5).concat(bk.slice(0,5))};
+  HZ_INCR_LOG.push(r); if(HZ_INCR_LOG.length>200)HZ_INCR_LOG.shift();
+  try{ console[(dk.length||bk.length)?'error':'log']('[HORIZON incr-check] demand rows '+r.demandRows+' diff '+r.demandDiff+' · buy rows '+r.buyRows+' diff '+r.buyDiff, r); }catch(e){}
+  if((dk.length||bk.length)&&typeof window.hzHealthMetric==='function'){ try{ window.hzHealthMetric('sanity','incremental demand differs from full',{demand_diff:dk.length,buy_diff:bk.length,sample:r.sample},'client:demand_incr'); }catch(e){} }
+  return r; }
+window.hzIncrCheck=hzIncrCheck;
 function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!BUY_FC_STALE);   // v28.163 (Ben): read before callers reset it (health idempotency generation)
-  RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null;   // v28.151 (review A5): set-to-component index rebuilt per build (SET_BOM can change)
   // v28.142: wire the TikTok (TIK, UK/US) and EU Zalando (ZAL) channels BEFORE building demand. They were only wired when the
   // DEMAND plan rendered, so the buy plan differed by navigation order (BUY opened first → no TIK/ZAL availability or rows →
   // different demand split). Both are idempotent ("runs once data is ready").
   try{ if(typeof zalInit==='function')zalInit(); }catch(e){} try{ if(typeof tikInit==='function')tikInit(); }catch(e){}   // v27.534: allocations must reflect the latest overrides / stock
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
+  try{ hzShareMemoCheck(); }catch(e){}   // v28.171 (Ben): config-driven share inputs changed → drop the share memo
+  var _t0=performance.now(), _S=null, _mode='full';   // v28.171 (Ben): incremental when the dirty slice is known, else full
+  try{ _S=hzDemandScope(); }catch(e){ _S={full:true,why:'scope threw'}; }
+  if(_S&&!_S.full){ try{ _hzBuildDemandCore(_S); _mode='inc'; }catch(e){ if(window.console)console.warn('[HORIZON] incremental demand build failed, running full',e); _S={full:true,why:'inc threw'}; } }
+  if(_mode==='full'){ _HZ_DINC=null; _hzBuildDemandCore(null); }   // throws as before; no snapshot → the next build is full too
+  hzDemandSnap();
+  HZ_DEMAND_LAST={mode:_mode, ms:Math.round((performance.now()-_t0)*10)/10, why:(_S&&_S.why)||'', skus:(_S&&_S.n)||0};
+  hzDemandSanity(_hzStale);   // v28.163 (Ben): health log idempotency check (never throws)
+  if(_mode==='inc'&&hzIncrCheckOn()){ try{ hzIncrCheck(); }catch(e){ if(window.console)console.error('[HORIZON incr-check] failed',e); } }
+}
+function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (unchanged); else only the _S SKU x country slices
+  function _inA(sku,co){ return !_S||!!(_S.co[co]&&_S.co[co].a[sku]); }
+  if(!_S){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; HZ_SHARE_MEMO={}; }   // v28.151 (review A5): set-to-component index rebuilt per build (SET_BOM can change)
+  else Object.keys(_S.co).forEach(function(co){ var X=_S.co[co];   // v28.171 (Ben): drop only the dirty slice's memos (SET_BOM unchanged → SET_BY_COMP kept)
+    Object.keys(X.r).forEach(function(k){ delete RUNOFF_MEMO[k+'|'+co]; delete RUNOFF_MEMO[k+'|'+co+'|X']; delete SETDEM_MEMO[k+'|'+co]; });   // R: forecast readers only
+    Object.keys(X.dsub).forEach(function(s){ ['DTC','B2B','FBA','TIK','ZAL'].forEach(function(ch){ delete CALC_MEMO[s+'|'+co+'|'+ch]; }); });
+    Object.keys(ASPADJ_MEMO).forEach(function(mk){ var i1=mk.indexOf('|'), i2=mk.indexOf('|',i1+1); if(i1<0||i2<0)return; if(mk.slice(0,i1)===co&&X.subs[mk.slice(i2+1)])delete ASPADJ_MEMO[mk]; });
+    try{ var BC=(typeof BP!=='undefined'&&BP&&BP.BUY_CACHE)||null; if(BC)for(var ck in BC){ if(X.a[ck.slice(0,ck.lastIndexOf('|'))])delete BC[ck]; } }catch(e){} });   // buy qtys of the rebuilt SKUs (all markets)
   var lyYearMonths=hzLyMonths();   // v28.151 (review A4): was hardcoded 2025_01..2025_12
   // v28.151 (review A2): the buy window (LIVE_FC_MONTHS) runs off the calendar, CUR_MONTH off the data. When the data lags (e.g.
   // CUR_MONTH 2026_09 while the window starts 2026_10) the chained LY rule had no value for the gap month (> CUR_YTD_END, not in the
@@ -16852,6 +16962,7 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
+      if(_S&&!_inA(sku,co))return;   // v28.171 (Ben): scoped build clears only the dirty slice
       var d=mk[co].demand;if(!d)return;
       ['DTC','B2B','FBA','TIK'].forEach(function(ch){if(d[ch])Object.keys(d[ch]).forEach(function(fym){delete d[ch][fym];});});
       delete d.ZAL;   // v28.151 (review A1): 2c only cleared ZAL for SKUs still in ZAL_SKUS; a SKU that left the scope kept its old overlay
@@ -16860,15 +16971,18 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   // 2) Live cascade: subcat monthly forecast (calc, reads IV) x SKU share
   MK.forEach(function(co){
     var ctry=co.toLowerCase();
+    if(_S&&!_S.co[co])return;   // v28.171 (Ben): scoped: only countries with a dirty slice
     CHS.forEach(function(chp){
       var ch=chp[0],chKey=chp[1];
       if(ch==='TIK'&&TIK_COUNTRIES.indexOf(co)<0)return;   // TIK only in enabled markets
       subList.forEach(function(subcat){
-        var skus=Object.keys(SKUM).filter(function(s2){var p=SKUM[s2];if(!p||p.s!==subcat)return false;return ((p.av||{})[ctry]||'').includes(chKey);});
+        if(_S&&!_S.co[co].subs[subcat])return;   // v28.171 (Ben): scoped: only subcats holding a dirty SKU (full SKU list kept for the shares)
+        var _ssm=hzSubShares(subcat,co,ch,chKey,lyYearMonths), skus=_ssm.skus;   // v28.171 (Ben): memoised list + shares (same filter, same order)
         if(!skus.length)return;
         var fu=calc(subcat,co,ch).fu;if(!fu)return;
-        var shares=buildSkuShares(skus,co,ch,lyYearMonths);
+        var shares=_ssm.shares();
         skus.forEach(function(s2){
+          if(_S&&!_inA(s2,co))return;   // v28.171 (Ben): scoped: write only the dirty SKUs
           var sh=shares[s2]||0;
           var prod=BP_DATA.products[s2];if(!prod||!prod.mkts||!prod.mkts[co])return;
           var md=prod.mkts[co];if(!md.demand)md.demand={};if(!md.demand[ch])md.demand[ch]={};
@@ -16912,14 +17026,17 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   //     SKU has an override that wins). Buy 3PL only; invisible elsewhere (3PL/total sums name DTC/B2B/FBA explicitly).
   (function(){
     var scope = (typeof ZAL_SKUS!=='undefined'?ZAL_SKUS:[]);   // ZAL channel scope (server-injected: stock upload ∪ ZAL-forecast SKUs)
-    scope.forEach(function(sku){ var p=BP_DATA.products[sku]; if(p&&p.mkts&&p.mkts.EU&&p.mkts.EU.demand&&p.mkts.EU.demand.ZAL)delete p.mkts.EU.demand.ZAL; });   // clear any prior overlay first
+    if(_S&&!_S.co.EU)return;   // v28.171 (Ben): scoped: no dirty EU slice → Zalando overlay unchanged
+    scope.forEach(function(sku){ if(_S&&!_inA(sku,'EU'))return; var p=BP_DATA.products[sku]; if(p&&p.mkts&&p.mkts.EU&&p.mkts.EU.demand&&p.mkts.EU.demand.ZAL)delete p.mkts.EU.demand.ZAL; });   // clear any prior overlay first
     if(!(ZAL_STOCK&&Object.keys(ZAL_STOCK).length))return;   // no stock file uploaded → Zalando off
     var bySub={}; scope.forEach(function(sku){ var sp=SKUM[sku]; if(sp&&sp.s)(bySub[sp.s]||(bySub[sp.s]=[])).push(sku); });
     Object.keys(bySub).forEach(function(subcat){
+      if(_S&&!_S.co.EU.subs[subcat])return;   // v28.171 (Ben)
       var skus=bySub[subcat], fu={}, shares={};
       try{ fu=calc(subcat,'EU','ZAL').fu||{}; }catch(e){}
       try{ shares=buildSkuShares(skus,'EU','ZAL',lyYearMonths)||{}; }catch(e){}
       skus.forEach(function(sku){
+        if(_S&&!_inA(sku,'EU'))return;   // v28.171 (Ben)
         var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
         var md=prod.mkts.EU, ovMap=FC_OUTPUTS[sku+'|'+skuWh('EU','ZAL')+'|ZAL']||{}, sh=shares[sku]||0, zal={};
         LIVE_FC_MONTHS.forEach(function(fym){ var raw=(ovMap[fym]!=null)?ovMap[fym]:((fu[fym]||0)*sh); var v=Math.round(raw); if(v>0)zal[fym]=v; });
@@ -16934,6 +17051,7 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
+      if(_S&&!_inA(sku,co))return;   // v28.171 (Ben)
       var md=mk[co];if(!md.pka)return;
       if(!md.demand)md.demand={};if(!md.demand.B2B)md.demand.B2B={};
       Object.keys(md.pka).forEach(function(fym){ if(!_pkaWin[fym])return; md.demand.B2B[fym]=(md.demand.B2B[fym]||0)+(md.pka[fym]||0);});
@@ -16945,6 +17063,7 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts; if(!mk)return;
     Object.keys(mk).forEach(function(co){
+      if(_S&&!_inA(sku,co))return;   // v28.171 (Ben)
       var md=mk[co]; delete md.demand_tik;
       if(!md.demand||!md.demand.TIK)return;
       md.demand_tik=Object.assign({},md.demand.TIK);
@@ -16963,18 +17082,20 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   (function(){
     // v28.151 (review A6): clear the prior overlays BEFORE the SET_BOM early returns, so an emptied BOM can't leave stale
     // demand_sets / PREPACK_COVER from the last build.
-    try{ Object.keys(PREPACK_COVER).forEach(function(k){ delete PREPACK_COVER[k]; }); }catch(e){}   // idempotent across rebuilds (prepack netting overlay)
+    try{ Object.keys(PREPACK_COVER).forEach(function(k){ if(_S){ var p=k.split('|'); if(!_inA(p[0],p[1]))return; } delete PREPACK_COVER[k]; }); }catch(e){}   // v28.171 (Ben): scoped: only the dirty sets' entries (key set|co|ch|month)   // idempotent across rebuilds (prepack netting overlay)
     // Clear any prior explosion overlay first (idempotent across rebuilds; section 1 already cleared md.demand.DTC).
     Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
-      Object.keys(mk).forEach(function(co){ delete mk[co].demand_sets; delete mk[co].demand_sets_src; }); });
+      Object.keys(mk).forEach(function(co){ if(_S&&!_inA(sku,co))return; delete mk[co].demand_sets; delete mk[co].demand_sets_src; }); });
     if(typeof SET_BOM!=='object'||!SET_BOM){ BP_DATA.set_explosion_skips={}; return; }
     var setSkus=Object.keys(SET_BOM); if(!setSkus.length){ BP_DATA.set_explosion_skips={}; return; }
     var skips={};
+    if(_S){ skips=BP_DATA.set_explosion_skips||{}; Object.keys(skips).forEach(function(k){ var i=k.lastIndexOf('|'); if(_inA(k.slice(0,i),k.slice(i+1)))delete skips[k]; }); }   // v28.171 (Ben): scoped: recount only the dirty components (every set feeding them is dirty too)
     setSkus.forEach(function(setSku){
       var comps=SET_BOM[setSku]; if(!Array.isArray(comps)||!comps.length)return;
       var sp=SKUM[setSku]; if(!sp||sp.vt!=='SET')return;   // only true sets explode
       var _sz=Math.max(1,_setSize(setSku));   // component units per box — the new-set cascade forecast is item-equivalent, so ÷setSize → BOXES before exploding (× component qty gives back the item volume; no double-count)
       MK.forEach(function(co){
+        if(_S&&!_inA(setSku,co))return;   // v28.171 (Ben)
         var ctry=co.toLowerCase(), av=(sp.av||{})[ctry]||'';
         var chans=[]; if(av.indexOf('d')>=0)chans.push('DTC'); if(av.indexOf('f')>=0)chans.push('FBA');   // DTC + FBA (decision 3)
         if(!chans.length)return;
@@ -16982,8 +17103,7 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
         chans.forEach(function(ch){                                    // (Ben P3b): override → last-year chain → subcat×share (same cascade as buildLiveDemand §2).
           var subcat=sp.s||'', subcatFU={}, share=0, chKey=(ch==='DTC'?'d':(ch==='FBA'?'f':'b'));
           try{ subcatFU=(calc(subcat,co,ch)||{}).fu||{}; }catch(e){}
-          try{ var subSkus=Object.keys(SKUM).filter(function(s2){var q=SKUM[s2];return q&&q.s===subcat&&(((q.av||{})[ctry]||'').indexOf(chKey)>=0);});
-               share=(buildSkuShares(subSkus,co,ch,lyYearMonths)||{})[setSku]||0; }catch(e){}   // set's own share of the subcat (now non-zero — 0c removed)
+          try{ share=(hzSubShares(subcat,co,ch,chKey,lyYearMonths).shares()||{})[setSku]||0; }catch(e){}   // v28.171 (Ben): memoised (same SKU list + shares)   // set's own share of the subcat (now non-zero — 0c removed)
           var launchDate=sp.lch&&sp.lch[ctry]?sp.lch[ctry]:null, discDate=sp.disc&&sp.disc[ctry]?sp.disc[ctry]:null;
           var rem=(sp.inv&&sp.inv[skuWh(co,ch)])||0, s2sales=skuSales(setSku,co,ch), s2HasLY=skuHasLY(s2sales);
           var ovMap=FC_OUTPUTS[setSku+'|'+skuWh(co,ch)+'|'+ch]||{}, chFC={};
@@ -17059,7 +17179,6 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   // one-time "build the PP cover" guards in both render()s must not trigger a SECOND ~3s rebuild. Only counts once the
   // real SKU data is in (lazy mode ships it empty; lazyLoadSkuData() re-arms both flags when it lands).
   if(!LAZY_SKU || SKU_DATA_READY)_PP_COVER_INIT=true;
-  hzDemandSanity(_hzStale);   // v28.163 (Ben): health log idempotency check (never throws)
 }
 
 // ===== LIVE PREORDER / KEY-ACCOUNT REFRESH (Airtable MCP) =====

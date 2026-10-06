@@ -47,6 +47,8 @@ sources:
   - artifact_v16.7.html :: _setSize
   - artifact_v16.7.html :: discCutoffMo
   - artifact_v16.7.html :: buildLiveDemand
+  - artifact_v16.7.html :: _hzBuildDemandCore
+  - artifact_v16.7.html :: hzDemandScope
   - artifact_v16.7.html :: computeSmoothAlloc
   - artifact_v16.7.html :: applySmoothAlloc
   - artifact_v16.7.html :: runAutoSmooth
@@ -99,14 +101,16 @@ fingerprints:
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderSkuView: caf284ab5888
   artifact_v16.7.html::buildPlanDownload: 82eb84ca27c4
-  artifact_v16.7.html::runoffAlloc: 9a3134e4dd7d
+  artifact_v16.7.html::runoffAlloc: 968439298ea7
   artifact_v16.7.html::runoffPoolSkus: 7400d4db134d
   artifact_v16.7.html::runoffChannels: eae41f431df5
-  artifact_v16.7.html::setDemandRaw: d0429a8084e3
+  artifact_v16.7.html::setDemandRaw: fe1e321b3a68
   artifact_v16.7.html::setBuildCap: a900b8ffed6a
   artifact_v16.7.html::_setSize: 7fd09e01e64c
   artifact_v16.7.html::discCutoffMo: 5e942f8dd917
-  artifact_v16.7.html::buildLiveDemand: c66325ec2461
+  artifact_v16.7.html::buildLiveDemand: 296b1886774d
+  artifact_v16.7.html::_hzBuildDemandCore: b3b734ead3a6
+  artifact_v16.7.html::hzDemandScope: 910b3f7073b6
   artifact_v16.7.html::computeSmoothAlloc: c256121c798f
   artifact_v16.7.html::applySmoothAlloc: 69c70cde748f
   artifact_v16.7.html::runAutoSmooth: 2cb92b470471
@@ -122,7 +126,7 @@ fingerprints:
   artifact_v16.7.html::aspAdjFactor: 719869ba1e05
   artifact_v16.7.html::buildBody: a57f1a107abd
   artifact_v16.7.html::_makeCatTotRow: 5d3d82f1593e
-verified_version: v28.166
+verified_version: v28.171
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -162,6 +166,8 @@ verified_version: v28.166
 - Consequence: a continuing SKU without an override does NOT move when you edit its subcategory forecast. Only new SKUs (subcat x share) and run-off/set effects move. (source: insertInlineSkuRows, buildLiveDemand)
 - Typing in a SKU cell saves an absolute override. "+X%" or "X%" is converted to units against the cell's last-year figure at entry. Clearing it falls back to the cascade. (source: skuCommitOv, skuOvSet)
 - If data lags the calendar (CUR_MONTH earlier than the window start), the gap months are computed only to feed the chain (so next year's same month is not 0); they are not written to demand and draw no run-off stock. (source: buildLiveDemand)
+
+- Rebuild timing (implementation only, numbers identical): the demand overlay is fully rebuilt on load, data refresh and any config change (contribution model, tier weights, months, scope); a forecast edit (subcategory cell, row growth, SKU override, smoothing, Zalando/TikTok cell, Preorder/KA change, undo) rebuilds only the edited SKUs x country plus every SKU linked to them through a set BOM, and reuses the rest. Any doubt falls back to a full rebuild. (source: buildLiveDemand, hzDemandScope, _hzBuildDemandCore)
 
 ## SKU shares (buildSkuShares)
 - Share pool = every SKU in the subcategory available for that country/channel. The inline plan rows additionally drop discontinued SKUs with no stock, inbound or saved forecast; the buy feed does not. On the inline rows the pool is NOT narrowed by tier/status pills or search. (source: insertInlineSkuRows, buildLiveDemand)

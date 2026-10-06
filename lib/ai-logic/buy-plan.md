@@ -12,10 +12,11 @@ sources:
   - artifact_v16.7.html :: ssmCoverWeeks
   - artifact_v16.7.html :: buildLiveBpOverlay
   - artifact_v16.7.html :: buildLiveDemand
+  - artifact_v16.7.html :: _hzBuildDemandCore
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.168
+verified_version: v28.171
 fingerprints:
   artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
@@ -25,7 +26,8 @@ fingerprints:
   artifact_v16.7.html::crCoverWeeks: be8157079b03
   artifact_v16.7.html::ssmCoverWeeks: 29a4ae6c62ea
   artifact_v16.7.html::buildLiveBpOverlay: 01bf2c87eb2c
-  artifact_v16.7.html::buildLiveDemand: c66325ec2461
+  artifact_v16.7.html::buildLiveDemand: 296b1886774d
+  artifact_v16.7.html::_hzBuildDemandCore: b3b734ead3a6
   artifact_v16.7.html::bpBuildFeedAsync: 92861a0bf15d
   server.mjs::buildPROD_CONST: b8b131b6ad8b
   server.mjs::buildSKURAW: bcbc97d69507
