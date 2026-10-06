@@ -1,3 +1,13 @@
+## v28.171 (Ben, branch review-fixes-2026-10-05): perf #7.1 incremental demand rebuild
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` + `buy-plan.md` (re-verified) (+ package.json, CHANGES.md). Client only. No migrations, no env vars.
+
+- A forecast edit (subcategory cell, row growth, SKU override, smoothing, Zalando/TikTok cell, Preorder/KA change, undo) no longer rebuilds the whole demand overlay. Each build snapshots its inputs; the next diffs them to find dirty subcategory x country and SKU x country slices, closes them over the set BOM (sets, components, run-off pools) and rebuilds only those.
+- Full rebuild still runs on load, data refresh, any config change (contribution model, tier weights, months, TikTok/Zalando scope) and whenever in doubt. Kill switch `?incr=0`.
+- SKU share pools are memoised (data-only inputs), which also cuts the full build about 4x.
+- **Measured (jsdom):** single cell edit 6 to 60 ms (was ~1.45 s); full build ~0.37 s (was ~1.45 s).
+- **Verified:** `?incrcheck=1` re-runs a full build after each incremental one and diffs demand + buy (health event on mismatch): 0 differences over 32 edit steps, lazy and `?lazysku=0`. Buy plan identical to v28.169: 0 of 3,605 rows differ; demand 0 of 2,996.
+
 ## v28.170 (Ben, branch review-fixes-2026-10-05): Create in Xero popup (Payments Report)
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
