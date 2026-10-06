@@ -1,21 +1,14 @@
 -- SEED 06-Oct-26 (Ben): planner.products.category_name_final / subcategory_name_final from Airtable SKU_CHILD
--- Source: SKU_CHILD-WORKING (3).csv exported from Airtable 06-Oct-26 (2868 SKUs; 2158 with a category; blanks are skipped, never written as NULL).
--- Why: the n8n products sync (map v3.3) does not carry these two fields, so 1,955 of 2,929 products have them NULL and 19 are stale.
--- Effect (checked against live 06-Oct-26): 1,190 rows filled from NULL + 19 subcategory_name_final corrections = 1,209 rows.
---   The planner engine groups by products.category / subcategory (synced correctly), so NO forecast or buy changes.
---   These fields feed exports, price lists, the urgent-buy Cat column and the health check only.
--- cost is NOT touched (CSV cost matches live on all 2,868 rows).
--- Safe to re-run: only rows that differ are updated; a re-run updates 0 rows.
+-- v2: single statement, so it works in the Supabase SQL editor (v1 used a temp table, which the editor drops between statements).
+-- Source: SKU_CHILD-WORKING (3).csv exported from Airtable 06-Oct-26 (2868 SKUs; 2,158 with a category). Blanks are skipped, never written as NULL.
+-- Expected on live (checked 06-Oct-26): updated_rows = 1209 (filled_from_null = 1190, plus 19 subcategory_name_final corrections).
+-- No forecast or buy impact: the planner groups by products.category / subcategory. cost is NOT touched.
+-- Safe to re-run: a second run returns updated_rows = 0.
+-- Backup: planner._bak_products_catfinal_20261006 already exists on live (created by the first attempt, holds the pre-seed values).
+--   On a database without it, run this first:
+--   CREATE TABLE IF NOT EXISTS planner._bak_products_catfinal_20261006 AS SELECT sku, category_name_final, subcategory_name_final FROM planner.products;
 
-BEGIN;
-
--- 1. Backup (rollback at the bottom)
-CREATE TABLE IF NOT EXISTS planner._bak_products_catfinal_20261006 AS
-  SELECT sku, category_name_final, subcategory_name_final FROM planner.products;
-
--- 2. Seed values
-CREATE TEMP TABLE _seed_catfinal (sku text PRIMARY KEY, cnf text, scnf text) ON COMMIT DROP;
-INSERT INTO _seed_catfinal (sku, cnf, scnf) VALUES
+WITH s (sku, cnf, scnf) AS (VALUES
 ('ACTIVE-LAR-BLUE','Towel - Beach','Towel - Beach CORE'),
 ('ACTIVE-LAR-GREEN','Towel - Beach','Towel - Beach CORE'),
 ('ACTIVE-LAR-GREY','Towel - Beach','Towel - Beach CORE'),
@@ -2173,28 +2166,21 @@ INSERT INTO _seed_catfinal (sku, cnf, scnf) VALUES
 ('WS-POS-EASEL-TOWLB-FR-2023','Non Core','Non Core'),
 ('WS-POS-EASEL-TOWLB-KID-2023','Non Core','Non Core'),
 ('WS-POS-EASEL-TOWLH-2023','Non Core','Non Core'),
-('WS-POS-EASEL-TOWLH-FR-2023','Non Core','Non Core');
+('WS-POS-EASEL-TOWLH-FR-2023','Non Core','Non Core')
+), u AS (
+  UPDATE planner.products p
+     SET category_name_final    = coalesce(nullif(s.cnf,''),  p.category_name_final),
+         subcategory_name_final = coalesce(nullif(s.scnf,''), p.subcategory_name_final)
+    FROM s
+   WHERE p.sku = s.sku
+     AND (p.category_name_final    IS DISTINCT FROM coalesce(nullif(s.cnf,''),  p.category_name_final)
+       OR p.subcategory_name_final IS DISTINCT FROM coalesce(nullif(s.scnf,''), p.subcategory_name_final))
+  RETURNING p.sku, (SELECT b.category_name_final IS NULL FROM planner._bak_products_catfinal_20261006 b WHERE b.sku = p.sku) AS was_null
+)
+SELECT count(*) AS updated_rows, count(*) FILTER (WHERE was_null) AS filled_from_null FROM u;
 
--- 3. Preview (expect changed_rows = 1209 on live as of 06-Oct-26; fewer if the data moved since)
-SELECT count(*) AS changed_rows,
-       count(*) FILTER (WHERE p.category_name_final IS NULL) AS filled_from_null
-FROM planner.products p JOIN _seed_catfinal s USING (sku)
-WHERE p.category_name_final    IS DISTINCT FROM coalesce(nullif(s.cnf,''),  p.category_name_final)
-   OR p.subcategory_name_final IS DISTINCT FROM coalesce(nullif(s.scnf,''), p.subcategory_name_final);
-
--- 4. Update (blank CSV values keep the current value)
-UPDATE planner.products p
-   SET category_name_final    = coalesce(nullif(s.cnf,''),  p.category_name_final),
-       subcategory_name_final = coalesce(nullif(s.scnf,''), p.subcategory_name_final)
-  FROM _seed_catfinal s
- WHERE p.sku = s.sku
-   AND (p.category_name_final    IS DISTINCT FROM coalesce(nullif(s.cnf,''),  p.category_name_final)
-     OR p.subcategory_name_final IS DISTINCT FROM coalesce(nullif(s.scnf,''), p.subcategory_name_final));
-
--- 5. Check: expect remaining_null = the SKUs with no category in Airtable plus SKUs not in SKU_CHILD (about 770)
-SELECT count(*) FILTER (WHERE category_name_final IS NULL) AS remaining_null, count(*) AS total FROM planner.products;
-
-COMMIT;
+-- CHECK afterwards (expect about 771 still NULL: SKUs with no category in Airtable + SKUs not in SKU_CHILD):
+-- SELECT count(*) FILTER (WHERE category_name_final IS NULL) AS remaining_null, count(*) AS total FROM planner.products;
 
 -- ROLLBACK (only if needed):
 -- UPDATE planner.products p SET category_name_final = b.category_name_final, subcategory_name_final = b.subcategory_name_final
