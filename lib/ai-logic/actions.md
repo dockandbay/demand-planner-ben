@@ -60,13 +60,13 @@ fingerprints:
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 86107ff0d881
   server.mjs::manufacturingActions: 66b6a0a35499
-  server.mjs::fulfilCompareRows: d0f12dbab280
+  server.mjs::fulfilCompareRows: 9afcbaf79bb7
   server.mjs::_dtcMismatchCompute: 5bd69a64946a
   server.mjs::_biProjectionCompute: a87946e44a55
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.164
+verified_version: v28.179
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -255,7 +255,8 @@ verified_version: v28.164
 ## ERP Compare (Fulfil only)
 - Lists Fulfil purchase orders that are not cancelled or done, are not matched to a planner PO (po, erp_po or Fulfil link), and whose supplier is a planner supplier.
 - Totals are in the Fulfil PO currency.
-- Cache: 2 minutes fresh, stale up to 10 minutes.
+- Cache: 2 minutes fresh, stale up to 10 minutes. The Fulfil data only: the planner side (POs, suppliers, ignored list, Fulfil links) is read live on every open, in one query (v28.179).
+- The menu badge reads the cached copy only and refreshes it in the background once it is older than 2 minutes (v28.179; was 10), so opening ERP Compare rarely waits on Fulfil.
 - Rows can be ignored, or imported via po-import-fulfil.
 (source: server.mjs :: fulfilCompareRows)
 

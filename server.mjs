@@ -20994,7 +20994,7 @@ async function fulfilCompareApiData(force, cachedOnly) {
   // v28.150: every Fulfil pull goes through ONE in-flight promise (cold, stale and background alike), so concurrent
   // callers (badge + drawer + Actions) share a single ~3 s pull. Background starts swallow errors; awaited ones surface them.
   const start = () => { if (!_fulfilCmpInflight) _fulfilCmpInflight = _fulfilCompareFetch(env).finally(() => { _fulfilCmpInflight = null; }); return _fulfilCmpInflight; };
-  if (cachedOnly) { if (!have || age >= 600000) start().catch(e => log500(e)); return have ? _fulfilCmpCache : null; }   // v28.144: never waits on Fulfil; v28.150: warms it in the background
+  if (cachedOnly) { if (!have || age >= 120000) start().catch(e => log500(e)); return have ? _fulfilCmpCache : null; }   // v28.144: never waits on Fulfil; v28.150: warms it in the background. v28.179 (Ben): from 2 min (was 10), so the menu badge keeps it warm and opening ERP Compare does not wait ~3 s on Fulfil
   if (!force && have && age < 600000) { start().catch(e => log500(e)); return _fulfilCmpCache; }
   return start();
 }
@@ -21028,12 +21028,15 @@ async function _fulfilCompareFetch(env) {
 async function fulfilCompareRows(force, cachedOnly) {
   const _api = await fulfilCompareApiData(force, cachedOnly); if (!_api) return null; const _apiAt = _api.at;
   const { pos, saleMap, poSaleMap } = _api;
-  const [poR, supR, igR, lkR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
-    pool.query('SELECT po, erp_po FROM planner.purchase_orders'),
-    pool.query("SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'"),
-    pool.query('SELECT po FROM planner.fulfil_compare_ignored'),
-    pool.query("SELECT external_id, external_ref FROM planner.po_links WHERE system='fulfil' AND status='linked'"),
-  ]);
+  // v28.179 (Ben: "ERP compare not fast"): the four lookups were four parallel queries = four pool connections per open (q 5, ~1-1.2 s
+  // on sandbox with pool waits). Now ONE statement returning the same four row sets (same SELECTs, json_agg), one connection, one
+  // round trip. Always read live (no cache), so an Ignore / link / import shows on the very next open.
+  const _cmp = (await pool.query(`SELECT
+      (SELECT coalesce(json_agg(json_build_object('po', po, 'erp_po', erp_po)), '[]') FROM planner.purchase_orders) po,
+      (SELECT coalesce(json_agg(json_build_object('n', n)), '[]') FROM (SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier') x) sup,
+      (SELECT coalesce(json_agg(json_build_object('po', po)), '[]') FROM planner.fulfil_compare_ignored) ig,
+      (SELECT coalesce(json_agg(json_build_object('external_id', external_id, 'external_ref', external_ref)), '[]') FROM planner.po_links WHERE system='fulfil' AND status='linked') lk`)).rows[0];
+  const poR = { rows: _cmp.po }, supR = { rows: _cmp.sup }, igR = { rows: _cmp.ig }, lkR = { rows: _cmp.lk };
   // v28.144 (Ben: 'PO314 is the same as PO-57EULX-SAMPLES — match by reference as well'): a Fulfil PO is already in the planner
   // when its Fulfil id is linked (po_links fulfil), OR its number OR its reference matches a planner PO / erp_po / linked ref.
   const _n = v => String(v == null ? '' : v).trim().toUpperCase();
@@ -22344,9 +22347,10 @@ app.get('/hz-health.js', (req, res) => { res.set('Content-Type', 'application/ja
 // with 202), fields truncated (message 500, stack 2000), identical events in one batch collapsed to a count, one INSERT.
 // v28.163 (Ben): + long_task / api_failure / page_view / sanity / metric. These arrive PRE-AGGREGATED by hz-health.js, so a row's
 // `count` (1..10000) is honoured instead of counting 1 per row.
-const HZ_CE_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'long_task', 'api_failure', 'page_view', 'sanity', 'metric']);
-const HZ_CE_AGG = new Set(['long_task', 'api_failure', 'page_view', 'metric']);
+const HZ_CE_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'long_task', 'api_failure', 'page_view', 'sanity', 'metric', 'dead_click']);   // v28.179 (Ben): + dead_click (nav press that changed nothing)
+const HZ_CE_AGG = new Set(['long_task', 'api_failure', 'page_view', 'metric', 'dead_click']);
 const _hzCeRate = new Map();   // key -> { t, n } fixed one-minute windows
+let _hzNoDeadClick = false;    // v28.179: set when the DB's kind CHECK predates migration 331 (dead_click rows are then dropped)
 function hzCeAllow(key, max, want) { const now = Date.now(); let r = _hzCeRate.get(key);
   if (!r || now - r.t > 60000) { r = { t: now, n: 0 }; _hzCeRate.set(key, r); }
   if (_hzCeRate.size > 5000) for (const [k, v] of _hzCeRate) if (now - v.t > 60000) _hzCeRate.delete(k);
@@ -22370,8 +22374,12 @@ async function hzClientEvents(req, res, source, email) {
     let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
     const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
     let n = hzCeAllow('ip|' + ip, 200, rows.length); n = hzCeAllow('u|' + source + '|' + ip + '|' + (em || ''), 60, n);
-    rows = rows.slice(0, n); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
-    await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]);
+    rows = rows.slice(0, n); if (_hzNoDeadClick) rows = rows.filter(r => r.kind !== 'dead_click');
+    if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
+    try { await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]); }
+    catch (e) {   // v28.179 (Ben): migration 331 not applied yet: the kind CHECK rejects dead_click; keep the rest of the batch, stop sending it
+      if (e && e.code === '23514' && rows.some(r => r.kind === 'dead_click')) { _hzNoDeadClick = true; rows = rows.filter(r => r.kind !== 'dead_click'); if (rows.length) await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]); }
+      else throw e; }
     res.status(202).json({ ok: true, accepted: rows.length });
     if (rows.some(r => r.kind === 'client_error' || r.kind === 'console_error')) { _hzAlertDirty = true; hzAlertMaybeEval(); }   // v28.162: red alert "same error, 3+ users" (at most one eval a minute)
   } catch (e) { console.warn('[health] client-events insert failed: ' + (e && e.message)); res.status(202).json({ ok: false }); }   // never a 500 (the page would log it again)
@@ -22434,11 +22442,13 @@ const HZ_INTEG_FILE = { fulfil: 'server.mjs fulfilFetch / fulfilFetchCfg (+ the 
 async function hzHealthReportExtra(days) {
   const x = (await pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int))
     SELECT json_build_object(
-      'kpis2', (SELECT json_build_object('freezes', coalesce(sum(count) FILTER (WHERE kind = 'long_task'), 0), 'api_failures', coalesce(sum(count) FILTER (WHERE kind = 'api_failure'), 0),
+      'kpis2', (SELECT json_build_object('freezes', coalesce(sum(count) FILTER (WHERE kind = 'long_task'), 0), 'dead_clicks', coalesce(sum(count) FILTER (WHERE kind = 'dead_click'), 0), 'api_failures', coalesce(sum(count) FILTER (WHERE kind = 'api_failure'), 0),
         'integration_errors', coalesce(sum(count) FILTER (WHERE kind = 'integration_error'), 0), 'data_findings', count(DISTINCT kind || path) FILTER (WHERE kind IN ('etl_stale', 'etl_flat', 'etl_drop', 'data_lag')),
         'sanity', count(DISTINCT path) FILTER (WHERE kind = 'sanity'), 'db', coalesce(sum(count) FILTER (WHERE kind IN ('db_pool', 'slow_query')), 0), 'red_alerts', count(*) FILTER (WHERE kind = 'red_alert')) FROM ev),
       'freezes', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, max(ms) max_ms, sum(coalesce((meta->>'sum_ms')::numeric, ms))::bigint sum_ms, count(DISTINCT user_email)::int users, array_agg(DISTINCT source) sources, max(ts) last_seen
         FROM ev WHERE kind = 'long_task' GROUP BY path ORDER BY sum_ms DESC NULLS LAST LIMIT 25) x),
+      'dead_clicks', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, coalesce(meta->>'label', message) label, sum(count)::int n, count(DISTINCT user_email)::int users, array_remove(array_agg(DISTINCT app_version), NULL) versions, max(ts) last_seen
+        FROM ev WHERE kind = 'dead_click' GROUP BY 1, 2 ORDER BY n DESC LIMIT 25) x),   -- v28.179 (Ben)
       'api', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT method, path, status, sum(count)::int n, max(ms) max_ms, count(DISTINCT user_email)::int users, (array_agg(message ORDER BY ts DESC))[1] message, max(ts) last_seen
         FROM ev WHERE kind = 'api_failure' GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 25) x),
       'integ', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT meta->>'service' service, path, status, sum(count)::int n, coalesce(sum(count) FILTER (WHERE meta->>'timeout' = 'true'), 0)::int timeouts, max(ms) max_ms,
@@ -22464,7 +22474,7 @@ async function hzHealthReportExtra(days) {
       'prev_version', (SELECT app_version FROM (SELECT app_version, min(ts) f FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1) v   -- the release deployed before this one (not a newer branch build writing to the same DB)
         WHERE f < coalesce((SELECT min(ts) FROM planner.app_health_events WHERE app_version = $2), now()) ORDER BY f DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
   for (const k in x.kpis2) x.kpis2[k] = Number(x.kpis2[k]) || 0;
-  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
+  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); }); x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
   x.integ.forEach(r => { r.file = HZ_INTEG_FILE[r.service] || 'server.mjs _fetchT callers'; });
   x.new_since.forEach(r => { r.file = r.kind === 'integration_error' ? (HZ_INTEG_FILE[String(r.path).split(' ')[0]] || 'server.mjs') : hzLikelyFile(r.path ? String(r.path).replace(/^[A-Z]+ /, '') : (r.views || [])[0], r.path ? null : 'staff'); });
   x.page_users.forEach(r => { r.user = hzShortUser(r.user_email); delete r.user_email; });
@@ -22481,7 +22491,7 @@ function hzHealthMarkdown(d) {
   L.push('How to use: upload this to Claude Code in the horizon-demand-and-supply-planner repo and ask it to work through the sections in order (server errors first). Each item gives counts, a concrete example and the likely file. Reproduce locally (`PORT=8124 node server.mjs`), fix, verify, and note each fix in CHANGES.md.', '');
   L.push(`Source: planner.app_health_events, last ${d.days} days (slow request = ${d.slow_ms}ms or more; slow view = over 3s to render). Generated ${dt(new Date().toISOString())}.`, '');
   L.push('## Summary', '', '| Metric | Count |', '|---|---|', `| Server errors (5xx) | ${k.server_errors} |`, `| Slow requests | ${k.slow_requests} |`, `| Browser errors | ${k.browser_errors} |`, `| Slow views | ${k.slow_views} |`, `| Distinct users affected (browser) | ${k.users} |`);
-  const k2 = d.kpis2 || {}; if (d.kpis2) L.push(`| Freezes (main thread >= 1s) | ${k2.freezes} |`, `| API failures (seen by browsers) | ${k2.api_failures} |`, `| Integration errors | ${k2.integration_errors} |`, `| Data freshness findings | ${k2.data_findings} |`, `| Sanity findings | ${k2.sanity} |`, `| DB pool / slow query events | ${k2.db} |`, `| Red alerts | ${k2.red_alerts} |`);
+  const k2 = d.kpis2 || {}; if (d.kpis2) L.push(`| Freezes (main thread >= 1s) | ${k2.freezes} |`, `| Dead clicks (nav press, nothing happened) | ${k2.dead_clicks || 0} |`, `| API failures (seen by browsers) | ${k2.api_failures} |`, `| Integration errors | ${k2.integration_errors} |`, `| Data freshness findings | ${k2.data_findings} |`, `| Sanity findings | ${k2.sanity} |`, `| DB pool / slow query events | ${k2.db} |`, `| Red alerts | ${k2.red_alerts} |`);
   L.push('');
   if (d.extra_error) L.push(`> The v28.162 sections failed to load: ${hzMdCode(d.extra_error)} (is migration 329 applied?)`, '');
   // v28.163 (Ben): New since last deploy goes FIRST: these are what the latest release broke.
@@ -22523,6 +22533,8 @@ function hzHealthMarkdown(d) {
       d.integ.map(r => [r.service, r.path, r.status || 'network', r.n, r.timeouts, r.max_ms, String(r.message || '').slice(0, 160), dt(r.last_seen), r.file]));
     tbl('## 8. Freezes (main thread blocked >= 1s)', 'Long tasks seen by browsers, per view. Profile the view in Chrome DevTools Performance; the likely file maps the view as in section 4.', ['View', 'Freezes', 'Max ms', 'Total ms', 'Users', 'Last seen', 'Likely file'],
       d.freezes.map(r => [r.path, r.n, r.max_ms, r.sum_ms, r.users, dt(r.last_seen), r.file]));
+    tbl('## 8b. Dead clicks (nav press that did nothing)', 'v28.179: a press on a menu / tab item (left rail, view toggles, L2 / L3 tabs) after which neither the route nor the active item changed and no loading panel appeared within 1.5 s. Usually a click swallowed by a re-render of the menu under the pointer, or a handler that bailed out. Reproduce by clicking that item from that view.', ['From view', 'Nav item', 'Count', 'Users', 'Versions', 'Last seen', 'Likely file'],
+      (d.dead_clicks || []).map(r => [r.path, r.label, r.n, r.users, (r.versions || []).join(', '), dt(r.last_seen), r.file]));
     tbl('## 9. API failures seen by browsers', 'Client-observed: 5xx, 408 / 429 / 504, network errors (status 0) and responses slower than 10s. Includes Vercel 504s that never reach the server log.', ['Endpoint', 'Status', 'Count', 'Max ms', 'Users', 'Last seen', 'Likely file'],
       d.api.map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.max_ms, r.users, dt(r.last_seen), r.file]));
     tbl('## 10. Database', 'db_pool = requests queued for a connection (pool max 4 on Vercel) or connect / query timeouts. Slow queries = one statement >= 2s, literals stripped; find it by its text in server.mjs.', ['Kind', 'What', 'Count', 'Max ms / waiting', 'Example route', 'Last seen'],
@@ -22541,6 +22553,7 @@ function hzHealthMarkdown(d) {
   if (d.errors[0]) s.push(`Fix the top server error: ${d.errors[0].method} ${d.errors[0].path} (${d.errors[0].n}x, "${hzMdCode(d.errors[0].message).slice(0, 120)}"). Search server.mjs for the route and add a guard or fix the query; the local log prints "[500] ${d.errors[0].method} ${d.errors[0].path}".`);
   if (d.browser[0]) s.push(`Fix the top browser error "${hzMdCode(d.browser[0].message).slice(0, 120)}" (${d.browser[0].n}x) in ${d.browser[0].file}; use the stack sample and view to reproduce.`);
   if (d.slow[0]) s.push(`Profile ${d.slow[0].method} ${d.slow[0].path} (p95 ${d.slow[0].p95}ms): run with HZ_QLOG=200 to print slow queries, then cut round trips or add it to the response cache.`);
+  if (d.dead_clicks && d.dead_clicks[0]) s.push(`Dead clicks: "${hzMdCode(d.dead_clicks[0].label)}" from ${hzMdCode(d.dead_clicks[0].path)} did nothing ${d.dead_clicks[0].n}x. Click it from that view and check the menu is not re-rendered under the pointer (supply/inject.html renderRailList) and that its handler runs.`);   // v28.179
   if (d.views[0]) s.push(`Investigate the slow view ${hzMdCode(d.views[0].path)} (p95 ${d.views[0].p95}ms): check which endpoints it waits on in the Slowest endpoints table.`);
   if (!s.length) s.push('Nothing logged in this period. No action needed.');
   else s.push('After fixing, run CONFIG ▸ Admin ▸ App health to confirm, and check next week\'s report shows the counts falling.');

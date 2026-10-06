@@ -29,8 +29,11 @@
   console.error=function(){ try{ var a=[].slice.call(arguments), er=null; a.forEach(function(x){ if(!er&&x instanceof Error)er=x; });
     add('console_error',a.map(str).join(' '),er&&er.stack,null,null); }catch(_){} return _cerr.apply(console,arguments); };
   // slow views: from nav (hash change) or first load until no visible "Loading…" panel remains
+  // v28.179 (Ben): + any visible [data-hz-loading] panel (the DEMAND / BUY & MOVE / REPORTS cold-entry panels have no .count text, so
+  // slow BUY & MOVE > Actions entries were never seen) and "⏳ Loading…" style text (a leading symbol defeated /^\s*Loading/).
   var LOADSEL='.count,.mut,.cp-lead,.pv-empty,.ask-empty', pend=null;
-  function loading(){ var els=document.querySelectorAll(LOADSEL); for(var i=0;i<els.length;i++){ var t=els[i].textContent; if(t&&t.length<120&&/^\s*Loading/.test(t)&&els[i].offsetParent!==null)return true; } return false; }
+  function loading(){ var els=document.querySelectorAll(LOADSEL); for(var i=0;i<els.length;i++){ var t=els[i].textContent; if(t&&t.length<120&&/^[^A-Za-z0-9]{0,4}Loading/.test(t)&&els[i].offsetParent!==null)return true; }
+    var pn=document.querySelectorAll('[data-hz-loading]'); for(var j=0;j<pn.length;j++)if(pn[j].offsetParent!==null)return true; return false; }
   function watch(t0,first){ var id={}; pend=id; var quiet=0, qms=0;   // two quiet ticks in a row = rendered (the app's own hashchange handler may run after ours)
     (function tick(){ if(pend!==id)return; var ms=(first?performance.now():Date.now()-t0);
       if(ms>60000){ pend=null; add('slow_view','View still loading after 60s: '+view(),null,ms,{timeout:true,first:!!first}); return; }
@@ -43,6 +46,7 @@
   //  api_failure: same-origin /api calls seen by THIS browser that failed: network error, timeout, status >= 500, 408 / 429, or
   //               slower than 10s; per method + normalised path + status. Health posts and /hz-health.js are never recorded.
   //  page_view  : visits + active seconds (visible tab only) per normalised view; ids in the hash become :id.
+  //  dead_click : v28.179 (Ben) staff nav presses that changed nothing within 1.5 s, per view + nav label (see below).
   // window.fetch is wrapped HERE, i.e. innermost: this script runs first in <head>, so the shell's own wrappers (memo / in-flight
   // sharing, the activity counter and __hzBg, the 403/401 handler) wrap this one and keep working unchanged; init is passed through
   // untouched. Memo hits never reach the network, so they are (correctly) not seen. Cost per fetch: one performance.now() + one then().
@@ -63,11 +67,30 @@
     try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000)apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?'slow':null); }catch(_){} },
       function(e){ try{ var n=e&&e.name; if(n==='AbortError')return; apiNote(m,path,0,Math.round(performance.now()-t0),n==='TimeoutError'?'timeout':'network'); }catch(_){} }); }catch(e){}
     return p; }; }
+  // v28.179 (Ben): dead_click: a press on a NAV item (left rail L1 / L2 / L3, top view toggles, L2 / L3 tab bars) that is not
+  // already the active one, after which neither the route nor the active nav item changes and no loading panel appears within
+  // 1.5 s. Aggregated per view + label like long_task (count, <= 10 a minute). Clicks on anything else are never looked at.
+  var DC={}, dcT=0, dcN=0, dcPend=null, DEAD_MS=1500;
+  var NAVSEL='#hz-leftrail .rl1,#hz-leftrail .rl2,#hz-leftrail .rl3,#view-tabs-row .view-toggle,.hz-l2 .dnav,.d3nav .d3tab,#supply-subnav .stab,#rep-subnav .rtab,#act-subnav .rtab,#product-subnav .stab,#client-subnav .stab,#config-subs .rtab,#config-subs-l3 .rtab,#perf-subnav .rtab';
+  function navLabel(el){ try{ var l=el.querySelector('.lab'), t=l?l.textContent:Array.prototype.filter.call(el.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');
+    return String(t||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60); }catch(e){ return '?'; } }
+  function navOn(el){ var c=el.classList; return !!(c&&(c.contains('active')||c.contains('on'))); }
+  function navSig(){ var s=String(location.hash||''); try{ var els=document.querySelectorAll(NAVSEL); for(var i=0;i<els.length;i++)if(navOn(els[i]))s+='|'+navLabel(els[i]); }catch(e){} return s; }
+  function dcNote(label,v){ try{ var now=Date.now(); if(now-dcT>60000){dcT=now;dcN=0;} if(++dcN>10)return false;
+    var k=v+'|'+label, a=DC[k]||(DC[k]={n:0,label:label,path:v}); a.n++; return true; }catch(e){ return false; } }
+  if(SRC==='staff')document.addEventListener('mousedown',function(e){ try{ if(e.button!==0||!e.target||!e.target.closest)return; var el=e.target.closest(NAVSEL); if(!el||navOn(el))return;
+    var o=dcPend, sig=navSig(); if(o&&o.sig===sig&&!loading()&&Date.now()-o.t>=400)dcNote(o.label,o.path);   // clicked again because the previous press did nothing: that one was dead
+    var p={label:navLabel(el),path:nview(),sig:sig,t:Date.now()}; dcPend=p;
+    (function chk(){ if(dcPend!==p)return;   // a newer nav press supersedes this one
+      if(navSig()!==p.sig||loading()){ dcPend=null; return; }
+      if(Date.now()-p.t>=DEAD_MS){ dcPend=null; dcNote(p.label,p.path); return; }
+      setTimeout(chk,250); })(); }catch(_){} },true);
   function pvAccrue(){ var now=Date.now(); if(curV&&vis&&curT){ var a=PV[curV]||(PV[curV]={n:0,s:0}); a.s+=(now-curT)/1000; } curT=now; }
   function pvEnter(){ try{ pvAccrue(); curV=nview(); var a=PV[curV]||(PV[curV]={n:0,s:0}); a.n++; }catch(e){} }
   function aggFlush(){ try{ pvAccrue(); var k, a, rows=[];
     for(k in PV){ a=PV[k]; if(a.n||a.s>=1)rows.push({kind:'page_view',message:'page view',path:k,count:Math.max(1,a.n),v:VER,meta:{visits:a.n,active_s:Math.round(a.s)}}); } PV={};
     for(k in LT){ a=LT[k]; rows.push({kind:'long_task',message:'Main thread blocked >= 1s',path:k,ms:Math.round(a.max),count:a.n,v:VER,meta:{sum_ms:Math.round(a.sum)}}); } LT={};
+    for(k in DC){ a=DC[k]; rows.push({kind:'dead_click',message:'Dead click: '+a.label,path:a.path,count:a.n,v:VER,meta:{label:a.label}}); } DC={};   // v28.179
     for(k in API){ a=API[k]; rows.push({kind:'api_failure',message:(a.s?'HTTP '+a.s:a.err)+' '+a.m+' '+a.p+(a.err==='slow'?' (> 10s)':''),path:a.p,method:a.m,status:a.s||null,ms:a.max,count:a.n,v:VER,meta:{err:a.err}}); } API={};
     for(var i=0;i<rows.length&&i<60;i++)q.push(rows[i]); return rows.length; }catch(e){ return 0; } }
   window.addEventListener('hashchange',pvEnter); pvEnter();
@@ -76,7 +99,7 @@
   window.hzHealthMetric=function(kind,message,meta,path){ try{
     if(kind==='sanity'){ var sk='sanity|'+message; if(seen[sk])return; seen[sk]=1; q.push({kind:'sanity',message:String(message||'').slice(0,500),path:String(path||'client:'+nview()).slice(0,200),v:VER,meta:meta||null}); }   // once per message per page session
     else if(kind==='metric')q.push({kind:'metric',message:String(message||'metric').slice(0,500),path:String(path||message||'').slice(0,200),count:1,v:VER,meta:meta||null}); }catch(e){} };
-  window.__hzHealth._t={ltNote:ltNote,aggFlush:aggFlush,nv:nv,apiPath:apiPath,state:function(){ return {LT:LT,API:API,PV:PV}; }};   // unit tests
+  window.__hzHealth._t={ltNote:ltNote,aggFlush:aggFlush,nv:nv,apiPath:apiPath,loading:loading,navSig:navSig,state:function(){ return {LT:LT,API:API,PV:PV,DC:DC}; }};   // unit tests
   setInterval(function(){ flush(false); },10000);
   setInterval(function(){ if(aggFlush())flush(false); },AGG_MS);
   window.addEventListener('pagehide',function(){ aggFlush(); flush(true); });
