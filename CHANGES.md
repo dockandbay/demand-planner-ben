@@ -1,3 +1,11 @@
+## v28.185 (Ben, branch review-fixes-2026-10-05): invoice + packing list downloads fixed; supplier portal deep dive
+
+**Files:** invoice template moved to `lib/templates/` (bundled via `lib/**`), `docs/Claude Analyses/PORTAL_DEEP_DIVE_2026-10-07.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- Invoice and packing list downloads (admin and supplier portal) returned 500 since the 21-Sep repo tidy: `lib/invoice.mjs` looks in `lib/templates/` but the template stayed in `/templates`, which isn't bundled on Vercel; the error also showed a server path to suppliers. Verified on sandbox: portal invoice download 500 to 200 (xlsx).
+- Portal deep dive report (ranked findings incl. 2 critical security items; proposed plan v28.186 to v28.190).
+- **Diviyaj:** confirm the template's location in prod after deploy.
+
 ## v28.184 (Ben, branch review-fixes-2026-10-05): mobile navigation, full L1 > L2 > L3 side menu
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html`, `supply/hz-health.js` (+ package.json, CHANGES.md). No migrations, no env vars.
