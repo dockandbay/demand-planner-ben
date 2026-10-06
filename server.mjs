@@ -1137,6 +1137,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement'   // v28.175 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -4821,6 +4822,182 @@ app.get('/api/supply/xero/bills', async (req, res) => {
     const rows = inv.slice(0, Number(req.query.limit) || 50).map(v => ({ invoice_number: v.InvoiceNumber, reference: v.Reference || '', contact: v.Contact && v.Contact.Name, date: xd(v.DateString || v.Date), due_date: xd(v.DueDateString || v.DueDate), status: v.Status, currency: v.CurrencyCode, total: v.Total, amount_due: v.AmountDue, amount_paid: v.AmountPaid, xero_id: v.InvoiceID }));
     res.set('Cache-Control', 'no-store').json({ region, org: (await xeroTenant(region)).name, count: rows.length, bills: rows });
   } catch (e) { res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.175 (Ben): UNIVERSAL PARTNERS FX USD bank STATEMENT CSV. Xero's public API cannot create bank statement lines, so
+// HORIZON builds a statement file (one line per in/out on that account) that someone imports in Xero (Universal
+// Partners FX USD > Manage Account > Import a Statement), so every payment / transfer there can be reconciled.
+// READ ONLY: GET calls to the UK org only. Sources: (1) Payments on the account (AUTHORISED; DELETED/VOIDED skipped),
+// (2) spend/receive BankTransactions on the account (transfer legs excluded, they come from 3), (3) BankTransfers from or
+// to the account, amount taken from THIS account's leg (a cross-currency transfer's Amount is in the FROM currency).
+// Default = unreconciled only (IsReconciled; From/ToIsReconciled for the matching transfer side); all=1 adds reconciled.
+// Settings: app_settings up_fx_bank_account_id (default below), up_fx_statement_recipients (JSON array),
+// up_fx_statement_emailed (JSON { ids: { <source id>: 'YYYY-MM-DD emailed' } }, pruned after 120 days).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const UPFX_DEFAULT_ACCOUNT = '1029ad39-5e0c-4335-8a66-fc69f3b7f564';
+const UPFX_DEFAULT_RECIPIENTS = ['rita@dockandbay.com', 'accounts@dockandbay.com'];
+const UPFX_EMAILED_KEY = 'up_fx_statement_emailed', UPFX_KEEP_DAYS = 120, UPFX_BT_LOOKBACK_MONTHS = 24;
+const UPFX_PAY_OUT = new Set(['ACCPAYPAYMENT', 'ARCREDITPAYMENT', 'AROVERPAYMENTPAYMENT', 'ARPREPAYMENTPAYMENT']);   // bill paid, customer refund
+const UPFX_PAY_IN = new Set(['ACCRECPAYMENT', 'APCREDITPAYMENT', 'APOVERPAYMENTPAYMENT', 'APPREPAYMENTPAYMENT']);    // invoice received, supplier refund
+async function upfxSetting(key) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0]; return r ? r.value : null; } catch (e) { return null; } }
+async function upfxConfig() {
+  const acc = String((await upfxSetting('up_fx_bank_account_id')) || '').replace(/"/g, '').trim();
+  let to = null; const raw = await upfxSetting('up_fx_statement_recipients');
+  try { const j = raw ? JSON.parse(raw) : null; to = Array.isArray(j) ? j : (typeof j === 'string' ? j.split(/[,;\s]+/) : null); } catch (e) { to = String(raw || '').split(/[,;\s]+/); }
+  to = hzEmailList(to); if (!to.length) to = UPFX_DEFAULT_RECIPIENTS.slice();
+  return { account_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(acc) ? acc.toLowerCase() : UPFX_DEFAULT_ACCOUNT, recipients: to };
+}
+// Xero dates: "/Date(1790294400000+0000)/" or "2026-09-29T00:00:00" -> YYYY-MM-DD (UTC; Xero stores the date at 00:00 UTC)
+function upfxXd(v) { const m = /\/Date\((-?\d+)/.exec(String(v || '')); if (m) return new Date(Number(m[1])).toISOString().slice(0, 10); const s = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; }
+function upfxLondonToday() { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const g = t => (p.find(x => x.type === t) || {}).value; return g('year') + '-' + g('month') + '-' + g('day'); }
+const _upfxLeg = new Map();   // bank transaction id -> { total, currency, at } (a transfer leg's own-currency total; 6 h)
+async function upfxPaged(path, key) {   // Xero pages are 100 rows; ~1 call per page, xeroFetch backs off on 429
+  const out = [];
+  for (let p = 1; p <= 50; p++) { const j = await xeroFetch('uk', path + (path.includes('?') ? '&' : '?') + 'page=' + p); const rows = (j && j[key]) || []; out.push(...rows); if (rows.length < 100) break; }
+  return out;
+}
+async function buildUpfxStatement(opts) {
+  opts = opts || {}; const all = !!opts.all;
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.from || '')) ? String(opts.from) : null, to = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.to || '')) ? String(opts.to) : null;
+  const cfg = await upfxConfig(), ACC = cfg.account_id, G = 'Guid("' + ACC + '")';
+  const dw = (from ? ' AND Date>=DateTime(' + from.replace(/-/g, ',') + ')' : '') + (to ? ' AND Date<=DateTime(' + to.replace(/-/g, ',') + ')' : '');
+  const aj = await xeroFetch('uk', '/api.xro/2.0/Accounts/' + ACC); const A = (aj && aj.Accounts && aj.Accounts[0]) || {};
+  if (A.Type && A.Type !== 'BANK') { const e = new Error('Xero account ' + ACC + ' is not a bank account (' + A.Type + ')'); e.code = 400; throw e; }
+  const acct = { id: ACC, name: A.Name || 'Universal Partners FX USD', currency: A.CurrencyCode || 'USD' };
+  const counts = { payments: 0, bank_txns: 0, transfers: 0, excluded_status: 0, reconciled_skipped: 0, transfer_legs_skipped: 0, zero_skipped: 0 };
+  const warnings = [], lines = new Map();
+  const inRange = d => !!d && (!from || d >= from) && (!to || d <= to);
+  const add = (l) => { if (!inRange(l.date)) return; if (!(Math.abs(l.amount) >= 0.005)) { counts.zero_skipped++; return; } if (!lines.has(l.id)) lines.set(l.id, l); };
+  // 1. Payments on the account
+  // no Status in the where: DELETED / VOIDED are read and dropped here so counts.excluded_status shows them
+  const pays = await upfxPaged('/api.xro/2.0/Payments?where=' + encodeURIComponent('Account.AccountID==' + G + dw) + '&order=Date', 'Payments');
+  for (const p of pays) {
+    if (String(p.Status || '').toUpperCase() !== 'AUTHORISED') { counts.excluded_status++; continue; }
+    const t = String(p.PaymentType || '').toUpperCase(), dir = UPFX_PAY_OUT.has(t) ? 'out' : UPFX_PAY_IN.has(t) ? 'in' : null;
+    if (!dir) { warnings.push('payment ' + p.PaymentID + ': unknown type ' + t + ' (skipped)'); continue; }
+    if (p.IsReconciled && !all) { counts.reconciled_skipped++; continue; }
+    const doc = p.Invoice || p.CreditNote || p.Prepayment || p.Overpayment || {};
+    const amt = Number(p.BankAmount != null ? p.BankAmount : p.Amount) || 0;   // BankAmount = in the bank account's currency
+    counts.payments++;
+    add({ id: 'pay:' + p.PaymentID, source: 'payment', type: t, date: upfxXd(p.Date), dir, amount: dir === 'in' ? Math.abs(amt) : -Math.abs(amt),
+      payee: (doc.Contact && doc.Contact.Name) || '', reference: doc.InvoiceNumber || doc.CreditNoteNumber || p.Reference || '', reconciled: !!p.IsReconciled, xero_id: p.PaymentID });
+  }
+  // 2. Spend / receive money on the account (transfer legs excluded: source 3 covers them)
+  // Xero refuses an account-only BankTransactions filter on this org (HighVolumeException, 06-Oct-26: ~12 months is accepted,
+  // 21 months is not), so read in 6-month date windows from `from` (default: UPFX_BT_LOOKBACK_MONTHS back) to `to` / today.
+  const bts = [], btTo = to || upfxLondonToday();
+  let ws = from || (() => { const d = new Date(btTo + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - UPFX_BT_LOOKBACK_MONTHS); return d.toISOString().slice(0, 10); })();
+  while (ws <= btTo) {
+    const n = new Date(ws + 'T00:00:00Z'); n.setUTCMonth(n.getUTCMonth() + 6); const nx = n.toISOString().slice(0, 10);
+    const we = new Date(n.getTime() - 86400000).toISOString().slice(0, 10), end = we < btTo ? we : btTo;
+    bts.push(...await upfxPaged('/api.xro/2.0/BankTransactions?where=' + encodeURIComponent('BankAccount.AccountID==' + G + ' AND Status=="AUTHORISED" AND Date>=DateTime(' + ws.replace(/-/g, ',') + ') AND Date<=DateTime(' + end.replace(/-/g, ',') + ')'), 'BankTransactions'));
+    ws = nx;
+  }
+  const legIds = new Set();
+  for (const x of bts) {
+    const t = String(x.Type || '').toUpperCase();
+    if (String(x.Status || '').toUpperCase() !== 'AUTHORISED') { counts.excluded_status++; continue; }
+    if (/-TRANSFER$/.test(t)) { counts.transfer_legs_skipped++; continue; }
+    const dir = /^SPEND/.test(t) ? 'out' : /^RECEIVE/.test(t) ? 'in' : null; if (!dir) { warnings.push('bank transaction ' + x.BankTransactionID + ': unknown type ' + t + ' (skipped)'); continue; }
+    if (x.IsReconciled && !all) { counts.reconciled_skipped++; continue; }
+    const amt = Math.abs(Number(x.Total) || 0); counts.bank_txns++;
+    add({ id: 'bt:' + x.BankTransactionID, source: 'bank_txn', type: t, date: upfxXd(x.DateString || x.Date), dir, amount: dir === 'in' ? amt : -amt,
+      payee: (x.Contact && x.Contact.Name) || '', reference: x.Reference || '', reconciled: !!x.IsReconciled, xero_id: x.BankTransactionID });
+  }
+  // 3. Bank transfers from / to the account: amount from THIS account's leg (own currency)
+  const trw = '(FromBankAccount.AccountID==' + G + ' OR ToBankAccount.AccountID==' + G + ')' + dw;
+  const tj = await xeroFetch('uk', '/api.xro/2.0/BankTransfers?where=' + encodeURIComponent(trw));
+  for (const x of ((tj && tj.BankTransfers) || [])) {
+    if (/^(DELETED|VOIDED)$/i.test(String(x.Status || ''))) { counts.excluded_status++; continue; }
+    const isIn = String((x.ToBankAccount || {}).AccountID || '').toLowerCase() === ACC, isOut = String((x.FromBankAccount || {}).AccountID || '').toLowerCase() === ACC;
+    for (const dir of [isIn ? 'in' : null, isOut ? 'out' : null].filter(Boolean)) {
+      const rec = dir === 'in' ? !!x.ToIsReconciled : !!x.FromIsReconciled;
+      if (rec && !all) { counts.reconciled_skipped++; continue; }
+      const legId = dir === 'in' ? x.ToBankTransactionID : x.FromBankTransactionID; let leg = legId ? _upfxLeg.get(legId) : null;
+      if (!leg || Date.now() - leg.at > 6 * 3600000) {
+        try { const bj = await xeroFetch('uk', '/api.xro/2.0/BankTransactions/' + legId); const b = bj && bj.BankTransactions && bj.BankTransactions[0];
+          leg = b ? { total: Math.abs(Number(b.Total) || 0), currency: b.CurrencyCode || '', at: Date.now() } : null; if (leg) _upfxLeg.set(legId, leg); }
+        catch (e) { leg = null; warnings.push('transfer ' + x.BankTransferID + ': could not read its ' + dir + ' leg (' + e.message + ')'); }
+      }
+      if (!leg) { warnings.push('transfer ' + x.BankTransferID + ' (' + upfxXd(x.DateString || x.Date) + '): no ' + dir + ' leg amount, line skipped'); continue; }
+      if (leg.currency && leg.currency !== acct.currency) warnings.push('transfer ' + x.BankTransferID + ': leg currency ' + leg.currency + ' is not ' + acct.currency);
+      legIds.add(legId); counts.transfers++;
+      const other = dir === 'in' ? x.FromBankAccount : x.ToBankAccount;
+      add({ id: 'trf:' + x.BankTransferID + ':' + dir, source: 'transfer', type: dir === 'in' ? 'TRANSFER-IN' : 'TRANSFER-OUT', date: upfxXd(x.DateString || x.Date), dir,
+        amount: dir === 'in' ? leg.total : -leg.total, payee: (other && other.Name) || '', reference: x.Reference || '', reconciled: rec, xero_id: x.BankTransferID });
+    }
+  }
+  for (const id of legIds) lines.delete('bt:' + id);   // belt and braces: a transfer leg never also counts as a spend/receive line
+  const out = Array.from(lines.values()).map(l => Object.assign(l, { description: l.dir === 'in' ? 'FX Transfer In' : 'FX Payment Out', amount: Math.round(l.amount * 100) / 100 }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id.localeCompare(b.id));
+  const sum = d => Math.round(out.filter(l => l.dir === d).reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  return { ok: true, account: acct, filters: { from, to, all }, lines: out, warnings,
+    counts: Object.assign(counts, { lines: out.length, in: out.filter(l => l.dir === 'in').length, out: out.filter(l => l.dir === 'out').length, total_in: sum('in'), total_out: sum('out'), net: Math.round((sum('in') + sum('out')) * 100) / 100 }) };
+}
+// Xero precoded statement import layout (UK org: dd/mm/yyyy, signed amount, 2 dp, no currency symbol)
+function upfxCsv(lines) {
+  const q = v => { const s = String(v == null ? '' : v).replace(/\r?\n/g, ' '); return /[",]/.test(s) || /^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const dmy = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; };
+  return ['*Date,*Amount,Payee,Description,Reference,Check Number'].concat((lines || []).map(l => [dmy(l.date), Number(l.amount).toFixed(2), l.payee, l.description, l.reference, ''].map(q).join(','))).join('\r\n') + '\r\n';
+}
+const upfxFileName = (suffix) => 'UP FX Statement' + (suffix ? ' ' + suffix : '') + ' ' + ddMonYy(upfxLondonToday()) + '.csv';
+async function upfxAdmin(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return false; } return true; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return false; } }
+const upfxQuery = q => ({ from: q.from, to: q.to, all: String(q.all || '') === '1' || String(q.all || '') === 'true' });
+app.get('/api/supply/xero/up-fx-statement.csv', async (req, res) => {
+  if (!(await upfxAdmin(req, res))) return;
+  try { const s = await buildUpfxStatement(upfxQuery(req.query));
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + upfxFileName() + '"', 'Cache-Control': 'no-store', 'X-Statement-Lines': String(s.lines.length) }).send(upfxCsv(s.lines)); }
+  catch (e) { if (!(e.code >= 400 && e.code < 500) && e.code !== 503) log500(e); res.status(e.code === 503 ? 503 : (e.code >= 400 && e.code < 500 ? e.code : 500)).json({ error: e.message }); }
+});
+app.get('/api/supply/xero/up-fx-statement', async (req, res) => {
+  if (!(await upfxAdmin(req, res))) return;
+  try { res.set('Cache-Control', 'no-store').json(await buildUpfxStatement(upfxQuery(req.query))); }
+  catch (e) { if (!(e.code >= 400 && e.code < 500) && e.code !== 503) log500(e); res.status(e.code === 503 ? 503 : (e.code >= 400 && e.code < 500 ? e.code : 500)).json({ error: e.message }); }
+});
+// Weekly email (n8n, Monday 08:00 Europe/London): POST /api/cron/up-fx-statement, x-webhook-secret = N8N_WEBHOOK_SECRET.
+// Sends ONLY when an unreconciled line exists that no earlier email carried (ids in up_fx_statement_emailed). ?dry=1 (or
+// { dry_run: true }) returns what would be sent and writes nothing. Ids are only marked emailed after Resend accepts the
+// email (sandbox has no RESEND_API_KEY: nothing sends and nothing is marked). Every real run logs etl_runs job up_fx_statement.
+async function upfxEmailed() { let j = null; try { j = JSON.parse((await upfxSetting(UPFX_EMAILED_KEY)) || 'null'); } catch (e) { j = null; } const ids = (j && j.ids && typeof j.ids === 'object') ? j.ids : {};
+  const cut = new Date(Date.now() - UPFX_KEEP_DAYS * 86400000).toISOString().slice(0, 10); let pruned = 0;
+  for (const k of Object.keys(ids)) if (!(String(ids[k]) >= cut)) { delete ids[k]; pruned++; }
+  return { ids, pruned }; }
+function upfxEmailHtml(s, fresh, today) {
+  const he = _xeroHe, money = v => (v < 0 ? '-' : '') + Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const td = 'padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:13px', th = td + ';text-align:left;background:#f1f5f9;font-weight:700';
+  const row = l => '<tr><td style="' + td + ';white-space:nowrap">' + he(ddMonYy(l.date)) + '</td><td style="' + td + ';color:' + (l.dir === 'in' ? '#15803d' : '#b91c1c') + ';font-weight:700">' + (l.dir === 'in' ? 'In' : 'Out') + '</td><td style="' + td + ';text-align:right;white-space:nowrap">' + money(l.amount) + '</td><td style="' + td + '">' + he(l.payee) + '</td><td style="' + td + '">' + he(l.reference) + '</td></tr>';
+  return '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;max-width:760px">'
+    + '<p style="font-size:14px"><b>' + fresh.length + ' new unreconciled transaction' + (fresh.length === 1 ? '' : 's') + '</b> on <b>' + he(s.account.name) + '</b> (' + he(s.account.currency) + ') since the last email. ' + s.lines.length + ' unreconciled in total.</p>'
+    + '<table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Date</th><th style="' + th + '">In / Out</th><th style="' + th + ';text-align:right">Amount (' + he(s.account.currency) + ')</th><th style="' + th + '">Payee</th><th style="' + th + '">Reference</th></tr>' + fresh.map(row).join('') + '</table>'
+    + '<p style="font-size:13px;margin-top:16px;padding:10px 12px;background:#eff6ff;border-radius:8px"><b>To import:</b> in Xero go to Accounting &gt; Bank accounts &gt; ' + he(s.account.name) + ' &gt; Manage Account &gt; Import a Statement, and choose <b>' + he(upfxFileName('NEW')) + '</b> (the new lines only). '
+    + '<b>' + he(upfxFileName()) + '</b> holds every unreconciled line (' + s.lines.length + '); use it only if earlier statements were not imported, otherwise lines already imported will be duplicated. Then reconcile each line in Xero.</p>'
+    + '<p style="font-size:12px;color:#64748b">Sent by HORIZON on ' + he(ddMonYy(today)) + '. Only sent when there are new unreconciled lines.</p></div>';
+}
+async function runUpfxStatementCron(opts) {
+  const dry = !!(opts && opts.dry), today = upfxLondonToday();
+  const cfg = await upfxConfig(); const s = await buildUpfxStatement({ all: false });
+  const em = await upfxEmailed(); const fresh = s.lines.filter(l => !em.ids[l.id]);
+  const subject = 'Universal Partners FX: ' + fresh.length + ' new unreconciled transaction' + (fresh.length === 1 ? '' : 's') + ' (' + ddMonYy(today) + ')';
+  const base = { account: s.account, to: cfg.recipients, unreconciled: s.lines.length, new_lines: fresh.length, previously_emailed: s.lines.length - fresh.length, warnings: s.warnings };
+  if (dry) return Object.assign({ ok: true, dry_run: true, would_send: fresh.length > 0, subject, lines: fresh, csv_new: upfxCsv(fresh), csv_all: upfxCsv(s.lines), html: fresh.length ? upfxEmailHtml(s, fresh, today) : null, emailed_tracked: Object.keys(em.ids).length, would_prune: em.pruned }, base);
+  const etl = async (status, rows, msg) => { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('up_fx_statement',$1,$2,$3)`, [status, rows, String(msg).slice(0, 500)]); } catch (e) { console.warn('[up-fx] etl_runs insert failed: ' + (e && e.message)); } };
+  const save = async () => pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [UPFX_EMAILED_KEY, JSON.stringify({ ids: em.ids, updated_at: new Date().toISOString() })]);
+  if (!fresh.length) { if (em.pruned) await save().catch(() => {}); await etl('success', 0, 'no change: ' + s.lines.length + ' unreconciled, 0 new, not sent' + (s.warnings.length ? ' | ' + s.warnings.length + ' warning(s)' : '')); return Object.assign({ ok: true, sent: 0, reason: 'no new unreconciled lines' }, base); }
+  const r = await sendResendEmail({ to: cfg.recipients, subject, html: upfxEmailHtml(s, fresh, today), kind: 'up-fx-statement', ref: s.account.name, by: 'cron',
+    attachments: [{ filename: upfxFileName('NEW'), content: Buffer.from(upfxCsv(fresh), 'utf8').toString('base64') }, { filename: upfxFileName(), content: Buffer.from(upfxCsv(s.lines), 'utf8').toString('base64') }] });
+  if (r.sandbox) { await etl('success', 0, 'no change: sandbox (no RESEND_API_KEY), ' + fresh.length + ' new not sent and not marked'); return Object.assign({ ok: true, sent: 0, sandbox: true }, base); }
+  if (r.error || !r.sent) { await etl('error', 0, 'email failed: ' + (r.error || 'not sent') + ' (' + fresh.length + ' new kept for next run)'); return Object.assign({ ok: false, sent: 0, error: r.error || 'not sent' }, base); }
+  for (const l of s.lines) if (!em.ids[l.id]) em.ids[l.id] = today;   // mark every line the email carried (the new ones; the rest were already marked)
+  await save();
+  await etl('success', fresh.length, 'emailed ' + fresh.length + ' new of ' + s.lines.length + ' unreconciled to ' + cfg.recipients.join(', ') + (s.warnings.length ? ' | ' + s.warnings.length + ' warning(s)' : ''));
+  return Object.assign({ ok: true, sent: r.sent, subject }, base);
+}
+app.post('/api/cron/up-fx-statement', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const b = req.body || {}, dry = String(req.query.dry || '') === '1' || b.dry_run === true || b.dry_run === 'true';
+  try { res.json(await runUpfxStatementCron({ dry })); }
+  catch (e) { log500(e); if (!dry) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('up_fx_statement','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} } res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════

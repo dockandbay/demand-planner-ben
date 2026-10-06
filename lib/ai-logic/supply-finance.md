@@ -22,7 +22,8 @@ sources:
   - server.mjs :: /api/client/commission/runs/build, /api/client/commission/runs/:id/xero-bill (client commission)
   - server.mjs :: /api/supply/charge/:id/accept, /api/supply/po-polybags/:po
   - server.mjs :: afLoadCommon (Auto Forecast cash phasing)
-  - supply/inject.html :: PO_STATUSES, stGroup, prodStatusException, isFOBdest, poErpMisaligned
+  - server.mjs :: buildUpfxStatement, upfxCsv, upfxConfig, runUpfxStatementCron, upfxEmailed, /api/supply/xero/up-fx-statement.csv, /api/cron/up-fx-statement
+  - supply/inject.html :: PO_STATUSES, stGroup, prodStatusException, isFOBdest, poErpMisaligned, upfxDownload
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
@@ -75,12 +76,20 @@ fingerprints:
   server.mjs::/api/supply/charge/:id/accept: 2726245218bd
   server.mjs::/api/supply/po-polybags/:po: abcb96e2dee0
   server.mjs::afLoadCommon: c726c90779ce
+  server.mjs::buildUpfxStatement: 55fca54cf96a
+  server.mjs::upfxCsv: 4f84929a2c4b
+  server.mjs::upfxConfig: 9883c0395688
+  server.mjs::runUpfxStatementCron: c69c19fb5017
+  server.mjs::upfxEmailed: 9f27ac33e9d1
+  server.mjs::/api/supply/xero/up-fx-statement.csv: 529bf12ec978
+  server.mjs::/api/cron/up-fx-statement: e01616997794
   supply/inject.html::PO_STATUSES: b735ad053af6
   supply/inject.html::stGroup: 0d2f0b12bf7b
   supply/inject.html::prodStatusException: dedfa68a3f75
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
-verified_version: v28.173
+  supply/inject.html::upfxDownload: 0924ecaf4755
+verified_version: v28.175
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -176,6 +185,13 @@ verified_version: v28.173
 - The post is refused if: a payment exceeds the bill's AmountDue; an account is missing, archived or not payments-enabled; or the run already has a non-voided bill (unless re-post is confirmed). Admin and confirm are required. (source: server.mjs :: xero-post)
 - Preflight badges (from v28.173): on the Payments Report, each unposted run that shows the XERO button gets a badge from the same plan and checks as the Create in Xero popup, read only (Xero GETs only, nothing written). Red "⚠ N" = N problems that stop the post: a cross-org or mixed-org deposit, a payment above the bill's AmountDue, a settle account that is missing, archived or not payments-enabled, a missing 901 loan account, or a line with no account mapped. Amber "⚠" = warnings only: a P58+ deposit (credit note, no payment), no linked Xero bill (payment skipped), a bill amount due that could not be read, a cross-org line settling via loan 901, or a warn-level check. A faint tick = all clear; "?" = the check could not read Xero; nothing when Xero is not connected or the run has nothing to post. Posted ("done") rows show no badge. Results are cached 10 minutes per run and line set; any post or deposit credit note clears the cache. Xero calls are paced to 30 a minute per org, one batch at a time. (source: server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues)
 - A failed Xero call reports Xero's own validation messages (every ValidationErrors entry, including nested ones) rather than the generic "A validation exception occurred". (source: server.mjs :: _xeroErrMsg)
+
+## Universal Partners FX USD statement (from v28.175)
+- Why: Xero's API cannot create bank statement lines, so HORIZON builds a statement file for the Universal Partners FX USD bank account (UK org; account id in app_settings up_fx_bank_account_id) that someone imports in Xero (the account > Manage Account > Import a Statement). Each in/out then has a statement line to reconcile against. Read only: Xero GET calls only. (source: server.mjs :: buildUpfxStatement, upfxConfig)
+- Sources. (1) Payments on the account with Status AUTHORISED (DELETED and VOIDED are dropped). ACCPAYPAYMENT, ARCREDITPAYMENT and AR overpayment/prepayment refunds are money OUT (negative); ACCRECPAYMENT, APCREDITPAYMENT and AP overpayment/prepayment refunds are money IN (positive). Amount = BankAmount (the bank account's currency). Payee = the invoice or credit note contact; Reference = the invoice or credit note number. (2) Spend / receive money on the account, AUTHORISED: SPEND* = OUT, RECEIVE* = IN; transfer legs (SPEND-TRANSFER / RECEIVE-TRANSFER) are skipped. Read in 6-month date windows, from 24 months back by default, because Xero refuses an account-only filter on this org. (3) Bank transfers from or to the account: IN when it is the To account, OUT when it is the From account. The amount comes from this account's own leg (the To or From bank transaction), so it is in USD; a cross-currency transfer's Amount is in the From currency and is not used. Payee = the other bank account's name; Reference = the transfer reference. (source: server.mjs :: buildUpfxStatement)
+- Unreconciled: IsReconciled for payments and bank transactions; ToIsReconciled (IN) or FromIsReconciled (OUT) for transfers. Default = unreconciled only; all=1 adds reconciled lines; from / to filter by date. Lines are deduplicated by source id and sorted by date. Description is "FX Transfer In" for money in and "FX Payment Out" for money out. (source: server.mjs :: buildUpfxStatement)
+- File layout (Xero precoded statement import): header *Date,*Amount,Payee,Description,Reference,Check Number; date dd/mm/yyyy; signed amount with 2 decimals, no currency symbol. File name "UP FX Statement dd-mmm-yy.csv". SUPPLY > Payments > Payments Report toolbar button "UP FX Statement" downloads the unreconciled file. (source: server.mjs :: upfxCsv, /api/supply/xero/up-fx-statement.csv; supply/inject.html :: upfxDownload)
+- Weekly email (n8n, Monday 08:00 London, POST /api/cron/up-fx-statement): sends ONLY when there is an unreconciled line that no earlier email carried. Emailed source ids are kept in app_settings up_fx_statement_emailed and pruned after 120 days. Recipients = app_settings up_fx_statement_recipients (default rita@ and accounts@). The email lists the new lines and attaches two files: the new lines only (the one to import) and every unreconciled line. Ids are marked only after the email is accepted; with no email key (sandbox) nothing sends and nothing is marked. Each real run logs etl_runs job up_fx_statement (rows = new lines). ?dry=1 returns what would be sent and writes nothing. (source: server.mjs :: runUpfxStatementCron, upfxEmailed, /api/cron/up-fx-statement)
 
 ## 3PL invoices
 - Four 3PLs: uk_ilg, us_geneva, eu_ifulfilment, au_coghlans. Bill number: FULFILLMENT-<region>-<period end>. For Coghlans the bill date is the file's period end and the invoice number is added. (source: server.mjs :: TPL_KEYS, tpl/xero-bill)
