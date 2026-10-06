@@ -1901,7 +1901,7 @@ if(!LAZY_SKU)buildLiveBpOverlay();
 // DEMAND plan render (~1.7 s) and the demand-overlay build (~3 s) on the main thread, so the first menu click waited ~5 s.
 // Only do that work when DEMAND / BUY is on screen; otherwise defer it to the first visit (both build on entry when needed).
 function hzDemandOnScreen(){ return !/^#\/(supply|product|client|config)(\/|$)/.test(location.hash||''); }
-try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='function'){ if(hzDemandOnScreen())buildLiveDemand(); else DEMAND_BUILT=false; } }catch(e){}
+try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='function'){ if(hzDemandOnScreen()&&(!LAZY_SKU||SKU_DATA_READY))buildLiveDemand(); else DEMAND_BUILT=false; } }catch(e){}   // v28.163: not on the empty lazy maps (the SKU-data landing re-arms + builds)
   try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }); }catch(e){}
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
@@ -1910,6 +1910,14 @@ try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='functio
 function hzResetDataMemos(tag){ try{ _SKUS_NEW_FORMAT_V=null; _SKUSALES_CACHE={}; _lySplitCache={}; CALC_MEMO={}; _DA_FU_CACHE={}; _subInvMemo={}; _scDiscMemo={}; _revCache={}; _grpCurveCache={}; _trecRecCache={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; try{ hzRowCacheClear(); }catch(_){} }catch(e){ if(window.console)console.error((tag||'')+' cache reset',e); } }
 // v28.151 (review A5): replace a const SKU map's contents wholesale (Object.assign alone kept keys the server no longer sends).
 function hzReplaceMap(dst,src){ if(!dst||!src)return; Object.keys(dst).forEach(function(k){ if(!Object.prototype.hasOwnProperty.call(src,k))delete dst[k]; }); Object.assign(dst,src); }
+// v28.163 (Ben): cold demand builds (DEMAND / BUY & MOVE / REPORTS / Auto Forecast) used to run on the EMPTY lazy maps before
+// /api/demand/sku-data landed, then again once it did. They now park here (one per key, latest wins) with their loading panel
+// up and run when the data lands; on final failure they run anyway (as before) so a panel is never stuck, and the retry bar shows.
+var SKU_DATA_FAILED=false, _HZ_SKU_WAIT={};
+function hzWhenSkuData(k,fn){ if(!LAZY_SKU||SKU_DATA_READY||SKU_DATA_FAILED)return fn(); _HZ_SKU_WAIT[k]=fn; }
+function hzFlushSkuWait(){ var w=_HZ_SKU_WAIT, n=0; _HZ_SKU_WAIT={};
+  Object.keys(w).forEach(function(k){ if(k!=='af' && !hzDemandOnScreen())return;   // left for SUPPLY etc. meanwhile: no off-screen build (v28.143); the next visit rebuilds
+    if(k!=='af')n++; try{ w[k](); }catch(e){ if(window.console)console.error('[lazy] '+k,e); } }); return n; }
 function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
   // v28.147: reuse the request the shell started in <head> (window.__HZ_SKUP); fall back to a fresh fetch if it failed.
   // v28.151 (review F4): check r.ok + payload shape, retry up to 3 times with backoff, visible retry bar on final failure.
@@ -1928,8 +1936,9 @@ function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
     hzResetDataMemos('[lazy]');
     try{augmentSKUM();}catch(e){if(window.console)console.error('[lazy] augmentSKUM',e);}
     try{buildLiveBpOverlay();}catch(e){if(window.console)console.error('[lazy] buildLiveBpOverlay',e);}
-    try{ if(typeof renderMain==='function'){ if(hzDemandOnScreen())renderMain(); } }catch(e){}   // v28.143: off-DEMAND landing → skip; navigating to DEMAND renders it
-  }).catch(function(e){ if(window.console)console.error('[lazy] sku-data',e); hzDataWarn('hz-sku-warn','Data failed to load (SKU data). The planner may show empty numbers.',function(){ lazyLoadSkuData(); }); }); }   // v28.151 (review F4)
+    SKU_DATA_FAILED=false; var _ran=hzFlushSkuWait();   // v28.163: a cold path waiting behind its loading panel builds + renders now (once)
+    try{ if(!_ran && typeof renderMain==='function'){ if(hzDemandOnScreen())renderMain(); } }catch(e){}   // v28.143: off-DEMAND landing → skip; navigating to DEMAND renders it
+  }).catch(function(e){ if(window.console)console.error('[lazy] sku-data',e); SKU_DATA_FAILED=true; hzFlushSkuWait(); hzDataWarn('hz-sku-warn','Data failed to load (SKU data). The planner may show empty numbers.',function(){ lazyLoadSkuData(); }); }); }   // v28.151 (review F4)
 if(LAZY_SKU){ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(lazyLoadSkuData,60);}); else setTimeout(lazyLoadSkuData,60); }
 
 // Buy plan compute engine (BP namespace IIFE). Injected from bp_engine.js at build time.
@@ -10130,14 +10139,14 @@ function render(){
     ['report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
     var _rb=document.createElement('div'); _rb.id='report-body'; document.querySelector('.wrap').appendChild(_rb);
     _rb.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Reports…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
-    clearTimeout(window.__rpColdT); window.__rpColdT=setTimeout(function(){
+    clearTimeout(window.__rpColdT); window.__rpColdT=setTimeout(function(){ hzWhenSkuData('rp',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
       if(VIEW_MODE!=='exec')return;   // user moved on: don't block them
-      try{ buildLiveDemand(); }catch(e){ console.error('[HORIZON] demand build FAILED',e); }
+      try{ if(!DEMAND_BUILT||BUY_FC_STALE)buildLiveDemand(); }catch(e){ console.error('[HORIZON] demand build FAILED',e); }
       try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}
       if(!DEMAND_BUILT)DEMAND_BUILT=true;
       var _x=document.getElementById('report-body'); if(_x)_x.remove();
       try{ render(); }catch(e){ console.error(e); }
-    },160);
+    }); },160);
     return;
   }
   if(VIEW_MODE==='exec'){renderReportView();return;}
@@ -10156,15 +10165,15 @@ function render(){
       _ld.innerHTML='<span class="hz-spin" style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Buy &amp; Move…</b><br>Calculating demand for the buy plan (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>';
       var _hostL=document.querySelector('.wrap'); if(_hostL)_hostL.appendChild(_ld);
       renderBuyMoveTabs();
-      clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){
+      clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){ hzWhenSkuData('bm',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
         var _stillBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
         if(!_stillBM){ var _l=document.getElementById('bm-loading'); if(_l)_l.remove(); return; }   // user moved on: don't block them
-        var _bok=false; try{ buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
+        var _bok=false; try{ if(!DEMAND_BUILT||BUY_FC_STALE)buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
         if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
         try{ render(); }catch(e){ console.error(e); }
         if(!_bok)hzDataWarn('hz-build-warn','Demand build failed: buy numbers may be unsettled.',function(){ DEMAND_BUILT=false; try{ render(); }catch(e){} });   // v28.151 (review F4): visible, not console-only
-      },160);
+      }); },160);
       return;
     }
     if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
@@ -10184,14 +10193,14 @@ function render(){
     var _dbD=document.getElementById('demand-body'); if(_dbD)_dbD.remove();
     _dbD=document.createElement('div'); _dbD.id='demand-body'; document.querySelector('.wrap').appendChild(_dbD);
     _dbD.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
-    clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){
+    clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){ hzWhenSkuData('dm',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
       if(VIEW_MODE!=='planning'){ var _x=document.getElementById('demand-body'); if(_x&&DEMAND_VIEW==='plan')_x.remove(); return; }   // user moved on: don't block them
-      var _bok=false; try{ buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
+      var _bok=false; try{ if(!DEMAND_BUILT||BUY_FC_STALE)buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
       if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
       try{ render(); }catch(e){ console.error(e); }
       if(!_bok)hzDataWarn('hz-build-warn','Demand build failed: forecast numbers may be incomplete.',function(){ DEMAND_BUILT=false; try{ render(); }catch(e){} });   // v28.151 (review F4)
-    },160);
+    }); },160);
     return;
   }
   if(DEMAND_VIEW!=='plan'){
