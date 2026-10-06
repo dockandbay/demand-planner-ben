@@ -33,6 +33,12 @@
 - **v28.158:** 1-month / 3-month trends on grand-total and category rows and the AI Insights payload/prompt are relative to the latest complete month (were hardcoded to May / 2025 / Jan-May 2026); fixes Insights sending past months as forecast. Client only.
 - **v28.159 Health log + weekly health email.** **Migration 328** (`planner.app_health_events`). New public script `/hz-health.js` and cron route `/api/cron/health-weekly` must be **added to your prod login-gate exemptions** (as the other crons). **n8n:** Schedule Trigger weekly, **Monday 08:00, timezone Australia/Sydney** → HTTP POST `https://horizon.dockandbay.com/api/cron/health-weekly`, header `x-webhook-secret`, body `{}`; test first with `{"dry_run":true}` (returns recipients, subject, html and the .md without sending). Recipients default ben@, diviyaj@, sarah@dockandbay.com (override via app_settings `health_report_recipients`). No new env vars.
 
+## Added 06-Oct (same branch): v28.160 to v28.163
+- **v28.160:** Email log navigation-away error fix (client).
+- **v28.161:** Catalogue "Hide products without barcode" (client).
+- **v28.162:** black top bar fixed while scrolling on desktop (CSS only).
+- **v28.163 App health: 8 new captures + RED ALERT emails. Migration 329.** Add `/api/cron/health-checks` to your prod login-gate exemptions (x-webhook-secret protected). **n8n: `POST https://horizon.dockandbay.com/api/cron/health-checks` with `x-webhook-secret`, every 15 minutes** (minimum daily 07:00 Australia/Sydney). It runs the data-freshness / sanity checks and is also what delivers held red alerts and a held Monday report once the 1-email-per-hour cap allows. **Please also set an n8n error-workflow email if that job fails** (it returns 503 when the DB is unreachable), so "the app is down and cannot alert itself" is covered. Red alerts and the weekly report go to ben@, diviyaj@, sarah@dockandbay.com, max one app-health email per rolling hour (DB-enforced, no retry loops).
+
 ## Separate ask (not code): `cin7_inbound_direct` n8n job
 Cin7 is decommissioned; this job still rebuilds `planner.inbound_shipments` from Cin7's frozen data every 6 h (2,016 lines / 628,816 units, last run 05-Oct 23:00 UTC). Ben OK'd disabling it. **Before disabling, please confirm it cannot empty the table** (an empty `inbound_shipments` = zero inbound in the buy plan = huge over-buy). Replacement (Fulfil-based inbound feed) is being scoped on Ben's side.
 
