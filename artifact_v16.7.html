@@ -46,6 +46,7 @@ body{margin:0;font-family:var(--font,system-ui,-apple-system,sans-serif);font-si
   #app .mob-filt-panel{gap:6px !important}
   #app #filters-row2{gap:5px !important;row-gap:6px}
   #app #filters-row2 #plan-sku-qry{flex:1 1 100% !important;width:100% !important;box-sizing:border-box;order:9;font-size:13px;padding:8px 11px}
+  #app #filters-row2 #plan-srch-ovr-lbl{order:10}   /* v28.165 (Ben): tick box sits under the full-width search on mobile */
   #app #filters-row2 .pill.catpill{padding:6px 13px}
   /* v27.647 mobile Phase 4 — DEMAND Summary & targets: narrow + wrap the sticky sub-category name column (230px is too
      wide on a phone) so more period columns fit, matching the plan's narrow name column. */
@@ -806,6 +807,7 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
     <input type="text" id="plan-sku-qry" placeholder="&#128269; Search SKU / name / parent…" autocomplete="off"
       style="font-size:11px;padding:4px 9px;border:1px solid #86efac;background:var(--pos-bg);border-radius:5px;width:210px"
       oninput="setPlanSkuQry(this.value)">
+    <label id="plan-srch-ovr-lbl" title="Ticked: the search looks across everything and ignores the other filters on this screen. Unticked: the search only looks inside what the current filters show (search AND filters)." style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap"><input type="checkbox" id="plan-srch-ovr" checked onchange="setPlanSrchOvr(this.checked)" style="margin:0">Search overrides filters</label><!-- v28.165 (Ben) -->
     <span style="position:relative;display:inline-flex;align-items:center">
       <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters &amp; settings — category, tier, release window, from-replacement, sort, category totals, variant image" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:var(--hover);color:var(--ink-soft);cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters <span style="opacity:.55;font-size:9px">▾</span></button>
       <div id="plan-filters-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:var(--card);border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:590px;max-width:94vw;padding:14px 16px">
@@ -5022,6 +5024,18 @@ function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.st
 let GRP_COLLAPSED=new Set((function(){try{return JSON.parse(localStorage.getItem('db_grp_collapsed_v1'))||[];}catch(e){return [];}})());
 function saveGrpCollapsed(){ try{ localStorage.setItem('db_grp_collapsed_v1',JSON.stringify(Array.from(GRP_COLLAPSED))); }catch(e){} }
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
+// v28.165 (Ben): shared "Search overrides filters" tick box (DEMAND plan + SUPPLY PO / Order plan / Shipments). Persisted per
+// screen in localStorage (key hzSrchOvr:<screen>); def = that screen's previous behaviour, so nothing changes until unticked/ticked.
+var hzSrchOvr=window.hzSrchOvr={
+  TIP:'Ticked: the search looks across everything and ignores the other filters on this screen. Unticked: the search only looks inside what the current filters show (search AND filters).',
+  get:function(k,def){ try{ var v=localStorage.getItem('hzSrchOvr:'+k); if(v==='1')return true; if(v==='0')return false; }catch(e){} return !!def; },
+  set:function(k,on){ try{ localStorage.setItem('hzSrchOvr:'+k,on?'1':'0'); }catch(e){} },
+  box:function(k,def,id){ return '<label id="'+id+'-lbl" class="hz-srch-ovr" title="'+esc(hzSrchOvr.TIP)+'" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;margin-left:4px"><input type="checkbox" id="'+id+'" style="margin:0"'+(hzSrchOvr.get(k,def)?' checked':'')+'>Search overrides filters</label>'; },
+  bind:function(id,k,cb){ var el=document.getElementById(id); if(!el)return; el.onchange=function(){ hzSrchOvr.set(k,el.checked); try{ cb(el.checked); }catch(e){} }; },
+  hint:function(n){ return n>0?(n+' match'+(n===1?'':'es')+' hidden by filters'):''; }
+};
+var PLAN_SRCH_OVR=hzSrchOvr.get('plan',true);   // v28.165 (Ben): true = SKU search overrides every DEMAND plan filter (old behaviour); false = search ANDs with them
+function setPlanSrchOvr(on){ PLAN_SRCH_OVR=!!on; hzSrchOvr.set('plan',PLAN_SRCH_OVR); if((PLAN_SKU_QRY||'').trim())renderMain(true); }
 var PLAN_RW='ALL';   // planner Release Window filter (dd next to Category); 'ALL' = no filter
 var PLAN_FROM_REP=false;   // "From replacement SKU" filter — show only SKUs that inherit a predecessor (products.replacement_sku)
 function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); var c=document.getElementById('plan-fromrep-chk'); if(c)c.checked=PLAN_FROM_REP; render(); }
@@ -5479,7 +5493,7 @@ function curMonthForecast(s,co,ch){
 // (removed dead fn recCalc — v26.759)
 
 function filteredCats(){
-  const ac=(SEL.has('ALL')||PLAN_SKU_QRY)?null:SEL;   // SKU search overrides the category pill (show matches across all categories)
+  const ac=(SEL.has('ALL')||(PLAN_SKU_QRY&&PLAN_SRCH_OVR))?null:SEL;   // SKU search overrides the category pill (show matches across all categories); v28.165 (Ben): unless "Search overrides filters" is unticked
   const rows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF)&&(!ac||ac.has(parentCat(r.c)));});
   const m={};
   rows.forEach(function(r){var pg=parentCat(r.c);if(pg==null||!String(pg).trim()||String(pg).trim().toLowerCase()==='null')return;if(!m[pg])m[pg]=[];if(!m[pg].find(function(x){return x.s===r.s&&x.ch===r.ch;}))m[pg].push({s:r.s,ch:r.ch,x:r.x,c:r.c});});
@@ -5591,6 +5605,8 @@ function refreshRow(s,co,ch){ _memoDropSubcat(s,co); try{ hzRowCacheClear(); }ca
   // category subtotal row for this row's category (only rendered when "show category totals" is on) → rebuild in place too
   try{ if(SHOW_CAT_TOT && typeof _makeCatTotRow==='function'){ var _rrow=DATA.find(function(r){return r.s===s&&r.co===co&&r.ch===ch;}); var _cat=_rrow?parentCat(_rrow.c):null;
     if(_cat){ var _oldCt=document.querySelector('tr.cat-tot[data-cat="'+esc(_cat)+'"]'); if(_oldCt){ var _newCt=_makeCatTotRow(_cat); if(_newCt)_oldCt.parentNode.replaceChild(_newCt,_oldCt); } } } }catch(e){}
+  // v28.165 (Ben): keep the read-only "Shown SKUs" lines (sub-category + category) in step with the edit
+  try{ if(document.querySelector('tr.hz-shown-row')){ var _srow=DATA.find(function(r){return r.s===s&&r.co===co&&r.ch===ch;}); hzShownRefresh(s,co,ch,_srow?parentCat(_srow.c):null); } }catch(e){}
 }
 
 // (Removed dead applyRec — superseded by the confidence-popup apply flow. v25.652)
@@ -7892,7 +7908,7 @@ function filteredSkus(s,co,ch,all,inclLyo){
     // it composes with everything. Metric conditions read the shared exceptions maps (computed once per co×ch).
     if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift())&&typeof filterMatch==='function'){ if(!filterMatch(sku,co,ch,FR_ACTIVE,frExcMaps(co,ch)))return false; }   // Drift rule = highlight-only → don't filter SKUs
     // SKU text filter — when active it OVERRIDES all pills (RW / tier / core-seasonal / status): match by code or name only.
-    if(PLAN_SKU_QRY){return skuMatchQ(sku,PLAN_SKU_QRY);}   // multi-SKU OR search (comma/space/newline separated), code or name
+    if(PLAN_SKU_QRY){ if(PLAN_SRCH_OVR)return skuMatchQ(sku,PLAN_SKU_QRY); if(!skuMatchQ(sku,PLAN_SKU_QRY))return false; }   // multi-SKU OR search (comma/space/newline separated), code or name. v28.165 (Ben): unticked "Search overrides filters" → the search ANDs with every pill below
     if(PLAN_RW!=='ALL'&&(p.rw||'')!==PLAN_RW)return false;   // Release Window filter (DEMAND plan)
     // all=true => show every SKU in the subcat (so the subtotal = sum of all rows, matching Smooth).
     if(all)return true;
@@ -8662,7 +8678,7 @@ function recalcDiscontinued(s,co,ch){
 // applying the same clamps as the SKU rows and Smooth: pre-launch = 0, discontinued runs
 // down on-hand+inbound stock (0 once exhausted). Used by the subtotal/gap so the displayed
 // gap matches what Smooth reconciles (full subcat, incl. discontinued — not just visible rows).
-function subcatSkuEffTotals(s,co,ch){
+function subcatSkuEffTotals(s,co,ch,perSku){   // v28.165 (Ben): optional perSku {} collects each SKU's monthly v (read-only side output for the "Shown SKUs" line; totals unchanged)
   var wh=skuWh(co,ch), ctry=co.toLowerCase();
   var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var FU=(calc(s,co,ch).fu)||{};
@@ -8695,13 +8711,70 @@ function subcatSkuEffTotals(s,co,ch){
       if(!(isDisc&&DIS)){ tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
         if(isSet){ setUnit[m]=(setUnit[m]||0)+v; setBox[m]=(setBox[m]||0)+Math.round(v/sz); } else { mastU[m]=(mastU[m]||0)+v; } }
       if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
+      if(perSku)(perSku[sku]||(perSku[sku]={}))[m]=v;
     });
   });
   return {totals:tot,activeTotals:actTot,discTotals:discTot,count:all.length,disc:discN,active:all.length-discN,anyDisc:anyD,
     masterUnits:mastU,setBoxes:setBox,setUnits:setUnit,hasSets:anySet};
 }
 
+// v28.165 (Ben): "Shown SKUs (N of M)" secondary line under the sub-category / category totals. The real totals keep summing
+// EVERY SKU (that is what Smooth and forecast edits act on), so a tier / status / core-seasonal / release / filter-rule pill
+// never moved them. This read-only line sums only the SKUs those filters leave visible: actual months = SKU sales, forecast
+// months = the same per-SKU effective forecast the SKU subtotal / gap uses (subcatSkuEffTotals), sets exploded (x set size)
+// like the sub-category cells. Shown only while a row-hiding filter is on; never editable; never read by Smooth or the buy plan.
+function hzPlanRowFilterOn(){ try{
+  if(SKU_FILTER.tier!=='ALL'||SKU_FILTER.cs!=='ALL'||SKU_FILTER.weeks!=='ALL')return true;
+  if((SKU_FILTER.startDate||SKU_FILTER.endDate)&&!(SKU_FILTER.active&&SKU_FILTER.startDate===TODAY&&SKU_FILTER.endDate===_ymdPlus(180)))return true;   // status: anything other than the default Active window
+  if(PLAN_RW!=='ALL'||PLAN_FROM_REP)return true;
+  if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()))return true;
+}catch(e){} return false; }
+function _hzShownCalc(s,co,ch){   // {n,m,act,fc}; memo lives on the reusable-row cache, so any data change / edit (hzRowCacheClear) drops it
+  var fk=''; try{ fk=JSON.stringify([SKU_FILTER,PLAN_RW,PLAN_FROM_REP,PLAN_SKU_QRY,PLAN_SRCH_OVR,(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'')]); }catch(e){}
+  var c=_hzRowCache.shown||(_hzRowCache.shown={}), k=s+'|'+co+'|'+ch+'|'+fk; if(c[k])return c[k];
+  var ctry=co.toLowerCase(), chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':ch.toLowerCase()==='zal'?'z':ch.toLowerCase()==='tik'?'t':'b';
+  var pool=Object.keys(SKUM).filter(function(sku){ var p=SKUM[sku]; return p&&p.s===s&&!p.lyo&&skuHasAnyActivity(sku,co)&&((p.av||{})[ctry]||'').indexOf(chKey)>=0; });
+  var shown=filteredSkus(s,co,ch,false,false);
+  if(typeof SETS_VIEW!=='undefined'&&SETS_VIEW!=='show'){ shown=shown.filter(function(sk){ var isS=SKUM[sk]&&SKUM[sk].vt==='SET'; return SETS_VIEW==='only'?isS:!isS; }); }   // same Sets show/hide/only rule as the SKU rows
+  var per={}; if(shown.length){ try{ subcatSkuEffTotals(s,co,ch,per); }catch(e){} }
+  var act={}, fc={};
+  shown.forEach(function(sku){ var p=SKUM[sku], sz=(p&&p.vt==='SET')?Math.max(1,_setSize(sku)):1, ss=skuSales(sku,co,ch)||{}, pv=per[sku]||{};
+    for(var m in ss){ if(ss[m])act[m]=(act[m]||0)+ss[m]*sz; }
+    for(var m2 in pv){ fc[m2]=(fc[m2]||0)+(pv[m2]||0); } });
+  return (c[k]={n:shown.length,m:pool.length,act:act,fc:fc});
+}
+function _hzShownCatCalc(cat){ var o={n:0,m:0,act:{},fc:{}}, seen={};
+  DATA.forEach(function(r){ if(r.co!==CUR||(CF&&r.ch!==CF)||parentCat(r.c)!==cat)return; var k=r.s+'|'+r.ch; if(seen[k])return; seen[k]=1;
+    var x=_hzShownCalc(r.s,CUR,r.ch); o.n+=x.n; o.m+=x.m; for(var a in x.act)o.act[a]=(o.act[a]||0)+x.act[a]; for(var f in x.fc)o.fc[f]=(o.fc[f]||0)+x.fc[f]; });
+  return o; }
+function _hzShownVal(x,m){ return isActualMonth(m)?(x.act[m]||0):(x.fc[m]||0); }
+function _hzShownRow(key,x,lvl){
+  var tr=document.createElement('tr'); tr.className='hz-shown-row'; tr.dataset.shownkey=key;
+  var cs='background:var(--blue-soft);border-bottom:1px dashed var(--line);', ns='text-align:right;padding:2px 3px;font-size:9px;font-weight:600;font-style:italic;color:var(--blue-ink);font-variant-numeric:tabular-nums;';
+  for(var i=0;i<8;i++){ var td=document.createElement('td');
+    if(i===0){ td.style.cssText='position:sticky;left:0;z-index:1;'+cs+'padding:2px 4px 2px 16px;font-size:9px;font-weight:600;font-style:italic;color:var(--blue-ink);text-align:left;white-space:nowrap;cursor:help';
+      td.textContent='↳ Shown SKUs ('+x.n+' of '+x.m+')';
+      td.title='Read-only. Sums only the '+x.n+' of '+x.m+' SKUs the current filters show (tier / status / core-seasonal / release window / filter rule), in exploded units like the '+lvl+' cells. The '+lvl+' total above still covers ALL SKUs: that is what Smooth and forecast edits act on.'; }
+    else if(i===1){ td.style.cssText='position:sticky;left:208px;z-index:1;'+cs+'border-right:2px solid #b0b0ae'; }
+    else td.style.cssText=cs;
+    tr.appendChild(td); }
+  TIME_COLS.forEach(function(tc){ var td=document.createElement('td'), v;
+    if(tc.t==='fc')v=x.fc[CUR_MONTH]||0;
+    else if(tc.t==='tot')v=fyMonths(tc.startY).reduce(function(t,m){return t+_hzShownVal(x,m);},0);
+    else if(tc.t==='q'||tc.t==='h')v=tc.months.reduce(function(t,m){return t+_hzShownVal(x,m);},0);
+    else v=_hzShownVal(x,tc.m);
+    if(tc.t==='tot'||tc.t==='q'||tc.t==='h'||(tc.t==='m'&&tc.m===fyMonths(fyStartOf(tc.m))[0]))td.className='sep2';
+    td.style.cssText=cs+ns; td.textContent=v?fn(Math.round(v)):''; tr.appendChild(td); });
+  return tr;
+}
+function _hzShownSubRow(s,co,ch){ return _hzShownRow('sub|'+s+'|'+co+'|'+ch,_hzShownCalc(s,co,ch),'sub-category'); }
+function _hzShownCatRow(cat){ return _hzShownRow('cat|'+cat,_hzShownCatCalc(cat),'category'); }
+// after an edit (refreshRow): rebuild this sub-category's line and its category's line in place
+function hzShownRefresh(s,co,ch,cat){ try{ var sk='sub|'+s+'|'+co+'|'+ch, ck=cat?('cat|'+cat):null;
+  document.querySelectorAll('tr.hz-shown-row').forEach(function(tr){ var k=tr.dataset.shownkey;
+    if(k===sk)tr.parentNode.replaceChild(_hzShownSubRow(s,co,ch),tr); else if(ck&&k===ck)tr.parentNode.replaceChild(_hzShownCatRow(cat),tr); }); }catch(e){} }
 function insertInlineSkuRows(s,co,ch,afterTr){
+  var _hzNx=afterTr&&afterTr.nextSibling; if(_hzNx&&_hzNx.classList&&_hzNx.classList.contains('hz-shown-row'))afterTr=_hzNx;   // v28.165 (Ben): SKU rows go below the "Shown SKUs" line that sits under the sub-category total
   var wh=skuWh(co,ch);
   var ctry=co.toLowerCase();
   var _skuSp=aspF(s,co,ch);   // subcat avg selling price — used to show revenue on SKU FY/period totals (SKU units × subcat ASP)
@@ -9685,6 +9758,7 @@ function buildBody(){
   var _frTop=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()));   // Filter Rules active → no grand-total summary row. Drift rule renders the full plan, so keep the totals.
   var _gtr0=_makeGrandTotRow(); if(_gtr0&&!_frTop)frag.appendChild(_gtr0);
   const fu_cache={};
+  var _shownOn=hzPlanRowFilterOn(), _anyCat=false;   // v28.165 (Ben): "Shown SKUs" lines on/off for this build; _anyCat feeds the search empty-state hint
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
     var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()));   // Filter Rules: explode to matching SKUs; the subcat summary-totals row is removed below (see the rows loop). Drift rule = highlight-only → render the plan NORMALLY (subcat cells stay so they can be painted yellow).
@@ -9703,6 +9777,7 @@ function buildBody(){
     // Redundant when every subcategory (CORE/SEASONAL variant stripped) is the category name or a prefix of it —
     // the data rows already carry that label, so the grey header would just be a blank bar when scrolled right.
     var _redundantHdr=_subsArr.length>0 && _catN && _subsArr.every(function(s){var n=_stripVar(s);return n===_catN||n.indexOf(_catN)===0||_catN.indexOf(n)===0;});
+    _anyCat=true;
     // Under a Filter Rule with sub-categories hidden → flat matching-SKU list, so drop the category header too.
     // Under a SKU search → only show the category header when the search query actually matches the CATEGORY name.
     var _catQ=(!PLAN_SKU_QRY)||(function(){ var toks=String(PLAN_SKU_QRY).toLowerCase().split(/[\s,;]+/).filter(Boolean); var cl=String(cat).toLowerCase(); return toks.some(function(t){return t&&cl.indexOf(t)>=0;}); })();
@@ -9739,11 +9814,18 @@ function buildBody(){
         var _grpQ=(function(){ var toks=String(PLAN_SKU_QRY).toLowerCase().split(/[\s,;]+/).filter(Boolean); var cl=String(cat).toLowerCase(), sl=String(row.s).toLowerCase(); return toks.some(function(t){return t&&(cl.indexOf(t)>=0||sl.indexOf(t)>=0);}); })();
         if(!_grpQ && drow.parentNode){ frag.removeChild(drow); }
       }
+      if(_shownOn && drow.parentNode===frag){ try{ frag.insertBefore(_hzShownSubRow(row.s,CUR,row.ch),drow.nextSibling); }catch(e){} }   // v28.165 (Ben): read-only "Shown SKUs (N of M)" right under the real sub-category total
     });
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn)return; // filter mode: skip category totals
     if(!SHOW_CAT_TOT)return; // category-total rows hidden by default (toolbar toggle)
-    var _ctr0=_makeCatTotRow(cat); if(_ctr0)frag.appendChild(_ctr0);
+    var _ctr0=_makeCatTotRow(cat); if(_ctr0){ frag.appendChild(_ctr0); if(_shownOn){ try{ frag.appendChild(_hzShownCatRow(cat)); }catch(e){} } }   // v28.165 (Ben): + "Shown SKUs" under the real category total
   });
+  // v28.165 (Ben): "Search overrides filters" unticked and the filters exclude every match → normal empty state + "N matches hidden by filters"
+  if(!_anyCat&&PLAN_SKU_QRY&&!PLAN_SRCH_OVR){ var _hn=0;
+    try{ PLAN_SRCH_OVR=true; var _sq={}, _hs={}; DATA.forEach(function(r){ if(r.co!==CUR||(CF&&r.ch!==CF))return; var k=r.s+'|'+r.ch; if(_sq[k])return; _sq[k]=1; filteredSkus(r.s,CUR,r.ch).forEach(function(sku){ _hs[sku]=1; }); }); _hn=Object.keys(_hs).length; }catch(e){} finally{ PLAN_SRCH_OVR=false; }
+    var _etr=document.createElement('tr'); _etr.className='hz-srch-empty'; var _etd=document.createElement('td'); _etd.colSpan=200;
+    _etd.style.cssText='padding:8px 12px;font-size:11px;color:var(--faint);font-style:italic;text-align:left';
+    _etd.textContent='No SKUs match current filters'+(_hn?' · '+hzSrchOvr.hint(_hn):''); _etr.appendChild(_etd); frag.appendChild(_etr); }
   return frag;
 }
 // Category subtotal row for one category (across its subcats in scope). Extracted so refreshRow() can rebuild it
@@ -19082,6 +19164,7 @@ function attachSkuMultiExpand(inputId,onApply){
   FC_INITIAL=Object.assign({},IV);
   syncPlanActiveDates();
   if(typeof hzPlanRestore==='function')hzPlanRestore();   // restore last plan filters (country/channel/categories/SKU) if within 1h
+  try{ var _pso=document.getElementById('plan-srch-ovr'); if(_pso)_pso.checked=PLAN_SRCH_OVR; }catch(e){}   // v28.165 (Ben): reflect the persisted tick box
   // Add the "paste many SKUs" expander to the demand-plan and BUY & MOVE (buy/fba/transfer share #qry) filters
   attachSkuMultiExpand('plan-sku-qry',function(v){ setPlanSkuQry(v); });
   attachSkuMultiExpand('qry',function(){ if(typeof BP!=='undefined'&&BP.renderFilter)BP.renderFilter(); });   // v28.151 (review F1)
