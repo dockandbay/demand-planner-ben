@@ -1,3 +1,17 @@
+## v28.186 (Ben, branch review-fixes-2026-10-05): SECURITY, deploy promptly. Supplier portal access fixes (07-Oct deep dive)
+
+**Files:** `server.mjs`, `supply/portal.html`, `supply/portal-view.js`, `supply/inject.html` (link wording), `lib/ai-logic/supply-finance.md`, `tests/portal-scope.cjs`, new `tests/portal-security.cjs` (+ package.json, CHANGES.md). No migrations. Optional env `PORTAL_LINK_HOURS` (default 24).
+
+- **C1 (confirmed on live):** suppliers sharing a consolidated shipment could download the master supplier's PO files incl. invoices (12 files on 4 master POs). `/api/portal/attachment/:id` now serves only the caller's own PO / sample / product files plus shipment-timeline files on shipments they are on; unknown ids 403; shipment files no longer listed in a PO's Documents.
+- **C2:** the portal no longer calls staff routes. New `GET /api/portal/product-swatch/:ref` and `POST /api/portal/dtc-shipment` (own PO, whitelisted fields, author from session); note images / product docs / sample photos via `/api/portal/attachment/:id`. Staff routes `supply/portal-attachment`, `product/swatch`, `product/doc` (+ `/thumb`), `supply/dtc-shipment` refuse portal sessions (`staffOnly`).
+- **H3:** one shipment rule (`portalShipmentRole`: master or rider) for notes, notes-read, charges, tracking, timeline files, escalate, submit. Consolidator can use notes/charges/tracking; only the master changes shipment status, dates, carrier, tracking (rider tracking staged as pending); charges shown per supplier; a supplier deletes only its own messages.
+- **Note attachments** must belong to the caller.
+- **Magic links:** GET shows "Continue to portal" (scanners can't burn it); POST `/api/portal/redeem` single-use, atomic; 24 h lifetime; request-link identical for known / unknown emails; Sign out restored.
+- **Errors / logging:** no SQL, stack traces or paths in portal errors (generic message + ref); refused portal access logged to App health (`api_failure`, security, supplier id only).
+- **Verified (sandbox):** exploit reproduced on v28.185 (rider downloads master invoice 200; portal cookie on staff route 200) and fixed (403). `tests/portal-security.cjs` 60/60, `tests/portal-scope.cjs` 120/120, `tests/portal-inplace.cjs` pass; 12 parallel redeems: exactly 1 succeeds; jsdom portal render for 3 suppliers.
+- **Suppliers will notice:** riders can't set Shipping / ship date / tracking on a shared shipment; riders no longer see the master's charges; links expire after 24 h; one extra click to sign in.
+- **Diviyaj:** let `POST /api/portal/redeem` (form-encoded), `GET /api/portal/product-swatch/:ref`, `POST /api/portal/dtc-shipment` through the gate (no change if `/api/portal/*` is a prefix exemption); confirm the prod gate never passes a portal session to the five staff routes; update any prod magic-link email to "valid 24 hours, single use".
+
 ## v28.185 (Ben, branch review-fixes-2026-10-05): invoice + packing list downloads fixed; supplier portal deep dive
 
 **Files:** invoice template moved to `lib/templates/` (bundled via `lib/**`), `docs/Claude Analyses/PORTAL_DEEP_DIVE_2026-10-07.md` (+ package.json, CHANGES.md). No migrations, no env vars.
