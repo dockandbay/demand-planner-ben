@@ -26,10 +26,20 @@ sources:
   - server.mjs :: buildTRANSFER_LEADS
   - server.mjs :: buildZalStock
   - server.mjs :: /api/supply/fba-transfers/refresh
+  - artifact_v16.7.html :: fbaCoverWks
+  - artifact_v16.7.html :: fbaBoxWks
+  - artifact_v16.7.html :: fbaSsmWks
+  - artifact_v16.7.html :: fbaTrfBoot
+  - artifact_v16.7.html :: bpExtraStockBoot
+  - server.mjs :: refreshFbaInflight
+  - server.mjs :: runFbaInflightCron
+  - server.mjs :: fbaInflightExcludedCodes
+  - server.mjs :: /api/supply/fba-transfers/list
+  - server.mjs :: /api/cron/fba-inflight-refresh
 fingerprints:
   artifact_v16.7.html::fbaTransferRec: e193d4279ab4
-  artifact_v16.7.html::fbaTransferSized: d1d65c13be27
-  artifact_v16.7.html::fbaTransferNonGrs: 41c2c51d9169
+  artifact_v16.7.html::fbaTransferSized: d58f25df052b
+  artifact_v16.7.html::fbaTransferNonGrs: ea083446f165
   artifact_v16.7.html::fbaTransferEff: 20e956620966
   artifact_v16.7.html::fbaResolveQty: 14ecb84bd2c9
   artifact_v16.7.html::fbaFwdDemand: 02d6a090e262
@@ -39,9 +49,9 @@ fingerprints:
   artifact_v16.7.html::awdOf: f072dda28079
   artifact_v16.7.html::nonGrsOf: 7a1b63f8cf8b
   artifact_v16.7.html::_fbaPendingOf: c7934ba681fa
-  artifact_v16.7.html::fbaTrfLoad: 80d7a7d66485
+  artifact_v16.7.html::fbaTrfLoad: 848d3b68a720
   artifact_v16.7.html::fbaInbSplit: 398d47e8849a
-  artifact_v16.7.html::project: 63cc8f0cfc13
+  artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
   artifact_v16.7.html::trfLane: 7e575818cea3
   artifact_v16.7.html::donorSpare: e2a4749a3379
@@ -49,8 +59,18 @@ fingerprints:
   server.mjs::buildPROD_CONST: b8b131b6ad8b
   server.mjs::buildTRANSFER_LEADS: 2c23341bb9a2
   server.mjs::buildZalStock: c704a06358cc
-  server.mjs::/api/supply/fba-transfers/refresh: e956d3288f25
-verified_version: v28.164
+  server.mjs::/api/supply/fba-transfers/refresh: 5d5383070888
+  artifact_v16.7.html::fbaCoverWks: 956940d76303
+  artifact_v16.7.html::fbaBoxWks: 22746e12a8aa
+  artifact_v16.7.html::fbaSsmWks: fd6b1e925671
+  artifact_v16.7.html::fbaTrfBoot: 071baeea24ca
+  artifact_v16.7.html::bpExtraStockBoot: 5cc1e43fd049
+  server.mjs::refreshFbaInflight: d83cb659fda1
+  server.mjs::runFbaInflightCron: d630dda7575f
+  server.mjs::fbaInflightExcludedCodes: 7089bef268c5
+  server.mjs::/api/supply/fba-transfers/list: d968d218b3ca
+  server.mjs::/api/cron/fba-inflight-refresh: 7732e28433a0
+verified_version: v28.168
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -59,7 +79,8 @@ verified_version: v28.164
 
 ## Transfer FBA: the recommended quantity now
 - One function, `fbaTransferRec`, produces the "Transfer FBA" number on the FBA tab AND the "transfer now" (current month) that the buy plan draws off 3PL. Displayed = used. (source: fbaTransferRec, project)
-- **FBA target**: forecast FBA demand over the next N full months, where N = max(1, round(FBA target weeks / 4.33)). FBA target weeks is the "FBA target" box in Buy Plan Settings (default 8, presets 4 / 8 / 12), so 8 weeks = 2 months, 4 = 1 month, 12 = 3 months. The current month is NOT included; it starts from next month. (source: fbaTransferSized, fbaFwdDemand)
+- **FBA target**: forecast FBA demand over the next N full months, where N = max(1, round(FBA cover weeks / 4.33)). The current month is NOT included; it starts from next month. (source: fbaTransferSized, fbaFwdDemand)
+- **FBA cover weeks** (v28.168, one value for the whole engine: transfer sizing, non-GRS transfer, project's FBA buy target and future transfers, the popup, Inventory Status): if SSM is opted in for that market's FBA pool (CONFIG SSM, key "MKT|FBA"), the SSM FBA cover wins for every SKU where SSM computes a positive cover (capped at SSM fbaCapWk, default 8). Otherwise the "FBA target" box in Buy Plan Settings (default 8, presets 4 / 8 / 12). Off the BUY page (box not on screen) the last box value is used (default 8). Products' per-SKU FBA cover (md.tf) is no longer used by the engine. The settings panel shows "SSM drives FBA cover in <mkt>" next to the box when SSM FBA is on. (source: fbaCoverWks, fbaBoxWks, fbaSsmWks, project)
 - **FBA cover already held** = FBA on-hand + FBA on-order (open orders into FBA) + AWD on-hand (US only) + in-flight transfers not yet in the inbound feed. (source: fbaTransferSized, awdOf, _fbaPendingOf)
 - **Shortfall** = target minus cover held, floored at 0. If 0, no transfer. (source: fbaTransferSized)
 - The shortfall is then limited by a **cap** (below) and carton-rounded by the **Cartons pill** (below).
@@ -85,16 +106,17 @@ verified_version: v28.164
 ## Non-GRS transfers (UK and US only)
 - "Transfer FBA (non GRS)" pill uses `fbaTransferNonGrs`: same FBA target and cover-held maths, capped at the non-GRS 3PL pool, NO website cap and NO 90-day / 70% gates. Pure carton maths under the same Any / Full / Partial rules. Only SKUs with a non-zero non-GRS transfer are listed. (source: fbaTransferNonGrs)
 - In the buy plan, FBA transfers draw the non-GRS pool down FIRST; only the excess reduces GRS "SOH 3PL". This lowers 3PL buying for SKUs holding non-GRS stock. The plan popup shows "SOH 3PL non-GRS (closing)" when the SKU has non-GRS stock. (source: project)
-- Non-GRS and AWD quantities come from /api/buy-extra-stock (EXTRA_STOCK). Non-GRS is 0 outside UK/US; AWD is 0 outside US. (source: nonGrsOf, awdOf)
+- Non-GRS and AWD quantities come from /api/buy-extra-stock (EXTRA_STOCK), loaded at startup (v28.168; was on the first BUY render, so buy numbers computed elsewhere first missed them). A failed load retries on the next buy render. Non-GRS is 0 outside UK/US; AWD is 0 outside US. (source: nonGrsOf, awdOf, bpExtraStockBoot)
 
 ## AWD (US)
 - AWD on-hand counts as FBA cover in the transfer calc, so `need = target minus (FBA + FBA on-order + AWD + in-flight)`. AWD has its own "SOH AWD" column on the US FBA view. (source: fbaTransferSized)
 - US-only pill "AWD · FBA <3wk" lists SKUs with AWD on-hand AND FBA (on-hand + on-order) under 3 weeks of cover, using average weekly FBA demand over the next 3 months (sum / 13). (source: render filter AWDLOW)
 
 ## In-flight transfers
-- Recently processed branch transfers into FBA / AWD (Cin7 and Fulfil, de-duplicated by FBA shipment id or normalised reference) that are not yet in the inbound feed are counted as FBA cover so they are not re-recommended. AWD-destination rows pool into that market's FBA cover. (source: _fbaPendingOf, /api/supply/fba-transfers/refresh)
-- Refresh pulls a 30-day window and prunes any transfer whose reference has landed in inbound_shipments or that has a received date. The FBA tab auto-refreshes if the last run is over 1 hour old (at most once per hour per page). (source: /api/supply/fba-transfers/refresh, _fbaTrfMaybeRefresh)
-- In-flight data is loaded when the FBA view is first opened in a session; before that it is empty, so the buy plan's transfer-now does not net it until then. (source: _fbaTrfOnView, fbaTrfLoad)
+- Source is **Fulfil only** (v28.168; Cin7 is decommissioned and its BranchTransfers pull was removed): every open Fulfil internal shipment (state waiting / assigned / packed / shipped) into an "Amazon FBA - XX" or AWD location, quantities from the incoming leg, de-duplicated by FBA shipment id or normalised reference. Not yet in the inbound feed = counted as FBA cover so it is not re-recommended. AWD-destination rows pool into that market's FBA cover. Any Cin7-sourced rows left in the table are ignored by the list and removed by the next refresh (full rebuild). (source: refreshFbaInflight, /api/supply/fba-transfers/list, _fbaPendingOf)
+- **Excluded source warehouses**: a shipment whose SOURCE warehouse code (from_location.warehouse) is in app_settings 'inflight_excluded_warehouses' (JSON array, case-insensitive; default UKILG-OLD, OPTEST, ILGW, COUGH) is NOT FBA cover. AUCOGHLANS is never excluded. Excluded shipments are listed in the in-flight drawer's collapsed "Excluded" section (admins can edit the code list there; applies on the next refresh). Only in-flight 3PL to FBA/AWD transfers are filtered; inbound / PO receipts are not. (source: refreshFbaInflight, fbaInflightExcludedCodes, /api/supply/fba-transfers/list)
+- Refresh rebuilds the table and prunes any transfer whose reference has landed in inbound_shipments or that has a received date. It runs daily (POST /api/cron/fba-inflight-refresh from n8n, logged to planner.etl_runs job 'fba_inflight_refresh'; the local server also runs it daily), on the FBA tab's refresh button, and automatically on an FBA tab visit if the last run is over 1 hour old (at most once per hour per page). (source: runFbaInflightCron, /api/supply/fba-transfers/refresh, _fbaTrfMaybeRefresh)
+- In-flight data is loaded at STARTUP with the buy data (v28.168), so buy and transfer numbers do not depend on whether the FBA tab was opened. If it lands after a buy was built and changes the per-SKU totals, the buy cache is dropped and a visible buy grid re-renders once. A failed reload keeps the last good data. (source: fbaTrfBoot, fbaTrfLoad)
 
 ## Transfer in the buy plan
 - **Transfer now (current month)**: `fbaTransferRec` is drawn off 3PL in the current-month "Remaining" step and lands in FBA after the transfer lead. getBuyQtys reports it as `tx`. (source: project, getBuyQtys)
@@ -142,4 +164,7 @@ verified_version: v28.164
 **A:** No. 3PL to 3PL transfers are display and report only. Buy 3PL, Urgent and Buy FBA do not change. Only 3PL to FBA transfers feed the buy maths.
 
 **Q:** I just sent a transfer to FBA; why is it still recommended?
-**A:** It is netted only once it shows as in-flight (Cin7 or Fulfil branch transfer, last 30 days) or in the inbound feed. Press the refresh button in the FBA toolbar's in-flight box; the count and units should update.
+**A:** It is netted only once it shows as in-flight (an open Fulfil internal shipment into FBA / AWD, not from an excluded warehouse) or in the inbound feed. In-flight refreshes daily; press the refresh button in the FBA toolbar's in-flight box to pull it now; the count and units should update.
+
+**Q:** Does SSM change the FBA cover?
+**A:** Yes when SSM is opted in for that market's FBA pool: the SSM FBA cover (capped at 8 weeks by default) replaces the "FBA target" box for every SKU SSM can compute. The box is the fallback for SKUs or markets without SSM FBA.

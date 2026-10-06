@@ -2287,7 +2287,7 @@ function _fbaPlus4(){ return new Date(Date.now()+4*864e5).toISOString().slice(0,
 function _fbaEffEta(eta){ if(!eta)return _fbaPlus4(); var d=new Date(eta); var today=new Date(new Date().toISOString().slice(0,10));
   return (isNaN(d.getTime())||d<today) ? _fbaPlus4() : String(eta).slice(0,10); }
 // Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by effective ETA). Includes both the
-// real inbound feed (md.inb, fba warehouses) AND in-flight Cin7 branch transfers not yet in that feed
+// real inbound feed (md.inb, fba warehouses) AND in-flight Fulfil transfers not yet in that feed
 // (FBA_PENDING_ROWS) so the "FBA inbound ≤14 days" column reflects everything on its way to FBA. Display only —
 // does NOT feed the transfer recommendation (that already counts the pending overlay via _fbaPendingOf).
 function fbaInbSplit(sku,mkt){
@@ -2328,22 +2328,42 @@ function fbaInbCell(amount, lines, firstEta){
 const FBA_OV={};
 // Per-SKU tick/selection state on the FBA view, keyed "sku|CUR".
 const FBA_TICK={};
-// ── In-flight Cin7 branch transfers into FBA/AWD not yet in inbound_shipments (server: /api/supply/fba-transfers).
+// ── In-flight Fulfil internal shipments into FBA/AWD not yet in inbound_shipments (server: /api/supply/fba-transfers; v28.168 Fulfil-only).
 // Client OVERLAY: a just-processed transfer counts as FBA cover (so it isn't re-recommended) and the grid updates
 // silently after a background refresh — without a page reload. Keyed sku|<mkt>_fba (AWD-dest pools into FBA cover).
-// Only read by the FBA transfer calc → the 3PL/FBA buy plan is unaffected.
+// Read by the FBA transfer calc, which project() also uses for the M+0 transfer, so it DOES move Buy 3PL (v28.168: loaded at startup).
 var FBA_PENDING={}, FBA_PENDING_ROWS=[], FBA_PENDING_LR=null, _fbaTrfLoaded=false, _fbaTrfBusy=false, _fbaDlTimer=null, _fbaTrfBlocked=null;   // _fbaTrfBlocked: null=ok, else the reason the refresh was refused (latches to stop the auto-retry loop)
 function _fbaPendingOf(sku,mkt){ return FBA_PENDING[sku+'|'+String(mkt).toLowerCase()+'_fba']||0; }
-function fbaTrfLoad(cb){ fetch('/api/supply/fba-transfers/list').then(function(r){return r.json();}).then(function(d){
-    FBA_PENDING={}; FBA_PENDING_ROWS=(d&&d.rows)||[]; FBA_PENDING_LR=(d&&d.last_run)||null; _fbaTrfLoaded=true;
-    FBA_PENDING_ROWS.forEach(function(r){ var k=r.sku+'|'+String(r.market||'').toLowerCase()+'_fba'; FBA_PENDING[k]=(FBA_PENDING[k]||0)+(Number(r.qty)||0); });
-    if(cb)cb();
-  }).catch(function(){ _fbaTrfLoaded=true; if(cb)cb(); }); }
+// v28.168 (Ben): FBA_PENDING now feeds the BUY engine too (project() draws the M+0 transfer via fbaTransferRec), so it loads at
+// STARTUP with the buy data (below), not only when the FBA tab opens: the buy numbers no longer depend on navigation. A load
+// whose per-SKU totals differ from what the engine last used drops BUY_CACHE and re-renders a mounted buy grid ONCE;
+// identical data (the normal case: it lands before the first build) triggers nothing. cb(changed).
+var FBA_PENDING_EXCL=[], FBA_PENDING_EXCL_CODES=[], _fbaTrfSig='', _fbaTrfBoot=null;
+function _fbaTrfSigOf(m){ return Object.keys(m).sort().map(function(k){ return k+'='+m[k]; }).join(';'); }
+function fbaTrfLoad(cb){ var _apply=function(d,okLoad){
+    var next={}, rows=(okLoad&&d&&d.ok!==false&&d.rows)||null;
+    if(rows){ rows.forEach(function(r){ var k=r.sku+'|'+String(r.market||'').toLowerCase()+'_fba'; next[k]=(next[k]||0)+(Number(r.qty)||0); }); }
+    else if(_fbaTrfLoaded){ next=FBA_PENDING; rows=FBA_PENDING_ROWS; }   // a failed reload keeps the last good data (never zeroes FBA cover)
+    else rows=[];
+    FBA_PENDING=next; FBA_PENDING_ROWS=rows; if(d&&d.last_run!==undefined)FBA_PENDING_LR=d.last_run||null; if(d&&Array.isArray(d.excluded))FBA_PENDING_EXCL=d.excluded; if(d&&Array.isArray(d.excluded_codes))FBA_PENDING_EXCL_CODES=d.excluded_codes;
+    _fbaTrfLoaded=true;
+    var sig=_fbaTrfSigOf(next), changed=(sig!==_fbaTrfSig); _fbaTrfSig=sig;
+    if(changed){ for(const k in BUY_CACHE)delete BUY_CACHE[k]; }
+    if(cb)cb(changed,!!(okLoad&&d&&d.ok!==false&&d.rows)); };
+  fetch('/api/supply/fba-transfers/list').then(function(r){return r.json();}).then(function(d){ _apply(d,true); }).catch(function(){ _apply(null,false); }); }
+var _fbaTrfOk=false;   // a load has succeeded this session
+function fbaTrfBoot(n){ n=n||0; if(!n&&(_fbaTrfBoot||_fbaTrfOk))return; _fbaTrfBoot=true;
+  fbaTrfLoad(function(changed,ok){ if(ok)_fbaTrfOk=true;
+    if(!ok&&n<5)setTimeout(function(){ fbaTrfBoot(n+1); },1500*Math.pow(2,n)); else _fbaTrfBoot=false;   // failed (e.g. DB pool busy): retry 5x with backoff; after that the next buy render retries
+    if(!changed)return;
+    try{ var w=document.getElementById('buy-wrap'); if(w&&!w.getAttribute('data-scaffold')&&w.style.display!=='none')render(); }catch(e){} }); }   // buy already on screen with other numbers → re-render once
+function _bpBootPools(){ fbaTrfBoot(); bpExtraStockBoot(); }   // v28.168: in-flight transfers + AWD/NonGRS pools, both inputs to the buy engine
+if(typeof document!=='undefined'){ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){ setTimeout(_bpBootPools,0); }); else setTimeout(_bpBootPools,0); }   // async, after first paint is queued; never blocks it
 function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearTimeout(_fbaDlTimer);_fbaDlTimer=null;}   // any refresh (esp. manual) supersedes a scheduled post-download run
   if(!silent)_fbaTrfBlocked=null;   // a manual ⟳ clears the latch and retries
   _fbaTrfBusy=true; _fbaTrfRenderBox();
   fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){ return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j||{}};},function(){return {ok:r.ok,status:r.status,j:{}};}); }).then(function(res){
-    if(!res.ok || res.j.ok===false){   // refusal (403 read-only) OR 200-with-ok:false (Cin7 not configured): latch and DO NOT run the success path — that's what closed the render()→maybeRefresh loop
+    if(!res.ok || res.j.ok===false){   // refusal (403 read-only) OR 200-with-ok:false (Fulfil not configured): latch and DO NOT run the success path; that's what closed the render()→maybeRefresh loop
       _fbaTrfBlocked=(res.j&&(res.j.error||res.j.message))||(res.ok?'source not available':(res.status===403?'no permission to refresh (read-only)':'no permission to refresh'));   // v27.521: explicit 403 wording (parity with live)
       _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); return; }
     _fbaTrfBlocked=null;
@@ -2352,29 +2372,58 @@ function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearT
 function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
 var _fbaTrfAutoAt=0;   // v28.148: at most ONE auto-refresh per hour per page (if the server's last_run did not advance, refresh → render → maybeRefresh re-fired: ×3 per FBA visit in the crawl)
 function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; if(_fbaTrfAutoAt&&Date.now()-_fbaTrfAutoAt<3600000)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000){ _fbaTrfAutoAt=Date.now(); fbaTrfRefresh(true); } }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
-function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
+function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(ch){ if(ch&&typeof render==='function')render(); else _fbaTrfRenderBox(); _fbaTrfMaybeRefresh(); }); }   /* v28.168: re-render only if the data changed what the engine used */ else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
 function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!el)return;
   var n=FBA_PENDING_ROWS.length, u=FBA_PENDING_ROWS.reduce(function(a,r){return a+(Number(r.qty)||0);},0), lr=FBA_PENDING_LR?(' · '+_fbaTrfAgo(FBA_PENDING_LR)):'';
   el.innerHTML=(_fbaTrfBusy?'<span style="color:var(--amber);font-weight:700">⟳ inbound data updating…</span>':(_fbaTrfBlocked?'<span style="color:var(--neg);font-weight:700" title="'+String(_fbaTrfBlocked).replace(/[<>&"]/g,' ')+' — click ⟳ to retry">⚠ not updating</span>':''))
-    +'<span id="fba-trf-sum" title="Recent branch transfers into FBA/AWD (Cin7 + Fulfil, deduped) not yet in the inbound feed — counted as FBA cover" style="cursor:pointer;color:var(--blue-ink);font-weight:600;border:1px solid #bae6fd;background:var(--blue-soft);border-radius:4px;padding:2px 8px">🚚 '+n+' in-flight'+(u?(' · '+u.toLocaleString()+'u'):'')+lr+'</span>'
-    +'<button id="fba-trf-refresh" title="Refresh in-flight transfers from Cin7 now" style="font-size:10px;padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:var(--card);cursor:pointer">⟳</button>';
-  var s=document.getElementById('fba-trf-sum'); if(s)s.onclick=_fbaTrfShowList;
+    +'<span id="fba-trf-sum" title="Recent Fulfil transfers into FBA/AWD (deduped) not yet in the inbound feed, counted as FBA cover" style="cursor:pointer;color:var(--blue-ink);font-weight:600;border:1px solid #bae6fd;background:var(--blue-soft);border-radius:4px;padding:2px 8px">🚚 '+n+' in-flight'+(u?(' · '+u.toLocaleString()+'u'):'')+lr+'</span>'
+    +'<button id="fba-trf-refresh" title="Refresh in-flight transfers from Fulfil now" style="font-size:10px;padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:var(--card);cursor:pointer">⟳</button>';
+  var s=document.getElementById('fba-trf-sum'); if(s){ s.onclick=function(){ _fbaTrfShowList(); }; s.tabIndex=0; }   // v28.168: no event arg (it read as keepOpen); focusable so focus can return here on close
   var b=document.getElementById('fba-trf-refresh'); if(b)b.onclick=function(){ fbaTrfRefresh(false); };
 }
-function _fbaTrfShowList(){ var p=document.getElementById('fba-trf-list');
-  if(!p){ p=document.createElement('div'); p.id='fba-trf-list'; p.style.cssText='position:fixed;z-index:9000;right:12px;top:96px;max-height:70vh;display:flex;flex-direction:column;overflow:hidden;background:var(--card);border:1px solid #bae6fd;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);font-size:11px;width:440px;text-align:left'; document.body.appendChild(p);
-    // click away from the popup (and not on its trigger) minimises it — same as the ✕
-    if(!window.__fbaTrfOutside){ window.__fbaTrfOutside=true; document.addEventListener('mousedown',function(e){ var pp=document.getElementById('fba-trf-list'); if(!pp||pp.style.display!=='block')return; if(pp.contains(e.target))return; if(e.target.closest&&e.target.closest('#fba-trf-sum'))return; pp.style.display='none'; }); } }
-  if(p.style.display==='block'){ p.style.display='none'; return; }
+// v28.168 (Ben): the in-flight list is now a right-side DRAWER (same pattern as the exec / summary drawers: dimmed backdrop,
+// close X + Esc + backdrop click, focus to the close button and back to the trigger). Sticky header (title, Fulfil-only help,
+// refresh, last refreshed dd-mmm-yy hh:mm); the BODY is the scroll container (the old popup set display:block on a flex
+// column, so its body never scrolled on live). ~50vw desktop, full width on a phone.
+function _fbaTrfWhen(iso){ var t=Date.parse(iso||''); if(!t)return 'never'; var d=new Date(t); return dateDMY(d.toISOString().slice(0,10))+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function _fbaTrfEnsureDrawer(){ var p=document.getElementById('fba-trf-list');
+  if(!p){ p=document.createElement('div'); p.id='fba-trf-list'; p.setAttribute('role','dialog'); p.setAttribute('aria-modal','true'); p.setAttribute('aria-label','In-flight FBA transfers'); p.tabIndex=-1;
+    p.style.cssText='position:fixed;top:0;right:0;height:100vh;width:clamp(400px,50vw,1000px);max-width:100vw;background:var(--card);box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none;font-size:11px;text-align:left';
+    document.body.appendChild(p); }
+  var bk=document.getElementById('fba-trf-backdrop');
+  if(!bk){ bk=document.createElement('div'); bk.id='fba-trf-backdrop'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900;display:none'; bk.onclick=_fbaTrfCloseList; document.body.appendChild(bk); }
+  if(!window.__fbaTrfEsc){ window.__fbaTrfEsc=true; document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ var pp=document.getElementById('fba-trf-list'); if(pp&&pp.style.display!=='none')_fbaTrfCloseList(); } }); }
+  return p; }
+function _fbaTrfCloseList(){ var p=document.getElementById('fba-trf-list'); if(p)p.style.display='none'; var bk=document.getElementById('fba-trf-backdrop'); if(bk)bk.style.display='none'; var s=document.getElementById('fba-trf-sum'); try{ if(s)s.focus(); }catch(e){} }
+function _fbaTrfShowList(keepOpen){ var p=document.getElementById('fba-trf-list');
+  if(!keepOpen&&p&&p.style.display!=='none'){ _fbaTrfCloseList(); return; }   // click the trigger again to close
+  p=_fbaTrfEnsureDrawer();
   // Only show the warehouse(s) for the market pill currently selected: UK→uk_fba, US→us_fba + us_awd, etc.
   var _co=String((typeof CUR!=='undefined'?CUR:'')||'').toLowerCase();
   var _allow=(_co==='us')?['us_fba','us_awd']:[_co+'_fba'];
   var _list=(typeof FBA_PENDING_ROWS!=='undefined'?FBA_PENDING_ROWS:[]).filter(function(r){ return _allow.indexOf(String(r.warehouse||'').toLowerCase())>=0; });
   var _srcTag=function(s){ return s==='fulfil'?'<span title="From Fulfil" style="font-size:8px;font-weight:800;color:#7c3aed;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:3px;padding:0 3px;margin-left:4px">F</span>':(s==='cin7'?'<span title="From Cin7" style="font-size:8px;font-weight:800;color:#0369a1;border:1px solid #bae6fd;background:#f0f9ff;border-radius:3px;padding:0 3px;margin-left:4px">C</span>':''); };
   var rows=_list.map(function(r){ return '<tr><td style="padding:2px 8px 2px 0;text-align:left">'+(r.reference||'')+_srcTag(r.source)+'</td><td style="padding:2px 8px 2px 0;text-align:left">'+(r.warehouse||'')+'</td><td style="padding:2px 8px 2px 0;text-align:left">'+(r.sku||'')+'</td><td style="padding:2px 8px 2px 0;text-align:left">'+(r.qty||0)+'</td><td style="padding:2px 0;color:var(--muted);white-space:nowrap;text-align:left">'+_fbaEffEta(r.eta)+'</td></tr>'; }).join('')||'<tr><td colspan="5" style="color:var(--faint);padding:6px 0;text-align:left">No in-flight transfers for '+(_co?_co.toUpperCase():'this market')+' not yet in the inbound feed.</td></tr>';
-  p.innerHTML='<div style="flex:0 0 auto;padding:10px 12px 6px;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>In-flight FBA transfers (not yet inbound) — '+(_co?_co.toUpperCase():'')+'</b><span style="display:flex;gap:8px;align-items:center"><button id="fba-trf-list-refresh" style="font-size:10px;padding:2px 9px;border:1px solid #7dd3fc;background:var(--blue-soft);color:var(--blue-ink);border-radius:4px;cursor:pointer;font-weight:700">⟳ Refresh data</button><a id="fba-trf-close" style="cursor:pointer;color:var(--neg)">✕</a></span></div><div class="mut" style="font-size:10px;margin-top:4px;text-align:left">Recently processed into FBA/AWD (from Cin7 and Fulfil, deduped by FBA shipment id), not yet showing as inbound. Counted as FBA cover so they aren’t re-recommended.</div></div><div style="flex:1 1 auto;min-height:0;overflow:auto;padding:6px 12px 10px"><table style="border-collapse:collapse;width:100%"><thead><tr style="color:var(--muted);text-transform:uppercase;font-size:9px"><th style="text-align:left;padding:4px 8px 4px 0;position:sticky;top:0;background:var(--card)">Ref</th><th style="text-align:left;padding:4px 8px 4px 0;position:sticky;top:0;background:var(--card)">Warehouse</th><th style="text-align:left;padding:4px 8px 4px 0;position:sticky;top:0;background:var(--card)">SKU</th><th style="text-align:left;padding:4px 8px 4px 0;position:sticky;top:0;background:var(--card)">Qty</th><th style="text-align:left;padding:4px 0;position:sticky;top:0;background:var(--card)">ETA</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
-  p.style.display='block'; var c=document.getElementById('fba-trf-close'); if(c)c.onclick=function(){ p.style.display='none'; };
-  var _rb=document.getElementById('fba-trf-list-refresh'); if(_rb)_rb.onclick=function(){ if(_fbaTrfBusy)return; _rb.textContent='⟳ Refreshing…'; _rb.disabled=true; fbaTrfRefresh(false,function(){ if(p.style.display==='block'){ p.style.display='none'; _fbaTrfShowList(); } }); };
+  // Excluded (source warehouse in the exclusion list): collapsed section so nothing disappears silently.
+  var _ex=(FBA_PENDING_EXCL||[]).filter(function(x){ return _allow.indexOf(String(x.warehouse||'').toLowerCase())>=0; }), _exU=_ex.reduce(function(a,x){return a+(Number(x.units)||0);},0);
+  var _exFrom=[]; _ex.forEach(function(x){ var n=x.from_wh_name||x.from_wh_code||''; if(n&&_exFrom.indexOf(n)<0)_exFrom.push(n); });
+  var _isAdm=!!(window.ME&&window.ME.is_admin)||window.ME===null||typeof window.ME==='undefined';   // sandbox / no /api/me = full access (server enforces admin on save)
+  var exHtml='<details id="fba-trf-excl" style="margin-top:10px;border-top:1px solid var(--line);padding-top:6px"><summary style="cursor:pointer;color:var(--muted);font-weight:700">Excluded ('+_ex.length+' shipment'+(_ex.length===1?'':'s')+', '+fmt(_exU)+' units)'+(_exFrom.length?': from '+esc(_exFrom.join(' / ')):'')+'</summary>'
+    +'<div class="mut" style="font-size:10px;margin:4px 0">Open Fulfil internal shipments from an excluded SOURCE warehouse (old / test warehouses). NOT counted as FBA cover. Codes: '+esc((FBA_PENDING_EXCL_CODES||[]).join(', ')||'none')+'</div>'
+    +(_ex.length?'<table style="border-collapse:collapse;width:100%"><thead><tr style="color:var(--muted);text-transform:uppercase;font-size:9px"><th style="text-align:left;padding:2px 8px 2px 0">Shipment</th><th style="text-align:left;padding:2px 8px 2px 0">Ref</th><th style="text-align:left;padding:2px 8px 2px 0">From</th><th style="text-align:left;padding:2px 8px 2px 0">State</th><th style="text-align:left;padding:2px 8px 2px 0">Lines</th><th style="text-align:left;padding:2px 0">Units</th></tr></thead><tbody>'
+      +_ex.map(function(x){ return '<tr><td style="padding:2px 8px 2px 0">'+esc(x.number||'')+'</td><td style="padding:2px 8px 2px 0">'+esc(x.reference||'')+'</td><td style="padding:2px 8px 2px 0">'+esc(x.from_wh_code||'')+'</td><td style="padding:2px 8px 2px 0">'+esc(x.state||'')+'</td><td style="padding:2px 8px 2px 0">'+(x.lines||0)+'</td><td style="padding:2px 0">'+fmt(x.units||0)+'</td></tr>'; }).join('')+'</tbody></table>':'')
+    +(_isAdm?'<div style="margin-top:6px;display:flex;gap:6px;align-items:center"><span class="mut" style="font-size:10px">Admin: excluded warehouse codes</span><input id="fba-trf-excl-codes" value="'+esc((FBA_PENDING_EXCL_CODES||[]).join(', '))+'" style="flex:1;font-size:10px;padding:2px 6px;border:1px solid var(--line);border-radius:4px"><button id="fba-trf-excl-save" style="font-size:10px;padding:2px 8px;border:1px solid var(--line);border-radius:4px;background:var(--hover);cursor:pointer">Save</button></div>':'')
+    +'</details>';
+  p.innerHTML='<div id="fba-trf-head" style="flex:0 0 auto;padding:12px 16px 8px;border-bottom:1px solid var(--line);background:var(--card)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:15px">In-flight FBA transfers (not yet inbound) · '+(_co?_co.toUpperCase():'')+'</b><span style="display:flex;gap:8px;align-items:center"><button id="fba-trf-list-refresh" style="font-size:10px;padding:2px 9px;border:1px solid #7dd3fc;background:var(--blue-soft);color:var(--blue-ink);border-radius:4px;cursor:pointer;font-weight:700">⟳ Refresh data</button><button id="fba-trf-close" title="Close (Esc)" aria-label="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid var(--line);background:var(--hover);cursor:pointer;font-size:16px;line-height:1">&times;</button></span></div><div class="mut" style="font-size:10px;margin-top:4px;text-align:left">Recently processed into FBA/AWD in Fulfil (deduped by FBA shipment id), not yet showing as inbound. Counted as FBA cover so they aren’t re-recommended.</div><div class="mut" style="font-size:10px;margin-top:2px">Last refreshed: '+_fbaTrfWhen(FBA_PENDING_LR)+' · '+_list.length+' line'+(_list.length===1?'':'s')+'</div></div>'
+    +'<div id="fba-trf-body" style="flex:1 1 auto;min-height:0;max-height:calc(100vh - 90px);overflow:auto;padding:0 16px 12px"><table style="border-collapse:collapse;width:100%;text-align:left"><thead><tr style="color:var(--muted);text-transform:uppercase;font-size:9px"><th style="text-align:left;padding:6px 8px 4px 0;position:sticky;top:0;background:var(--card);z-index:1">Ref</th><th style="text-align:left;padding:6px 8px 4px 0;position:sticky;top:0;background:var(--card);z-index:1">Warehouse</th><th style="text-align:left;padding:6px 8px 4px 0;position:sticky;top:0;background:var(--card);z-index:1">SKU</th><th style="text-align:left;padding:6px 8px 4px 0;position:sticky;top:0;background:var(--card);z-index:1">Qty</th><th style="text-align:left;padding:6px 0 4px;position:sticky;top:0;background:var(--card);z-index:1">ETA</th></tr></thead><tbody>'+rows+'</tbody></table>'+exHtml+'</div>';
+  var bk=document.getElementById('fba-trf-backdrop'); if(bk)bk.style.display='block';
+  p.style.display='flex'; var c=document.getElementById('fba-trf-close'); if(c){ c.onclick=_fbaTrfCloseList; if(!keepOpen){ try{ c.focus(); }catch(e){} } }
+  var _rb=document.getElementById('fba-trf-list-refresh'); if(_rb)_rb.onclick=function(){ if(_fbaTrfBusy)return; _rb.textContent='⟳ Refreshing…'; _rb.disabled=true; fbaTrfRefresh(false,function(){ if(p.style.display!=='none')_fbaTrfShowList(true); }); };
+  var _xs=document.getElementById('fba-trf-excl-save'); if(_xs)_xs.onclick=function(){ var v=(document.getElementById('fba-trf-excl-codes')||{}).value||''; var codes=v.split(/[\s,;]+/).filter(Boolean);
+    _xs.disabled=true; _xs.textContent='Saving…';
+    fetch('/api/supply/fba-transfers/excluded-warehouses',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({codes:codes})}).then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
+      .then(function(x){ if(!x.ok||!x.j.ok){ alert('Could not save: '+((x.j&&x.j.error)||'error')); _xs.disabled=false; _xs.textContent='Save'; return; } FBA_PENDING_EXCL_CODES=x.j.codes||codes; _xs.textContent='Saved (applies on next refresh)'; })
+      .catch(function(){ alert('Could not save (network error)'); _xs.disabled=false; _xs.textContent='Save'; }); };
 }
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
@@ -2484,9 +2533,9 @@ function statusMetrics(mkt){
     out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', subcat:s.sc||'', rw:s.rw||'', cs:_p.cs||s.cs||'', csf:_p.csf||s.csf||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
       i3:i3, iff:iff, oo3:oo3, oof:oof, oo:oo3+oof, wk3:wk3, wkf:wkf, cov3:cov3, covf:covf,
       dtcWk:chWk(D), b2bWk:chWk(B), fbaWk:chWk(F),   // per-channel avg weekly demand (for lost-sales £ via each channel's ASP)
-      t3:md.t3||12, tf:md.tf||(mkt==='CA'?4:8), inbUnits:inbUnits, nextEta:nextEta, nx3:nx3, nxf:nxf,
+      t3:md.t3||12, tf:fbaCoverWks(s.s,mkt,md,PD[s.s]), inbUnits:inbUnits, nextEta:nextEta, nx3:nx3, nxf:nxf,
       inbList:inbList, dl:{soh:i3+iff, inb:projInb, dem:projDem, out:projOut, months:months},
-      launch:md.launch||null, disc:md.disc||null}); });
+      launch:md.launch||null, disc:md.disc||null}); });   // v28.168 (Ben): tf = the engine's FBA cover (SSM when opted in, else the FBA target box), was products md.tf
   return out;
 }
 const TRF_MIN_3PL_WKS=4;   // hybrid guard: never transfer so much that 3PL drops below this many weeks of website cover
@@ -2502,12 +2551,21 @@ const TRF_MIN_3PL_WKS=4;   // hybrid guard: never transfer so much that 3PL drop
 // current FBA cover (on-hand + inbound + AWD), LIMITED by `capUnits` (the pool we're allowed to draw from),
 // then carton-rounded per FBA_CARTON_MODE. Callers set the cap: 50%-of-3PL for the normal 3PL transfer,
 // or the full non-GRS pool for the non-GRS transfer (3PL never uses non-GRS stock, so no 3PL cap there).
+// v28.168 (Ben): ONE FBA cover target (weeks) for the whole engine: project() (FBA buy target + transfer sim), both transfer
+// sizers, the popup table and the SSM note. SSM opted in for this market's FBA pool => the SSM cover wins wherever it computes a
+// positive cover; otherwise the page "FBA target" box. The box is only in the DOM once BUY & MOVE has been opened, so off-BUY
+// callers (cash flow, reports, Actions, buyplanItems) use the last value it held (default 8) instead of products md.tf, which
+// made those numbers depend on navigation. Was: SSM FBA only applied when no box value was passed, i.e. never on BUY.
+var _FBW_LAST=8;
+function fbaBoxWks(){ var el=(typeof document!=='undefined')?document.getElementById('fbw'):null, v=el?parseInt(el.value,10):NaN; if(v>0){ _FBW_LAST=v; return v; } return _FBW_LAST; }
+function fbaSsmWks(sku,mkt,md,pd){ if(!ssmEnabled(mkt,'FBA'))return 0; var c=ssmCoverWeeks(sku,mkt,'FBA',md,pd); return c>0?c:0; }
+function fbaCoverWks(sku,mkt,md,pd){ return fbaSsmWks(sku,mkt,md,pd)||fbaBoxWks(); }
 function fbaTransferSized(sku,mkt,capUnits){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const cp=pd.cp||1;
   const iF=md['if_']||0, oof=md.oof||0;
   const awd=awdOf(sku,mkt);   // AWD (US upstream) + inbound-to-AWD counts as FBA cover — same pool for the calc
-  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
+  const fbw=fbaCoverWks(sku,mkt,md,pd);   // v28.168 (Ben): SSM FBA cover when opted in, else the box (was the box only)
   const targetMonths=Math.max(1,Math.round(fbw/4.33));
   const target=fbaFwdDemand(md,targetMonths);
   const fbaHave=(iF+oof+awd+_fbaPendingOf(sku,mkt));                   // current FBA-side cover: on-hand + open orders + AWD + in-flight transfers
@@ -2580,7 +2638,7 @@ function fbaTransferNonGrs(sku,mkt){
   if(pool<=0)return 0;
   const cp=pd.cp||1;
   const iF=md['if_']||0, oof=md.oof||0, awd=awdOf(sku,mkt);
-  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
+  const fbw=fbaCoverWks(sku,mkt,md,pd);   // v28.168 (Ben): same FBA cover as the normal transfer (SSM when opted in, else the box)
   const targetMonths=Math.max(1,Math.round(fbw/4.33));
   const need=Math.max(0,fbaFwdDemand(md,targetMonths)-(iF+oof+awd+_fbaPendingOf(sku,mkt)));   // FBA shortfall vs target — includes in-flight transfers (overlay)
   const base=Math.min(need,pool);                                      // capped at the non-GRS pool we hold
@@ -2813,6 +2871,13 @@ function updateTrfHeaders(){
 // Per-SKU extra stock pools (AWD US + NonGRS UK/US), loaded once from the server. AWD is pooled into FBA
 // cover; NonGRS is display-only under SOH 3PL.
 var EXTRA_STOCK=null;
+// v28.168 (Ben): AWD (FBA cover) + NonGRS (transferable to FBA) feed the transfer / buy math, but were only fetched on the first
+// BUY render, so SUPPLY / reports consumers of getBuyQtys saw empty pools until BUY was opened. Load them at startup with the
+// in-flight transfers; drop BUY_CACHE when they land and re-render a mounted buy grid once (non-empty data only).
+function bpExtraStockBoot(n){ n=n||0; if(EXTRA_STOCK!==null)return; EXTRA_STOCK={};
+  fetch('/api/buy-extra-stock').then(function(r){return r.json();}).then(function(d){ if(!d||!d.stock||typeof d.stock!=='object')throw new Error('extra-stock payload'); EXTRA_STOCK=d.stock; if(!Object.keys(EXTRA_STOCK).length)return;
+    for(const k in BUY_CACHE)delete BUY_CACHE[k];
+    try{ var w=document.getElementById('buy-wrap'); if(w&&!w.getAttribute('data-scaffold')&&w.style.display!=='none')render(); }catch(e){} }).catch(function(){ EXTRA_STOCK=null; if(n<3)setTimeout(function(){ bpExtraStockBoot(n+1); },1500*Math.pow(2,n)); }); }   // failed fetch: retry 3x with backoff, then on the next render (was stuck empty for the session)
 function awdOf(sku,mkt){ return (String(mkt).toUpperCase()==='US'&&EXTRA_STOCK&&EXTRA_STOCK[sku])?(EXTRA_STOCK[sku].awd||0):0; }
 function nonGrsOf(sku,mkt){ if(!EXTRA_STOCK||!EXTRA_STOCK[sku])return 0; var m=String(mkt).toUpperCase(); return m==='UK'?(EXTRA_STOCK[sku].nuk||0):m==='US'?(EXTRA_STOCK[sku].nus||0):0; }
 // v28.151 (review F1): SKU search re-renders debounced (250ms) and keeps BUY_CACHE (filtering does not change buy qtys;
@@ -2835,7 +2900,8 @@ function render(){
   try{ var _ppNeed=(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length);
     if(typeof buildLiveDemand==='function' && ((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) || (typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE) || _ppNeed)){ buildLiveDemand(); BUY_FC_STALE=false; if(_ppNeed)_PP_COVER_INIT=true; } }catch(e){}
   // Load AWD / NonGRS pools once, then re-render (mirrors CAL_EVENTS).
-  if(EXTRA_STOCK===null){ EXTRA_STOCK={}; fetch('/api/buy-extra-stock').then(function(r){return r.json();}).then(function(d){ EXTRA_STOCK=(d&&d.stock)||{}; render(); }).catch(function(){}); }
+  if(!_fbaTrfOk)fbaTrfBoot();   // v28.168: in-flight never loaded (boot retries exhausted) → try again; a re-render follows only if it changes the numbers
+  if(EXTRA_STOCK===null)bpExtraStockBoot();   // v28.168: normally already loaded at startup (bpExtraStockBoot) so buy numbers do not depend on opening BUY
   // Extra stock columns on the FBA view: SOH NON GRS (UK+US), SOH AWD (US only).
   var _CU=String(CUR).toUpperCase();
   var showNonGRS=(BP_VIEW==='fba'&&(_CU==='UK'||_CU==='US'));
@@ -2897,6 +2963,8 @@ function render(){
   var _vdl=document.getElementById('bp-view-dl'); if(_vdl)_vdl.style.display=(BP_VIEW==='fba'||BP_VIEW==='transfer')?'inline-flex':'none';
   var _tbx=document.getElementById('fba-trf-box'); if(_tbx)_tbx.style.display=(BP_VIEW==='fba')?'inline-flex':'none';   // in-flight branch-transfer overlay box (FBA only)
   if(BP_VIEW==='fba')_fbaTrfOnView();
+  (function(){ var n=document.getElementById('fbw-ssm-note'); if(!n)return; var on=ssmEnabled(CUR,'FBA');   // v28.168 (Ben): honest FBA target box: say when SSM drives FBA cover
+    n.style.display=on?'inline':'none'; if(on)n.textContent='SSM drives FBA cover in '+CUR+' (this box is the fallback where SSM has no cover)'; })();
   var _crb=document.getElementById('cr-btn'); if(_crb)_crb.style.display=(BP_VIEW==='buy')?'':'none';   // Complex Rules — BUY tab only
   var _crp=document.getElementById('cr-panel'); if(_crp&&BP_VIEW!=='buy')_crp.style.display='none';
   updateFbaSelBox();
@@ -3488,7 +3556,7 @@ function rpc(){
   const {b3,b3u,bf}=getBuyQtys(PSKU,PMKT);
   let cards='<div class="scs">';
   if(is3)cards+=card('SOH 3PL',fmt(md.i3),`target ${md.t3}wk`,md.i3<0?'warn':'');
-  if(hasFBA)cards+=card('SOH FBA',fmt(md['if_']),`target ${md.tf}wk`,md['if_']<0?'warn':'');
+  if(hasFBA){ const _ssF=fbaSsmWks(PSKU,PMKT,md,pd); cards+=card('SOH FBA',fmt(md['if_']),_ssF?('target '+(Math.round(_ssF*10)/10)+'wk (SSM)'):('target '+fbaBoxWks()+'wk'),md['if_']<0?'warn':''); }   // v28.168 (Ben): show the cover the engine actually used (was products md.tf, which the box always overrode)
   if(is3||hasFBA)cards+=card('On Order',fmt((md.oo3||0)+(md.oof||0)),fmt(md.oo3||0)+' 3PL · '+fmt(md.oof||0)+' FBA','');
   // Open POs on order but not yet in the inbound feed that have NO computable landing date (missing production
   // dates) — flagged so they can be fixed. Open POs WITH a calculated date now appear in the inbound list instead.
@@ -3588,8 +3656,10 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const lp=String(md.launch).split('-'); const lIdx=Number(lp[0])*12+(Number(lp[1])-1);
     _lrFloor=function(i){ const p=PROJ[i]; if(!p||!p.key)return 0; const pr=String(p.key).split('_'); const k=(Number(pr[0])*12+(Number(pr[1])-1))-lIdx; if(k<0||k>=N)return 0; return covBase+(covRamp-covBase)*(1-(k/N)); };
   })();
-  let tf=(tfOverride!==undefined&&tfOverride!==null)?tfOverride:(md.tf||4);
-  if(_ssmOnF&&(tfOverride===undefined||tfOverride===null)){ const _scf=ssmCoverWeeks(skuKey||PSKU,mkt,'FBA',md,pd); if(_scf>0)tf=_scf; }   // SSM: safety-stock-derived FBA cover (FBA opted in)
+  // v28.168 (Ben): SSM FBA cover WINS when FBA is opted in (was skipped whenever a box value was passed, i.e. always on BUY);
+  // the box (tfOverride, or the last box value when a caller passes null) is the fallback. md.tf no longer used here.
+  let tf=(tfOverride!==undefined&&tfOverride!==null)?tfOverride:fbaBoxWks();
+  if(_ssmOnF){ const _scf=ssmCoverWeeks(skuKey||PSKU,mkt,'FBA',md,pd); if(_scf>0)tf=_scf; }   // SSM: safety-stock-derived FBA cover (FBA opted in)
   const fm=md.fm||24;
   const hasFBA=(md.ch||[]).includes('FBA');
 
@@ -4283,7 +4353,7 @@ function crRuleTip(r){
 function buildTable(proj,md,pd,is3,hasFBA){
   const ch=md.ch||[],hasDTC=ch.includes('DTC'),hasB2B=ch.includes('B2B'),hasTIK=!!(md.demand_tik&&Object.keys(md.demand_tik).length),hasSETS=!!(md.demand_sets&&Object.keys(md.demand_sets).length);
   const tfOv=parseInt(document.getElementById('fbw')?.value)||null;
-  const t3=md.t3||12,tf=(tfOv!==null?tfOv:(md.tf||4));
+  const t3=md.t3||12,tf=(typeof PSKU!=='undefined'&&PSKU)?fbaCoverWks(PSKU,PMKT,md,pd):(tfOv!==null?tfOv:fbaBoxWks());   // v28.168 (Ben): colour vs the SAME FBA cover the engine used (SSM when opted in)
   const hdr='<tr><th class="rl">Row</th>'+proj.map(p=>{
     const bg=p.isDisc?'background:#fdf6f0;color:#b08968;':p.isActual?'background:var(--pos-bg);':p.isForecast?'background:var(--hover);':BUY_KEYS.includes(p.key)?'background:var(--blue-soft);color:var(--blue)':'';
     const cls=p.now&&!p.isActual&&!p.isForecast?'now':'';
@@ -4454,7 +4524,8 @@ function card(l,v,s,w){return`<div class="sc2 ${w}"><div class="l">${l}</div><di
 function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);return Math.abs(r)>=1000?r.toLocaleString():String(r);}
 // Buy-plan items for BUY\u2192PO in the current market. mode '3pl' \u2192 Buy 3PL (b3); 'fba' \u2192 Buy FBA (bf).
 function buyplanItems(mode){ var out=[], fba=(mode==='fba'); try{ for(var sku in PD){ var qq=getBuyQtys(sku,CUR); var q=fba?(qq&&qq.bf):(qq&&qq.b3); if(q>0) out.push({sku:sku, qty:Math.round(q)}); } }catch(e){} return out; }
-return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, render:render, renderFilter:renderFilter, initUI:initUI, setFilters:setFilters, restoreFilters:bpRestoreFilters, donorSpare:donorSpare,
+return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, fbaPending:function(){ return FBA_PENDING; }, fbaTrfShowList:_fbaTrfShowList, fbaCoverWks:fbaCoverWks,   // v28.168: read-only accessors (tests / drawer)
+ render:render, renderFilter:renderFilter, initUI:initUI, setFilters:setFilters, restoreFilters:bpRestoreFilters, donorSpare:donorSpare,
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis, statusMetrics:statusMetrics, trfLane:trfLane,
@@ -4756,6 +4827,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
           <button type="button" class="fbw-preset" onclick="document.getElementById('fbw').value=8;BP.render()" style="font-size:9px;padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--hover);cursor:pointer">8</button>
           <button type="button" class="fbw-preset" onclick="document.getElementById('fbw').value=12;BP.render()" style="font-size:9px;padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--hover);cursor:pointer">12</button>
         </span>
+        <span id="fbw-ssm-note" class="sl" style="display:none;font-size:10px;color:var(--blue-ink);background:var(--blue-soft);border:1px solid #bae6fd;border-radius:3px;padding:1px 6px"></span>
       </span>
 
       <span class="sl">Transfer flag:</span>

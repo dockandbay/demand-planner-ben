@@ -1136,7 +1136,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
-      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks'   // v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -15015,11 +15015,10 @@ app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   } catch (e) { res.json({ ok: false, error: e.message, runs: [] }); }
 });
 // ── FBA pending branch transfers (migration 179) ────────────────────────────────────────────────────────
-// A just-processed Cin7 branch transfer INTO an FBA/AWD branch isn't reflected as inbound straight away, so the
-// FBA transfer recommendation wrongly re-suggests it. This imports approved BranchTransfers created in the last
-// 48h (dest branch in the FBA/AWD set) into planner.fba_pending_transfers, then prunes any that have since landed
-// in inbound_shipments (matched by reference) or been received — so the table = in-flight, not-yet-inbound.
-const FBA_TRANSFER_BRANCH = { 5052: { market: 'uk', pool: 'fba' }, 5056: { market: 'us', pool: 'fba' }, 16289: { market: 'au', pool: 'fba' }, 27816: { market: 'us', pool: 'awd' }, 10879: { market: 'eu', pool: 'fba' } };
+// A just-processed transfer INTO an FBA/AWD location isn't reflected as inbound straight away, so the FBA transfer
+// recommendation wrongly re-suggests it. This imports open Fulfil internal shipments into Amazon FBA / AWD into
+// planner.fba_pending_transfers, then prunes any that have since landed in inbound_shipments (matched by reference)
+// or been received, so the table = in-flight, not-yet-inbound. (v28.168: Cin7 BranchTransfers source removed.)
 // v27.798 (Ben): classify a Fulfil destination location name → {market,pool}. Amazon FBA locations are named
 // "Amazon FBA - XX - …"; AWD is the "US AWD" warehouse. Only Horizon-tracked markets (uk/us/au/eu) are kept.
 const _FBA_EU_COUNTRIES = new Set(['DE', 'FR', 'IT', 'ES', 'NL', 'PL', 'SE', 'BE', 'IE', 'AT', 'FI', 'DK', 'PT', 'CZ', 'GR', 'LU', 'SK', 'SI', 'EE', 'LV', 'LT', 'HR', 'BG', 'RO', 'HU', 'CY', 'MT']);
@@ -15036,52 +15035,36 @@ function _fbaFulfilDestMeta(name) {
 }
 // Normalise the Amazon FBA shipment id from a reference (the FBAxxxxx string) — the cross-ERP dedupe key.
 function _fbaShipId(ref) { const m = /FBA[A-Z0-9]{4,}/i.exec(String(ref || '')); return m ? m[0].toUpperCase() : null; }
-app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
-  try {
-    const auth = cin7Auth();
+// v28.168 (Ben): FULFIL-ONLY (Cin7 is decommissioned; the Cin7 BranchTransfers pull is removed). The full rebuild below
+// deletes every row first, so the first Fulfil-only run also clears any Cin7-sourced rows left in the table. Shared by the
+// manual refresh (FBA tab) and the daily cron (/api/cron/fba-inflight-refresh). dry: fetch + dedupe, no DB write.
+// Local test hook (never on Vercel): HZ_FBA_INFLIGHT_STUB=<path to JSON [{number,reference,state,to_location,planned_date,lines:[{sku,qty}]}]>
+// replaces the Fulfil read with stubbed shipments when the sandbox has no Fulfil credentials.
+async function refreshFbaInflight({ dry = false } = {}) {
     const fcfg = fulfilConfigFor(await activeFulfilEnv());
-    if (!auth && !fcfg.configured) return res.json({ ok: false, error: 'Neither Cin7 nor Fulfil is configured in this environment.' });
-    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);   // 30d window: a transfer can be in transit far longer than 48h; the prune drops any that have landed
-    const sinceCin7 = since.toISOString().slice(0, 19) + 'Z';
-    const sinceIso = since.toISOString().slice(0, 10);
-    // Union both ERPs, then collapse duplicates on the Amazon FBA shipment id (FBAxxxxx). Key = fba:<id>|sku when we
-    // can read an FBA id (cross-ERP dedupe, Fulfil wins on a tie); otherwise <source>:<id>|sku (kept as its own row).
+    const stubPath = (!process.env.VERCEL && process.env.HZ_FBA_INFLIGHT_STUB) || '';
+    if (!fcfg.configured && !stubPath) return { ok: false, inert: true, error: 'Fulfil (' + fcfg.env + ') is not configured in this environment (FULFIL_' + fcfg.env.toUpperCase() + '_SUBDOMAIN / _API_KEY); in-flight FBA transfers not refreshed.' };
+    // Collapse duplicates on the Amazon FBA shipment id (FBAxxxxx) when present, else the normalised reference, else the
+    // shipment id (v27.799 review item 1: covers AWD + transfers with no literal "FBA" token).
     const merged = new Map();   // dedupe key → row
     const _refNorm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const addRow = (row) => {
-      // v27.799 (review item 1, Ben): dedupe cross-ERP on the FBA shipment id when present; else on the NORMALISED
-      // reference (covers AWD + any transfer with no literal "FBA" token, which the FBA-id key alone missed → double-count);
-      // else keep as its own row. Fulfil wins a tie.
       const refN = _refNorm(row.reference);
       const dk = row._fbaId ? ('fba:' + row._fbaId + '|' + row.sku) : (refN ? ('ref:' + refN + '|' + row.sku) : (row.source + ':' + row.cin7_id + '|' + row.sku));
-      const ex = merged.get(dk);
-      if (ex && !(row.source === 'fulfil' && ex.source === 'cin7')) return;   // keep existing unless the newcomer is Fulfil overriding a Cin7 dup
+      if (merged.has(dk)) return;
       merged.set(dk, row);
     };
-    let cin7Calls = 0, fulfilCalls = 0, cin7Shipments = 0, fulfilShipments = 0;
-    // ── Cin7 BranchTransfers ──────────────────────────────────────────────────────────────
-    if (auth) {
-      let page = 1;
-      for (; ;) {
-        const where = encodeURIComponent("CreatedDate>='" + sinceCin7 + "'");
-        const url = 'https://api.cin7.com/api/v1/BranchTransfers?rows=250&page=' + page + '&fields=id,reference,sourceBranchId,destinationBranchId,stage,approvalDate,createdDate,dispatchedDate,receivedDate,estimatedDeliveryDate,isApproved,lineItems&where=' + where;
-        const r = await cin7Fetch(url, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } }); cin7Calls++;
-        if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 HTTP ' + r.status });
-        let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
-        if (!Array.isArray(arr) || !arr.length) break;
-        for (const t of arr) {
-          const meta = FBA_TRANSFER_BRANCH[t.destinationBranchId]; if (!meta || !t.isApproved) continue;
-          const wh = meta.market + '_' + meta.pool, bySku = {}, fbaId = _fbaShipId(t.reference);
-          (t.lineItems || []).forEach(li => { const sku = String(li.code || '').trim(); if (!sku) return; bySku[sku] = (bySku[sku] || 0) + (Number(li.qty) || 0); });
-          cin7Shipments++;
-          const eta = ((d => d ? String(d).slice(0, 10) : null)(t.estimatedDeliveryDate || t.approvalDate));
-          for (const sku in bySku) addRow({ source: 'cin7', cin7_id: t.id, sku, qty: bySku[sku], reference: t.reference || null, _fbaId: fbaId, source_branch_id: t.sourceBranchId || null, dest_branch_id: t.destinationBranchId || null, market: meta.market, pool: meta.pool, warehouse: wh, stage: t.stage || null, eta, created_date: t.createdDate || null, dispatched_date: t.dispatchedDate || null, received_date: t.receivedDate || null });
-        }
-        if (arr.length < 250) break; page++; if (page > 20) break;
+    let fulfilCalls = 0, fulfilShipments = 0;
+    const excl = await fbaInflightExcludedCodes(), exclSet = new Set(excl.map(c => String(c).toUpperCase()));
+    const norm = [];   // normalised open shipments: {id,number,reference,state,to_location,from_wh_code,from_wh_name,planned_date,create_date,bySku}
+    // ── Fulfil internal shipments into Amazon FBA / AWD ────────────────────────────────────
+    if (stubPath && !fcfg.configured) {
+      for (const s of JSON.parse(readFileSync(stubPath, 'utf8'))) {
+        const bySku = {}; (s.lines || []).forEach(l => { if (l.sku) bySku[l.sku] = (bySku[l.sku] || 0) + (Number(l.qty) || 0); });
+        norm.push({ id: Number(s.id) || 0, number: s.number, reference: s.reference, state: s.state, to_location: s.to_location, from_wh_code: s.from_wh_code || null, from_wh_name: s.from_wh_name || null, planned_date: s.planned_date || null, create_date: s.create_date || null, bySku });
       }
     }
-    // ── Fulfil internal shipments into Amazon FBA / AWD ────────────────────────────────────
-    if (fcfg.configured) {
+    else if (fcfg.configured) {
       // in-flight = not yet received/done and not cancelled/draft
       // v27.901 (Ben): Fulfil is the master source for in-flight FBA — EVERY open shipment into an Amazon / AWD location
       // counts (the 30-day create-date window dropped transfers that had been waiting longer). Quantities come from the
@@ -15089,7 +15072,11 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
       // of them quadrupled every quantity (IS108: 160 per SKU instead of 40).
       const domain = [['state', 'in', ['waiting', 'assigned', 'packed', 'shipped']],
         ['OR', ['to_location.name', 'ilike', 'Amazon FBA%'], ['to_location.name', 'ilike', '%AWD%']]];
-      const ships = await fulfilSearchAll('stock.shipment.internal', domain, ['id', 'number', 'reference', 'state', 'to_location.name', 'planned_date', 'create_date', 'effective_date', 'moves', 'incoming_moves', 'outgoing_moves']);
+      const ships = await fulfilSearchAll('stock.shipment.internal', domain, ['id', 'number', 'reference', 'state', 'to_location.name', 'from_location', 'from_location.name', 'from_location.warehouse', 'planned_date', 'create_date', 'effective_date', 'moves', 'incoming_moves', 'outgoing_moves']);
+      // v28.168 (Ben): resolve each shipment's SOURCE warehouse (from_location.warehouse → stock.location code/name) once, for the exclusion list
+      const whIds = [...new Set(ships.map(s => Number(s['from_location.warehouse']) || 0).filter(Boolean))], whById = new Map();
+      if (whIds.length) { const wr = await fulfilFetch('PUT', '/model/stock.location/search_read', [[['id', 'in', whIds]], 0, 500, null, ['id', 'code', 'name']]); fulfilCalls++; (Array.isArray(wr) ? wr : []).forEach(w => whById.set(w.id, w)); }
+      ships.forEach(s => { const w = whById.get(Number(s['from_location.warehouse']) || 0); s._whCode = w ? (w.code || null) : null; s._whName = w ? (w.name || null) : null; });
       ships.forEach(s => { s.moves = (Array.isArray(s.incoming_moves) && s.incoming_moves.length) ? s.incoming_moves : ((Array.isArray(s.outgoing_moves) && s.outgoing_moves.length) ? s.outgoing_moves : s.moves); });
       fulfilCalls += Math.max(1, Math.ceil(ships.length / 500));
       // batch-resolve moves → sku+qty
@@ -15101,22 +15088,41 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
         (Array.isArray(mv) ? mv : []).forEach(m => moveById.set(m.id, { sku: m['product.code'], qty: _fulfilNum(m.quantity) || 0 }));
       }
       for (const s of ships) {
-        const meta = _fbaFulfilDestMeta(s['to_location.name']); if (!meta) continue;
-        const wh = meta.market + '_' + meta.pool, bySku = {}, fbaId = _fbaShipId(s.reference) || _fbaShipId(s.number);
+        const bySku = {};
         (Array.isArray(s.moves) ? s.moves : []).forEach(id => { const mm = moveById.get(id); if (!mm || !mm.sku) return; bySku[mm.sku] = (bySku[mm.sku] || 0) + (mm.qty || 0); });
-        if (!Object.keys(bySku).length) continue;
-        fulfilShipments++;
-        const eta = fulfilUnwrap(s.planned_date) || null;
         const created = fulfilUnwrap(s.create_date) || null;
-        for (const sku in bySku) addRow({ source: 'fulfil', cin7_id: -Math.abs(s.id), sku, qty: bySku[sku], reference: s.reference || s.number || null, _fbaId: fbaId, source_branch_id: null, dest_branch_id: null, market: meta.market, pool: meta.pool, warehouse: wh, stage: s.state || null, eta, created_date: created ? created + 'T00:00:00Z' : null, dispatched_date: null, received_date: null });
+        norm.push({ id: s.id, number: s.number, reference: s.reference, state: s.state, to_location: s['to_location.name'], from_wh_code: s._whCode, from_wh_name: s._whName, planned_date: fulfilUnwrap(s.planned_date) || null, create_date: created ? created + 'T00:00:00Z' : null, bySku });
       }
     }
+    // v28.168 (Ben): EXCLUDE shipments whose SOURCE warehouse code is in app_settings 'inflight_excluded_warehouses' (default
+    // UKILG-OLD / OPTEST / ILGW: old + test warehouses, e.g. the never-shipped IS168..IS187 BOT shipments of 24-Sep-26). Only
+    // in-flight 3PL→FBA/AWD transfers are filtered here; inbound / PO receipts are untouched. Excluded ones are kept in
+    // app_settings 'fba_inflight_excluded' so the FBA tab drawer lists them (nothing disappears silently).
+    const excluded = [];
+    for (const s of norm) {
+      const meta = _fbaFulfilDestMeta(s.to_location); if (!meta) continue;
+      if (!Object.keys(s.bySku).length) continue;
+      const units = Object.values(s.bySku).reduce((a, q) => a + (Number(q) || 0), 0);
+      if (s.from_wh_code && exclSet.has(String(s.from_wh_code).toUpperCase())) { excluded.push({ number: s.number || null, reference: s.reference || null, state: s.state || null, to_location: s.to_location || null, from_wh_code: s.from_wh_code, from_wh_name: s.from_wh_name || null, warehouse: meta.market + '_' + meta.pool, planned_date: s.planned_date || null, units, lines: Object.keys(s.bySku).length }); continue; }
+      fulfilShipments++;
+      const fbaId = _fbaShipId(s.reference) || _fbaShipId(s.number);
+      for (const sku in s.bySku) addRow({ source: 'fulfil', cin7_id: -Math.abs(Number(s.id) || 0), sku, qty: s.bySku[sku], reference: s.reference || s.number || null, _fbaId: fbaId, source_branch_id: null, dest_branch_id: null, market: meta.market, pool: meta.pool, warehouse: meta.market + '_' + meta.pool, stage: s.state || null, eta: s.planned_date || null, created_date: s.create_date || null, dispatched_date: null, received_date: null });
+    }
+    const exclUnits = excluded.reduce((a, x) => a + x.units, 0);
     // ── Rebuild the cache from the merged set (full refresh), then prune landed/received ─────
     // v27.799 (review items 2+6): the delete + re-insert now runs in ONE transaction on a checked-out client, and the
     // inserts are batched multi-row — the old per-row loop on the autocommit pool could leave the table empty/partial if
     // any insert threw mid-loop (FBA cover → 0 → over-buying), and was hundreds of serial round-trips.
     let lines = 0, pruned = 0;
     const all = [...merged.values()];
+    const byWh = {}; all.forEach(r => { const w = byWh[r.warehouse] || (byWh[r.warehouse] = { lines: 0, units: 0 }); w.lines++; w.units += Number(r.qty) || 0; });
+    const units = all.reduce((a, r) => a + (Number(r.qty) || 0), 0);
+    if (dry) {   // read-only preview: what the rebuild would write + what it would drop (Cin7 leftovers, landed references)
+      const cur = (await pool.query(`SELECT coalesce(source,'cin7') src, count(*)::int n, coalesce(sum(qty),0)::int u FROM planner.fba_pending_transfers GROUP BY 1`)).rows;
+      const refs = [...new Set(all.map(r => r.reference).filter(Boolean))];
+      const landed = refs.length ? (await pool.query(`SELECT count(DISTINCT reference)::int n FROM planner.inbound_shipments WHERE reference = ANY($1)`, [refs])).rows[0].n : 0;
+      return { ok: true, dry: true, source: stubPath && !fcfg.configured ? 'stub' : 'fulfil:' + fcfg.env, transfers: fulfilShipments, lines: all.length, units, by_warehouse: byWh, refs_already_inbound: landed, excluded_codes: excl, excluded_shipments: excluded.length, excluded_units: exclUnits, excluded, current_table: cur, fulfil_calls: fulfilCalls };
+    }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -15133,11 +15139,56 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
       const pr = await client.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
       pruned = pr.rowCount;
       await client.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
+      await client.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_inflight_excluded',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify(excluded)]);   // v28.168: drawer's "Excluded" section
       await client.query('COMMIT');
     } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
-    res.json({ ok: true, transfers: cin7Shipments + fulfilShipments, cin7_shipments: cin7Shipments, fulfil_shipments: fulfilShipments, lines, pruned, cin7_calls: cin7Calls, fulfil_calls: fulfilCalls });
+    bumpSupplyEpoch();   // v28.168 (Ben): /api/supply/fba-transfers/list is response-cached (10 min, supply-epoch gated); bust it so the new rows show now
+    return { ok: true, source: stubPath && !fcfg.configured ? 'stub' : 'fulfil:' + fcfg.env, transfers: fulfilShipments, fulfil_shipments: fulfilShipments, lines, units, by_warehouse: byWh, pruned, excluded_shipments: excluded.length, excluded_units: exclUnits, fulfil_calls: fulfilCalls };
+}
+// v28.168 (Ben): source-warehouse codes whose in-flight internal shipments are NOT FBA cover (app_settings JSON array).
+const FBA_INFLIGHT_EXCL_DEFAULT = ['UKILG-OLD', 'OPTEST', 'ILGW', 'COUGH'];   // UK ILG - Old (16), Test for IS (49), ILG - Test Warehouse (45), Coghlan test (old Cin7 branch). Matched case-insensitively.
+const FBA_INFLIGHT_NEVER_EXCL = new Set(['AUCOGHLANS']);   // AU Coghlans (28) is a real 3PL: never excluded, even if listed
+async function fbaInflightExcludedCodes() {
+  let a = null;
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='inflight_excluded_warehouses'`)).rows[0];
+    if (r && r.value != null) { const j = JSON.parse(r.value); if (Array.isArray(j)) a = j; } } catch (_) {}
+  return (a || FBA_INFLIGHT_EXCL_DEFAULT).map(x => String(x).trim().toUpperCase()).filter(c => c && !FBA_INFLIGHT_NEVER_EXCL.has(c));
+}
+app.post('/api/supply/fba-transfers/excluded-warehouses', async (req, res) => {   // admin-only edit of the exclusion code list
+  try { if (!(await hzAdminOnly(req, res))) return;
+    const codes = (Array.isArray((req.body || {}).codes) ? req.body.codes : []).map(x => String(x).trim().toUpperCase()).filter(c => /^[A-Z0-9_.-]{1,40}$/.test(c) && !FBA_INFLIGHT_NEVER_EXCL.has(c));
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('inflight_excluded_warehouses',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [JSON.stringify([...new Set(codes)])]);
+    bumpSupplyEpoch();
+    res.json({ ok: true, codes: [...new Set(codes)], note: 'Takes effect on the next in-flight refresh.' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
+  try { res.json(await refreshFbaInflight({})); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.168 (Ben): daily in-flight FBA refresh. POST /api/cron/fba-inflight-refresh (x-webhook-secret = N8N_WEBHOOK_SECRET,
+// timing-safe). { dry_run: true } = fetch + preview, no write, no etl_runs row. Each real run records planner.etl_runs job
+// 'fba_inflight_refresh' (success: rows_affected = lines written; failure / not configured: status 'error') so the health
+// log ETL checks see it. PROD SCHEDULE: n8n daily 06:00 Europe/London. The long-lived local server also runs it daily
+// (unref'd timer, first run 10 min after boot; HZ_FBA_INFLIGHT_CRON=0 turns that off).
+async function runFbaInflightCron({ dry = false } = {}) {
+  let r; try { r = await refreshFbaInflight({ dry }); } catch (e) { r = { ok: false, error: e.message }; }
+  if (!dry) {
+    const msg = r.ok ? (r.lines + ' line(s), ' + r.units + 'u from ' + r.transfers + ' Fulfil shipment(s), ' + r.pruned + ' pruned (' + r.source + ')') : String(r.error || 'failed').slice(0, 500);
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('fba_inflight_refresh',$1,$2,$3)`, [r.ok ? 'success' : 'error', r.ok ? r.lines : 0, msg]); }
+    catch (e) { console.warn('[fba-inflight] etl_runs insert failed: ' + (e && e.message)); r.etl_logged = false; }
+  }
+  return r;
+}
+app.post('/api/cron/fba-inflight-refresh', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const b = req.body || {}; const r = await runFbaInflightCron({ dry: b.dry_run === true || b.dry_run === 'true' }); res.status(r.ok || r.inert ? 200 : 500).json(r); }   // 500 on a real failure so the n8n error workflow fires
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+if (!process.env.VERCEL && process.env.HZ_FBA_INFLIGHT_CRON !== '0') {
+  const _fi = () => runFbaInflightCron({}).then(r => console.log('[fba-inflight] ' + (r.ok ? ('refreshed ' + r.lines + ' line(s)') : ('not refreshed: ' + r.error))), e => console.warn('[fba-inflight] failed: ' + (e && e.message)));
+  setTimeout(_fi, 600000).unref?.(); setInterval(_fi, 86400000).unref?.();
+}
 // ── Zalando: baked per-SKU forecast + uploaded stock-on-hand (planner.zalando_stock). Feeds the BUY & MOVE ▸ Zalando tab.
 app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: single-segment /api/supply/zalando is caught by the :section catch-all
   try {
@@ -15188,10 +15239,15 @@ app.get('/api/supply/fba-transfers/list', async (req, res) => {
     const rows = (await pool.query(`SELECT cin7_id, sku, qty, reference, market, pool, warehouse, stage, coalesce(source,'cin7') source,
         to_char(eta,'YYYY-MM-DD') eta, to_char(created_date,'YYYY-MM-DD') created, to_char(dispatched_date,'YYYY-MM-DD') dispatched
       FROM planner.fba_pending_transfers t
-      WHERE received_date IS NULL AND (reference IS NULL OR NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=t.reference))
+      WHERE received_date IS NULL AND coalesce(source,'cin7')='fulfil' AND (reference IS NULL OR NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=t.reference))
       ORDER BY created_date DESC, reference, sku`)).rows;
     const lr = (await pool.query(`SELECT value, to_char(updated_at,'YYYY-MM-DD HH24:MI') at FROM planner.app_settings WHERE key='fba_transfers_last_run'`)).rows[0];
-    res.json({ ok: true, rows, last_run: lr ? (lr.value || lr.at) : null });
+    // v28.168 (Ben): shipments from excluded source warehouses are never FBA cover; drop any such row still in the table and
+    // return the excluded list (+ the code list) for the drawer's "Excluded" section.
+    let excluded = []; try { const x = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fba_inflight_excluded'`)).rows[0]; if (x && x.value) { const a = JSON.parse(x.value); if (Array.isArray(a)) excluded = a; } } catch (_) {}
+    const exRefs = new Set(); excluded.forEach(e => { if (e.reference) exRefs.add(String(e.reference)); if (e.number) exRefs.add(String(e.number)); });
+    const kept = exRefs.size ? rows.filter(r => !(r.reference && exRefs.has(String(r.reference)))) : rows;
+    res.json({ ok: true, rows: kept, last_run: lr ? (lr.value || lr.at) : null, source: 'fulfil', excluded, excluded_codes: await fbaInflightExcludedCodes() });
   } catch (e) { res.json({ ok: false, error: e.message, rows: [] }); }
 });
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).

@@ -9,6 +9,9 @@ sources:
   - artifact_v16.7.html :: discCutoffMo
   - artifact_v16.7.html :: ssmParamsFor
   - artifact_v16.7.html :: ssmEnabled
+  - artifact_v16.7.html :: fbaCoverWks
+  - artifact_v16.7.html :: fbaSsmWks
+  - artifact_v16.7.html :: fbaBoxWks
   - artifact_v16.7.html :: ssmServiceLevel
   - artifact_v16.7.html :: ssmZ
   - artifact_v16.7.html :: ssmCoverWeeks
@@ -22,12 +25,15 @@ sources:
   - server.mjs :: buildBRANCH_FREIGHT
   - server.mjs :: expediteActions
 fingerprints:
-  artifact_v16.7.html::project: 63cc8f0cfc13
+  artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
   artifact_v16.7.html::urgentLeadText: b441c9da65b3
   artifact_v16.7.html::discCutoffMo: 5e942f8dd917
   artifact_v16.7.html::ssmParamsFor: 757995abb45b
   artifact_v16.7.html::ssmEnabled: 9751a3702e64
+  artifact_v16.7.html::fbaCoverWks: 956940d76303
+  artifact_v16.7.html::fbaSsmWks: fd6b1e925671
+  artifact_v16.7.html::fbaBoxWks: 22746e12a8aa
   artifact_v16.7.html::ssmServiceLevel: 45efb7e8a5ff
   artifact_v16.7.html::ssmZ: 0b0158b65185
   artifact_v16.7.html::ssmCoverWeeks: 29a4ae6c62ea
@@ -40,7 +46,7 @@ fingerprints:
   server.mjs::buildPROD_CONST: b8b131b6ad8b
   server.mjs::buildBRANCH_FREIGHT: d4506891f8e0
   server.mjs::expediteActions: 2357d115088a
-verified_version: v28.164
+verified_version: v28.168
 ---
 ## Buy 3PL Urgent: when it fires
 - Urgent is a separate scan after the normal Buy 3PL pass. It covers 3PL only (not FBA). See topic buy-plan for normal Buy 3PL. (source: project)
@@ -76,10 +82,10 @@ verified_version: v28.164
 - One action per PO, citing the SKU with the biggest gap. Severity high if that line's value is at least £5,000 or the gap is at least 21 days; else amber. (source: expediteActions)
 
 ## Cover target: products weeks vs SSM
-- Default ("Cover weeks"): 3PL target = products `target_cover_weeks_<mkt>_3pl` (blank = 4). FBA target = products `target_cover_weeks_<mkt>_fba` (blank = 4), but the buy plan passes the Buy Plan Settings "FBA target" box (default 8) as an override when that box is on the page. (source: buildPROD_CONST, getBuyQtys, project)
+- Default ("Cover weeks"): 3PL target = products `target_cover_weeks_<mkt>_3pl` (blank = 4). FBA cover = the Buy Plan Settings "FBA target" box (default 8; off the BUY page the last box value, default 8). Products `target_cover_weeks_<mkt>_fba` (md.tf) is no longer used by the engine (v28.168). (source: buildPROD_CONST, fbaBoxWks, project)
 - **SSM opt-in** is per market x pool at DEMAND ▸ Config ▸ Buy plan logic. Rows: UK, US, EU, AU each 3PL and FBA, plus CA FBA. Nothing ticked = all weeks-cover. (source: renderBuyPlanView, ssmEnabled)
 - When a pool is ticked, SSM cover weeks REPLACE the products cover for that pool. If SSM cannot compute (no forward demand) the products cover is used. (source: project, ssmCoverWeeks)
-- SSM FBA cover is only used when no FBA target override is passed. Unverified: whether the "FBA target" box is absent in any context where the buy plan computes, so in practice FBA SSM may be overridden by that box. (source: project, getBuyQtys)
+- **SSM FBA wins** (v28.168; before this it was silently overridden by the "FBA target" box on every BUY computation): when FBA is ticked for a market, the SSM FBA cover replaces the box for every SKU where SSM computes a positive cover; the box is the fallback for SKUs SSM cannot compute and for markets without SSM FBA. FBA demand is part of total demand: this cover sets the FBA buy target inside Buy 3PL (nextFbaNeed), the future-month transfer target, AND the transfer-now sizing (fbaTransferRec / non-GRS), so one FBA cover drives all of them. Because SSM FBA is capped at "FBA cap" (default 8 weeks), it only differs from a box of 8 where SSM computes less than 8. The settings panel shows "SSM drives FBA cover in <mkt>" next to the box. (source: project, fbaCoverWks, fbaSsmWks, fbaTransferSized)
 
 ## SSM maths
 - Service level by marketing tier (defaults): **A 99%, B 97%, C 93%, untiered 90%**. Seasonal SKUs (Type = Seasonal) get a floor of **97%**. All editable per market x pool. (source: ssmParamsFor, ssmServiceLevel)
