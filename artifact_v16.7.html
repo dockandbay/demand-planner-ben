@@ -1903,8 +1903,9 @@ if(!LAZY_SKU)buildLiveBpOverlay();
 // DEMAND plan render (~1.7 s) and the demand-overlay build (~3 s) on the main thread, so the first menu click waited ~5 s.
 // Only do that work when DEMAND / BUY is on screen; otherwise defer it to the first visit (both build on entry when needed).
 function hzDemandOnScreen(){ return !/^#\/(supply|product|client|config)(\/|$)/.test(location.hash||''); }
-try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='function'){ if(hzDemandOnScreen()&&(!LAZY_SKU||SKU_DATA_READY))buildLiveDemand(); else DEMAND_BUILT=false; } }catch(e){}   // v28.163: not on the empty lazy maps (the SKU-data landing re-arms + builds)
-  try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }); }catch(e){}
+try{ loadPreorderKA().then(function(){ function _rb(){ try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }
+  try{ if(typeof buildLiveDemand==='function'){ if(hzDemandOnScreen()&&(!LAZY_SKU||SKU_DATA_READY)){ hzDemandBuildAsync('pka').then(_rb,_rb); return; } else DEMAND_BUILT=false; } }catch(e){}   // v28.163: not on the empty lazy maps (the SKU-data landing re-arms + builds); v28.178 (Ben): async build, then the buy grid
+  _rb(); }); }catch(e){}
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
 // v28.151 (review A5): one place that drops every cache derived from SKU / sales / forecast data. Used by the lazy load and both
@@ -10306,11 +10307,13 @@ function render(){
     _rb.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Reports…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
     clearTimeout(window.__rpColdT); window.__rpColdT=setTimeout(function(){ hzWhenSkuData('rp',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
       if(VIEW_MODE!=='exec')return;   // user moved on: don't block them
-      try{ if(!DEMAND_BUILT||BUY_FC_STALE)buildLiveDemand(); }catch(e){ console.error('[HORIZON] demand build FAILED',e); }
+      hzDemandReady(function(){   // v28.178 (Ben): async build (worker / chunked), panel stays up and the page stays responsive meanwhile
+      if(VIEW_MODE!=='exec')return;
       try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}
       if(!DEMAND_BUILT)DEMAND_BUILT=true;
       var _x=document.getElementById('report-body'); if(_x)_x.remove();
       try{ render(); }catch(e){ console.error(e); }
+      });
     }); },160);
     return;
   }
@@ -10333,11 +10336,14 @@ function render(){
       clearTimeout(window.__bmColdT); window.__bmColdT=setTimeout(function(){ hzWhenSkuData('bm',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
         var _stillBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
         if(!_stillBM){ var _l=document.getElementById('bm-loading'); if(_l)_l.remove(); return; }   // user moved on: don't block them
-        var _bok=false; try{ if(!DEMAND_BUILT||BUY_FC_STALE)buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
+        hzDemandReady(function(_bok){   // v28.178 (Ben): async build (worker / chunked), panel stays up and the page stays responsive meanwhile
+        var _still2=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='inventory');
+        if(!_still2){ var _l2=document.getElementById('bm-loading'); if(_l2)_l2.remove(); return; }
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
         if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
         try{ render(); }catch(e){ console.error(e); }
         if(!_bok)hzDataWarn('hz-build-warn','Demand build failed: buy numbers may be unsettled.',function(){ DEMAND_BUILT=false; try{ render(); }catch(e){} });   // v28.151 (review F4): visible, not console-only
+        });
       }); },160);
       return;
     }
@@ -10360,11 +10366,13 @@ function render(){
     _dbD.innerHTML='<div style="margin:28px 0;padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;max-width:640px"><span style="width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;animation:hzspin .8s linear infinite"></span><span><b style="color:var(--text)">Loading Demand…</b><br>Calculating demand (a few seconds, first open only).</span><style>@keyframes hzspin{to{transform:rotate(360deg)}}</style></div>';
     clearTimeout(window.__dmColdT); window.__dmColdT=setTimeout(function(){ hzWhenSkuData('dm',function(){   // v28.163: lazy mode waits (panel up) for the SKU data, then builds once (none if a fresh build landed meanwhile)
       if(VIEW_MODE!=='planning'){ var _x=document.getElementById('demand-body'); if(_x&&DEMAND_VIEW==='plan')_x.remove(); return; }   // user moved on: don't block them
-      var _bok=false; try{ if(!DEMAND_BUILT||BUY_FC_STALE)buildLiveDemand(); _bok=true; }catch(e){ console.error('[HORIZON] demand build FAILED, buy numbers may be unsettled',e); }
+      hzDemandReady(function(_bok){   // v28.178 (Ben): async build (worker / chunked), panel stays up and the page stays responsive meanwhile
+      if(VIEW_MODE!=='planning'){ var _x2=document.getElementById('demand-body'); if(_x2&&DEMAND_VIEW==='plan')_x2.remove(); return; }
         try{BUY_FC_STALE=false;}catch(_){} try{ if(typeof PREPACK_MAP==='object'&&Object.keys(PREPACK_MAP).length)_PP_COVER_INIT=true; }catch(_){}   // v28.150: cleared even if the build threw, so render() cannot re-enter the loading path forever
       if(!DEMAND_BUILT)DEMAND_BUILT=true;   // never loop on the loading panel if a build threw part-way
       try{ render(); }catch(e){ console.error(e); }
       if(!_bok)hzDataWarn('hz-build-warn','Demand build failed: forecast numbers may be incomplete.',function(){ DEMAND_BUILT=false; try{ render(); }catch(e){} });   // v28.151 (review F4)
+      });
     }); },160);
     return;
   }
@@ -16514,7 +16522,7 @@ function renderAutoForecastReport(body){
       fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail); };
     // v28.148: a cold demand build (~3 s) ran before the page could paint. Show what is happening, let it paint, then build.
     var afCold=!AF_FEED && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)||(LAZY_SKU&&!SKU_DATA_READY&&!SKU_DATA_FAILED));
-    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(function(){ hzWhenSkuData('af',afGo); },120); }   // v28.163: waits for lazy SKU data (an early open built + cached an EMPTY feed)
+    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(function(){ hzWhenSkuData('af',function(){ hzDemandReady(afGo); }); },120); }   // v28.163: waits for lazy SKU data (an early open built + cached an EMPTY feed); v28.178 (Ben): then the async demand build
     else afGo();
   }
 }
@@ -16858,9 +16866,16 @@ function _hzDemEnv(){ function g(f){ try{ return f(); }catch(e){ return '?'; } }
     g(function(){return TIK_COUNTRIES.join(',');}), CUR_MONTH, g(function(){return CUR_YTD_END;}), LIVE_FC_MONTHS.join(','), g(function(){return SKU_ACT_MONTHS.join(',');}),
     !!SKU_DATA_READY, !!LAZY_SKU, g(function(){return JSON.stringify(CONTRIB_MODEL);}), g(function(){return JSON.stringify(TIER_W);}), IV, FC_OUTPUTS,
     RUNOFF_TAIL_MAX, HZ_DEMAND_FULLREQ, g(function(){return BP_DATA.set_explosion_skips;})]; }
-function hzDemandSnap(){ var iv={}, fc={}, pk={}, k, P=BP_DATA.products; for(k in IV)iv[k]=IV[k]; for(k in FC_OUTPUTS)fc[k]=JSON.stringify(FC_OUTPUTS[k]);
+function hzDemandSnap(){ _HZ_DINC=_hzDemandSnapObj(); }
+function _hzDemandSnapObj(){ var iv={}, fc={}, pk={}, k, P=BP_DATA.products; for(k in IV)iv[k]=IV[k]; for(k in FC_OUTPUTS)fc[k]=JSON.stringify(FC_OUTPUTS[k]);   // v28.178 (Ben): also the async build's start snapshot
   for(var s in P){ var mk=P[s]&&P[s].mkts; if(mk)for(var co in mk){ if(mk[co]&&mk[co].pka)pk[s+'|'+co]=JSON.stringify(mk[co].pka); } }
-  _HZ_DINC={env:_hzDemEnv(), iv:iv, fc:fc, pk:pk, sub:null}; }
+  return {env:_hzDemEnv(), iv:iv, fc:fc, pk:pk, sub:null}; }
+// v28.178 (Ben): null when every build input still matches snapshot D (same env + IV / FC_OUTPUTS / pka), else the first difference.
+function _hzDemandChanged(D){ var e=_hzDemEnv(), k; for(var i=0;i<e.length;i++)if(e[i]!==D.env[i])return 'env '+i;
+  for(k in IV)if(IV[k]!==D.iv[k])return 'iv'; for(k in D.iv)if(!(k in IV))return 'iv';
+  for(k in FC_OUTPUTS)if(JSON.stringify(FC_OUTPUTS[k])!==D.fc[k])return 'fc'; for(k in D.fc)if(!(k in FC_OUTPUTS))return 'fc';
+  var P=BP_DATA.products, n=0; for(var s in P){ var mk=P[s]&&P[s].mkts; if(mk)for(var co in mk){ if(mk[co]&&mk[co].pka){ n++; if(JSON.stringify(mk[co].pka)!==D.pk[s+'|'+co])return 'pka'; } } }
+  return n===Object.keys(D.pk).length?null:'pka'; }
 function hzDemandIncrOn(){ try{ if(window.HZ_DEMAND_INCR===false||/[?&]incr=0\b/.test(location.search))return false; }catch(e){} return true; }
 // v28.171 (Ben): {full:true,why} or {co:{CO:{a:{sku:1},subs:{subcat:1},dsub:{subcat:1}}},n}. Conservative: any doubt → full.
 function hzDemandScope(){ var D=_HZ_DINC; if(!hzDemandIncrOn())return {full:true,why:'off'}; if(!D||!DEMAND_BUILT)return {full:true,why:D?'not built':'no base'};
@@ -16920,7 +16935,162 @@ function hzIncrCheck(){ var a=_hzDemOut(), ba=_hzBuyMap();
   if((dk.length||bk.length)&&typeof window.hzHealthMetric==='function'){ try{ window.hzHealthMetric('sanity','incremental demand differs from full',{demand_diff:dk.length,buy_diff:bk.length,sample:r.sample},'client:demand_incr'); }catch(e){} }
   return r; }
 window.hzIncrCheck=hzIncrCheck;
-function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!BUY_FC_STALE);   // v28.163 (Ben): read before callers reset it (health idempotency generation)
+// v28.178 (Ben): ASYNC full demand build (perf #7.2 chunked + #7.3 Web Worker). A full build (load, SKU data landing, data refresh,
+// prewarm, cold DEMAND / BUY & MOVE / REPORTS / Auto Forecast entry) no longer blocks the main thread for its whole length:
+//  • worker (default when available): the engine (_hzDemandGen + its 30 helpers, from their own source text via a Blob URL, so one
+//    copy of the logic) runs in a Web Worker on structured-clone copies of its inputs, posted in slices (big maps split by key)
+//    so no single post is a long task; the result comes back as one message.
+//  • chunked (fallback, or ?worker=0 / window.HZ_DEMAND_WORKER=false): the same generator on the main thread, yielding every
+//    HZ_SLICE_MS (scheduler.yield, else MessageChannel, else setTimeout 0).
+// Both write into a private shadow (never the live BP_DATA) and publish in ONE step when complete, so no reader ever sees a
+// half-built overlay. Inputs are snapshotted at start; if any input moved by the end (edit, data reload, Preorder/KA) the result
+// is discarded and the build restarts (3 tries, then one sync build). Incremental (edit) builds stay synchronous (6-60 ms).
+// Any worker error / timeout → health event + chunked build; a worker script error turns the worker off for the session.
+// ?chunk=0 (window.HZ_DEMAND_CHUNK=false) with ?worker=0 = the old synchronous behaviour. ?buildcheck=1 (window.HZ_BUILD_CHECK)
+// re-runs a synchronous full build after every async one and diffs demand + buy (HZ_BUILD_LOG; health event on a mismatch).
+// Results are identical to the synchronous build (same code, same inputs, same order of operations).
+var HZ_DBUILD=null, _hzDbSeq=0, HZ_BUILD_LOG=[], HZ_SLICE_MS=12, _HZ_W=null, HZ_DEMAND_WORKER_OK=null, _hzDbMetric=false;
+function _hzQ0(n){ try{ return new RegExp('[?&]'+n+'=0\\b').test(location.search); }catch(e){ return false; } }
+function hzDemandChunkOn(){ try{ if(window.HZ_DEMAND_CHUNK===false||_hzQ0('chunk'))return false; }catch(e){} return true; }
+function hzDemandWorkerOn(){ try{ if(window.HZ_DEMAND_WORKER===false||_hzQ0('worker')||HZ_DEMAND_WORKER_OK===false)return false;
+  return typeof Worker==='function'&&typeof Blob==='function'&&typeof URL!=='undefined'&&typeof URL.createObjectURL==='function'; }catch(e){ return false; } }
+function hzBuildCheckOn(){ try{ return window.HZ_BUILD_CHECK===true||/[?&]buildcheck=1\b/.test(location.search); }catch(e){ return false; } }
+function _hzYield(){ try{ if(typeof scheduler!=='undefined'&&scheduler&&typeof scheduler.yield==='function')return scheduler.yield(); }catch(e){}
+  return new Promise(function(res){ try{ var c=new MessageChannel(); c.port1.onmessage=function(){ c.port1.close(); res(); }; c.port2.postMessage(0); }catch(e){ setTimeout(res,0); } }); }
+function _hzCloneJ(v){ if(v===null||typeof v!=='object')return v; if(Array.isArray(v))return v.map(_hzCloneJ); var o={}; for(var k in v)o[k]=_hzCloneJ(v[k]); return o; }
+// Shadow products: same SKU / market keys and order, md.demand deep-copied (a full build clears + rewrites it), pka by reference (read only).
+function _hzShadowTarget(){ var P={}, SP=BP_DATA.products;
+  for(var s in SP){ var mk=SP[s]&&SP[s].mkts; if(!mk){ P[s]={mkts:mk}; continue; } var m2={};
+    for(var co in mk){ var md=mk[co]; if(!md){ m2[co]=md; continue; } m2[co]={demand:(md.demand&&typeof md.demand==='object')?_hzCloneJ(md.demand):md.demand, pka:md.pka}; }
+    P[s]={mkts:m2}; }
+  return {P:P, PPC:{}, B:{set_explosion_skips:null, demand_source:null}}; }
+// Publish a complete shadow onto the live objects in one step (in place: same objects, same key order as a sync build leaves).
+function _hzDemandApply(T,fromWorker){ var SP=BP_DATA.products, F=['demand_tik','demand_sets','demand_sets_src'], k, j;
+  for(var s in T.P){ var sm=T.P[s]&&T.P[s].mkts, mk=SP[s]&&SP[s].mkts; if(!sm||!mk)continue;
+    for(var co in sm){ var x=sm[co], md=mk[co]; if(!x||!md)continue;
+      if(x.demand!==undefined){ var D=md.demand;
+        if(!D||typeof D!=='object')md.demand=x.demand;
+        else { var old={}; for(k in D){ old[k]=D[k]; delete D[k]; }
+          for(k in x.demand){ var nv=x.demand[k], ov=old[k];
+            if(ov&&nv&&typeof ov==='object'&&typeof nv==='object'&&!Array.isArray(ov)&&!Array.isArray(nv)){ for(j in ov)delete ov[j]; for(j in nv)ov[j]=nv[j]; D[k]=ov; } else D[k]=nv; } } }
+      for(var i=0;i<F.length;i++){ delete md[F[i]]; if(Object.prototype.hasOwnProperty.call(x,F[i]))md[F[i]]=x[F[i]]; } } }
+  for(k in PREPACK_COVER)delete PREPACK_COVER[k]; for(k in T.PPC)PREPACK_COVER[k]=T.PPC[k];
+  BP_DATA.set_explosion_skips=T.B.set_explosion_skips; BP_DATA.demand_source=T.B.demand_source;
+  if(fromWorker){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; HZ_SHARE_MEMO={}; }   // what a sync full build resets at its start (pure caches; refilled on demand)
+  try{ if(typeof BP!=='undefined'&&BP&&BP.BUY_CACHE)for(k in BP.BUY_CACHE)delete BP.BUY_CACHE[k]; }catch(e){} }   // buy qtys cached against the old overlay
+function _hzDemandPrelude(){ try{ if(typeof zalInit==='function')zalInit(); }catch(e){} try{ if(typeof tikInit==='function')tikInit(); }catch(e){} try{ hzShareMemoCheck(); }catch(e){} }
+// Promise of a current overlay. opts: {full:true} force a full build; {mode:'worker'|'chunk'} force a mode (tests).
+function hzDemandBuildAsync(why,opts){ opts=opts||{};
+  if(HZ_DBUILD&&!opts.mode)return HZ_DBUILD.promise;   // one async build at a time; it restarts itself if inputs move
+  try{ if(typeof BP_DATA==='undefined'||!BP_DATA.products)return Promise.resolve(null);
+    if(opts.full)hzDemandNeedFull();
+    if((!hzDemandChunkOn()&&!hzDemandWorkerOn()&&!opts.mode)||(LAZY_SKU&&!SKU_DATA_READY)){ buildLiveDemand(); return Promise.resolve(HZ_DEMAND_LAST); }   // off / empty lazy maps: sync (as before)
+    _hzDemandPrelude(); var S=null; try{ S=hzDemandScope(); }catch(e){ S={full:true,why:'scope threw'}; }
+    if(S&&!S.full){ buildLiveDemand(); return Promise.resolve(HZ_DEMAND_LAST); }   // incremental: main thread, already fast
+    if(HZ_DBUILD){ HZ_DBUILD.cancelled=true; HZ_DBUILD.res(null); HZ_DBUILD=null; }
+    var job={id:++_hzDbSeq, why:String(why||''), full:(S&&S.why)||'', stale:(typeof BUY_FC_STALE!=='undefined'&&!!BUY_FC_STALE), t0:performance.now(), tries:0, cancelled:false,
+      slices:0, maxSlice:0, postMs:0, posts:0, applyMs:0, force:opts.mode||null, mode:null, werr:null};
+    job.promise=new Promise(function(res,rej){ job.res=res; job.rej=rej; });
+    HZ_DBUILD=job; _hzDbRun(job); return job.promise; }
+  catch(e){ return Promise.reject(e); } }
+function _hzDbRun(job){ if(job.cancelled)return; job.tries++; job.snap=_hzDemandSnapObj();
+  var useW=job.force?(job.force==='worker'):hzDemandWorkerOn(), p;
+  job.mode=useW?'worker':'chunk';
+  p=useW?_hzDbWorker(job).catch(function(e){ if(job.cancelled)return null; _hzWorkerFail(e,job); job.mode='chunk'; return _hzDbChunk(job); }):_hzDbChunk(job);
+  p.then(function(T){ if(job.cancelled||HZ_DBUILD!==job)return; if(!T)return;
+    var ch=_hzDemandChanged(job.snap);
+    if(ch){ job.moved=ch; if(job.tries<3)return _hzDbRun(job);   // inputs moved mid-build: discard, rebuild from the current inputs
+      HZ_DBUILD=null; try{ _hzBuildLiveDemandSync(); }catch(e){ return job.rej(e); } return job.res(HZ_DEMAND_LAST); }   // still moving: one sync build
+    var ta=performance.now(); _hzDemandApply(T,job.mode==='worker'); hzDemandSnap(); _hzDemandBuilt(); job.applyMs=performance.now()-ta;
+    var r={mode:job.mode, ms:Math.round((performance.now()-job.t0)*10)/10, why:job.full, skus:0, tries:job.tries, slices:job.slices, maxSliceMs:Math.round(job.maxSlice*10)/10,
+      postMs:Math.round(job.postMs*10)/10, posts:job.posts, applyMs:Math.round(job.applyMs*10)/10, workerMs:job.workerMs||null, werr:job.werr, caller:job.why};
+    HZ_DEMAND_LAST=r; HZ_BUILD_LOG.push(r); if(HZ_BUILD_LOG.length>50)HZ_BUILD_LOG.shift();
+    hzDemandSanity(job.stale); HZ_DBUILD=null;
+    if(!_hzDbMetric&&typeof window.hzHealthMetric==='function'){ _hzDbMetric=true; try{ window.hzHealthMetric('metric','demand async build',{mode:r.mode,ms:r.ms,max_slice_ms:Math.max(r.maxSliceMs,r.applyMs),post_ms:r.postMs,tries:r.tries,worker_ms:r.workerMs},'client:demand_build'); }catch(e){} }   // once per session: real-device timings
+    if(hzBuildCheckOn()){ try{ hzBuildCheck(); }catch(e){ if(window.console)console.error('[HORIZON build-check] failed',e); } }
+    job.res(r);
+  }, function(e){ if(job.cancelled||HZ_DBUILD!==job)return; HZ_DBUILD=null; job.rej(e); }); }
+// 7.2: same generator on the main thread, one slice per task.
+function _hzDbChunk(job){ var T=_hzShadowTarget(), g=_hzDemandGen(null,T);
+  return new Promise(function(res,rej){ (function step(){ if(job.cancelled)return res(null);
+    var t0=performance.now(), r; try{ do{ r=g.next(); }while(!r.done&&performance.now()-t0<HZ_SLICE_MS); }catch(e){ return rej(e); }
+    var d=performance.now()-t0; job.slices++; if(d>job.maxSlice)job.maxSlice=d;
+    if(r.done)return res(T); _hzYield().then(step); })(); }); }
+// 7.3: Web Worker. Source = the engine's own functions (toString) + a tiny message loop. Data globals it reads are posted per build.
+function _hzWorkerFns(){ return [_hzDemandGen, prepacksForSet, setHasConstrainedComps, _setSize, buildSkuShares, contribResolve, skuSales, _skuSalesRaw, skuWh, _skusNewFormat,
+  runoffAlloc, setBuildCap, skuOutFC, skuHasLY, _flatLyKey, runoffPoolSkus, skuHasAnyActivity, calc, parseStored, curMonthForecast, gk, ym, pa, ga, fn, runoffChannels,
+  setLoadOnComp, setDemandRaw, hzSubShares, setsForComp, hzLyMonths]; }
+// [name, value] for every global the engine reads (kept in step with _hzWorkerFns by scripts/dev/demand-worker-closure.cjs).
+function _hzWorkerData(){ var cm={}; for(var k in CALC_MEMO){ var c=CALC_MEMO[k]; if(c&&c.fu)cm[k]={fu:c.fu}; }   // calc memo as the sync build would see it (fu only)
+  return [['LIVE_FC_MONTHS',LIVE_FC_MONTHS],['CUR_MONTH',CUR_MONTH],['TIK_COUNTRIES',TIK_COUNTRIES],['CUR_YTD_END',CUR_YTD_END],['ZAL_SKUS',ZAL_SKUS],['ZAL_STOCK',ZAL_STOCK],
+    ['SET_BOM',SET_BOM],['PREPACK_STOCK',PREPACK_STOCK],['PREPACK_BY_SET',PREPACK_BY_SET],['TIER_W',(typeof TIER_W!=='undefined'?TIER_W:undefined)],['SKU_ACT_MONTHS',SKU_ACT_MONTHS],
+    ['TODAY',TODAY],['CONTRIB_MODEL',(typeof CONTRIB_MODEL!=='undefined'?CONTRIB_MODEL:undefined)],['_SKUS_NEW_FORMAT_V',_SKUS_NEW_FORMAT_V],['RUNOFF_LYYM',RUNOFF_LYYM],['FM_CALC',FM_CALC],
+    ['RUNOFF_TAIL_MAX',RUNOFF_TAIL_MAX],['CUR',CUR],['IV',IV],['DATA',DATA],['CALC_MEMO',cm],['SKUI',SKUI],['FC_OUTPUTS',FC_OUTPUTS],['SKUM',SKUM],['SKUS',SKUS],['P',_hzShadowTarget().P]]; }
+var _HZ_W_VARS='LIVE_FC_MONTHS,CUR_MONTH,TIK_COUNTRIES,CUR_YTD_END,ZAL_SKUS,ZAL_STOCK,SET_BOM,PREPACK_STOCK,PREPACK_BY_SET,TIER_W,SKU_ACT_MONTHS,TODAY,CONTRIB_MODEL,_SKUS_NEW_FORMAT_V,'
+  +'RUNOFF_LYYM,FM_CALC,RUNOFF_TAIL_MAX,CUR,IV,DATA,CALC_MEMO,SKUI,FC_OUTPUTS,SKUM,SKUS,RUNOFF_MEMO,SETDEM_MEMO,ASPADJ_MEMO,HZ_SHARE_MEMO,SET_BY_COMP,_SKUSALES_CACHE,BP';
+function _hzWorkerMain(){ var _D={};   // runs INSIDE the worker
+  self.onmessage=function(e){ var m=e.data;
+    try{ if(m.t==='d'){ if(m.part){ var o=_D[m.k]||(_D[m.k]={}); for(var k in m.v)o[k]=m.v[k]; } else _D[m.k]=m.v; return; }
+      if(m.t==='run'){ var t0=performance.now();
+        for(var n in _D)if(n!=='P')self[n]=_D[n];
+        RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; HZ_SHARE_MEMO={}; SET_BY_COMP=null; _SKUSALES_CACHE={}; BP=null; if(!CALC_MEMO)CALC_MEMO={};
+        var T={P:_D.P, PPC:{}, B:{set_explosion_skips:null, demand_source:null}}, g=_hzDemandGen(null,T); _D={};
+        while(!g.next().done){}
+        for(var s in T.P){ var mk=T.P[s]&&T.P[s].mkts; if(mk)for(var co in mk){ if(mk[co])delete mk[co].pka; } }
+        IV=DATA=SKUM=SKUS=SKUI=FC_OUTPUTS=CALC_MEMO=null; RUNOFF_MEMO=SETDEM_MEMO=HZ_SHARE_MEMO={};   // free the copies between builds
+        self.postMessage({t:'done', id:m.id, T:T, ms:performance.now()-t0}); } }
+    catch(err){ _D={}; self.postMessage({t:'err', id:m.id, msg:String(err&&err.message||err), stack:String(err&&err.stack||'').slice(0,800)}); } }; }
+function _hzWorkerGet(){ if(_HZ_W)return _HZ_W;
+  var src='var '+_HZ_W_VARS+';\n'+_hzWorkerFns().map(function(f){ if(!f||!f.name)throw new Error('worker fn without a name'); return 'var '+f.name+'='+f.toString()+';'; }).join('\n')+'\n('+_hzWorkerMain.toString()+')();\n';
+  var url=URL.createObjectURL(new Blob([src],{type:'text/javascript'})), w=new Worker(url), W={w:w, url:url, jobs:{}};
+  w.onmessage=function(e){ var m=e.data||{}, j=W.jobs[m.id]; if(!j)return; delete W.jobs[m.id]; clearTimeout(j.timer); if(m.t==='done')j.res(m); else { var er=new Error(m.msg||'worker error'); er.wstack=m.stack; er.phase='run'; j.rej(er); } };
+  w.onerror=function(e){ try{ e.preventDefault(); }catch(_){} var er=new Error('worker script error: '+((e&&e.message)||'?')); er.phase='script'; er.fatal=true; _hzWorkerKill(er); };
+  w.onmessageerror=function(){ var er=new Error('worker message could not be cloned'); er.phase='clone'; er.fatal=true; _hzWorkerKill(er); };
+  _HZ_W=W; return W; }
+function _hzWorkerKill(er){ var W=_HZ_W; _HZ_W=null; if(!W)return; try{ W.w.terminate(); }catch(e){} try{ URL.revokeObjectURL(W.url); }catch(e){}
+  Object.keys(W.jobs).forEach(function(id){ var j=W.jobs[id]; clearTimeout(j.timer); j.rej(er); }); W.jobs={}; }
+function _hzWorkerFail(e,job){ job.werr=String(e&&e.message||e).slice(0,300); if(e&&e.fatal)HZ_DEMAND_WORKER_OK=false;   // script / clone error: no worker for the rest of the session
+  try{ if(window.console)console.warn('[HORIZON] demand worker failed, main-thread chunked build instead',e); }catch(_){}
+  try{ if(typeof window.hzHealthMetric==='function')window.hzHealthMetric('sanity','demand worker failed, chunked main-thread build used',{err:job.werr,phase:(e&&e.phase)||'',stack:String((e&&(e.wstack||e.stack))||'').slice(0,400),worker_off:HZ_DEMAND_WORKER_OK===false},'client:demand_worker'); }catch(_){} }
+function _hzDbWorker(job){ return new Promise(function(res,rej){ var W;
+  try{ W=_hzWorkerGet(); }catch(e){ e.phase='create'; e.fatal=true; return rej(e); }
+  var MAXK=1500, data=_hzWorkerData(), parts=[], i=0;
+  data.forEach(function(nv){ var v=nv[1], ks=(v&&typeof v==='object'&&!Array.isArray(v))?Object.keys(v):null;
+    if(!ks||ks.length<=MAXK){ parts.push({t:'d',k:nv[0],v:v}); return; }
+    for(var a=0;a<ks.length;a+=MAXK)parts.push({t:'d',k:nv[0],part:true,keys:ks.slice(a,a+MAXK),src:v}); });   // big maps: posted in key slices, merged in order in the worker
+  var j={res:function(m){ job.workerMs=Math.round(m.ms*10)/10; res(m.T); }, rej:rej, timer:setTimeout(function(){ delete W.jobs[job.id]; var er=new Error('worker timeout'); er.phase='timeout'; _hzWorkerKill(er); rej(er); },60000)};
+  W.jobs[job.id]=j;
+  (function send(){ if(job.cancelled){ delete W.jobs[job.id]; clearTimeout(j.timer); return res(null); }
+    if(_HZ_W!==W)return;   // killed meanwhile (rejected there)
+    var t0=performance.now();
+    try{ do{ var p=parts[i++]; if(p.part){ var o={}; for(var q=0;q<p.keys.length;q++)o[p.keys[q]]=p.src[p.keys[q]]; W.w.postMessage({t:'d',k:p.k,part:true,v:o}); } else W.w.postMessage(p); job.posts++; }
+      while(i<parts.length&&performance.now()-t0<HZ_SLICE_MS); }
+    catch(e){ delete W.jobs[job.id]; clearTimeout(j.timer); e.phase='post'; e.fatal=(e&&e.name==='DataCloneError'); return rej(e); }
+    var d=performance.now()-t0; job.postMs+=d; if(d>job.maxSlice)job.maxSlice=d;
+    if(i<parts.length)_hzYield().then(send); else W.w.postMessage({t:'run',id:job.id}); })(); }); }
+// v28.178 (Ben): verification: the published async result vs a synchronous full build of the same inputs (leaves the sync result).
+function hzBuildCheck(){ var a=_hzDemOut(), ba=_hzBuyMap(), last=HZ_DEMAND_LAST;
+  _HZ_DINC=null; _hzBuildDemandCore(null); hzDemandSnap();
+  var b=_hzDemOut(), bb=_hzBuyMap(), dk=[], bk=[];
+  Object.keys(b).forEach(function(x){ if(a[x]!==b[x])dk.push(x); }); Object.keys(a).forEach(function(x){ if(!(x in b))dk.push(x); });
+  Object.keys(bb).forEach(function(x){ if(ba[x]!==bb[x])bk.push(x); }); Object.keys(ba).forEach(function(x){ if(!(x in bb))bk.push(x); });
+  var r={at:Date.now(), check:'build', last:last, demandRows:Object.keys(b).length, demandDiff:dk.length, buyRows:Object.keys(bb).length, buyDiff:bk.length, sample:dk.slice(0,5).concat(bk.slice(0,5))};
+  HZ_BUILD_LOG.push(r); if(HZ_BUILD_LOG.length>50)HZ_BUILD_LOG.shift();
+  try{ console[(dk.length||bk.length)?'error':'log']('[HORIZON build-check] '+(last&&last.mode)+': demand rows '+r.demandRows+' diff '+r.demandDiff+' · buy rows '+r.buyRows+' diff '+r.buyDiff, r); }catch(e){}
+  if((dk.length||bk.length)&&typeof window.hzHealthMetric==='function'){ try{ window.hzHealthMetric('sanity','async demand build differs from sync',{mode:last&&last.mode,demand_diff:dk.length,buy_diff:bk.length,sample:r.sample},'client:demand_build'); }catch(e){} }
+  return r; }
+// v28.178 (Ben): run cb(ok) once the overlay is current: at once when it already is, else after the (async) build. For the cold
+// entry paths that already show a loading panel.
+function hzDemandReady(cb){ var fresh=DEMAND_BUILT&&!(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE);
+  if(fresh&&!HZ_DBUILD)return cb(true);
+  var p; try{ p=hzDemandBuildAsync('ready'); }catch(e){ p=Promise.reject(e); }
+  p.then(function(){ cb(true); }, function(e){ if(window.console)console.error('[HORIZON] demand build FAILED',e); cb(false); }); }
+// v28.178 (Ben): the synchronous build. A sync caller always wins over an in-flight async full build (perf #7.2/7.3): that build is
+// cancelled (its result is never published) and its waiters get this build's result instead.
+function buildLiveDemand(){ var _pre=HZ_DBUILD; if(_pre){ _pre.cancelled=true; HZ_DBUILD=null; }
+  try{ _hzBuildLiveDemandSync(); }catch(e){ if(_pre)_pre.rej(e); throw e; }
+  if(_pre)_pre.res(HZ_DEMAND_LAST); }
+function _hzBuildLiveDemandSync(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!BUY_FC_STALE);   // v28.163 (Ben): read before callers reset it (health idempotency generation)
   // v28.142: wire the TikTok (TIK, UK/US) and EU Zalando (ZAL) channels BEFORE building demand. They were only wired when the
   // DEMAND plan rendered, so the buy plan differed by navigation order (BUY opened first → no TIK/ZAL availability or rows →
   // different demand split). Both are idempotent ("runs once data is ready").
@@ -16937,6 +17107,21 @@ function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!B
   if(_mode==='inc'&&hzIncrCheckOn()){ try{ hzIncrCheck(); }catch(e){ if(window.console)console.error('[HORIZON incr-check] failed',e); } }
 }
 function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (unchanged); else only the _S SKU x country slices
+  // v28.178 (Ben): the engine is the generator below; a synchronous build drains it in one go, writing straight onto BP_DATA.
+  var g=_hzDemandGen(_S,{P:BP_DATA.products,PPC:PREPACK_COVER,B:BP_DATA}); while(!g.next().done){}
+  _hzDemandBuilt(); }
+function _hzDemandBuilt(){ DEMAND_BUILT=true;   // shares + set explosion have settled at least once (buy render gates on this)
+  // v28.125 (perf): this pass already rebuilt PREPACK_COVER (§4) from the server-injected PREPACK_MAP/STOCK, so the
+  // one-time "build the PP cover" guards in both render()s must not trigger a SECOND ~3s rebuild. Only counts once the
+  // real SKU data is in (lazy mode ships it empty; lazyLoadSkuData() re-arms both flags when it lands).
+  if(!LAZY_SKU || SKU_DATA_READY)_PP_COVER_INIT=true; }
+// v28.178 (Ben): THE demand engine (perf #7.2/7.3), one copy of the logic for every mode. Writes go to the target T
+// ({P: products map, PPC: prepack cover map, B: holder of set_explosion_skips / demand_source}): the live BP_DATA for a sync
+// build, a private shadow copy for a chunked build or the worker (published in one step when complete, never half-built).
+// Yields (0) between slices (per subcat x country x channel, per 32 SKUs inside a subcat, per set); the driver decides when to
+// actually hand the thread back. Loop bodies are the v28.171 forEach bodies wrapped in IIFEs, so `return` still means "next".
+// No DOM, no window: the worker builds this function from its own source text (Function.prototype.toString).
+function* _hzDemandGen(_S,T){
   function _inA(sku,co){ return !_S||!!(_S.co[co]&&_S.co[co].a[sku]); }
   if(!_S){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null; HZ_SHARE_MEMO={}; }   // v28.151 (review A5): set-to-component index rebuilt per build (SET_BOM can change)
   else Object.keys(_S.co).forEach(function(co){ var X=_S.co[co];   // v28.171 (Ben): drop only the dirty slice's memos (SET_BOM unchanged → SET_BY_COMP kept)
@@ -16959,8 +17144,8 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
   // 1) Clear demand everywhere (drops the baked x1.10 fallback)
   // v28.151 (review A1): clear EVERY month, not just LIVE_FC_MONTHS. md.demand is written only by this function, so a full clear
   // leaves no prior-run contribution behind (the old window-only clear let the past-month Preorder/KA fold grow every rebuild).
-  Object.keys(BP_DATA.products).forEach(function(sku){
-    var mk=BP_DATA.products[sku].mkts;if(!mk)return;
+  Object.keys(T.P).forEach(function(sku){
+    var mk=T.P[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
       if(_S&&!_inA(sku,co))return;   // v28.171 (Ben): scoped build clears only the dirty slice
       var d=mk[co].demand;if(!d)return;
@@ -16969,22 +17154,23 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
     });
   });
   // 2) Live cascade: subcat monthly forecast (calc, reads IV) x SKU share
-  MK.forEach(function(co){
+  // v28.178 (Ben): plain loops (were forEach, `return` → `continue`) so the generator can yield; the per-SKU body is unchanged.
+  for(var _mi=0;_mi<MK.length;_mi++){ var co=MK[_mi];
     var ctry=co.toLowerCase();
-    if(_S&&!_S.co[co])return;   // v28.171 (Ben): scoped: only countries with a dirty slice
-    CHS.forEach(function(chp){
+    if(_S&&!_S.co[co])continue;   // v28.171 (Ben): scoped: only countries with a dirty slice
+    for(var _hi=0;_hi<CHS.length;_hi++){ var chp=CHS[_hi];
       var ch=chp[0],chKey=chp[1];
-      if(ch==='TIK'&&TIK_COUNTRIES.indexOf(co)<0)return;   // TIK only in enabled markets
-      subList.forEach(function(subcat){
-        if(_S&&!_S.co[co].subs[subcat])return;   // v28.171 (Ben): scoped: only subcats holding a dirty SKU (full SKU list kept for the shares)
+      if(ch==='TIK'&&TIK_COUNTRIES.indexOf(co)<0)continue;   // TIK only in enabled markets
+      for(var _ui=0;_ui<subList.length;_ui++){ var subcat=subList[_ui];
+        if(_S&&!_S.co[co].subs[subcat])continue;   // v28.171 (Ben): scoped: only subcats holding a dirty SKU (full SKU list kept for the shares)
         var _ssm=hzSubShares(subcat,co,ch,chKey,lyYearMonths), skus=_ssm.skus;   // v28.171 (Ben): memoised list + shares (same filter, same order)
-        if(!skus.length)return;
-        var fu=calc(subcat,co,ch).fu;if(!fu)return;
+        if(!skus.length)continue;
+        var fu=calc(subcat,co,ch).fu;if(!fu)continue;
         var shares=_ssm.shares();
-        skus.forEach(function(s2){
+        for(var _ki=0;_ki<skus.length;_ki++){ (function(s2){
           if(_S&&!_inA(s2,co))return;   // v28.171 (Ben): scoped: write only the dirty SKUs
           var sh=shares[s2]||0;
-          var prod=BP_DATA.products[s2];if(!prod||!prod.mkts||!prod.mkts[co])return;
+          var prod=T.P[s2];if(!prod||!prod.mkts||!prod.mkts[co])return;
           var md=prod.mkts[co];if(!md.demand)md.demand={};if(!md.demand[ch])md.demand[ch]={};
           // Match the PLAN cascade (skuFC): zero pre-launch months, run down stock after discontinue.
           var sp=SKUM[s2]||{};
@@ -17012,10 +17198,11 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
             if(_gap){ if(fc>0)chFC[fym]=fc; return; }
             if(fc>0){ md.demand[ch][fym]=fc; chFC[fym]=fc; } else delete md.demand[ch][fym];
           });
-        });
-      });
-    });
-  });
+        })(skus[_ki]); if((_ki&31)===31)yield 0; }   // v28.178 (Ben): slice point every 32 SKUs
+        yield 0;   // v28.178 (Ben): slice point per subcat x country x channel
+      }
+    }
+  }
   // (2b removed v26.461 — saved SKU overrides (forecast_outputs) are now applied INLINE in section 2's
   //  chronological pass, so the chained last-year rule can read a month's final value incl. its override.)
   // 2c) Zalando (EU only): extra EU-3PL demand from the LIVE forecast — Stage 3b (v26.754). Built the same way the
@@ -17027,7 +17214,7 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
   (function(){
     var scope = (typeof ZAL_SKUS!=='undefined'?ZAL_SKUS:[]);   // ZAL channel scope (server-injected: stock upload ∪ ZAL-forecast SKUs)
     if(_S&&!_S.co.EU)return;   // v28.171 (Ben): scoped: no dirty EU slice → Zalando overlay unchanged
-    scope.forEach(function(sku){ if(_S&&!_inA(sku,'EU'))return; var p=BP_DATA.products[sku]; if(p&&p.mkts&&p.mkts.EU&&p.mkts.EU.demand&&p.mkts.EU.demand.ZAL)delete p.mkts.EU.demand.ZAL; });   // clear any prior overlay first
+    scope.forEach(function(sku){ if(_S&&!_inA(sku,'EU'))return; var p=T.P[sku]; if(p&&p.mkts&&p.mkts.EU&&p.mkts.EU.demand&&p.mkts.EU.demand.ZAL)delete p.mkts.EU.demand.ZAL; });   // clear any prior overlay first
     if(!(ZAL_STOCK&&Object.keys(ZAL_STOCK).length))return;   // no stock file uploaded → Zalando off
     var bySub={}; scope.forEach(function(sku){ var sp=SKUM[sku]; if(sp&&sp.s)(bySub[sp.s]||(bySub[sp.s]=[])).push(sku); });
     Object.keys(bySub).forEach(function(subcat){
@@ -17037,7 +17224,7 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
       try{ shares=buildSkuShares(skus,'EU','ZAL',lyYearMonths)||{}; }catch(e){}
       skus.forEach(function(sku){
         if(_S&&!_inA(sku,'EU'))return;   // v28.171 (Ben)
-        var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
+        var prod=T.P[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
         var md=prod.mkts.EU, ovMap=FC_OUTPUTS[sku+'|'+skuWh('EU','ZAL')+'|ZAL']||{}, sh=shares[sku]||0, zal={};
         LIVE_FC_MONTHS.forEach(function(fym){ var raw=(ovMap[fym]!=null)?ovMap[fym]:((fu[fym]||0)*sh); var v=Math.round(raw); if(v>0)zal[fym]=v; });
         if(Object.keys(zal).length){ if(!md.demand)md.demand={}; md.demand.ZAL=zal; }
@@ -17048,8 +17235,8 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
   // v28.151 (review A1): fold ONLY months inside LIVE_FC_MONTHS. Ben's rule: past-dated Preorder/KA months are past forecasts,
   // so they never appear in the demand or the buy and never roll forward; months beyond the window are ignored too.
   var _pkaWin=_inWin;   // window months only (a lagging CUR_MONTH gap month is NOT in it)
-  Object.keys(BP_DATA.products).forEach(function(sku){
-    var mk=BP_DATA.products[sku].mkts;if(!mk)return;
+  Object.keys(T.P).forEach(function(sku){
+    var mk=T.P[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
       if(_S&&!_inA(sku,co))return;   // v28.171 (Ben)
       var md=mk[co];if(!md.pka)return;
@@ -17060,8 +17247,8 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
   // TIK fold: TikTok behaves like DTC on the 3PL pool. Built above as its own channel (gated to TIK_COUNTRIES); here we
   // FOLD it into DTC so every downstream 3PL/total demand sum counts it additively with no per-site edits, and stash a
   // display-only copy (md.demand_tik) so the buy popup can show a separate 'TikTok demand' line. No TIK data => no-op.
-  Object.keys(BP_DATA.products).forEach(function(sku){
-    var mk=BP_DATA.products[sku].mkts; if(!mk)return;
+  Object.keys(T.P).forEach(function(sku){
+    var mk=T.P[sku].mkts; if(!mk)return;
     Object.keys(mk).forEach(function(co){
       if(_S&&!_inA(sku,co))return;   // v28.171 (Ben)
       var md=mk[co]; delete md.demand_tik;
@@ -17079,18 +17266,18 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
   //    set_forecast × component_qty onto every component's md.demand.DTC (the 3PL pool that builds sets — FBA sets
   //    draw components from 3PL too) so it flows into d3DemFn → the buy target. Stash a display-only copy in
   //    md.demand_sets (+ md.demand_sets_src for the buy-popup source tooltip). No set gets a buy line; only components move.
-  (function(){
+  _sets:{   // v28.178 (Ben): labelled block (was an IIFE, `return` → `break _sets`) so the set loop can yield
     // v28.151 (review A6): clear the prior overlays BEFORE the SET_BOM early returns, so an emptied BOM can't leave stale
     // demand_sets / PREPACK_COVER from the last build.
-    try{ Object.keys(PREPACK_COVER).forEach(function(k){ if(_S){ var p=k.split('|'); if(!_inA(p[0],p[1]))return; } delete PREPACK_COVER[k]; }); }catch(e){}   // v28.171 (Ben): scoped: only the dirty sets' entries (key set|co|ch|month)   // idempotent across rebuilds (prepack netting overlay)
+    try{ Object.keys(T.PPC).forEach(function(k){ if(_S){ var p=k.split('|'); if(!_inA(p[0],p[1]))return; } delete T.PPC[k]; }); }catch(e){}   // v28.171 (Ben): scoped: only the dirty sets' entries (key set|co|ch|month)   // idempotent across rebuilds (prepack netting overlay)
     // Clear any prior explosion overlay first (idempotent across rebuilds; section 1 already cleared md.demand.DTC).
-    Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
+    Object.keys(T.P).forEach(function(sku){ var mk=T.P[sku].mkts; if(!mk)return;
       Object.keys(mk).forEach(function(co){ if(_S&&!_inA(sku,co))return; delete mk[co].demand_sets; delete mk[co].demand_sets_src; }); });
-    if(typeof SET_BOM!=='object'||!SET_BOM){ BP_DATA.set_explosion_skips={}; return; }
-    var setSkus=Object.keys(SET_BOM); if(!setSkus.length){ BP_DATA.set_explosion_skips={}; return; }
+    if(typeof SET_BOM!=='object'||!SET_BOM){ T.B.set_explosion_skips={}; break _sets; }
+    var setSkus=Object.keys(SET_BOM); if(!setSkus.length){ T.B.set_explosion_skips={}; break _sets; }
     var skips={};
-    if(_S){ skips=BP_DATA.set_explosion_skips||{}; Object.keys(skips).forEach(function(k){ var i=k.lastIndexOf('|'); if(_inA(k.slice(0,i),k.slice(i+1)))delete skips[k]; }); }   // v28.171 (Ben): scoped: recount only the dirty components (every set feeding them is dirty too)
-    setSkus.forEach(function(setSku){
+    if(_S){ skips=T.B.set_explosion_skips||{}; Object.keys(skips).forEach(function(k){ var i=k.lastIndexOf('|'); if(_inA(k.slice(0,i),k.slice(i+1)))delete skips[k]; }); }   // v28.171 (Ben): scoped: recount only the dirty components (every set feeding them is dirty too)
+    for(var _si=0;_si<setSkus.length;_si++){ (function(setSku){
       var comps=SET_BOM[setSku]; if(!Array.isArray(comps)||!comps.length)return;
       var sp=SKUM[setSku]; if(!sp||sp.vt!=='SET')return;   // only true sets explode
       var _sz=Math.max(1,_setSize(setSku));   // component units per box — the new-set cascade forecast is item-equivalent, so ÷setSize → BOXES before exploding (× component qty gives back the item volume; no double-count)
@@ -17149,13 +17336,13 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
               if(d<=0)return;
               var opening=rem2, cov=Math.min(d,rem2); rem2-=cov;
               setFC[fym]=Math.max(0,(setFC[fym]||0)-cov);             // uncovered remainder explodes into components (3PL pool)
-              PREPACK_COVER[setSku+'|'+co+'|'+ch+'|'+fym]={onHand:ppOpen,avail:opening,fc:d,covered:cov,remaining:rem2,cur:(fym===CUR_MONTH)}; });
+              T.PPC[setSku+'|'+co+'|'+ch+'|'+fym]={onHand:ppOpen,avail:opening,fc:d,covered:cov,remaining:rem2,cur:(fym===CUR_MONTH)}; });
           });
         })();
         if(!Object.keys(setFC).length)return;
         comps.forEach(function(cc){
           var cs=cc&&cc.sku, q=Number(cc&&cc.qty)||0; if(!cs||q<=0)return;
-          var cprod=BP_DATA.products[cs];
+          var cprod=T.P[cs];
           if(!cprod||!cprod.mkts||!cprod.mkts[co]){ skips[cs+'|'+co]=(skips[cs+'|'+co]||0)+1; return; }   // component not planned in this market — can't stock it here; report
           var cmd=cprod.mkts[co];
           if(!cmd.demand)cmd.demand={}; if(!cmd.demand.DTC)cmd.demand.DTC={};
@@ -17169,16 +17356,11 @@ function _hzBuildDemandCore(_S){   // v28.171 (Ben): _S null = full build (uncha
             (cmd.demand_sets_src[fym]||(cmd.demand_sets_src[fym]=[])).push({set:setSku,units:add,q:q,dtcU:_dtcU,fbaU:_fbaU}); });
         });
       });
-    });
-    BP_DATA.set_explosion_skips=skips;
+    })(setSkus[_si]); yield 0; }   // v28.178 (Ben): slice point per set
+    T.B.set_explosion_skips=skips;
     // (v27.544 pass 2 retired in v27.545: runoffAlloc() now folds set demand into a discontinued component's pool itself, and the explosion loop above takes only the allowed share)
-  })();
-  BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
-  DEMAND_BUILT=true;   // shares + set explosion have settled at least once (buy render gates on this)
-  // v28.125 (perf): this pass already rebuilt PREPACK_COVER (§4) from the server-injected PREPACK_MAP/STOCK, so the
-  // one-time "build the PP cover" guards in both render()s must not trigger a SECOND ~3s rebuild. Only counts once the
-  // real SKU data is in (lazy mode ships it empty; lazyLoadSkuData() re-arms both flags when it lands).
-  if(!LAZY_SKU || SKU_DATA_READY)_PP_COVER_INIT=true;
+  }
+  T.B.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';   // v28.178 (Ben): DEMAND_BUILT / _PP_COVER_INIT now set by the caller (_hzDemandBuilt)
 }
 
 // ===== LIVE PREORDER / KEY-ACCOUNT REFRESH (Airtable MCP) =====
@@ -17230,7 +17412,7 @@ window.refreshBuyCache = async function(btn){
     try{augmentSKUM();}catch(e){}
     try{buildLiveBpOverlay();}catch(e){}
     try{ await loadPreorderKA(); }catch(e){}   // re-pull committed Preorder/KA demand so the button refreshes it too
-    try{buildLiveDemand();}catch(e){}
+    try{ await hzDemandBuildAsync('refresh'); }catch(e){}   // v28.178 (Ben): async full build (data reload forces full), UI stays responsive
     try{ for(var c in BUY_CACHE)delete BUY_CACHE[c]; }catch(e){}
     try{ BUY_FC_STALE=false; }catch(e){}
     try{ if(typeof renderBuyView==='function')renderBuyView(); else if(typeof renderMain==='function')renderMain(); }catch(e){}

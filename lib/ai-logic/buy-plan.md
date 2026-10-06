@@ -13,10 +13,11 @@ sources:
   - artifact_v16.7.html :: buildLiveBpOverlay
   - artifact_v16.7.html :: buildLiveDemand
   - artifact_v16.7.html :: _hzBuildDemandCore
+  - artifact_v16.7.html :: _hzDemandGen
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.171
+verified_version: v28.178
 fingerprints:
   artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
@@ -26,8 +27,9 @@ fingerprints:
   artifact_v16.7.html::crCoverWeeks: be8157079b03
   artifact_v16.7.html::ssmCoverWeeks: 29a4ae6c62ea
   artifact_v16.7.html::buildLiveBpOverlay: 01bf2c87eb2c
-  artifact_v16.7.html::buildLiveDemand: 296b1886774d
-  artifact_v16.7.html::_hzBuildDemandCore: b3b734ead3a6
+  artifact_v16.7.html::buildLiveDemand: fcbc97070915
+  artifact_v16.7.html::_hzBuildDemandCore: de531209af79
+  artifact_v16.7.html::_hzDemandGen: 625a066042de
   artifact_v16.7.html::bpBuildFeedAsync: 92861a0bf15d
   server.mjs::buildPROD_CONST: b8b131b6ad8b
   server.mjs::buildSKURAW: bcbc97d69507
@@ -43,6 +45,7 @@ fingerprints:
 - If a buy's ideal placement month is already in the past, it is NOT a Buy 3PL: that need is left to the Urgent scan. So the earliest month a Buy 3PL placed now can land = current month + round(lead weeks / 4.33). [project]
 
 ## Demand the buy uses
+- The demand overlay the buy reads may be built in a Web Worker or in chunks (v28.178); it is published only when complete and is identical to a synchronous build, so buy quantities do not depend on where it ran. The buy engine itself (project, getBuyQtys) still runs on the main thread. [buildLiveDemand, _hzDemandGen]
 - Channels: DTC (TikTok folded into DTC), B2B, FBA; EU also Zalando when a Zalando stock file is uploaded. 3PL demand = DTC + B2B (+ Zalando); FBA demand is supplied from the 3PL by transfers, so the 3PL buy also funds the FBA top-up. [buildLiveDemand, project]
 - Per SKU month: a saved SKU forecast (planner.forecast_outputs) wins; otherwise a continuing SKU uses last year's same-month actual (chained); otherwise a new SKU gets subcategory forecast x SKU share. [buildLiveDemand]
 - Pre-launch months are zero (month start before the market launch date). [buildLiveDemand]

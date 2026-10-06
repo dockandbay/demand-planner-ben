@@ -48,6 +48,8 @@ sources:
   - artifact_v16.7.html :: discCutoffMo
   - artifact_v16.7.html :: buildLiveDemand
   - artifact_v16.7.html :: _hzBuildDemandCore
+  - artifact_v16.7.html :: _hzDemandGen
+  - artifact_v16.7.html :: hzDemandBuildAsync
   - artifact_v16.7.html :: hzDemandScope
   - artifact_v16.7.html :: computeSmoothAlloc
   - artifact_v16.7.html :: applySmoothAlloc
@@ -108,8 +110,10 @@ fingerprints:
   artifact_v16.7.html::setBuildCap: a900b8ffed6a
   artifact_v16.7.html::_setSize: 7fd09e01e64c
   artifact_v16.7.html::discCutoffMo: 5e942f8dd917
-  artifact_v16.7.html::buildLiveDemand: 296b1886774d
-  artifact_v16.7.html::_hzBuildDemandCore: b3b734ead3a6
+  artifact_v16.7.html::buildLiveDemand: fcbc97070915
+  artifact_v16.7.html::_hzBuildDemandCore: de531209af79
+  artifact_v16.7.html::_hzDemandGen: 625a066042de
+  artifact_v16.7.html::hzDemandBuildAsync: ae8d121bb869
   artifact_v16.7.html::hzDemandScope: 910b3f7073b6
   artifact_v16.7.html::computeSmoothAlloc: c256121c798f
   artifact_v16.7.html::applySmoothAlloc: 69c70cde748f
@@ -126,7 +130,7 @@ fingerprints:
   artifact_v16.7.html::aspAdjFactor: 719869ba1e05
   artifact_v16.7.html::buildBody: a57f1a107abd
   artifact_v16.7.html::_makeCatTotRow: 5d3d82f1593e
-verified_version: v28.171
+verified_version: v28.178
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -168,6 +172,7 @@ verified_version: v28.171
 - If data lags the calendar (CUR_MONTH earlier than the window start), the gap months are computed only to feed the chain (so next year's same month is not 0); they are not written to demand and draw no run-off stock. (source: buildLiveDemand)
 
 - Rebuild timing (implementation only, numbers identical): the demand overlay is fully rebuilt on load, data refresh and any config change (contribution model, tier weights, months, scope); a forecast edit (subcategory cell, row growth, SKU override, smoothing, Zalando/TikTok cell, Preorder/KA change, undo) rebuilds only the edited SKUs x country plus every SKU linked to them through a set BOM, and reuses the rest. Any doubt falls back to a full rebuild. (source: buildLiveDemand, hzDemandScope, _hzBuildDemandCore)
+- Where builds run (implementation only, numbers identical, v28.178): a FULL rebuild at load, SKU-data landing, data refresh, prewarm and cold DEMAND / BUY & MOVE / REPORTS / Auto Forecast entry runs off the main thread in a Web Worker (same engine code, copied inputs), or chunked on the main thread when the worker is unavailable or fails (a health event is logged). The result is published in one step only when complete; if any input changed during the build it is discarded and rebuilt. Edit (incremental) builds and other synchronous callers still run on the main thread; a synchronous build cancels an in-flight async one. Async results match the synchronous build exactly (?buildcheck=1 verifies). (source: hzDemandBuildAsync, _hzDemandGen, buildLiveDemand)
 
 ## SKU shares (buildSkuShares)
 - Share pool = every SKU in the subcategory available for that country/channel. The inline plan rows additionally drop discontinued SKUs with no stock, inbound or saved forecast; the buy feed does not. On the inline rows the pool is NOT narrowed by tier/status pills or search. (source: insertInlineSkuRows, buildLiveDemand)

@@ -18613,7 +18613,7 @@
   (function(){ var done=false, tries=0;
     // v28.143: the prewarm is a ~3 s main-thread block; started while the user is on a SUPPLY / PRODUCT / CLIENT / CONFIG page it froze
     // their first menu click (live 01-Oct: PO click at 6.4 s painted at 9.5 s). Stand down there — DEMAND / BUY build on first visit.
-    function warm(){ try{ if(typeof window.hzDemandOnScreen==='function' && !window.hzDemandOnScreen())return; if(!window.DEMAND_BUILT && typeof window.buildLiveDemand==='function')window.buildLiveDemand(); }catch(e){} }
+    function warm(){ try{ if(typeof window.hzDemandOnScreen==='function' && !window.hzDemandOnScreen())return; if(!window.DEMAND_BUILT){ if(typeof window.hzDemandBuildAsync==='function')window.hzDemandBuildAsync('prewarm').catch(function(){}); else if(typeof window.buildLiveDemand==='function')window.buildLiveDemand(); } }catch(e){} }   // v28.178 (Ben): async (worker / chunked), no ~3 s main-thread block
     var iv=setInterval(function(){ if(done)return;
       if(++tries>120){ done=true; clearInterval(iv); return; }                       // give up after ~60s
       if(window.DEMAND_BUILT){ done=true; clearInterval(iv); return; }               // already built (user opened DEMAND, or a load-time pass) → nothing to do
