@@ -1,3 +1,15 @@
+## v28.181 (Ben, branch review-fixes-2026-10-05): DEMAND ▸ Actions faster + live action status + mid-build catch-up
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `lib/ai-logic/actions.md` + `demand-engine.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- `/api/demand-actions` caches only the rows (lazy cache `'demand-actions'` in CACHE_DEPS, up to 90 s, stale on PO / PO-line edits, trading-calendar writes, other instances' edits); done / snooze / dismiss status is read live in one query. **Fixes a bug:** a just-dismissed or snoozed action could show as open for up to 90 s (old response cache held the status).
+- `/api/demand-actions/state` 1 query (was 2); sell-through reads parallel; `/api/demand/ssm-backtest` 6 reads in parallel (2.7 s to 0.5 s on sandbox). A `<head>` prefetch (`EARLY_DA`, next to `EARLY_SKU`) starts the Actions reads at boot when the URL is `#/demand/actions`.
+- Client: shared fetches; repeat open paints the last result at once and refreshes behind (repaint only on change); loading panel reports `slow_view` under `#/demand/actions`.
+- Demand build: when the Preorder/KA map lands mid-build (health log tries=2), only the changed slices are rebuilt instead of the whole build (checked identical to a full build). Build metric adds `moved` / `catchup`.
+- **Measured (sandbox):** first open 1.24 s to 0.66 s; repeat open 1.1 s to 0.15 s; cold boot onto Actions 6.2 s to 4.8 s; boot build 1.13 s to 0.73 s.
+- **Verified:** endpoints byte-identical; 242 Actions rows identical; buy 0/3,605 and demand 0/2,996 differ (lazy and `?lazysku=0`); dismiss / snooze lifecycle matches old status logic.
+- **Diviyaj:** keep the `EARLY_DA` `<head>` snippet if the harness rewrites `<head>`; the `'/api/demand-actions'` response-cache entry is gone (replaced by its own cache).
+
 ## v28.180 (Ben, branch review-fixes-2026-10-05): Ask Claude: rename conversations, livelier "working" indicator
 
 **Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). Client only; uses the existing `POST /api/assistant/conversations/:id {title}`. No migrations, no env vars.
