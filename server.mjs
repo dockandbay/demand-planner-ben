@@ -126,7 +126,7 @@ async function _fetchT(url, opts, ms) {
 // ms, timeout flag, and for KV the command name only. Never headers or bodies. DHL 404 = "tracking number not found" (normal).
 const HZ_INTEG_HOSTS = [[/fulfil\.io$/, 'fulfil'], [/^identity\.xero\.com$/, 'xero-token'], [/xero\.com$/, 'xero'], [/flexport\.com$/, 'flexport'], [/dhl\.com$/, 'dhl'], [/fedex\.com$/, 'fedex'],
   [/bladepro\.io$/, 'blade'], [/anthropic\.com$/, 'anthropic'], [/resend\.com$/, 'resend'], [/upstash\.io$/, 'kv'], [/drivehq\.com$/, 'drivehq'], [/dearsystems\.com$|cin7\.com$/, 'cin7']];
-const hzIdSeg = s => (/^(v\d{1,2}|\d{1,2}\.\d{1,2})$/.test(s)) ? s : (s.length > 24 || /\d/.test(s)) ? ':id' : s;   // keep API versions (v1, v2, 2.0)
+const hzIdSeg = s => (/^(v\d{1,2}|\d{1,2}\.\d{1,2})$/.test(s)) ? s : (s.length > 24 || /^\d+$/.test(s) || (/\d/.test(s) && s.length >= 5)) ? ':id' : s;   // ids -> :id; keeps API versions (v1, 2.0) and short names (3pl, b2b)
 function hzIntegNote(url, o, status, ms, timeout, msg) {
   try {
     let u; try { u = new URL(String(url)); } catch (_) { return; }
@@ -21490,7 +21490,7 @@ async function hzClientEvents(req, res, source, email) {
       const cnt = HZ_CE_AGG.has(e.kind) ? Math.max(1, Math.min(10000, Math.round(Number(e.count) || 1))) : 1;
       const ex = agg.get(k); if (ex) { ex.count += cnt; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
       let meta = null; if (e.meta && typeof e.meta === 'object') { try { const j = JSON.stringify(e.meta); if (j.length <= 1000) meta = e.meta; } catch (_) {} }
-      agg.set(k, { kind: e.kind, source, path, ms, message, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: cnt, meta });
+      agg.set(k, { kind: e.kind, source, path, ms, message, method: e.kind === 'api_failure' ? clip(e.method, 10) : null, status: (e.kind === 'api_failure' && e.status != null && Number.isInteger(Number(e.status)) && Number(e.status) >= 0 && Number(e.status) < 1000) ? Number(e.status) : null, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: cnt, meta });   // v28.162: client api_failure carries method + status
     }
     let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
     const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
@@ -21575,9 +21575,9 @@ async function hzHealthReportExtra(days) {
       'db_pool', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, max((meta->>'max_waiting')::int) max_waiting, (array_agg(message ORDER BY ts DESC))[1] message, max(ts) last_seen FROM ev WHERE kind = 'db_pool' GROUP BY path ORDER BY n DESC) x),
       'slow_q', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path sql, sum(count)::int n, max(ms) max_ms, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, (array_agg(meta->>'example' ORDER BY ts DESC))[1] example, max(ts) last_seen
         FROM ev WHERE kind = 'slow_query' GROUP BY path ORDER BY max_ms DESC LIMIT 25) x),
-      'pages', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, array_agg(DISTINCT source) sources, sum(count)::int visits, count(DISTINCT user_email)::int users, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s
+      'pages', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, array_agg(DISTINCT source) sources, sum(coalesce((meta->>'visits')::int, count))::int visits, count(DISTINCT user_email)::int users, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s
         FROM ev WHERE kind = 'page_view' GROUP BY path ORDER BY visits DESC LIMIT 30) x),
-      'page_users', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT user_email, sum(count)::int visits, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s, count(DISTINCT path)::int pages, max(ts) last_seen
+      'page_users', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT user_email, sum(coalesce((meta->>'visits')::int, count))::int visits, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s, count(DISTINCT path)::int pages, max(ts) last_seen
         FROM ev WHERE kind = 'page_view' AND user_email IS NOT NULL GROUP BY 1 ORDER BY active_s DESC LIMIT 30) x),
       'unvisited', (SELECT coalesce(json_agg(DISTINCT a.path), '[]') FROM planner.app_health_events a WHERE a.kind = 'page_view' AND a.ts >= now() - interval '60 days' AND NOT EXISTS (SELECT 1 FROM ev WHERE ev.kind = 'page_view' AND ev.path = a.path)),
       'red', (SELECT coalesce(json_agg(x ORDER BY x.ts DESC), '[]') FROM (SELECT id, ts, path, message, count n, meta FROM planner.app_health_events WHERE kind = 'red_alert' AND (ts >= now() - make_interval(days => $1::int) OR meta->>'pending_alert' = 'true') ORDER BY ts DESC LIMIT 50) x),
