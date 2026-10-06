@@ -29,6 +29,13 @@
 - **v28.157:** Jan-27 year-agnostic DEMAND UI (last-year lists, ASP, Exec Summary FY cards, FY strip, YoY loops all roll from CUR_MONTH; **0 / 320 buy rows differ, plan/exec render identical today**); catalogue Season + new Category dropdowns on one row with search; PRODUCT ▸ Reports / Config level-3 tabs moved into the left rail (`RAIL_L3MAP.product`); barcode picker shows assigned codes in search, greyed with "assigned to <SKU>", not selectable.
 - Still no new migration beyond 327, no new env vars, no server change in v28.157. Client files only plus the catalogue PDF route in v28.156.
 
+## Added 06-Oct (same branch): v28.158 to v28.159
+- **v28.158:** 1-month / 3-month trends on grand-total and category rows and the AI Insights payload/prompt are relative to the latest complete month (were hardcoded to May / 2025 / Jan-May 2026); fixes Insights sending past months as forecast. Client only.
+- **v28.159 Health log + weekly health email.** **Migration 328** (`planner.app_health_events`). New public script `/hz-health.js` and cron route `/api/cron/health-weekly` must be **added to your prod login-gate exemptions** (as the other crons). **n8n:** Schedule Trigger weekly, **Monday 08:00, timezone Australia/Sydney** → HTTP POST `https://horizon.dockandbay.com/api/cron/health-weekly`, header `x-webhook-secret`, body `{}`; test first with `{"dry_run":true}` (returns recipients, subject, html and the .md without sending). Recipients default ben@, diviyaj@, sarah@dockandbay.com (override via app_settings `health_report_recipients`). No new env vars.
+
+## Separate ask (not code): `cin7_inbound_direct` n8n job
+Cin7 is decommissioned; this job still rebuilds `planner.inbound_shipments` from Cin7's frozen data every 6 h (2,016 lines / 628,816 units, last run 05-Oct 23:00 UTC). Ben OK'd disabling it. **Before disabling, please confirm it cannot empty the table** (an empty `inbound_shipments` = zero inbound in the buy plan = huge over-buy). Replacement (Fulfil-based inbound feed) is being scoped on Ben's side.
+
 ## Verification done on the sandbox (details in CHANGES.md)
 - Buy plan: see the comparison line at the end of this note.
 - Demand total identical across 4 rebuilds (1,786,072); DEMAND search no longer changes the buy (0 rows).
