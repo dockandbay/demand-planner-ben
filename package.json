@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node tests/portal-inplace.cjs",
-    "bump": "npm version minor --no-git-tag-version"
+    "bump": "npm version minor --no-git-tag-version",
+    "ai-logic:check": "node scripts/ai-logic-check.cjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
