@@ -4778,6 +4778,7 @@ async function xeroTenant(region) {
   await xeroPutStore(region, { tenant_id: c.tenantId, tenant_name: c.tenantName || '', mode: 'custom', connected_at: new Date().toISOString() });
   return { id: c.tenantId, name: c.tenantName };
 }
+const _xeroCallN = { get: 0, write: 0, since: new Date().toISOString() };
 async function xeroFetch(region, path, opts) {
   region = xeroRegion(region); opts = opts || {}; const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
   const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }
@@ -4785,6 +4786,7 @@ async function xeroFetch(region, path, opts) {
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
+    _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;   // v28.183 (Ben): per-instance call counter (bills-sync status)
     r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
     const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET');   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
     if (_retryable && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
@@ -5182,13 +5184,14 @@ async function resolvePoLinks(po, poRow) {
     // to the Flexport contact) and mis-linked it. Only the LEADING token counts now.
     const leadMatch = (str) => { const first = String(str || '').trim().split(/[\s/]+/)[0] || '';
       return first === poStr || (first.startsWith(poStr) && /^\d+$/.test(first.slice(poStr.length))); };   // PO, or PO + a purely-numeric deposit/balance suffix (PO-x2) — not a dash-variant like PO-x-FBA
-    const inv = ((j && j.Invoices) || []).filter(v => leadMatch(v.Reference) || leadMatch(v.InvoiceNumber));
+    // v28.183 (Ben): a VOIDED / DELETED bill is never a link (the live search returns every status; it used to pick a voided copy)
+    const inv = ((j && j.Invoices) || []).filter(v => !xbDead(v.Status) && (leadMatch(v.Reference) || leadMatch(v.InvoiceNumber)));
     if (inv.length) {
       const primary = inv[0];
       const pref = primary.InvoiceNumber || primary.Reference || primary.InvoiceID;
       out.xero = { external_id: primary.InvoiceID, external_ref: String(pref) + (inv.length > 1 ? ' +' + (inv.length - 1) + ' more' : ''),
         url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + primary.InvoiceID,
-        status: 'linked', note: (inv.length > 1 ? inv.length + ' bills (' + region.toUpperCase() + ')' : region.toUpperCase()) };
+        status: 'linked', note: (inv.length > 1 ? inv.length + ' bills (' + region.toUpperCase() + ')' : region.toUpperCase()), multi: inv.length > 1 };
     } else {
       out.xero = { external_id: null, external_ref: null, url: null, status: 'unknown', note: 'No bill in Xero ' + region.toUpperCase() + ' with Reference ' + po };
     }
@@ -5202,8 +5205,10 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
     const po = String(req.params.po || '');
     const poRow = (await pool.query(`SELECT po, status, production_status, country_code, branch, flexport_reference, shipment_ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO not found' });
-    let cached = (await pool.query(`SELECT system, external_id, external_ref, url, status, note, found_by, found_at, updated_at FROM planner.po_links WHERE po=$1`, [po])).rows;
     const doResolve = String(req.query.refresh || '') === '1';   // read from the DB by default (fast); only hit the live APIs on an explicit refresh
+    // v28.183 (Ben): a link to a VOIDED/DELETED bill heals first: from the cache on a normal read, re-checked live in Xero on refresh.
+    let heal = null; try { heal = await xeroHealPoLinks([po], { live: doResolve }); if (heal.healed.length || heal.flagged.some(f => f.changed)) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); } } catch (e) { console.warn('[po-links] heal failed for ' + po + ': ' + e.message); }
+    let cached = (await pool.query(`SELECT system, external_id, external_ref, url, status, note, found_by, found_at, updated_at FROM planner.po_links WHERE po=$1`, [po])).rows;
     if (doResolve) {
       const r = await resolvePoLinks(po, poRow);
       for (const sys of PO_LINK_SYSTEMS) {
@@ -5211,6 +5216,9 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
         // Don't clobber a manual override with an auto 'unknown'
         const prev = cached.find(c => c.system === sys);
         if (prev && prev.found_by === 'manual' && v.status !== 'linked') continue;
+        // v28.183 (Ben): a voided link waiting for a choice is not overwritten by a guess between several bills (or by nothing)
+        if (sys === 'xero' && prev && prev.status === 'action' && String(prev.note || '').startsWith(XB_VOID_NOTE) && (v.status !== 'linked' || v.multi)) continue;
+        if (sys === 'xero' && prev && prev.found_by === 'auto-heal' && prev.external_id === v.external_id) continue;   // keep the heal's audit note
         await pool.query(
           `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,'auto',now(),now())
@@ -5225,9 +5233,12 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
     const actions = [];
     // RULE: a SHIPPED PO with no Xero bill is an open action.
     const xr = byS.xero;
-    if (shipped && (!xr || xr.status !== 'linked')) actions.push({ system: 'xero', level: 'action', msg: 'PO ' + po + ' is ' + (poRow.status || 'shipped') + ' but has no linked bill in Xero' });
+    const xVoid = !!(xr && xr.status === 'action' && String(xr.note || '').startsWith(XB_VOID_NOTE));   // v28.183 (Ben)
+    if (xVoid) actions.push({ system: 'xero', level: 'action', msg: 'The Xero bill linked to ' + po + ' (' + (xr.external_ref || xr.external_id) + ') was voided in Xero: choose the right bill (change bill)' });
+    else if (shipped && (!xr || xr.status !== 'linked')) actions.push({ system: 'xero', level: 'action', msg: 'PO ' + po + ' is ' + (poRow.status || 'shipped') + ' but has no linked bill in Xero' });
     const systems = PO_LINK_SYSTEMS.map(sys => Object.assign({ system: sys, external_id: null, external_ref: null, url: null, status: 'none', note: null, found_by: null, found_at: null }, byS[sys] || {}));
-    res.set('Cache-Control', 'no-store').json({ po, status: poRow.status, shipped, resolved: doResolve, systems, actions });
+    res.set('Cache-Control', 'no-store').json({ po, status: poRow.status, shipped, resolved: doResolve, systems, actions,
+      healed: heal && heal.healed.length ? heal.healed : undefined, voided_link: xVoid || undefined });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Manual override — paste/clear a link the resolver can't find. { system, external_id?, external_ref?, url? }
@@ -5238,6 +5249,10 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
     if (!PO_LINK_SYSTEMS.includes(sys)) return res.status(400).json({ error: 'system must be one of ' + PO_LINK_SYSTEMS.join(', ') });
     const eid = (b.external_id || '').toString().trim() || null, eref = (b.external_ref || '').toString().trim() || null, url = (b.url || '').toString().trim() || null;
     if (!eid && !url) { await pool.query(`DELETE FROM planner.po_links WHERE po=$1 AND system=$2 AND found_by='manual'`, [po, sys]); return res.json({ ok: true, cleared: true }); }
+    if (sys === 'xero' && eid) {   // v28.183 (Ben): never link a bill the cache knows is VOIDED / DELETED
+      const bs = (await pool.query(`SELECT status FROM planner.xero_bills WHERE invoice_id=$1`, [eid])).rows[0];
+      if (bs && xbDead(bs.status)) return res.status(409).json({ error: 'That Xero bill is ' + String(bs.status).toUpperCase() + ': choose a live bill' });
+    }
     await pool.query(
       `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,'linked','manual link','manual',now(),now())
@@ -5248,23 +5263,27 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
 });
 
 // v28.172 (Ben): search Xero bills to (re)link a PO (PO drawer ▸ MASTER DATA & DOCS ▸ Linked records ▸ change). Reads the
-// LOCAL planner.xero_bills cache (kept fresh by syncXeroBills), never live Xero. Matches bill number / reference / supplier;
-// each hit says which PO(s) it is already linked to, so a relink can't silently double-link a bill. Excludes DELETED/VOIDED.
+// LOCAL planner.xero_bills cache (kept fresh by syncXeroBills). Matches bill number / reference / supplier;
+// each hit says which PO(s) it is already linked to, so a relink can't silently double-link a bill.
+// v28.183 (Ben): VOIDED / DELETED bills are listed too (after the live ones, flagged dead: the picker strikes them through
+// and won't link them), and the PO's current bill is always included, so a voided current link is visible. The picker then
+// re-checks the listed bills live (POST /api/supply/xero/bills/verify).
 app.get('/api/supply/xero/bills/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim(), po = String(req.query.po || '').trim();
     if (q.length < 2) return res.json({ ok: true, bills: [] });
     const terms = q.split(/\s+/).filter(Boolean).slice(0, 5).map(t => '%' + t.replace(/[%_\\]/g, m => '\\' + m) + '%');
     const where = terms.map((_, i) => `(b.invoice_number ILIKE $${i + 1} OR b.reference ILIKE $${i + 1} OR b.contact_name ILIKE $${i + 1})`).join(' AND ');
+    const n = terms.length;
     const rows = (await pool.query(
       `SELECT b.invoice_id, b.region, b.invoice_number, b.reference, b.contact_name, b.total, b.amount_due, b.currency_code, b.status, to_char(b.invoice_date,'YYYY-MM-DD') invoice_date,
-              (SELECT array_agg(l.po ORDER BY l.po) FROM planner.po_links l WHERE l.system='xero' AND l.external_id=b.invoice_id AND l.status='linked') linked_pos
+              (SELECT array_agg(l.po ORDER BY l.po) FROM planner.po_links l WHERE l.system='xero' AND l.external_id=b.invoice_id AND l.status IN ('linked','action')) linked_pos
          FROM planner.xero_bills b
-        WHERE upper(coalesce(b.status,'')) NOT IN ('DELETED','VOIDED') AND ${where}
-        ORDER BY (b.invoice_number ILIKE $${terms.length + 1} OR b.reference ILIKE $${terms.length + 1}) DESC, b.invoice_date DESC NULLS LAST LIMIT 40`,
-      [...terms, '%' + (po || q) + '%'])).rows;
+        WHERE (${where}) OR b.invoice_id = (SELECT external_id FROM planner.po_links WHERE po=$${n + 2} AND system='xero')
+        ORDER BY (upper(coalesce(b.status,'')) IN ('DELETED','VOIDED')), (b.invoice_number ILIKE $${n + 1} OR b.reference ILIKE $${n + 1}) DESC, b.invoice_date DESC NULLS LAST LIMIT 40`,
+      [...terms, '%' + (po || q) + '%', po])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, bills: rows.map(r => ({ id: r.invoice_id, region: String(r.region || '').toUpperCase(), number: r.invoice_number, reference: r.reference,
-      contact: r.contact_name, total: Number(r.total) || 0, due: Number(r.amount_due) || 0, currency: r.currency_code, status: r.status, date: r.invoice_date,
+      contact: r.contact_name, total: Number(r.total) || 0, due: Number(r.amount_due) || 0, currency: r.currency_code, status: r.status, dead: xbDead(r.status), date: r.invoice_date,
       url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.invoice_id, linked_pos: (r.linked_pos || []).filter(x => x !== po), this_po: (r.linked_pos || []).includes(po) })) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -5448,6 +5467,10 @@ async function computeXeroRunPlan(run, ctx) {
   // Loan (901) account for every org this run touches — the paying org (cross-org bill lines) and each home org.
   const orgsNeeded = new Set([paying]); payLines.forEach(l => orgsNeeded.add(homeOfLine(l)));
   const loanByOrg = {}; for (const o of orgsNeeded) loanByOrg[o] = await _xeroLoanAcct(o, ctx && ctx.xget);
+  // v28.183 (Ben): the linked bills are re-read live first (same GETs the amount-due check below needed anyway); a link to a
+  // VOIDED/DELETED bill heals to the PO's single live replacement, or turns into 'action' (blocks the post: choose a bill).
+  let heal = { healed: [], flagged: [], fresh: {} };
+  if (poRefs.length) { try { heal = await xeroHealPoLinks(poRefs, { live: true, xget: _xget }); if (heal.healed.length || heal.flagged.some(f => f.changed)) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); } } catch (e) { console.warn('[xero-plan] link heal failed: ' + e.message); } }
   const linkRows = poRefs.length ? (await pool.query(`SELECT po, external_id, external_ref, url FROM planner.po_links WHERE system='xero' AND status='linked' AND po = ANY($1::text[])`, [poRefs])).rows : [];
   const linkByPo = {}; linkRows.forEach(r => { linkByPo[r.po] = r; });
   // Production tracking options live in the PAYING org (the supplier-payment bill is there; only same-org deposits carry tracking).
@@ -5534,17 +5557,18 @@ async function computeXeroRunPlan(run, ctx) {
   const byOrgIds = {};
   outLines.filter(l => l.will_pay).forEach(l => { (byOrgIds[l.settle_org] = byOrgIds[l.settle_org] || new Set()).add(l.linked_bill.id); });
   const dueById = {};
+  for (const id of Object.keys(heal.fresh || {})) { const f = heal.fresh[id]; dueById[id + '|' + f.region] = { due: f.due, status: f.status, ccy: f.ccy, rate: f.rate }; }   // v28.183: already read live by the heal
   for (const org of Object.keys(byOrgIds)) {
-    const ids = [...byOrgIds[org]];
+    const ids = [...byOrgIds[org]].filter(id => !dueById[id + '|' + org]);
     for (let i = 0; i < ids.length; i += 40) {
       const chunk = ids.slice(i, i + 40);
-      try { const jb = await _xget(org, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
+      try { const jb = await _xget(org, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); ((jb && jb.Invoices) || []).forEach(v => { dueById[v.InvoiceID + '|' + org] = { due: Number(v.AmountDue) || 0, status: v.Status, ccy: v.CurrencyCode, rate: (v.CurrencyRate != null ? Number(v.CurrencyRate) : null) }; }); } catch (e) {}
     }
   }
   outLines.forEach(l => {
     if (l.will_pay) {
-      const b = dueById[l.linked_bill.id];
-      if (b) { l.bill_due = b.due; l.bill_status = b.status; l.bill_ccy = b.ccy; l.bill_rate = b.rate; l.pay_ok = (Number(l.amount) || 0) <= b.due + 0.01; }
+      const b = dueById[l.linked_bill.id + '|' + l.settle_org];   // v28.183: keyed per org (a bill read in another org can't be paid from this one)
+      if (b) { l.bill_due = b.due; l.bill_status = b.status; l.bill_ccy = b.ccy; l.bill_rate = b.rate; l.pay_ok = !xbDead(b.status) && (Number(l.amount) || 0) <= b.due + 0.01; }   // v28.183: a voided bill can't take a payment
       else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted, or wrong org) → can't validate
     }
   });
@@ -5581,7 +5605,11 @@ async function computeXeroRunPlan(run, ctx) {
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
   const noBill = outLines.filter(l => !l.linked_bill && !l.blocked).map(l => l.reference);
   if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
-  return { ok: true, region: paying, paying_org: paying, supplier: run.supplier,
+  // v28.183 (Ben): voided linked bills. Healed = relinked to the PO's single live bill (said so); unresolved = blocks the post.
+  const voidedLinks = (heal.flagged || []).filter(f => payLines.some(l => String(l.reference || '') === f.po));
+  if (heal.healed && heal.healed.length) checks.push({ level: 'warn', msg: 'Relinked ' + heal.healed.map(h => h.po + ' to ' + h.to_ref + ' (' + String(h.region || '').toUpperCase() + ')').join(', ') + ': the previously linked bill was voided in Xero.' });
+  if (voidedLinks.length) checks.push({ level: 'error', msg: 'Linked Xero bill voided, choose the right bill (PO drawer > Linked records > change bill): ' + voidedLinks.map(f => f.po + ' (' + (f.candidates ? f.candidates + ' candidate bills' : 'no live bill found') + ')').join(', ') });
+  return { ok: true, region: paying, paying_org: paying, supplier: run.supplier, voided_links: voidedLinks, healed_links: heal.healed || [],
     contact: { ok: !!contact.ok, id: contact.ContactID || null, name: contact.ok ? contact.Name : (contact.target || ''), target: contact.target || '', configured: !!contact.configured, lookup_failed: !!contact.lookup_failed, error: contact.ok ? null : contact.error },   // v28.176 (Ben)
     reference: ref, currency: String(run.base_ccy || 'USD').toUpperCase(), run_key: run.run_key || null, date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
 }
@@ -5599,6 +5627,7 @@ function _xeroPlanIssues(plan) {
   const block = [], warn = [], add = (a, m) => { if (m && !a.includes(m)) a.push(m); };
   const _n = v => (Number(v) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (plan.contact && !plan.contact.ok) add(block, plan.contact.error || ("Xero contact '" + (plan.contact.target || '') + "' not found in " + String(plan.paying_org || '').toUpperCase()));   // v28.176 (Ben): no contact = no post
+  (plan.voided_links || []).forEach(v => add(block, v.po + ': linked Xero bill ' + (v.bill_ref || '') + ' was voided, choose the right bill (PO drawer > Linked records)'));   // v28.183 (Ben)
   (plan.lines || []).forEach(l => {
     const po = l.reference || '(no ref)', isDep = /deposit/i.test(String(l.type || ''));
     if (l.blocked) add(block, po + ': ' + l.blocked);
@@ -5710,6 +5739,8 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     // v28.176 (Ben): the bill references the supplier's Xero contact by ContactID (fresh lookup). Not found = nothing posted
     // (posting by Name would make Xero create a duplicate contact and undo Ben's merges).
     if (!plan.contact || !plan.contact.ok || !plan.contact.id) return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: (plan.contact && plan.contact.error) || 'Xero contact not resolved: nothing posted' });
+    // v28.183 (Ben): a PO whose linked bill was voided and has no single replacement: nothing posted until a bill is chosen.
+    if ((plan.voided_links || []).length) return res.status(400).json({ code: 'XERO_BILL_VOIDED', error: 'Linked Xero bill voided, nothing posted: choose the right bill for ' + plan.voided_links.map(v => v.po).join(', ') + ' (PO drawer > Linked records > change bill)' });
     // v28.134: PO-bill payments settle from the line's coded account (602.1 / production account), never the USD bank.
     // Refuse the whole post (nothing written) if any same-org payment can't resolve a payments-enabled account.
     const badSettle = plan.lines.filter(l => l.will_pay && l.settle_from === 'account' && !l.settle_account_id);
@@ -6058,52 +6089,345 @@ app.get('/api/supply/xero/exceptions', async (req, res) => {
 // so the link resolver and the Exceptions reconciliation read amounts/refs from Postgres instead of hitting Xero live
 // every run (was a ~3-min full sweep + a ~22s by-id refetch). First run per region (no watermark) is a full pull.
 const _xBillDate = s => { const m = /\/Date\((\d+)/.exec(String(s || '')); if (m) return new Date(Number(m[1])); const t = String(s || ''); return /^\d{4}-\d{2}-\d{2}/.test(t) ? new Date(t.length > 10 ? (t.slice(0, 19) + 'Z') : (t + 'T00:00:00Z')) : null; };
-async function syncXeroBills(opts) {
+// v28.183 (Ben): every bill list call names ALL statuses (Xero's default list does include VOIDED/DELETED today, verified
+// 06-Oct-26, but the explicit Statuses param keeps a void from ever being filtered out) and reads 1000 bills per page
+// (pageSize; was the 100 default, so a full UK pull is 9 calls instead of 88).
+const XB_STATUSES = 'DRAFT,SUBMITTED,AUTHORISED,PAID,VOIDED,DELETED';
+const XB_PAGE = 1000;
+const xbDead = s => /^(VOIDED|DELETED)$/i.test(String(s || ''));
+const xbUrl = id => 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + id;
+// Upsert Xero ACCPAY invoices (API shape) into planner.xero_bills in ONE multi-row statement. Returns how many rows are new
+// or changed (status, amount due, or UpdatedDateUTC differ from the cached row), so callers can tell "nothing changed".
+async function xbUpsert(inv, reg) {
+  inv = (inv || []).filter(v => v && v.InvoiceID && (!v.Type || v.Type === 'ACCPAY'));
+  if (!inv.length) return 0;
+  const prev = new Map((await pool.query(`SELECT invoice_id, status, amount_due, updated_utc FROM planner.xero_bills WHERE invoice_id = ANY($1::text[])`, [inv.map(v => v.InvoiceID)])).rows.map(r => [r.invoice_id, r]));
+  const vals = [], params = []; let pi = 0, changed = 0;
+  for (const v of inv) {
+    const idt = _xBillDate(v.DateString || v.Date), ddt = _xBillDate(v.DueDateString || v.DueDate), udt = _xBillDate(v.UpdatedDateUTC);
+    const p = prev.get(v.InvoiceID);
+    if (!p || String(p.status || '') !== String(v.Status || '') || Math.abs((Number(p.amount_due) || 0) - (Number(v.AmountDue) || 0)) > 0.004 || (p.updated_utc ? new Date(p.updated_utc).getTime() : 0) !== (udt ? udt.getTime() : 0)) changed++;
+    vals.push('(' + Array.from({ length: 13 }, (_, k) => '$' + (pi + k + 1)).join(',') + ',now())');
+    params.push(v.InvoiceID, reg, v.InvoiceNumber || null, v.Reference || null, (v.Contact && v.Contact.Name) || null, Number(v.Total) || 0, Number(v.AmountPaid) || 0, Number(v.AmountDue) || 0, v.CurrencyCode || null, v.Status || null,
+      idt ? idt.toISOString().slice(0, 10) : null, ddt ? ddt.toISOString().slice(0, 10) : null, udt ? udt.toISOString() : null);
+    pi += 13;
+  }
+  await pool.query(
+    `INSERT INTO planner.xero_bills (invoice_id,region,invoice_number,reference,contact_name,total,amount_paid,amount_due,currency_code,status,invoice_date,due_date,updated_utc,synced_at)
+     VALUES ${vals.join(',')}
+     ON CONFLICT (invoice_id) DO UPDATE SET region=excluded.region,invoice_number=excluded.invoice_number,reference=excluded.reference,contact_name=excluded.contact_name,total=excluded.total,amount_paid=excluded.amount_paid,amount_due=excluded.amount_due,currency_code=excluded.currency_code,status=excluded.status,invoice_date=excluded.invoice_date,due_date=excluded.due_date,updated_utc=excluded.updated_utc,synced_at=now()`,
+    params);
+  return changed;
+}
+async function _xbSetting(key, value) { await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [key, value]); }
+// v28.183 (Ben): INCREMENTAL sync (If-Modified-Since, which Xero reads as UTC: verified 06-Oct-26 at the minute boundary).
+// Root-cause review of the 06-Oct "stale" reports: the live hourly cron (n8n, :20 past) was healthy. The Lixin bill
+// 6ce7fe3f was CREATED in Xero UK on 06-Oct 05:02 UTC (by Cin7 Omni, bill date 25-Sep) and cached at 05:20; the UK
+// PO-57AUNL1 void (8849012a) happened 09:08 UTC and was cached at 09:20. The 30-Sep / missing-bill state Ben saw is the
+// SANDBOX cache, whose last sync was 30-Sep (no cron there). So the gap is the up-to-1-hour window between syncs plus
+// decisions that trusted the cache: closed by the live checks + auto-heal below and the sync-on-visit. Hardening here:
+// (1) a run that hits the page cap no longer jumps the watermark to its start (that would have skipped the rest of the
+// backlog for good): it saves the high-water of what it processed and the next run resumes; (2) the watermark keeps a
+// 5-minute overlap behind the run start, so a bill Xero commits with an UpdatedDateUTC just before the start is still read.
+const XB_WM_OVERLAP_MS = 5 * 60 * 1000;
+async function _syncXeroBillsRun(opts) {
   opts = opts || {};
-  const out = { uk: { fetched: 0, upserted: 0 }, au: { fetched: 0, upserted: 0 } };
-  for (const reg of ['uk', 'au']) {
+  const out = { uk: { fetched: 0, upserted: 0, changed: 0 }, au: { fetched: 0, upserted: 0, changed: 0 } };
+  for (const reg of XERO_REGIONS) {
     let watermark = null;
     if (!opts.full) { try { const w = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['xero_bills_sync_' + reg])).rows[0]; watermark = w && w.value ? w.value : null; } catch (e) { /* first run */ } }
     const startedAt = new Date();
-    let progressWm = null;   // v28.120 (Diviyaj): high-water of updated_utc actually processed — saved even on error so a 429 mid-pull resumes, not restarts
+    let progressWm = null, complete = false;   // v28.120 (Diviyaj): high-water of updated_utc actually processed — saved even on error so a 429 mid-pull resumes, not restarts
     try {
-      for (let page = 1; page <= 120; page++) {
+      for (let page = 1; page <= 30; page++) {   // 30 x 1000 bills per run; more = the next run resumes from progressWm
         const headers = watermark ? { 'If-Modified-Since': watermark } : {};
-        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY"') + '&order=UpdatedDateUTC%20ASC&page=' + page, { headers });
-        const inv = (j && j.Invoices) || []; if (!inv.length) break;
-        out[reg].fetched += inv.length;
-        // batch the whole page into ONE multi-row upsert (was one round-trip per bill → the full first sync crawled)
-        const vals = [], params = []; let pi = 0;
-        for (const v of inv) {
-          const idt = _xBillDate(v.DateString || v.Date), ddt = _xBillDate(v.DueDateString || v.DueDate), udt = _xBillDate(v.UpdatedDateUTC);
-          vals.push('($' + (pi + 1) + ',$' + (pi + 2) + ',$' + (pi + 3) + ',$' + (pi + 4) + ',$' + (pi + 5) + ',$' + (pi + 6) + ',$' + (pi + 7) + ',$' + (pi + 8) + ',$' + (pi + 9) + ',$' + (pi + 10) + ',$' + (pi + 11) + ',$' + (pi + 12) + ',$' + (pi + 13) + ',now())');
-          params.push(v.InvoiceID, reg, v.InvoiceNumber || null, v.Reference || null, (v.Contact && v.Contact.Name) || null, Number(v.Total) || 0, Number(v.AmountPaid) || 0, Number(v.AmountDue) || 0, v.CurrencyCode || null, v.Status || null,
-            idt ? idt.toISOString().slice(0, 10) : null, ddt ? ddt.toISOString().slice(0, 10) : null, udt ? udt.toISOString() : null);
-          pi += 13;
+        const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY"') + '&Statuses=' + XB_STATUSES + '&order=UpdatedDateUTC%20ASC&pageSize=' + XB_PAGE + '&page=' + page, { headers });
+        const inv = (j && j.Invoices) || [];
+        if (inv.length) {
+          out[reg].fetched += inv.length;
+          out[reg].changed += await xbUpsert(inv, reg);
+          out[reg].upserted += inv.length;
+          { const _lu = inv[inv.length - 1] && inv[inv.length - 1].UpdatedDateUTC; const _d = _lu ? _xBillDate(_lu) : null; if (_d) progressWm = _d.toISOString().slice(0, 19); }
         }
-        await pool.query(
-          `INSERT INTO planner.xero_bills (invoice_id,region,invoice_number,reference,contact_name,total,amount_paid,amount_due,currency_code,status,invoice_date,due_date,updated_utc,synced_at)
-           VALUES ${vals.join(',')}
-           ON CONFLICT (invoice_id) DO UPDATE SET region=excluded.region,invoice_number=excluded.invoice_number,reference=excluded.reference,contact_name=excluded.contact_name,total=excluded.total,amount_paid=excluded.amount_paid,amount_due=excluded.amount_due,currency_code=excluded.currency_code,status=excluded.status,invoice_date=excluded.invoice_date,due_date=excluded.due_date,updated_utc=excluded.updated_utc,synced_at=now()`,
-          params);
-        out[reg].upserted += inv.length;
-        { const _lu = inv[inv.length - 1] && inv[inv.length - 1].UpdatedDateUTC; const _d = _lu ? _xBillDate(_lu) : null; if (_d) progressWm = _d.toISOString().slice(0, 19); }
-        if (inv.length < 100) break;
+        if (inv.length < XB_PAGE) { complete = true; break; }
       }
-      // advance the watermark to this sync's start (a small overlap next run is harmless — the upsert is idempotent)
-      await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_bills_sync_' + reg, startedAt.toISOString().slice(0, 19)]);
+      if (complete) {
+        await _xbSetting('xero_bills_sync_' + reg, new Date(startedAt.getTime() - XB_WM_OVERLAP_MS).toISOString().slice(0, 19));
+        await _xbSetting('xero_bills_synced_at_' + reg, new Date().toISOString());
+      } else { out[reg].truncated = true; if (progressWm) await _xbSetting('xero_bills_sync_' + reg, progressWm); }
     } catch (e) { out[reg].error = e.message;
       // v28.120 (Diviyaj): persist how far we got so the next run resumes via If-Modified-Since instead of pulling from page 1 again.
-      if (progressWm) { try { await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, ['xero_bills_sync_' + reg, progressWm]); } catch (_) {} }
+      if (progressWm) { try { await _xbSetting('xero_bills_sync_' + reg, progressWm); } catch (_) {} }
     }
   }
+  out.changed = out.uk.changed + out.au.changed;
   out.at = new Date().toISOString();
+  return out;
+}
+// Single-flight: the cron, the Payments pages (sync-on-visit), "Sync now" and the resolvers share one run per instance;
+// a caller arriving mid-run waits for that run. After every run: heal links to voided bills (cache only, no Xero calls)
+// and record the voided-link sanity finding (App health log + weekly report).
+let _xbSyncP = null, _xbLast = null;
+async function syncXeroBills(opts) {
+  opts = opts || {};
+  if (_xbSyncP) return _xbSyncP;
+  _xbSyncP = (async () => {
+    const r = await _syncXeroBillsRun(opts);
+    try { const h = await xeroHealAllVoided(); r.healed = h.healed.length; r.flagged = h.flagged.length; } catch (e) { r.heal_error = e.message; }
+    try { const s = await xeroVoidLinkFinding(); r.voided_links = s ? s.meta.n : 0; if (s) await pool.query(HZ_FINDINGS_UPSERT, [JSON.stringify([s]), APP_VERSION]); } catch (e) { console.warn('[xero-bills] sanity check failed: ' + e.message); }
+    if (r.changed || r.healed || r.flagged) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); xeroPreflightBust(); }
+    _xbLast = r; return r;
+  })().finally(() => { _xbSyncP = null; });
+  return _xbSyncP;
+}
+async function xbLastSync() {
+  const rows = (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key IN ('xero_bills_synced_at_uk','xero_bills_synced_at_au','xero_bills_sync_uk','xero_bills_sync_au')`)).rows;
+  const m = {}; rows.forEach(r => { m[r.key] = r.value; });
+  const out = {};
+  for (const reg of XERO_REGIONS) {   // completed-at stamp (v28.183); older deploys only have the watermark (UTC, no zone)
+    const at = m['xero_bills_synced_at_' + reg] || (m['xero_bills_sync_' + reg] ? m['xero_bills_sync_' + reg] + 'Z' : null);
+    out[reg] = at && !isNaN(Date.parse(at)) ? new Date(at).toISOString() : null;
+  }
+  const ts = XERO_REGIONS.map(r => out[r] ? Date.parse(out[r]) : 0);
+  out.oldest = ts.some(t => !t) ? null : new Date(Math.min(...ts)).toISOString();
   return out;
 }
 app.post('/api/supply/xero/bills-sync', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
-  try { const r = await syncXeroBills({ full: String(req.query.full || '') === '1' }); res.json(Object.assign({ ok: true }, r)); }
+  try { const r = await syncXeroBills({ full: String(req.query.full || '') === '1' }); res.json(Object.assign({ ok: true, last: await xbLastSync() }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.183 (Ben): SYNC ON VISIT. The Payments Report and Xero payments pages call this when they open: an incremental sync
+// runs only when the last completed sync is older than 12 hours (the hourly cron normally keeps it fresher), never twice at
+// once (single-flight; a visitor arriving mid-run just waits for it). The page never waits on it: it fires this
+// asynchronously and refreshes its rows / badges when changed > 0. Any signed-in user may trigger it (it only reads Xero).
+const XB_VISIT_MAX_AGE_MS = 12 * 3600 * 1000;
+app.post('/api/supply/xero/bills-sync-visit', async (req, res) => {
+  try {
+    const last = await xbLastSync();
+    const due = !last.oldest || Date.now() - Date.parse(last.oldest) > XB_VISIT_MAX_AGE_MS;
+    if (!due && !_xbSyncP) return res.set('Cache-Control', 'no-store').json({ ok: true, ran: false, running: false, last });
+    const joined = !!_xbSyncP;
+    const r = await syncXeroBills({});
+    res.set('Cache-Control', 'no-store').json({ ok: true, ran: true, joined, changed: r.changed || 0, healed: r.healed || 0, flagged: r.flagged || 0, errors: XERO_REGIONS.filter(g => r[g] && r[g].error).map(g => g.toUpperCase() + ': ' + r[g].error), last: await xbLastSync() });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/xero/bills-sync/status', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, running: !!_xbSyncP, last: await xbLastSync(), xero_calls: _xeroCallN, last_result: _xbLast ? { at: _xbLast.at, changed: _xbLast.changed || 0, healed: _xbLast.healed || 0, flagged: _xbLast.flagged || 0 } : null }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── v28.183 (Ben): FULL RESYNC (CONFIG ▸ Xero ▸ Xero bills cache ▸ Resync all bills) ───────────────────────────────────
+// Re-reads EVERY ACCPAY bill per org (all statuses, 1000 per page, ordered by InvoiceID so paging is stable while bills
+// change), upserting as it goes; xeroFetch backs off on 429. Progress is saved in app_settings xero_bills_resync_state
+// (the page polls it). A cached bill the resync did not see is pruned ONLY when the org's set was complete (bills seen ==
+// Xero's pagination.itemCount, no error, no page cap) and only if no po_link points at it; otherwise nothing is deleted.
+// One run at a time (in-process single-flight + a 3-minute heartbeat across instances). Logs etl_runs 'xero_bills_full_resync'.
+const XB_RESYNC_KEY = 'xero_bills_resync_state';
+let _xbResyncP = null;
+async function _xbResyncState() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XB_RESYNC_KEY])).rows[0]; return r && r.value ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+async function xeroBillsFullResync(by) {
+  const st = { status: 'running', by: by || null, started_at: new Date().toISOString(), heartbeat: new Date().toISOString(), orgs: {}, calls: 0 };
+  const save = async () => { st.heartbeat = new Date().toISOString(); try { await _xbSetting(XB_RESYNC_KEY, JSON.stringify(st)); } catch (_) {} };
+  await save();
+  try {
+    for (const reg of XERO_REGIONS) {
+      const o = st.orgs[reg] = { page: 0, pages: null, total: null, seen: 0, changed: 0, complete: false, pruned: 0, kept_linked: 0 };
+      const t0 = (await pool.query(`SELECT now() t`)).rows[0].t;
+      try {
+        for (let page = 1; page <= 60; page++) {
+          const j = await xeroFetch(reg, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY"') + '&Statuses=' + XB_STATUSES + '&order=InvoiceID&pageSize=' + XB_PAGE + '&page=' + page);
+          st.calls++;
+          const inv = (j && j.Invoices) || [], pg = (j && j.pagination) || {};
+          if (pg.pageCount != null) o.pages = Number(pg.pageCount); if (pg.itemCount != null) o.total = Number(pg.itemCount);
+          o.page = page; o.seen += inv.length; o.changed += await xbUpsert(inv, reg);
+          await save();
+          if (inv.length < XB_PAGE || (o.pages != null && page >= o.pages)) { o.complete = o.total == null ? inv.length < XB_PAGE : o.seen >= o.total; break; }
+        }
+      } catch (e) { o.error = e.message; o.complete = false; }
+      if (o.complete) {
+        const d = await pool.query(`DELETE FROM planner.xero_bills b WHERE b.region=$1 AND b.synced_at < $2
+            AND NOT EXISTS (SELECT 1 FROM planner.po_links l WHERE l.external_id=b.invoice_id) RETURNING invoice_id`, [reg, t0]);
+        o.pruned = d.rowCount || 0;
+        o.kept_linked = Number((await pool.query(`SELECT count(*)::int n FROM planner.xero_bills b WHERE b.region=$1 AND b.synced_at < $2`, [reg, t0])).rows[0].n) || 0;
+        await _xbSetting('xero_bills_sync_' + reg, new Date(new Date(t0).getTime() - XB_WM_OVERLAP_MS).toISOString().slice(0, 19));
+        await _xbSetting('xero_bills_synced_at_' + reg, new Date().toISOString());
+      }
+      await save();
+    }
+    let h = null; try { h = await xeroHealAllVoided(); st.healed = h.healed.length; st.flagged = h.flagged.length; } catch (e) { st.heal_error = e.message; }
+    try { const s = await xeroVoidLinkFinding(); st.voided_links = s ? s.meta.n : 0; if (s) await pool.query(HZ_FINDINGS_UPSERT, [JSON.stringify([s]), APP_VERSION]); } catch (_) {}
+    const errs = XERO_REGIONS.filter(r => st.orgs[r].error).map(r => r.toUpperCase() + ': ' + st.orgs[r].error);
+    st.status = errs.length ? 'error' : 'done'; st.finished_at = new Date().toISOString(); if (errs.length) st.error = errs.join('; ');
+    _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); xeroPreflightBust();
+  } catch (e) { st.status = 'error'; st.error = e.message; st.finished_at = new Date().toISOString(); }
+  await save();
+  const seen = XERO_REGIONS.reduce((s, r) => s + ((st.orgs[r] && st.orgs[r].seen) || 0), 0);
+  const msg = XERO_REGIONS.map(r => { const o = st.orgs[r] || {}; return r.toUpperCase() + ' ' + o.seen + '/' + (o.total == null ? '?' : o.total) + (o.complete ? ' complete' : ' INCOMPLETE') + ', changed ' + (o.changed || 0) + ', pruned ' + (o.pruned || 0) + (o.error ? ', error ' + o.error : ''); }).join(' | ') + ' | healed ' + (st.healed || 0) + ', flagged ' + (st.flagged || 0) + ', ' + st.calls + ' Xero calls';
+  try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('xero_bills_full_resync',$1,$2,$3)`, [st.status === 'done' ? 'success' : 'error', seen, msg.slice(0, 500)]); } catch (e) { console.warn('[xero-bills] etl_runs insert failed: ' + e.message); }
+  return st;
+}
+app.post('/api/supply/xero/bills-resync-all', async (req, res) => {
+  let me = null; try { me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try {
+    if (!_xbResyncP) {
+      const cur = await _xbResyncState();
+      if (cur && cur.status === 'running' && Date.now() - Date.parse(cur.heartbeat || 0) < 3 * 60 * 1000) return res.status(409).json({ error: 'A full resync is already running (started ' + cur.started_at + ')', state: cur });
+      _xbResyncP = xeroBillsFullResync((me && me.email) || null).finally(() => { _xbResyncP = null; });
+    }
+    // The request stays open until the run ends (Vercel has no background time); the page does not wait on it, it polls status.
+    res.set('Cache-Control', 'no-store').json(Object.assign({ ok: true }, await _xbResyncP));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/xero/bills-resync-all/status', async (req, res) => {
+  try {
+    const st = await _xbResyncState();
+    if (st && st.status === 'running' && !_xbResyncP && Date.now() - Date.parse(st.heartbeat || 0) > 3 * 60 * 1000) st.status = 'stalled';
+    const cnt = (await pool.query(`SELECT region, count(*)::int n, count(*) FILTER (WHERE upper(coalesce(status,'')) IN ('VOIDED','DELETED'))::int voided, max(synced_at) synced FROM planner.xero_bills GROUP BY region`)).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, state: st, running: !!_xbResyncP || !!(st && st.status === 'running'), cache: cnt, last: await xbLastSync(), sync_running: !!_xbSyncP });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── v28.183 (Ben): LIVE BILL CHECK + VOIDED-LINK AUTO-HEAL ──────────────────────────────────────────────────────────────
+// xbRefreshLive: re-read bills by id from live Xero (GET Invoices?IDs=, 50 per call, per org; a bill whose org is not in
+// the cache is tried in UK then AU) and write the fresh status / amounts into planner.xero_bills. opts.xget = a paced
+// GET-only fetcher (the payment-run preflight); opts.maxAgeMs skips ids this instance re-read that recently (the picker).
+const _xbLiveAt = new Map();   // invoice id -> ms last re-read live (this instance)
+async function xbRefreshLive(ids, opts) {
+  opts = opts || {}; const get = opts.xget || ((org, path) => xeroFetch(org, path));   // GET only: no method / body ever passed
+  const out = { bills: {}, calls: 0, errors: [], missing: [] };
+  ids = [...new Set((ids || []).map(String).filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))];
+  const now = Date.now(); if (opts.maxAgeMs) ids = ids.filter(id => !(now - (_xbLiveAt.get(id) || 0) < opts.maxAgeMs));
+  if (!ids.length) return out;
+  const reg = {}; (await pool.query(`SELECT invoice_id, region FROM planner.xero_bills WHERE invoice_id = ANY($1::text[])`, [ids])).rows.forEach(r => { reg[r.invoice_id] = xeroRegion(r.region); });
+  const byOrg = { uk: [], au: [] }; ids.forEach(id => { if (reg[id]) byOrg[reg[id]].push(id); else { byOrg.uk.push(id); byOrg.au.push(id); } });
+  for (const org of XERO_REGIONS) {
+    const want = byOrg[org].filter(id => !out.bills[id]);
+    for (let i = 0; i < want.length; i += 50) {
+      const chunk = want.slice(i, i + 50);
+      let j; try { out.calls++; j = await get(org, '/api.xro/2.0/Invoices?IDs=' + chunk.join(',')); }
+      catch (e) { out.errors.push({ org, code: e.code, msg: e.message }); continue; }
+      const inv = ((j && j.Invoices) || []).filter(v => v && v.Type === 'ACCPAY');
+      try { await xbUpsert(inv, org); } catch (e) { out.errors.push({ org, msg: 'cache write: ' + e.message }); }
+      inv.forEach(v => { _xbLiveAt.set(v.InvoiceID, Date.now()); out.bills[v.InvoiceID] = { id: v.InvoiceID, region: org, status: v.Status, number: v.InvoiceNumber || '', reference: v.Reference || '', contact: (v.Contact && v.Contact.Name) || '',
+        total: Number(v.Total) || 0, due: Number(v.AmountDue) || 0, paid: Number(v.AmountPaid) || 0, ccy: v.CurrencyCode || '', rate: v.CurrencyRate != null ? Number(v.CurrencyRate) : null, dead: xbDead(v.Status) }; });
+    }
+  }
+  if (_xbLiveAt.size > 5000) _xbLiveAt.clear();
+  out.missing = ids.filter(id => !out.bills[id]);
+  return out;
+}
+// The resolver's PO rule (resolvePoLinks / _resolveAllPoLinks, v28.093): a bill belongs to a PO when its InvoiceNumber or
+// Reference STARTS with the PO, or the PO plus a purely numeric suffix (PO-x2 deposit / balance), never merely contains it.
+function xbLeadMatch(po, str) { const p = String(po || ''), first = String(str || '').trim().split(/[\s/]+/)[0] || '';
+  return !!p && (first === p || (first.startsWith(p) && /^\d+$/.test(first.slice(p.length)))); }
+const XB_VOID_NOTE = 'linked bill voided: choose a bill';
+// Heal the Xero links of the given POs whose linked bill is VOIDED/DELETED. opts.live: first re-read the linked bills in
+// Xero (and, for a dead one, search both orgs for the PO's bills); otherwise the cache decides. Replacement = exactly ONE
+// non-voided ACCPAY bill (either org) that lead-matches the PO and whose contact is the PO's supplier family (a supplier is
+// '<name>', '<name> - <code>' or its configured Xero contact: supplierByXeroContactIndex). A MANUAL link is only healed to a
+// bill of the same supplier family as the voided bill. One match: relink (found_by 'auto-heal', note keeps the old bill,
+// health event sanity / xero:link_healed). None or several: status 'action', note XB_VOID_NOTE (the panel shows ⚠ + picker).
+async function xeroHealPoLinks(pos, opts) {
+  opts = opts || {}; const get = opts.xget || ((org, path) => xeroFetch(org, path));
+  pos = [...new Set((pos || []).map(String).filter(Boolean))];
+  const res = { checked: 0, dead: 0, healed: [], flagged: [], fresh: {}, calls: 0, errors: [] };
+  if (!pos.length) return res;
+  const links = (await pool.query(`SELECT l.po, l.external_id, l.external_ref, l.status, l.found_by, l.note, b.status bill_status, b.region bill_region, b.contact_name, b.invoice_number
+      FROM planner.po_links l LEFT JOIN planner.xero_bills b ON b.invoice_id=l.external_id
+     WHERE l.system='xero' AND coalesce(l.external_id,'')<>'' AND l.po = ANY($1::text[]) AND (l.status='linked' OR (l.status='action' AND l.note LIKE $2))`, [pos, XB_VOID_NOTE + '%'])).rows;
+  res.checked = links.length; if (!links.length) return res;
+  if (opts.live) {
+    const r = await xbRefreshLive(links.map(l => l.external_id), { xget: opts.xget, maxAgeMs: opts.maxAgeMs });
+    res.fresh = r.bills; res.calls += r.calls; res.errors.push(...r.errors);
+    links.forEach(l => { const f = r.bills[l.external_id]; if (f) { l.bill_status = f.status; l.bill_region = f.region; l.contact_name = f.contact; l.invoice_number = f.number; } });
+  }
+  const dead = links.filter(l => xbDead(l.bill_status)); res.dead = dead.length;
+  if (!dead.length) return res;
+  const idx = await supplierByXeroContactIndex();
+  const fam = n => { const s = String(n || '').trim(); if (!s) return ''; return String(idx(s) || s.replace(/\s+-\s+\S.*$/, '')).trim().toLowerCase().replace(/\s+/g, ' '); };
+  const supOf = {}; (await pool.query(`SELECT po, coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [dead.map(l => l.po)])).rows.forEach(r => { supOf[r.po] = r.s; });
+  for (const l of dead) {
+    const poEsc = String(l.po).replace(/["\\]/g, '');
+    if (opts.live) for (const org of XERO_REGIONS) {   // pick up a replacement Xero has but the cache doesn't yet (created since the last sync)
+      try { res.calls++; const j = await get(org, '/api.xro/2.0/Invoices?Statuses=' + XB_STATUSES + '&where=' + encodeURIComponent('Type=="ACCPAY" AND ((Reference!=null AND Reference.Contains("' + poEsc + '")) OR (InvoiceNumber!=null AND InvoiceNumber.Contains("' + poEsc + '")))'));
+        await xbUpsert((j && j.Invoices) || [], org); }
+      catch (e) { res.errors.push({ org, code: e.code, msg: e.message }); }
+    }
+    const like = '%' + String(l.po).replace(/[%_\\]/g, m => '\\' + m) + '%';
+    const rows = (await pool.query(`SELECT invoice_id, region, invoice_number, reference, contact_name, status FROM planner.xero_bills
+       WHERE (invoice_number ILIKE $1 OR reference ILIKE $1) AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') AND invoice_id <> $2`, [like, l.external_id])).rows
+      .filter(b => xbLeadMatch(l.po, b.invoice_number) || xbLeadMatch(l.po, b.reference));
+    // a lead token that is ANOTHER PO's number (PO-x vs PO-x2 as two real POs) is that PO's bill, not this one's
+    const toks = [...new Set(rows.map(b => String(b.invoice_number || b.reference || '').trim().split(/[\s/]+/)[0]).filter(t => t && t !== l.po))];
+    const otherPo = new Set(toks.length ? (await pool.query(`SELECT po FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [toks])).rows.map(r => r.po) : []);
+    const want = fam(supOf[l.po]) || fam(l.contact_name);
+    let cands = rows.filter(b => !otherPo.has(String(b.invoice_number || b.reference || '').trim().split(/[\s/]+/)[0]) && want && fam(b.contact_name) === want);
+    const nAny = cands.length;
+    if (l.found_by === 'manual') cands = cands.filter(b => fam(b.contact_name) === fam(l.contact_name));   // never heal a manual link to a different supplier
+    const was = (l.invoice_number || l.external_ref || '?') + ' ' + l.external_id + ' ' + String(l.bill_region || '').toUpperCase() + ' ' + String(l.bill_status || '').toUpperCase();
+    if (cands.length === 1) {
+      const nb = cands[0], ref = nb.invoice_number || nb.reference || nb.invoice_id;
+      const note = ('relinked: previous bill voided (was ' + was + '; ' + (l.found_by === 'manual' ? 'manual' : 'auto') + ' link)').slice(0, 500);
+      const u = await pool.query(`UPDATE planner.po_links SET external_id=$3, external_ref=$4, url=$5, status='linked', note=$6, found_by='auto-heal', updated_at=now()
+          WHERE po=$1 AND system='xero' AND external_id=$2 RETURNING po`, [l.po, l.external_id, nb.invoice_id, ref, xbUrl(nb.invoice_id), note]);
+      if (u.rowCount) {
+        res.healed.push({ po: l.po, from: l.external_id, from_ref: l.invoice_number || l.external_ref, to: nb.invoice_id, to_ref: ref, region: nb.region });
+        try { await pool.query(HZ_FINDINGS_UPSERT, [JSON.stringify([{ kind: 'sanity', path: 'xero:link_healed', count: 1, message: l.po + ': relinked from voided bill ' + was + ' to ' + ref + ' ' + nb.invoice_id + ' ' + String(nb.region || '').toUpperCase(),
+          meta: { po: l.po, from: l.external_id, to: nb.invoice_id, found_by_was: l.found_by } }]), APP_VERSION]); } catch (e) { console.warn('[xero-heal] health event failed: ' + e.message); }
+      }
+    } else {
+      const note = XB_VOID_NOTE + ' (' + (cands.length ? cands.length + ' candidate bills: ' + cands.slice(0, 3).map(b => b.invoice_number || b.reference).join(', ') : (nAny ? 'manual link: the PO\'s live bill is from a different supplier than the voided one' : 'no replacement bill found')) + '; was ' + was + ')';
+      const u = await pool.query(`UPDATE planner.po_links SET status='action', note=$3, updated_at=now() WHERE po=$1 AND system='xero' AND external_id=$2 AND (status<>'action' OR note IS DISTINCT FROM $3) RETURNING po`, [l.po, l.external_id, note.slice(0, 500)]);
+      res.flagged.push({ po: l.po, bill: l.external_id, bill_ref: l.invoice_number || l.external_ref, candidates: cands.length, changed: !!u.rowCount });
+    }
+  }
+  return res;
+}
+// Every link whose cached bill is VOIDED/DELETED (after a sync): heal from the cache, no Xero calls.
+async function xeroHealAllVoided() {
+  const pos = (await pool.query(`SELECT DISTINCT l.po FROM planner.po_links l JOIN planner.xero_bills b ON b.invoice_id=l.external_id
+     WHERE l.system='xero' AND l.status='linked' AND upper(coalesce(b.status,'')) IN ('VOIDED','DELETED')`)).rows.map(r => r.po);
+  return pos.length ? xeroHealPoLinks(pos, {}) : { checked: 0, dead: 0, healed: [], flagged: [], fresh: {}, calls: 0, errors: [] };
+}
+// App health sanity: PO links still pointing at a VOIDED/DELETED bill (linked, or waiting for a choice). null = none.
+async function xeroVoidLinkFinding() {
+  const r = (await pool.query(`SELECT l.po, l.status, coalesce(b.invoice_number, l.external_ref, '') num, upper(b.status) bs, upper(coalesce(b.region,'')) reg
+      FROM planner.po_links l JOIN planner.xero_bills b ON b.invoice_id=l.external_id
+     WHERE l.system='xero' AND l.status IN ('linked','action') AND upper(coalesce(b.status,'')) IN ('VOIDED','DELETED') ORDER BY l.updated_at DESC LIMIT 200`)).rows;
+  if (!r.length) return null;
+  const linked = r.filter(x => x.status === 'linked').length, ex = r.slice(0, 6).map(x => x.po + ' -> ' + x.num + ' (' + x.bs + ' ' + x.reg + (x.status === 'action' ? ', choose a bill' : '') + ')');
+  return { kind: 'sanity', path: 'xero:links_to_voided_bills', count: 1, message: r.length + ' PO Xero link(s) point at a voided/deleted bill (' + linked + ' still linked, ' + (r.length - linked) + ' waiting for a bill to be chosen in the PO drawer > Linked records), e.g. ' + ex.join('; '),
+    meta: { n: r.length, linked, action: r.length - linked, examples: ex } };
+}
+// v28.183 (Ben): the "change bill" picker re-checks the bills it lists + the PO's current link against live Xero.
+const _xbQAt = new Map();   // lower(search text) -> ms of the last live search
+app.post('/api/supply/xero/bills/verify', async (req, res) => {
+  try {
+    const b = req.body || {}, po = String(b.po || '').trim();
+    let ids = (Array.isArray(b.ids) ? b.ids : []).map(String).slice(0, 100);
+    const cur = po ? (await pool.query(`SELECT external_id, status, note FROM planner.po_links WHERE po=$1 AND system='xero'`, [po])).rows[0] : null;
+    if (cur && cur.external_id) ids.push(cur.external_id);
+    let live = null, error = null, added = 0, calls = 0;
+    try { live = await xbRefreshLive(ids, { maxAgeMs: 60000 }); calls += live.calls; if (live.errors.length) error = live.errors[0].msg; } catch (e) { error = e.message; }
+    // + the search text looked up live in both orgs (number / reference contains it), so a bill created since the last sync
+    // shows up at once (added > 0: the picker re-runs its search). Same text at most once a minute per instance.
+    const q = String(b.q || '').trim().replace(/["\\]/g, '');
+    if (q.length >= 4 && !error && !(Date.now() - (_xbQAt.get(q.toLowerCase()) || 0) < 60000)) {
+      _xbQAt.set(q.toLowerCase(), Date.now()); if (_xbQAt.size > 500) _xbQAt.clear();
+      for (const org of XERO_REGIONS) {
+        try { calls++; const j = await xeroFetch(org, '/api.xro/2.0/Invoices?Statuses=' + XB_STATUSES + '&where=' + encodeURIComponent('Type=="ACCPAY" AND ((Reference!=null AND Reference.Contains("' + q + '")) OR (InvoiceNumber!=null AND InvoiceNumber.Contains("' + q + '")))'));
+          const inv = (j && j.Invoices) || [];
+          const known = new Set(inv.length ? (await pool.query(`SELECT invoice_id FROM planner.xero_bills WHERE invoice_id = ANY($1::text[])`, [inv.map(v => v.InvoiceID)])).rows.map(r => r.invoice_id) : []);
+          added += inv.filter(v => !known.has(v.InvoiceID)).length; await xbUpsert(inv, org); }
+        catch (e) { error = error || e.message; }
+      }
+    }
+    const rows = ids.length ? (await pool.query(`SELECT invoice_id, region, status, total, amount_due, amount_paid, currency_code, synced_at FROM planner.xero_bills WHERE invoice_id = ANY($1::text[])`, [ids])).rows : [];
+    const bills = {}; rows.forEach(r => { bills[r.invoice_id] = { status: r.status, dead: xbDead(r.status), region: String(r.region || '').toUpperCase(), total: Number(r.total) || 0, due: Number(r.amount_due) || 0, paid: Number(r.amount_paid) || 0, currency: r.currency_code, synced_at: r.synced_at }; });
+    const c = cur && cur.external_id ? Object.assign({ id: cur.external_id, link_status: cur.status }, bills[cur.external_id] || { status: null, dead: false }) : null;
+    res.set('Cache-Control', 'no-store').json({ ok: !error, error, checked_at: new Date().toISOString(), calls, added, bills, current: c, missing: live ? live.missing : [] });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cron/xero-bills-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
@@ -6128,8 +6452,12 @@ async function _resolveAllPoLinks(opts = {}) {   // v28.120 (Diviyaj prod fix): 
   const xeroByPo = {}; const billsScanned = billRows.length;
   for (const b of billRows) {   // newest first → first match per PO wins (same as the old Date DESC sweep)
     const po = leadPo(b.reference) || leadPo(b.invoice_number);   // Reference must START with the PO — never merely contain it
-    if (po && !xeroByPo[po]) xeroByPo[po] = { region: b.region, id: b.invoice_id, number: b.invoice_number || b.reference };
+    if (po && !xeroByPo[po]) xeroByPo[po] = { region: b.region, id: b.invoice_id, number: b.invoice_number || b.reference, n: 0 };
+    if (po) xeroByPo[po].n++;
   }
+  // v28.183 (Ben): a PO whose linked bill was voided and is waiting for a choice is only relinked here when exactly one bill matches
+  const voidWait = new Set((await pool.query(`SELECT po FROM planner.po_links WHERE system='xero' AND status='action' AND note LIKE $1`, [XB_VOID_NOTE + '%'])).rows.map(r => r.po));
+  for (const po of voidWait) if (xeroByPo[po] && xeroByPo[po].n > 1) delete xeroByPo[po];
   // Fulfil / Flexport / DHL — local mirrors
   const fulfilBy = {}; (await pool.query(`SELECT po, fulfil_id FROM planner.fulfil_purchase_orders WHERE fulfil_id IS NOT NULL`)).rows.forEach(r => { fulfilBy[r.po] = String(r.fulfil_id); });
   const fc = fulfilConfigFor(await activeFulfilEnv()); const fUrl = id => (id && fc.subdomain) ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + id + '?window_name=default') : null;
@@ -22845,6 +23173,7 @@ async function runHealthChecks(opt) {
     if (miss.length) F.push({ kind: 'sanity', path: 'sales_actuals:missing_months', message: 'sales_actuals has no rows for ' + miss.join(', '), meta: { missing: miss } }); }
   if (d.nocat && Number(d.nocat.n)) F.push({ kind: 'sanity', path: 'products:scope_no_category', message: `${d.nocat.n} in-planning-scope product(s) have no category (e.g. ${(d.nocat.ex || []).join(', ')})`, meta: { n: Number(d.nocat.n), examples: d.nocat.ex } });
   if (d.neg && Number(d.neg.n)) F.push({ kind: 'sanity', path: 'inventory:negative_on_hand', message: `${d.neg.n} SKU/warehouse row(s) with negative on-hand in v_product_inventory (e.g. ${(d.neg.ex || []).slice(0, 4).join('; ')})`, meta: { n: Number(d.neg.n), examples: d.neg.ex } });
+  try { const xv = await xeroVoidLinkFinding(); if (xv) F.push(xv); } catch (_) {}   // v28.183 (Ben): PO links to voided / deleted Xero bills (also written after every bill sync)
   // 4. daily metric snapshots (once per calendar day per path) for week-on-week compares
   const today = new Set(d.metric_today || []);
   const mv = { inbound_total: units, inbound_rows: Number(inb.n) || 0, sales_last_month_units: sm[lastFull] || 0, scope_no_category: Number((d.nocat || {}).n) || 0, negative_on_hand_rows: Number((d.neg || {}).n) || 0 };
