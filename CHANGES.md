@@ -1,3 +1,12 @@
+## v28.170 (Ben, branch review-fixes-2026-10-05): Create in Xero popup (Payments Report)
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- **PO number never cut off:** the popup sits on `<body>`, so the DEMAND artifact's global `table{table-layout:fixed}` and `td{padding:0;overflow:hidden}` split the columns evenly and clipped the PO (live: PO-57DILLARD, 7,516.08). The popup now forces auto layout, padded cells and a nowrap full-width PO column; other columns wrap.
+- **PO opens in the drawer:** each PO in the popup is a link that opens the PO drawer ABOVE the popup (popup stays open underneath).
+- **Button flips to "done" at once:** after a successful post the Payments Report row shows "done ↗" immediately (was: only after a refresh, because the report is cached server-side), then re-fetches quietly.
+- Verified on sandbox in Chrome: PO cell 157px, not clipped; drawer z 10050 above popup z 9999; faked post flips XERO to done without a reload.
+
 ## v28.169 (Ben, branch review-fixes-2026-10-05): health check "no category" false positives
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env vars.

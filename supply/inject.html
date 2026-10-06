@@ -10923,7 +10923,7 @@
         rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbDownload(f[+btn.dataset.i],fx.ccy,fx.amt); }; });
         rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopy(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
         rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
-        rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ xbPreview(f[+btn.dataset.i],btn); }; }); }
+        rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ _xbRow=f[+btn.dataset.i]; xbPreview(_xbRow,btn); }; }); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); if(window._payTod)clearTimeout(window._payTod); window._payTod=setTimeout(draw,250); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
@@ -10934,6 +10934,7 @@
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
   // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
   var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null, _payRows=[];
+  var _xbRow=null;   // v28.170 (Ben): the Payments Report row whose Create in Xero popup is open, so a successful post can flip its button to "done" at once
   function payRunKey(r){ return r.run_key||((r.dt||'')+'|'+(r.supplier||'')); }
   // v28.136 (Ben): Xero column. Already in Xero (a recorded supplier-payment bill, or anything before 21-Sep-26) → "done",
   // linked to the bill when we have it, + a small ↻ redo that relaunches the Create-in-Xero popup. Otherwise the XERO button
@@ -10980,7 +10981,7 @@
         :(l.pay_ok===false?'<span style="color:var(--neg);font-weight:700" title="payment exceeds the bill’s amount due — Xero would reject">✕ over (due '+money(l.bill_due)+')</span>'
         :'<span class="mut tiny">due n/a</span>')));
       var rowBg=l.flag==='brightred'?'background:#fecaca':(l.flag==='red'?'background:#fee2e2':'');
-      return '<tr style="border-top:1px solid var(--line);'+rowBg+'"'+(l.blocked?' title="'+esc(l.blocked)+'"':'')+'><td class="l" style="font-family:ui-monospace,Menlo,monospace;white-space:nowrap">'+orgPill(l.home_org)+' '+esc(l.reference||'')+'</td><td class="l">'+esc(l.type||'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td class="l">'+acct+'</td><td class="l">'+trk+'</td><td class="l">'+bill+'</td><td class="l">'+payChk+'</td></tr>'; }).join('');
+      return '<tr style="border-top:1px solid var(--line);'+rowBg+'"'+(l.blocked?' title="'+esc(l.blocked)+'"':'')+'><td class="l xbp-po-td">'+orgPill(l.home_org)+' '+(l.reference?'<button type="button" class="lnk-btn xbp-po" data-po="'+esc(l.reference)+'" title="Open '+esc(l.reference)+' in the PO drawer">'+esc(l.reference)+' ↗</button>':'')+'</td><td class="l">'+esc(l.type||'')+'</td><td class="l" style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td class="l">'+acct+'</td><td class="l">'+trk+'</td><td class="l">'+bill+'</td><td class="l">'+payChk+'</td></tr>'; }).join('');
     var payingUp=String(j.paying_org||j.region||'uk').toUpperCase();
     var hasCross=(j.lines||[]).some(function(l){return l.cross;});
     var orgSel='<select id="xbp-org" title="Which Xero org pays. Cross-org POs settle via the intercompany loan (901)." style="font-weight:800;border-radius:6px;padding:3px 8px;font-size:12px;border:1px solid var(--line);'+(payingUp==='AU'?'background:#dcfce7;color:#15803d':'background:#fee2e2;color:#b91c1c')+'">'
@@ -10988,7 +10989,11 @@
       +'<option value="au"'+(payingUp==='AU'?' selected':'')+'>Pay from AU org</option></select>';
     var _old=document.getElementById('xbp-bg'); if(_old)_old.remove();
     var bg=document.createElement('div'); bg.id='xbp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
-    bg.innerHTML='<style>#xbp-bg th,#xbp-bg td{text-align:left!important}</style>'
+    bg.innerHTML='<style>#xbp-bg th,#xbp-bg td{text-align:left!important}'
+      // v28.170 (Ben): the popup lives on <body>, so the DEMAND artifact's global `td{padding:0;overflow:hidden}` applied and clipped the PO column (live: PO-57DILLARD unreadable). Cells get padding and never clip; the PO column is nowrap at its full width, the other columns wrap.
+      +'#xbp-bg table{width:100%;border-collapse:collapse;table-layout:auto!important}#xbp-bg th,#xbp-bg td{padding:6px 8px!important;overflow:visible!important;vertical-align:top;max-width:none!important}'
+      +'#xbp-bg td.xbp-po-td,#xbp-bg th:first-child{white-space:nowrap!important;width:1%;min-width:max-content!important}'
+      +'#xbp-bg .xbp-po{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:var(--blue);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}#xbp-bg .xbp-po:hover{text-decoration:underline}</style>'
       +'<div style="background:var(--card);border-radius:12px;max-width:900px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
       +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Create in Xero</b>'+(hasCross?'<span class="mut tiny" title="some POs live in the other Xero org and settle via the intercompany loan (901)">+ cross-org via loan 901</span>':'')+'<button id="xbp-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
       +'<div style="padding:16px 18px">'
@@ -11008,6 +11013,9 @@
       +'</div></div>';
     document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
     var x=document.getElementById('xbp-x'); if(x)x.onclick=function(){ bg.remove(); };
+    // v28.170 (Ben): PO number opens that PO in the drawer, stacked ABOVE this popup (popup stays open underneath)
+    bg.querySelectorAll('.xbp-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openPODrawer(b.dataset.po);
+      var _up=function(){ var d=document.getElementById('podrawer-bg'); if(d)d.style.zIndex='10050'; }; _up(); requestAnimationFrame(_up); }; });   // the drawer stacks ABOVE this popup (z 9999); openPODrawer resets its own counter, so set it after opening
     var org=document.getElementById('xbp-org'); if(org)org.onchange=function(){ xbPreview(Object.assign({},j._run,{paying_org:org.value})); };   // re-price the run against the chosen paying org
     var q=document.getElementById('xbp-post'); if(q)q.onclick=function(){
       if(!confirm('Create the supplier-payment bill AND post payments to the linked PO bills in Xero '+((j.region||'').toUpperCase())+' now?\n\nThis writes to live Xero.'))return;
@@ -11020,6 +11028,8 @@
           var billHtml=x.bill?('Bill <b>'+esc(x.bill.number||x.reference||'')+'</b>'+(x.bill.url?' <a href="'+esc(x.bill.url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700">open ↗</a>':'')):'—';
           var skHtml=(x.skipped&&x.skipped.length)?('<div style="color:var(--amber);font-size:12px;margin-top:4px">Skipped: '+x.skipped.map(function(s){return esc(s.po)+' ('+esc(s.reason)+')';}).join(', ')+'</div>'):'';
           if(rb)rb.innerHTML=(x.ok===false?'<div style="border:1px solid var(--neg);border-radius:8px;padding:10px 12px;font-size:13px"><div style="font-weight:700;color:var(--neg)">⚠ Posted with '+esc(x.failed_payments||'')+' failed payment(s): check the skipped list and finish them in Xero</div>':'<div style="border:1px solid #86efac;background:var(--pos-bg);border-radius:8px;padding:10px 12px;font-size:13px"><div style="font-weight:700;color:var(--pos)">✓ Posted to Xero</div>')+'<div style="margin-top:3px">'+billHtml+' · <b>'+(x.payments?x.payments.length:0)+'</b> payment'+((x.payments&&x.payments.length===1)?'':'s')+' posted</div>'+skHtml+'</div>';
+          // v28.170 (Ben): flip the row's Xero button to "done" now (was: only after a page refresh, because the report is cached server-side), then re-fetch quietly
+          if(x.bill&&_xbRow){ _xbRow.xero_done=true; _xbRow.xero_bills=[{number:x.bill.number||x.reference||'',url:x.bill.url||'',status:x.bill.status||''}].concat(_xbRow.xero_bills||[]); if(_payDraw)_payDraw(); setTimeout(function(){ if(typeof payRefreshState==='function')payRefreshState(); },3000); }
           q.textContent=x.ok===false?'⚠ Posted (errors)':'✓ Posted'; if(ps)ps.textContent=''; })
         .catch(function(e){ q.disabled=false; q.textContent=_t; if(ps){ps.style.color='var(--neg)';ps.textContent='Failed: '+(e.message||e);} }); };
   }
