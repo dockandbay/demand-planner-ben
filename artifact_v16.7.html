@@ -2818,10 +2818,11 @@ function render(){
   // first pass settles, a new in-scope set (no forecast/no LY) can take an oversized subcat share and
   // over-explode into its components — the "COOL-CAB-3SET flashes huge, clears when you visit DEMAND" symptom.
   // Force one demand build up front so shares are always settled before any buy quantity is computed.
-  try{ if((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) && typeof buildLiveDemand==='function'){ buildLiveDemand(); } }catch(e){}
-  try{ if(typeof BUY_FC_STALE!=='undefined' && BUY_FC_STALE && typeof buildLiveDemand==='function'){ buildLiveDemand(); BUY_FC_STALE=false; } }catch(e){}
   // First demand-plan render: build the prepack cover once so the rail "PP" badge shows without opening the buy plan.
-  try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
+  // v28.163 (Ben): ONE build per render for all three reasons (not built / forecast stale / PP cover pending). The !DEMAND_BUILT
+  // branch never cleared BUY_FC_STALE, so a render could run buildLiveDemand() up to 3 times (~1.5 s each) on identical inputs.
+  try{ var _ppNeed=(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length);
+    if(typeof buildLiveDemand==='function' && ((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) || (typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE) || _ppNeed)){ buildLiveDemand(); BUY_FC_STALE=false; if(_ppNeed)_PP_COVER_INIT=true; } }catch(e){}
   // Load AWD / NonGRS pools once, then re-render (mirrors CAL_EVENTS).
   if(EXTRA_STOCK===null){ EXTRA_STOCK={}; fetch('/api/buy-extra-stock').then(function(r){return r.json();}).then(function(d){ EXTRA_STOCK=(d&&d.stock)||{}; render(); }).catch(function(){}); }
   // Extra stock columns on the FBA view: SOH NON GRS (UK+US), SOH AWD (US only).
