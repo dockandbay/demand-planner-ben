@@ -1,3 +1,12 @@
+## v28.184 (Ben, branch review-fixes-2026-10-05): mobile navigation, full L1 > L2 > L3 side menu
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html`, `supply/hz-health.js` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- Root cause: the phone drawer only listed the top text buttons, so CONFIG (the cog, a different class) and everything under it, and CLIENT, were missing; L3 menus were never in the drawer (SUPPLY ▸ PAYMENTS etc.), and SUPPLY ▸ CONFIG's L3 bar was hidden on phones.
+- The hamburger menu is now a collapsible tree of every section (L1), page (L2) and sub-page (L3), built from the same menu model as the desktop rail (`window.__hzNavModel`: RAIL_L1 / RAIL_L2 / RAIL_L3MAP, plus drawer-only L3 for DEMAND ▸ Actions, BUY & MOVE ▸ Inventory, REPORTS ▸ 3PL & Invoicing, CLIENT ▸ Commissions / Config), so new menus appear on mobile automatically. Current page highlighted; L3 tap navigates and closes; rows >= 44px; scrolls; never re-renders under a finger. On phones only, duplicated in-page L3 strips are hidden.
+- dead_click covers mobile taps (taken on finger release; a scroll is not a tap).
+- **Verified (jsdom, 390 px):** all 7 L1, 41 L2, 124 L3 reachable by tap, 0 JS errors; CONFIG opens with all its pages; desktop rail byte-identical at 1440 px and first click still navigates. Real-phone look still to check (jsdom has no CSS layout).
+
 ## v28.183 (Ben, branch review-fixes-2026-10-05): Xero bill links stay correct when bills are voided; sync on visit + resync
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
