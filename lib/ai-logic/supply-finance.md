@@ -20,6 +20,7 @@ sources:
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
   - server.mjs :: /api/portal/submit, /api/portal/line-cost, /api/supply/submission/:id/apply, /api/supply/po-line-accept, /api/supply/po-line-reject
+  - server.mjs :: portalShipmentRole, portalCanReadAttachment, /api/portal/shipment/:ref, /api/portal/attachment/:id, staffOnly, /api/portal/redeem (portal access rules)
   - server.mjs :: cpTierPrice, /api/cp/prices, /api/cp/order, cpCreateFulfilDraft
   - server.mjs :: /api/client/commission/runs/build, /api/client/commission/runs/:id/xero-bill (client commission)
   - server.mjs :: /api/supply/charge/:id/accept, /api/supply/po-polybags/:po
@@ -77,11 +78,17 @@ fingerprints:
   server.mjs::fulfilCompareRows: 9afcbaf79bb7
   server.mjs::fulfilImportPOs: 17755776cb38
   server.mjs::/api/supply/received-pos/process: 39c24ef889e6
-  server.mjs::/api/portal/submit: 8b510434ae83
+  server.mjs::/api/portal/submit: ac23063287f4
   server.mjs::/api/portal/line-cost: 7d91a415da96
   server.mjs::/api/supply/submission/:id/apply: 49638e804b19
   server.mjs::/api/supply/po-line-accept: 073111cc8cb5
   server.mjs::/api/supply/po-line-reject: e6636f5d3d7e
+  server.mjs::portalShipmentRole: 745b3171a691
+  server.mjs::portalCanReadAttachment: b41d05b11c1f
+  server.mjs::/api/portal/shipment/:ref: f6ee876e945f
+  server.mjs::/api/portal/attachment/:id: 386ae75896e8
+  server.mjs::staffOnly: 0df84ff342f4
+  server.mjs::/api/portal/redeem: 6a098ae2a3e9
   server.mjs::cpTierPrice: a2b9b629bb4a
   server.mjs::/api/cp/prices: 1445d08c02f9
   server.mjs::/api/cp/order: d604b61b8633
@@ -123,7 +130,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.183
+verified_version: v28.186
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -257,9 +264,12 @@ verified_version: v28.183
 - Compare (Fulfil POs not in HORIZON): open Fulfil POs from product suppliers. A Fulfil PO counts as already in HORIZON when its number or reference matches a HORIZON PO, an erp_po, or a linked po_links ref/id. (source: server.mjs :: fulfilCompareRows)
 
 ## Supplier portal
-- Suppliers submit a completion date and an invoice value. These wait as pending submissions until D&B applies them: completion goes to end_production_overide, invoice to supplier_invoice_total. Carrier and tracking update the shipment immediately. Production status applies immediately. (source: server.mjs :: /api/portal/submit, submission/:id/apply)
+- Suppliers submit a completion date and an invoice value. These wait as pending submissions until D&B applies them: completion goes to end_production_overide, invoice to supplier_invoice_total. Carrier and tracking update the shipment immediately when the supplier is the shipment's master (consolidating) supplier; a rider's carrier and tracking wait as a pending submission. Production status applies immediately. (source: server.mjs :: /api/portal/submit, submission/:id/apply)
 - Order confirmation stores supplier_confirmed_at/by plus an approved_lines snapshot (SKU to qty), so later changes show as a diff. (source: server.mjs :: /api/portal/submit)
 - Line cost, qty and added-SKU changes go to portal_line_costs. D&B accepts them (they update the order-plan line, and the supplier cost becomes final_cost) or rejects them. Only confirmed final_cost feeds PO value. (source: server.mjs :: po-line-accept, po-line-reject)
+- Shipment access: a supplier is on a shipment as its master (they supply the master PO: shipments.master_po, else the shipment ref when it is a PO number) or as a rider (one of their POs has that shipment_ref). Both may read and post shipment notes, add charges, see the shipment's tracking and add timeline files. Only the master may change shipment-level fields (Shipping status, ship date, carrier, tracking); setting Shipping moves every PO aboard to SHIPPING. A supplier sees only the shipment charges raised by its own supplier, and may delete only a shipment message written by its own people. (source: server.mjs :: portalShipmentRole, /api/portal/shipment/:ref)
+- File access in the portal: a file is served when its PO is the supplier's, or it belongs to the supplier's sample request, product development item (sample versions by the supplier's own development request), or it is a shipment timeline file (attached to a note on that shipment, or uploaded by the supplier) on a shipment the supplier is on. Sharing a shipment never opens another supplier's PO documents. A note may only reference a file the supplier can open. Staff file and DTC routes refuse portal sessions; the portal uses its own /api/portal routes. (source: server.mjs :: portalCanReadAttachment, /api/portal/attachment/:id, staffOnly)
+- Sign-in links: valid 24 hours (PORTAL_LINK_HOURS) and single use. Opening the link only shows a "Continue to portal" page; the button redeems it once (atomic), so email scanners cannot use it up. The session lasts 7 days; Sign out deletes it. (source: server.mjs :: /api/portal/redeem)
 - Portal "Amount due" = final invoice − milestones with a paid date, + credit_amount. It is 0 until a final invoice exists. Amounts always show "$" even for non-USD suppliers. (source: supply/portal-view.js :: PAYMENTS tab)
 
 ## Client portal pricing, orders, commissions
