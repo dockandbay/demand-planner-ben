@@ -170,7 +170,7 @@ pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 
     if (cfg && typeof cfg.submit === 'function') return oq.apply(this, arguments);   // Cursor / Submittable: untouched
     const t0 = Date.now(), n = arguments.length, cb = n && typeof arguments[n - 1] === 'function' ? arguments[n - 1] : null;
     let st = this.__hzSt || null; if (!st) { try { st = _reqStore.getStore(); } catch (_) {} }
-    const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query');
+    const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query'); _hzDbTot.n++; _hzDbTot.ms += ms;   // v28.167 (Ben): process-wide DB execution totals (GET /api/perf/recent)
       if (ms >= HZ_SLOW_Q_MS) { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;
         hzHealthEvt('slow_query', sql, { path: sql, ms, message: 'Slow SQL ' + ms + 'ms', meta: { example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' } }); } } catch (_) {} };
     if (cb) { const a = Array.prototype.slice.call(arguments); a[n - 1] = function (err) { done(err); return cb.apply(this, arguments); }; return oq.apply(this, a); }
@@ -840,6 +840,9 @@ function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
 // GET /api/perf/recent so a slow path can be found without tailing logs. Zero cost on the hot path beyond a Date.now().
 const HZ_SLOW_MS = Math.max(0, Number(process.env.HZ_SLOW_MS || 750));
 const _perfRing = []; const PERF_RING_MAX = 300;
+// v28.167 (Ben): process-wide DB statement count + execution ms, and server cache rebuild counts per cache (measurement only; read via GET /api/perf/recent).
+const _hzDbTot = { n: 0, ms: 0 }; const _hzRbStats = {};
+function hzRbNote(name, ms) { const e = _hzRbStats[name] || (_hzRbStats[name] = { n: 0, ms: 0 }); e.n++; e.ms += ms; }
 // v28.159 (Ben): persistent health log (migration 328, planner.app_health_events). Slow requests (>= HZ_SLOW_MS) and every
 // status >= 500 are aggregated IN MEMORY per (kind, method, route, status): count, max ms, last log500 message. The buffer is
 // flushed with ONE multi-row INSERT when it holds >= 25 occurrences or the last flush was > 60s ago, checked from request
@@ -908,6 +911,25 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
   } catch (_) { /* measurement must never throw */ } });
   next();
 }));
+// v28.167 (Ben): per-browser session id for server-cache read-your-writes (see _lcGet). hz_sid is an opaque random HttpOnly
+// cookie (no identity in it), set on the first /api call. hz_rw (set by invalidateSupplyCaches on the write response) carries the
+// time of this browser's last edit for other instances. Every non-GET /api call that did NOT invalidate server caches before it
+// answered is "uncovered": the client's follow-up POST /api/supply/cache/invalidate then still invalidates everything (lazily).
+const HZ_RW_SKIP = /^\/api\/(supply\/cache\/invalidate|supply\/actions\/invalidate|perf\/|ai$|version$)/;
+app.use((req, res, next) => {
+  const p = String(req.path || ''); if (!p.startsWith('/api/')) return next();
+  const s = _reqStore.getStore(); if (!s) return next();
+  let sid = cookieVal(req, 'hz_sid');
+  if (!sid || !/^[\w-]{16,64}$/.test(sid)) { sid = crypto.randomBytes(16).toString('base64url'); try { res.append('Set-Cookie', 'hz_sid=' + sid + '; Path=/; HttpOnly; SameSite=Lax' + (_reqHttps(req) ? '; Secure' : '')); } catch (_) {} }
+  s.sid = sid;
+  const rw = Number(cookieVal(req, 'hz_rw') || 0); if (rw > 0 && Date.now() - rw < RW_COOKIE_MS) s.rwT = rw;
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !HZ_HEALTH_SKIP.test(p) && !HZ_RW_SKIP.test(p)) {
+    const me = _rwSessGet(sid); me.inflight++; let done = false;
+    const fin = () => { if (done) return; done = true; me.inflight--; if (!s.inv) me.uncovered = true; else me.wroteAt = Date.now(); };
+    res.on('finish', fin); res.on('close', fin);
+  }
+  next();
+});
 app.use(express.json({ limit: '25mb' }));   // 25mb: small document/invoice uploads still arrive as base64 JSON (~33% inflation). Vercel caps the request body at ~4.5MB, so anything over STORAGE_INLINE_MAX goes direct-to-Storage instead (see the Supabase Storage block below); this limit only covers the inline path.
 
 // ── Supabase Storage — large uploads (> STORAGE_INLINE_MAX) go straight to Storage, bypassing Vercel's ~4.5MB body cap ──
@@ -2785,7 +2807,7 @@ app.get('/api/perf/recent', (req, res) => {
   if (slow) rows = rows.filter(r => r.ms >= HZ_SLOW_MS);
   if (pf) rows = rows.filter(r => r.path.indexOf(pf) >= 0);
   const tot = rows.reduce((a, r) => a + r.ms, 0);
-  res.set('Cache-Control', 'no-store').json({ ok: true, slow_ms: HZ_SLOW_MS, n: rows.length, avg_ms: rows.length ? Math.round(tot / rows.length) : 0, rows: rows.slice(0, 300) });
+  res.set('Cache-Control', 'no-store').json({ ok: true, db: _hzDbTot, rebuilds: _hzRbStats, slow_ms: HZ_SLOW_MS, n: rows.length, avg_ms: rows.length ? Math.round(tot / rows.length) : 0, rows: rows.slice(0, 300) });
 });
 // v28.123 (Diviyaj prod v28.122.1): report the SERVED blob's freshness (element 8 of _buildDataVals) so the page's
 // EXTRACT_TS and the poll compare like for like; a live max() moved ahead of the blob and flagged every tab stale.
@@ -4503,7 +4525,7 @@ app.post('/api/supply/shipments/cleanup-orphans', async (req, res) => {
     await client.query(`${orphanCTE} DELETE FROM planner.shipment_change_log c USING orphans o WHERE c.shipment_ref = o.shipment_ref`);
     const del = await client.query(`${orphanCTE} DELETE FROM planner.shipments s USING orphans o WHERE s.shipment_ref = o.shipment_ref`);
     await client.query('COMMIT');
-    invalidateSupplyCaches();
+    invalidateSupplyCaches('shipment');   // v28.167: scoped
     res.json({ ok: true, deleted: del.rowCount });
   } catch (e) { await _rollback(client); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -5256,7 +5278,7 @@ async function sweepSupplierPaymentBills() {
 }
 app.post('/api/supply/payments/xero-bill-sweep', async (req, res) => {
   try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
-  try { const r = await sweepSupplierPaymentBills(); try { invalidateSupplyCaches(); } catch (_) {} res.json(Object.assign({ ok: true }, r)); }
+  try { const r = await sweepSupplierPaymentBills(); try { invalidateSupplyCaches('payment'); } catch (_) {} res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/payments/xero-post', async (req, res) => {
@@ -5303,7 +5325,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
       await pool.query(`INSERT INTO planner.payment_xero_bills (bill_id, run_key, run_date, supplier, region, bill_number, bill_url, status, source, created_by)
         VALUES ($1,$2,$3::date,$4,$5,$6,$7,'DRAFT','post',$8) ON CONFLICT (bill_id) DO UPDATE SET run_key=excluded.run_key, status=excluded.status, updated_at=now()`,
         [out.bill.id, rk, rr.dt || null, rr.supplier || null, region === 'au' ? 'AU' : 'UK', out.bill.number || plan.reference, out.bill.url, authUser(req) || 'system']);
-      try { invalidateSupplyCaches(); } catch (_) {}
+      try { invalidateSupplyCaches('payment'); } catch (_) {}
     } catch (e) { console.error('[payment_xero_bills] record failed (migration 324 applied?):', e.message); out.record_warning = 'bill posted but its reference was not recorded: ' + e.message; } }
     // Same-org payments post at the SUPPLIER-PAYMENT bill's rate (the paying org's daily USD rate) — one consistent run.
     const runRate = (binv && binv.CurrencyRate != null) ? Number(binv.CurrencyRate) : null;
@@ -6520,7 +6542,7 @@ async function buildShipmentPlan() {
 // layers) is expensive to compute on every first visit. Cache the FULL computed row set for 10 min, boot-warm it,
 // and refresh in the background when stale (stale-while-revalidate) so a real request never blocks on a cold build.
 // The per-row snooze/dismiss/done lifecycle overlay is applied FRESH on each request (cheap, must reflect instantly).
-let _actionsCache = null, _actionsRefresh = null; const ACTIONS_TTL_MS = 10 * 60 * 1000;
+const ACTIONS_TTL_MS = 10 * 60 * 1000;
 async function buildActionsRows() {
   const q = (sql) => pool.query(sql).then(r => r.rows);
         const arows = await q(`
@@ -6804,19 +6826,9 @@ async function buildActionsRows() {
     if (_child.size) return arows.filter(r => !(r && r.ref && _child.has(r.ref)) && !(r && r.target && _child.has(r.target)) && !(r && r.po && _child.has(r.po))); } catch (e) { /* best-effort */ }
   return arows;
 }
-function refreshActionsCache() {   // single-flight — coalesces concurrent refreshes into one build
-  if (_actionsRefresh) return _actionsRefresh;
-  _actionsRefresh = buildActionsRows()
-    .then((rows) => { _actionsCache = { at: Date.now(), rows }; _actionsRefresh = null; return rows; })
-    .catch((e) => { _actionsRefresh = null; throw e; });
-  return _actionsRefresh;
-}
-// Long-lived (sandbox) server only — on Vercel this cache builds lazily on the first Actions request (see makeCache
-// note); boot-warming + a 10-min timer on a frozen container strands pooled connections (Diviyaj 01-Sep).
-if (!process.env.VERCEL) {
-  refreshActionsCache().catch(() => {});           // warm on boot
-  setInterval(() => { refreshActionsCache().catch(() => {}); }, ACTIONS_TTL_MS).unref?.();   // refresh every 10 min in the background
-}
+// v28.167 (Ben): the hand-rolled Actions cache (_actionsCache / refreshActionsCache) is now `actionsCache = makeCache('actions', ...)`
+// (defined after makeCache below): same boot warm + 10-min re-warm on the long-lived server only, lazy on Vercel, plus scoped
+// stale-while-revalidate and read-your-writes like every other supply cache.
 
 // ---- Shared SUPPLY read-cache framework (Phase 1 of the load-time work) --------------------------------------
 // Same shape as _dataCache/_actionsCache: boot-warm + single-flight refresh + stale-while-revalidate. A real
@@ -6838,19 +6850,37 @@ async function currentSupplyEpoch() {
   if (_epochAt && now - _epochAt < EPOCH_POLL_MS) return _epochVal;
   if (_epochInflight) return _epochInflight;
   _epochInflight = pool.query(`SELECT coalesce(value::bigint,0) v FROM planner.app_settings WHERE key='supply_cache_epoch'`)
-    .then(r => { _epochVal = r.rows[0] ? Number(r.rows[0].v) : 0; _epochAt = Date.now(); _epochInflight = null; return _epochVal; })
+    .then(r => { _epochInflight = null; if (_bumpsInflight === 0) _adoptEpoch(r.rows[0] ? Number(r.rows[0].v) : 0); return _epochVal; })   // v28.167: a read racing our own bump is ignored (the bump adopts)
     .catch(() => { _epochAt = Date.now(); _epochInflight = null; return _epochVal; });   // keep last known on error
   return _epochInflight;
 }
+// v28.167 (Ben): the epoch values THIS instance produced are remembered, so a move of the shared epoch can be classified: our own
+// bumps are already covered by the scoped local marks (_lcMark); any value we did not produce is another instance's edit with an
+// unknown scope, which marks EVERY cache stale (lazily: rebuilt on the next request, stale-while-revalidate). The first read after
+// boot just adopts the value. Concurrent local bumps adopt once the last one lands (out-of-order RETURNING values stay local).
+const _localEpochs = new Set(); let _bumpsInflight = 0, _bumpMax = 0, _epochSeen = false;
+function _adoptEpoch(v) {
+  if (!Number.isFinite(v)) return;
+  if (v > _epochVal && _epochSeen) {
+    let foreign = v - _epochVal > 1000;
+    for (let k = _epochVal + 1; !foreign && k <= v; k++) if (!_localEpochs.has(k)) foreign = true;
+    if (foreign) { _lcMark(null); swrStale('sup:'); if (LC_LOG) console.log('[cache] epoch ' + _epochVal + ' -> ' + v + ' from another instance: all caches stale (lazy)'); }
+  }
+  if (v > _epochVal || !_epochSeen) _epochVal = v;
+  _epochSeen = true; _epochAt = Date.now();
+  if (_localEpochs.size > 500) for (const k of _localEpochs) if (k <= _epochVal) _localEpochs.delete(k);
+}
 async function bumpSupplyEpoch() {
+  _bumpsInflight++;
   try {
     const r = await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('supply_cache_epoch','1')
       ON CONFLICT (key) DO UPDATE SET value=((coalesce(planner.app_settings.value,'0')::bigint)+1)::text, updated_at=now() RETURNING value`);
     // v28.151 (review E4): adopt the bumped value directly (was _epochAt=0 + a re-read, which a concurrent in-flight read
     // could overwrite with the pre-bump value for another 5s, so builds got stamped with the old epoch and ran twice).
     const v = r.rows[0] ? Number(r.rows[0].value) : NaN;
-    if (Number.isFinite(v) && v >= _epochVal) { _epochVal = v; _epochAt = Date.now(); } else _epochAt = 0;
+    if (Number.isFinite(v)) { _localEpochs.add(v); if (v > _bumpMax) _bumpMax = v; }
   } catch (e) { /* non-fatal */ }
+  finally { if (--_bumpsInflight === 0 && _bumpMax) _adoptEpoch(_bumpMax); }
 }
 // Run a heavy read with a hard server-side time cap, so a slow rebuild (e.g. under DB contention) can't hold a
 // pooled connection open for a minute. SET LOCAL scopes the cap to this one read-only transaction/connection; on
@@ -6874,7 +6904,9 @@ async function queryCapped(sql, params, _ms) {
 // one rebuild. The writer's own row is kept exact by cache.patch() (see poRowsPatchPo below), so the only thing that can
 // lag up to that window is a cross-row effect of somebody else's edit (e.g. a shared deposit's remaining balance).
 // Cold (no build yet) still blocks once. TTL expiry keeps its request-driven SWR. No timers: request-driven only (Vercel).
-const SUPPLY_REBUILD_MIN_MS = Math.max(0, Number(process.env.SUPPLY_REBUILD_MIN_MS || 30000));
+// v28.167 (Ben): default 30s -> 10s. It now only spaces BACKGROUND revalidations of a cache someone else's edit staled (rebuilds
+// are lazy, single-flight and capped at 2 process-wide); the editor never waits on it (read-your-writes forces the rebuild).
+const SUPPLY_REBUILD_MIN_MS = Math.max(0, Number(process.env.SUPPLY_REBUILD_MIN_MS || 10000));
 // v28.081 (Ben, perf audit): tiny stale-while-revalidate memo for small, user-independent payloads that were computed live on
 // every call — the nav BADGE counts (dtc/mismatch 9s, bi/reallocations 7s, product/unread 2.8s, Xero exceptions 22s live Xero)
 // all fired during page load and held pooler slots while the grid was still loading. swrGet: fresh → return; stale → return
@@ -6891,35 +6923,103 @@ async function swrGet(key, ttlMs, builder) {
 }
 function swrStale(prefix) { for (const [k, e] of _swr) if (!prefix || k.startsWith(prefix)) { if (e.at > 0) e.at = 1; } }
 function swrDrop(prefix) { for (const k of Array.from(_swr.keys())) if (!prefix || k.startsWith(prefix)) _swr.delete(k); }
-function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
-  let entry = null, inflight = null, lastStart = 0, gen = 0, pendingBump = null;
-  // v28.151 (review E4): (a) the build is stamped with the epoch read AFTER the invalidating bump has landed and BEFORE the
-  // builder runs (was: whatever _epochVal held when the build finished, usually the pre-bump value, so the next get() saw an
-  // epoch mismatch and rebuilt the whole cache a second time); (b) a generation counter: a build that was already running
-  // when invalidate() fired read pre-edit data, so it is discarded and one more build runs (was: cached as if fresh).
-  function refresh() {
-    if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
-    lastStart = Date.now(); const myGen = gen;
-    inflight = Promise.resolve(pendingBump).catch(() => {}).then(() => currentSupplyEpoch())
-      .then((ep) => Promise.resolve().then(builder).then((v) => {
-        inflight = null;
-        if (myGen !== gen) return refresh();       // invalidated mid-build → stale, rebuild once more
-        entry = { v, at: Date.now(), epoch: ep }; return v; }))
-      .catch((e) => { inflight = null; throw e; });
-    return inflight;
+// ---- v28.167 (Ben, perf roadmap #4 / review E4): LAZY + SCOPED cache invalidation ------------------------------------------
+// Before: any supply edit nulled every makeCache entry and rebuilt ALL of them at once (order-plan, po-rows, po-kids, lookups,
+// exceptions) plus Actions and every cached section staggered 400ms apart, whether or not anyone looked (~20 DB-s per edit on
+// prod's max-4 pool; sandbox measured 22 rebuilds / ~150 DB-s for one PO date edit). Now:
+//  1. STALE-WHILE-REVALIDATE: an invalidation only MARKS the affected caches stale (last value kept; `dirty` = invalidation
+//     generations the value has not absorbed). Nothing rebuilds until someone asks: that request is served the stale value and
+//     starts ONE background rebuild (single-flight per cache, spaced by SUPPLY_REBUILD_MIN_MS). Unrequested caches never rebuild.
+//  2. SCOPED: invalidateSupplyCaches(type) stales only CACHE_DEPS[type]; a bare call (or an unknown type) = every cache.
+//  3. READ-YOUR-WRITES: the session that made the edit (hz_sid cookie; the invalidation records its generation through the
+//     request context) is never served a value built before its edit: its request waits for / forces the rebuild (shared
+//     single-flight, jumps the queue). Another instance (Vercel) learns of the edit through the epoch (stales everything) and
+//     the editor's hz_rw=<edit ms> cookie (that user waits for any cache built before it, for RW_COOKIE_MS).
+//  4. CAP: at most HZ_MAX_REBUILDS (2) rebuilds run at once process-wide, the rest queue. A build that reads another cache
+//     (cashflow -> po-rows) runs that inner build inside its own slot (no cap deadlock), and the inner value must be at least as
+//     fresh as the outer build (a stale input is never baked into a "fresh" result).
+//  5. A rebuild always stores a NEW object (the v28.164 sendJsonMemo / ETag memo is keyed on it); patch() swaps in a new object.
+const _lc = new Map();                 // name -> { name, builder, ttl, entry: { v, at, gen, t0 }, dirty: [gen], job, lastStart }
+let _lcGen = 0;                        // local invalidation generation (monotonic)
+const LC_MAX = Math.max(1, Number(process.env.HZ_MAX_REBUILDS || 2));
+const LC_LOG = process.env.HZ_CACHE_LOG === '1';   // log every rebuild start / end with running + queued counts
+const _lcQ = []; let _lcRunning = 0;
+const _lcBuildCtx = new AsyncLocalStorage();       // { gen, at } freshness bar of the build in progress (nested gets inherit it)
+const _rwSess = new Map();             // hz_sid -> { gen, T, inflight, uncovered, covered, seen }: this session's own edits
+const RW_COOKIE_MS = 5 * 60 * 1000;
+function _rwSessGet(sid) { let me = _rwSess.get(sid);
+  if (!me) { if (_rwSess.size > 5000) { const old = Date.now() - 3600000; for (const [k, v] of _rwSess) if (v.seen < old && !v.inflight) _rwSess.delete(k); }
+    me = { gen: 0, T: 0, inflight: 0, uncovered: false, covered: 0, wroteAt: 0, seen: 0 }; _rwSess.set(sid, me); }
+  me.seen = Date.now(); return me; }
+function _lcNew(name, builder, ttl) { const st = { name, builder, ttl, entry: null, dirty: [], job: null, lastStart: 0 }; _lc.set(name, st); return st; }
+function _lcMark(names) {             // names: Set of cache names, null = all. Marks only; never builds. Returns the new generation.
+  const gen = ++_lcGen;
+  for (const st of _lc.values()) if ((!names || names.has(st.name)) && (st.entry || st.job)) {
+    st.dirty.push(gen); if (st.dirty.length > 2000) { st.entry = null; st.dirty = []; }   // pathological backlog: drop (next request builds cold)
   }
-  async function get() {
-    const ep = await currentSupplyEpoch();
-    if (entry && entry.epoch === ep) { if (Date.now() - entry.at >= ttlMs && !inflight) refresh(ep).catch(() => {}); return entry.v; }
-    if (entry && opts.blockOnEpoch !== true) {     // epoch moved on → serve the last build now, rebuild behind (rate-limited)
-      if (!inflight && Date.now() - lastStart >= SUPPLY_REBUILD_MIN_MS) refresh(ep).catch(() => {});
-      return entry.v;
+  return gen;
+}
+function _lcNext() { while (_lcRunning < LC_MAX && _lcQ.length) { const j = _lcQ.shift(); if (!j.started) j.run(); } }
+function _lcJob(st, mode, need) {     // one build of st. mode 0 = background (queue tail), 1 = a request waits (queue head), 2 = nested (run now)
+  const job = { started: false, gen: 0, at: 0, needAt: (need && need.at) || 0 };
+  job.p = new Promise((ok, ko) => { job.run = () => {
+    if (job.started) return; job.started = true; _lcRunning++; job.gen = _lcGen; job.at = st.lastStart = Date.now();
+    if (LC_LOG) console.log('[cache] rebuild start ' + st.name + ' (running ' + _lcRunning + ', queued ' + _lcQ.length + ')');
+    _lcBuildCtx.run({ gen: job.gen, at: job.needAt }, () => Promise.resolve().then(st.builder)).then((v) => {
+      if (v == null) throw new Error('empty build');
+      hzRbNote(st.name, Date.now() - job.at);
+      st.entry = { v, at: Date.now(), gen: job.gen, t0: job.at };   // NEW object every build (v28.164 memo invariant)
+      st.dirty = st.dirty.filter((g) => g > job.gen);                // an edit that landed mid-build keeps it stale (served SWR, never to its editor)
+      ok(v);
+    }).catch((e) => { console.warn('[cache] rebuild ' + st.name + ' failed: ' + ((e && e.message) || e)); ko(e); })
+      .finally(() => { _lcRunning--; if (st.job === job) st.job = null;
+        if (LC_LOG) console.log('[cache] rebuild end ' + st.name + ' ' + (Date.now() - job.at) + 'ms (running ' + _lcRunning + ', queued ' + _lcQ.length + ')');
+        _lcNext(); });
+  }; });
+  job.p.catch(() => {});              // a background build nobody awaits must not raise an unhandled rejection
+  st.job = job;
+  if (mode === 2 || _lcRunning < LC_MAX) job.run(); else if (mode === 1) _lcQ.unshift(job); else _lcQ.push(job);
+  return job;
+}
+function _lcNeed(st) {                // this caller's freshness bar: null = may be served stale, else { gen, at } the value must be built from
+  let gen = 0, at = 0;
+  const b = _lcBuildCtx.getStore();
+  if (b) { if (st.dirty.length && st.dirty[0] <= b.gen) gen = b.gen; at = b.at || 0; }
+  let s = null; try { s = _reqStore.getStore(); } catch (_) {}
+  if (s && s.sid) { const me = _rwSess.get(s.sid);
+    if (me && me.gen > gen && st.dirty.length && st.dirty[0] <= me.gen) gen = me.gen;     // an invalidation this session made is still pending here
+    if (s.rwT && (!me || s.rwT > me.T) && s.rwT > at) at = s.rwT; }                      // this user edited on another instance (scope unknown)
+  return (gen || at) ? { gen, at } : null;
+}
+async function _lcGet(st) {
+  try { await currentSupplyEpoch(); } catch (_) {}   // notices another instance's edit (stales everything, lazily)
+  const nested = !!_lcBuildCtx.getStore(); let fails = 0, lastErr = null;
+  for (let i = 0; i < 4; i++) {
+    const need = _lcNeed(st), e = st.entry;
+    if (e && (!need || (e.gen >= need.gen && e.t0 >= need.at))) {
+      if (!st.job && ((st.dirty.length && Date.now() - st.lastStart >= SUPPLY_REBUILD_MIN_MS) || Date.now() - e.at >= st.ttl)) _lcJob(st, 0, null);   // stale: serve now, revalidate behind
+      return e.v;
     }
-    return refresh(ep);                            // cold → rebuild (block once)
+    let job = st.job;                 // cold, or this caller needs a newer build: wait for one (single-flight shared with everyone)
+    if (!job) job = _lcJob(st, nested ? 2 : 1, need);
+    else if (!job.started) { const k = _lcQ.indexOf(job); if (k >= 0) _lcQ.splice(k, 1); if (need && need.at > job.needAt) job.needAt = need.at;
+      if (nested) job.run(); else { _lcQ.unshift(job); _lcNext(); } }
+    const fits = !job.started || !need || (job.gen >= need.gen && job.at >= need.at && job.needAt >= need.at);
+    try { const v = await job.p; if (fits) return v; }
+    catch (err) { lastErr = err;
+      if (!need) { if (e) return e.v; throw err; }   // cold: the error; (a caller allowed stale never gets here with a value)
+      if (++fails >= 2) throw err; }                 // the editor: one retry, then an error, never their pre-edit value
   }
-  function peek() { return entry ? entry.v : null; }
-  function patch(fn) { if (!entry) return false; try { const v = fn(entry.v); if (v !== undefined) entry.v = v; return true; } catch (e) { return false; } }   // in-place row patch (keeps the epoch: a rebuild still follows, rate-limited)
-  const c = { name, get, refresh, peek, patch, invalidate(bump) { gen++; pendingBump = bump || null; entry = null; refresh().catch(() => {}); } };   // v28.151 (review E4): bump awaited inside refresh()
+  if (st.entry && !_lcNeed(st)) return st.entry.v;
+  throw lastErr || new Error('cache ' + st.name + ' still rebuilding');
+}
+function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
+  const st = _lcNew(name, builder, ttlMs);
+  const refresh = () => (st.job || _lcJob(st, 0, null)).p;
+  const c = { name, get: () => _lcGet(st), refresh, peek: () => (st.entry ? st.entry.v : null),
+    // row patch (poRowsPatchPo): fn must return a NEW object; the entry keeps its generation, so it stays exactly as stale as it was
+    patch(fn) { if (!st.entry) return false; try { const v = fn(st.entry.v); if (v !== undefined && v !== st.entry.v) st.entry = Object.assign({}, st.entry, { v }); return true; } catch (e) { return false; } },
+    invalidate() { _lcMark(new Set([name])); } };   // v28.167: mark only (was: drop + rebuild now)
   _supplyCaches.push(c);
   // On Vercel, DON'T boot-warm or install a re-warm timer: an idle/frozen container fires the builder (opening a pooled
   // backend) with no request in flight → stranded connections + overnight reap spikes (Diviyaj 01-Sep). get() builds
@@ -6930,6 +7030,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   }
   return c;
 }
+const actionsCache = makeCache('actions', buildActionsRows, ACTIONS_TTL_MS);   // v28.167: was the hand-rolled _actionsCache (same boot warm + 10-min re-warm off Vercel)
 // Section response-cache (Phase 2). For a whitelist of EXPENSIVE, param-free, user-independent GET sections we cache
 // the exact JSON the handler returns (captured via a per-request res.json wrapper — so output is provably identical to
 // the uncached path, no code extraction). TTL cache with single-flight lazy refresh: a fresh entry is served straight
@@ -6938,33 +7039,25 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
 // on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
 const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS, deposits: SUPPLY_CACHE_TTL_MS, skus: SUPPLY_CACHE_TTL_MS, 'payments-by-supplier': SUPPLY_CACHE_TTL_MS, remittances: SUPPLY_CACHE_TTL_MS, 'payment-emails': SUPPLY_CACHE_TTL_MS,
   'shipment-plan': SUPPLY_CACHE_TTL_MS, pipeline: SUPPLY_CACHE_TTL_MS, upcoming: SUPPLY_CACHE_TTL_MS, suppliers: SUPPLY_CACHE_TTL_MS, 'products-all': SUPPLY_CACHE_TTL_MS };   // v28.089: more heavy param-free user-independent section reads (shipment-plan 1.3s, pipeline/upcoming ~0.85s, suppliers 0.8s, products-all 2.5s)   // v28.088: the remaining uncached PAYMENTS-tab reads (payments-by-supplier ~1.6s cold; remittances / payment-emails) — param-free, user-independent, epoch-busted on any payment edit   // v28.083: skus (SKU master for ORDER PLAN, 807 KB, 1.9s live on every Order-plan open) joins the cache — param-free, user-independent, product master changes land within the TTL / epoch   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
-const _sectionResp = {};        // section -> { v, at, epoch }
-const _sectionInflight = {};    // section -> Promise (a recompute is running; others serve stale or await it)
-// v28.081 (Ben, perf audit): the section cache used to BLOCK the first request after TTL expiry or after any edit (the
-// epoch bump dropped the entry), so the first person to open PAYMENTS / CASH FLOW / SHIPMENTS each cycle paid the full
-// rebuild (payments-report 3.7s, shipments 1.5s, cashflow 1.3s measured). Now:
-//  • TTL-stale + same epoch → serve the cached JSON at once and recompute in the background (stale-while-revalidate).
-//  • edit (epoch bump) → the entry is KEPT and a background recompute starts immediately from invalidateSupplyCaches,
-//    so by the time the user navigates it is usually done; a request that arrives mid-rebuild awaits it (never stale
-//    after an edit, same correctness as before, just a shorter wait).
-//  • long-lived server: the whitelisted sections are warmed once at boot (staggered) so the first user never builds.
-// The recompute drives the real route handler with a minimal req/res, so the cached output stays byte-identical.
+// v28.081 (Ben, perf audit): the section cache used to BLOCK the first request after TTL expiry or after any edit.
+// v28.167 (Ben): each whitelisted section is now a lazy cache like makeCache ('sec:<section>' in CACHE_DEPS): an edit only marks
+// it stale (no eager staggered recompute of every section), the next request is served the last JSON and revalidates it in the
+// background, the editor's own next request waits for the rebuild (read-your-writes), all under the 2-rebuild cap.
+// The build drives the real route handler with a minimal req/res, so the cached output stays byte-identical.
+// The long-lived server still warms the whitelisted sections once at boot (now through the cap, so no boot storm).
 let supplySectionHandler = null;   // assigned where the route is defined (below)
-function _sectionRecompute(sec) {
-  if (_sectionInflight[sec] || !supplySectionHandler) return _sectionInflight[sec] || null;
-  const p = (async () => {
-    const ep = await currentSupplyEpoch();
-    const fakeReq = { _hzRecompute: true, params: { section: sec }, query: {}, headers: {}, get() { return ''; }, _parsedUrl: { search: '' } };
-    let out = null;
-    const fakeRes = { _s: 200, status(c) { this._s = c; return this; }, set() { return this; }, setHeader() { return this; }, type() { return this; },
-      json(v) { if (this._s < 400 && !(v && v.error)) { out = v; _sectionResp[sec] = { v, at: Date.now(), epoch: ep }; } return this; }, send() { return this; }, end() { return this; } };
-    await supplySectionHandler(fakeReq, fakeRes, () => {});
-    return out;
-  })().catch((e) => { console.warn('[section-cache] recompute ' + sec + ' failed: ' + (e && e.message || e)); return null; })
-    .finally(() => { if (_sectionInflight[sec] === p) delete _sectionInflight[sec]; });
-  _sectionInflight[sec] = p;
-  return p;
+async function _sectionBuild(sec) {
+  if (!supplySectionHandler) throw new Error('section handler not ready');
+  const fakeReq = { _hzRecompute: true, params: { section: sec }, query: {}, headers: {}, get() { return ''; }, _parsedUrl: { search: '' } };
+  let out = null;
+  const fakeRes = { _s: 200, status(c) { this._s = c; return this; }, set() { return this; }, setHeader() { return this; }, type() { return this; },
+    json(v) { if (this._s < 400 && !(v && v.error)) out = v; return this; }, send() { return this; }, end() { return this; } };
+  await supplySectionHandler(fakeReq, fakeRes, () => {});
+  if (out == null) throw new Error('section ' + sec + ' returned an error');
+  return out;
 }
+function _secCache(sec) { return _lc.get('sec:' + sec) || _lcNew('sec:' + sec, () => _sectionBuild(sec), SECTION_CACHE_TTL_MAP[sec]); }
+function _sectionRecompute(sec) { const st = _secCache(sec); return (st.job || _lcJob(st, 0, null)).p.catch(() => null); }
 if (!process.env.VERCEL) {   // boot warm (long-lived server only — on Vercel a frozen container must never open a backend with no request in flight)
   setTimeout(() => { Object.keys(SECTION_CACHE_TTL_MAP).forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 1500).unref?.()); }, 4000).unref?.();
 }
@@ -6994,20 +7087,48 @@ function portalBootstrapRun(key, builder, ep) {   // single-flight build → cac
   const p = Promise.resolve().then(builder).then((v) => { _portalCache.set(key, { v, at: Date.now(), epoch: ep }); return v; }).finally(() => { _portalInflight.delete(key); });
   _portalInflight.set(key, p); return p;
 }
-function invalidateSupplyCaches() {
-  const _epochBump = bumpSupplyEpoch();                          // shared epoch → every OTHER instance rebuilds too (cross-instance)
+// v28.167 (Ben): which server caches each kind of edit can change. Derived from the write routes that invalidate and from the
+// tables each build reads (PO_ROWS_SQL: purchase_orders, lines, v_po_finance, shipments, deposits via finance, prod_numbers,
+// key_accounts, payment_likely_dates, portal costs/notes; ORDER_PLAN / OP_EXC: POs, lines, ERP lines, branches, availability;
+// cashflow / payments-report / deposits / bi / shipments / pipeline / manufacturing / actions: POs, lines, deposits, shipments,
+// payments, suppliers, branches). When unsure the type is 'all'. Unknown types and a bare invalidateSupplyCaches() = 'all'.
+// Every invalidation, whatever its scope, also bumps the shared epoch, drops the shell memo and marks the 'sup:' badge memos and
+// the portal bootstraps stale (all already lazy / request-driven).
+const _CD_PO = ['po-rows', 'po-kids', 'order-plan', 'order-plan-exceptions', 'actions', 'sec:cashflow', 'sec:bi', 'sec:manufacturing',
+  'sec:payments-report', 'sec:shipments', 'sec:deposits', 'sec:payments-by-supplier', 'sec:shipment-plan', 'sec:pipeline', 'sec:upcoming'];   // every build that reads purchase_orders / its lines
+const CACHE_DEPS = {
+  'po-fields': _CD_PO,                                    // PO header field that cannot move the open-PO picker: dates, payment plan, refs, deposit / shipment link, packing, notes (patch on purchase_orders, Fulfil date sync)
+  po: _CD_PO.concat('lookups'),                           // PO created / imported / status / master link: + lookups (lists open, non-child POs)
+  'po-lines': _CD_PO,                                     // purchase_order_lines (qty, cost, approvals): every PO-derived build, not the pickers
+  shipment: _CD_PO.concat('lookups'),                     // shipments: PO rows, cashflow, shipments / pipeline / bi / plan; lookups lists shipment refs
+  deposit: _CD_PO.concat('lookups'),                      // deposits + Other Payments: PO finance, deposits / payments / cashflow / bi / actions; lookups lists deposit refs
+  payment: _CD_PO.concat('sec:remittances', 'sec:payment-emails'),   // likely dates, payment_fx, payment_transactions, Xero bills: PO rows, cashflow, payments-report + the remittance / email lists
+  production: _CD_PO.concat('lookups'),                   // prod_numbers / batches: PO rows, payments-report, bi, actions; lookups lists batches + active prod numbers
+  'key-account': _CD_PO.concat('sec:suppliers'),          // key_accounts: PO_ROWS_SQL joins them; the suppliers section lists them
+  sample: ['sec:payments-report'],                        // sample_requests: the only cached build reading them is payments-report (the samples grid is live)
+  'portal-user': [],                                      // supplier_portal_users: no cached build reads it (portal bootstraps are marked stale on every invalidation)
+  all: null,                                              // suppliers, products, rate cards / branches / config, unknown, the bare call, another instance's edit
+};
+function _lcScope(types) {            // -> Set of cache names, or null = every cache
+  if (types == null) return null;
+  const out = new Set();
+  for (const t of [].concat(types)) { const d = CACHE_DEPS[t]; if (d === null || d === undefined) return null; d.forEach((n) => out.add(n)); }
+  return out;
+}
+function invalidateSupplyCaches(types) {   // v28.167: types = a CACHE_DEPS key (or array); none = every cache. Marks stale only, never rebuilds.
+  const _epochBump = bumpSupplyEpoch();                          // shared epoch → every OTHER instance stales its caches too (cross-instance)
   try { shellMemoDrop(); } catch (_) {}                          // v28.081: the shell's fresh-builder memo too
-  _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
-  _supplyCaches.forEach((c) => { try { c.invalidate(_epochBump); } catch (e) { /* best-effort */ } });   // v28.151 (review E4): rebuild after the bump lands
-  // v28.081: cached section responses are no longer dropped (that made the next PAYMENTS / CASH FLOW open block on a full
-  // rebuild). They stay epoch-stale (never served after this edit) and rebuild NOW in the background, one after the epoch
-  // bump lands so the new entries carry the new epoch; a request that lands mid-rebuild awaits it.
-  const _secs = Object.keys(_sectionResp);
-  if (_secs.length) Promise.resolve(_epochBump).then(() => { _secs.forEach((sec, i) => setTimeout(() => { _sectionRecompute(sec); }, i * 400).unref?.()); }).catch(() => {});
+  const gen = _lcMark(_lcScope(types));                          // v28.167: mark the affected caches stale; nothing rebuilds until someone asks
   swrStale('sup:');                                                    // badge counts (dtc / reallocations / product unread): serve stale once, refresh behind
   portalCacheMarkStale();                                              // portal bootstraps: served stale once + revalidated by the page (v27.880), not dropped
+  // v28.167 read-your-writes: remember that THIS session made the edit (its next reads of the marked caches wait for a rebuild),
+  // and hand the browser hz_rw=<edit ms> so another instance can do the same for this user.
+  try { const s = _reqStore.getStore(); if (s && s.sid) { s.inv = true; const me = _rwSessGet(s.sid); me.gen = gen; me.T = Date.now(); me.covered++;
+    const res = s.req && s.req.res; if (res && !res.headersSent) res.append('Set-Cookie', 'hz_rw=' + me.T + '; Path=/; Max-Age=' + Math.round(RW_COOKIE_MS / 1000) + '; HttpOnly; SameSite=Lax' + (_reqHttps(s.req) ? '; Secure' : '')); } } catch (_) {}
+  if (LC_LOG) console.log('[cache] invalidate ' + (types == null ? 'all' : [].concat(types).join('+')) + ' gen ' + gen);
   return _epochBump;   // v28.127: callers that re-read straight away (e.g. deposit-create) can await the epoch bump; others ignore it
 }
+function _reqHttps(req) { try { return !!(req && (req.secure || /https/i.test(String(req.headers['x-forwarded-proto'] || '')))); } catch (_) { return false; } }
 
 
 // Deposits Drawdown report (SUPPLY ▸ Payments): per-deposit burn-down — a deposit is PAID in (increases the pool),
@@ -7122,19 +7243,9 @@ supplySectionHandler = async (req, res, next) => {
   const _sec = req.params.section;
   const _isFake = req._hzRecompute === true;   // driven by _sectionRecompute → always compute, never consult the cache
   if (SECTION_CACHE_TTL_MAP[_sec] && Object.keys(req.query || {}).length === 0 && !_isFake) {
-    const _ep = await currentSupplyEpoch();                        // epoch-gated: a cached response is only valid while the epoch is unchanged
-    const _c = _sectionResp[_sec];
-    if (_c && _c.epoch === _ep) {                                   // fresh, or TTL-stale at the same epoch → serve now (SWR: recompute behind)
-      if (Date.now() - _c.at >= SECTION_CACHE_TTL_MAP[_sec]) _sectionRecompute(_sec);
-      return res.json(_c.v);
-    }
-    if (_sectionInflight[_sec]) {                                   // epoch moved on / cold, and a rebuild is already running → wait for it (no stale after an edit)
-      try { const v = await _sectionInflight[_sec]; if (v) return res.json(v); } catch (_) { /* fall through to a live compute */ }
-    }
-    const _origJson = res.json.bind(res);                           // cold → this request computes and captures; concurrent ones await the same in-flight promise
-    let _resolve; _sectionInflight[_sec] = new Promise((r) => { _resolve = r; });
-    res.json = (p) => { if (!(p && p.error)) _sectionResp[_sec] = { v: p, at: Date.now(), epoch: _ep }; delete _sectionInflight[_sec]; _resolve((p && p.error) ? null : p); return _origJson(p); };
-    res.on('close', () => { if (_sectionInflight[_sec]) { delete _sectionInflight[_sec]; _resolve(null); } });   // aborted before json() → release the waiters
+    // v28.167: lazy scoped cache (see _lcGet): fresh or someone else's stale value at once (revalidated behind); cold or this
+    // session's own edit pending → waits for the single-flight rebuild. A failed cold build falls through to a live compute.
+    try { return res.json(await _lcGet(_secCache(_sec))); } catch (_) { /* live compute below */ }
   }
   try {
     switch (req.params.section) {
@@ -7928,8 +8039,7 @@ supplySectionHandler = async (req, res, next) => {
         // are still skipped for the preview and arrive with the full fetch.
         // Serve the cached full action set (stale-while-revalidate); apply the snooze/dismiss overlay fresh below.
         let _full;
-        if (_actionsCache) { _full = _actionsCache.rows; if (Date.now() - _actionsCache.at >= ACTIONS_TTL_MS && !_actionsRefresh) refreshActionsCache().catch(() => {}); }
-        else { _full = await refreshActionsCache(); }
+        _full = await actionsCache.get();   // v28.167: lazy scoped SWR + read-your-writes (makeCache)
         const arows = (req.query.scope === 'priority' ? _full.filter(r => r.severity === 'high') : _full).map(r => ({ ...r }));
         const dtoday = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
         let astate = {};
@@ -8103,6 +8213,16 @@ app.get('/api/supply/:section', supplySectionHandler);
 // (Ben's sandbox). Whitelisted fields only, parameterised. Production writes stay Diviyaj's/gated.
 // extraFn (optional): async fn run after a successful update; whatever object it returns is merged into the
 // JSON response. Used by the PO save to hand back the freshly-computed grid row (no separate fetch).
+// v28.167 (Ben): CACHE_DEPS type per table edited through patch(); purchase_orders is decided per edit (status → 'po', else
+// 'po-fields'); any table not listed (suppliers, air_freight_rates, trading_calendar, product_dev_sizes, ...) → 'all'.
+const PATCH_CACHE_SCOPE = { 'planner.purchase_order_lines': 'po-lines', 'planner.deposits': 'deposit', 'planner.key_accounts': 'key-account',
+  'planner.batches': 'production', 'planner.prod_numbers': 'production', 'planner.payment_transactions': 'payment',
+  'planner.sample_requests': 'sample', 'planner.supplier_portal_users': 'portal-user' };
+function _patchScope(table, body) {
+  if (table === 'planner.purchase_orders') return 'status' in body ? 'po' : 'po-fields';
+  if (table === 'planner.deposits' && 'supplier_name' in body) return 'all';   // the deposit route may have added a new supplier to the master
+  return PATCH_CACHE_SCOPE[table] || 'all';
+}
 async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn) {
   const sets = [], vals = []; let i = 1;
   for (const k of Object.keys(body || {})) {
@@ -8118,7 +8238,9 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn
   try {
     const r = await pool.query(`UPDATE ${table} SET ${sets.join(',')} WHERE ${keyCol}=$${i}${keyType ? '::' + keyType : ''}`, vals);
     if (table === 'planner.purchase_orders' && keyCol === 'po') { try { await poRowsPatchPo(keyVal); } catch (e) { /* the epoch rebuild below still covers it */ } }   // v27.881: exact row now, full rebuild later (rate-limited)
-    bumpSupplyEpoch();   // any supply edit bumps the shared epoch → cached sections (cash flow, PO rows…) rebuild cross-instance, not just after the 10-min TTL
+    // v28.167 (Ben): was bumpSupplyEpoch() alone (the client's follow-up /cache/invalidate then rebuilt everything). Now a scoped,
+    // lazy invalidation (still bumps the epoch) that also gives this editor read-your-writes on the affected caches.
+    invalidateSupplyCaches(_patchScope(table, body || {}));
     let extra = {};
     if (extraFn) { try { extra = (await extraFn(r.rowCount)) || {}; } catch (e) { /* non-fatal — still report the save */ } }
     res.json({ updated: r.rowCount, ...extra });
@@ -8142,7 +8264,7 @@ app.post('/api/supply/deposit/:id', async (req, res) => {
 app.post('/api/supply/deposit/:id/delete', async (req, res) => {
   try {
     const d = (await pool.query(`SELECT id, is_deposit, coalesce(reference,'') reference, date_paid FROM planner.deposits WHERE id=$1`, [req.params.id])).rows[0];
-    if (!d) { invalidateSupplyCaches(); return res.json({ ok: true, already_deleted: true }); }   // idempotent: already gone (e.g. a double-click) → succeed + bust cache so the list refreshes to reality
+    if (!d) { invalidateSupplyCaches('deposit'); return res.json({ ok: true, already_deleted: true }); }   // idempotent: already gone (e.g. a double-click) → succeed + bust cache so the list refreshes to reality
     if (d.date_paid) return res.status(400).json({ error: 'Cannot delete — this item has a payment date. Clear the paid date first if it was entered in error.' });
     if (d.is_deposit && d.reference) {
       const n = Number((await pool.query(`SELECT count(*) n FROM planner.purchase_orders WHERE deposit_ref=$1`, [d.reference])).rows[0].n);
@@ -8158,7 +8280,7 @@ app.post('/api/supply/deposit/:id/delete', async (req, res) => {
       await pool.query(`DELETE FROM planner.production_deposits WHERE deposit_ref=$1`, [d.reference]);
     }
     await pool.query(`DELETE FROM planner.deposits WHERE id=$1`, [req.params.id]);
-    invalidateSupplyCaches();   // deposit removed + linked POs re-pointed → bust the cached deposits/PO/cashflow sections so a silent reload shows reality
+    invalidateSupplyCaches('deposit');   // deposit removed + linked POs re-pointed → bust the cached deposits/PO/cashflow sections so a silent reload shows reality
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -8178,7 +8300,7 @@ app.post('/api/supply/deposit/:id/apply-all', async (req, res) => {
       WHERE coalesce(po.prod_no,'')=$1 AND lower(trim(coalesce(po.supplier_name,'')))=lower(trim($2))
         AND coalesce(po.deposit_ref,'')='' AND coalesce(po.status,'') NOT ILIKE '%complete%'`, [d.prod_no, d.supplier_name])).rows;
     const match = cand.filter(r => (/^AU$/.test(r.ctry || '')) === depAU);
-    if (match.length) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]); invalidateSupplyCaches(); }   // POs re-pointed → bust cached deposits/PO sections
+    if (match.length) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]); invalidateSupplyCaches('deposit'); }   // POs re-pointed → bust cached deposits/PO sections
     res.json({ assigned: match.length, skipped_region: cand.length - match.length, reference: d.reference, pos: match.map(r => r.po) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -8187,10 +8309,10 @@ app.post('/api/supply/likely-date', async (req, res) => {
   const { line_key, likely_date } = req.body || {};
   if (!line_key) return res.status(400).json({ error: 'line_key required' });
   try {
-    if (!likely_date) { await pool.query(`DELETE FROM planner.payment_likely_dates WHERE line_key=$1`, [line_key]); invalidateSupplyCaches(); return res.json({ cleared: true }); }
+    if (!likely_date) { await pool.query(`DELETE FROM planner.payment_likely_dates WHERE line_key=$1`, [line_key]); invalidateSupplyCaches('payment'); return res.json({ cleared: true }); }
     await pool.query(`INSERT INTO planner.payment_likely_dates (line_key, likely_date, updated_at) VALUES ($1,$2::date,now())
       ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [line_key, likely_date]);
-    invalidateSupplyCaches();   // bump the epoch so the CACHED purchase-orders / cash flow / payments-due builds rebuild — otherwise a new likely date shows in the PO drawer (fresh fetch) but not in the payment LISTS until the TTL
+    invalidateSupplyCaches('payment');   // bump the epoch so the CACHED purchase-orders / cash flow / payments-due builds rebuild; otherwise a new likely date shows in the PO drawer (fresh fetch) but not in the payment LISTS until the TTL
     res.json({ saved: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -14190,7 +14312,7 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     // Link children (they keep their own status; the Child PO tab shows the master's status live).
     await client.query(`UPDATE planner.purchase_orders SET master_po=$1, updated_at=now() WHERE po = ANY($2)`, [mpo, childPos]);
     await client.query('COMMIT');
-    invalidateSupplyCaches();
+    invalidateSupplyCaches('po');   // v28.167: scoped
     res.json({ ok: true, master_po: mpo, biggest_child: big });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -14216,7 +14338,7 @@ app.post('/api/supply/master-po/:id/remove-child', async (req, res) => {   // de
     await client.query(`UPDATE planner.purchase_orders SET order_value_estimation=(SELECT coalesce(sum(f.value_est),0) FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.master_po=$1), updated_at=now() WHERE po=$1`, [id]);
     const remaining = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE master_po=$1`, [id])).rows[0].n;
     await client.query('COMMIT');
-    invalidateSupplyCaches();
+    invalidateSupplyCaches('po');   // v28.167: scoped
     res.json({ ok: true, remaining });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -14232,7 +14354,7 @@ app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: 
     await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
     await client.query(`DELETE FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id]);
     await client.query('COMMIT');
-    invalidateSupplyCaches();
+    invalidateSupplyCaches('po');   // v28.167: scoped
     res.json({ ok: true });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -15101,7 +15223,16 @@ app.post('/api/supply/actions/state', async (req, res) => {
 // freshness. Kicks a background rebuild so the cache re-warms without blocking the caller.
 // Drop ALL user-independent SUPPLY read caches (Actions + po-rows + lookups + order-plan-exceptions) so the next
 // fetch reflects a just-made edit; each rebuilds in the background. The client fires this from invalidateDerived.
-app.post(['/api/supply/cache/invalidate', '/api/supply/actions/invalidate'], (req, res) => { invalidateSupplyCaches(); res.json({ ok: true }); });
+// v28.167 (Ben): marks stale only (no rebuild here; see _lcGet). If every write this browser made since its last call already
+// invalidated its own scope server-side (e.g. a PO date edit: patch() -> 'po-fields') and none is still running, the call is a
+// no-op, so the edit stays scoped. Anything else (an uncovered write, a write still in flight, no write at all = a manual
+// refresh, no session cookie, another instance) invalidates every cache as before, lazily.
+app.post(['/api/supply/cache/invalidate', '/api/supply/actions/invalidate'], (req, res) => {
+  const s = _reqStore.getStore(); const me = s && s.sid ? _rwSess.get(s.sid) : null;
+  if (me && !me.uncovered && !me.inflight && me.covered > 0 && Date.now() - (me.wroteAt || 0) < 120000) { me.covered = 0; return res.json({ ok: true, scoped: true }); }
+  invalidateSupplyCaches(); if (me) { me.uncovered = false; me.covered = 0; }
+  res.json({ ok: true });
+});
 // Ungated demand data-cache rebuild for the in-app "↻ Refresh" button (busts _dataCache + rebuilds _SKU_RAW/
 // FC_OUTPUTS from Supabase). Harmless (rebuild only, no write) so it needs no webhook secret — unlike the
 // n8n /api/data-cache/invalidate. Lets a user pick up a product/scope change without waiting on the TTL. (v27.327)
@@ -15216,7 +15347,7 @@ app.post('/api/supply/deposit-create', async (req, res) => {
     // v28.127 (Ben: "adding a new deposit doesn't show"): the deposits list is SECTION_CACHE'd + epoch-gated, and this
     // INSERT never bumped the epoch, so the page's immediate re-fetch served the cached list without the new row.
     // Await the bump so that re-fetch is guaranteed to see it (edits go through patch(), which already bumps).
-    try { await invalidateSupplyCaches(); } catch (_) { /* non-fatal: TTL backstop */ }
+    try { await invalidateSupplyCaches('deposit'); } catch (_) { /* non-fatal: TTL backstop */ }   // v28.167: scoped; the creator's re-fetch waits for the rebuild (read-your-writes)
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -15527,7 +15658,7 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
           [p.po + '|' + l.sku, p.po, l.sku, l.qty]);
       created++;
     }
-    invalidateSupplyCaches();   // new POs written → bump the epoch so the cached PO-rows / order-plan build rebuilds; otherwise the new POs don't show in Order Plan until the TTL / a hard refresh
+    invalidateSupplyCaches('po');   // new POs written → bump the epoch so the cached PO-rows / order-plan build rebuilds; otherwise the new POs don't show in Order Plan until the TTL / a hard refresh
     res.json({ committed: true, created, pos, warnings: warn });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -16515,7 +16646,7 @@ app.post('/api/supply/po-create', async (req, res) => {
       [po, b.supplier_name || null, supId, b.country_code || null, b.branch || null,
        b.status || null, b.start_production || null, b.prod_no || null, b.batch_id || null]);
     await notePoCreated(pool, po, authUser(req));
-    invalidateSupplyCaches();   // new PO written → rebuild cached PO-rows / order-plan so it shows without a hard refresh
+    invalidateSupplyCaches('po');   // new PO written → rebuild cached PO-rows / order-plan so it shows without a hard refresh
     res.json({ ok: true, po });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -17215,7 +17346,7 @@ app.post('/api/supply/payment-fx', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (run_date, supplier, region) DO UPDATE
       SET paid_currency=excluded.paid_currency, paid_amount=excluded.paid_amount, updated_at=now()`,
       [b.run_date, b.supplier, newCcy, newAmt, reg]);
-    try { invalidateSupplyCaches(); } catch (e) {}   // bust the cached payments-report so the run shows as paid on the next fetch (silent refresh)
+    try { invalidateSupplyCaches('payment'); } catch (e) {}   // bust the cached payments-report so the run shows as paid on the next fetch (silent refresh)
     const nowConfirmed = (newAmt != null && newCcy && String(newCcy).trim() !== '');
     let emailPreview;
     if (nowConfirmed && !wasConfirmed) {   // fire the supplier payment-confirmed notification ONCE, on transition — IMMEDIATELY (no delay)
@@ -18946,7 +19077,7 @@ app.post('/api/supply/sample-create', async (req, res) => {
     await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
       [id, createdByUser||null, (shortUser(createdByUser)||'Dock & Bay')+' created this sample request']);
     await client.query('COMMIT');
-    invalidateSupplyCaches();   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
+    invalidateSupplyCaches('sample');   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
     res.json({ ok:true, id, ref });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -19010,7 +19141,7 @@ app.post('/api/supply/sample/:id', async (req, res) => {   // patch fields (admi
   if (b.internal_stakeholders !== undefined) { try { await pool.query(`UPDATE planner.sample_requests SET internal_stakeholders=$2::jsonb WHERE id=$1::bigint`, [id, sampleStakeholdersJson(b.internal_stakeholders)]); } catch (e) { log500(e); } }   // v27.691 (Ben)
   // v27.694 (Ben fix): a jsonb-only save (recipients / internal_stakeholders) has no flat SAMPLE_FIELDS to patch —
   // the explicit updates above already applied, so return OK instead of letting patch() 400 with "no editable fields".
-  if (!Object.keys(b).some(k => SAMPLE_FIELDS[k] !== undefined)) { try { invalidateSupplyCaches(); } catch (e) {} return res.json({ ok: true }); }
+  if (!Object.keys(b).some(k => SAMPLE_FIELDS[k] !== undefined)) { try { invalidateSupplyCaches('sample'); } catch (e) {} return res.json({ ok: true }); }
   // Detect a transition INTO shipped so we can email the notify-stakeholders (read prior state before the update).
   let _pre = null;
   if (b.status && /ship|complete/i.test(String(b.status))) {
@@ -19089,7 +19220,7 @@ app.post('/api/supply/sample/:id/ref', async (req, res) => {
     await client.query(`UPDATE planner.supplier_charges SET source_ref=$1 WHERE source_type='sample' AND source_ref=$2`, [newRef, oldRef]);
     await client.query(`UPDATE planner.deposits SET reference=$1 WHERE is_deposit=false AND reference=$2`, [newRef, oldRef]);
     await client.query('COMMIT');
-    invalidateSupplyCaches();
+    invalidateSupplyCaches(['sample', 'deposit']);   // v28.167: scoped (sample ref + its Other Payments)
     res.json({ ok: true, ref: newRef, old_ref: oldRef });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -19147,7 +19278,7 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
     await client.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [op.rows[0].id, req.params.id]);
     await chargeTimelineNote(client, c.source_type, c.source_ref, `✅ Charge accepted → Other Payment $${amount} (${chargeLbl(c.freight_cost, c.product_cost, c.description)})`, shortUser(authUser(req)) || null);
     await client.query('COMMIT');
-    invalidateSupplyCaches();   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately
+    invalidateSupplyCaches('deposit');   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -20852,7 +20983,8 @@ const poKidsCache = makeCache('po-kids', async () => (await queryCapped(PO_ROWS_
 async function poRowsPatchPo(po) {
   if (!po || !poRowsCache.peek()) return false;
   const fresh = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [po])).rows[0] || null;
-  return poRowsCache.patch((rows) => {
+  return poRowsCache.patch((cur) => {
+    const rows = cur.slice();   // v28.167: a NEW array (cached values are never mutated in place; payload memos key on the object)
     const i = rows.findIndex(r => r.po === po);
     if (!fresh || fresh.master_po) { if (i >= 0) rows.splice(i, 1); return rows; }
     if (i >= 0) rows[i] = fresh; else { const j = rows.findIndex(r => String(r.po) > String(po)); if (j < 0) rows.push(fresh); else rows.splice(j, 0, fresh); }
