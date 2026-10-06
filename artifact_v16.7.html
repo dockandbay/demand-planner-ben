@@ -16348,8 +16348,8 @@ function renderAutoForecastReport(body){
       afPushFeed(AF_FEED);   // v28.002: persist for the server-side export
       fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED,includeGap:AF_GAP})}).then(function(r){return r.json();}).then(done).catch(fail); };
     // v28.148: a cold demand build (~3 s) ran before the page could paint. Show what is happening, let it paint, then build.
-    var afCold=!AF_FEED && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE));
-    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(afGo,120); }
+    var afCold=!AF_FEED && ((typeof DEMAND_BUILT!=='undefined'&&!DEMAND_BUILT)||(typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)||(LAZY_SKU&&!SKU_DATA_READY&&!SKU_DATA_FAILED));
+    if(afCold){ if(content)content.innerHTML='<span class="hz-spin" style="width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:hzspin .8s linear infinite"></span>Calculating demand for the buy feed… (a few seconds, first open only)<style>@keyframes hzspin{to{transform:rotate(360deg)}}</style>'; setTimeout(function(){ hzWhenSkuData('af',afGo); },120); }   // v28.163: waits for lazy SKU data (an early open built + cached an EMPTY feed)
     else afGo();
   }
 }
