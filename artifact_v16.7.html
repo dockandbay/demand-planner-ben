@@ -106,6 +106,19 @@ body{margin:0;font-family:var(--font,system-ui,-apple-system,sans-serif);font-si
 #hz-drawer .hz-item.hz-sub.active{border-left-color:#38bdf8;color:#fff}
 #hz-drawer .hz-grp-lbl{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:9px 18px 3px 34px;font-weight:700;margin-left:14px}   /* v27.573: DEMAND group heading inside the drawer */
 #hz-drawer .hz-item.hz-sub2{padding-left:46px;font-size:12.5px}
+/* v28.184 (Ben): L1 > L2 > L3 tree from the rail model; every row >= 44px tall (thumb target), long lists scroll inside the drawer */
+#hz-drawer{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+#hz-drawer .hz-item.hz-nav{display:flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;line-height:1.25}
+#hz-drawer .hz-nav .hz-lab{flex:1;min-width:0;overflow-wrap:anywhere}
+#hz-drawer .hz-nav .hz-badge{margin-left:0;flex:0 0 auto}
+#hz-drawer .hz-nav .hz-chev{flex:0 0 auto;width:18px;text-align:center;font-size:18px;line-height:1;color:var(--faint);transition:transform .15s ease}
+#hz-drawer .hz-nav .hz-chev.open{transform:rotate(90deg)}
+#hz-drawer .hz-item.hz-lv1{font-size:13.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+#hz-drawer .hz-item.hz-lv2{padding:8px 14px 8px 30px;font-size:13.5px}
+#hz-drawer .hz-item.hz-lv2.active{border-left-color:#38bdf8}
+#hz-drawer .hz-item.hz-lv3{padding:8px 14px 8px 46px;font-size:13px;color:var(--faint)}
+#hz-drawer .hz-item.hz-lv3.active{background:transparent;color:#5aa6ea;font-weight:700;border-left-color:#5aa6ea}
+#hz-drawer .hz-close{min-width:44px;min-height:44px}
 #hz-drawer .hz-close{float:right;background:transparent;border:none;color:var(--faint);font-size:20px;cursor:pointer;padding:0 16px}
 #hz-drawer .hz-badge{display:inline-block;margin-left:8px;background:var(--neg);color:#fff;font-size:10px;font-weight:700;border-radius:9px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;vertical-align:middle}
 .catpill{font-size:9px !important;padding:2px 6px !important}
@@ -19864,12 +19877,64 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
   function subItem(label,active,onClick){ var b=item(label,active,onClick); b.className+=' hz-sub'; return b; }
   function lbl(t){ var d=document.createElement('div'); d.className='hz-sec-lbl'; d.textContent=t; return d; }
   function close(){ drawer.classList.remove('open'); backdrop.classList.remove('open'); }
-  function open(){ build(); drawer.classList.add('open'); backdrop.classList.add('open'); }
+  function open(){ build(); drawer.classList.add('open'); backdrop.classList.add('open'); try{ watchRail(); }catch(e){} }
+  // v28.184 (Ben: "On mobile, cannot access the main CONFIG menu (or any level 2/3 menus below that) ... ALL level 3 menus on mobile should
+  // be in the side menu"). Root causes: the drawer listed only '#view-tabs-row .view-toggle' buttons, so the CONFIG cog (#config-btn is a
+  // .config-toggle) and CLIENT were never offered; it nested only L2, and only for some views, so no L3 (SUPPLY > PAYMENTS etc.) ever
+  // appeared; and SUPPLY > CONFIG's flat L3 (#config-subs) is CSS-hidden on phones, so it was unreachable. Now, when supply/inject.html
+  // exposes window.__hzNavModel (the desktop rail's L1 / L2 / L3 model), the drawer is a collapsible L1 > L2 > L3 tree built from it.
+  var _navCollapsed={};   // 'k' (an L1) or 'k|label' (an L2) the user folded; the current L1 and L2 start open
+  // The L3 bar of the L2 the user just LEFT stays in the DOM until the new page paints (SUPPLY keeps the old view while loading), so right
+  // after an L2 tap it would read as the new L2's L3 (SAMPLES showed PAYMENTS' tabs). Remember it and ignore that exact bar until it changes.
+  var _navStale=null;
+  function _l3sig(s){ return s?s.items.map(function(x){ return x.label; }).join('|'):''; }
+  function _l3fresh(s){ return !!(s&&s.items&&s.items.length)&&!(_navStale&&s.el===_navStale.el&&_l3sig(s)===_navStale.sig); }
+  function navRow(level,label,on,count,hasKids,open,onTap){ var b=document.createElement('button'); b.type='button';
+    b.className='hz-item hz-nav hz-lv'+level+(on?' active':'');
+    var t=document.createElement('span'); t.className='hz-lab'; t.textContent=label; b.appendChild(t);
+    if(count>0){ var bd=document.createElement('span'); bd.className='hz-badge'; bd.textContent=count>99?'99+':String(count); b.appendChild(bd); }
+    if(hasKids){ var cv=document.createElement('span'); cv.className='hz-chev'+(open?' open':''); cv.textContent='›'; b.appendChild(cv); }
+    b.onclick=onTap; return b; }
+  function navFresh(level,mod,lab,idx){ var M=window.__hzNavModel; try{ var L=level===2?M.l2(mod):((M.l3(mod)||{}).items);   // re-read at tap time: a re-rendered tab bar leaves the captured node detached (a detached <a> cannot navigate)
+      if(L){ if(L[idx]&&L[idx].label===lab)return L[idx]; for(var i=0;i<L.length;i++)if(L[i].label===lab)return L[i]; } }catch(e){} return null; }
+  function buildTree(M){
+    try{ document.body.classList.add('hz-navtree'); }catch(e){}   // phone CSS hides the now-redundant in-page L3 strips only while this tree is live
+    var ak=M.active();
+    M.l1().forEach(function(m){
+      var on=m.k===ak, open=on&&!_navCollapsed[m.k], l2=on?(M.l2(m.k)||[]):null;
+      drawer.appendChild(navRow(1,m.label,on,0,true,open,function(){
+        if(on){ _navCollapsed[m.k]=!_navCollapsed[m.k]; build(); return; }   // the current section: fold / unfold its L2
+        clearSearch(); _navCollapsed[m.k]=false; _navStale=null; try{ m.go(); }catch(e){} try{ M.soon(); }catch(e){}
+        waitBuild(function(){ var a=M.active(), l=a===m.k&&M.l2(m.k); return !!(l&&l.length); }, null, 40);   // stay open: show its L2 (+ the current L2's L3) as they render
+      }));
+      if(!open||!l2||!l2.length)return;
+      l2.forEach(function(it,i){
+        var l3=it.active?M.l3(m.k):null; if(!_l3fresh(l3))l3=null;
+        var kids=!!l3, ck=m.k+'|'+it.label, open3=kids&&!_navCollapsed[ck];
+        drawer.appendChild(navRow(2,it.label,it.active,it.count,kids,open3,function(){
+          if(it.active){ if(kids){ _navCollapsed[ck]=!_navCollapsed[ck]; build(); } else close(); return; }
+          var src=navFresh(2,m.k,it.label,i), old=null; try{ old=M.l3(m.k); }catch(e){} _navStale=old?{el:old.el,sig:_l3sig(old)}:null;
+          clearSearch(); _navCollapsed[ck]=false; if(src&&src.el){ try{ src.el.click(); }catch(e){} } try{ M.soon(); }catch(e){}
+          // stay open while its L3 renders (then tap one); an L2 with no L3 just navigates and closes
+          waitBuild(function(){ var l=M.l2(m.k)||[], a=l.filter(function(x){ return x.active; })[0]; if(!a||a.label!==it.label)return false; return _l3fresh(M.l3(m.k)); }, close, 25);
+        }));
+        if(!open3)return;
+        l3.items.forEach(function(s,j){
+          drawer.appendChild(navRow(3,s.label,s.active,s.count,false,false,function(){
+            if(!s.active){ var src=navFresh(3,m.k,s.label,j); clearSearch(); if(src&&src.el){ try{ src.el.click(); }catch(e){} } try{ M.soon(); }catch(e){} }
+            close(); }));
+        });
+      });
+    });
+  }
   function build(){
+    var _st=drawer.scrollTop;   // v28.184: rebuilding (async L2 / L3 arriving) must not jump a long, scrolled drawer back to the top
     drawer.innerHTML='';
     var x=document.createElement('button'); x.className='hz-close'; x.innerHTML='&times;'; x.onclick=close; drawer.appendChild(x);
     drawer.appendChild(lbl('Navigate'));
-    var views=Array.prototype.slice.call(document.querySelectorAll('#view-tabs-row .view-toggle'));
+    var _M=window.__hzNavModel, _treeOk=false;
+    if(_M){ try{ buildTree(_M); _treeOk=true; }catch(e){ while(drawer.childNodes.length>2)drawer.removeChild(drawer.lastChild); try{ document.body.classList.remove('hz-navtree'); }catch(_){} } }
+    var views=_treeOk?[]:Array.prototype.slice.call(document.querySelectorAll('#view-tabs-row .view-toggle'));
     var supplyActive=false, demandActive=false, scenActive=false, configActive=false;
     views.forEach(function(vb){
       if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn' && vb.id!=='config-btn' && vb.id!=='product-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO + CONFIG + PRODUCT buttons
@@ -19927,12 +19992,29 @@ try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventLi
     drawer.appendChild(msg);
     if(window.HZ_SUGGEST&&window.HZ_SUGGEST.open) drawer.appendChild(item('💡  Suggestion box', false, function(){ close(); window.HZ_SUGGEST.open(); }));
     drawer.appendChild(item('⎋  Sign out', false, function(){ close(); hzLogout(); }));   // v27.575
+    if(_st)drawer.scrollTop=_st;
   }
   // keep the drawer's Messages count fresh: when the bell's poll updates the count and the drawer is open, rebuild.
-  window.__tlOnCount=function(){ if(drawer.classList.contains('open'))build(); };
+  window.__tlOnCount=function(){ if(drawer.classList.contains('open'))softBuild(); };   // v28.184: softBuild (not mid-press)
   // rebuild the drawer now, then keep rebuilding (up to ~1.4s) until the just-activated view's sub-nav has
   // rendered — so the nested sub-items appear on the FIRST tap even when they load asynchronously (CONFIG).
-  function waitBuild(ready){ var n=0; (function tick(){ if(!drawer.classList.contains('open'))return; build(); if(!ready()&&n++<22){ setTimeout(tick,60); } })(); }
+  // v28.184: optional onTimeout (an L2 with no L3 closes the drawer once it has navigated) and max ticks; a newer tap cancels an older wait.
+  var _wbSeq=0;
+  function waitBuild(ready,onTimeout,max){ var n=0, my=++_wbSeq, lim=max||22; (function tick(){ if(my!==_wbSeq||!drawer.classList.contains('open'))return; softBuild(); if(ready())return; if(n++<lim){ setTimeout(tick,60); } else if(onTimeout){ onTimeout(); } })(); }
+  // v28.184: never swap the drawer's rows out from under a finger (the v28.179 lesson: a press spanning a re-render lands on a detached
+  // node and the tap is lost). Background rebuilds wait until the touch / mouse press is released (+ the click that follows it).
+  var _navPress=false, _navDeferred=false;
+  function softBuild(){ if(_navPress){ _navDeferred=true; return; } build(); }
+  function _pressEnd(){ if(!_navPress)return; _navPress=false; if(_navDeferred){ _navDeferred=false; setTimeout(function(){ if(!_navPress&&drawer.classList.contains('open'))build(); },350); } }
+  ['touchstart','mousedown'].forEach(function(ev){ drawer.addEventListener(ev,function(){ _navPress=true; },{capture:true,passive:true}); });
+  ['touchend','touchcancel','mouseup'].forEach(function(ev){ drawer.addEventListener(ev,_pressEnd,{capture:true,passive:true}); });
+  // While the drawer is open, follow the nav as it renders: the (hidden on phones) desktop rail list is rewritten only when the nav model
+  // actually changes (v28.179), so its mutations are the change signal; the drawer just rebuilds from the same model.
+  var _railWatch=null, _railWatchT=0;
+  function watchRail(){ var l=document.getElementById('hz-rl-list'); if(!l||!window.MutationObserver||(_railWatch&&_railWatch._el===l))return;
+    try{ if(_railWatch)_railWatch.disconnect(); }catch(e){}
+    _railWatch=new MutationObserver(function(){ if(!drawer.classList.contains('open'))return; clearTimeout(_railWatchT); _railWatchT=setTimeout(softBuild,60); });
+    _railWatch._el=l; _railWatch.observe(l,{childList:true}); }
   burger.onclick=function(){ drawer.classList.contains('open')?close():open(); };
   backdrop.onclick=close;
 
