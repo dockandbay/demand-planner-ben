@@ -1,4 +1,4 @@
--- 329_app_health_kinds.sql  (v28.162, Ben): widen the App health log (migration 328) to the new capture types.
+-- 329_app_health_kinds.sql  (v28.163, Ben): widen the App health log (migration 328) to the new capture types.
 -- Browser: long_task (main-thread freezes >= 1s), api_failure (client-observed 5xx / 408 / 429 / network error / > 10s),
 -- page_view (visits + active seconds per view). Server: etl_stale / etl_flat / etl_drop / data_lag (data freshness, from
 -- runHealthChecks), integration_error (Fulfil / Xero / Flexport / DHL / BLADE / Anthropic / Resend / KV via _fetchT), sanity

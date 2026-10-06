@@ -38,7 +38,7 @@
       setTimeout(tick,300); })(); }
   window.addEventListener('hashchange',function(){ watch(Date.now(),false); });
   watch(0,true);
-  // v28.162 (Ben): AGGREGATED captures, kept in memory and sent as one row per group every 60s and on pagehide / tab hidden:
+  // v28.163 (Ben): AGGREGATED captures, kept in memory and sent as one row per group every 60s and on pagehide / tab hidden:
   //  long_task  : main-thread tasks >= 1s (PerformanceObserver 'longtask', buffered), per normalised view: count, max, sum; <= 10 a minute.
   //  api_failure: same-origin /api calls seen by THIS browser that failed: network error, timeout, status >= 500, 408 / 429, or
   //               slower than 10s; per method + normalised path + status. Health posts and /hz-health.js are never recorded.

@@ -8827,7 +8827,7 @@
             +rows.map(function(r){ return '<tr>'+cols.map(function(c){ var v=c[2]?c[2](r):esc(r[c[0]]==null?'':r[c[0]]); return '<td class="l" style="vertical-align:top;text-align:left">'+v+'</td>'; }).join('')+'</tr>'; }).join('')
             +'</tbody></table></div>':'<div class="mut tiny" style="padding:6px 0">None logged in this period.</div>'); }
         var mono=function(v){ return '<span style="font-family:ui-monospace,Menlo,monospace">'+esc(v)+'</span>'; };
-        // v28.162 (Ben): second KPI row + New since last deploy (first), red alerts, data freshness, sanity, integrations, freezes,
+        // v28.163 (Ben): second KPI row + New since last deploy (first), red alerts, data freshness, sanity, integrations, freezes,
         // API failures, database, page usage and errors per version. Same sortable left-aligned grids.
         function dtm(s){ s=String(s||''); return s?fd(s.slice(0,10))+(s.length>15?' '+new Date(s).toTimeString().slice(0,5):''):''; }
         function mins(s){ return Math.round((Number(s)||0)/60)+' min'; }

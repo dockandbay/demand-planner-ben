@@ -114,11 +114,11 @@ async function _rollback(client) {
 async function _fetchT(url, opts, ms) {
   const o = Object.assign({}, opts || {}); const t = AbortSignal.timeout(ms || 20000); const t0 = Date.now();
   o.signal = o.signal ? AbortSignal.any([o.signal, t]) : t;
-  try { const r = await fetch(url, o); if (!r.ok) hzIntegNote(url, o, r.status, Date.now() - t0, false, null); return r; }   // v28.162 (Ben): health log integration_error on non-2xx
+  try { const r = await fetch(url, o); if (!r.ok) hzIntegNote(url, o, r.status, Date.now() - t0, false, null); return r; }   // v28.163 (Ben): health log integration_error on non-2xx
   catch (e) { if (e && (e.name === 'TimeoutError' || (e.name === 'AbortError' && t.aborted))) { let h = ''; try { h = new URL(String(url)).host; } catch (_) {} const x = new Error('Timed out after ' + Math.round((ms || 20000) / 1000) + 's calling ' + h); x.code = 'FETCH_TIMEOUT'; hzIntegNote(url, o, 0, Date.now() - t0, true, x.message); throw x; }
     hzIntegNote(url, o, 0, Date.now() - t0, false, (e && e.message) || String(e)); throw e; }
 }
-// v28.162 (Ben): INTEGRATION HEALTH. Every outbound call above goes through _fetchT, so ONE hook covers Fulfil, Xero (incl. the
+// v28.163 (Ben): INTEGRATION HEALTH. Every outbound call above goes through _fetchT, so ONE hook covers Fulfil, Xero (incl. the
 // identity.xero.com token refresh), Flexport, DHL, FedEx, BLADE, Anthropic (/api/ai + Ask Claude), Resend and KV. A non-2xx, a
 // network error or a timeout is noted into the health buffer as integration_error (no DB round trip; flushed with the rest),
 // grouped by service + method + normalised path + status. Logged: host-derived service, method, path with ids replaced by :id and
@@ -151,7 +151,7 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
     if (_QLOG && p && typeof p.then === 'function') { const t0 = Date.now(); const sql = String((arguments[0] && arguments[0].text) || arguments[0] || '').replace(/\s+/g, ' ').slice(0, 110); const path = (s && s.req) ? (s.req.method + ' ' + String(s.req.originalUrl || s.req.url || '').split('?')[0]) : '-';
       p.then(() => { const ms = Date.now() - t0; if (ms >= _QLOG) console.log('[q ' + ms + 'ms] ' + path + ' :: ' + sql); }, () => {}); }
     return p; }; }
-// v28.162 (Ben): DB HEALTH for the health log. (1) Every physical client gets its query() wrapped ONCE (pool 'connect' event) and
+// v28.163 (Ben): DB HEALTH for the health log. (1) Every physical client gets its query() wrapped ONCE (pool 'connect' event) and
 // timed: a statement >= HZ_SLOW_QUERY_MS (default 2000) is noted as slow_query, grouped by its first 160 chars with string and
 // number literals replaced by ? (never parameters or data). This times EXECUTION only (pool.query reaches client.query with a
 // callback after the checkout), so a pool wait never shows up as a slow statement; waits are db_pool below. (2) pool.connect is
@@ -855,7 +855,7 @@ function hzHealthNote(kind, method, path, status, ms, msg, example) {
   if (example && example !== e.path) e.meta = { example: String(example).slice(0, 300) };
   if (kind === 'server_error') _hzAlertDirty = true;
 }
-// v28.162 (Ben): generic buffered event for the new server kinds (integration_error, db_pool, slow_query). Same buffer, same
+// v28.163 (Ben): generic buffered event for the new server kinds (integration_error, db_pool, slow_query). Same buffer, same
 // one-INSERT flush, same 1000-key cap. `key` groups occurrences; meta merges (max_* fields keep the max); ms keeps the max.
 const HZ_ALERT_KINDS = new Set(['server_error', 'db_pool', 'integration_error']);
 let _hzAlertDirty = false, _hzAlertEvalAt = 0;
@@ -866,7 +866,7 @@ function hzHealthEvt(kind, key, f) { try { f = f || {};
   if (f.meta) { const m = e.meta || (e.meta = {}); for (const x in f.meta) m[x] = (/^max_/.test(x) && typeof m[x] === 'number') ? Math.max(m[x], f.meta[x]) : f.meta[x]; }
   if (HZ_ALERT_KINDS.has(kind)) _hzAlertDirty = true;
 } catch (_) {} }
-// v28.162 (Ben): per-route call / 5xx counts for the red-alert "route mostly failing" trigger, in fixed 10-minute windows, in memory
+// v28.163 (Ben): per-route call / 5xx counts for the red-alert "route mostly failing" trigger, in fixed 10-minute windows, in memory
 // (per instance: the app-wide 5xx count comes from the DB instead). O(1) per request, capped at 500 routes.
 let _hzRoute = new Map(), _hzRouteT = Date.now(), _hzPoolT = 0;
 function hzRouteCount(route, is5xx) { const now = Date.now(); if (now - _hzRouteT > 600000) { _hzRoute = new Map(); _hzRouteT = now; }
@@ -889,7 +889,7 @@ function hzHealthFlush(force) {
 if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), 30000).unref?.();
 app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
   if (_hzHB.size) hzHealthFlush(false);   // v28.159: due flush rides an active request (Vercel has no background time)
-  // v28.162 (Ben): DB pool sample at most once per 10s (three integer reads); noted only when requests are queued for a connection.
+  // v28.163 (Ben): DB pool sample at most once per 10s (three integer reads); noted only when requests are queued for a connection.
   try { const now = Date.now(); if (now - _hzPoolT >= 10000) { _hzPoolT = now; const w = pool.waitingCount;
     if (w > 0) hzHealthEvt('db_pool', 'waiting', { path: 'db pool waiting', message: 'Requests queued for a DB connection (pool max ' + ((pool.options && pool.options.max) || '?') + ')', meta: { max_waiting: w, total: pool.totalCount, idle: pool.idleCount } }); } } catch (_) {}
   res.on('finish', () => { try { const s = _reqStore.getStore(); const ms = Date.now() - ((s && s.t0) || Date.now()); const q = (s && s.q) || 0;
@@ -1097,7 +1097,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
-      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks'   // v28.162 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks'   // v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -3337,7 +3337,7 @@ async function fulfilPushLines(po, completion) {
         try { if ((await fulfilPOState(fulfilId)) !== 'confirmed') await fulfilPOButton(fulfilId, 'confirm', 'confirmed'); }
         catch (e) { const m = 'PO reverted to draft for the edit but could NOT be re-confirmed (' + (e && e.message) + '): confirm it in Fulfil by hand';
           console.error('[fulfil push] ' + po + ': ' + m); _upProblems.push(m); if (_upErr) _upErr.message += '. ALSO: ' + m;
-          hzIntegFatal('fulfil', 'reconfirm_failed', 'Fulfil PO ' + po + ' left in DRAFT: ' + m, { po: String(po), fulfil_id: fulfilId });   // v28.162 (Ben): health log + red alert
+          hzIntegFatal('fulfil', 'reconfirm_failed', 'Fulfil PO ' + po + ' left in DRAFT: ' + m, { po: String(po), fulfil_id: fulfilId });   // v28.163 (Ben): health log + red alert
         }
       }
     }
@@ -4652,7 +4652,7 @@ async function _xeroRefresh(region, store) {
       catch (e2) { if (!(e2.code === 400 && e2.oauthError === 'invalid_grant')) throw e2; store = fresh; }
     }
     console.error('[xero] ' + region.toUpperCase() + ' refresh token rejected (invalid_grant): dropping the stored connection; reconnect needed');
-    hzIntegFatal('xero', 'disconnected_' + region, 'Xero ' + region.toUpperCase() + ' disconnected: refresh token rejected (invalid_grant). An admin must reconnect (SUPPLY ▸ CONFIG ▸ Payments)', { region });   // v28.162 (Ben): health log + red alert
+    hzIntegFatal('xero', 'disconnected_' + region, 'Xero ' + region.toUpperCase() + ' disconnected: refresh token rejected (invalid_grant). An admin must reconnect (SUPPLY ▸ CONFIG ▸ Payments)', { region });   // v28.163 (Ben): health log + red alert
     await pool.query(`DELETE FROM planner.app_settings WHERE key=$1 AND (CASE WHEN key=$1 THEN (value::jsonb)->>'refresh_token' END) = $2`, ['xero_oauth_' + region, store.refresh_token]).catch(() => {});
     _xeroTok[region] = { token: null, exp: 0 };
     return null;
@@ -21468,7 +21468,7 @@ app.get('/hz-health.js', (req, res) => { res.set('Content-Type', 'application/ja
 // (csid). Trade-off: errors on the portal LOGIN screens (no session yet) are not captured, which is acceptable vs an open
 // write hole. Limits: <= 50 events a request, per (source, IP, user) 60 events a minute and per IP 200 a minute (excess dropped
 // with 202), fields truncated (message 500, stack 2000), identical events in one batch collapsed to a count, one INSERT.
-// v28.162 (Ben): + long_task / api_failure / page_view / sanity / metric. These arrive PRE-AGGREGATED by hz-health.js, so a row's
+// v28.163 (Ben): + long_task / api_failure / page_view / sanity / metric. These arrive PRE-AGGREGATED by hz-health.js, so a row's
 // `count` (1..10000) is honoured instead of counting 1 per row.
 const HZ_CE_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'long_task', 'api_failure', 'page_view', 'sanity', 'metric']);
 const HZ_CE_AGG = new Set(['long_task', 'api_failure', 'page_view', 'metric']);
@@ -21551,11 +21551,11 @@ async function hzHealthReport(daysIn) {
   d.markdown = hzHealthMarkdown(d);
   return d;
 }
-// v28.162 (Ben): likely file per integration service (the .md is written for Claude Code).
+// v28.163 (Ben): likely file per integration service (the .md is written for Claude Code).
 const HZ_INTEG_FILE = { fulfil: 'server.mjs fulfilFetch / fulfilFetchCfg (+ the PO push)', xero: 'server.mjs xeroFetch', 'xero-token': 'server.mjs xeroExchange / _xeroRefresh / xeroToken', flexport: 'server.mjs flexportFetch',
   dhl: 'server.mjs dhlLookupOne (tracking poller)', fedex: 'server.mjs fedexToken / FedEx track', blade: 'server.mjs bladeLogin / bladeVariations / bladeStocks', anthropic: 'server.mjs POST /api/ai proxy + Ask Claude (/api/assistant)',
   resend: 'server.mjs sendResendEmail (+ the direct Resend calls)', kv: 'server.mjs kvCmd (KV data cache)', drivehq: 'server.mjs 3PL DriveHQ stock fetch', cin7: 'server.mjs Cin7 calls' };
-// v28.162 (Ben): the new sections, ONE query. New since last deploy = error groups (kind + path + message; browser errors by
+// v28.163 (Ben): the new sections, ONE query. New since last deploy = error groups (kind + path + message; browser errors by
 // message) whose FIRST-EVER row (whole table, 60-day retention) carries the current app_version.
 async function hzHealthReportExtra(days) {
   const x = (await pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int))
@@ -21610,7 +21610,7 @@ function hzHealthMarkdown(d) {
   const k2 = d.kpis2 || {}; if (d.kpis2) L.push(`| Freezes (main thread >= 1s) | ${k2.freezes} |`, `| API failures (seen by browsers) | ${k2.api_failures} |`, `| Integration errors | ${k2.integration_errors} |`, `| Data freshness findings | ${k2.data_findings} |`, `| Sanity findings | ${k2.sanity} |`, `| DB pool / slow query events | ${k2.db} |`, `| Red alerts | ${k2.red_alerts} |`);
   L.push('');
   if (d.extra_error) L.push(`> The v28.162 sections failed to load: ${hzMdCode(d.extra_error)} (is migration 329 applied?)`, '');
-  // v28.162 (Ben): New since last deploy goes FIRST: these are what the latest release broke.
+  // v28.163 (Ben): New since last deploy goes FIRST: these are what the latest release broke.
   if (d.new_since) { L.push(`## New since ${d.prev_version || 'the previous version'} (first seen on ${d.version})`, '');
     if (!d.new_since.length) L.push('Nothing new: every error in the log was already seen on an earlier version.', '');
     else { L.push('| # | Kind | Where | Message | Count | Users | First seen | Likely file |', '|---|---|---|---|---|---|---|---|');
@@ -21637,7 +21637,7 @@ function hzHealthMarkdown(d) {
   if (!d.views.length) L.push('None logged.', '');
   else { L.push('| # | View | Source | Count | p95 ms | Max ms | Users | Last seen | Likely file |', '|---|---|---|---|---|---|---|---|---|');
     d.views.forEach((r, i) => L.push(`| ${i + 1} | ${hzMdCell(r.path)} | ${hzMdCell((r.sources || []).join(', '))} | ${r.n} | ${r.p95} | ${r.max_ms} | ${r.users} | ${dt(r.last_seen)} | ${hzMdCell(r.file)} |`)); L.push(''); }
-  // v28.162 (Ben): new sections.
+  // v28.163 (Ben): new sections.
   const tbl = (title, note, heads, rows) => { L.push(title, ''); if (note) L.push(note, ''); if (!rows.length) { L.push('None logged.', ''); return; }
     L.push('| ' + heads.join(' | ') + ' |', '|' + heads.map(() => '---').join('|') + '|'); rows.forEach(r => L.push('| ' + r.map(hzMdCell).join(' | ') + ' |')); L.push(''); };
   if (d.kpis2) {
@@ -21699,7 +21699,7 @@ async function hzHealthEmail(days, to) {
   const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;max-width:760px">`
     + `<h2 style="font-size:17px;margin:0 0 4px">HORIZON weekly health</h2><div style="font-size:12px;color:#64748b;margin-bottom:12px">${E(F)} to ${E(T)} · ${E(d.version)}</div>`
     + `<table style="border-collapse:separate;border-spacing:8px 0"><tr>${tile(k.server_errors, 'Server errors', 1)}${tile(k.slow_requests, 'Slow requests', 0)}${tile(k.browser_errors, 'Browser errors', 1)}${tile(k.slow_views, 'Slow views', 0)}</tr></table>`
-    // v28.162 (Ben): second KPI row, then New since last deploy FIRST, data freshness in full, top 5 of every other section.
+    // v28.163 (Ben): second KPI row, then New since last deploy FIRST, data freshness in full, top 5 of every other section.
     + (d.kpis2 ? `<table style="border-collapse:separate;border-spacing:8px 0;margin-top:8px"><tr>${tile(d.kpis2.freezes, 'Freezes', 1)}${tile(d.kpis2.api_failures, 'API failures', 1)}${tile(d.kpis2.integration_errors, 'Integration errors', 1)}${tile(d.kpis2.data_findings, 'Data freshness', 1)}${tile(d.kpis2.sanity, 'Sanity', 1)}${tile(d.kpis2.db, 'DB', 1)}</tr></table>`
       + tbl('New since ' + (d.prev_version || 'last deploy') + ' (first seen on ' + d.version + ')', ['Kind', 'Where', 'Message', 'Count', 'Users'], d.new_since.slice(0, 5).map(r => [r.kind, (r.path || (r.views || []).filter(Boolean).join(', ')) + (r.status ? ' (' + r.status + ')' : ''), String(r.message || '').slice(0, 140), r.n, r.users]))
       + ((d.red_alerts || {}).pending ? tbl('Red alerts held by the hourly cap (now delivered)', ['Raised', 'Alert', 'Events'], d.red_alerts.rows.filter(r => r.meta && r.meta.pending_alert).map(r => [hzSydney(r.ts) + ' Sydney', r.message, r.n])) : '')
@@ -21729,14 +21729,14 @@ app.post('/api/cron/health-weekly', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
   try {
     const b = req.body || {}, dry = b.dry_run === true || b.dry_run === 'true';
-    // v28.162 (Ben): fresh data-freshness / sanity findings first (dry run: computed only). noSend: alerts raised here are stored as
+    // v28.163 (Ben): fresh data-freshness / sanity findings first (dry run: computed only). noSend: alerts raised here are stored as
     // pending and ride THIS weekly email instead of spending the hourly slot on their own.
     let checks = null; try { checks = await runHealthChecks({ dry, noSend: true }); } catch (e) { console.warn('[health] weekly pre-checks failed: ' + e.message); }
     if (!dry) return res.json(Object.assign(await hzWeeklySend(b.days || 7, 'cron'), { checks: checks ? { findings: (checks.findings || []).length, written: checks.written || 0 } : null }));
     const to = hzEmailList(b.to).length ? hzEmailList(b.to) : await hzHealthRecipients();   // a caller's `to` is honoured ONLY on a dry run
     const { payload, report } = await hzHealthEmail(b.days || 7, to);
     if (dry) { const slot = await hzEmailSlot(); return res.json({ ok: true, dry_run: true, payload, md: report.markdown, kpis: report.kpis, kpis2: report.kpis2 || null, purge: 'skipped (dry run)', would_throttle: !!(slot.next_allowed && Date.parse(slot.next_allowed) > Date.now()), next_allowed: slot.next_allowed }); }
-    // v28.162 (Ben): cap-aware. Inside the hour after another health email it is held (app_settings health_weekly_pending) and the
+    // v28.163 (Ben): cap-aware. Inside the hour after another health email it is held (app_settings health_weekly_pending) and the
     // next POST /api/cron/health-checks after the hour sends it. Recipients are always the configured list on a real send.
     res.json(await hzWeeklySend(b.days || 7, 'cron'));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -21753,7 +21753,7 @@ app.post('/api/health/send-test', async (req, res) => {
     const email = me.email || authUser(req); if (!email) return res.status(400).json({ error: 'No signed-in email to send to' });
     const b = req.body || {}, { payload, report } = await hzHealthEmail(b.days || 7, [String(email).toLowerCase()]);
     if (b.dry_run === true) return res.json({ ok: true, dry_run: true, payload, kpis: report.kpis });
-    // v28.162 (Ben): the one-health-email-per-hour cap covers the test send too (it would otherwise be a way round it).
+    // v28.163 (Ben): the one-health-email-per-hour cap covers the test send too (it would otherwise be a way round it).
     if (!(await hzEmailClaim())) { const slot = await hzEmailSlot(); return res.json({ ok: false, throttled: true, error: 'Health emails are capped at one per hour. Next allowed ' + (slot.next_allowed ? hzSydney(slot.next_allowed) + ' Sydney' : 'soon') + '.', next_allowed: slot.next_allowed }); }
     const r = await hzHealthSend(payload, email);
     res.json({ ok: !r.error, sent: r.sent || 0, sandbox: !!r.sandbox, error: r.error || null, to: payload.to, subject: payload.subject });
@@ -21761,7 +21761,7 @@ app.post('/api/health/send-test', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// v28.162 (Ben): HEALTH CHECKS (data freshness, ETL, business sanity, daily metrics) + RED ALERT emails with a DB-enforced cap of
+// v28.163 (Ben): HEALTH CHECKS (data freshness, ETL, business sanity, daily metrics) + RED ALERT emails with a DB-enforced cap of
 // ONE health email per rolling hour across every health email (red alerts, weekly report, send-test).
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ETL rules (planner.etl_runs). A job is checked when ACTIVE: >= 3 runs in the last 60 days and not excluded. Cadence = median gap
