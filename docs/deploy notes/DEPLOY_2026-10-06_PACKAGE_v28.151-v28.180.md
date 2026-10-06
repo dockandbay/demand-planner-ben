@@ -58,3 +58,8 @@ All with header `x-webhook-secret: N8N_WEBHOOK_SECRET`, body `{}`.
 6. `SHOW statement_timeout` via 6543 = 30s.
 
 **Added after hand-off: v28.181** (DEMAND > Actions faster; fixes a dismissed/snoozed action showing as open for up to 90 s; keep the new `EARLY_DA` `<head>` snippet next to `EARLY_SKU`). No migration, no env vars. Deploy it with the rest: pull `origin/review-fixes-2026-10-05` HEAD.
+
+**Added after hand-off: v28.182 and v28.183** (deploy with the rest; pull `origin/review-fixes-2026-10-05` HEAD).
+- v28.182: Key Accounts forecast grid works like a spreadsheet; `POST /api/supply/ka-forecast-cells` now takes per-cell client/warehouse and rejects negative/decimal quantities. No migration, no env vars.
+- v28.183: Xero bill links survive voids (live-checked picker, auto-heal, payment runs re-read live); sync on visit when >12 h old + "Sync now"; CONFIG > Xero "Resync all bills". **After deploy run CONFIG > Xero > Resync all bills once.** Correction to the separate ask above: the live hourly bill sync was NOT missing bills (the Lixin bill was created in Xero at 05:02 UTC and cached at 05:20); no resync investigation needed beyond the one-off resync. No migration, no env vars.
+
