@@ -1,3 +1,16 @@
+## v28.175 (Ben, branch review-fixes-2026-10-05): portal speed (perf roadmap #5)
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (fingerprints re-verified, rules unchanged), new `tests/portal-scope.cjs` (+ package.json, CHANGES.md). No migrations, no new env vars, no new cookies (reuses `hz_sid` / `hz_rw`).
+
+- Supplier and client portals read from shared server-side base caches built once, with a per-supplier / per-client filter on top, inside the v28.167 cache machinery (lazy stale-while-revalidate, single-flight, `HZ_MAX_REBUILDS` cap, read-your-writes, cross-instance epoch). Added: hard max age, strict mode (client portal never served an invalidated entry), prefix scopes (`pb:*`), 30-min sweep of unread per-identity entries.
+- **Measured (sandbox):** warm portal data 0 to 4 ms (was 0.3 to 2.5 s); 304 ~1 ms. First portal hit after a deploy builds the shared bases (6.3 s on sandbox; once per instance).
+- Supplier bootstrap cached per supplier set (`pb:*`) from `portal:pos`, `portal:lines`, `sec:shipment-plan`; 8 PO fields the portal never reads dropped. Client portal: settings, products, stock, retail prices, price lists shared; orders 90 s and commission per user; responses `private, no-cache` (was `no-store`) so 304s work.
+- New `CACHE_DEPS` types `portal-po`, `client-order`, `client`; portal writes, `/api/cp/order`, client sales import and CLIENT admin writes invalidate via a `res.end` hook. Portal shared writes now also stale the admin PO caches.
+- **Security:** every key and filter comes from the authenticated portal session; `tests/portal-scope.cjs` 107/107 (two suppliers / clients get disjoint data; another user's ETag gets their own 200, never a 304; forged session / `x-*-email` headers get 401).
+- **Verified:** 40 endpoint payloads byte-identical before/after (minus the 8 trimmed fields); 31 jsdom screens render identically.
+- **Risk:** product and stock data refresh on TTL (5 / 2 min) or an `all` invalidation instead of being read live.
+- **Diviyaj:** mirror the write-hook middleware placement (before the routes) and the `CACHE_DEPS` additions.
+
 ## v28.174 (Ben, branch review-fixes-2026-10-05): UP FX Statement (Xero bank statement file for Universal Partners FX USD) + weekly email
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no new env vars.
