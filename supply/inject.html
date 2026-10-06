@@ -10966,7 +10966,8 @@
         rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbDownload(f[+btn.dataset.i],fx.ccy,fx.amt); }; });
         rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopy(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
         rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
-        rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ _xbRow=f[+btn.dataset.i]; xbPreview(_xbRow,btn); }; }); }
+        rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ _xbRow=f[+btn.dataset.i]; xbPreview(_xbRow,btn); }; });
+        try{ payXpfRun(f); }catch(_e){} }   // v28.173 (Ben): preflight badges fill in after render, never block it
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); if(window._payTod)clearTimeout(window._payTod); window._payTod=setTimeout(draw,250); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
@@ -10987,7 +10988,42 @@
       var done=bills.length?bills.map(function(b){ return '<a href="'+esc(b.url||'#')+'" target="_blank" rel="noopener" title="'+esc((b.number||'supplier payment')+(b.status?' · '+b.status:''))+'" style="color:var(--pos);font-weight:700;font-size:11px;text-decoration:none;white-space:nowrap">done ↗</a>'; }).join(' ')
         :'<span class="mut" title="Submitted to Xero before 21-Sep-26 (no supplier-payment bill found to link)" style="font-weight:700;font-size:11px;color:var(--pos)">done</span>';
       return '<span style="display:inline-flex;gap:6px;align-items:center">'+done+((r.lines||[]).length?'<button class="lnk-btn pay-xero-preview" data-i="'+i+'" title="Re-send to Xero (opens the Create in Xero popup)" style="color:var(--mut);font-size:12px;line-height:1;padding:0 2px">↻</button>':'')+'</span>'; }
-    return (((r.lines||[]).length && (r.other_amount!=null) && String(r.bank_ccy||'').trim())?'<button class="pay-xero-preview" data-i="'+i+'" title="Create / queue this run in Xero (preview first)" style="background:#13B5EA;color:#fff;border:1px solid #13B5EA;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">XERO</button>':''); }   // v28.133: server run_key = date|supplier (UK, unchanged) or date|supplier|AU
+    return (payXeroShowBtn(r)?'<button class="pay-xero-preview" data-i="'+i+'" title="Create / queue this run in Xero (preview first)" style="background:#13B5EA;color:#fff;border:1px solid #13B5EA;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">XERO</button>'+payXpfBadge(r):''); }   // v28.133: server run_key = date|supplier (UK, unchanged) or date|supplier|AU
+  function payXeroShowBtn(r){ return !!((r.lines||[]).length && (r.other_amount!=null) && String(r.bank_ccy||'').trim()); }
+  // v28.173 (Ben): Xero PREFLIGHT badge beside the XERO button (unposted rows only): red "⚠ N" = N problems that stop the
+  // post, amber "⚠" = warnings / lines skipped by design, faint ✓ = all clear. Same checks as the Create in Xero popup
+  // (POST /api/supply/payments/xero-preflight, read only). Filled progressively after render, a few runs per request,
+  // one request at a time; results kept per run + line signature so redraws (typing in the filters) don't re-ask.
+  var PAY_XPF={}, _xpfQ=[], _xpfBusy=false, _xpfOff=false, _xpfWant={};
+  function payXpfSig(r){ var t=JSON.stringify((r.lines||[]).map(function(l){return [l.reference,l.type,l.amount,l.prod_no,l.deposit_ref,l.account_code];})), h=5381;
+    for(var k=0;k<t.length;k++)h=((h<<5)+h+t.charCodeAt(k))|0; return payRunKey(r)+'#'+(h>>>0).toString(36); }
+  function payXpfBadge(r){ if(_xpfOff)return ''; var s=payXpfSig(r); return '<span class="pay-xpf" data-s="'+esc(s)+'" style="display:inline-flex;align-items:center">'+payXpfInner(PAY_XPF[s])+'</span>'; }
+  function payXpfInner(x){
+    if(!x)return '<span class="mut" style="font-size:10px;white-space:nowrap">checking...</span>';
+    if(x.status==='error')return '<span class="mut" title="'+esc('Xero preflight could not run: '+(x.error||'unknown error')+'\nOpen XERO to see the full checks.')+'" style="font-size:11px;font-weight:700;cursor:help">?</span>';
+    if(x.status!=='ok')return '';   // skip (nothing to post) / not connected: nothing
+    var b=x.block||[], w=x.warn||[];
+    var tip=(b.length?'Blocks posting:\n'+b.map(function(m){return '- '+m;}).join('\n'):'')+(b.length&&w.length?'\n\n':'')+(w.length?'Warnings:\n'+w.map(function(m){return '- '+m;}).join('\n'):'');
+    if(b.length)return '<span title="'+esc(tip)+'" style="background:var(--neg);color:#fff;border-radius:5px;padding:1px 5px;font-size:10px;font-weight:800;white-space:nowrap;cursor:help">⚠ '+b.length+'</span>';
+    if(w.length)return '<span title="'+esc(tip)+'" style="color:var(--amber);font-size:13px;font-weight:800;cursor:help">⚠</span>';
+    return '<span title="Xero preflight: all checks pass" style="color:var(--pos);font-size:11px;opacity:.55">✓</span>'; }
+  function payXpfPaint(s){ var rep=document.getElementById('pay-rep'); if(!rep)return; rep.querySelectorAll('.pay-xpf').forEach(function(el){ if(s==null||el.getAttribute('data-s')===s)el.innerHTML=_xpfOff?'':payXpfInner(PAY_XPF[el.getAttribute('data-s')]); }); }
+  function payXpfRun(rows){ if(_xpfOff)return; _xpfWant={};
+    (rows||[]).forEach(function(r){ if(r.xero_done||!payXeroShowBtn(r))return; var s=payXpfSig(r); if(PAY_XPF[s])return; _xpfWant[s]=r; if(_xpfQ.indexOf(s)<0)_xpfQ.push(s); });
+    _xpfQ=_xpfQ.filter(function(s){ return _xpfWant[s]; });   // rows filtered out of view are not checked
+    if(!_xpfBusy)payXpfNext(); }
+  function payXpfNext(){ var batch=[]; while(_xpfQ.length&&batch.length<4){ var s=_xpfQ.shift(); if(_xpfWant[s]&&!PAY_XPF[s])batch.push(s); }
+    if(!batch.length||_xpfOff){ _xpfBusy=false; return; } _xpfBusy=true;
+    var runs=batch.map(function(s){ var r=_xpfWant[s]; return {k:s, run:{run_key:r.run_key, dt:r.dt, supplier:r.supplier, supplier_code:r.supplier_code, region:r.region, base_ccy:r.base_ccy,
+      lines:(r.lines||[]).map(function(l){ return {reference:l.reference, type:l.type, amount:l.amount, prod_no:l.prod_no, deposit_ref:l.deposit_ref, account_code:l.account_code}; })}}; });
+    fetch('/api/supply/payments/xero-preflight',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({runs:runs})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'no response');
+        if(j.connected===false){ _xpfOff=true; _xpfQ=[]; _xpfBusy=false; payXpfPaint(); return; }   // Xero not connected: badges stay hidden
+        batch.forEach(function(s){ PAY_XPF[s]=(j.results&&j.results[s])||{status:'error',error:'no result'}; payXpfPaint(s); });
+        payXpfNext(); })
+      .catch(function(e){ batch.forEach(function(s){ PAY_XPF[s]={status:'error',error:e.message||String(e)}; payXpfPaint(s); }); _xpfBusy=false; _xpfQ=[]; });   // one failure stops the queue (no retry loop)
+  }
   function payBuildMaps(rem,em){ PAY_REMIT={}; PAY_EMAILS={};
     (rem||[]).forEach(function(x){ (PAY_REMIT[x.run_key]||(PAY_REMIT[x.run_key]=[])).push(x); });
     (em||[]).forEach(function(x){ if(!PAY_EMAILS[x.run_key])PAY_EMAILS[x.run_key]=x; }); }   // list is id DESC → first seen = latest
