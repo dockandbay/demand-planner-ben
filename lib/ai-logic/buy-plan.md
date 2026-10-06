@@ -59,6 +59,7 @@ fingerprints:
 - A buy is raised only when the gap is at least one carton (or a genuine stockout with no inbound), there is demand next month, and the month is before the cutoff. [project]
 - Quantity = gap rounded UP to whole cartons (ceil(gap / carton) x carton), then the end-of-life cap (rounded DOWN to cartons) if the SKU discontinues. Every buy is therefore a whole number of cartons. [project]
 - Carton = products.case_pack_size, else products.carton_qty (1 if both blank). [buildPROD_CONST]
+- So carton rounding changes a single buy by less than one carton. A difference between buy and forecast larger than that is not rounding; look at stock, inbound, cover target and the discontinue cutoff. [project]
 - MOQ is NOT applied per market. It is a per-production minimum checked across markets when building production. [project]
 - A planned buy is carried forward as stock, so later months do not re-buy the same gap. [project]
 
@@ -88,7 +89,7 @@ fingerprints:
 The browser computes the plan and posts it (planner.buy_plan_snapshot, hourly while a BUY tab is open); buy_plan_latest is the newest snapshot, one row per SKU x market with any non-zero value. computed_at / app_version say when and by which version. [bpBuildFeedAsync]
 - buy_3pl: Buy 3PL to ORDER NOW = buys whose placement month is the current month (plus next month when today is on/after the 20th). [getBuyQtys]
 - buy_3pl_urgent: the Urgent total (air + sea). [getBuyQtys]
-- future_qty: buys the engine has already SCHEDULED for LATER placement months (shown as "+Nf" on the grid). NOT inbound, NOT on order, NOT ordered yet. [getBuyQtys]
+- future_qty: buys the engine has already SCHEDULED for LATER placement months. NOT inbound, NOT on order, NOT ordered yet. The grid flags them as "+Nf" next to Buy 3PL, where N is the NUMBER of later buys (the units are in its tooltip). [getBuyQtys]
 - Total planned buy for the horizon = buy_3pl + buy_3pl_urgent + future_qty. [getBuyQtys]
 - buy_fba: the FBA top-up SLICE of the Buy 3PL in the order-now window, shown for visibility; it is NOT an extra buy (do not add it to the total). Rounded up to cartons when over 1 carton, else 0 (taken as a transfer instead). [getBuyQtys, project]
 - transfer: recommended 3PL to FBA transfer now (units). [getBuyQtys]

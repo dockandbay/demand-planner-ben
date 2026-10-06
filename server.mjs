@@ -19249,7 +19249,7 @@ You have LIVE ACCESS to HORIZON's own data through tools. Use them instead of as
 - describe_data(table?): discover the data. With no argument it lists the planner tables; with a table name it returns that table's columns and a few sample rows.
 - query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows. The latest computed buy plan is the view buy_plan_latest (one row per SKU x market: buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound; column meanings are in app_logic("buy-plan")). The latest Auto-Forecast (cash-out phasing) is the view auto_forecast_latest (one row per phased payment: month, payment_type deposit/completion/balance/freight/duty, reference, market, supplier, amount_usd).
 Essentially all of HORIZON's data is queryable. For anything the two SKU tools do not cover, call describe_data to find the right table and columns, then query_horizon, rather than asking the user. When a user gives you a purchase order or SKU list, resolve the SKUs if needed and look the data up yourself. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON, for example a brand-new customer PO they have not uploaded. Never invent Dock & Bay figures; if a tool returns nothing, say so.
-- explain_buy(sku, market): everything behind ONE SKU x market buy in one call: the buy_plan_latest row, 18-month forecast by channel, stock, open inbound/on-order with dates, product buy params (carton, lead, cover, tier, launch/discontinue), matching Complex Rules, SSM flag, and derived facts (discontinue cutoff, sellable window, forecast inside vs outside it, total buy and its carton count). For ANY "why is the buy X / why is it lower or higher than forecast / is it rounding" question, call explain_buy FIRST.
+- explain_buy(sku, market): everything behind ONE SKU x market buy in one call: the buy_plan_latest row, 18-month forecast by channel, stock, open inbound/on-order with dates, product buy params (carton, lead, cover, tier, launch/discontinue), matching Complex Rules, SSM flag, and derived facts (discontinue cutoff, sellable window, forecast inside vs outside it, total buy and its carton count). For ANY "why is the buy X / why is it lower or higher than forecast / is it rounding" question, call explain_buy FIRST. Do not substitute sku_availability (its 6-month forecast is not the buy's demand window) or products.target_cover_weeks (SSM may replace it: use explain_buy's cover_target_in_use). If explain_buy fails, say the buy could not be explained right now instead of reconstructing it from other tools.
 - app_logic(topic?): HORIZON's documented logic. No argument lists the topics; with a topic it returns that topic's rules (each rule cites the code function it comes from).
 
 APP LOGIC (documented rules, generated from the logic library at server start):
@@ -19258,7 +19258,8 @@ Before explaining ANY number, calculation, rule, report or action in HORIZON, ca
 
 HONESTY RULES (numbers and causes):
 - State a cause only if the tool data or the app logic rules support it. Show the arithmetic using the actual numbers the tools returned (e.g. "672 + 32 + 128 = 832 = 52 cartons of 16").
-- Never assume a rounding direction: check it. Buys are whole cartons; compare the total buy to the buyable demand before saying it was rounded up or down.
+- Never assume a rounding direction: check it. Each buy is whole cartons, so carton rounding moves a buy by less than one carton. Only call a difference "rounding" if it is under one carton per buy; say "rounded up" only when the total is the smallest whole-carton number at or above the demand it covers (e.g. 825 needs 51.6 cartons of 16, bought 52 = 832). A bigger difference is NOT rounding: it comes from stock, inbound timing, cover target or the discontinue cutoff.
+- Do not invent intermediate steps (which month was capped, what a gap was before rounding). The tools give totals and inputs, not the engine's month-by-month working; if the remaining difference is not explained by the inputs, say that and point to the BUY popup for the month-by-month projection. Never contradict yourself (e.g. "533 to 500" is a reduction, not rounding up).
 - future_qty is buys the engine has SCHEDULED for later placement months. It is NOT inbound, NOT on order and NOT ordered yet. The buy_plan_latest "inbound" column is always 0 in this version; use on_order or explain_buy's inbound list.
 - Always check the discontinue date: forecast at or after the discontinue cutoff month is never bought. Say so when it explains a gap.
 - Never invent costs, prices, values or quantities that are not in the tool data. Do not convert units to money unless a price or cost came back from a tool.
@@ -19298,7 +19299,7 @@ const AI_MARKETS = ['UK', 'US', 'EU', 'AU', 'CA'];
 const AI_TOOLS = [
   { name: 'resolve_skus', description: 'Find Dock & Bay SKU codes by SKU code, product name, or parent code. Use when the user names products in words, gives a partial code, or you are unsure of the exact SKUs.',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: 'search text: a SKU, partial code, product name, or parent code' } }, required: ['query'] } },
-  { name: 'sku_availability', description: "Live HORIZON stock availability for the given SKUs: current stock on hand (3PL + Amazon FBA), open inbound shipments (qty + ETA per warehouse), and forecast demand for the next 6 months, per market. Use for any stock / cover / fulfilment question instead of asking the user to upload stock or forecast data.",
+  { name: 'sku_availability', description: "Live HORIZON stock availability for the given SKUs: current stock on hand (3PL + Amazon FBA), open inbound shipments (qty + ETA per warehouse), and forecast demand for the next 6 months, per market. Use for any stock / cover / fulfilment question instead of asking the user to upload stock or forecast data. Not for explaining a buy-plan number: use explain_buy for that.",
     input_schema: { type: 'object', properties: { skus: { type: 'array', items: { type: 'string' }, description: 'exact SKU codes' }, market: { type: 'string', enum: AI_MARKETS, description: 'optional: limit to one market; omit for all markets' } }, required: ['skus'] } },
   { name: 'describe_data', description: "Discover HORIZON's data. With no argument, lists the tables in the planner schema (name, approx row count, column count). With a table name, returns that table's columns (name + type) and a few sample rows. Use this first to find the right table and columns before query_horizon.",
     input_schema: { type: 'object', properties: { table: { type: 'string', description: 'optional: a planner table or view name (e.g. products, sales_actuals, purchase_orders, inbound_shipments, forecasts)' } } } },
@@ -19338,25 +19339,26 @@ async function aiExplainBuy(sku, market) {
   const t3 = m === 'ca' ? null : (num1(p['t3_' + m]) ?? 4), tf = num1(p['tf_' + m]) ?? 4;
   const cur = (await pool.query(`SELECT to_char(now(),'YYYY-MM') ym, extract(day from now())::int dd`)).rows[0], curYm = cur.ym;
   const months = Array.from({ length: 18 }, (_, i) => aiYmAdd(curYm, i)), endYm = months[17];
+  const errs = [], qs = (sql, args) => pool.query(sql, args).catch(e => { errs.push(e.message); return { rows: [] }; });   // fail-soft: one failed read is reported, not fatal
   const [bp, fc, pka, inv, inb, opo, rules, ssm, sales] = await Promise.all([
-    pool.query(`SELECT computed_at, app_version, buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound FROM planner.buy_plan_latest WHERE sku = $1 AND market = $2`, [p.sku, M]).catch(e => ({ rows: [], err: e.message })),
-    pool.query(`SELECT to_char(month,'YYYY-MM') ym, channel ch, warehouse wh, sum(units)::int u FROM planner.forecast_outputs
+    qs(`SELECT computed_at, app_version, buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound FROM planner.buy_plan_latest WHERE sku = $1 AND market = $2`, [p.sku, M]).catch(e => ({ rows: [], err: e.message })),
+    qs(`SELECT to_char(month,'YYYY-MM') ym, channel ch, warehouse wh, sum(units)::int u FROM planner.forecast_outputs
       WHERE sku = $1 AND warehouse IN ($2, $3) AND month >= date_trunc('month', now()) AND month < date_trunc('month', now()) + interval '18 months' GROUP BY 1,2,3`, [p.sku, m + '_3pl', m + '_fba']),
-    pool.query(`SELECT 'preorder' src, to_char(ship_date,'YYYY-MM') ym, sum(quantity)::int u FROM planner.preorders WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2
+    qs(`SELECT 'preorder' src, to_char(ship_date,'YYYY-MM') ym, sum(quantity)::int u FROM planner.preorders WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2
       UNION ALL SELECT 'key_account', to_char(ship_date,'YYYY-MM'), sum(quantity)::int FROM planner.key_account_forecasts WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2`, [p.sku, m]).catch(() => ({ rows: [] })),
-    pool.query(`SELECT warehouse wh, available::int qty FROM planner.v_product_inventory WHERE sku = $1 AND warehouse IN ($2, $3, $4)`, [p.sku, m + '_3pl', m + '_fba', m + '_awd']),
-    pool.query(`SELECT i.reference ref, i.destination_warehouse wh, (i.quantity - coalesce(i.received_quantity,0))::int open_qty, to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.status
+    qs(`SELECT warehouse wh, available::int qty FROM planner.v_product_inventory WHERE sku = $1 AND warehouse IN ($2, $3, $4)`, [p.sku, m + '_3pl', m + '_fba', m + '_awd']),
+    qs(`SELECT i.reference ref, i.destination_warehouse wh, (i.quantity - coalesce(i.received_quantity,0))::int open_qty, to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.status
       FROM planner.inbound_shipments i WHERE i.sku = $1 AND split_part(i.destination_warehouse,'_',1) = $2 AND coalesce(i.received_quantity,0) < i.quantity AND i.reference NOT IN (${EXCL_REF_LIST}) ORDER BY i.estimated_delivery_date`, [p.sku, m]),
-    pool.query(`SELECT po.po ref, lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' || (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh, l.qty::int open_qty, coalesce(po.status,'') status,
+    qs(`SELECT po.po ref, lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' || (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh, l.qty::int open_qty, coalesce(po.status,'') status,
         to_char((coalesce(po.end_production_overide, CASE WHEN po.start_production IS NOT NULL AND s.production_days IS NOT NULL THEN (po.start_production + (s.production_days||' days')::interval)::date END)
           + interval '7 days' + (b.sea_lead_time_days||' days')::interval)::date,'YYYY-MM-DD') eta
       FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po = l.po LEFT JOIN planner.branches b ON b.name = po.branch LEFT JOIN planner.suppliers s ON s.id = po.supplier_id
       WHERE l.sku = $1 AND coalesce(l.qty,0) > 0 AND coalesce(po.status,'') NOT ILIKE '%complete%' AND po.master_po IS NULL AND upper(coalesce(nullif(po.country_code,''), b.country_code)) = $2
         AND po.po NOT IN (${EXCL_REF_LIST}) AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)`, [p.sku, M]),
-    pool.query(`SELECT id, name, country, sku, category, tier, season, to_char(window_from,'YYYY-MM-DD') window_from, to_char(window_to,'YYYY-MM-DD') window_to, coverage_type, cover_months, range_from, range_to, ramp_months, ramp_sl
+    qs(`SELECT id, name, country, sku, category, tier, season, to_char(window_from,'YYYY-MM-DD') window_from, to_char(window_to,'YYYY-MM-DD') window_to, coverage_type, cover_months, range_from, range_to, ramp_months, ramp_sl
       FROM planner.buy_complex_rules WHERE enabled IS NOT FALSE`).catch(() => ({ rows: [] })),
-    pool.query(`SELECT value FROM planner.app_settings WHERE key = 'ssm_enabled'`).catch(() => ({ rows: [] })),
-    pool.query(`SELECT to_char(month,'YYYY-MM') ym, channel ch, sum(units)::int u FROM planner.sales_actuals WHERE sku = $1 AND upper(country) = $2
+    qs(`SELECT value FROM planner.app_settings WHERE key = 'ssm_enabled'`).catch(() => ({ rows: [] })),
+    qs(`SELECT to_char(month,'YYYY-MM') ym, channel ch, sum(units)::int u FROM planner.sales_actuals WHERE sku = $1 AND upper(country) = $2
       AND month >= date_trunc('month', now()) - interval '12 months' AND month < date_trunc('month', now()) GROUP BY 1,2`, [p.sku, M]).catch(() => ({ rows: [] })),
   ]);
   // forecast by month x channel (the buy's demand basis when a saved SKU forecast exists; Preorder/KA added to B2B)
@@ -19389,6 +19391,7 @@ async function aiExplainBuy(sku, market) {
   const inbound = inb.rows.map(r => ({ ref: r.ref, wh: r.wh, qty: r.open_qty, eta: r.eta, status: r.status, kind: 'inbound shipment', note: etaNote(r.eta, false) }))
     .concat(opo.rows.map(r => ({ ref: r.ref, wh: r.wh, qty: r.open_qty, eta: r.eta, status: r.status, kind: 'open PO not yet shipped', note: etaNote(r.eta, true) })));
   return {
+    ...(errs.length ? { partial_data_warning: errs.length + ' of 9 reads failed (' + errs[0] + '); figures below may be incomplete, say so in the answer' } : {}),
     as_of: new Date().toISOString().slice(0, 10), sku: p.sku, market: M, name: p.product_name, status: p.status, in_planning_scope: p.in_planning_scope, variant_type: p.variant_type,
     buy_plan_row: b ? { computed_at: b.computed_at, app_version: b.app_version, buy_3pl: n(b.buy_3pl), buy_3pl_urgent: n(b.buy_3pl_urgent), future_qty: n(b.future_qty), buy_fba_slice: n(b.buy_fba), transfer_to_fba_now: n(b.transfer), soh_3pl: n(b.soh_3pl), soh_fba: n(b.soh_fba), on_order: n(b.on_order) }
       : { note: 'no row in buy_plan_latest for this SKU x market (no buy, stock or on-order in the last posted plan, or not in the plan)' },
@@ -19410,6 +19413,11 @@ async function aiExplainBuy(sku, market) {
       forecast_18m_total: sum(() => true), forecast_inside_sellable_window: sum(inWin), forecast_after_cutoff_not_bought: cutoff ? sum(ym => ym >= cutoff) : 0, forecast_pre_launch_not_bought: sum(preLaunch),
       earliest_buy3pl_arrival_month: firstArr, earliest_arrival_note: 'a Buy 3PL placed this month lands round(lead weeks / 4.33) months later; needs before then are served by stock / inbound or the Urgent scan',
       forecast_from_earliest_arrival_to_cutoff: firstArr ? sum(ym => ym >= firstArr && inWin(ym)) : null,
+      cover_target_in_use: sshMap[M + '|3PL'] ? 'SSM safety-stock cover (SSM is on for ' + M + ' 3PL); products target_cover_weeks_3pl (' + t3 + ') is NOT used' : (t3 + ' weeks (products target_cover_weeks_' + m + '_3pl' + (p.tier === 'A' ? ', plus the A-tier extra setting if set' : '') + ')') + (matched.length ? '; Complex Rules may raise it (see complex_rules_matching)' : ''),
+      stock_on_hand_total: (invBy[m + '_3pl'] || 0) + (invBy[m + '_fba'] || 0),
+      inbound_counted_by_engine: inbound.filter(x => x.eta).reduce((a, x) => a + (x.qty || 0), 0), inbound_not_counted_no_date: inbound.filter(x => !x.eta).reduce((a, x) => a + (x.qty || 0), 0),
+      net_need_rough: sum(inWin) - ((invBy[m + '_3pl'] || 0) + (invBy[m + '_fba'] || 0)) - inbound.filter(x => x.eta).reduce((a, x) => a + (x.qty || 0), 0),
+      net_need_rough_note: 'forecast inside the sellable window minus stock on hand minus inbound with a date. ROUGH: ignores the cover target the engine holds, current-month actuals to date and arrival timing. A gap between total_buy and this can come from the cover target held each month (SSM or weeks), the FBA top-up, arrival timing (stock landing after it is needed), months before the earliest arrival, or inputs changed since computed_at. These tools cannot split it exactly: say so and point to the BUY popup for the month-by-month working.',
       total_buy: totalBuy, total_buy_formula: b ? n(b.buy_3pl) + ' + ' + n(b.buy_3pl_urgent) + ' + ' + n(b.future_qty) + ' (buy_3pl + buy_3pl_urgent + future_qty; buy_fba is a slice, not added)' : null,
       total_buy_cartons: totalBuy != null ? +(totalBuy / cp).toFixed(2) : null, total_buy_whole_cartons: totalBuy != null ? totalBuy % cp === 0 : null,
       buy3pl_plus_future_excl_urgent: b ? n(b.buy_3pl) + n(b.future_qty) : null,
