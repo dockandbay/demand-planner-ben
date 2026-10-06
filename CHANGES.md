@@ -1,3 +1,14 @@
+## v28.179 (Ben, branch review-fixes-2026-10-05): first-click fix, faster ERP Compare and BUY & MOVE first entry, dead-click + slow-view captures
+
+**Files:** `supply/inject.html`, `supply/hz-health.js`, `artifact_v16.7.html`, `server.mjs`, `lib/ai-logic/actions.md` + `supply-finance.md` (fingerprints; actions adds the cache note), new `migrations/331_app_health_dead_click.sql` (+ package.json, CHANGES.md). No new env vars.
+
+- **"Needed 2 clicks"** (Ben, real Chrome): the left menu rebuilt itself every ~270 ms on every page (its own redraw re-triggered the nav observer), so a click whose press spanned a rebuild was dropped. An unchanged menu is no longer redrawn, and a press on an item redrawn mid-press completes on release. Measured: 12 rebuilds per 3 s down to 0; every first click opens (DEMAND ▸ Inputs, Plan, Scenario, BUY & MOVE).
+- **ERP Compare** draws straight away (it used to wait on the Actions build and the cash flow first) and repaints the last result instantly; its four planner lookups are one query (warm 1.0 to 1.2 s down to 0.33 to 0.39 s on sandbox; 144 rows identical). The menu badge keeps the Fulfil copy warm from 2 minutes (was 10).
+- With the Web Worker, the demand prewarm and the Preorder/KA build also run while you are on SUPPLY, so the first BUY & MOVE / DEMAND / REPORTS visit is already built (BUY ready 776 to 430 ms in jsdom). A cold DEMAND build no longer re-renders a tab you switched to meanwhile.
+- **App health log:** new `dead_click` (a nav press that changed nothing within 1.5 s; CONFIG ▸ Health log KPI + grid, weekly report section 8b). slow_view now sees the DEMAND / BUY & MOVE / REPORTS / Auto Forecast loading panels and "⏳ Loading" text (Actions and Scenario were missed before). Scenario planner keeps its tool in the URL and shows a loading line.
+- **Verified:** buy plan and demand 0 rows differ (3,605 / 2,996; lazy, `?lazysku=0`, background build); jsdom first-click, dead_click and slow_view tests. Not yet in real Chrome (Ben's check). Unchanged: fulfil/grid-status and scenario prime-day are sandbox network latency (SQL 20 to 30 ms).
+- **Diviyaj:** apply `migrations/331_app_health_dead_click.sql` (replaces the kind CHECK). Until then the server drops dead_click rows and keeps everything else.
+
 ## v28.178 (Ben, branch review-fixes-2026-10-05): perf #7.2/7.3 full demand build off the main thread
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html` (prewarm), `lib/ai-logic/demand-engine.md` + `buy-plan.md` + `supply-finance.md` (re-verified; supply-finance also records the Fulfil contact names from v28.177), new `scripts/dev/demand-worker-closure.cjs` (+ package.json, CHANGES.md). Client only. No migrations, no env vars.
