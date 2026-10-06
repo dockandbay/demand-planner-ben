@@ -37,7 +37,7 @@ sources:
 fingerprints:
   artifact_v16.7.html::renderExceptionsView: c5c8aa1bfeec
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
-  artifact_v16.7.html::renderDemandActionsView: 32a73bd5ac9e
+  artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
   artifact_v16.7.html::daClientDetectors: 57025c59e925
   artifact_v16.7.html::daForecastTrend: f4be6d3e7fb3
   artifact_v16.7.html::daAnomalies: 74acb0249bec
@@ -53,7 +53,7 @@ fingerprints:
   supply/inject.html::cfUnpaidActions: fe40096c76b7
   supply/inject.html::renderRecsTab: cb6e7811b196
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
-  server.mjs::/api/demand-actions: d466887e48d1
+  server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
   server.mjs::buildActionsRows: a79d996fb47e
   server.mjs::expediteActions: 2357d115088a
@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.179
+verified_version: v28.181
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -193,6 +193,11 @@ verified_version: v28.179
     - A forecast below 0.25x seasonal expected (dip) or above 3x (spike).
     - Allocation gaps >= 40 units in subcategories with LY >= 400 a month.
 - Done / Snooze / Dismiss: saved in planner.demand_action_state by stable action key. Snooze defaults to 7 days or can be indefinite. Expired snoozes reopen. (source: server.mjs :: /api/demand-actions/state)
+- Caching (v28.181, speed only, rows unchanged): (source: server.mjs :: /api/demand-actions, renderDemandActionsView)
+  - Server rows (before status) are cached up to 90 seconds. A PO / PO line edit or a trading-calendar edit refreshes them on the next open.
+  - Done / Snooze / Dismiss status is read live on every load, so it shows straight away.
+  - The page shows the last loaded list at once on a repeat open, then refreshes behind it and repaints only if something changed.
+  - Client detectors are recomputed from the live forecast on every paint.
 
 ## SUPPLY Actions (BI & REPORTS > ACTIONS)
 - How the feed works: (source: server.mjs :: buildActionsRows)

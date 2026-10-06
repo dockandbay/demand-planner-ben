@@ -14683,20 +14683,51 @@ function daClientDetectors(stateMap){
   items.forEach(function(x){ var s=stateMap&&stateMap[x.key]; if(s){ x.status=s.status; x.snooze_until=s.snooze_until||null; } else { x.status='open'; x.snooze_until=null; } });
   return items;
 }
+// v28.181 (Ben, perf): DEMAND ▸ Actions data layer. The two reads (/api/demand-actions server rows + /api/demand-actions/state map)
+// go through ONE shared in-flight promise (concurrent opens / the boot prefetch / a re-render share it) and the last good result is
+// kept (_DA_NET.res, the raw JSON exactly as fetched). An open then:
+//  • result < DA_FRESH_MS old (e.g. the boot prefetch just landed): paints from it, no refetch;
+//  • older result: paints from it AT ONCE, refetches behind, and repaints only if the server rows or the state map changed
+//    (and the view is still on screen); identical data = no second paint;
+//  • no result yet: the loading panel (data-hz-loading, so the health log's slow_view sees it) until the fetch lands.
+// A lifecycle write (dismiss / snooze / done / restore) drops the kept result, so the reload after it always waits for fresh data.
+// The client-side detectors (forecast vs trend, anomalies, A-players, alerts, back-in-stock) are recomputed on every paint from
+// the live in-memory forecast data, exactly as before, so a forecast edit is reflected on the next paint. Rows / counts / state
+// are identical to the old load (same inputs, same functions); only the waiting changed.
+var _DA_NET={p:null,res:null,at:0,gen:0}, DA_FRESH_MS=15000;
+function daFetchData(){ if(_DA_NET.p)return _DA_NET.p;
+  var g=_DA_NET.gen, early=window.__HZ_DAP; window.__HZ_DAP=null;   // the <head> boot prefetch (server.mjs EARLY_DA), used once
+  var net=function(){ return Promise.all([
+      fetch('/api/demand-actions').then(function(r){return r.json();}),
+      fetch('/api/demand-actions/state').then(function(r){return r.json();}).catch(function(){return {state:{}};})
+    ]); };
+  var p=(early?early.catch(net):net()).then(function(res){ if(_DA_NET.p===p)_DA_NET.p=null;
+      if(g===_DA_NET.gen&&res[0]&&!res[0].error&&Array.isArray(res[0])){ _DA_NET.res=res; _DA_NET.at=Date.now(); }   // only a good, pre-write-free result is kept
+      return res; },
+    function(e){ if(_DA_NET.p===p)_DA_NET.p=null; throw e; });
+  _DA_NET.p=p; return p; }
+function daDropData(){ _DA_NET.gen++; _DA_NET.res=null; _DA_NET.at=0; _DA_NET.p=null; }   // after a lifecycle write: never paint / share pre-write data
+// boot straight onto DEMAND ▸ Actions (reload / deep link): start both reads now, in parallel with the page's own boot fetches,
+// instead of after the shell has routed and rendered (they used to start ~4 s into a cold boot, behind the SKU data).
+try{ if(/^#\/demand\/actions(\/|$)/.test(location.hash||''))daFetchData().catch(function(){}); }catch(e){}
 function renderDemandActionsView(body,opts){
   var _daDrawer=!!(opts&&opts.drawer);   // drawer mode (plan ▸ Trend Gaps popout): hide the level-3 nav, show just the report
   var SC={high:'var(--neg)',amber:'var(--amber)',info:'#0369a1'};
-  function setState(key,status,days){ var ind=(parseInt(days,10)<0); return fetch('/api/demand-actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:(ind?7:days),indefinite:ind})}).then(function(r){return r.json();}); }
-  function load(){ body.innerHTML='<div style="padding:18px;color:var(--muted);font-size:12px">Loading…</div>';
-    Promise.all([
-      fetch('/api/demand-actions').then(function(r){return r.json();}),
-      fetch('/api/demand-actions/state').then(function(r){return r.json();}).catch(function(){return {state:{}};})
-    ]).then(function(res){ var d=res[0], sm=(res[1]&&res[1].state)||{};
+  function setState(key,status,days){ var ind=(parseInt(days,10)<0); daDropData(); return fetch('/api/demand-actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:(ind?7:days),indefinite:ind})}).then(function(r){ daDropData(); return r.json(); }); }   // v28.181: drop the kept result before AND after the write (a read racing the write is never reused)
+  function paint(res){ var d=res[0], sm=(res[1]&&res[1].state)||{};
       window._daSM=sm;   // shared with the Anomalies section (same demand_action_state store, keys anomaly|…)
       if(d&&d.error){body.innerHTML='<div style="padding:18px;color:var(--neg)">'+tHesc(d.error)+'</div>';return;}
       var all=(Array.isArray(d)?d:[]).concat(daClientDetectors(sm));
-      draw(all);
-    }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:var(--neg)">'+tHesc(String(e))+'</div>'; }); }
+      draw(all); }
+  function load(){ var last=_DA_NET.res, age=Date.now()-_DA_NET.at;
+    if(last){ paint(last); if(age<DA_FRESH_MS)return;   // v28.181: paint from the last result at once
+      var sig=JSON.stringify(last);
+      daFetchData().then(function(res){ if(!body.isConnected||res===last)return; var same=false; try{ same=JSON.stringify(res)===sig; }catch(e){}
+        if(!same&&_DA_NET.res===res)paint(res); }).catch(function(){});   // refresh behind; repaint only on a real change
+      return; }
+    body.innerHTML='<div data-hz-loading="1" style="padding:18px;color:var(--muted);font-size:12px">Loading…</div>';   // v28.181: data-hz-loading → slow_view sees this panel
+    daFetchData().then(function(res){ if(!body.isConnected)return; paint(res);
+    }).catch(function(e){ if(!body.isConnected)return; body.innerHTML='<div style="padding:18px;color:var(--neg)">'+tHesc(String(e))+'</div>'; }); }
   // level-3 sub-nav: ACTIONS · INSIGHTS · WEATHER (same .dnav style as the DEMAND/SUPPLY/REPORTS menus)
   function secNav(){
     if(_daDrawer)return '';   // drawer mode: no level-3 nav (the plan ▸ Trend Gaps popout shows only the report)
@@ -17000,20 +17031,37 @@ function hzDemandBuildAsync(why,opts){ opts=opts||{};
     job.promise=new Promise(function(res,rej){ job.res=res; job.rej=rej; });
     HZ_DBUILD=job; _hzDbRun(job); return job.promise; }
   catch(e){ return Promise.reject(e); } }
+// v28.181 (Ben): the incremental scope from snapshot D (the inputs a finished async build used) to the current inputs, or null when it
+// has to be a full build (an environment change, unparseable key, incremental off...). Computed BEFORE anything is published, with
+// D standing in as the built base, so a null leaves the old discard-and-retry path untouched.
+function _hzCatchupScope(D){ if(!D)return null; var d0=_HZ_DINC, b0=DEMAND_BUILT;
+  try{ _HZ_DINC=D; DEMAND_BUILT=true; var S=hzDemandScope(); return (S&&!S.full)?S:null; }
+  catch(e){ return null; }
+  finally{ _HZ_DINC=d0; DEMAND_BUILT=b0; } }
 function _hzDbRun(job){ if(job.cancelled)return; job.tries++; job.snap=_hzDemandSnapObj();
   var useW=job.force?(job.force==='worker'):hzDemandWorkerOn(), p;
   job.mode=useW?'worker':'chunk';
   p=useW?_hzDbWorker(job).catch(function(e){ if(job.cancelled)return null; _hzWorkerFail(e,job); job.mode='chunk'; return _hzDbChunk(job); }):_hzDbChunk(job);
   p.then(function(T){ if(job.cancelled||HZ_DBUILD!==job)return; if(!T)return;
-    var ch=_hzDemandChanged(job.snap);
-    if(ch){ job.moved=ch; if(job.tries<3)return _hzDbRun(job);   // inputs moved mid-build: discard, rebuild from the current inputs
+    var ch=_hzDemandChanged(job.snap), S2=ch?_hzCatchupScope(job.snap):null;
+    if(ch){ job.moved=ch; }
+    if(ch&&!S2){ if(job.tries<3)return _hzDbRun(job);   // inputs moved mid-build: discard, rebuild from the current inputs
       HZ_DBUILD=null; try{ _hzBuildLiveDemandSync(); }catch(e){ return job.rej(e); } return job.res(HZ_DEMAND_LAST); }   // still moving: one sync build
-    var ta=performance.now(); _hzDemandApply(T,job.mode==='worker'); hzDemandSnap(); _hzDemandBuilt(); job.applyMs=performance.now()-ta;
+    var ta=performance.now(); _hzDemandApply(T,job.mode==='worker');
+    if(S2){ // v28.181 (Ben): catch-up instead of a whole second try. T is a complete build of the inputs in job.snap, so publish it with
+      // job.snap as the incremental base and rebuild only the slices whose inputs moved since (the v28.171 incremental path, same
+      // code a forecast edit uses). The usual case is the Preorder / KA map landing mid-build on a cold boot (health log tries=2).
+      var tc=performance.now(); _HZ_DINC=job.snap; _hzDemandBuilt();
+      try{ _hzBuildDemandCore(S2); job.catchup={skus:S2.n, ms:Math.round((performance.now()-tc)*10)/10}; }
+      catch(e){ if(window.console)console.warn('[HORIZON] demand catch-up failed, running full',e); _HZ_DINC=null; _hzBuildDemandCore(null); job.catchup={full:true}; }   // same fallback as an incremental edit build
+    }
+    hzDemandSnap(); _hzDemandBuilt(); job.applyMs=performance.now()-ta;
     var r={mode:job.mode, ms:Math.round((performance.now()-job.t0)*10)/10, why:job.full, skus:0, tries:job.tries, slices:job.slices, maxSliceMs:Math.round(job.maxSlice*10)/10,
-      postMs:Math.round(job.postMs*10)/10, posts:job.posts, applyMs:Math.round(job.applyMs*10)/10, workerMs:job.workerMs||null, werr:job.werr, caller:job.why};
+      postMs:Math.round(job.postMs*10)/10, posts:job.posts, applyMs:Math.round(job.applyMs*10)/10, workerMs:job.workerMs||null, werr:job.werr, caller:job.why,
+      moved:job.moved||null, catchup:job.catchup||null};   // v28.181 (Ben): why a try was discarded / caught up (first input difference) + the catch-up build
     HZ_DEMAND_LAST=r; HZ_BUILD_LOG.push(r); if(HZ_BUILD_LOG.length>50)HZ_BUILD_LOG.shift();
     hzDemandSanity(job.stale); HZ_DBUILD=null;
-    if(!_hzDbMetric&&typeof window.hzHealthMetric==='function'){ _hzDbMetric=true; try{ window.hzHealthMetric('metric','demand async build',{mode:r.mode,ms:r.ms,max_slice_ms:Math.max(r.maxSliceMs,r.applyMs),post_ms:r.postMs,tries:r.tries,worker_ms:r.workerMs},'client:demand_build'); }catch(e){} }   // once per session: real-device timings
+    if(!_hzDbMetric&&typeof window.hzHealthMetric==='function'){ _hzDbMetric=true; try{ window.hzHealthMetric('metric','demand async build',{mode:r.mode,ms:r.ms,max_slice_ms:Math.max(r.maxSliceMs,r.applyMs),post_ms:r.postMs,tries:r.tries,worker_ms:r.workerMs,moved:r.moved,catchup:r.catchup},'client:demand_build'); }catch(e){} }   // once per session: real-device timings
     if(hzBuildCheckOn()){ try{ hzBuildCheck(); }catch(e){ if(window.console)console.error('[HORIZON build-check] failed',e); } }
     job.res(r);
   }, function(e){ if(job.cancelled||HZ_DBUILD!==job)return; HZ_DBUILD=null; job.rej(e); }); }
