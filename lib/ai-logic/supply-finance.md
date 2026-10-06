@@ -42,7 +42,7 @@ fingerprints:
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
   server.mjs::computeXeroRunPlan: f15b214d5c13
-  server.mjs::/api/supply/payments/xero-post: aa2395b6e61f
+  server.mjs::/api/supply/payments/xero-post: 72d85a8859fb
   server.mjs::/api/supply/xero/deposit-credit-note: 9bfbca642608
   server.mjs::_poXeroRegion: 844d7ad9c549
   server.mjs::/api/supply/tpl/data: a80126dd517b
@@ -68,7 +68,7 @@ fingerprints:
   server.mjs::cpCreateFulfilDraft: 5117a7608ab4
   server.mjs::/api/client/commission/runs/build: 9f79554f891a
   server.mjs::/api/client/commission/runs/:id/xero-bill: fd75919ebdf4
-  server.mjs::/api/supply/charge/:id/accept: 61e85b7b305d
+  server.mjs::/api/supply/charge/:id/accept: 2726245218bd
   server.mjs::/api/supply/po-polybags/:po: abcb96e2dee0
   server.mjs::afLoadCommon: c726c90779ce
   supply/inject.html::PO_STATUSES: b735ad053af6
@@ -76,7 +76,7 @@ fingerprints:
   supply/inject.html::prodStatusException: dedfa68a3f75
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
-verified_version: v28.164
+verified_version: v28.167
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)

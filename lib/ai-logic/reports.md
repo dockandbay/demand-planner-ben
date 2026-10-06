@@ -75,7 +75,7 @@ fingerprints:
   supply/inject.html::renderPimWaitingRoom: d6c089a9c8e7
   server.mjs::_kpiBaseCompute: 8e09912ef657
   server.mjs::computeOpenActions: 6e77ee5970fa
-  server.mjs::/api/supply/:section: 6ca5c9ae5bf5
+  server.mjs::/api/supply/:section: 6338a43b5269
   server.mjs::/api/scenario/slow-moving: fb22071cbe1a
   server.mjs::/api/scenario/markdown-eos: bb925e0e2b9b
   server.mjs::/api/scenario/otb: 2e30af6efc34
@@ -91,7 +91,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.164
+verified_version: v28.167
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)

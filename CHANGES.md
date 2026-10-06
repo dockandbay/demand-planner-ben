@@ -1,3 +1,15 @@
+## v28.167 (Ben, branch review-fixes-2026-10-05): lazy, scoped server cache invalidation (perf roadmap #4, review E4)
+
+**Files:** `server.mjs`, `lib/ai-logic/reports.md` + `supply-finance.md` (fingerprints re-verified, cache plumbing only) (+ package.json, CHANGES.md). No migration. Optional env: `HZ_MAX_REBUILDS` (default 2), `HZ_CACHE_LOG=1`; `SUPPLY_REBUILD_MIN_MS` default 30 s → 10 s.
+
+1. **Stale-while-revalidate:** an edit marks the affected caches stale and nothing rebuilds until someone asks; the next request gets the last value and starts one background rebuild. Was: every cache and section rebuilt on every edit.
+2. **Scoped:** `invalidateSupplyCaches(type)` with a `CACHE_DEPS` map (PO fields / PO / lines / shipment / deposit / payment / production / key account / sample / portal user / all); `patch()` scopes by table. The client's follow-up `/cache/invalidate` does nothing when that browser's writes already invalidated server-side. PO import, bulk, Fulfil date-sync and onboarding-approve still invalidate everything.
+3. **Read-your-writes:** the editor's next read always waits for a fresh build (`hz_sid` session cookie; `hz_rw` cookie for other instances); other users may get seconds-old data once.
+4. **At most 2 rebuilds at once** process-wide, single-flight per cache; Actions and sections use the same lazy cache. `/api/perf/recent` adds DB totals and rebuild counts.
+
+**Verified (sandbox):** one PO date edit 22 rebuilds / 149 DB-s → 0 / 12.5 DB-s; the editor sees the new value on the PO grid and order plan straight away (ETag changes); 10 rapid edits → 3 rebuilds; buy map 342 rows, 0 differ, rebuild-identical in all 5 markets.
+**Diviyaj:** the prod login gate must pass the `hz_sid` / `hz_rw` cookies through. Editors now wait for the rebuild after their own edit (~2.7 s PO grid on prod) instead of seeing a partly stale row instantly.
+
 ## v28.166 (Ben, branch review-fixes-2026-10-05): Ask Claude knows the app logic
 
 **Files:** `server.mjs` (Ask Claude only, plus `readdirSync` import), `lib/ai-logic/*.md` (7 new), `scripts/ai-logic-check.cjs` (new), package.json (`ai-logic:check` script), CHANGES.md. No migrations, no new env vars. `lib/**` is already in vercel.json includeFiles.
