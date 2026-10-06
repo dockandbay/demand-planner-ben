@@ -7,7 +7,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { readFileSync, appendFile } from 'fs';
+import { readFileSync, readdirSync, appendFile } from 'fs';
 import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
@@ -19205,6 +19205,33 @@ const AI_TEXT_MIMES = /^(text\/|application\/(json|csv|xml|x-ndjson|x-yaml|yaml)
 const AI_TEXT_EXT = /\.(csv|tsv|txt|json|md|markdown|log|xml|yaml|yml|html?|js|ts|sql|py)$/i;
 const AI_MAX_FILE_TEXT = 200000;   // chars of a text/xlsx file passed to the model (keeps token cost sane)
 const AI_MAX_UPLOAD_BYTES = 12 * 1024 * 1024;   // per message, across all attachments
+// v28.167 (Ben): APP LOGIC library. Every lib/ai-logic/*.md file documents one area of HORIZON's logic (front matter: topic, title,
+// covers, sources, verified_version, fingerprints; body = plain-language rules citing their source functions). Loaded once at boot;
+// the index goes into AI_SYSTEM and the app_logic tool returns a file body. scripts/ai-logic-check.cjs flags a file whose source
+// functions changed since it was last verified.
+function aiParseFrontMatter(txt) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(txt); if (!m) return { meta: {}, body: txt };
+  const meta = {}; let cur = null;
+  m[1].split(/\r?\n/).forEach(l => { if (!l.trim()) return;
+    const li = /^\s+-\s+(.*)$/.exec(l); if (li && cur) { (Array.isArray(meta[cur]) ? meta[cur] : (meta[cur] = [])).push(li[1].trim()); return; }
+    const kv = /^\s+(\S.*?):\s+(\S+)\s*$/.exec(l); if (kv && cur) { const o = (meta[cur] && !Array.isArray(meta[cur]) && typeof meta[cur] === 'object') ? meta[cur] : (meta[cur] = {}); o[kv[1]] = kv[2]; return; }
+    const top = /^([A-Za-z_]+):\s*(.*)$/.exec(l); if (top) { cur = top[1]; meta[cur] = top[2].trim() || null; } });
+  return { meta, body: txt.slice(m[0].length) };
+}
+const AI_LOGIC = (() => { const out = {};
+  try { const dir = new URL('./lib/ai-logic/', import.meta.url);
+    readdirSync(dir).filter(f => /\.md$/i.test(f)).sort().forEach(f => { try { const { meta, body } = aiParseFrontMatter(readFileSync(new URL(f, dir), 'utf8'));
+      const slug = String(meta.topic || f.replace(/\.md$/i, '')).trim(); out[slug] = { topic: slug, title: meta.title || slug, covers: meta.covers || '', verified_version: meta.verified_version || '', sources: Array.isArray(meta.sources) ? meta.sources : [], body: body.trim() }; } catch (e) {} });
+  } catch (e) {}
+  return out; })();
+const AI_LOGIC_INDEX = Object.values(AI_LOGIC).map(t => '- ' + t.topic + ': ' + t.title + '. ' + t.covers).join('\n') || '- (no logic files loaded)';
+function aiAppLogic(topic) {
+  const t = String(topic || '').trim().toLowerCase();
+  if (!t) return { topics: Object.values(AI_LOGIC).map(x => ({ topic: x.topic, title: x.title, covers: x.covers })) };
+  const hit = AI_LOGIC[t] || Object.values(AI_LOGIC).find(x => x.topic.toLowerCase() === t || x.title.toLowerCase().includes(t));
+  if (!hit) return { error: 'no logic topic "' + t + '"', topics: Object.keys(AI_LOGIC) };
+  return { topic: hit.topic, title: hit.title, verified_version: hit.verified_version, sources: hit.sources, rules: hit.body };
+}
 
 const AI_SYSTEM = `You are "Ask Claude", the in-app assistant inside HORIZON — Dock & Bay's demand & supply planning tool (used by the Dock & Bay team: buying, ops, finance, product). Be concise, practical and numerate; show your working when it matters. You can analyse files the user uploads (CSV, spreadsheets converted to CSV, PDFs, images, text).
 
@@ -19220,8 +19247,22 @@ You have LIVE ACCESS to HORIZON's own data through tools. Use them instead of as
 - resolve_skus(query): find SKU codes by SKU, product name, or parent code.
 - sku_availability(skus, market?): per market (UK/US/EU/AU/CA), current stock on hand (3PL + Amazon FBA), open inbound shipments (quantity + ETA), and forecast demand for the next 6 months. Use it for stock, cover and "can we fulfil this order?" questions.
 - describe_data(table?): discover the data. With no argument it lists the planner tables; with a table name it returns that table's columns and a few sample rows.
-- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows. The latest computed buy plan is the view buy_plan_latest (one row per SKU x market: buy_3pl, buy_3pl_urgent, buy_fba, transfer, soh_3pl, soh_fba, on_order, inbound). The latest Auto-Forecast (cash-out phasing) is the view auto_forecast_latest (one row per phased payment: month, payment_type deposit/completion/balance/freight/duty, reference, market, supplier, amount_usd).
-Essentially all of HORIZON's data is queryable. For anything the two SKU tools do not cover, call describe_data to find the right table and columns, then query_horizon, rather than asking the user. When a user gives you a purchase order or SKU list, resolve the SKUs if needed and look the data up yourself. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON, for example a brand-new customer PO they have not uploaded. Never invent Dock & Bay figures; if a tool returns nothing, say so.`;
+- query_horizon(sql): run a read-only SELECT against the planner schema and get rows back. This reaches ANY of HORIZON's data (sales, purchase orders, shipments, payments, key accounts, preorders, clients, forecasts, buy plan and more). SELECT or WITH only, a single statement, capped at 500 rows. The latest computed buy plan is the view buy_plan_latest (one row per SKU x market: buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound; column meanings are in app_logic("buy-plan")). The latest Auto-Forecast (cash-out phasing) is the view auto_forecast_latest (one row per phased payment: month, payment_type deposit/completion/balance/freight/duty, reference, market, supplier, amount_usd).
+Essentially all of HORIZON's data is queryable. For anything the two SKU tools do not cover, call describe_data to find the right table and columns, then query_horizon, rather than asking the user. When a user gives you a purchase order or SKU list, resolve the SKUs if needed and look the data up yourself. Markets map to warehouses <market>_3pl (the 3PL) and <market>_fba (Amazon). Only ask the user for data that genuinely is not in HORIZON, for example a brand-new customer PO they have not uploaded. Never invent Dock & Bay figures; if a tool returns nothing, say so.
+- explain_buy(sku, market): everything behind ONE SKU x market buy in one call: the buy_plan_latest row, 18-month forecast by channel, stock, open inbound/on-order with dates, product buy params (carton, lead, cover, tier, launch/discontinue), matching Complex Rules, SSM flag, and derived facts (discontinue cutoff, sellable window, forecast inside vs outside it, total buy and its carton count). For ANY "why is the buy X / why is it lower or higher than forecast / is it rounding" question, call explain_buy FIRST.
+- app_logic(topic?): HORIZON's documented logic. No argument lists the topics; with a topic it returns that topic's rules (each rule cites the code function it comes from).
+
+APP LOGIC (documented rules, generated from the logic library at server start):
+${AI_LOGIC_INDEX}
+Before explaining ANY number, calculation, rule, report or action in HORIZON, call app_logic for the relevant topic(s) (for a SKU-level buy, also call explain_buy) and answer from those. Cite the topic you used, e.g. "(app logic: buy-plan)". Never describe HORIZON's logic from general knowledge or guesswork.
+
+HONESTY RULES (numbers and causes):
+- State a cause only if the tool data or the app logic rules support it. Show the arithmetic using the actual numbers the tools returned (e.g. "672 + 32 + 128 = 832 = 52 cartons of 16").
+- Never assume a rounding direction: check it. Buys are whole cartons; compare the total buy to the buyable demand before saying it was rounded up or down.
+- future_qty is buys the engine has SCHEDULED for later placement months. It is NOT inbound, NOT on order and NOT ordered yet. The buy_plan_latest "inbound" column is always 0 in this version; use on_order or explain_buy's inbound list.
+- Always check the discontinue date: forecast at or after the discontinue cutoff month is never bought. Say so when it explains a gap.
+- Never invent costs, prices, values or quantities that are not in the tool data. Do not convert units to money unless a price or cost came back from a tool.
+- If the rules and data do not fully explain a number, say so plainly, give the part you can explain, and say what to check (e.g. open the BUY popup for that SKU and market to see the month-by-month projection).`;
 
 // Decode a base64 attachment into a content block for the Anthropic Messages API.
 async function aiFileBlock(att) {
@@ -19263,7 +19304,118 @@ const AI_TOOLS = [
     input_schema: { type: 'object', properties: { table: { type: 'string', description: 'optional: a planner table or view name (e.g. products, sales_actuals, purchase_orders, inbound_shipments, forecasts)' } } } },
   { name: 'query_horizon', description: "Run a READ-ONLY SQL SELECT against HORIZON's planner schema and get the rows back. This reaches ALL of HORIZON's data (products, sales, forecasts, purchase orders, shipments, payments, key accounts, preorders, clients, buy plan, and more). SELECT or WITH only; a single statement; capped at 500 rows. Unqualified table names resolve to the planner schema. Call describe_data first if unsure of table or column names.",
     input_schema: { type: 'object', properties: { sql: { type: 'string', description: 'a single read-only SELECT (or WITH ... SELECT) against planner tables' } }, required: ['sql'] } },
+  // v28.167 (Ben): explain one SKU x market buy, and read the documented app logic (lib/ai-logic/*.md)
+  { name: 'explain_buy', description: "Everything behind ONE SKU x market buy-plan number, read-only: the latest buy_plan_latest row (+ computed_at, app_version), 18-month forecast by month and channel, stock on hand, open inbound / on-order with arrival dates, product buy params (carton, lead weeks, target cover, tier, release window, launch and discontinue dates), matching Complex Rules, SSM flag, and derived facts (discontinue cutoff month, sellable window, forecast inside vs outside it, earliest month a Buy 3PL placed now can land, total buy = buy_3pl + urgent + future_qty and its carton count). Call this FIRST for any why-is-the-buy question.",
+    input_schema: { type: 'object', properties: { sku: { type: 'string', description: 'exact SKU code' }, market: { type: 'string', enum: AI_MARKETS, description: 'market' } }, required: ['sku', 'market'] } },
+  { name: 'app_logic', description: "HORIZON's documented logic (how numbers, reports and actions are calculated), maintained alongside the code. With no topic, returns the topic index (topic, title, covers). With a topic slug (e.g. buy-plan), returns that topic's rules, each citing its source function. Call before explaining any HORIZON number, rule or calculation.",
+    input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'optional: topic slug from the index, e.g. buy-plan' } } } },
 ];
+// v28.167 (Ben): mirrors discCutoffMo (artifact): disc day > 15 cuts the NEXT month, else that month. Returns 'YYYY-MM' or null.
+function aiDiscCutoff(d) { if (!/^\d{4}-\d{2}-\d{2}/.test(String(d || ''))) return null; let y = +d.slice(0, 4), mo = +d.slice(5, 7); if (+d.slice(8, 10) > 15) { mo++; if (mo > 12) { mo = 1; y++; } } return y + '-' + String(mo).padStart(2, '0'); }
+function aiYmAdd(ym, n) { let y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + n; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return y + '-' + String(m + 1).padStart(2, '0'); }
+// v28.167 (Ben): server-side, read-only gather of everything behind one SKU x market buy (same sources + mappings as the buy
+// engine: buildPROD_CONST params, buildSKURAW launch/disc/stock/on-order, forecast_outputs <mkt>_3pl DTC/B2B/TIK/ZAL + <mkt>_fba FBA,
+// preorders/KA folded into B2B). Derived facts let the assistant show the arithmetic instead of guessing.
+async function aiExplainBuy(sku, market) {
+  sku = String(sku || '').trim().toUpperCase(); const M = String(market || '').trim().toUpperCase(); const m = M.toLowerCase();
+  if (!sku) return { error: 'no SKU given' }; if (!AI_MARKETS.includes(M)) return { error: 'market must be one of ' + AI_MARKETS.join('/') };
+  const p = (await pool.query(`SELECT sku, product_name, upper(coalesce(nullif(btrim(status),''),'')) status, in_planning_scope, upper(coalesce(nullif(btrim(variant_type),''),'MASTER')) variant_type,
+      market_tier tier, core_seasonal, release_window, category, subcategory, case_pack_size, carton_qty, moq, production_lead_time_weeks,
+      china_to_uk_lead_time_weeks l3_uk, china_to_us_lead_time_weeks l3_us, china_to_eu_lead_time_weeks l3_eu, china_to_au_lead_time_weeks l3_au, china_to_ca_lead_time_weeks l3_ca,
+      target_cover_weeks_uk_3pl t3_uk, target_cover_weeks_us_3pl t3_us, target_cover_weeks_eu_3pl t3_eu, target_cover_weeks_au_3pl t3_au,
+      target_cover_weeks_uk_fba tf_uk, target_cover_weeks_us_fba tf_us, target_cover_weeks_eu_fba tf_eu, target_cover_weeks_au_fba tf_au, target_cover_weeks_ca_fba tf_ca, target_cover_overide,
+      launch_date_uk, launch_date_uk_final, launch_date_us, launch_date_eu, launch_date_au, launch_date_au_final, launch_date_ca_retail,
+      discontinue_date_final, discontinue_date_au_final, discontinue_date_ca
+    FROM planner.products WHERE upper(sku) = $1`, [sku])).rows[0];
+  if (!p) return { error: 'SKU not found in planner.products: ' + sku };
+  const nz = v => (v == null || String(v).trim() === '') ? null : String(v).trim();
+  const num1 = v => { if (v == null) return null; const x = String(v).match(/-?\d+(\.\d+)?/); return x ? Number(x[0]) : null; };
+  // launch / discontinue per market: same mapping as buildSKURAW
+  const launch = { uk: nz(p.launch_date_uk_final) || nz(p.launch_date_uk), us: nz(p.launch_date_us), eu: nz(p.launch_date_eu), au: nz(p.launch_date_au_final) || nz(p.launch_date_au), ca: nz(p.launch_date_ca_retail) }[m];
+  const disc = m === 'au' ? nz(p.discontinue_date_au_final) : m === 'ca' ? nz(p.discontinue_date_ca) : nz(p.discontinue_date_final);
+  const cp = Number(p.case_pack_size) > 0 ? Number(p.case_pack_size) : (num1(p.carton_qty) > 0 ? Math.round(num1(p.carton_qty)) : 1);   // buildPROD_CONST: case_pack_size, else carton_qty
+  const leadW = p['l3_' + m] != null ? Math.round(Number(p['l3_' + m])) : null, leadM = leadW != null ? Math.round(leadW / 4.33) : null;
+  const t3 = m === 'ca' ? null : (num1(p['t3_' + m]) ?? 4), tf = num1(p['tf_' + m]) ?? 4;
+  const cur = (await pool.query(`SELECT to_char(now(),'YYYY-MM') ym, extract(day from now())::int dd`)).rows[0], curYm = cur.ym;
+  const months = Array.from({ length: 18 }, (_, i) => aiYmAdd(curYm, i)), endYm = months[17];
+  const [bp, fc, pka, inv, inb, opo, rules, ssm, sales] = await Promise.all([
+    pool.query(`SELECT computed_at, app_version, buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound FROM planner.buy_plan_latest WHERE sku = $1 AND market = $2`, [p.sku, M]).catch(e => ({ rows: [], err: e.message })),
+    pool.query(`SELECT to_char(month,'YYYY-MM') ym, channel ch, warehouse wh, sum(units)::int u FROM planner.forecast_outputs
+      WHERE sku = $1 AND warehouse IN ($2, $3) AND month >= date_trunc('month', now()) AND month < date_trunc('month', now()) + interval '18 months' GROUP BY 1,2,3`, [p.sku, m + '_3pl', m + '_fba']),
+    pool.query(`SELECT 'preorder' src, to_char(ship_date,'YYYY-MM') ym, sum(quantity)::int u FROM planner.preorders WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2
+      UNION ALL SELECT 'key_account', to_char(ship_date,'YYYY-MM'), sum(quantity)::int FROM planner.key_account_forecasts WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2`, [p.sku, m]).catch(() => ({ rows: [] })),
+    pool.query(`SELECT warehouse wh, available::int qty FROM planner.v_product_inventory WHERE sku = $1 AND warehouse IN ($2, $3, $4)`, [p.sku, m + '_3pl', m + '_fba', m + '_awd']),
+    pool.query(`SELECT i.reference ref, i.destination_warehouse wh, (i.quantity - coalesce(i.received_quantity,0))::int open_qty, to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.status
+      FROM planner.inbound_shipments i WHERE i.sku = $1 AND split_part(i.destination_warehouse,'_',1) = $2 AND coalesce(i.received_quantity,0) < i.quantity AND i.reference NOT IN (${EXCL_REF_LIST}) ORDER BY i.estimated_delivery_date`, [p.sku, m]),
+    pool.query(`SELECT po.po ref, lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' || (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh, l.qty::int open_qty, coalesce(po.status,'') status,
+        to_char((coalesce(po.end_production_overide, CASE WHEN po.start_production IS NOT NULL AND s.production_days IS NOT NULL THEN (po.start_production + (s.production_days||' days')::interval)::date END)
+          + interval '7 days' + (b.sea_lead_time_days||' days')::interval)::date,'YYYY-MM-DD') eta
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po = l.po LEFT JOIN planner.branches b ON b.name = po.branch LEFT JOIN planner.suppliers s ON s.id = po.supplier_id
+      WHERE l.sku = $1 AND coalesce(l.qty,0) > 0 AND coalesce(po.status,'') NOT ILIKE '%complete%' AND po.master_po IS NULL AND upper(coalesce(nullif(po.country_code,''), b.country_code)) = $2
+        AND po.po NOT IN (${EXCL_REF_LIST}) AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)`, [p.sku, M]),
+    pool.query(`SELECT id, name, country, sku, category, tier, season, to_char(window_from,'YYYY-MM-DD') window_from, to_char(window_to,'YYYY-MM-DD') window_to, coverage_type, cover_months, range_from, range_to, ramp_months, ramp_sl
+      FROM planner.buy_complex_rules WHERE enabled IS NOT FALSE`).catch(() => ({ rows: [] })),
+    pool.query(`SELECT value FROM planner.app_settings WHERE key = 'ssm_enabled'`).catch(() => ({ rows: [] })),
+    pool.query(`SELECT to_char(month,'YYYY-MM') ym, channel ch, sum(units)::int u FROM planner.sales_actuals WHERE sku = $1 AND upper(country) = $2
+      AND month >= date_trunc('month', now()) - interval '12 months' AND month < date_trunc('month', now()) GROUP BY 1,2`, [p.sku, M]).catch(() => ({ rows: [] })),
+  ]);
+  // forecast by month x channel (the buy's demand basis when a saved SKU forecast exists; Preorder/KA added to B2B)
+  const byM = {}, saved = {}, lyFill = {}; months.forEach(ym => { byM[ym] = {}; });
+  fc.rows.forEach(r => { if (!byM[r.ym]) return; const ch = r.ch === 'TIK' ? 'DTC' : r.ch; byM[r.ym][ch] = (byM[r.ym][ch] || 0) + r.u; (saved[r.ch] || (saved[r.ch] = {}))[r.ym] = 1; });
+  // buildLiveDemand: a month with no saved SKU forecast for a channel falls back to last year's same-month actual (chained through
+  // this run's values when last year's month is not complete yet). Estimate that here for continuing channels so the total is visible.
+  const salesBy = {}; sales.rows.forEach(r => { (salesBy[r.ch] || (salesBy[r.ch] = {}))[r.ym] = r.u; });
+  ['DTC', 'B2B', 'FBA'].forEach(ch => { const sh = salesBy[ch]; if (!sh || !Object.values(sh).some(v => v > 0)) return; const sv = saved[ch] || {}, run = {};
+    months.forEach(ym => { if (sv[ym]) { run[ym] = byM[ym][ch] || 0; return; } const ly = aiYmAdd(ym, -12); const v = ly < curYm ? (sh[ly] || 0) : (run[ly] || 0); run[ym] = v;
+      if (v > 0 && !(launch && (ym + '-01') < launch.slice(0, 10))) { byM[ym][ch] = (byM[ym][ch] || 0) + v; (lyFill[ym] || (lyFill[ym] = [])).push(ch); } }); });
+  const pkaBy = {}; pka.rows.forEach(r => { if (r.ym && byM[r.ym] && r.u) { pkaBy[r.ym] = (pkaBy[r.ym] || 0) + r.u; byM[r.ym].B2B_preorder_ka = (byM[r.ym].B2B_preorder_ka || 0) + r.u; } });
+  const cutoff = aiDiscCutoff(disc), launchYm = launch && /^\d{4}-\d{2}/.test(launch) ? launch.slice(0, 7) : null;
+  const firstArr = leadM != null ? aiYmAdd(curYm, leadM) : null;
+  const sum = f => months.reduce((a, ym) => a + (f(ym) ? Object.values(byM[ym]).reduce((x, y) => x + y, 0) : 0), 0);
+  const tot = ym => Object.values(byM[ym]).reduce((x, y) => x + y, 0);
+  const preLaunch = ym => launch ? (ym + '-01') < launch.slice(0, 10) : false;   // buildLiveDemand: month start before launch date = 0
+  const inWin = ym => !preLaunch(ym) && !(cutoff && ym >= cutoff);
+  const forecast = months.map(ym => ({ month: ym, ...byM[ym], total: tot(ym), sellable: inWin(ym), ...(lyFill[ym] ? { filled_from_last_year: lyFill[ym].join('+') } : {}) })).filter(r => r.total || (cutoff && r.month === cutoff));
+  const b = bp.rows[0] || null, n = v => Math.round(Number(v) || 0);
+  const totalBuy = b ? n(b.buy_3pl) + n(b.buy_3pl_urgent) + n(b.future_qty) : null;
+  const sshMap = (() => { try { return JSON.parse((ssm.rows[0] || {}).value || '{}'); } catch (_) { return {}; } })();
+  const meta = { cat: p.category || '', tier: p.tier || '', rw: p.release_window || '' };
+  const matched = rules.rows.filter(r => (!r.country || String(r.country).split(',').map(x => x.trim()).includes(M)) && (!r.sku || String(r.sku).split(',').map(x => x.trim()).includes(p.sku))
+    && (!r.category || r.category === meta.cat) && (!r.tier || r.tier === meta.tier) && (!r.season || r.season === meta.rw));   // crMatch scope (category approximated by products.category)
+  const invBy = {}; inv.rows.forEach(r => { invBy[r.wh] = r.qty; });
+  // project() / inbEffEta: a past ETA is counted at the PO-grid landing date if that is in the future, else THIS month; an open PO with no landing date is skipped
+  const today = new Date().toISOString().slice(0, 10);
+  const etaNote = (eta, po) => !eta ? (po ? 'no landing date: NOT counted by the buy engine' : 'no ETA: counted only if the PO has a landing date') : eta < today ? 'ETA in the past: counted at the PO landing date if future, else this month' : undefined;
+  const inbound = inb.rows.map(r => ({ ref: r.ref, wh: r.wh, qty: r.open_qty, eta: r.eta, status: r.status, kind: 'inbound shipment', note: etaNote(r.eta, false) }))
+    .concat(opo.rows.map(r => ({ ref: r.ref, wh: r.wh, qty: r.open_qty, eta: r.eta, status: r.status, kind: 'open PO not yet shipped', note: etaNote(r.eta, true) })));
+  return {
+    as_of: new Date().toISOString().slice(0, 10), sku: p.sku, market: M, name: p.product_name, status: p.status, in_planning_scope: p.in_planning_scope, variant_type: p.variant_type,
+    buy_plan_row: b ? { computed_at: b.computed_at, app_version: b.app_version, buy_3pl: n(b.buy_3pl), buy_3pl_urgent: n(b.buy_3pl_urgent), future_qty: n(b.future_qty), buy_fba_slice: n(b.buy_fba), transfer_to_fba_now: n(b.transfer), soh_3pl: n(b.soh_3pl), soh_fba: n(b.soh_fba), on_order: n(b.on_order) }
+      : { note: 'no row in buy_plan_latest for this SKU x market (no buy, stock or on-order in the last posted plan, or not in the plan)' },
+    params: { carton_units: cp, carton_source: Number(p.case_pack_size) > 0 ? 'case_pack_size' : 'carton_qty', moq: p.moq, moq_note: 'MOQ is not applied per market (production-level check)',
+      lead_weeks_total: leadW, lead_source: 'china_to_' + m + '_lead_time_weeks (production + shipping)', production_weeks: p.production_lead_time_weeks, lead_months_rounded: leadM,
+      target_cover_weeks_3pl: t3, target_cover_weeks_fba: tf, target_cover_override_field: p.target_cover_overide, ssm_on_3pl: !!sshMap[M + '|3PL'], ssm_on_fba: !!sshMap[M + '|FBA'],
+      ssm_note: sshMap[M + '|3PL'] ? 'SSM is ON for ' + M + ' 3PL: the safety-stock cover replaces target_cover_weeks_3pl' : undefined,
+      tier: p.tier, core_seasonal: p.core_seasonal, release_window: p.release_window, category: p.category, subcategory: p.subcategory,
+      launch_date: launch, discontinue_date: disc, dates_raw: { launch_date_uk: p.launch_date_uk, launch_date_uk_final: p.launch_date_uk_final, launch_date_au_final: p.launch_date_au_final, discontinue_date_final: p.discontinue_date_final, discontinue_date_au_final: p.discontinue_date_au_final, discontinue_date_ca: p.discontinue_date_ca } },
+    stock_on_hand: { '3pl': invBy[m + '_3pl'] || 0, fba: invBy[m + '_fba'] || 0, ...(invBy[m + '_awd'] ? { awd: invBy[m + '_awd'] } : {}) },
+    open_inbound_and_on_order: { total: inbound.reduce((a, x) => a + (x.qty || 0), 0), lines: inbound },
+    forecast_by_month: forecast, forecast_note: 'planner.forecast_outputs (saved SKU plan) for ' + m + '_3pl (DTC incl TikTok, B2B, ZAL) and ' + m + '_fba (FBA); B2B_preorder_ka = preorders + key-account forecasts the engine adds to B2B. A channel-month with no saved forecast is filled the way the engine does it for a continuing SKU (last year same month, chained), flagged filled_from_last_year: an ESTIMATE of the engine input. A new SKU with no saved forecast and no history gets subcategory x share, not shown here.',
+    complex_rules_matching: matched,
+    derived: {
+      current_month: curYm, today_day: cur.dd, order_now_window: cur.dd >= 20 ? curYm + ' and ' + aiYmAdd(curYm, 1) : curYm,
+      discontinue_cutoff_month: cutoff, cutoff_rule: cutoff ? 'disc ' + disc + (+disc.slice(8, 10) > 15 ? ' is after the 15th, so the disc month still sells; first cut month ' : ' is on/before the 15th, so that month is cut; first cut month ') + cutoff + '. No buy is sized for demand in or after it.' : 'no discontinue date: perpetual, no end-of-life cap',
+      last_sellable_month: cutoff ? aiYmAdd(cutoff, -1) : null, launch_month: launchYm,
+      sellable_window: (launchYm && launchYm > curYm ? launchYm : curYm) + ' .. ' + (cutoff ? aiYmAdd(cutoff, -1) : endYm),
+      forecast_18m_total: sum(() => true), forecast_inside_sellable_window: sum(inWin), forecast_after_cutoff_not_bought: cutoff ? sum(ym => ym >= cutoff) : 0, forecast_pre_launch_not_bought: sum(preLaunch),
+      earliest_buy3pl_arrival_month: firstArr, earliest_arrival_note: 'a Buy 3PL placed this month lands round(lead weeks / 4.33) months later; needs before then are served by stock / inbound or the Urgent scan',
+      forecast_from_earliest_arrival_to_cutoff: firstArr ? sum(ym => ym >= firstArr && inWin(ym)) : null,
+      total_buy: totalBuy, total_buy_formula: b ? n(b.buy_3pl) + ' + ' + n(b.buy_3pl_urgent) + ' + ' + n(b.future_qty) + ' (buy_3pl + buy_3pl_urgent + future_qty; buy_fba is a slice, not added)' : null,
+      total_buy_cartons: totalBuy != null ? +(totalBuy / cp).toFixed(2) : null, total_buy_whole_cartons: totalBuy != null ? totalBuy % cp === 0 : null,
+      buy3pl_plus_future_excl_urgent: b ? n(b.buy_3pl) + n(b.future_qty) : null,
+    },
+  };
+}
 async function aiResolveSkus(query) {
   const q = String(query || '').trim(); if (!q) return { matches: [] };
   const r = await pool.query(`SELECT sku, product_name, nullif(trim(parent_p1),'') parent, upper(coalesce(nullif(btrim(status),''),'')) status
@@ -19360,6 +19512,8 @@ async function aiRunTool(name, input) {
     if (name === 'sku_availability') return await aiSkuAvailability(input && input.skus, input && input.market);
     if (name === 'describe_data') return await aiDescribeData(input && input.table);
     if (name === 'query_horizon') return await aiQueryHorizon(input && input.sql);
+    if (name === 'explain_buy') return await aiExplainBuy(input && input.sku, input && input.market);   // v28.167 (Ben)
+    if (name === 'app_logic') return aiAppLogic(input && input.topic);
     return { error: 'unknown tool ' + name };
   } catch (e) { return { error: e.message }; }
 }
