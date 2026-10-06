@@ -8383,7 +8383,7 @@
               +lblBlk('Cin7 member ID','', inp('cin7_member_id', fieldOf(r,'cin7_member_id'),'200px'))
               +lblBlk('Fulfil ERP ID','The record ID from the Fulfil URL (…/model/contact/6 → enter 6), NOT the supplier “Code” number. Sandbox and live IDs differ — re-enter at go-live.', inp('fulfil_id', fieldOf(r,'fulfil_id'),'200px'))
               +'</div>'
-              // v28.177 (Ben): Xero contact per org. Supplier bills / credit notes post to this exact, active contact (by ID);
+              // v28.176 (Ben): Xero contact per org. Supplier bills / credit notes post to this exact, active contact (by ID);
               // if it isn't in that Xero org, posting is blocked (HORIZON never creates the contact). Blank = '<name> - <code>'.
               +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:2px">Xero contacts</div>'
@@ -8424,7 +8424,7 @@
             listHtml:listHtml, editHtml:editHtml, editSel:'.sup-edit', idAttr:'k',
             ids:{save:'sup-save',back:'sup-back',cancel:'sup-cancel',msg:'sup-msg'},
             saveUrl:function(id){ return '/api/supply/supplier/'+encodeURIComponent(id); },
-            wireEdit:function(){ updPctSum(); supXcWire(b,'sup-in');   // v28.177 (Ben)
+            wireEdit:function(){ updPctSum(); supXcWire(b,'sup-in');   // v28.176 (Ben)
               b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; });
               wireSupPu(b);
               var ab=document.getElementById('sup-arch-btn'); if(ab)ab.onclick=function(){ var id=ab.dataset.id, toArch=ab.dataset.arch!=='1', row=null; rows.forEach(function(x){ if(String(x.id)===String(id))row=x; });
@@ -10579,7 +10579,7 @@
   // ── "Manage supplier" popout drawer (from PO ▸ Master Data + the supplier picker) — edit the supplier + its
   // portal users without leaving the PO. Saves to the same /api/supply/supplier/:id endpoint as CONFIG ▸ Suppliers.
   var _supDrawerCcy=['USD','GBP','EUR','AUD','CAD'], _supDrawerKinds=['supplier','freight','internal','other'];
-  // v28.177 (Ben): the supplier's Xero CONTACT per org (CONFIG ▸ Suppliers edit + the Manage supplier drawer). HORIZON posts
+  // v28.176 (Ben): the supplier's Xero CONTACT per org (CONFIG ▸ Suppliers edit + the Manage supplier drawer). HORIZON posts
   // supplier bills / credit notes by the ContactID of this exact (active) contact; blank = '<name> - <code>' (placeholder).
   // "check" = read-only lookup in that Xero org (GET only): ✓ found / ✕ not found.
   function supXcDefault(r){ var n=String((r&&r.name)||'').trim(), c=String((r&&r.code)||'').trim(), k=String((r&&r.kind)||'supplier').toLowerCase(); return (c&&k==='supplier')?(n+' - '+c):n; }
@@ -10628,14 +10628,14 @@
       +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">'+blk('Start deposit %',num('start_deposit_pct',fo('start_deposit_pct')))+blk('Completion %',num('completion_pct',fo('completion_pct')))+blk('Balance %',num('balance_pct',fo('balance_pct')))+blk('Production (days)',num('production_days',fo('production_days')))+blk('Expedited (weeks)',num('expedited_production_weeks',fo('expedited_production_weeks')))+blk('Credit (days)',num('credit_days',fo('credit_days')))+blk('Credit type',creditOpts)+'</div>'
       +'<div style="border-top:1px solid var(--line2);margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:8px">Contact &amp; ERP IDs</div>'
       +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+blk('Contact name',inp('contact_name',fo('contact_name')))+blk('Email',inp('email',fo('email')))+blk('Incoterm',inp('incoterm',fo('incoterm'),'110px'))+blk('Export port',inp('export_port',fo('export_port'),'160px'))+blk('Cin7 member ID',inp('cin7_member_id',fo('cin7_member_id'),'160px'))+blk('Fulfil ERP ID',inp('fulfil_id',fo('fulfil_id'),'120px'))+'</div>'
-      // v28.177 (Ben): Xero contact per org (bills / credit notes post to this exact contact; blank = '<name> - <code>')
+      // v28.176 (Ben): Xero contact per org (bills / credit notes post to this exact contact; blank = '<name> - <code>')
       +'<div style="font-weight:700;font-size:12px;color:var(--ink-soft);margin:4px 0 6px">Xero contacts</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px">'+supXcFields('supd-in',r,'flex:1;min-width:0;box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px')+'</div>'
       +'<div style="border-top:1px solid var(--line2);margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:2px">Portal users <span class="mut tiny" style="font-weight:400">— tick = active</span></div>'
       +'<div id="supd-pu-list" data-sup="'+esc(r.name||'')+'" style="margin-bottom:6px">'+puList+'</div>'
       +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="supd-pu-email" type="email" placeholder="email@supplier.com" style="font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:190px"><input id="supd-pu-contact" placeholder="contact (optional)" style="font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:130px"><button class="save-btn light" id="supd-pu-add">+ Add</button><span id="supd-pu-msg" class="mut tiny"></span></div>'
       +'<div style="display:flex;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line2);position:sticky;bottom:0;background:var(--card)"><button id="supd-save" style="cursor:pointer;border:none;background:var(--blue);color:#fff;padding:7px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button><button class="save-btn light" onclick="closeSupplierDrawer()">Close</button><span id="supd-msg" class="mut tiny"></span><button class="lnk-btn" style="margin-left:auto" onclick="closeSupplierDrawer();try{window.__configNav.select(\'suppliers\')}catch(e){}">Full settings in CONFIG ↗</button></div>';
     function pctSum(){ var el=document.getElementById('supd-pctsum'); if(!el)return; var s=0; ['start_deposit_pct','completion_pct','balance_pct'].forEach(function(f){ var i=body.querySelector('.supd-in[data-f="'+f+'"]'); if(i)s+=parseFloat(i.value)||0; }); s=Math.round(s*100)/100; el.innerHTML='Deposit + Completion + Balance = <b style="color:'+(s===100?'#16a34a':'#b45309')+'">'+s+'%</b>'+(s===100?'':' — should total 100%'); }
-    supXcWire(body,'supd-in');   // v28.177 (Ben)
+    supXcWire(body,'supd-in');   // v28.176 (Ben)
     pctSum(); body.querySelectorAll('.supd-in[data-f="start_deposit_pct"],.supd-in[data-f="completion_pct"],.supd-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=pctSum; });
     document.getElementById('supd-save').onclick=function(){ var btn=this, msg=document.getElementById('supd-msg'); var payload={}; body.querySelectorAll('.supd-in').forEach(function(i){ payload[i.dataset.f]=i.value; }); btn.disabled=true; msg.style.color='#64748b'; msg.textContent='Saving…';
       fetch('/api/supply/supplier/'+encodeURIComponent(r.id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(x){return x.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; } msg.style.color='#16a34a'; msg.textContent='Saved.'; try{invalidateDerived();}catch(e){} }).catch(function(e){ btn.disabled=false; msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); };
@@ -11086,7 +11086,7 @@
     var hasOverpay=(j.lines||[]).some(function(l){return l.pay_ok===false;});
     var hasBlocked=(j.lines||[]).some(function(l){return !!l.blocked;});
     var hasSettleBad=(j.lines||[]).some(function(l){return l.will_pay&&l.settle_from==='account'&&!l.settle_account_id;});   // v28.134: payment account (602.1 / production account) unresolved
-    var hasContactBad=!!(j.contact&&!j.contact.ok);   // v28.177 (Ben): supplier's Xero contact not in the paying org → no post
+    var hasContactBad=!!(j.contact&&!j.contact.ok);   // v28.176 (Ben): supplier's Xero contact not in the paying org → no post
     function orgPill(o){ o=String(o||'').toUpperCase(); var au=o==='AU'; return '<span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:1px 5px;border-radius:4px;'+(au?'background:#dcfce7;color:#15803d':'background:#fee2e2;color:#b91c1c')+'">'+esc(o||'—')+'</span>'; }
     var rows=(j.lines||[]).map(function(l){
       var acct=l.account?(esc(l.account.code)+' · '+esc(l.account.name)):'<span style="color:var(--neg)">unmapped</span>';
@@ -11119,7 +11119,7 @@
       +((j.has_deposits&&(j.deposit_orgs||[]).length)?('<div style="background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c;font-weight:800;padding:9px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">THIS MUST BE PAID FROM A BANK LINKED TO XERO '+(j.deposit_orgs||[]).map(function(o){return String(o).toUpperCase();}).join(' &amp; ')+((j.deposit_orgs||[]).length>1?' — deposits from two orgs cannot be in one run, split them':' — deposits settle only in their home org')+'</div>'):'')
       +'<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">'
         +'<div><div class="mut tiny">Supplier</div><b>'+esc(j.supplier||'')+'</b></div>'
-        // v28.177 (Ben): the resolved Xero contact (the bill posts to it by ID); red when it isn't in the paying org
+        // v28.176 (Ben): the resolved Xero contact (the bill posts to it by ID); red when it isn't in the paying org
         +(j.contact?'<div><div class="mut tiny">Xero contact ('+esc(String(j.paying_org||j.region||'').toUpperCase())+')</div>'+(j.contact.ok?'<b class="xbp-contact" title="Supplier: '+esc(j.supplier||'')+' → Xero: '+esc(j.contact.name||'')+'">'+esc(j.contact.name||'')+'</b>':'<b class="xbp-contact" style="color:var(--neg)" title="'+esc(j.contact.error||'')+'">✕ '+esc(j.contact.target||j.contact.name||'')+' not found</b>')+'</div>':'')
         +'<div><div class="mut tiny">Bill reference</div><b style="font-family:ui-monospace,Menlo,monospace">'+esc(j.reference||'')+'</b></div>'
         +'<div><div class="mut tiny">Date</div><b>'+esc(fd(j.date)||j.date||'')+'</b></div>'

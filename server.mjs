@@ -4791,7 +4791,7 @@ function _xeroErrMsg(j, status) {
   if (j && typeof j === 'object') walk(j.Elements, 0);
   return ve.join('; ') || (j && (j.Detail || j.Message)) || ('Xero ' + status);
 }
-// v28.177 (Ben): SUPPLIER -> XERO CONTACT resolver. Fulfil created supplier contacts named "<name> - <code>" (e.g.
+// v28.176 (Ben): SUPPLIER -> XERO CONTACT resolver. Fulfil created supplier contacts named "<name> - <code>" (e.g.
 // "Nice Look - NL") and Ben is merging every supplier onto that convention in BOTH orgs. Posting a document with
 // Contact:{Name} makes Xero silently CREATE a contact when the name doesn't match (which would undo the merges), so every
 // supplier bill / credit note HORIZON posts now references Contact:{ContactID} from this resolver. Target name =
@@ -4846,7 +4846,7 @@ async function xeroContactFor(region, supplierNameOrRow, opts) {
   const r = await xeroContactLookup(region, xeroContactTarget(region, s), opts);
   return Object.assign(r, { supplier: s.name, configured: !!String(s['xero_contact_' + region] || '').trim() });
 }
-// v28.177 (Ben): Xero contact name -> HORIZON supplier name. A supplier is known in Xero as '<name>', '<name> - <code>' or
+// v28.176 (Ben): Xero contact name -> HORIZON supplier name. A supplier is known in Xero as '<name>', '<name> - <code>' or
 // its configured xero_contact_uk / xero_contact_au; all of them map back to the same supplier (plus the base name without
 // a "(contact)" suffix and the one historic AU alias). Used wherever Xero bills are matched to suppliers by contact name.
 async function supplierByXeroContactIndex() {
@@ -5428,7 +5428,7 @@ async function computeXeroRunPlan(run, ctx) {
   const usdBankRole = paying === 'au' ? 'gentium_usd' : 'universal_partners_usd';
   let bank = banks[usdBankRole] || null;
   if (!bank) { try { bank = await _xeroBankForCurrency(paying, 'USD', ctx && ctx.xget); } catch (e) {} }
-  // v28.177 (Ben): the supplier-payment bill's CONTACT in the paying org (by ContactID, never by name; missing = BLOCK).
+  // v28.176 (Ben): the supplier-payment bill's CONTACT in the paying org (by ContactID, never by name; missing = BLOCK).
   const contact = await xeroContactFor(paying, run.supplier, { xget: _xget, fresh: !!(ctx && ctx.contactFresh) });
   // Loan (901) account for every org this run touches — the paying org (cross-org bill lines) and each home org.
   const orgsNeeded = new Set([paying]); payLines.forEach(l => orgsNeeded.add(homeOfLine(l)));
@@ -5534,7 +5534,7 @@ async function computeXeroRunPlan(run, ctx) {
     }
   });
   const checks = [];
-  // v28.177 (Ben): Xero contact for the supplier-payment bill (exact name, active, in the paying org).
+  // v28.176 (Ben): Xero contact for the supplier-payment bill (exact name, active, in the paying org).
   checks.push(contact.ok ? { level: 'ok', msg: 'Xero contact (' + paying.toUpperCase() + '): ' + contact.Name } : { level: 'error', msg: contact.error });
   // v28.134: payments settle from the line's coded account (602.1 / production account), not the USD bank.
   const badSettle = outLines.filter(l => l.will_pay && l.settle_from === 'account' && !l.settle_account_id);
@@ -5567,7 +5567,7 @@ async function computeXeroRunPlan(run, ctx) {
   const noBill = outLines.filter(l => !l.linked_bill && !l.blocked).map(l => l.reference);
   if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
   return { ok: true, region: paying, paying_org: paying, supplier: run.supplier,
-    contact: { ok: !!contact.ok, id: contact.ContactID || null, name: contact.ok ? contact.Name : (contact.target || ''), target: contact.target || '', configured: !!contact.configured, lookup_failed: !!contact.lookup_failed, error: contact.ok ? null : contact.error },   // v28.177 (Ben)
+    contact: { ok: !!contact.ok, id: contact.ContactID || null, name: contact.ok ? contact.Name : (contact.target || ''), target: contact.target || '', configured: !!contact.configured, lookup_failed: !!contact.lookup_failed, error: contact.ok ? null : contact.error },   // v28.176 (Ben)
     reference: ref, currency: String(run.base_ccy || 'USD').toUpperCase(), run_key: run.run_key || null, date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
 }
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
@@ -5583,7 +5583,7 @@ app.post('/api/supply/payments/xero-preview', async (req, res) => {
 function _xeroPlanIssues(plan) {
   const block = [], warn = [], add = (a, m) => { if (m && !a.includes(m)) a.push(m); };
   const _n = v => (Number(v) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (plan.contact && !plan.contact.ok) add(block, plan.contact.error || ("Xero contact '" + (plan.contact.target || '') + "' not found in " + String(plan.paying_org || '').toUpperCase()));   // v28.177 (Ben): no contact = no post
+  if (plan.contact && !plan.contact.ok) add(block, plan.contact.error || ("Xero contact '" + (plan.contact.target || '') + "' not found in " + String(plan.paying_org || '').toUpperCase()));   // v28.176 (Ben): no contact = no post
   (plan.lines || []).forEach(l => {
     const po = l.reference || '(no ref)', isDep = /deposit/i.test(String(l.type || ''));
     if (l.blocked) add(block, po + ': ' + l.blocked);
@@ -5656,7 +5656,7 @@ app.post('/api/supply/payments/xero-preflight', async (req, res) => {
 // the number: Xero's stored InvoiceDate is UTC-shifted) → supplier by suppliers.code. Writes ONLY planner.payment_xero_bills
 // (nothing to Xero). One batched upsert. Deleted / voided bills are ignored.
 async function sweepSupplierPaymentBills() {
-  // v28.177 (Ben): contact name -> supplier via the shared index ('<name>', '<name> - <code>', configured Xero contacts,
+  // v28.176 (Ben): contact name -> supplier via the shared index ('<name>', '<name> - <code>', configured Xero contacts,
   // "(contact)" base name, the Jinmatex alias). Was a local name / base / alias map that missed "Nice Look - NL".
   const byCode = {}; (await pool.query(`SELECT coalesce(code,'') code, name FROM planner.suppliers WHERE coalesce(name,'')<>''`)).rows.forEach(s => { if (String(s.code).trim()) byCode[String(s.code).trim().toUpperCase()] = s.name; });
   const supOfContact = await supplierByXeroContactIndex();
@@ -5692,7 +5692,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {}, { contactFresh: true });
     if (!plan.ok) return res.status(400).json({ error: plan.error });
     const region = plan.region, today = new Date().toISOString().slice(0, 10), date = plan.date || today;
-    // v28.177 (Ben): the bill references the supplier's Xero contact by ContactID (fresh lookup). Not found = nothing posted
+    // v28.176 (Ben): the bill references the supplier's Xero contact by ContactID (fresh lookup). Not found = nothing posted
     // (posting by Name would make Xero create a duplicate contact and undo Ben's merges).
     if (!plan.contact || !plan.contact.ok || !plan.contact.id) return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: (plan.contact && plan.contact.error) || 'Xero contact not resolved: nothing posted' });
     // v28.134: PO-bill payments settle from the line's coded account (602.1 / production account), never the USD bank.
@@ -5785,7 +5785,7 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     let due = null; let billRate = null;
     try { const bi = await xeroFetch(region, '/api.xro/2.0/Invoices/' + link.external_id); const inv = bi && bi.Invoices && bi.Invoices[0]; if (inv) { due = Number(inv.AmountDue) || 0; billRate = (inv.CurrencyRate != null ? Number(inv.CurrencyRate) : null); } } catch (e) {}
     if (due != null && amount > due + 0.01) return res.status(400).json({ error: 'Deposit ' + _usd(amount) + ' exceeds the bill’s amount due ' + _usd(due) + ' — cannot allocate more than is owed.' });
-    // v28.177 (Ben): resolve the supplier's Xero contact (ContactID) BEFORE any write; not found = nothing posted.
+    // v28.176 (Ben): resolve the supplier's Xero contact (ContactID) BEFORE any write; not found = nothing posted.
     const xc = await xeroContactFor(region, poRow.supplier, { fresh: true });
     if (!xc.ok) return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: xc.error });
     const trackOption = (pn != null) ? ('P' + pn) : null;
@@ -5813,7 +5813,7 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
 // It does NOT touch the UK bill or the PO's link — voiding the UK bill and re-pointing the link are deliberate
 // follow-up steps once Ben has reviewed the AU bills.
 const AU_INVENTORY_ACCT = '625';   // AU "Inventory Balance Sheet"
-// v28.177 (Ben): _xeroEnsureContact (v28.109: created a missing supplier contact in AU) is REMOVED. HORIZON never creates
+// v28.176 (Ben): _xeroEnsureContact (v28.109: created a missing supplier contact in AU) is REMOVED. HORIZON never creates
 // a supplier contact in Xero; the AU bill uses the resolved AU contact (xeroContactFor) and is refused when it's missing.
 async function _auBillCandidates() {
   const rows = (await pool.query(`SELECT p.po, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch, coalesce(p.status,'') status, coalesce(p.supplier_name,'') supplier, l.external_id, l.external_ref
@@ -5858,7 +5858,7 @@ app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
     let dupe = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(invNo).replace(/["\\]/g, '') + '"')); dupe = ex && ex.Invoices && ex.Invoices[0]; }
     catch (e) { console.error('[xero au-migrate] duplicate check failed for ' + po + ':', e.message); return res.status(502).json({ error: 'Could not check Xero AU for an existing bill ' + invNo + ' (' + e.message + '). Nothing created; try again.' }); }
     if (dupe && dupe.InvoiceID) return res.status(409).json({ error: 'An AU bill ' + invNo + ' already exists (InvoiceID ' + dupe.InvoiceID + ') — ' + po + ' looks already migrated.', au_bill: { id: dupe.InvoiceID, number: dupe.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + dupe.InvoiceID } });
-    // v28.177 (Ben): the AU contact is the SUPPLIER's AU Xero contact (suppliers.xero_contact_au, else '<name> - <code>'),
+    // v28.176 (Ben): the AU contact is the SUPPLIER's AU Xero contact (suppliers.xero_contact_au, else '<name> - <code>'),
     // resolved by exact name among active AU contacts. Missing = refused (dry run reports it); never created from HORIZON.
     const xc = await xeroContactFor('au', poRow.supplier || (src.Contact && src.Contact.Name) || '', { fresh: !dry });
     const contactName = xc.ok ? xc.Name : (xc.target || poRow.supplier || '');
@@ -5868,7 +5868,7 @@ app.post('/api/supply/xero/migrate-au-bill', async (req, res) => {
     const auBody = { Type: 'ACCPAY', Contact: { ContactID: auContactId }, Date: (src.DateString || src.Date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), DueDate: (src.DueDateString || src.DueDate || '').slice(0, 10) || undefined, InvoiceNumber: invNo, Reference: src.Reference || invNo, CurrencyCode: src.CurrencyCode || 'USD', Status: status, LineAmountTypes: 'NoTax', LineItems: srcLines };
     const summary = { po, supplier: poRow.supplier || contactName, contact: { name: contactName, exists_in_au: auContactExists, will_create: false, error: xc.ok ? null : xc.error }, source_bill: { id: src.InvoiceID, number: src.InvoiceNumber, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + src.InvoiceID, total: Number(src.Total) || 0, currency: src.CurrencyCode, status: src.Status, amount_due: Number(src.AmountDue) || 0 }, au_bill_to_create: auBody, lines_recoded_to: AU_INVENTORY_ACCT };
     if (dry) return res.json({ ok: true, dry_run: true, ...summary });
-    if (!auContactId) return res.status(400).json(Object.assign({ code: 'XERO_CONTACT_MISSING', error: xc.error }, summary));   // v28.177 (Ben): nothing created
+    if (!auContactId) return res.status(400).json(Object.assign({ code: 'XERO_CONTACT_MISSING', error: xc.error }, summary));   // v28.176 (Ben): nothing created
     const contactCreated = false;
     const cr = await xeroFetch('au', '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [auBody] } });
     const ni = cr && cr.Invoices && cr.Invoices[0];
@@ -6177,7 +6177,7 @@ app.post('/api/supply/xero/push-queue/:id/push', async (req, res) => {
     if (row.status === 'pushed') return res.status(409).json({ error: 'already pushed', xero_id: row.xero_id });
     const region = xeroRegion(row.region); const today = new Date().toISOString().slice(0, 10);
     let xeroId = null, xeroRef = null;
-    // v28.177 (Ben): bills / credit notes reference the supplier's Xero contact by ContactID, resolved BEFORE any write
+    // v28.176 (Ben): bills / credit notes reference the supplier's Xero contact by ContactID, resolved BEFORE any write
     // (tracking options included). Not found = nothing posted; the queue row shows the error.
     let xc = null;
     if (row.kind === 'bill' || row.kind === 'credit_note') {
@@ -7824,7 +7824,7 @@ supplySectionHandler = async (req, res, next) => {
         // expedited_production_weeks (migration 161) read separately + defensively so the page still works pre-migration
         const ew = {}; try { (await q(`SELECT id, expedited_production_weeks FROM planner.suppliers`)).forEach(x => { ew[x.id] = x.expedited_production_weeks; }); } catch (e) {}
         suppliers.forEach(r => { r.expedited_production_weeks = (ew[r.id] != null ? Number(ew[r.id]) : 6); });
-        // v28.177 (Ben): Xero contact names per org (migration 330), read defensively like the above (pre-migration = blank)
+        // v28.176 (Ben): Xero contact names per org (migration 330), read defensively like the above (pre-migration = blank)
         const xc = {}; if (await _supXeroColsOk()) { try { (await q(`SELECT id, xero_contact_uk, xero_contact_au FROM planner.suppliers`)).forEach(x => { xc[x.id] = x; }); } catch (e) {} }
         suppliers.forEach(r => { const x = xc[r.id] || {}; r.xero_contact_uk = x.xero_contact_uk || null; r.xero_contact_au = x.xero_contact_au || null; r.xero_contact_default = xeroContactDefault(r); });
         return res.json(suppliers);
@@ -8840,7 +8840,7 @@ app.get('/api/supply/deposit-context/:po', async (req, res) => {
 });
 // Suppliers — editable terms table (CONFIG). Edit by id; create a new supplier (name required).
 app.post('/api/supply/supplier/:id', async (req, res) => {
-  // v28.177 (Ben): xero_contact_uk / xero_contact_au (migration 330). Dropped from the body if the columns don't exist yet
+  // v28.176 (Ben): xero_contact_uk / xero_contact_au (migration 330). Dropped from the body if the columns don't exist yet
   // (so a pre-migration save still works); any change to them or to name / code / kind clears the contact + preflight caches.
   const body = Object.assign({}, req.body || {});
   if (!(await _supXeroColsOk())) { delete body.xero_contact_uk; delete body.xero_contact_au; }
@@ -8856,7 +8856,7 @@ app.post('/api/supply/supplier/:id', async (req, res) => {
       te_id: 'text', incoterm: 'text', cin7_member_id: 'bigint', fulfil_id: 'text', export_port: 'text',
       include_product_dev: 'boolean', active: 'boolean', xero_contact_uk: 'text', xero_contact_au: 'text' }, body, 'bigint');   // active=false → archived (v27.522)
 });
-// v28.177 (Ben): READ-ONLY check that a Xero contact exists (exact name, active) in one org: the "check" buttons beside the
+// v28.176 (Ben): READ-ONLY check that a Xero contact exists (exact name, active) in one org: the "check" buttons beside the
 // supplier's Xero contact fields. GET only to Xero; skips the cache. ?region=uk|au&name=<contact> (or &supplier=<name>
 // to check the supplier's resolved contact).
 app.get('/api/supply/xero/contact-check', async (req, res) => {
@@ -8867,7 +8867,7 @@ app.get('/api/supply/xero/contact-check', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, connected: true, region, name: r.target, found: !!r.ok, contact_id: r.ContactID || null, contact_name: r.Name || null, error: r.ok ? null : r.error, lookup_failed: !!r.lookup_failed });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// v28.177 (Ben): READ-ONLY roll-up: every active supplier's resolved Xero contact in UK and AU (found / missing), so Ben can
+// v28.176 (Ben): READ-ONLY roll-up: every active supplier's resolved Xero contact in UK and AU (found / missing), so Ben can
 // see which '<name> - <code>' contacts still need creating or merging. GETs only, serial, uses the 10 min contact cache.
 app.get('/api/supply/xero/supplier-contacts', async (req, res) => {
   try {

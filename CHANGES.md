@@ -1,3 +1,15 @@
+## v28.176 (Ben, branch review-fixes-2026-10-05): Xero supplier contacts by ContactID, never auto-created
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, new `migrations/330_supplier_xero_contacts.sql` (+ package.json, CHANGES.md). No new env vars.
+
+- Fulfil names supplier contacts "<name> - <code>" (e.g. "Nice Look - NL"); Ben is aligning every supplier to that name in Xero UK and AU. HORIZON used to post with Contact {Name}, which makes Xero silently create a duplicate contact when the name doesn't match.
+- Every supplier document (supplier-payment bill, deposit credit note, push-queue bill / credit note, AU bill migration) now posts with Contact {ContactID} from `xeroContactFor(region, supplier)`: suppliers.xero_contact_uk / xero_contact_au, else "<name> - <code>", else the name; exact active-contact lookup (GET only; cached 10 min, misses 1 min, re-checked at post time). A missing contact BLOCKS the post with a clear message; nothing is written. HORIZON never creates supplier contacts (AU-migration auto-create removed).
+- Preflight badge + Create in Xero popup show the block before clicking; popup shows "Supplier: X → Xero: Y".
+- SUPPLY ▸ CONFIG ▸ Suppliers and the Manage supplier drawer: "Xero contact (UK)" / "(AU)" fields with a check button. New read-only `GET /api/supply/xero/contact-check` and `GET /api/supply/xero/supplier-contacts` (`?fresh=1`).
+- Supplier-payment bill sweep treats "<name>", "<name> - <code>" and configured contacts as the same supplier. Commission and 3PL bills unchanged.
+- **IMPORTANT, deploy order:** today only UK "Nice Look - NL", "Lixin - LX", "XR Textile - XR" exist; every other supplier in UK, and ALL suppliers in AU, are missing their "- CODE" contact, so posting to Xero would be blocked for them. Ben creates / merges the contacts in Xero first (check with `/api/supply/xero/supplier-contacts?fresh=1`), THEN deploy.
+- **Diviyaj:** apply `migrations/330_supplier_xero_contacts.sql` (additive, idempotent; seeds kind='supplier' rows with name || ' - ' || code). Nothing else.
+
 ## v28.175 (Ben, branch review-fixes-2026-10-05): portal speed (perf roadmap #5)
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (fingerprints re-verified, rules unchanged), new `tests/portal-scope.cjs` (+ package.json, CHANGES.md). No migrations, no new env vars, no new cookies (reuses `hz_sid` / `hz_rw`).
