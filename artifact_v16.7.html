@@ -16642,7 +16642,29 @@ var LIVE_FC_MONTHS=(function(){
   for(var i=0;i<18;i++){var mm=m+i,yy=y;while(mm>12){mm-=12;yy++;}o.push(yy+'_'+(mm<10?'0':'')+mm);}
   return o;
 })();
-function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null;   // v28.151 (review A5): set-to-component index rebuilt per build (SET_BOM can change)
+// v28.162 (Ben): App health hooks (transport = hz-health.js window.hzHealthMetric). (1) Demand rebuild idempotency: total demand
+// units over BP_DATA.products (all markets / channels / months) are remembered per INPUT GENERATION; a rebuild of the same
+// generation with a different total is reported once as a sanity event (the +6,566 units per rebuild bug). Generation = forecast
+// edits (BUY_FC_STALE at build entry bumps HZ_DEMAND_GEN) + FC_OUTPUTS key count + SKU_DATA_READY + identity of PKA_MAP /
+// BP_DATA.products / PREPACK_MAP. Costs one pass over the demand maps (~1-3 ms) after a multi-second build. (2) Once a day per
+// user, buy totals per market from the ALREADY-COMPUTED buy cache (only markets whose cache covers every product; never builds).
+var HZ_DEMAND_GEN=0, _hzDemLast=null;
+function hzDemandTotal(){ var t=0, P=BP_DATA.products; for(var s in P){ var mk=P[s]&&P[s].mkts; if(!mk)continue; for(var co in mk){ var dm=mk[co]&&mk[co].demand; if(!dm)continue;
+  for(var ch in dm){ var o=dm[ch]; if(o&&typeof o==='object')for(var m in o){ var v=+o[m]; if(v)t+=v; } } } } return Math.round(t); }
+function hzDemandSanity(entryStale){ try{ if(typeof window.hzHealthMetric!=='function'||typeof BP_DATA==='undefined'||!BP_DATA.products)return; if(entryStale)HZ_DEMAND_GEN++;
+  var g={e:HZ_DEMAND_GEN,k:Object.keys(FC_OUTPUTS).length,r:!!SKU_DATA_READY,p:(typeof PKA_MAP!=='undefined'?PKA_MAP:null),b:BP_DATA.products,pp:(typeof PREPACK_MAP!=='undefined'?PREPACK_MAP:null)}, tot=hzDemandTotal(), L=_hzDemLast;
+  if(L&&L.g.e===g.e&&L.g.k===g.k&&L.g.r===g.r&&L.g.p===g.p&&L.g.b===g.b&&L.g.pp===g.pp&&L.tot!==tot)
+    window.hzHealthMetric('sanity','demand rebuild not idempotent',{before:L.tot,after:tot,delta:tot-L.tot,gen:g.e,fc_keys:g.k},'client:demand_rebuild');
+  _hzDemLast={g:g,tot:tot}; }catch(e){} }
+try{ setInterval(function(){ try{ if(typeof window.hzHealthMetric!=='function'||typeof BP==='undefined'||!BP||!BP.BUY_CACHE||typeof BP_DATA==='undefined'||!BP_DATA.products)return;
+  var d=new Date(), day=d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(), K='hzBuyMetricDay'; try{ if(localStorage.getItem(K)===day)return; }catch(e){ return; }
+  var C=BP.BUY_CACHE, P=BP_DATA.products, need={}, have={}, sum={}, co, out={}, n=0;
+  for(var s in P){ var mk=P[s]&&P[s].mkts; if(mk)for(co in mk)need[co]=(need[co]||0)+1; }
+  for(var key in C){ var i=key.lastIndexOf('|'), q=C[key]; co=key.slice(i+1); if(!q||!P[key.slice(0,i)])continue; have[co]=(have[co]||0)+1; var x=sum[co]||(sum[co]={b3:0,b3u:0,bf:0}); x.b3+=q.b3||0; x.b3u+=q.b3u||0; x.bf+=q.bf||0; }
+  for(co in need)if(have[co]>=need[co]){ out[co]={b3:Math.round(sum[co].b3),b3u:Math.round(sum[co].b3u),bf:Math.round(sum[co].bf)}; n++; }
+  if(!n)return; window.hzHealthMetric('metric','buy totals per market',{markets:out},'client:buy_totals'); try{ localStorage.setItem(K,day); }catch(e){} }catch(e){} },600000); }catch(e){}
+function buildLiveDemand(){ var _hzStale=(typeof BUY_FC_STALE!=='undefined'&&!!BUY_FC_STALE);   // v28.162 (Ben): read before callers reset it (health idempotency generation)
+  RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_BY_COMP=null;   // v28.151 (review A5): set-to-component index rebuilt per build (SET_BOM can change)
   // v28.142: wire the TikTok (TIK, UK/US) and EU Zalando (ZAL) channels BEFORE building demand. They were only wired when the
   // DEMAND plan rendered, so the buy plan differed by navigation order (BUY opened first → no TIK/ZAL availability or rows →
   // different demand split). Both are idempotent ("runs once data is ready").
@@ -16873,6 +16895,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; SET_
   // one-time "build the PP cover" guards in both render()s must not trigger a SECOND ~3s rebuild. Only counts once the
   // real SKU data is in (lazy mode ships it empty; lazyLoadSkuData() re-arms both flags when it lands).
   if(!LAZY_SKU || SKU_DATA_READY)_PP_COVER_INIT=true;
+  hzDemandSanity(_hzStale);   // v28.162 (Ben): health log idempotency check (never throws)
 }
 
 // ===== LIVE PREORDER / KEY-ACCOUNT REFRESH (Airtable MCP) =====
