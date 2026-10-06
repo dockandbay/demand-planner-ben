@@ -57,4 +57,4 @@ All with header `x-webhook-secret: N8N_WEBHOOK_SECRET`, body `{}`.
 5. Payments Report: XERO buttons show preflight badges; "UP FX Statement" downloads.
 6. `SHOW statement_timeout` via 6543 = 30s.
 
-**Not in this package:** v28.181 (DEMAND > Actions speed) is in progress and will follow.
+**Added after hand-off: v28.181** (DEMAND > Actions faster; fixes a dismissed/snoozed action showing as open for up to 90 s; keep the new `EARLY_DA` `<head>` snippet next to `EARLY_SKU`). No migration, no env vars. Deploy it with the rest: pull `origin/review-fixes-2026-10-05` HEAD.
