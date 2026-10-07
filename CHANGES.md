@@ -1,3 +1,10 @@
+## v28.211 (Ben, branch review-fixes-2026-10-05): CLIENT edit tabs more visible
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- CLIENT > Clients & agents > Edit tabs (Account | Users | Access & features | Commission | Orders | Audit) are a clear segmented bar: 13px darker labels, larger click area, active tab a raised white pill with blue outline and text. Theme tokens only (dark mode follows).
+- Header strip: "updated" date now dd-mmm-yy (was ISO 2026-09-30) and owner / updated-by shown short (ben@).
+
 ## v28.210 (Ben, branch review-fixes-2026-10-05): hash portal login tokens (DB hardening H2)
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
