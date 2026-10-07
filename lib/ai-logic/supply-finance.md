@@ -18,6 +18,7 @@ sources:
   - migrations/330_supplier_xero_contacts.sql :: planner.suppliers.xero_contact_uk/au
   - server.mjs :: /api/supply/tpl/data, /api/supply/tpl/goods-in, _tplGridSummary, _tplConsumablesInside (3PL invoices)
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
+  - server.mjs :: fulfilPushTarget, fulfilGuardCtx, fulfilExistingCandidates, FULFIL_CLIENT_PO_SQL, /api/supply/fulfil/po-search, /api/supply/po/:po/links (Fulfil create guard + Link Fulfil PO)
   - server.mjs :: sovAnalyse, sovLineBlock, sovFindSales, sovPushOrder, /api/supply/fulfil/sales-order/push-suppliers, /api/supply/fulfil/sales-order/analyse-batch, /api/supply/fulfil/sales-order/push-batch (Validate sales order)
   - migrations/334_so_supplier_pushes.sql :: planner.so_supplier_pushes
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
@@ -75,13 +76,19 @@ fingerprints:
   server.mjs::/api/supply/tpl/goods-in: 015c39460dba
   server.mjs::_tplGridSummary: 0e93f4ce0c66
   server.mjs::_tplConsumablesInside: e11316018639
-  server.mjs::fulfilPushLines: 7bf2e380a910
+  server.mjs::fulfilPushLines: 5aa606bd5490
   server.mjs::FULFIL_MAP: a6c47c881a14
   server.mjs::fulfilCompletionMap: df8ad2805725
   server.mjs::/api/supply/fulfil/drift: 5d0b453f9536
-  server.mjs::/api/supply/fulfil/grid-status: 29e8325d5f40
+  server.mjs::/api/supply/fulfil/grid-status: de13cc6028c0
   server.mjs::fulfilCompareRows: 9afcbaf79bb7
   server.mjs::fulfilImportPOs: 17755776cb38
+  server.mjs::fulfilPushTarget: 2c0fb3c1cc0a
+  server.mjs::fulfilGuardCtx: 431118959c8c
+  server.mjs::fulfilExistingCandidates: 4a108d8a257b
+  server.mjs::FULFIL_CLIENT_PO_SQL: 1dfcdf1c9fe5
+  server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
+  server.mjs::/api/supply/po/:po/links: 0bdb5f8c0dfd
   server.mjs::sovAnalyse: f7dd288a3ddc
   server.mjs::sovLineBlock: 889239e00674
   server.mjs::sovFindSales: 18cf17b8bb06
@@ -145,13 +152,12 @@ fingerprints:
   server.mjs::xbLeadMatch: 4dfee85a4bdd
   server.mjs::xeroVoidLinkFinding: 093a000593ab
   server.mjs::resolvePoLinks: 2bf35107b878
-  server.mjs::/api/supply/po/:po/links: a7c2abd3cb82
   server.mjs::/api/supply/xero/bills/search: 5098368ae682
   server.mjs::/api/supply/xero/bills/verify: 13d9d1030b2a
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.194
+verified_version: v28.199
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -280,6 +286,13 @@ verified_version: v28.194
 - Company is fixed at create: AU ship-to country (PO, else branch) = company 3 (Dock & Bay Pty Ltd), anything else = company 1 (Dock & Bay Ltd). Currency = the supplier's default_currency. Payment term: credit days 90/60/30 give Net 90/60/30; anything else gives Immediate. (source: server.mjs :: fulfilCompanyForCountry, fulfilPaymentTermName)
 - Line price: the confirmed portal cost, else the line cost, else the SKU's latest priced line from the same supplier, else from any supplier. Rounded to 4 decimal places. (source: server.mjs :: fulfilPushLines)
 - Preflight blocks the push when: the supplier party, currency, payment term, China Port, metafield or branch is missing; a SKU is not in Fulfil; a line has no price; or a product has no purchase UOM. Writes to live Fulfil need FULFIL_LIVE_WRITES=true. (source: server.mjs :: fulfilPushLines)
+- Create guard (v28.199, URGENT after the PO373 / PO385 duplicate): HORIZON never creates a Fulfil PO for a CLIENT PO = branch country DIRECT, a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a key-account PO (a plain "client" text or a sales_order_ref alone is not enough: stock POs use client for samples and sales_order_ref for FBA shipment ids; the duplicate check below still uses any PO's refs). A client PO must be linked to its existing Fulfil PO instead. (source: server.mjs :: FULFIL_CLIENT_PO_SQL, fulfilPushTarget)
+- Push target order: (1) the PO's manual Fulfil link (po_links system fulfil, found_by manual), (2) the Fulfil PO whose reference = the HORIZON PO. A manual link is never overwritten by the automatic link refresh. (source: server.mjs :: fulfilPushTarget, resolvePoLinks)
+- No create for ANY PO when Fulfil already has a non-cancelled PO whose number = the HORIZON PO or its erp_po, whose reference = one of its refs (sales_order_ref and client_po_ref, split on , ; /), or which is sale-linked (purchase.request chain) to a sales order whose number or reference is one of those refs. The push returns 409 "This PO looks like it already exists in Fulfil (from sales order X). Link it instead of creating a new one." (source: server.mjs :: fulfilExistingCandidates, fulfilPushTarget)
+- A push never rewrites the lines of a Fulfil PO generated from a sales order (type dropship, or sales set): refused with 409, change it in Fulfil. A client PO found only by reference is refused when Fulfil has another candidate PO for it (ambiguous: link the right one). A manual link to a cancelled or missing Fulfil PO is refused. (source: server.mjs :: fulfilPushTarget)
+- A failed or malformed Fulfil lookup is never treated as "not found": the push stops with 503 and nothing is sent. Every refusal (including lookup failures) logs a sanity row "fulfil:create_refused:<po>" in the App health log. All guard checks run before the dry-run / write. (source: server.mjs :: fulfilStrictSearch, fulfilGuardRefuse, /api/supply/po/:po/cin7-lines)
+- Link Fulfil PO: PO grid Fulfil column (every client PO not linked by hand, replacing Update lines / both / date and a reference-only "in sync"), the ERP update popup and the PO drawer Linked records. The picker searches live Fulfil READ ONLY: first the guard's own candidates ("suggested"), then by number, reference, supplier or sales order; it shows number, supplier, state, SO-generated flag, line count, units, last modification and which HORIZON PO already points at it. Choosing one saves po_links fulfil (manual) after checking the id exists and is not cancelled; nothing is written to Fulfil. A linked client PO shows a link badge in the grid (no push). (source: server.mjs :: /api/supply/fulfil/po-search, /api/supply/po/:po/links, /api/supply/fulfil/grid-status; supply/inject.html :: fulfilPoPicker, fillErpFulfil, erpUploadInert)
+- Dev only: HZ_FULFIL_WRITE_STUB=1 (ignored on Vercel) makes the PO push run its guard and preflight reads, then return what it would send without any write. (source: server.mjs :: fulfilPushLines)
 - Updating a confirmed Fulfil PO: it is set back to draft, its lines are replaced in one write, then it is re-confirmed. States past confirmed cannot be edited. (source: server.mjs :: fulfilPushLines)
 - Mirror: fulfil_purchase_orders is refreshed every 6 hours, or by n8n. Drift covers active POs only (PRODUCTION, READY TO SHIP, SHIPPING) and flags: missing from Fulfil, line count difference, or per-SKU qty difference. Price differences are never flagged. A "drift approved" sign-off lapses once the lines change. (source: server.mjs :: fulfil/drift, grid-status)
 - ERP date drift: completion vs the Fulfil requested date (Cin7-era date for POs not in Fulfil). It flags when the gap is at least max(3 days, 5% of the days from today to completion). (source: server.mjs :: PO_ROWS_SQL erp_date_pending)
