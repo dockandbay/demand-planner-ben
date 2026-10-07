@@ -1,3 +1,9 @@
+## v28.196 (Ben, branch review-fixes-2026-10-05): client portal "XLSX Line Sheet" label
+
+**Files:** `supply/client-view.js` (+ package.json, CHANGES.md). Label only.
+
+- Client portal ▸ Catalogue ▸ Line sheet: the "⬇ XLSX order form" button is now "⬇ XLSX Line Sheet", and the intro text says "an XLSX line sheet".
+
 ## v28.195 (Ben, branch review-fixes-2026-10-05): client portal health-log coverage
 
 **Files:** `server.mjs`, `supply/hz-health.js`, `supply/client-view.js`, `supply/client.html`, `supply/inject.html`, new `migrations/335_client_sessions_last_seen.sql` (+ package.json, CHANGES.md). No env vars.
