@@ -26821,6 +26821,13 @@ app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
 
 // (Removed dead /api/portal/data — old supplier loader, superseded by /api/portal/bootstrap. Zero callers. v25.653)
 
+// v28.208 (Ben): Dock & Bay logo for the CLIENT portal header + login card. Public brand image under /api/cp/* (already
+// exempt from the staff login gate, so no gate change); cached a day.
+app.get('/api/cp/asset/logo', (req, res) => {
+  try { res.setHeader('content-type', 'image/png'); res.setHeader('cache-control', 'public, max-age=86400');
+    res.end(readFileSync(new URL('./supply/assets/db-logo.png', import.meta.url))); }
+  catch (e) { res.status(404).end(); }
+});
 // Label/barcode assets for the portal (static fonts/logos — same files as the admin asset route).
 app.get('/api/portal/asset/:name', (req, res) => {
   const files = { grs: ['grs-logo.png', 'image/png'], db: ['db-logo.png', 'image/png'],

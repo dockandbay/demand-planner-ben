@@ -1,3 +1,10 @@
+## v28.208 (Ben, branch review-fixes-2026-10-05): client portal shows the Dock & Bay logo
+
+**Files:** `server.mjs`, `supply/client-view.js`, `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Top-left brand is the Dock & Bay logo (deck chair + wordmark, `supply/assets/db-logo.png`, 44px; 36px and no "Client portal" label on phones) instead of the "Dock & Bay" text; "Client portal" sits beside it after a hairline. The sign-in card shows the logo too.
+- New public route `GET /api/cp/asset/logo` (brand image, cached 1 day). It is under /api/cp/*, already exempt from the staff login gate, so no gate change.
+
 ## v28.207 (Ben, branch review-fixes-2026-10-05): "Link Fulfil PO" action item for unlinked client POs
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/actions.md`, `lib/ai-logic/reports.md`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
