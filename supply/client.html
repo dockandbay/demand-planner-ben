@@ -33,7 +33,8 @@
   .cp-nl .cnt{position:absolute;top:1px;right:2px;background:var(--neg);color:#fff;font-size:9px;font-weight:800;padding:0 5px;border-radius:999px}
   .cp-who{margin-left:auto;text-align:right;font-size:12px;color:var(--muted);white-space:nowrap;line-height:1.3} .cp-who b{display:block;color:var(--ink)}
   .cp-av{width:34px;height:34px;border-radius:999px;background:var(--cp-acc);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex:none;cursor:pointer}
-  main#cp{padding:22px 24px 70px;max-width:1300px;margin:0 auto}
+  main#cp{padding:22px 24px 70px;max-width:1680px;margin:0 auto}   /* v28.212 (Ben): wider on desktop (was 1300px) */
+  @media (min-width:1400px){ main#cp{padding-left:36px;padding-right:36px} }
   h1.cp-h{font-family:var(--disp);font-weight:500;font-size:28px;margin:0 0 4px;letter-spacing:-.01em;text-wrap:balance} .cp-lead{color:var(--muted);margin:0 0 16px;max-width:72ch}
   .cp-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
   .cp-in{height:34px;padding:0 12px;border:1px solid var(--cp-line);border-radius:8px;background:var(--cp-card);color:var(--ink);font-family:inherit;font-size:13px;max-width:100%}

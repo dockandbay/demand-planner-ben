@@ -1,3 +1,9 @@
+## v28.212 (Ben, branch review-fixes-2026-10-05): client portal wider on desktop
+
+**Files:** `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Page content max width 1300px -> 1680px, with 36px side padding from 1400px wide. Phones unchanged.
+
 ## v28.211 (Ben, branch review-fixes-2026-10-05): CLIENT edit tabs more visible
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
