@@ -1,3 +1,13 @@
+## v28.192 (Ben, branch review-fixes-2026-10-05): Validate sales order
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, new `migrations/334_so_supplier_pushes.sql` (+ package.json, CHANGES.md). No new required env vars.
+
+- SUPPLY ▸ Purchase Orders ▸ Direct to Client: "Validate sales order" opens a 50%-width drawer. Paste a Fulfil sales order number, link or reference; Analyse lists every line with its ship method (`sale.line.delivery_mode`: drop ship vs from stock, greyed) and its Fulfil drop-ship supplier (`sale.line.supplier`). Each drop-ship line has a picker of the suppliers set up on that product in Fulfil (`purchase.product_supplier`), HORIZON's SKU supplier shown as a hint; Fulfil column ok / differs / missing; summary chips (units per chosen supplier, No supplier, Ship from stock) update live.
+- "Push selected" / "Push all changed": in-app confirm listing SKU, old, new; writes `sale.line.supplier` (and the party on a still-draft purchase request with no PO line), then reads every line back; per-line ok / failed / blocked. Blocked: not drop ship, order done / cancelled, line shipped, or the line's purchase request already on a PO. Server re-reads the order, refuses suppliers not set up on the product; admin only; one push per order at a time; every attempt logged (migration 334).
+- Endpoints: `GET /api/supply/fulfil/sales-order/analyse`, `POST /api/supply/fulfil/sales-order/push-suppliers`, `GET /api/supply/fulfil/sales-order/pushes`.
+- **Verified:** read-only against live Fulfil (number, link, reference all resolve; real drop-ship orders SO56619 / SO58297 / SO56641); pushes tested only through a stub (`HZ_FULFIL_WRITE_STUB`, ignored on Vercel). **No live Fulfil write was made.**
+- **Diviyaj:** apply migration 334 (push still works without it). Live pushes need the existing `FULFIL_LIVE_WRITES=true` (otherwise 423). Never set `HZ_FULFIL_WRITE_STUB*` in prod. First live use: push one line on a confirmed order (e.g. SO56641) and check it in Fulfil.
+
 ## v28.191 (Ben, branch review-fixes-2026-10-05): supplier portal product-dev access, errors, translations (deep dive H6, M6, M7, M12)
 
 **Files:** `server.mjs`, `supply/portal-view.js`, `lib/ai-logic/supply-finance.md`, `tests/portal-security.cjs`. No migrations, no env vars.
