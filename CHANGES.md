@@ -1,3 +1,15 @@
+## v28.195 (Ben, branch review-fixes-2026-10-05): client portal health-log coverage
+
+**Files:** `server.mjs`, `supply/hz-health.js`, `supply/client-view.js`, `supply/client.html`, `supply/inject.html`, new `migrations/335_client_sessions_last_seen.sql` (+ package.json, CHANGES.md). No env vars.
+
+- Client portal slow screens timed (first load via the boot card, every screen, order filter changes); 4xx failures recorded (not the expected sign-in 401); dead clicks on the top nav, view toggles and order chips (touch too); login page errors via new `POST /api/cp/health/login-events` (no session, rate-limited, few event types, stores no user).
+- Data protection: client portal health rows carry ids only (client id, rep group id, client user id, preview flag), never the email (browser rows used to store it), prices or order contents; server error text on `/api/cp/*` rows has emails and quoted values blanked. Server `/api/cp/*` rows (slow, 5xx, and new 4xx except 401 as `api_failure`) tagged with the client id.
+- Session check stamps `client_sessions.last_seen_at` (max once per 5 min, same query, never for admin previews); works before migration 335 (falls back).
+- CONFIG ▸ App health log, weekly email and .md report gain a "Client portal" section (sign-ins, live sessions, active clients, per-client last seen, page views, slow screens, slow requests, failures). Fixed: Home called the line sheet for clients without that feature (403 on every visit).
+- **Verified (sandbox):** jsdom render for 3 clients, every screen, phone width and login page: 0 JS errors; slow screens, forced 404, JS error and dead tap recorded, normal tap not; login events accepted then rate-limited; last seen stamped and throttled; section in App health log and weekly dry run. portal-scope 129/129, portal-security 47/47, portal-inplace pass.
+- **Known, not fixed:** a late response from a previous client-portal screen can overwrite the current one; the Order screen still calls the line sheet for clients without the feature (now logged as a 403).
+- **Diviyaj:** apply migration 335 (additive). `POST /api/cp/health/login-events` through the gate (covered by a `/api/cp/*` prefix exemption).
+
 ## v28.194 (Ben, branch review-fixes-2026-10-05): Validate sales order, many orders at once
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
