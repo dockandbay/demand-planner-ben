@@ -547,7 +547,7 @@ async function buildSKURAW() {
                        coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img,   -- variant image, falling back to the colour swatch when blank
                        nullif(trim(p.colour_swatch_url),'') sw,   -- colour swatch URL — client-side fallback when the variant image URL 404s
                        upper(coalesce(nullif(btrim(p.status),''),'')) st,
-                       upper(coalesce(nullif(btrim(p.variant_type),''),'MASTER')) vt   -- MASTER | SET (blank ⇒ MASTER); SETS feature identifies build-on-fly set SKUs
+                       upper(coalesce(nullif(btrim(p.variant_type),''),'MASTER')) vt, nullif(btrim(p.size_short),'') sz   -- v28.221 size type for the Contribution model size split; MASTER | SET (blank ⇒ MASTER); SETS feature identifies build-on-fly set SKUs
                 FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku ${_fiJoin} WHERE p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
@@ -657,6 +657,7 @@ async function buildSKURAW() {
                  pp: r.pp || '',    // v28.005: parent_p1 (e.g. TOWLB-DES-HBRTRS) — SKU search + trading-calendar grouping
                  st: r.st || '',    // products.status (ACTIVE/…) — for the Key-Accounts "active only" SKU picker
                  vt: r.vt || 'MASTER',   // MASTER | SET — SETS feature (build-on-fly sets)
+                 sz: r.sz || '',   // v28.221: products.size_short (L / XL / ...) — Contribution model size split
                  av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
   for (const r of avail.rows) if (p[r.sku] && r.av) p[r.sku].av[r.co] = r.av;
   for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }

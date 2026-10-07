@@ -8006,6 +8006,7 @@
               .then(function(r){return r.json();}).then(function(j){ var m=document.getElementById('cm-msg');
                 if(j&&j.error){ if(m){m.textContent='Save failed: '+j.error;m.style.color='var(--neg)';} return; }
                 if(m){ m.textContent='Saved ✓'; m.style.color='var(--pos)'; setTimeout(function(){ if(m&&m.textContent==='Saved ✓')m.textContent=''; },1400); }
+                try{ window.CONTRIB_MODEL=JSON.parse(JSON.stringify(_cmModel)); if(typeof hzShareMemoCheck==='function')hzShareMemoCheck(); if(typeof CALC_MEMO!=='undefined')CALC_MEMO={}; if(typeof hzRowCacheClear==='function')hzRowCacheClear(); if(typeof hzMarkDemandStale==='function')hzMarkDemandStale(); if(typeof window._cmSizeRedraw==='function')window._cmSizeRedraw(); }catch(_e){}   // v28.221: the open planner uses the saved model at once (size split / tiers / sets)
                 if(flashEl)flashGreen(flashEl);
               }).catch(function(e){ var m=document.getElementById('cm-msg'); if(m){m.textContent='Save failed';m.style.color='var(--neg)';} });
           },300);
@@ -8040,7 +8041,40 @@
           }).join('');
           b.innerHTML=info+bar+'<div style="max-height:calc(100vh - 340px);overflow:auto;border:1px solid var(--line);border-radius:6px"><table style="border-collapse:collapse;font-size:12px;width:880px;table-layout:fixed">'
             +'<colgroup><col style="width:240px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:140px"></colgroup>'
-            +'<thead style="position:sticky;top:0;background:var(--line)">'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+            +'<thead style="position:sticky;top:0;background:var(--line)">'+head+'</thead><tbody>'+body+'</tbody></table></div><div id="cm-size"></div>';
+          // ── v28.221 (Ben): SIZE SPLIT per sub-category (same scope + cascade as the tier mix, stored as .size on the row) ──
+          function sizeSubs(){ var out={}; try{ Object.keys(SKUM).forEach(function(sk){ var p=SKUM[sk]; if(!p||p.vt==='SET'||!p.sz||!p.s)return; if(SUBLIST.indexOf(p.s)<0)return; (out[p.s]=out[p.s]||{})[p.sz]=1; }); }catch(e){} var r={}; Object.keys(out).forEach(function(s){ var z=Object.keys(out[s]); if(z.length>=2)r[s]=z.sort(); }); return r; }
+          function scopeCombos(){ var cos=_cmCo==='ALL'?['UK','US','EU','AU','CA']:[_cmCo], chs=_cmCh==='ALL'?['DTC','FBA','B2B']:[_cmCh], o=[]; cos.forEach(function(c){ chs.forEach(function(h){ if(c==='AU'&&h==='B2B')return; if(c==='CA'&&h!=='FBA')return; o.push([c,h]); }); }); return o; }
+          function mixTxt(m){ var t=0; Object.keys(m).forEach(function(z){ t+=m[z]; }); if(!(t>0))return '<span style="color:var(--faint)">no data</span>'; return Object.keys(m).sort().map(function(z){ return z+' '+Math.round(m[z]/t*100)+'%'; }).join(' · '); }
+          function actualMix(sub,sizes){ var m={}; sizes.forEach(function(z){ m[z]=0; }); var ly=(typeof hzLyMonths==='function')?hzLyMonths():[];
+            scopeCombos().forEach(function(c){ Object.keys(SKUM).forEach(function(sk){ var p=SKUM[sk]; if(!p||p.s!==sub||p.vt==='SET'||!p.sz||m[p.sz]==null)return; var sa={}; try{ sa=skuSales(sk,c[0],c[1])||{}; }catch(e){} ly.forEach(function(mm){ m[p.sz]+=Number(sa[mm])||0; }); }); }); return m; }
+          function fcMix(sub,sizes){ var m={}; sizes.forEach(function(z){ m[z]=0; }); var ms=[]; try{ var i=FM_CALC.indexOf(CUR_MONTH); ms=FM_CALC.slice(i<0?0:i,(i<0?0:i)+12); }catch(e){}
+            scopeCombos().forEach(function(c){ var has=false; try{ has=DATA.some(function(d){ return d.co===c[0]&&d.ch===c[1]&&d.s===sub; }); }catch(e){} if(!has)return; var fu={}, sh={}; try{ fu=(calc(sub,c[0],c[1])||{}).fu||{}; }catch(e){}
+              var ck=c[1]==='DTC'?'d':c[1]==='FBA'?'f':'b'; try{ var ctry=c[0].toLowerCase(), pool=Object.keys(SKUM).filter(function(sk){ var q=SKUM[sk]; return q&&q.s===sub&&skuHasAnyActivity(sk,c[0],c[0])&&(((q.av||{})[ctry])||'').indexOf(ck)>=0; }); sh=buildSkuShares(pool,c[0],c[1],hzLyMonths())||{}; }catch(e){}
+              var tot=ms.reduce(function(a,mm){ return a+(fu[mm]||0); },0); Object.keys(sh).forEach(function(sk){ var p=SKUM[sk]; if(p&&p.vt!=='SET'&&p.sz&&m[p.sz]!=null)m[p.sz]+=tot*sh[sk]; }); }); return m; }
+          function sizeInherited(sub){ var ps=parents(_cmCo,_cmCh); for(var i=0;i<ps.length;i++){ var v=_cmModel[ps[i][0]+'|'+ps[i][1]+'|'+sub]; if(v&&v.size&&Object.keys(v.size).length)return {val:v.size,from:ps[i]}; } return null; }
+          function drawSize(){ var host=document.getElementById('cm-size'); if(!host)return; var SS=sizeSubs(), subs=Object.keys(SS).sort();
+            if(!subs.length){ host.innerHTML='<div class="mut tiny">No sub-category has more than one size type in the product data.</div>'; return; }
+            var rows=subs.map(function(sub){ var sizes=SS[sub], k=keyOf(_cmCo,_cmCh,sub), own=_cmModel[k]&&_cmModel[k].size&&Object.keys(_cmModel[k].size).length?_cmModel[k].size:null, inh=own?null:sizeInherited(sub), eff=own||(inh&&inh.val)||null;
+              var am=actualMix(sub,sizes), fm=fcMix(sub,sizes);
+              var ins=sizes.map(function(z){ var v=eff&&eff[z]!=null?eff[z]:''; return '<label style="display:inline-flex;gap:4px;align-items:center;margin-right:8px">'+esc(z)+' <input class="cm-sz" data-sub="'+esc(sub)+'" data-z="'+esc(z)+'" value="'+v+'" placeholder="-" onfocus="this.select()" style="width:46px;text-align:center;font-size:12px;padding:3px;border:1px solid '+(own?'var(--faint)':'var(--line)')+';border-radius:4px;color:'+(own?'var(--nav)':'var(--faint)')+'">%</label>'; }).join('');
+              var sum=eff?sizes.reduce(function(a,z){ return a+(Number(eff[z])||0); },0):0;
+              var stat=own?'<span style="color:var(--blue)">● set <a class="cm-szclr" data-sub="'+esc(sub)+'" title="Clear the size split for this scope" style="cursor:pointer;color:var(--neg);font-weight:700">×</a></span>'+(sum!==100?' <span style="color:var(--amber)">'+sum+'% → normalises</span>':'')
+                :inh?'<span style="color:var(--faint)">↑ '+fromLabel(inh.from)+'</span>':'<span style="color:var(--faint)">off (shares by history / tier)</span>';
+              return '<tr style="border-top:1px solid var(--hover)"><td style="text-align:left;padding:4px 8px">'+esc(sub)+'</td><td style="text-align:left;padding:4px 6px">'+ins+'</td><td style="text-align:left;padding:4px 6px">'+mixTxt(am)+' <a class="cm-szuse" data-sub="'+esc(sub)+'" style="cursor:pointer;color:var(--blue);font-weight:600;margin-left:6px" title="Set the split to last year’s actual mix">Use actual</a></td><td style="text-align:left;padding:4px 6px">'+mixTxt(fm)+'</td><td style="text-align:left;padding:4px 8px;font-size:11px">'+stat+'</td></tr>'; }).join('');
+            host.innerHTML='<div style="font-weight:700;font-size:13px;margin:16px 0 4px">Size split <span class="mut tiny" style="font-weight:400">('+scopeLabel(_cmCo,_cmCh)+')</span></div>'
+              +'<div class="annot" style="margin-bottom:8px">How a sub-category’s forecast splits across <b>size types</b> (from the product data). Leave blank to keep today’s split (SKU history, then tier). When set, each size gets its % of the sub-category forecast for the masters; within a size, SKUs keep their relative weights; sets are not affected. <b>LY actual mix</b> = last year’s units by size for this scope. <b>Forecast mix now</b> = the next 12 months as currently forecast, so you can see the gap. Changes apply to the Plan and the buy plan straight away.</div>'
+              +'<div style="overflow:auto;border:1px solid var(--line);border-radius:6px"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:760px"><thead style="background:var(--line)"><tr><th style="text-align:left;padding:4px 8px">Sub-category</th><th style="text-align:left;padding:4px 6px">Size split</th><th style="text-align:left;padding:4px 6px">LY actual mix</th><th style="text-align:left;padding:4px 6px">Forecast mix now (12 mo)</th><th style="text-align:left;padding:4px 8px">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+            function ensure(sub){ var k=keyOf(_cmCo,_cmCh,sub); if(!_cmModel[k]){ var base=inherited(_cmCo,_cmCh,sub).val; _cmModel[k]={A:base.A,B:base.B,C:base.C,sets:base.sets}; } return _cmModel[k]; }
+            host.querySelectorAll('.cm-sz').forEach(function(el){ el.onchange=function(){ var sub=el.dataset.sub, row=ensure(sub), sz=row.size||{}; var raw=String(el.value).trim();
+              if(raw===''){ delete sz[el.dataset.z]; } else { sz[el.dataset.z]=Math.max(0,Math.min(100,parseInt(raw,10)||0)); }
+              if(Object.keys(sz).length)row.size=sz; else delete row.size; cmSave(el); drawSize(); }; });
+            host.querySelectorAll('.cm-szuse').forEach(function(a){ a.onclick=function(){ var sub=a.dataset.sub, sizes=SS[sub], am=actualMix(sub,sizes), t=0; sizes.forEach(function(z){ t+=am[z]; }); if(!(t>0))return;
+              var row=ensure(sub), sz={}, acc=0; sizes.forEach(function(z,i){ var v=i===sizes.length-1?100-acc:Math.round(am[z]/t*100); sz[z]=v; acc+=v; }); row.size=sz; cmSave(); drawSize(); }; });
+            host.querySelectorAll('.cm-szclr').forEach(function(a){ a.onclick=function(){ var k=keyOf(_cmCo,_cmCh,a.dataset.sub); if(_cmModel[k]){ delete _cmModel[k].size; } cmSave(); drawSize(); }; });
+          }
+          window._cmSizeRedraw=function(){ try{ if(document.getElementById('cm-size'))drawSize(); }catch(_){} };
+          try{ drawSize(); }catch(e){ var _hs=document.getElementById('cm-size'); if(_hs)_hs.innerHTML='<div class="mut tiny">Size split unavailable: '+esc(String(e&&e.message||e))+'</div>'; }
           document.getElementById('cm-co').onchange=function(){ _cmCo=this.value; draw(); };
           document.getElementById('cm-ch').onchange=function(){ _cmCh=this.value; draw(); };
           function rowEls(sub,cls){ return Array.prototype.filter.call(b.querySelectorAll('.'+cls),function(el){return el.dataset.sub===sub;}); }
@@ -8063,9 +8097,10 @@
           b.querySelectorAll('.cm-clr').forEach(wireClr);
         }
         hzqGet('/api/app-settings').then(function(s){ s=s||{};
+          if(!document.body.contains(b))return;   // v28.221: a newer render replaced this screen (e.g. SKU data finished loading) — let that one own the load, else this stale draw throws and blocks every save
           try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }
           _cmLoaded=true; draw();
-        }).catch(function(){ _cmLoaded=false;   // v27.586: do NOT open an empty editor on a load failure — a save would overwrite live with {} and wipe every saved value
+        }).catch(function(){ if(!document.body.contains(b))return; _cmLoaded=false;   // v27.586: do NOT open an empty editor on a load failure — a save would overwrite live with {} and wipe every saved value
           b.innerHTML='<div class="count" style="color:var(--neg)">Couldn’t load the saved Contribution model — <b>not opening the editor</b> so a save can’t overwrite your live settings. <button class="save-btn" id="cm-retry">Retry</button></div>';
           var rb=document.getElementById('cm-retry'); if(rb)rb.onclick=function(){ hzCfgContribModel(b); };
         });

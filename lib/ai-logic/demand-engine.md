@@ -72,7 +72,7 @@ sources:
 fingerprints:
   migrations/248_planning_scope_status_gate.sql::set_in_planning_scope: b1b7fa248f49
   server.mjs::buildDATA: b1b365e09434
-  server.mjs::buildSKURAW: bcbc97d69507
+  server.mjs::buildSKURAW: 3fa61dca6e8a
   server.mjs::buildFC_CURRENT: 9396b5f52559
   server.mjs::buildFC_OUTPUTS: 8fd6e8cafb46
   server.mjs::computeAutoForecastFromFeed: 81f1aadccc9e
@@ -96,7 +96,7 @@ fingerprints:
   artifact_v16.7.html::skuHasLY: 256651173359
   artifact_v16.7.html::skuOvSet: 9f3bd3d13567
   artifact_v16.7.html::skuCommitOv: 6e045bf21538
-  artifact_v16.7.html::buildSkuShares: e66b486c61e2
+  artifact_v16.7.html::buildSkuShares: eaad35f53373
   artifact_v16.7.html::contribResolve: 482025c09b56
   artifact_v16.7.html::tierMix: c2167e52701b
   artifact_v16.7.html::skuHasAnyActivity: e319e553da16
@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.220
+verified_version: v28.221
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -304,3 +304,8 @@ verified_version: v28.220
 ## Plan grid Combined topline (v28.220)
 - "⊕ Combine" beside the Channel pills turns the Country and Channel pills into multi-select. The grid becomes a read-only topline summed over every selected country x channel (real combinations only): grand total, category and sub-category rows, with the same columns as the Plan (months, quarters, halves, YTD / To go, FY totals). Category filter and run-off hiding still apply. Selection is remembered per browser. (source: setPlanAgg, planAggToggle, renderPlanTopline)
 - Units only, exploded like the Plan sub-category cells: past months = actuals, current month on = forecast (current-month cell also shows month-to-date actuals); each cell shows last year, this year and growth %. Revenue is not summed (each market's revenue is in its own currency). Editing, SKU rows and smoothing stay in the normal single-market view. (source: renderPlanTopline, expAct, expFc)
+
+## Contribution model size split (v28.221)
+- CONFIG ▸ Demand ▸ Contribution model has a **Size split** per sub-category (sizes = products.size_short, e.g. L / XL / M / One Size; only sub-categories with 2+ size types are listed). Same scope and cascade as the tier mix (cell → channel → country → default), stored as `.size` on the contribution row and resolved on its own cascade, so a size-only row never hides a tier-mix row. (source: contribSizeResolve, hzCfgContribModel)
+- When set, the SKU shares of the sub-category's MASTER SKUs are rescaled so each size type gets its % of the masters' share; within a size the SKUs keep their relative weights (history, then tier); masters with no size (or a size with no %) keep their share; % are normalised over the sizes present; sets are not affected (the Sets % reservation still applies afterwards). Blank = no change. This flows into the Plan SKU rows, Cross Market view, downloads and the buy plan. SKU forecast overrides still win over shares. (source: applySizeSplit, buildSkuShares)
+- The screen shows the LY actual mix by size for the scope and the forecast mix for the next 12 months as currently forecast, with "Use actual" to copy last year's mix. A save updates the open planner at once. (source: hzCfgContribModel)

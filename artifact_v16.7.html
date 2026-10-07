@@ -1702,6 +1702,28 @@ function contribResolve(s,co,ch){
   for(var i=0;i<ks.length;i++){ var v=CONTRIB_MODEL[ks[i]+'|'+s]; if(v&&(v.A!=null||v.B!=null||v.C!=null||v.sets!=null))return v; }
   return null;
 }
+// v28.221 (Ben): SIZE split for a subcat × country × channel ({L:35,XL:65}), resolved on its OWN cascade so a size-only
+// row never shadows a tier-mix row (and vice versa). null = no size split (shares unchanged).
+function contribSizeResolve(s,co,ch){
+  if(typeof CONTRIB_MODEL!=='object'||!CONTRIB_MODEL)return null;
+  var ks=[co+'|'+ch,'*|'+ch,co+'|*','*|*'];
+  for(var i=0;i<ks.length;i++){ var v=CONTRIB_MODEL[ks[i]+'|'+s]; if(v&&v.size&&typeof v.size==='object'&&Object.keys(v.size).length)return v.size; }
+  return null;
+}
+// v28.221: rescale MASTER shares so each size type gets its target % of the masters' total (sets untouched). Within a
+// size the SKUs keep their relative weights. Targets are normalised over the sizes present; masters with no size (or a
+// size with no target) keep their share. Returns shares unchanged when no split applies.
+function applySizeSplit(shares,skus,s,co,ch){
+  var tgt=contribSizeResolve(s,co,ch); if(!tgt)return shares;
+  var by={}, free=0, tot=0;
+  skus.forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; var v=shares[sku]||0; tot+=v; var z=p.sz||''; if(z&&tgt[z]!=null&&Number(tgt[z])>=0){ (by[z]=by[z]||{sum:0,skus:[]}).skus.push(sku); by[z].sum+=v; } else free+=v; });
+  var sizes=Object.keys(by); if(sizes.length<2&&!(sizes.length===1&&free>0))return shares;
+  var tsum=sizes.reduce(function(a,z){ return a+(Number(tgt[z])||0); },0); if(!(tsum>0))return shares;
+  var pool=tot-free; if(!(pool>0))return shares;
+  sizes.forEach(function(z){ var want=pool*(Number(tgt[z])||0)/tsum, g=by[z];
+    if(g.sum>0)g.skus.forEach(function(sku){ shares[sku]=(shares[sku]||0)/g.sum*want; }); else g.skus.forEach(function(sku){ shares[sku]=want/g.skus.length; }); });
+  return shares;
+}
 // Look up the {A,B,C} tier mix for a given subcat × country × channel. The editable Contribution model wins;
 // else the legacy baked CONTRIB_TARGETS (by base subcat); else the methodology default 50/25/25.
 function tierMix(s,co,ch){
@@ -7664,6 +7686,7 @@ function buildSkuShares(skus,co,ch,lyMonths){
   // keep theirs). ONLY applies when a Sets % is configured (_setsPct>0). Default/unset = 0 → NO rescale → byte-identical
   // (existing sets keep their history share, masters unchanged); nothing moves in the demand plan or buy plan until a
   // Sets % is set in the Contribution model. When set, forecast shifts from masters to sets (sets explode to components).
+  try{ var _subZ=(skus.length&&SKUM[skus[0]])?SKUM[skus[0]].s:''; if(_subZ)shares=applySizeSplit(shares,skus,_subZ,co,ch); }catch(e){}   // v28.221 Contribution model size split (masters only; no-op when unset)
   if(_setsPct>0&&_setsPct<100){
     var _setT=_setsPct/100, _mastT=1-_setT, _setSk=[], _mastSk=[], _setSum=0, _mastSum=0, _ctry2=co.toLowerCase();
     // Reserve the Sets% pool for ACTIVE sets only. A DISCONTINUED set (build-on-fly, no stock) would otherwise take a

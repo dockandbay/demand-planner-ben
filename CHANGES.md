@@ -1,3 +1,13 @@
+## v28.221 (Ben, branch review-fixes-2026-10-05): Contribution model size split
+
+**Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars (uses the existing `app_settings.contrib_model` JSON).
+
+- **Size split per sub-category** in CONFIG ▸ Demand ▸ Contribution model (new section under the tier table). Sizes come from `products.size_short` (now sent with the SKU master as `sz`). Same Country / Channel scope and cascade as the tier mix. Shows **LY actual mix** and **Forecast mix now (12 months)** per sub-category, with **Use actual**. Example: Picnic Blanket forecast was L 43% / XL 57% on UK DTC; set L 35 / XL 65 and the SKU forecast follows.
+- Engine: `buildSkuShares` rescales master SKU shares by size (`applySizeSplit`); within a size SKUs keep their relative weights; sets untouched; blank = byte-identical. Feeds the Plan, Cross Market view, downloads and the buy plan. SKU overrides still win.
+- A Contribution model save now updates the open planner straight away (was: next reload).
+- Fix: opening the Contribution model before SKU data finished loading could leave it "Not saved — the saved model didn't load" (a stale first load errored on the replaced screen and blocked saves). The stale load is now ignored.
+- Verified on sandbox (jsdom, real data): with L 35 / XL 65 on All countries · DTC, Picnic Blanket SKU shares are exactly 35 / 65 in UK, US, EU, AU; UK FBA unchanged (56.8 / 43.2); the screen's forecast mix updates to 35 / 65 after a real save; with no split set the shares are unchanged (56.7 / 43.3). Sandbox contrib_model restored from backup after the test.
+
 ## v28.220 (Ben, branch review-fixes-2026-10-05): Plan grid Combined topline (multiple countries / channels)
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
