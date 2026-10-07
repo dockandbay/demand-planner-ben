@@ -84,7 +84,7 @@
     +',#hz-drawer .hz-nav,#prod-subtabs .rtab,#pcfg-subs-l3 .rtab,#client-l3 .rtab,#tpl-subnav .dnav3'   // v28.184 (Ben): + the phone drawer tree (L1 / L2 / L3) and the L3 bars the drawer mirrors
     +',#pp-secs .pp-sec,#pp-tabs .rtab'   // v28.188 (Ben): + the supplier portal's section menu and tab row (same rules, touch-aware)
     +',#cp-nav .cp-nl,#cp .cp-seg span,#cp .cp-chip'   // v28.195 (Ben): + the client portal's top nav, view / tab toggles and order filter chips
-    +',#client-root .ce-tabs .rtab';   // v28.199 (Ben): + CLIENT > Clients & agents > Edit tabs (switch is instant: hash + active tab change, never a false dead click)
+    +',#client-root .ce-tabs .rtab';   // v28.198 (Ben): + CLIENT > Clients & agents > Edit tabs (switch is instant: hash + active tab change, never a false dead click)
   function navLabel(el){ try{ var l=el.querySelector('.lab,.hz-lab'), t=l?l.textContent:Array.prototype.filter.call(el.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');
     return String(t||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60); }catch(e){ return '?'; } }   // v28.184 (Ben): .hz-lab = drawer row label (without its count badge)
   function navOn(el){ var c=el.classList; return !!(c&&(c.contains('active')||c.contains('on'))); }

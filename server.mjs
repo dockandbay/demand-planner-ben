@@ -22974,7 +22974,7 @@ app.post('/api/client/clients', async (req, res) => {
 app.get('/api/client/clients/:id', async (req, res) => {
   try {
     const c = await cpClientById(req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
-    // v28.199 (Ben): header "last login" = latest of a user's portal sign-in and any live session's last_seen_at (migration 335), else its
+    // v28.198 (Ben): header "last login" = latest of a user's portal sign-in and any live session's last_seen_at (migration 335), else its
     // created_at; staff preview sessions (cppv_) excluded. Falls back to sign-ins + session created_at if 335 is not applied yet.
     const lastQ = (seen) => pool.query(`SELECT to_char(GREATEST((SELECT max(u.last_login_at) FROM planner.client_users u WHERE u.client_id=$1),
         (SELECT max(${seen ? 'COALESCE(s.last_seen_at, s.created_at)' : 's.created_at'}) FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE u.client_id=$1 AND s.token NOT LIKE 'cppv\\_%')),'YYYY-MM-DD HH24:MI') last_login`, [c.id]);

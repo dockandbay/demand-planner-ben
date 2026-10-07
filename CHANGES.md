@@ -1,3 +1,12 @@
+## v28.198 (Ben, branch review-fixes-2026-10-05): CLIENT ▸ Clients & agents ▸ Edit is a tabbed view
+
+**Files:** `supply/inject.html`, `server.mjs`, `supply/hz-health.js` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Header strip: name, type, Active / Inactive, number of users, last login (dd-mmm-yy). 6 tabs: Account | Users | Access & features (Access & visibility, Feature toggles, Stock scope) | Commission | Orders | Audit. Users and Orders show counts; Access & features shows a red dot when portal visibility needs attention (no mode ticked, or a ticked mode with nothing to match on), with the warnings listed at the top of the tab.
+- Every card and auto-save field works as before (tabs only show / hide). Last tab remembered per browser and in the URL (`#/client/clients/<id>/<tab>`); deep links open the right tab. Phones: tabs scroll sideways, form stacks. Empty Orders tab says so.
+- Server: `GET /api/client/clients/:id` adds `last_login` (latest sign-in or session last-seen, staff previews excluded). Dead-click watch covers the tabs.
+- Verified (sandbox, 3 clients): every card under the right tab, edits in each tab saved and restored, magic link, deep link, phone width, 0 app JS errors; other CLIENT screens unaffected.
+
 ## v28.197 (Ben, branch review-fixes-2026-10-05): client portal commission statement: CSV, separate credit note columns, left-aligned
 
 **Files:** `supply/client-view.js` (+ package.json, CHANGES.md). Client only.
