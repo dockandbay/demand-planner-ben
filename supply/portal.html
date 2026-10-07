@@ -76,6 +76,7 @@
   function get(p){ return fetch(p).then(function(r){ if(r.status===401) throw {auth:true}; return r.json(); }); }
 
   function showLogin(){
+    try{ if(window.__hzHealth&&window.__hzHealth.setEp)window.__hzHealth.setEp('/api/portal/health/login-events'); }catch(e){}   // v28.188 (Ben): no session yet, so the login page reports to the unauthenticated, rate-limited endpoint
     var expired=/[?&]e=expired/.test(location.search);
     root.innerHTML='<div class="pv-login"><form class="pv-card" id="lf">'
       +'<h1>Dock &amp; Bay</h1><h2>Supplier Portal</h2>'
@@ -139,7 +140,9 @@
       +'<span class="pv-div"></span>'
       +'<h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
       +'<button type="button" class="pv-btn ghost" id="pv-signout" style="padding:4px 10px;font-size:12px" title="Sign out / 退出">Sign out</button>'
-      +'</header><div id="pv-wrap"><div id="pv"></div></div>';   // v28.186 (Ben, M5e): Sign out restored (deletes the session server-side, clears the cookie)
+      +'</header><div id="pv-wrap"><div id="pv"><div class="pv-empty" data-hz-loading="1">Loading…</div></div></div>';   // v28.186 (Ben, M5e): Sign out restored (deletes the session server-side, clears the cookie)
+    // v28.188 (Ben): #pv shows a loading panel (data-hz-loading) until portal-view.js has loaded and mounted, so the boot slow-view timer
+    // (hz-health.js) keeps running through the script download and the first bootstrap instead of stopping when "Loading…" left #root.
     var so=document.getElementById('pv-signout'); if(so)so.onclick=function(){ so.disabled=true; fetch('/api/portal/logout',{method:'POST'}).catch(function(){}).then(function(){ location.replace('/portal?signedout=1'); }); };
     // v27.855 (Ben): window.__PV_STANDALONE marks the real supplier portal so portal-view.js's global tracking-pill click handler only runs here — NOT when the admin app loads portal-view.js. Set at the top of this script now (v27.879), before portal-view.js runs.
     // v27.879: portal-view.js is already loading (version-stamped, cacheable) and the first bootstrap is already in flight (_jsP / _bootP above).
@@ -265,8 +268,10 @@
         host.innerHTML='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 13px;margin:6px 0 14px;max-width:860px"><div style="font-weight:700;font-size:12px;color:#075985;margin-bottom:5px">📣 Recent decisions on your proposals</div>'+rows.map(function(r){ var lbl=r.scope==='sku'?r.sku:r.price_type; return '<div style="font-size:12px;display:flex;gap:9px;align-items:baseline;padding:2px 0"><span style="width:82px;flex:0 0 auto">'+outcome(r.status)+'</span><b style="flex:0 0 auto">'+esc(lbl||'')+'</b><span style="color:#64748b;flex:1">'+tierStr(r)+'</span><span style="color:#94a3b8;font-size:11px;flex:0 0 auto">'+esc(fd2(r.decided_at))+'</span></div>'; }).join('')+'</div>'; }).catch(function(){ host.innerHTML=''; }); }
     host.innerHTML='<div id="pl-body"><div class="pv-empty">Loading…</div></div>';   // v27.503: inline under FINANCE (the router owns the hash)
     function load(){ var c=window.__plData; if(c&&(Date.now()-c.t)<120000){ render(c.d); return; }   // client cache: re-opening the tab is instant (v27.505)
-      get('/api/portal/price-list').then(function(d){ window.__plData={t:Date.now(),d:d}; render(d); }).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
-    function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[], pts=d.priceTypes||[], man=d.manualSkus||[], sups=(d.suppliers&&d.suppliers.length?d.suppliers:['']); _prods=d.productions||[]; _cur=d.currentProduction||0;
+      get('/api/portal/price-list').then(function(d){ window.__plData={t:Date.now(),d:d}; render(d); }).catch(function(e){ var b=document.getElementById('pl-body'); if(b)b.innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
+    // v28.188 (Ben): the supplier may leave the tab before the price list arrives (cold load ~2-4 s): #pl-body is then gone. Rendering into
+    // it threw, and the catch threw again (an unhandled rejection in the App health log). Nothing to draw when the tab is not open.
+    function render(d){ var b=document.getElementById('pl-body'); if(!b)return; var ents=d.entries||[], pts=d.priceTypes||[], man=d.manualSkus||[], sups=(d.suppliers&&d.suppliers.length?d.suppliers:['']); _prods=d.productions||[]; _cur=d.currentProduction||0;
       var byKey={}, supCcy={}; ents.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); if(e.currency)supCcy[e.supplier]=e.currency; });
       var typeSkus={}, ptInfo={}; pts.forEach(function(t){ typeSkus[t.price_type]=t.skus||[]; ptInfo[t.price_type]=t; });
       function pendBadge(){ return '<span style="display:inline-block;background:#dc2626;color:#fff;font-weight:800;font-size:9px;letter-spacing:.03em;padding:2px 7px;border-radius:4px">⚑ AWAITING APPROVAL</span>'; }

@@ -120,6 +120,17 @@ const internal = (t) => /relation "|column "|syntax error|violates|duplicate key
     await new Promise((r) => setTimeout(r, 200));
     ok((await get('/api/portal/me', { cookie: c })).status === 401, 'M5e: the signed-out token no longer works');
   }
+  // ── v28.188 (Ben, H7): health capture. The session route still needs a session; the login-page route takes no session but only
+  // the allowed kinds (a 'metric' row is dropped), at most 20 events, and never answers with an error page.
+  const tx = { 'content-type': 'text/plain' };
+  ok((await req('POST', '/api/portal/health/client-events', { body: [{ kind: 'client_error', message: 'v28187 test' }] })).status === 401, 'H7: session capture route without a session -> 401');
+  const le = await req('POST', '/api/portal/health/login-events', { headers: tx, body: undefined, form: undefined }).catch(() => null);
+  const le2 = await new Promise((res) => { const h = { 'content-type': 'text/plain' }; const data = JSON.stringify([{ kind: 'client_error', message: 'v28187 test: login page error', path: '/portal' }, { kind: 'metric', message: 'v28187 test: not allowed' }]);
+    const r = http.request({ host: BASE.hostname, port: BASE.port, path: '/api/portal/health/login-events', method: 'POST', headers: h }, (resp) => { const ch = []; resp.on('data', (c) => ch.push(c)); resp.on('end', () => { let j = null; try { j = JSON.parse(Buffer.concat(ch).toString('utf8')); } catch (_) {} res({ status: resp.statusCode, json: j }); }); });
+    r.on('error', () => res({ status: 0 })); r.write(data); r.end(); });
+  ok(le2.status === 202 && le2.json && le2.json.accepted === 1, 'H7: login-page capture without a session -> 202, only the allowed kind accepted (got ' + le2.status + ' ' + JSON.stringify(le2.json) + ')');
+  ok(!le || le.status === 400 || le.status === 202, 'H7: login-page capture with an empty body never errors (got ' + (le && le.status) + ')');
+
   console.log((fails ? 'FAILED' : 'OK') + ': ' + passes + ' checks passed, ' + fails + ' failed');
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -830,6 +830,9 @@
     var _ppRouting=false;
     var PP_TABS=['pos','shipmentplan','deposits','payments','productions','samples','product','specs','quality'];
     var PP_SEC_KEYS=['orders','finance','samples','product'];
+    // v28.188 (Ben): a tab click renders BEFORE ppSetHash changes the hash, so hz-health's hashchange timer never saw tab renders. The click
+    // starts the slow-view timer itself (until no loading panel is visible, > 3 s recorded per tab); no-op in the staff preview without it.
+    function ppHealthWatch(){ try{ if(window.__PV_STANDALONE&&typeof window.hzHealthWatch==='function')window.hzHealthWatch(); }catch(e){} }
     function ppSetHash(tab, ref){ _ppRouting=true; try{ var sec=(typeof PP_SEC!=='undefined'&&PP_SEC[tab])||'orders'; location.hash='#/'+sec+'/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }   // v27.500: section/tab slugs
     // ── v27.747 (P4c portal) Supplier phone SAMPLE CARD — scanning their own sample-card QR (or the short code)
     // opens the sample record: a clear swatch + identity + receipt status + Dock & Bay's review (read-only).
@@ -976,7 +979,7 @@
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
         +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 6L22 7"></path></svg><span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
         +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
-      +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></div>';
+      +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="pp-skel" data-hz-loading="1" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
     //    handlers are untouched; each is tagged with data-sec and the tab row shows only the active section's tabs (CSS). ──
@@ -1009,7 +1012,7 @@
       try{ if(!PP_SECS.some(function(s){return s[0]===sec;})){ PP_SECS.push([sec,def.secLabel||sec.toUpperCase()]); if(PP_TAB_ORDER.indexOf(def.pt)<0)PP_TAB_ORDER.push(def.pt); var _row=document.getElementById('pp-secs'); if(_row){ var sb=document.createElement('span'); sb.className='pp-sec'; sb.dataset.sec=sec; sb.textContent=def.secLabel||sec.toUpperCase(); _row.appendChild(sb); sb.onclick=function(){ var first=tabsEl.querySelector('.rtab[data-sec="'+sec+'"][data-pt]'); if(first)first.click(); }; } } }catch(e){}
       var t=document.createElement('span'); t.className='rtab'; t.dataset.pt=def.pt; t.dataset.sec=sec; t.textContent=def.label||def.pt;
       var same=tabsEl.querySelectorAll('.rtab[data-sec="'+sec+'"]'), last=same.length?same[same.length-1]:null; if(last&&last.nextSibling)tabsEl.insertBefore(t,last.nextSibling); else tabsEl.appendChild(t);
-      t.onclick=function(){ PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec(); ppBilingualApply(document);
+      t.onclick=function(){ ppHealthWatch(); PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec(); ppBilingualApply(document);
       try{ if(new RegExp('(^|/)'+def.pt+'(/|$)').test((location.hash||'').replace(/^#\/?/,''))){ PORTAL_TAB=def.pt; if(_ppData)renderPP(); } }catch(e){} }   // deep link that landed before the tab existed
     try{ window.DBPortalView.addTab=ppAddTab; window.DBPortalView.setLang=ppSetLang; window.DBPortalView.setBilingualNav=ppSetBilingualNav; }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
@@ -3169,7 +3172,8 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   rerenderRow(row,po,'invoice');   // row now shows the ⏳ "Submitted, awaiting approval" badge (no submit button)
                   ppNotice('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
-    function loadPreview(){ tabsEl.style.display=''; if(!_ppData)body.innerHTML='<div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';   // v27.879: a re-load keeps the current view on screen until the fresh payload lands (no skeleton flash after a save)
+    // v28.188 (Ben): the boot skeleton carries data-hz-loading, so hz-health.js times the first view until the payload has rendered.
+    function loadPreview(){ tabsEl.style.display=''; if(!_ppData)body.innerHTML='<div class="pp-skel" data-hz-loading="1" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';   // v27.879: a re-load keeps the current view on screen until the fresh payload lands (no skeleton flash after a save)
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP();
         // v27.880: the server handed us its last payload because an admin edit moved on since it was built (d.__stale) → pull the fresh
         // one in the background and repaint in place, unless the supplier is typing or has a PO / product / sample detail open.
@@ -3178,7 +3182,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
           if(!typing&&!detail)renderPP(); }).catch(function(){}); }
       }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
-    tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();
+    tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ ppHealthWatch(); PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();
     loadPreview();
   }
   window.DBPortalView={ mount: mount };

@@ -851,11 +851,13 @@ function hzRbNote(name, ms) { const e = _hzRbStats[name] || (_hzRbStats[name] = 
 // or fails a request. Health routes, the App health sweep's own self-timed calls (x-hz-health-sweep) and non-/api paths are skipped.
 const HZ_HEALTH_SKIP = /^\/api\/(health\/|cron\/health-(weekly|checks)|config\/health-check|portal\/health\/|cp\/health\/)/;   // v28.162: + health-checks cron + portal capture posts
 const _hzHB = new Map(); let _hzHBn = 0, _hzHBlast = Date.now(), _hzHBbusy = null, _hzHBoffUntil = 0;
-function hzHealthNote(kind, method, path, status, ms, msg, example) {
-  const k = kind + '|' + method + '|' + path + '|' + status; let e = _hzHB.get(k);
-  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: null }; _hzHB.set(k, e); }
+// v28.188 (Ben): `sids` = the supplier id(s) of a supplier-portal request (/api/portal/*, from the psid session; never the email): kept
+// in meta.supplier_ids and part of the grouping key, so a slow or failing portal request can be tied to a supplier.
+function hzHealthNote(kind, method, path, status, ms, msg, example, sids) {
+  const k = kind + '|' + method + '|' + path + '|' + status + (sids ? '|' + sids : ''); let e = _hzHB.get(k);
+  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: sids ? { supplier_ids: sids } : null }; _hzHB.set(k, e); }
   e.count++; _hzHBn++; if (ms > e.ms) e.ms = ms; if (msg) e.message = String(msg).slice(0, 1000); e.ts = new Date().toISOString();
-  if (example && example !== e.path) e.meta = { example: String(example).slice(0, 300) };
+  if (example && example !== e.path) e.meta = Object.assign(e.meta || {}, { example: String(example).slice(0, 300) });
   if (kind === 'server_error') _hzAlertDirty = true;
 }
 // v28.163 (Ben): generic buffered event for the new server kinds (integration_error, db_pool, slow_query). Same buffer, same
@@ -904,8 +906,9 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
     // v28.159 (Ben): health log. Group by the matched route pattern (/api/supply/po/:po) so ids don't fragment the report.
     if ((ms >= HZ_SLOW_MS || res.statusCode >= 500) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
       const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
-      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path);
-      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path);
+      const sids = (path.startsWith('/api/portal/') && req.portal && Array.isArray(req.portal.supplierIds)) ? req.portal.supplierIds.slice(0, 5).join(',') : '';   // v28.188
+      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path, sids);
+      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path, sids);
       hzHealthFlush(false);
     }
   } catch (_) { /* measurement must never throw */ } });
@@ -22874,25 +22877,31 @@ function hzCeAllow(key, max, want) { const now = Date.now(); let r = _hzCeRate.g
   if (!r || now - r.t > 60000) { r = { t: now, n: 0 }; _hzCeRate.set(key, r); }
   if (_hzCeRate.size > 5000) for (const [k, v] of _hzCeRate) if (now - v.t > 60000) _hzCeRate.delete(k);
   const ok = Math.max(0, Math.min(want, max - r.n)); r.n += ok; return ok; }
-async function hzClientEvents(req, res, source, email) {
+// v28.188 (Ben): opt.sids = the portal session's supplier id(s), stored in meta.supplier_ids (portal activity per supplier). opt.login = the
+// supplier portal LOGIN page (no session): only errors / page views / slow views / API failures, path tagged "/portal (login)", no user.
+async function hzClientEvents(req, res, source, email, opt) {
   try {
+    opt = opt || {};
     let arr = req.body; if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (_) { arr = null; } }
     if (!Array.isArray(arr)) return res.status(400).json({ error: 'expected a JSON array of events' });
     const clip = (v, n) => (v == null || v === '') ? null : String(v).slice(0, n);
     const ua = clip(req.get('user-agent'), 300), em = email ? String(email).toLowerCase().slice(0, 200) : null;
     const agg = new Map();
-    for (const e of arr.slice(0, 50)) {
+    for (const e of arr.slice(0, opt.login ? 20 : 50)) {
       if (!e || typeof e !== 'object' || !HZ_CE_KINDS.has(e.kind)) continue;
+      if (opt.login && !HZ_CE_LOGIN_KINDS.has(e.kind)) continue;
       const message = clip(e.message, 500); if (!message) continue;
-      const path = clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
+      const path = opt.login ? '/portal (login)' : clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
       const cnt = HZ_CE_AGG.has(e.kind) ? Math.max(1, Math.min(10000, Math.round(Number(e.count) || 1))) : 1;
       const ex = agg.get(k); if (ex) { ex.count += cnt; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
       let meta = null; if (e.meta && typeof e.meta === 'object') { try { const j = JSON.stringify(e.meta); if (j.length <= 1000) meta = e.meta; } catch (_) {} }
+      if (opt.sids) meta = Object.assign({}, meta, { supplier_ids: opt.sids }); if (opt.login) meta = Object.assign({}, meta, { login: true });   // v28.188
       agg.set(k, { kind: e.kind, source, path, ms, message, method: e.kind === 'api_failure' ? clip(e.method, 10) : null, status: (e.kind === 'api_failure' && e.status != null && Number.isInteger(Number(e.status)) && Number(e.status) >= 0 && Number(e.status) < 1000) ? Number(e.status) : null, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: cnt, meta });   // v28.162: client api_failure carries method + status
     }
     let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
     const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
     let n = hzCeAllow('ip|' + ip, 200, rows.length); n = hzCeAllow('u|' + source + '|' + ip + '|' + (em || ''), 60, n);
+    if (opt.login) { n = hzCeAllow('login|' + ip, 30, n); n = hzCeAllow('login|all', 300, n); }   // v28.188: anonymous endpoint, tighter caps (per IP and overall)
     rows = rows.slice(0, n); if (_hzNoDeadClick) rows = rows.filter(r => r.kind !== 'dead_click');
     if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
     try { await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]); }
@@ -22905,13 +22914,20 @@ async function hzClientEvents(req, res, source, email) {
 }
 const _hzText = express.text({ type: 'text/plain', limit: '256kb' });   // sendBeacon(string) arrives as text/plain
 app.post('/api/health/client-events', _hzText, (req, res) => hzClientEvents(req, res, 'staff', authUser(req)));
-app.post('/api/portal/health/client-events', _hzText, portalAuth, (req, res) => hzClientEvents(req, res, 'portal', req.portal && req.portal.email));
+app.post('/api/portal/health/client-events', _hzText, portalAuth, (req, res) => hzClientEvents(req, res, 'portal', req.portal && req.portal.email, { sids: (req.portal && req.portal.supplierIds || []).slice(0, 5).join(',') || null }));
+// v28.188 (Ben, deep dive H7): the supplier portal LOGIN page has no session, so its errors were dropped (portalAuth 401). This route takes
+// them without a session, as a deliberately narrow write: kinds client_error / console_error / slow_view / page_view / api_failure only,
+// <= 20 events a request (sendBeacon text body capped at 4 KB), 30 events a minute per IP and 300 a minute overall, path fixed to "/portal (login)", no user or
+// email stored. The page switches to it in showLogin (hz-health.js setEp). Gate: covered by the /api/portal/* exemption.
+const HZ_CE_LOGIN_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'page_view', 'api_failure']);
+const _hzTextSmall = express.text({ type: 'text/plain', limit: '4kb' });
+app.post('/api/portal/health/login-events', _hzTextSmall, (req, res) => hzClientEvents(req, res, 'portal', null, { login: true }));
 app.post('/api/cp/health/client-events', _hzText, cpAuth, (req, res) => hzClientEvents(req, res, 'client_portal', req.cp && req.cp.user && req.cp.user.email));
 
 // Likely file for a path / view, so the .md tells Claude Code where to start.
 function hzLikelyFile(path, source) {
   const p = String(path || '');
-  if (source === 'portal' || p.startsWith('/api/portal')) return 'server.mjs (supplier portal /api/portal routes) + supply/portal-view.js';
+  if (source === 'portal' || p.startsWith('/api/portal') || p.startsWith('/portal')) return 'server.mjs (supplier portal /api/portal routes) + supply/portal-view.js';   // v28.188: + portal views (/portal#...)
   if (source === 'client_portal' || p.startsWith('/api/cp')) return 'server.mjs (client portal /api/cp routes) + supply/client-view.js';
   if (/^\/api\/(demand|forecast|save-|kpi|scenario|preorders|price-changes|buy-|auto-forecast|trading-calendar|filter-rules)/.test(p)) return 'server.mjs + artifact_v16.7.html (DEMAND)';
   if (/^\/api\/(supply|config|product|client|me|inbox)/.test(p)) return 'server.mjs + supply/inject.html';
@@ -22949,7 +22965,52 @@ async function hzHealthReport(daysIn) {
   d.views.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); });
   d.days = days; d.version = APP_VERSION; d.slow_ms = HZ_SLOW_MS;
   try { Object.assign(d, await hzHealthReportExtra(days)); } catch (e) { d.extra_error = e.message; console.warn('[health] report extras failed: ' + e.message); }   // v28.162: never lose the v28.159 report
+  try { d.portal = await hzPortalActivity(days); } catch (e) { d.portal = { error: e.message }; console.warn('[health] portal activity failed: ' + e.message); }   // v28.188
   d.markdown = hzHealthMarkdown(d);
+  return d;
+}
+// v28.188 (Ben, deep dive H7): supplier portal activity for CONFIG > App health log and the weekly report. Sessions come from
+// planner.portal_sessions (created_at = a sign-in, last_seen_at = migration 332, stamped at most every 5 min while in use); events are
+// app_health_events rows from portal browsers (source 'portal', incl. the login page) and server rows for /api/portal/*. A row is
+// attributed to a supplier by meta.supplier_ids (server rows, v28.188 client rows) or by the portal user's email (older client rows).
+// Supplier names only: no emails leave this function. Without migration 332 the sign-in time stands in for "last seen".
+async function hzPortalActivity(days) {
+  const run = (LS) => pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int) AND (source = 'portal' OR path LIKE '/api/portal/%')),
+      us AS (SELECT lower(email) email, supplier_id::text sid, supplier_name FROM planner.supplier_portal_users WHERE active AND coalesce(supplier_name,'') <> ''),
+      ss AS (SELECT s.created_at, s.expires_at, coalesce(s.${LS}, s.created_at) seen, u.supplier_name, lower(s.email) email FROM planner.portal_sessions s JOIN us u ON u.email = lower(s.email)),
+      evs AS (SELECT ev.kind, ev.count, ev.ms, coalesce(sn.name, u.supplier_name) supplier_name FROM ev
+        LEFT JOIN LATERAL unnest(string_to_array(nullif(ev.meta->>'supplier_ids', ''), ',')) x(sid) ON true
+        LEFT JOIN planner.suppliers sn ON sn.id::text = trim(x.sid)
+        LEFT JOIN us u ON x.sid IS NULL AND u.email = lower(ev.user_email)),
+      per AS (SELECT supplier_name FROM ss WHERE seen >= now() - make_interval(days => $1::int) OR created_at >= now() - make_interval(days => $1::int)
+        UNION SELECT supplier_name FROM evs WHERE supplier_name IS NOT NULL)
+    SELECT json_build_object(
+      'kpis', json_build_object(
+        'sign_ins', (SELECT count(*) FROM planner.portal_sessions WHERE created_at >= now() - make_interval(days => $1::int)),
+        'live_sessions', (SELECT count(*) FROM planner.portal_sessions WHERE expires_at > now()),
+        'active_sessions', (SELECT count(*) FROM planner.portal_sessions WHERE coalesce(${LS}, created_at) >= now() - make_interval(days => $1::int)),
+        'active_suppliers', (SELECT count(DISTINCT supplier_name) FROM ss WHERE seen >= now() - make_interval(days => $1::int)),
+        'page_views', (SELECT coalesce(sum(coalesce((meta->>'visits')::int, count)), 0) FROM ev WHERE kind = 'page_view'),
+        'slow_views', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'slow_view'),
+        'slow_requests', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'slow_request'),
+        'failures', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind IN ('api_failure', 'server_error', 'client_error', 'console_error')),
+        'dead_clicks', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'dead_click'),
+        'login_errors', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind IN ('client_error', 'console_error', 'api_failure') AND meta->>'login' = 'true')),
+      'suppliers', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC NULLS LAST), '[]') FROM (SELECT p.supplier_name supplier,
+          (SELECT count(DISTINCT email) FROM ss WHERE ss.supplier_name = p.supplier_name AND ss.seen >= now() - make_interval(days => $1::int))::int users,
+          (SELECT count(*) FROM ss WHERE ss.supplier_name = p.supplier_name AND ss.created_at >= now() - make_interval(days => $1::int))::int sign_ins,
+          (SELECT max(seen) FROM ss WHERE ss.supplier_name = p.supplier_name) last_seen,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'page_view')::int page_views,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'slow_view')::int slow_views,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'slow_request')::int slow_requests,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind IN ('api_failure', 'server_error', 'client_error', 'console_error'))::int failures
+        FROM per p WHERE p.supplier_name IS NOT NULL) x),
+      'views', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, max(ms) max_ms, max(ts) last_seen
+        FROM ev WHERE kind = 'slow_view' GROUP BY path ORDER BY p95 DESC NULLS LAST, n DESC LIMIT 20) x),
+      'failures', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT kind, source, coalesce(method || ' ', '') || coalesce(path, '') path, status, split_part(coalesce(message, ''), E'\\n', 1) message, sum(count)::int n, max(ts) last_seen
+        FROM ev WHERE kind IN ('api_failure', 'server_error', 'client_error', 'console_error') GROUP BY 1, 2, 3, 4, 5 ORDER BY n DESC, last_seen DESC LIMIT 25) x)) d`, [days]);
+  let r; try { r = await run('last_seen_at'); } catch (e) { if (!(e && e.code === '42703')) throw e; r = await run('created_at'); r.rows[0].d.no_last_seen = true; }
+  const d = r.rows[0].d; for (const k in d.kpis) d.kpis[k] = Number(d.kpis[k]) || 0;
   return d;
 }
 // v28.163 (Ben): likely file per integration service (the .md is written for Claude Code).
@@ -22993,7 +23054,7 @@ async function hzHealthReportExtra(days) {
       'prev_version', (SELECT app_version FROM (SELECT app_version, min(ts) f FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1) v   -- the release deployed before this one (not a newer branch build writing to the same DB)
         WHERE f < coalesce((SELECT min(ts) FROM planner.app_health_events WHERE app_version = $2), now()) ORDER BY f DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
   for (const k in x.kpis2) x.kpis2[k] = Number(x.kpis2[k]) || 0;
-  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); }); x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
+  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { if (/^\/portal/.test(String(r.path || ''))) { r.file = 'supply/portal-view.js (#pp-secs / #pp-tabs nav)'; return; } const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); });   // v28.188: portal nav x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
   x.integ.forEach(r => { r.file = HZ_INTEG_FILE[r.service] || 'server.mjs _fetchT callers'; });
   x.new_since.forEach(r => { r.file = r.kind === 'integration_error' ? (HZ_INTEG_FILE[String(r.path).split(' ')[0]] || 'server.mjs') : hzLikelyFile(r.path ? String(r.path).replace(/^[A-Z]+ /, '') : (r.views || [])[0], r.path ? null : 'staff'); });
   x.page_users.forEach(r => { r.user = hzShortUser(r.user_email); delete r.user_email; });
@@ -23065,6 +23126,13 @@ function hzHealthMarkdown(d) {
     L.push('### Pages with zero visits this period', '', d.unvisited_note, '', (d.unvisited || []).length ? d.unvisited.map(v => '- `' + hzMdCode(v) + '`').join('\n') : 'None.', '');
     tbl('## 13. Errors per version', null, ['Version', 'Errors', 'Server', 'Browser', 'API', 'Integration', 'First seen', 'Last seen'], d.per_version.map(r => [r.app_version, r.errors, r.server, r.browser, r.api, r.integ, dt(r.first_seen), dt(r.last_seen)]));
   }
+  // v28.188 (Ben): supplier portal activity (hzPortalActivity).
+  const P = d.portal; if (P && P.kpis) { const pk = P.kpis;
+    tbl('## 14. Supplier portal activity', `Sign-ins ${pk.sign_ins} · live sessions ${pk.live_sessions} · sessions active in the period ${pk.active_sessions} · active suppliers ${pk.active_suppliers} · page views ${pk.page_views} · slow views ${pk.slow_views} · slow requests ${pk.slow_requests} · failures ${pk.failures} (login page ${pk.login_errors}) · dead clicks ${pk.dead_clicks}.` + (P.no_last_seen ? ' Migration 332 is not applied, so "last seen" is the sign-in time.' : '') + ' Fix portal issues in server.mjs (/api/portal routes) and supply/portal-view.js / supply/portal.html.',
+      ['Supplier', 'Users', 'Sign-ins', 'Last seen', 'Page views', 'Slow views', 'Slow requests', 'Failures'], (P.suppliers || []).map(r => [r.supplier, r.users, r.sign_ins, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.slow_requests, r.failures]));
+    tbl('### Portal slow views', null, ['View', 'Count', 'p95 ms', 'Max ms', 'Last seen'], (P.views || []).map(r => [r.path, r.n, r.p95, r.max_ms, dt(r.last_seen)]));
+    tbl('### Portal failures', null, ['Kind', 'Source', 'Where', 'Status', 'Message', 'Count', 'Last seen'], (P.failures || []).map(r => [r.kind, r.source, r.path, r.status || '', String(r.message || '').slice(0, 160), r.n, dt(r.last_seen)]));
+  } else if (P && P.error) L.push('## 14. Supplier portal activity', '', `> Failed to load: ${hzMdCode(P.error)}`, '');
   L.push('## Suggested next steps', '');
   const s = [];
   if (d.new_since && d.new_since[0]) s.push(`Start with what ${d.version} introduced: ${d.new_since[0].kind} "${hzMdCode(d.new_since[0].message).slice(0, 120)}" (${d.new_since[0].n}x) in ${d.new_since[0].file}. Diff against ${d.prev_version || 'the previous release'} (git log -p) around that code.`);   // v28.162
@@ -23120,6 +23188,10 @@ async function hzHealthEmail(days, to) {
       + tbl('API failures seen by browsers', ['Endpoint', 'Status', 'Count', 'Users'], d.api.slice(0, 5).map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.users]))
       + tbl('Database', ['What', 'Count', 'Max'], d.db_pool.slice(0, 3).map(r => [r.message || r.path, r.n, (r.max_waiting || 0) + ' waiting']).concat(d.slow_q.slice(0, 5 - Math.min(3, d.db_pool.length)).map(r => [r.sql, r.n, r.max_ms + ' ms'])))
       + tbl('Top pages', ['View', 'Visits', 'Users', 'Active min'], d.pages.slice(0, 5).map(r => [r.path, r.visits, r.users, Math.round((r.active_s || 0) / 60)])) : '')
+    // v28.188 (Ben): supplier portal activity (sign-ins, suppliers active, last seen, slow views, failures)
+    + ((d.portal && d.portal.kpis) ? `<h3 style="font-size:14px;margin:18px 0 6px">Supplier portal</h3><div style="font-size:12px;color:#64748b">${E(d.portal.kpis.sign_ins + ' sign-ins · ' + d.portal.kpis.active_suppliers + ' active suppliers · ' + d.portal.kpis.slow_views + ' slow views · ' + d.portal.kpis.failures + ' failures')}</div>`
+      + tbl('Portal suppliers', ['Supplier', 'Users', 'Last seen', 'Page views', 'Slow views', 'Failures'], (d.portal.suppliers || []).slice(0, 10).map(r => [r.supplier, r.users, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.failures]))
+      + tbl('Portal failures', ['Kind', 'Where', 'Status', 'Count'], (d.portal.failures || []).slice(0, 5).map(r => [r.kind, r.path, r.status || '', r.n])) : '')
     + `<p style="font-size:13px;margin-top:18px;padding:10px 12px;background:#eff6ff;border-radius:8px">Full details attached: upload the .md to Claude Code.</p></div>`;
   const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html,
     attachments: [{ filename, content: Buffer.from(d.markdown, 'utf8').toString('base64') }] };
@@ -24314,17 +24386,39 @@ app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []
 // by an admin therefore takes at most a minute to reach an open portal session, which is fine.
 const _portalAuthMemo = new Map();   // psid -> { t, v: {email, suppliers, supplierIds} }
 const PORTAL_AUTH_TTL_MS = 60000;
+// v28.188 (Ben): session -> {email, sups:[{supplier_id, supplier_name}] (same rows / order / types as portalSuppliers), zh} in one
+// statement, plus the throttled last_seen_at stamp. zh = the EN / 中文 flag /me used to look up separately (any linked supplier in China).
+let _psNoLastSeen = false;   // migration 332 not applied yet (42703): stop trying the stamp
+const _PS_SELECT = `SELECT s.email,
+    coalesce((SELECT json_agg(json_build_object('supplier_id', u.supplier_id::text, 'supplier_name', u.supplier_name)) FROM planner.supplier_portal_users u
+      WHERE lower(u.email)=lower(s.email) AND u.active=true AND coalesce(u.supplier_name,'')<>''), '[]') sups,
+    coalesce((SELECT bool_or(coalesce(x.country,'') ILIKE '%china%' OR upper(coalesce(x.country,''))='CN' OR x.country LIKE '%中国%') FROM planner.suppliers x
+      WHERE x.name IN (SELECT u2.supplier_name FROM planner.supplier_portal_users u2 WHERE lower(u2.email)=lower(s.email) AND u2.active=true AND coalesce(u2.supplier_name,'')<>'')), false) zh`;
+async function portalSessionLookup(psid) {
+  if (!_psNoLastSeen) {
+    try {
+      return (await pool.query(`WITH s AS (SELECT token, email FROM planner.portal_sessions WHERE token=$1 AND expires_at>now()),
+          seen AS (UPDATE planner.portal_sessions p SET last_seen_at=now() FROM s WHERE p.token=s.token AND (p.last_seen_at IS NULL OR p.last_seen_at < now() - interval '5 minutes') RETURNING 1)
+        ${_PS_SELECT} FROM s`, [psid])).rows[0] || null;
+    } catch (e) { if (e && e.code === '42703') _psNoLastSeen = true; else throw e; }
+  }
+  return (await pool.query(`${_PS_SELECT} FROM planner.portal_sessions s WHERE s.token=$1 AND s.expires_at>now()`, [psid])).rows[0] || null;
+}
 async function portalAuth(req, res, next) {
   try {
     const psid = cookieVal(req, 'psid');
     if (!psid) return res.status(401).json({ error: 'not signed in' });
     const hit = _portalAuthMemo.get(psid);
     if (hit && Date.now() - hit.t < PORTAL_AUTH_TTL_MS) { req.portal = hit.v; return next(); }
-    const s = (await pool.query(`SELECT email FROM planner.portal_sessions WHERE token=$1 AND expires_at>now()`, [psid])).rows[0];
+    // v28.188 (Ben): ONE round trip (was 2 serial: session, then its suppliers; /me added a 3rd for the China flag). The same statement
+    // stamps portal_sessions.last_seen_at (migration 332) at most once per 5 minutes per session (the WHERE guard makes repeat calls
+    // and other instances no-ops), for "who is using the portal" in CONFIG > App health log. Until 332 is applied (column missing,
+    // 42703) it falls back to the read-only form, so the code can deploy first.
+    const s = await portalSessionLookup(psid);
     if (!s) { _portalAuthMemo.delete(psid); return res.status(401).json({ error: 'session expired' }); }
-    const sups = await portalSuppliers(s.email);
+    const sups = s.sups || [];
     if (!sups.length) return res.status(403).json({ error: 'no supplier linked to this account' });
-    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null) };
+    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null), zh: !!s.zh };
     _portalAuthMemo.set(psid, { t: Date.now(), v: req.portal });
     if (_portalAuthMemo.size > 2000) { for (const [k, e] of _portalAuthMemo) if (Date.now() - e.t > PORTAL_AUTH_TTL_MS) _portalAuthMemo.delete(k); }
     next();

@@ -95,6 +95,34 @@ const q = sel => doc.querySelector(sel);
     chk('No full reload (row still expanded after prod-status change)', !!q('.pptab[data-pt="dtc"]'));
   }
 
+  // v28.188 (Ben, deep dive H7): hz-health.js on the supplier portal. 4xx answers are recorded (the GET /api/portal/me 401 sign-in probe
+  // is not), a press on the portal nav that changes nothing is a dead click, the Chinese "加载中…" counts as loading, the tab click
+  // hook (hzHealthWatch) exists, and the login page can switch the capture endpoint (setEp).
+  {
+    const hz = fs.readFileSync(path.join(__dirname, '..', 'supply', 'hz-health.js'), 'utf8');
+    const d2 = new JSDOM('<!DOCTYPE html><head></head><body><div id="pp-secs"><span class="pp-sec active" data-sec="orders">ORDERS</span><span class="pp-sec" data-sec="finance">FINANCE</span></div>'
+      + '<div id="pp-tabs"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="payments">Payments</span></div><div class="pv-empty" id="ld">加载中…</div></body>', { runScripts: 'dangerously', url: 'http://localhost/portal' });
+    const w2 = d2.window;
+    w2.fetch = (u) => Promise.resolve({ status: /\/api\/portal\/me$/.test(String(u)) ? 401 : 403, ok: false });
+    Object.defineProperty(w2.HTMLElement.prototype, 'offsetParent', { get() { return this.parentNode; } });   // jsdom has no layout: treat attached nodes as visible
+    const sc = w2.document.createElement('script'); sc.setAttribute('data-hz-src', 'portal'); sc.textContent = hz; w2.document.head.appendChild(sc);
+    const H = w2.__hzHealth; chk('hz-health loaded as source portal', !!H && H.src === 'portal');
+    await w2.fetch('/api/portal/shipment-notes/X'); await w2.fetch('/api/portal/me'); await tick(); await tick();
+    const api = Object.keys(H._t.state().API);
+    chk('portal 403 recorded as api_failure (' + api.join(', ') + ')', api.some(k => /shipment-notes/.test(k) && / 403$/.test(k)));
+    chk('GET /api/portal/me 401 (sign-in probe) NOT recorded', !api.some(k => /\/api\/portal\/me/.test(k)));
+    chk('Chinese loading text 加载中 counts as loading', H._t.loading() === true);
+    chk('hzHealthWatch hook exposed', typeof w2.hzHealthWatch === 'function');
+    w2.document.getElementById('ld').remove();   // a visible loading panel means "the press did something": clear it before the dead-click check
+    const pay = w2.document.querySelector('#pp-tabs .rtab[data-pt="payments"]');
+    pay.dispatchEvent(new w2.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    await new Promise(r => setTimeout(r, 1900));
+    const dc = Object.values(H._t.state().DC);
+    chk('portal tab press that changed nothing = dead click (' + dc.map(x => x.label).join(', ') + ')', dc.some(x => x.label === 'Payments'));
+    H.setEp('/api/portal/health/login-events'); chk('setEp switches the capture endpoint (login page)', H.ep === '/api/portal/health/login-events');
+    w2.close();
+  }
+
   console.log('\n' + (pass ? 'ALL CHECKS PASSED ✅' : 'SOME CHECKS FAILED ❌'));
   process.exit(pass ? 0 : 1);
 })();
