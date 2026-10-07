@@ -2130,6 +2130,52 @@
       }).catch(function(e){ if(my===seq)res.innerHTML='<div class="mut tiny" style="color:var(--neg)">Search failed: '+esc(e&&e.message||e)+'</div>'; }); }
     q.oninput=function(){ clearTimeout(t); t=setTimeout(run,250); }; q.focus(); q.select(); run();
   }
+  // v28.199 (Ben): "Link Fulfil PO" picker. Searches LIVE Fulfil read only (GET /api/supply/fulfil/po-search): first the
+  // POs that already look like this one (same number, SO / client ref, sale-linked to that SO; marked "suggested"), then
+  // whatever is typed (number, reference, supplier, sales order). Click a row to save it as this PO's manual Fulfil link
+  // (po_links fulfil, found_by manual): the push target from then on. Nothing is written to Fulfil.
+  function fulfilPoPicker(po,done){
+    var old=document.getElementById('fpl-bg'); if(old)old.remove();
+    var bg=document.createElement('div'); bg.id='fpl-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100100;display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto';
+    bg.innerHTML='<style>#fpl-bg table{table-layout:auto!important;border-collapse:collapse;width:100%}#fpl-bg th,#fpl-bg td{padding:6px 8px!important;overflow:visible!important;text-align:left!important;vertical-align:top;border-top:1px solid var(--line)}#fpl-bg tr.fpl-row{cursor:pointer}#fpl-bg tr.fpl-row:hover td{background:var(--hover)}#fpl-bg .fpl-num{font-family:ui-monospace,Menlo,monospace;font-weight:700;white-space:nowrap}#fpl-bg tr.fpl-dead{cursor:not-allowed;opacity:.62}#fpl-bg tr.fpl-dead .fpl-num{text-decoration:line-through}</style>'
+      +'<div style="background:var(--card);border-radius:12px;max-width:920px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Link Fulfil PO → '+esc(po)+'</b><span id="fpl-ctx" class="mut tiny"></span><button id="fpl-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
+      +'<div style="padding:14px 18px"><input id="fpl-q" class="fci" placeholder="Search Fulfil PO number, reference, supplier or sales order…" style="width:100%;text-align:left;font-size:13px;padding:7px 10px">'
+      +'<div class="mut tiny" style="margin:6px 0 8px">Searches Fulfil live (read only). <b>Suggested</b> = Fulfil POs that already match this PO&rsquo;s number or sales order. Click a PO to link it; HORIZON then uses it for this PO and never creates a new one.</div>'
+      +'<div id="fpl-res" style="max-height:52vh;overflow:auto"></div></div></div>';
+    document.body.appendChild(bg);
+    function close(){ bg.remove(); }
+    bg.onclick=function(ev){ if(ev.target===bg)close(); }; document.getElementById('fpl-x').onclick=close;
+    var q=document.getElementById('fpl-q'), res=document.getElementById('fpl-res'), cx=document.getElementById('fpl-ctx'), t=null, seq=0, L=[];
+    function draw(){
+      if(!L.length){ res.innerHTML='<div class="mut tiny">No matching Fulfil POs'+(q.value.trim().length<2?'. Type a PO number, reference, supplier or sales order.':'.')+'</div>'; return; }
+      res.innerHTML='<table style="font-size:12.5px"><thead><tr><th>Fulfil PO</th><th>Supplier</th><th>State</th><th style="text-align:right!important">Lines</th><th style="text-align:right!important">Units</th><th>Last modified</th><th></th></tr></thead><tbody>'
+        +L.map(function(p,i){ var dead=/^cancel/i.test(p.state||'');
+          var others=(p.linked_pos||[]).filter(function(x){return x.po!==po;});
+          var tags=(p.current?'<div class="tiny" style="color:var(--pos);font-weight:700">current link</div>':'')
+            +(p.suggested?'<div class="tiny" style="color:var(--blue);font-weight:700">suggested: '+esc((p.via||[]).join(', '))+'</div>':'')
+            +(others.length?'<div class="tiny" style="color:var(--amber)">HORIZON '+others.map(function(x){return esc(x.po)+(x.by==='mirror'?' (by reference)':'');}).join(', ')+'</div>':'');
+          return '<tr class="fpl-row'+(dead?' fpl-dead':'')+'" data-i="'+i+'"'+(dead?' title="cancelled in Fulfil: cannot be linked"':'')+'><td><span class="fpl-num">'+esc(p.number||('id '+p.id))+'</span>'+(p.reference?'<div class="mut tiny">'+esc(p.reference)+'</div>':'')+tags+'</td>'
+            +'<td>'+esc(p.supplier||'')+'</td><td style="white-space:nowrap">'+esc(p.state||'')+(p.so_linked?' <span class="tool-badge" style="font-size:9.5px" title="generated from a sales order: Fulfil owns its lines">SO</span>':'')+'</td>'
+            +'<td style="text-align:right!important">'+esc(p.line_count)+'</td><td style="text-align:right!important">'+units(p.units)+'</td><td style="white-space:nowrap">'+esc(p.last_modification?fd(p.last_modification):'')+'</td>'
+            +'<td>'+(p.url?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" class="fpl-open" style="color:var(--blue);white-space:nowrap">Fulfil ↗</a>':'')+'</td></tr>'; }).join('')+'</tbody></table>';
+      res.querySelectorAll('.fpl-open').forEach(function(a){ a.onclick=function(ev){ ev.stopPropagation(); }; });
+      res.querySelectorAll('tr.fpl-row').forEach(function(tr){ tr.onclick=function(){ var p=L[+tr.dataset.i]; if(/^cancel/i.test(p.state||''))return; if(p.current){ close(); return; }
+        var others=(p.linked_pos||[]).filter(function(x){return x.po!==po;});
+        if(others.length && !confirm('Fulfil '+(p.number||p.id)+' is already tied to '+others.map(function(x){return x.po;}).join(', ')+'. Link it to '+po+' as well?'))return;
+        if(!confirm('Link '+po+' to Fulfil '+(p.number||p.id)+' ('+(p.supplier||'')+', '+(p.state||'')+', '+p.line_count+' lines, '+p.units+' units)?\n\nThis saves the link in HORIZON only; nothing is written to Fulfil.'))return;
+        fetch('/api/supply/po/'+encodeURIComponent(po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'fulfil',external_id:String(p.id),external_ref:p.number||String(p.id),url:p.url})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); close(); if(done)done(); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
+    }
+    function run(first){ var v=q.value.trim(); var my=++seq; res.innerHTML='<div class="mut tiny">Searching Fulfil…</div>';
+      fetch('/api/supply/fulfil/po-search?po='+encodeURIComponent(po)+(v.length>=2?'&q='+encodeURIComponent(v):'')).then(function(r){return r.json();}).then(function(j){ if(my!==seq)return;
+        if(j&&j.error)throw new Error(j.error); L=(j&&j.rows)||[];
+        cx.innerHTML=(j.client_po?'client PO':'stock PO')+(j.sales_order_ref?' · SO ref '+esc(j.sales_order_ref):'')+(j.env?' · Fulfil '+esc(j.env):'');
+        if(first&&!L.length&&j.sales_order_ref&&!q.value){ q.value=String(j.sales_order_ref).split(/[,;]/)[0].trim(); run(false); return; }
+        draw();
+      }).catch(function(e){ if(my===seq)res.innerHTML='<div class="mut tiny" style="color:var(--neg)">Fulfil search failed: '+esc(e&&e.message||e)+'</div>'; }); }
+    q.oninput=function(){ clearTimeout(t); t=setTimeout(function(){ run(false); },350); }; q.focus(); run(true);
+  }
   function linkedRecordsPanel(po){
     return '<div class="sect-h">Linked records <span class="mut tiny">— how this PO maps to Xero, Fulfil, Flexport &amp; DHL. Any SHIPPED PO must have a Xero bill.</span></div>'
       +'<div class="po-links-ctx" data-po="'+esc(po)+'"><div class="mut tiny">Open to load linkages…</div></div>';
@@ -2152,7 +2198,10 @@
       var add=s.system==='xero'
         ?('<button class="lnk-btn poln-xsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Xero bills by number, reference or supplier">'+((linked||voided)?'✎ change bill':'🔍 link bill')+'</button>'
           +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="xero" style="color:var(--neg);white-space:nowrap" title="remove the manual link (the auto-resolver can find it again)">unlink</button>':''))
-        :('<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">'+(linked?'✎ change':'＋ add link')+'</button>');
+        :(s.system==='fulfil'   // v28.199 (Ben): Fulfil uses the read-only search picker (the link becomes the push target)
+          ?('<button class="lnk-btn poln-fsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Fulfil POs by number, reference, supplier or sales order">'+(linked?'✎ change PO':'🔍 link Fulfil PO')+'</button>'
+            +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="fulfil" style="color:var(--neg);white-space:nowrap" title="remove the manual Fulfil link">unlink</button>':''))
+          :('<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">'+(linked?'✎ change':'＋ add link')+'</button>'));
       return '<tr style="border-top:1px solid #eef2f7">'
         +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
         +'<td style="padding:6px 10px;white-space:nowrap;vertical-align:top">'+badge+'</td>'
@@ -2174,8 +2223,9 @@
   function wirePoLinks(el){
     el.querySelectorAll('.poln-refresh').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='↻ Finding…'; loadPoLinks(el,true); }; });
     el.querySelectorAll('.poln-xsearch').forEach(function(b){ b.onclick=function(){ xeroBillPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); }); }; });
-    el.querySelectorAll('.poln-unlink').forEach(function(b){ b.onclick=function(){ if(!confirm('Unlink the Xero bill from '+b.dataset.po+'?'))return;
-      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'xero'})})
+    el.querySelectorAll('.poln-fsearch').forEach(function(b){ b.onclick=function(){ fulfilPoPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); try{fillErpFulfil();}catch(e){} }); }; });   // v28.199 (Ben)
+    el.querySelectorAll('.poln-unlink').forEach(function(b){ b.onclick=function(){ var sys=b.dataset.sys||'xero'; if(!confirm('Unlink the '+(sys==='fulfil'?'Fulfil PO':'Xero bill')+' from '+b.dataset.po+'?'))return;
+      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:sys})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); el._loaded=0; loadPoLinks(el,false); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
     el.querySelectorAll('.poln-add').forEach(function(b){ b.onclick=function(){ var sys=b.dataset.sys, p=b.dataset.po;
       var url=prompt('Paste the '+sys.toUpperCase()+' link (URL) for PO '+p+':'); if(url==null)return; url=(url||'').trim(); if(!url)return;
@@ -3650,6 +3700,11 @@
         // v28.007 (Ben): lines drift on a PROCESSED Fulfil PO (processing / done) is an issue Fulfil can't auto-fix — flag it, and offer
         // an "ERP drift approved" tick that removes the action. An approval lapses (drift shows again) if the lines change on either side.
         var locked=s.in_fulfil && /^(processing|done|received|cancel)/i.test(String(s.fulfil_state||''));
+        // v28.199 (Ben): a CLIENT PO (direct / B2B / key account) is never created from HORIZON (duplicate
+        // PO385 incident). Not linked by hand → always "Link Fulfil PO" (replaces Update lines / both / date and a reference-only "in sync": PO373 matched its own duplicate).
+        // Manually linked → a link badge (Fulfil owns a sales-order PO's lines; the server refuses a push to one).
+        if(s.client_po && s.fulfil_link_manual){ el.innerHTML='<a class="tool-badge bg-green" href="'+esc(s.fulfil_url||'#')+'" target="_blank" rel="noopener" style="text-decoration:none" title="linked by hand to Fulfil '+esc(s.fulfil_link_ref||'')+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'. Client PO: created in Fulfil from the sales order, never pushed from HORIZON.">🔗 '+esc(s.fulfil_link_ref||'Fulfil')+' ↗</a> <a class="po-flink tiny" data-po="'+esc(po)+'" style="cursor:pointer;color:var(--muted);text-decoration:underline" title="change the linked Fulfil PO">change</a>'; return; }
+        if(s.client_po){ el.innerHTML='<button class="po-flink tool-badge bg-amber" data-po="'+esc(po)+'" style="'+estyle+'" title="Client PO: Fulfil creates it from the sales order, so HORIZON never creates it. Find its Fulfil PO and link it.">🔗 Link Fulfil PO</button>'; return; }
         if(linesPending && s.erp_drift_approved){ el.innerHTML='<span class="tool-badge bg-neutral" title="lines drift signed off by '+esc(s.erp_drift_approved_by||'—')+' on '+esc(s.erp_drift_approved_at||'')+' — '+lineTip+'">✓ drift approved</span> <a class="po-drift-undo tiny" data-po="'+esc(po)+'" style="cursor:pointer;color:var(--muted);text-decoration:underline" title="remove the sign-off">undo</a>'+(datePending?' <button class="po-fpush tool-badge bg-amber" data-po="'+esc(po)+'" data-fup="date" style="'+estyle+'" title="'+dateTip+'">Update date</button>':''); return; }
         if(linesPending && locked){ el.innerHTML='<button class="po-fpush tool-badge bg-red" data-po="'+esc(po)+'" data-fup="'+(datePending?'both':'lines')+'" style="'+estyle+'" title="Fulfil PO is '+esc(s.fulfil_state)+' — it will not accept a line push. '+lineTip+(s.erp_drift_stale?'. A previous approval lapsed because the lines changed.':'')+'">⚠ ERP drift'+(s.erp_drift_stale?' (re-check)':'')+'</button>'; return; }   // v28.066: removed the "ERP drift approved" checkbox (Ben)
         if(linesPending && datePending) el.innerHTML='<button class="po-fpush tool-badge bg-purple" data-po="'+esc(po)+'" data-fup="both" style="'+estyle+'" title="'+lineTip+'; also '+dateTip.toLowerCase()+'">Update both</button>';
@@ -3661,6 +3716,7 @@
       // v27.888 (Ben): under the PLAN button — a link straight to this PO's record in Fulfil (only once the PO exists there).
       document.querySelectorAll('#sup-grid .po-fulfil-link[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; el.innerHTML=(s&&s.fulfil_url)?'<a href="'+esc(s.fulfil_url)+'" target="_blank" rel="noopener" title="Open this PO in Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'" style="font-size:9px;font-weight:700;color:var(--blue);text-decoration:underline;letter-spacing:.03em">Fulfil ↗</a>':''; });
       document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ erpUploadInert(b.dataset.po, false, 'fulfil', b.dataset.fup||''); }; });
+      document.querySelectorAll('#sup-grid .po-flink').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ fulfilPoPicker(b.dataset.po, function(){ fillErpFulfil(); }); }; });   // v28.199 (Ben)
       // v28.007: ERP drift approved tick / undo
       var _driftSet=function(po,approved,el){ if(el)el.disabled=true; fetch('/api/supply/po/'+encodeURIComponent(po)+'/erp-drift-approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:approved,by:(ME&&ME.email)||''})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert(j.error); if(el)el.disabled=false; return; } fillErpFulfil(); }).catch(function(e){ alert('Could not save: '+(e.message||e)); if(el)el.disabled=false; }); };
       document.querySelectorAll('#sup-grid .po-drift-ok').forEach(function(cb){ if(cb._b)return; cb._b=1; cb.onchange=function(){ if(!cb.checked)return; if(!confirm('Approve the ERP drift on '+cb.dataset.po+'?\n\nThe Fulfil PO will stay different from Horizon. This removes the action until the lines change again.')){ cb.checked=false; return; } _driftSet(cb.dataset.po,true,cb); }; });
@@ -3678,6 +3734,9 @@
     // a date drift directly from grid-status (fulfil requested delivery differs from this PO's completion date).
     var _gs=(window._erpGridStatus&&window._erpGridStatus[po])||null;
     var _gsDateDrift=!!(_gs && _gs.push_req_delivery && String(_gs.push_req_delivery)!==String(_gs.fulfil_req_delivery||''));
+    // v28.199 (Ben): a client PO with no manual Fulfil link gets "Link Fulfil PO" in place of the create/update push (server refuses the create anyway)
+    var _cli=_gs?!!_gs.client_po:(String(_r.country||_r.country_code||'').toUpperCase()==='DIRECT'||/direct to client|b2b jlew|b2b next/i.test(_r.branch||'')||!!_r.dtc_key_account);
+    var _cliLink=_cli && !(_gs && _gs.fulfil_link_manual);
     var datePending=(fup==='date'||fup==='both'||_gsDateDrift);
     var showLines=(fup!=='date'||forceFull), showDate=datePending;   // forceFull (Push full) always offers the lines override
     var manualBlk=showLines
@@ -3691,7 +3750,8 @@
       +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px;display:flex;flex-direction:column;gap:8px">'
         +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:var(--pos);color:#fff;border-color:#0b6">📅 Update '+EN+' Date</button>'
             +(erp==='fulfil'?' <span class="mut tiny">Fulfil requested delivery: <b>'+(_gs&&_gs.fulfil_req_delivery?fd(_gs.fulfil_req_delivery):'—')+'</b> &rarr; <b>'+(_gs&&_gs.push_req_delivery?fd(_gs.push_req_delivery):(_r.checkin?fd(_r.checkin):'—'))+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':' <span class="mut tiny">'+EN+' EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>'):'')
-        +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:var(--pos);color:#fff;border-color:#0a8">📦 Update / Create '+EN+' PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the '+EN+' PO, or creates it if not in '+EN+' — price = approved supplier final cost, else standard (live write)</span></div>':'')
+        +((showLines&&_cliLink)?'<div><button class="save-btn" id="erp-flink" style="background:var(--amber);color:#fff;border-color:var(--amber)">🔗 Link Fulfil PO</button> <span class="mut tiny">client PO: Fulfil creates it from the sales order, so HORIZON never creates it. Find it in Fulfil and link it (read only).</span></div>':'')
+        +((showLines&&!_cliLink)?'<div><button class="save-btn" id="erp-cin7-lines" style="background:var(--pos);color:#fff;border-color:#0a8">📦 Update / Create '+EN+' PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the '+EN+' PO, or creates it if not in '+EN+' — price = approved supplier final cost, else standard (live write)</span></div>':'')
       +'</div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div>'
       +'<div style="margin-top:10px;text-align:right"><button class="save-btn light" id="erp-x">Close</button></div></div>';
@@ -3731,6 +3791,7 @@
         invalidateDerived(); delete cache['purchase-orders']; try{fillErpFulfil();}catch(e){}   // v27.777 (Ben): refresh ERP status SILENTLY — no full-section re-render; drift flags recompute on next natural render (cache cleared)
       }).catch(function(e){ msg.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; }); };
     // #14b — push SKU / qty / price line items to Cin7 (price = approved supplier final, else standard)
+    var _flBtn=bg.querySelector('#erp-flink'); if(_flBtn)_flBtn.onclick=function(){ bg.remove(); fulfilPoPicker(po,function(){ try{fillErpFulfil();}catch(e){} }); };   // v28.199 (Ben)
     var _clBtn=bg.querySelector('#erp-cin7-lines'); if(_clBtn)_clBtn.onclick=function(){
       var comp=(poBy[po]||{}).checkin||'';
       if(_clBtn.disabled)return;   // v28.151 (review D2): in flight, ignore repeat clicks (server also refuses a concurrent push per PO)
@@ -3738,7 +3799,10 @@
       msg.textContent='Sending to '+EN+'…'; _clBtn.disabled=true;
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines'+_eq,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         _clBtn.disabled=false;
-        if(j&&j.error){ msg.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'+cin7TraceHtml(j.cin7_trace); return; }
+        if(j&&j.error){ msg.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'+cin7TraceHtml(j.cin7_trace)
+          +((j.code==='FULFIL_CREATE_REFUSED')?'<div style="margin-top:6px"><button class="save-btn" id="erp-flink2">🔗 Link Fulfil PO</button></div>':'');   // v28.199 guard refusal → offer the link picker
+          var _fl2=bg.querySelector('#erp-flink2'); if(_fl2)_fl2.onclick=function(){ bg.remove(); fulfilPoPicker(po,function(){ try{fillErpFulfil();}catch(e){} }); };
+          return; }
         var _tc=(Number(j.total_cost)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
         msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ '+EN+' PO '+((j.mode==='created'||j.action==='create')?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')
           +'<div style="margin-top:4px;font-weight:700">TOTAL COST: '+esc(j.currency||'')+' '+_tc+' &nbsp;·&nbsp; TOTAL UNITS: '+units(j.total_units)+'</div>'

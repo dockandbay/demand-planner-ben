@@ -3288,7 +3288,8 @@ async function fulfilFetchCfg(cfg, method, path, body) {
 // find a Fulfil purchase order id by its reference (PO number); null if not present
 async function fulfilFindPO(reference) {
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[[FULFIL_MAP.ref, '=', reference]], 0, 1, null, ['id', FULFIL_MAP.ref]]);
-  return (Array.isArray(rows) && rows[0]) ? rows[0].id : null;
+  if (!Array.isArray(rows)) throw fulfilLookupFailed('PO by reference', new Error('unexpected response'));   // v28.199 (Ben): a malformed answer is never "not found"
+  return rows[0] ? rows[0].id : null;
 }
 // v27.840 (Ben): a purchase.purchase is only line-editable in draft/quotation. To change lines on a CONFIRMED PO we must
 // revert it to draft, edit, then confirm again. Read the current workflow state so the push can decide.
@@ -3423,6 +3424,107 @@ async function _withXactLock(key, busy, fn) {   // shared by the Fulfil push (D2
 function withFulfilPushLock(po, fn) {
   return _withXactLock('fulfil_push:' + po, { code: 'FULFIL_PUSH_BUSY', message: 'A Fulfil push for ' + po + ' is already in progress. Wait for it to finish, then refresh before pushing again.' }, fn);
 }
+// ═══ v28.199 (Ben): URGENT Fulfil CREATE GUARD ═══════════════════════════════════════════════════════════════════════
+// Live incident 05-Oct: HORIZON PO373 (Direct to Client, SO56447) had no Fulfil mirror row (the mirror is keyed on the
+// Fulfil `reference`, and SO-generated POs carry the client's SO reference), so the push looked "absent" and CREATED a
+// duplicate Fulfil PO385 (id 542, XR Textile) next to the real SO-generated Fulfil PO373 (id 530, Lixin, dropship).
+// Rules (checked BEFORE any write, and before the dry-run return so a preview shows the refusal too):
+//  1. A client PO (FULFIL_CLIENT_PO_SQL) is NEVER created in Fulfil. It must be linked to its existing Fulfil PO
+//     (PO grid / drawer "Link Fulfil PO" picker, po_links system 'fulfil' found_by 'manual').
+//  2. Any PO: no create when Fulfil already has a non-cancelled PO whose number = the HORIZON PO / erp_po, whose
+//     reference = one of the PO's refs (sales_order_ref, client_po_ref, the PO itself as a number), or which is
+//     sale-linked (purchase.request chain) to a sales order whose number/reference is one of those refs.
+//  3. A failed or malformed Fulfil lookup is NEVER "not found": the push stops (FULFIL_LOOKUP_FAILED, 503).
+//  4. A manual link is the push target (before the reference lookup). A push never rewrites the lines of a Fulfil PO that
+//     is sale-linked (type dropship or sales[] set): Fulfil owns those lines (refused with 409).
+//  5. A client PO found only by reference is refused when Fulfil has another candidate PO for it (ambiguous: link it).
+// Every refusal logs a 'sanity' row in the App health log (path fulfil:create_refused:<po>).
+// Client PO = the v28.187 client-bound set: branch country DIRECT, a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a
+// key-account PO. NOT "client set" (live stock POs use client for SAMPLES / sample-sale donations into 3PL branches) and NOT
+// "sales_order_ref set" (stock FBA POs carry FBA shipment ids / crossdock refs there). Rule 2 still checks any PO's refs.
+const FULFIL_CLIENT_PO_SQL = (p, b) => `(upper(coalesce(${b}.country_code,''))='DIRECT' OR lower(coalesce(${p}.branch,'')) ~ '(direct to client|b2b jlew|b2b next)'
+  OR coalesce(${p}.dtc_key_account,false))`;
+function fulfilLookupFailed(what, e) {
+  const err = new Error('Fulfil lookup failed (' + what + '): ' + ((e && e.message) || 'no answer') + '. Nothing was sent to Fulfil; try again in a minute.');
+  err.code = 'FULFIL_LOOKUP_FAILED'; err.status = 503; return err;
+}
+// search_read that throws on ANY failure or a non-list answer (fulfilFindPO used to read a non-list as "not found").
+async function fulfilStrictSearch(model, domain, fields, limit, what) {
+  let rows;
+  try { rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, 0, limit || 100, null, fields]); }
+  catch (e) { if (e && e.code === 'NO_FULFIL_CFG') throw e; throw fulfilLookupFailed(what || model, e); }
+  if (!Array.isArray(rows)) throw fulfilLookupFailed(what || model, new Error('unexpected response'));
+  return rows;
+}
+const FULFIL_GUARD_PO_FIELDS = ['id', 'number', 'reference', 'state', 'type', 'sales', 'party.name', 'last_modification'];
+const _fulfilSoLinked = (p) => !!p && (String(p.type || '') === 'dropship' || (Array.isArray(p.sales) && p.sales.length > 0));
+// The HORIZON side of the guard: client flag + every ref the PO is known by + its manual Fulfil link.
+async function fulfilGuardCtx(po) {
+  const r = (await pool.query(`SELECT po.po, coalesce(po.erp_po,'') erp_po, coalesce(po.sales_order_ref,'') sales_order_ref, coalesce(po.client_po_ref,'') client_po_ref,
+      ${FULFIL_CLIENT_PO_SQL('po', 'b')} client_po,
+      (SELECT json_build_object('id', l.external_id, 'ref', l.external_ref, 'by', l.found_by) FROM planner.po_links l
+        WHERE l.po=po.po AND l.system='fulfil' AND l.status='linked' AND l.found_by='manual' AND coalesce(l.external_id,'') ~ '^[0-9]+$') manual_link
+    FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch WHERE po.po=$1`, [po])).rows[0];
+  if (!r) return { po, client_po: false, refs: [], numbers: [po], manual_link: null };
+  const refs = new Set();
+  [r.sales_order_ref, r.client_po_ref].forEach(s => String(s || '').split(/\s*[,;\/]\s*|\s+and\s+|\s{2,}/i).forEach(x => { const t = String(x || '').trim(); if (t.length >= 3) { refs.add(t); refs.add(_dtcNorm(t)); } }));
+  const numbers = Array.from(new Set([po, String(r.erp_po || '').trim()].filter(Boolean)));
+  return { po, client_po: !!r.client_po, refs: Array.from(refs).slice(0, 60), numbers, manual_link: r.manual_link || null,
+    sales_order_ref: r.sales_order_ref || null, client_po_ref: r.client_po_ref || null };
+}
+// Every non-cancelled Fulfil PO that already looks like this HORIZON PO (read only). Throws FULFIL_LOOKUP_FAILED.
+async function fulfilExistingCandidates(ctx) {
+  const found = new Map();
+  const add = (rows, via) => rows.forEach(p => { if (!p || p.id == null || String(p.state || '') === 'cancelled' || String(p.state || '') === 'cancel') return;
+    const c = found.get(p.id); if (c) { if (!c.via.includes(via)) c.via.push(via); } else found.set(p.id, Object.assign({}, p, { via: [via] })); });
+  add(await fulfilStrictSearch(FULFIL_MAP.poModel, [['number', 'in', ctx.numbers]], FULFIL_GUARD_PO_FIELDS, 50, 'PO number'), 'number');
+  if (ctx.refs.length) {
+    add(await fulfilStrictSearch(FULFIL_MAP.poModel, [['reference', 'in', ctx.refs]], FULFIL_GUARD_PO_FIELDS, 200, 'PO reference'), 'reference');
+    const sales = await fulfilStrictSearch('sale.sale', ['OR', [['number', 'in', ctx.refs]], [['reference', 'in', ctx.refs]]], ['id', 'number', 'reference'], 50, 'sales order');
+    if (sales.length) {
+      const reqs = await fulfilStrictSearch('purchase.request', [['sale_lines.sale', 'in', sales.map(s => s.id)], ['purchase_line', '!=', null]], ['id', 'purchase_line.purchase'], 500, 'purchase requests');
+      const pids = Array.from(new Set(reqs.map(q => q['purchase_line.purchase']).filter(Boolean)));
+      if (pids.length) add(await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', pids]], FULFIL_GUARD_PO_FIELDS, 200, 'sale-linked POs'), 'sales order ' + sales.map(s => s.number).join(', '));
+    }
+  }
+  return Array.from(found.values());
+}
+function fulfilGuardRefuse(po, reason, message, meta) {
+  hzHealthEvt('sanity', 'fulfil:create_refused:' + po, { path: 'fulfil:create_refused:' + po, message: po + ': ' + message, meta: Object.assign({ po: String(po), reason, last_seen: new Date().toISOString() }, meta || {}) });
+  hzHealthFlush(true);
+  console.warn('[fulfil guard] ' + po + ' refused (' + reason + '): ' + message);
+  const e = new Error(message); e.code = 'FULFIL_CREATE_REFUSED'; e.status = 409; e.reason = reason; e.candidates = (meta && meta.candidates) || []; return e;
+}
+const _fgDesc = (c) => (c.number || ('id ' + c.id)) + (c['party.name'] ? ' (' + c['party.name'] + ', ' + (c.state || '?') + ')' : '');
+// Resolve the push target and apply the guard. Returns { fulfilId, by } (fulfilId null = a create is allowed) or throws.
+async function fulfilPushTarget(po) {
+  const ctx = await fulfilGuardCtx(po);
+  if (ctx.manual_link) {   // explicit link: the target, whatever its reference
+    const id = Number(ctx.manual_link.id);
+    const rows = await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', '=', id]], FULFIL_GUARD_PO_FIELDS, 1, 'linked Fulfil PO');
+    const t = rows[0];
+    if (!t || /^cancel/.test(String(t.state || ''))) throw fulfilGuardRefuse(po, 'link_missing', 'The Fulfil PO linked to ' + po + ' (id ' + id + ') is ' + (t ? 'cancelled' : 'not in Fulfil') + '. Link the right Fulfil PO instead; nothing was created.', { fulfil_id: id });
+    if (_fulfilSoLinked(t)) throw fulfilGuardRefuse(po, 'so_linked', po + ' is linked to Fulfil ' + _fgDesc(t) + ', which was generated from a sales order: Fulfil owns its lines. Change them in Fulfil (or on the sales order); nothing was sent.', { fulfil_id: id });
+    return { fulfilId: id, by: 'manual', ctx };
+  }
+  const byRef = await fulfilStrictSearch(FULFIL_MAP.poModel, [[FULFIL_MAP.ref, '=', po]], FULFIL_GUARD_PO_FIELDS, 5, 'PO by reference');
+  const live = byRef.filter(p => !/^cancel/.test(String(p.state || '')));
+  const target = live[0] || byRef[0] || null;
+  if (target && _fulfilSoLinked(target)) throw fulfilGuardRefuse(po, 'so_linked', 'Fulfil ' + _fgDesc(target) + ' (reference ' + po + ') was generated from a sales order: Fulfil owns its lines. Nothing was sent.', { fulfil_id: target.id });
+  if (target && !ctx.client_po) return { fulfilId: target.id, by: 'reference', ctx };   // stock PO already in Fulfil: update, unchanged
+  const cands = await fulfilExistingCandidates(ctx);
+  const others = cands.filter(c => !target || c.id !== target.id);
+  const so = (others.find(c => c.via.some(v => /^sales order/.test(v))) || {}).via;
+  const soTxt = so ? so.filter(v => /^sales order/.test(v)).map(v => v.replace(/^sales order /, '')).join(', ') : (ctx.sales_order_ref || null);
+  const candMeta = others.slice(0, 10).map(c => ({ id: c.id, number: c.number, reference: c.reference, state: c.state, supplier: c['party.name'] || null, via: c.via }));
+  if (target) {   // client PO found by reference only
+    if (others.length) throw fulfilGuardRefuse(po, 'ambiguous', po + ' matches more than one Fulfil PO (' + [target].concat(others).slice(0, 6).map(_fgDesc).join('; ') + '). Link the right one with "Link Fulfil PO"; nothing was sent.', { fulfil_id: target.id, candidates: candMeta });
+    return { fulfilId: target.id, by: 'reference', ctx };
+  }
+  if (others.length) throw fulfilGuardRefuse(po, 'exists_in_fulfil', 'This PO looks like it already exists in Fulfil' + (soTxt ? ' (from sales order ' + soTxt + ')' : '') + ': ' + others.slice(0, 6).map(_fgDesc).join('; ') + '. Link it instead of creating a new one.', { candidates: candMeta });
+  if (ctx.client_po) throw fulfilGuardRefuse(po, 'client_unlinked', po + ' is a client (direct / B2B / key-account) PO' + (ctx.sales_order_ref ? ' for ' + ctx.sales_order_ref : '') + ' and is not linked to a Fulfil PO. Client POs are created in Fulfil from the sales order, never from HORIZON: use "Link Fulfil PO". Nothing was created.', { candidates: [] });
+  return { fulfilId: null, by: null, ctx };
+}
 // push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
 // data the Cin7 push uses. Resolves supplier/currency/warehouse/products to Fulfil ids first (read-only) and aborts
 // with a clear message if any are missing — so a create is never attempted with an unresolved SKU/supplier.
@@ -3461,7 +3563,10 @@ async function fulfilPushLines(po, completion) {
   const curCode = supRow.c || 'USD';
   if (!lines.length) return { ok: false, error: 'PO ' + po + ' has no line quantities to push.' };
 
-  const fulfilId = await fulfilFindPO(po);                          // needs keys; throws NO_FULFIL_CFG when absent
+  // v28.199 (Ben): URGENT create guard. Manual link first, then reference; a client PO is never created, an existing
+  // Fulfil PO (number / SO ref / sale-linked) blocks a create, and a failed lookup stops the push (never "not found").
+  const _target = await fulfilPushTarget(po);                       // needs keys; throws NO_FULFIL_CFG / FULFIL_LOOKUP_FAILED / FULFIL_CREATE_REFUSED
+  const fulfilId = _target.fulfilId;
   // Prefer the Fulfil party id stored on the supplier record (planner.suppliers.fulfil_id, manual entry) — this is the
   // authoritative link and skips the name-lookup API call. Note: it's env-specific (sandbox party id ≠ live id), so it
   // must be re-entered at go-live. Falls back to a name search when the field is blank.
@@ -3530,6 +3635,12 @@ async function fulfilPushLines(po, completion) {
   const _totCost = lines.reduce((a, l) => a + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
   const _fCfg = fulfilConfigFor(_activeEnv);
   const _fulfilUrl = (fid) => (fid && _fCfg.subdomain) ? ('https://' + _fCfg.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fid + '?window_name=default') : null;
+  // v28.199 (Ben): dev write stub (HZ_FULFIL_WRITE_STUB=1, ignored on Vercel): the guard + preflight ran for real (reads
+  // only); return what WOULD be written and stop here, so a push can be tested against LIVE Fulfil with no write at all.
+  if (sovStubOn()) {
+    return { ok: problems.length === 0, stub: true, action: fulfilId ? 'update' : 'create', fulfil_id: fulfilId, target_by: _target.by, total_units: _totUnits, total_cost: _totCost, currency: curCode,
+      note: 'HZ_FULFIL_WRITE_STUB=1: nothing was sent to Fulfil. Would ' + (fulfilId ? 'update Fulfil PO id ' + fulfilId : 'create a new Fulfil PO') + '.', resolution, problems, would_send: headerPayload };
+  }
   if (!FULFIL_LINES_SEND || _liveBlocked) {
     return { ok: problems.length === 0, dry_run: true, live_blocked: _liveBlocked, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId),
       note: _liveBlocked ? 'LIVE Fulfil writes are DISABLED (go-live safety gate) — set FULFIL_LIVE_WRITES=true to enable real ' + (fulfilId ? 'updates' : 'creates') + '. Payload below is what would be sent.'
@@ -3578,7 +3689,8 @@ async function fulfilPushLines(po, completion) {
       problems: _upProblems, reconfirm_failed: _upProblems.length > 0 };
   }
   // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
-  const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
+  if (!_target || _target.fulfilId || !_target.ctx || _target.ctx.client_po) throw fulfilGuardRefuse(po, 'client_unlinked', 'Create blocked by the v28.199 guard (client PO or unresolved target). Nothing was created.');   // v28.199 (Ben): belt and braces at the only create call
+  const created =await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
   const newId = Array.isArray(created) ? (created[0] && (typeof created[0] === 'object' ? created[0].id : created[0])) : (created && created.id);
   await fulfilUpsertMetafield(newId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (definition pre-flighted above)
   try { await fulfilMirrorOne(newId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738
@@ -3688,7 +3800,9 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
   try {
     const _gsCfg = fulfilConfigFor(await activeFulfilEnv());   // v27.888 (Ben): deep link per PO to its Fulfil record
     const _gsUrl = (fid) => (fid && _gsCfg.subdomain) ? ('https://' + _gsCfg.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fid + '?window_name=default') : null;
-    const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required, m.fulfil_id,
+    const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required, coalesce(CASE WHEN lk.po IS NOT NULL THEN lk.external_id::bigint END, m.fulfil_id) fulfil_id,
+        -- v28.199 (Ben): client PO flag (never created from HORIZON) + its manual Fulfil link (the push target; the mirror row is joined by that id)
+        ${FULFIL_CLIENT_PO_SQL('po', 'b')} client_po, (lk.po IS NOT NULL) fulfil_link_manual, lk.external_ref fulfil_link_ref,
         (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, coalesce(m.line_count,0) fulfil_lines,
         -- v28.007 (Ben): "ERP drift approved" sign-off (mig 305) + the signature of the lines it covered; a later change on either side lapses it
         to_char(po.erp_drift_approved_at,'YYYY-MM-DD HH24:MI') erp_drift_approved_at, po.erp_drift_approved_by, po.erp_drift_approved_sig,
@@ -3704,13 +3818,16 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
         (CASE WHEN m.po IS NULL THEN (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)
               ELSE (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0
                       AND coalesce(l.qty,0) IS DISTINCT FROM coalesce((SELECT (x->>'qty')::numeric FROM jsonb_array_elements(m.lines) x WHERE x->>'sku'=l.sku LIMIT 1),0)) END)::int fulfil_lines_pending
-      FROM planner.purchase_orders po LEFT JOIN planner.fulfil_purchase_orders m ON m.po=po.po
+      FROM planner.purchase_orders po
+      LEFT JOIN planner.po_links lk ON lk.po=po.po AND lk.system='fulfil' AND lk.status='linked' AND lk.found_by='manual' AND coalesce(lk.external_id,'') ~ '^[0-9]+$'
+      LEFT JOIN planner.fulfil_purchase_orders m ON (CASE WHEN lk.po IS NOT NULL THEN m.fulfil_id = lk.external_id::bigint ELSE m.po=po.po END)
       LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
       LEFT JOIN planner.branches b ON b.name=po.branch
       LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
     const _chk = await fulfilCompletionMap();   // v27.900 (Ben): the Fulfil date target is the COMPLETION date
     const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_id: r.fulfil_id, fulfil_url: _gsUrl(r.fulfil_id), fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: _chk[r.po] || r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required,
+      client_po: !!r.client_po, fulfil_link_manual: !!r.fulfil_link_manual, fulfil_link_ref: r.fulfil_link_ref || null,   // v28.199 (Ben)
       // v28.007: approved = a sign-off exists AND the lines have not changed since (signature match); stale = signed off, but changed since
       erp_drift_approved: !!(r.erp_drift_approved_at && r.erp_drift_approved_sig && r.erp_drift_approved_sig === r.drift_sig),
       erp_drift_stale: !!(r.erp_drift_approved_at && r.erp_drift_approved_sig && r.erp_drift_approved_sig !== r.drift_sig),
@@ -5606,6 +5723,7 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
         // Don't clobber a manual override with an auto 'unknown'
         const prev = cached.find(c => c.system === sys);
         if (prev && prev.found_by === 'manual' && v.status !== 'linked') continue;
+        if (sys === 'fulfil' && prev && prev.found_by === 'manual') continue;   // v28.199 (Ben): a manual Fulfil link is the push target; the mirror (reference) guess never overwrites it (PO373 was auto-linked to the duplicate PO385)
         // v28.183 (Ben): a voided link waiting for a choice is not overwritten by a guess between several bills (or by nothing)
         if (sys === 'xero' && prev && prev.status === 'action' && String(prev.note || '').startsWith(XB_VOID_NOTE) && (v.status !== 'linked' || v.multi)) continue;
         if (sys === 'xero' && prev && prev.found_by === 'auto-heal' && prev.external_id === v.external_id) continue;   // keep the heal's audit note
@@ -5643,6 +5761,23 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
       const bs = (await pool.query(`SELECT status FROM planner.xero_bills WHERE invoice_id=$1`, [eid])).rows[0];
       if (bs && xbDead(bs.status)) return res.status(409).json({ error: 'That Xero bill is ' + String(bs.status).toUpperCase() + ': choose a live bill' });
     }
+    if (sys === 'fulfil' && eid) {   // v28.199 (Ben): a Fulfil link is the push target, so it must be a real, non-cancelled Fulfil PO id (read only check)
+      if (!/^[0-9]+$/.test(eid)) return res.status(400).json({ error: 'Fulfil link needs the numeric Fulfil PO id (use "Link Fulfil PO" to search)' });
+      let fp;
+      try { fp = (await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', '=', Number(eid)]], ['id', 'number', 'reference', 'state', 'party.name'], 1, 'Fulfil PO'))[0]; }
+      catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 503).json({ error: e.message }); }
+      if (!fp) return res.status(404).json({ error: 'Fulfil PO id ' + eid + ' not found in Fulfil' });
+      if (/^cancel/.test(String(fp.state || ''))) return res.status(409).json({ error: 'Fulfil ' + (fp.number || eid) + ' is cancelled: choose a live PO' });
+      const fc = fulfilConfigFor(await activeFulfilEnv());
+      const furl = fc.subdomain ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fp.id + '?window_name=default') : url;
+      await pool.query(
+        `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
+         VALUES ($1,'fulfil',$2,$3,$4,'linked',$5,'manual',now(),now())
+         ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, found_by='manual', updated_at=now()`,
+        [po, String(fp.id), fp.number || fp.reference || String(fp.id), furl, ('manual link: ' + (fp.number || '') + ' ' + (fp['party.name'] || '') + ' (' + (fp.state || '') + ')').trim()]);
+      logPoChange(po, 'Linked records', 'Fulfil PO linked: ' + (fp.number || fp.id) + ' (id ' + fp.id + ', ' + (fp['party.name'] || '') + ')', authUser(req));
+      return res.json({ ok: true, fulfil_id: fp.id, number: fp.number || null });
+    }
     await pool.query(
       `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,'linked','manual link','manual',now(),now())
@@ -5652,6 +5787,49 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// v28.199 (Ben): "Link Fulfil PO" picker. READ ONLY against Fulfil (search_read only). With ?po= it first lists the
+// Fulfil POs that already look like this HORIZON PO (same number, SO / client ref as reference, sale-linked to that SO:
+// the guard's own candidate search, marked `suggested`); ?q= then searches number, reference, supplier and the sales
+// order number / reference. Each row: number, supplier, state, type, line count, units, last modification, and the
+// HORIZON PO(s) already pointing at it (po_links fulfil or the mirror), so a link can't silently double up.
+app.get('/api/supply/fulfil/po-search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().slice(0, 80), po = String(req.query.po || '').trim();
+    const found = new Map();
+    const add = (rows, tag, sugg) => rows.forEach(p => { if (!p || p.id == null) return; const c = found.get(p.id);
+      if (c) { if (tag && !c.via.includes(tag)) c.via.push(tag); if (sugg) c.suggested = true; } else found.set(p.id, Object.assign({}, p, { via: tag ? [tag] : [], suggested: !!sugg })); });
+    let ctx = null;
+    if (po) { ctx = await fulfilGuardCtx(po); (await fulfilExistingCandidates(ctx)).forEach(c => add([c], c.via.join(', '), true)); }
+    if (q.length >= 2) {
+      const pat = '%' + q.replace(/([\\%_])/g, '\\$1') + '%';
+      add(await fulfilStrictSearch(FULFIL_MAP.poModel, ['OR', [['number', 'ilike', pat]], [['reference', 'ilike', pat]], [['party.name', 'ilike', pat]]], FULFIL_GUARD_PO_FIELDS, 40, 'PO search'), 'search');
+      const sales = await fulfilStrictSearch('sale.sale', ['OR', [['number', 'ilike', pat]], [['reference', 'ilike', pat]]], ['id', 'number'], 20, 'sales order search');
+      if (sales.length) {
+        const reqs = await fulfilStrictSearch('purchase.request', [['sale_lines.sale', 'in', sales.map(s => s.id)], ['purchase_line', '!=', null]], ['purchase_line.purchase'], 500, 'purchase requests');
+        const pids = Array.from(new Set(reqs.map(r => r['purchase_line.purchase']).filter(Boolean))).slice(0, 60);
+        if (pids.length) add(await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', pids]], FULFIL_GUARD_PO_FIELDS, 60, 'sale-linked POs'), 'sales order ' + sales.map(s => s.number).slice(0, 4).join(', '));
+      }
+    }
+    const list = Array.from(found.values()).slice(0, 80);
+    const ids = list.map(p => p.id);
+    const agg = {};
+    if (ids.length) (await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', 'in', ids], ['product', '!=', null]], ['purchase', 'quantity']))
+      .forEach(l => { const a = agg[l.purchase] || (agg[l.purchase] = { n: 0, u: 0 }); a.n++; a.u += Number(_fulfilNum(l.quantity)) || 0; });
+    const linked = {};
+    if (ids.length) (await pool.query(`SELECT external_id::bigint fid, po, found_by FROM planner.po_links WHERE system='fulfil' AND status='linked' AND coalesce(external_id,'') ~ '^[0-9]+$' AND external_id::bigint = ANY($1::bigint[])
+        UNION SELECT m.fulfil_id, m.po, 'mirror' FROM planner.fulfil_purchase_orders m JOIN planner.purchase_orders p ON p.po=m.po WHERE m.fulfil_id = ANY($1::bigint[])`, [ids])).rows
+      .forEach(r => { const k = String(r.fid); (linked[k] = linked[k] || []); if (!linked[k].some(x => x.po === r.po)) linked[k].push({ po: r.po, by: r.found_by }); });
+    const fc = fulfilConfigFor(await activeFulfilEnv());
+    const cur = ctx && ctx.manual_link ? String(ctx.manual_link.id) : null;
+    const rows = list.map(p => ({ id: p.id, number: p.number || null, reference: p.reference || null, supplier: p['party.name'] || null, state: p.state || null, type: p.type || null,
+      so_linked: _fulfilSoLinked(p), line_count: (agg[p.id] || {}).n || 0, units: (agg[p.id] || {}).u || 0, last_modification: fulfilUnwrap(p.last_modification) || null,
+      last_modification_at: (p.last_modification && p.last_modification.iso_string) || null,
+      url: fc.subdomain ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + p.id + '?window_name=default') : null,
+      via: p.via, suggested: !!p.suggested, current: cur === String(p.id), linked_pos: linked[String(p.id)] || [] }))
+      .sort((a, b) => (b.current - a.current) || (b.suggested - a.suggested) || (/^cancel/.test(a.state || '') - /^cancel/.test(b.state || '')) || String(b.number || '').localeCompare(String(a.number || ''), undefined, { numeric: true }));
+    res.set('Cache-Control', 'no-store').json({ ok: true, po: po || null, client_po: ctx ? ctx.client_po : null, sales_order_ref: ctx ? ctx.sales_order_ref : null, current: cur, env: fc.env, rows });
+  } catch (e) { if (e.code !== 'FULFIL_LOOKUP_FAILED' && e.code !== 'NO_FULFIL_CFG') log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_LOOKUP_FAILED' ? 503 : 500).json({ error: e.message }); }
+});
 // v28.172 (Ben): search Xero bills to (re)link a PO (PO drawer ▸ MASTER DATA & DOCS ▸ Linked records ▸ change). Reads the
 // LOCAL planner.xero_bills cache (kept fresh by syncXeroBills). Matches bill number / reference / supplier;
 // each hit says which PO(s) it is already linked to, so a relink can't silently double-link a bill.
@@ -17414,7 +17592,12 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   const _erpLines = (req.query.erp === 'cin7' || req.query.erp === 'fulfil') ? req.query.erp : await activeErp();   // v27.741: ?erp= forces the target (2-button model)
   if (_erpLines === 'fulfil') {   // same process, Fulfil target (create-if-absent)
     try { return res.json(await withFulfilPushLock(po, () => fulfilPushLines(po, completion))); }   // v28.151 (review D2): per-PO single-flight
-    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_PUSH_BUSY' ? 409 : 502).json({ error: e.message }); }
+    catch (e) {
+      if (e.code === 'FULFIL_CREATE_REFUSED' || e.code === 'FULFIL_LOOKUP_FAILED') {   // v28.199 (Ben): create guard refusals
+        if (e.code === 'FULFIL_LOOKUP_FAILED') fulfilGuardRefuse(po, 'lookup_failed', e.message);   // health log only (the returned error is discarded)
+        return res.status(e.status || 409).json({ error: e.message, code: e.code, reason: e.reason || 'lookup_failed', candidates: e.candidates || [] });
+      }
+      return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_PUSH_BUSY' ? 409 : 502).json({ error: e.message }); }
   }
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
