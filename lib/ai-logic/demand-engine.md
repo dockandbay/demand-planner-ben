@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.182
+verified_version: v28.215
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -235,6 +235,7 @@ verified_version: v28.182
 ## ASP and revenue
 - Actual months use their own ASP (revenue / units). Future months use the same calendar month's ASP from the most recent prior year that has sales, x compounded logged price changes, capped at 1.2x the retail-derived ASP. No history at all: last actual month's ASP, then retail list ASP ex-tax (UK/EU /1.2, AU /1.1) x 0.95 (B2B x 0.5). (source: getASPraw, priceUpliftFactor)
 - Future months are then reduced by the ASP reduction % and by the discontinued discount % x the share of that month's units from discontinued SKUs (Config ▸ More settings). Revenue only; the buy plan never reads ASP. (source: getASP, aspAdjFactor)
+- The discontinued share is memoised per country|channel|sub-category (ASPADJ_MEMO). It is refreshed for the edited sub-category on a cell edit (refreshRow), fully on an ASP settings save and on a data reload, but NOT on every render (v28.215, matches prod v28.150.2). After a bulk forecast change (auto-smooth apply, undo, cell sheet) a sub-category with discontinued SKUs can show the previous discontinued share until the next reload. (source: aspDiscShare, _memoDropSubcat)
 
 ## Display basis and totals
 - Subcategory, category, grand-total and FY/half/quarter figures show EXPLODED units: masters + set boxes x BOM size. Forecast months scale the most recent same-month actual's set uplift (up to 3 years back) by forecast / that actual. SKU rows are not exploded. (source: expAct, expFc, subcatLySplit, periodTotX)

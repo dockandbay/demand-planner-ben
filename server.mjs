@@ -7192,7 +7192,7 @@ function flexportConfig() { const token = (process.env.FLEXPORT_API_TOKEN || pro
 async function flexportFetch(path) {
   const cfg = flexportConfig(); if (!cfg.present) { const e = new Error('Flexport not connected (set FLEXPORT_API_TOKEN)'); e.code = 503; throw e; }
   const url = /^https?:/.test(path) ? path : ('https://api.flexport.com' + path);
-  const r = await _fetchT(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } });
+  const r = await _fetchT(url, { headers: { 'Authorization': 'Bearer ' + cfg.token, 'Flexport-Version': '3', 'Accept': 'application/json' } }, 60000);   // v28.215 (Diviyaj v28.183.2): the paginated crawl takes 90-143s; one slow page over the 20s default aborted the whole import
   const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { raw: t }; }
   if (!r.ok) { const e = new Error('Flexport ' + r.status + ': ' + String((j && (j.message || (j.errors && JSON.stringify(j.errors)))) || t).slice(0, 200)); e.code = r.status; throw e; }
   return j;
@@ -10164,7 +10164,7 @@ app.post('/api/supply/manufacturing-notes', async (req, res) => {
 // initiator 'supplier' (portal) → routed to a CONFIG-managed internal list by context; link → planner.
 // initiator 'internal' (grid)   → that supplier's active portal users;                 link → portal.
 const PLANNER_URL = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '');
-const PORTAL_URL = (process.env.PORTAL_URL || 'https://suppliers.dockandbay.com/portal').replace(/\/$/, '');
+const PORTAL_URL = (process.env.PORTAL_URL || 'https://supplier.dockandbay.com/portal').replace(/\/$/, '');
 // v28.151 (review B5): supplier magic links are built from the fixed PORTAL_URL env when it is set, so a forged Host /
 // X-Forwarded-Host can no longer point a real supplier's sign-in link at another site. Unset (sandbox/local): request host, as before.
 function portalLinkBase(req) {
@@ -23976,7 +23976,7 @@ const HZ_CHECKS_SQL = `SELECT json_build_object(
   'sales_max', (SELECT to_char(max(month), 'YYYY-MM') FROM planner.sales_actuals),
   'sales_months', (SELECT coalesce(json_agg(x ORDER BY m), '[]') FROM (SELECT to_char(month, 'YYYY-MM') m, sum(units)::float8 u FROM planner.sales_actuals WHERE month >= (date_trunc('month', now()) - interval '14 months')::date GROUP BY 1) x),
   'inb', (SELECT json_build_object('n', count(*), 'units', coalesce(sum(quantity), 0)::float8, 'loaded', max(loaded_at)) FROM planner.inbound_shipments),
-  'nocat', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku ORDER BY sku))[1:8]) FROM planner.products WHERE in_planning_scope AND coalesce(nullif(trim(category_name_final), ''), trim(category), '') = ''),   // v28.169 (Ben): same category the app uses (category_name_final, else category); product_category is not refreshed by the n8n products sync, so it flagged 92 false positives
+  'nocat', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku ORDER BY sku))[1:8]) FROM planner.products WHERE in_planning_scope AND coalesce(nullif(trim(category_name_final), ''), trim(category), '') = ''),   -- v28.169 (Ben): same category the app uses (category_name_final, else category); product_category is not refreshed by the n8n products sync, so it flagged 92 false positives
   'neg', (SELECT json_build_object('n', count(*), 'ex', (array_agg(sku || ' @ ' || warehouse || ' = ' || available ORDER BY available))[1:8]) FROM planner.v_product_inventory WHERE available < 0),
   'metric', (SELECT coalesce(json_object_agg(path, json_build_object('v', (meta->>'value')::float8, 'ts', ts)), '{}') FROM (SELECT DISTINCT ON (path) path, meta, ts FROM planner.app_health_events WHERE kind = 'metric' AND source = 'server' ORDER BY path, ts DESC) m),
   'metric_today', (SELECT coalesce(json_agg(DISTINCT path), '[]') FROM planner.app_health_events WHERE kind = 'metric' AND source = 'server' AND ts >= date_trunc('day', now())),

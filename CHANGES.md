@@ -1,3 +1,13 @@
+## v28.215 (Ben, branch review-fixes-2026-10-05): mirror Diviyaj's live hotfixes + port-conflict fixes
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `vercel.json`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Mirrors live v28.183.1: the v28.169 nocat comment inside `HZ_CHECKS_SQL` was a JS `//` comment, so Postgres threw and `POST /api/cron/health-checks` returned 500 on every run. Now `--`. Verified on sandbox: the query runs, nocat = 15.
+- Mirrors live v28.183.2: `flexportFetch` uses a 60s timeout (was the 20s `_fetchT` default, which aborted the 90 to 143s paginated import). `POST /bookings` stays on 20s.
+- `vercel.json` `includeFiles` collapsed to two pdfjs globs (159 chars; Vercel rejects over 256, ours was 262).
+- `PORTAL_URL` code default is now `https://supplier.dockandbay.com/portal` (`suppliers.` had no DNS). Prod sets the env var, so no live change.
+- `ASPADJ_MEMO` is no longer reset in `render()` / `renderMain()` (matches prod v28.150.2, ~1.5s per Reports render). Still cleared on a cell edit (per sub-category), an ASP settings save and data reloads. Trade-off: after a bulk forecast change (auto-smooth apply, undo, cell sheet) a sub-category with discontinued SKUs can show the previous discontinued share in revenue until the next reload. Buy plan unaffected.
+
 ## v28.214 (Ben, branch review-fixes-2026-10-05): Prime Day inbound = shipped only + "arriving by" date
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
