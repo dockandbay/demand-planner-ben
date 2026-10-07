@@ -836,13 +836,52 @@ app.use((req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff')
 // v28.151 (review B5): JSON for an inline <script>: escapes < > U+2028 U+2029 so data can never close the tag (same rule G_JS used).
 function safeInlineJson(v) { return String(JSON.stringify(v)).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'); }
 function safeEq(got, want) { try { const a = Buffer.from(String(got || '')), b = Buffer.from(String(want || '')); return !!(a.length && b.length) && a.length === b.length && crypto.timingSafeEqual(a, b); } catch (_) { return false; } }
+// v28.210 (Ben): H2 (DB hardening review 07-Oct-26). Portal login tokens (supplier psid sessions + magic links, client csid sessions +
+// magic links, cppv_ admin previews) are stored as tokHash(raw) = 'h1:' + sha256 hex, never raw: the raw token only exists in the cookie /
+// link URL, so reading the tables (SQL editor, backups, planner_ro) no longer lets anyone sign in. A cppv_ preview keeps its prefix
+// OUTSIDE the hash ('cppv_h1:...') so the existing token NOT LIKE 'cppv\_%' filters (activity, last login, last_seen stamp) still work.
+// Every lookup / UPDATE / DELETE by token goes through tokMatchSql + tokArgs; every INSERT stores tokHash(raw).
+function tokHash(raw) { raw = String(raw || ''); return (raw.startsWith('cppv_') ? 'cppv_' : '') + 'h1:' + crypto.createHash('sha256').update(raw).digest('hex'); }
+// LEGACY (v28.210 transition): tokArgs' 2nd value also matches a row written RAW before v28.210, so sessions and unexpired links minted
+// by the old build keep working. Only a token shaped like one we mint (hex, optional cppv_) is tried raw, so a stored 'h1:' hash can
+// never be replayed as a cookie / link. REMOVE 14 days after v28.210 is live (sessions last 7 days, links 24 h / 7 days): then
+// tokMatchSql(col, i) -> `${col}=$${i}` and tokArgs(raw) -> [tokHash(raw)].
+const TOK_LEGACY_RE = /^(cppv_)?[0-9a-f]{32,128}$/;
+const tokMatchSql = (col, i) => `${col} IN ($${i},$${i + 1})`;
+const tokArgs = (raw) => { const h = tokHash(raw); return [h, TOK_LEGACY_RE.test(String(raw || '')) ? String(raw) : h]; };
+// v28.210 (Ben): expired login-token purge, at most once an hour per instance, piggybacked on request handling (Vercel has no timer; the
+// long-lived local server also has an unref'd hourly tick). LIMIT-batched DELETE / UPDATE statements (500 rows, autocommit, no long
+// transaction, max 20 a table a run). Magic links: deleted once expired. Admin preview sessions (cppv_): deleted once expired.
+// Real sessions: kept 90 days past expiry because they ARE the sign-in history the App health log portal activity (window up to
+// 90 days) and the client "last login" read; until then an expired legacy raw token is rewritten to its hash in place (it can no
+// longer sign in, so this only removes the raw value at rest). Best-effort: an error is console.warn'd and retried next hour.
+let _tokPurgeAt = 0, _tokPurgeBusy = false;
+const TOK_PURGE_SQL = [
+  ['portal_magic_tokens del', `DELETE FROM planner.portal_magic_tokens WHERE ctid IN (SELECT ctid FROM planner.portal_magic_tokens WHERE expires_at < now() LIMIT 500)`],
+  ['client_magic_tokens del', `DELETE FROM planner.client_magic_tokens WHERE ctid IN (SELECT ctid FROM planner.client_magic_tokens WHERE expires_at < now() LIMIT 500)`],
+  ['client_sessions preview del', `DELETE FROM planner.client_sessions WHERE ctid IN (SELECT ctid FROM planner.client_sessions WHERE token LIKE 'cppv\\_%' AND expires_at < now() LIMIT 500)`],
+  ['portal_sessions del', `DELETE FROM planner.portal_sessions WHERE ctid IN (SELECT ctid FROM planner.portal_sessions WHERE expires_at < now() - interval '90 days' LIMIT 500)`],
+  ['client_sessions del', `DELETE FROM planner.client_sessions WHERE ctid IN (SELECT ctid FROM planner.client_sessions WHERE expires_at < now() - interval '90 days' LIMIT 500)`],
+  ['portal_sessions hash', `UPDATE planner.portal_sessions SET token = 'h1:' || encode(sha256(convert_to(token, 'UTF8')), 'hex') WHERE ctid IN (SELECT ctid FROM planner.portal_sessions WHERE expires_at < now() AND token !~ '^(cppv_)?h1:' AND token NOT LIKE 'cppv\\_%' LIMIT 500)`],
+  ['client_sessions hash', `UPDATE planner.client_sessions SET token = 'h1:' || encode(sha256(convert_to(token, 'UTF8')), 'hex') WHERE ctid IN (SELECT ctid FROM planner.client_sessions WHERE expires_at < now() AND token !~ '^(cppv_)?h1:' AND token NOT LIKE 'cppv\\_%' LIMIT 500)`],
+];
+function tokPurgeMaybe(force) {
+  if (_tokPurgeBusy || (!force && Date.now() - _tokPurgeAt < 3600000)) return null;
+  _tokPurgeAt = Date.now(); _tokPurgeBusy = true;
+  return _reqStore.exit(async () => { const done = {};
+    try { for (const [name, sql] of TOK_PURGE_SQL) { let n = 0; for (let i = 0; i < 20; i++) { const k = (await pool.query(sql)).rowCount || 0; n += k; if (k < 500) break; } if (n) done[name] = n; }
+      if (Object.keys(done).length) console.log('[token purge] ' + JSON.stringify(done));
+    } catch (e) { console.warn('[token purge] failed: ' + (e && e.message)); } finally { _tokPurgeBusy = false; }
+    return done; });
+}
 // Per-request context so any 500 catch can name its route in the logs (a swallowed error once hid a 5-day dead
 // Cash Flow — the alert could only name /api/index). log500(e) reads the current req via AsyncLocalStorage, so it
 // works even in helpers that don't have `req` in scope (e.g. patch()). Call log500(e) before every res.status(500).
 const _reqStore = new AsyncLocalStorage();
 function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
   if (s) s.err = String((e && e.message) || e || '').split('\n')[0].slice(0, 500);   // v28.159 (Ben): the health log records this message with the 500
-  console.error('[500] ' + ((r && r.method) || '?') + ' ' + ((r && (r.originalUrl || r.url)) || '?') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
+  // v28.210 (Ben, H2): the URL is logged with any ?token= value redacted (a 500 on /portal?token= or /client?token= must not print a magic link)
+  console.error('[500] ' + ((r && r.method) || '?') + ' ' + String((r && (r.originalUrl || r.url)) || '?').replace(/([?&]token=)[^&#]*/gi, '$1[redacted]') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
 // v27.886 (Ben, perf phase 4 — measurement): every request carries a start time + a DB-query counter (pool.query is
 // wrapped below to bump it). On finish, anything slower than HZ_SLOW_MS (default 750ms) is logged as
 // "[slow 1234ms 7q] GET /api/... 200" and the last 300 requests (all, not just slow) sit in a ring buffer behind
@@ -905,8 +944,10 @@ function hzHealthFlush(force) {
   } catch (e) { console.warn('[health] flush error: ' + (e && e.message)); return null; }
 }
 if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), 30000).unref?.();
+if (!process.env.VERCEL) setInterval(() => tokPurgeMaybe(false), 3600000).unref?.();   // v28.210 (Ben): hourly token purge on the long-lived server
 app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
   if (_hzHB.size) hzHealthFlush(false);   // v28.159: due flush rides an active request (Vercel has no background time)
+  tokPurgeMaybe(false);   // v28.210 (Ben): expired login-token purge, at most once an hour per instance (a no-op Date check otherwise)
   // v28.163 (Ben): DB pool sample at most once per 10s (three integer reads); noted only when requests are queued for a connection.
   try { const now = Date.now(); if (now - _hzPoolT >= 10000) { _hzPoolT = now; const w = pool.waitingCount;
     if (w > 0) hzHealthEvt('db_pool', 'waiting', { path: 'db pool waiting', message: 'Requests queued for a DB connection (pool max ' + ((pool.options && pool.options.max) || '?') + ')', meta: { max_waiting: w, total: pool.totalCount, idle: pool.idleCount } }); } } catch (_) {}
@@ -9988,7 +10029,7 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     if (!u) return res.status(404).json({ error: 'no such portal user' });
     if (!u.active) return res.status(400).json({ error: 'user is inactive — activate before issuing a link' });
     const token = crypto.randomBytes(24).toString('hex');
-    await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [token, u.email, PORTAL_LINK_HOURS]);   // v28.186 (Ben): 24 h link life (was 7 days)
+    await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(token), u.email, PORTAL_LINK_HOURS]);   // v28.186 (Ben): 24 h link life (was 7 days). v28.210 (Ben, H2): stored hashed
     const base = portalLinkBase(req);   // v28.151 (review B5)
     res.json({ email: u.email, url: base + '/portal?token=' + token, expires_hours: PORTAL_LINK_HOURS, expires_days: Math.round(PORTAL_LINK_HOURS / 24 * 10) / 10 });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -21527,7 +21568,7 @@ async function emailSpecToSuppliers(names, specType, base) {
     for (const email of recips) {
       if (done.has(email)) continue; done.add(email);
       let url = base + '/portal';
-      try { const tok = portalToken(); await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tok, email, PORTAL_LINK_HOURS]); url = base + '/portal?token=' + tok; } catch (e) {}   // v28.186 (Ben): 24 h link life
+      try { const tok = portalToken(); await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(tok), email, PORTAL_LINK_HOURS]); url = base + '/portal?token=' + tok; } catch (e) {}   // v28.186 (Ben): 24 h link life. v28.210 (Ben, H2): stored hashed
       await sendResendEmail({ kind: 'spec-approval', ref: name, to: email,
         subject: 'New ' + specType + ' specification to confirm — Dock & Bay',
         html: `<p>Hi,</p><p>Dock &amp; Bay has published a new <b>${specType}</b> specification that requires your confirmation.</p><p>Please review and confirm it under <b>Specifications</b> in your supplier portal:</p><p><a href="${url}">${url}</a></p>` });
@@ -23233,7 +23274,7 @@ function adminBase(req) {
 }
 async function cpMintLink(userId, req) {
   const tok = cpToken();
-  await pool.query(`INSERT INTO planner.client_magic_tokens (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, userId]);
+  await pool.query(`INSERT INTO planner.client_magic_tokens (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tokHash(tok), userId]);   // v28.210 (Ben, H2): stored hashed, raw only in the link
   await pool.query(`UPDATE planner.client_users SET invited_at=now() WHERE id=$1`, [userId]);
   return cpBase(req) + '/client?token=' + tok;
 }
@@ -23301,7 +23342,7 @@ app.post('/api/client/preview/:uid', async (req, res) => {
     if (!u.active) return res.status(400).json({ error: 'that portal login is deactivated — activate it first' });
     if (!u.c_active) return res.status(400).json({ error: 'that client account is inactive' });
     const tok = 'cppv_' + cpToken();
-    await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '2 hours')`, [tok, u.id]);
+    await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '2 hours')`, [tokHash(tok), u.id]);   // v28.210 (Ben, H2): stored 'cppv_h1:<sha256>', raw only in the cookie
     const secure = req.headers['x-forwarded-proto'] === 'https';
     res.setHeader('Set-Cookie', `csid=${tok}; HttpOnly; Path=/; Max-Age=7200; SameSite=Lax${secure ? '; Secure' : ''}`);
     await cpAudit(u.client_id, 'Portal previewed', 'as ' + u.email + (u.scope === 'self' ? ' (rep · own customers)' : ''), req.me.email);
@@ -23310,7 +23351,7 @@ app.post('/api/client/preview/:uid', async (req, res) => {
 });
 // stop the preview: clear the cppv_ session + cookie (never touches a real client's csid)
 app.post('/api/client/preview-stop', async (req, res) => {
-  try { const csid = cookieVal(req, 'csid'); if (csid && /^cppv_/.test(csid)) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]); } } catch (e) {}
+  try { const csid = cookieVal(req, 'csid'); if (csid && /^cppv_/.test(csid)) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE ${tokMatchSql('token', 1)}`, tokArgs(csid)); } } catch (e) {}   // v28.210 (Ben, H2): hashed + legacy match
   res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true });
 });
 
@@ -23362,11 +23403,11 @@ app.get('/api/config/health-check', async (req, res) => {
     let psid = null, csid = null; const cleanup = [];
     try {
       const sup = (await pool.query(`SELECT lower(email) email, supplier_id FROM planner.supplier_portal_users WHERE active=true AND coalesce(email,'')<>'' AND supplier_id IS NOT NULL ORDER BY id LIMIT 1`)).rows[0];
-      if (sup) { psid = portalToken(); await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '5 minutes')`, [psid, sup.email, sup.supplier_id]); cleanup.push(() => pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [psid]).catch(() => {})); }
+      if (sup) { psid = portalToken(); const h = tokHash(psid); await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '5 minutes')`, [h, sup.email, sup.supplier_id]); cleanup.push(() => pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [h]).catch(() => {})); }   // v28.210 (Ben, H2): stored hashed
     } catch (e) { /* no supplier portal user → skip that group */ }
     try {
       const cu = (await pool.query(`SELECT id FROM planner.client_users WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
-      if (cu) { csid = 'cppv_' + cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '5 minutes')`, [csid, cu.id]); cleanup.push(() => pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]).catch(() => {})); }
+      if (cu) { csid = 'cppv_' + cpToken(); const h = tokHash(csid); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '5 minutes')`, [h, cu.id]); cleanup.push(() => pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [h]).catch(() => {})); }   // v28.210 (Ben, H2): stored hashed
     } catch (e) { /* no client user → skip that group */ }
     // 3) time each route (skip live unless asked; skip a portal group whose session couldn't be minted). Small concurrency.
     const targets = routes.filter(r => (includeLive || !r.live) && !(r.auth === 'portal' && !psid) && !(r.auth === 'cp' && !csid));
@@ -24810,12 +24851,12 @@ const _CS_SELECT = `SELECT s.user_id, u.email, u.name, u.scope, u.client_id, u.a
 async function cpSessionLookup(csid) {
   if (!_csNoLastSeen) {
     try {
-      return (await pool.query(`WITH s AS (SELECT token, user_id FROM planner.client_sessions WHERE token=$1 AND expires_at>now()),
+      return (await pool.query(`WITH s AS (SELECT token, user_id FROM planner.client_sessions WHERE ${tokMatchSql('token', 1)} AND expires_at>now()),
           seen AS (UPDATE planner.client_sessions c SET last_seen_at=now() FROM s WHERE c.token=s.token AND c.token NOT LIKE 'cppv\\_%' AND (c.last_seen_at IS NULL OR c.last_seen_at < now() - interval '5 minutes') RETURNING 1)
-        ${_CS_SELECT} FROM s JOIN planner.client_users u ON u.id=s.user_id`, [csid])).rows[0] || null;
+        ${_CS_SELECT} FROM s JOIN planner.client_users u ON u.id=s.user_id`, tokArgs(csid))).rows[0] || null;   // v28.210 (Ben, H2): hashed + legacy match
     } catch (e) { if (e && e.code === '42703') _csNoLastSeen = true; else throw e; }
   }
-  return (await pool.query(`${_CS_SELECT} FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>now()`, [csid])).rows[0] || null;
+  return (await pool.query(`${_CS_SELECT} FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE ${tokMatchSql('s.token', 1)} AND s.expires_at>now()`, tokArgs(csid))).rows[0] || null;
 }
 async function cpAuth(req, res, next) {
   try {
@@ -24835,10 +24876,10 @@ const CLIENT_PAGE = DEV ? null : loadClientPage();
 app.get('/client', async (req, res) => {
   try {
     if (req.query.token) {
-      const t = (await pool.query(`SELECT user_id FROM planner.client_magic_tokens WHERE token=$1 AND expires_at>now() AND used_at IS NULL`, [String(req.query.token)])).rows[0];
+      // v28.210 (Ben, H2): hashed + legacy match; consumed in ONE guarded UPDATE (was SELECT then UPDATE: two tabs could both redeem a link)
+      const t = (await pool.query(`UPDATE planner.client_magic_tokens SET used_at=now() WHERE ${tokMatchSql('token', 1)} AND expires_at>now() AND used_at IS NULL RETURNING user_id`, tokArgs(String(req.query.token)))).rows[0];
       if (t) {
-        await pool.query(`UPDATE planner.client_magic_tokens SET used_at=now() WHERE token=$1`, [String(req.query.token)]);
-        const csid = cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [csid, t.user_id]);
+        const csid = cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tokHash(csid), t.user_id]);
         await pool.query(`UPDATE planner.client_users SET last_login_at=now() WHERE id=$1`, [t.user_id]);
         const secure = req.headers['x-forwarded-proto'] === 'https';
         res.setHeader('Set-Cookie', `csid=${csid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${secure ? '; Secure' : ''}`);
@@ -24875,7 +24916,7 @@ app.post('/api/cp/request-link', async (req, res) => {
       if (u) { const url = await cpMintLink(u.id, req); await cpSendLink(email, url, u.name); } }
     res.json({ ok: true }); } catch (e) { res.json({ ok: true }); }   // never reveal whether an email is registered
 });
-app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cookieVal(req, 'csid'); if (csid) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]); } } catch {} res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true }); });
+app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cookieVal(req, 'csid'); if (csid) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE ${tokMatchSql('token', 1)}`, tokArgs(csid)); } } catch {} res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true }); });   // v28.210 (Ben, H2): DELETE by hashed + legacy match
 app.get('/api/cp/me', cpAuth, async (req, res) => {
   // v28.200 (Ben): unread = the sum over the SAME thread list Messages shows (cpPortalThreads: order threads scoped to the user, internal
   // notes never counted), so the nav badge, Messages and My orders agree. 0 when messaging is off.
@@ -25277,12 +25318,12 @@ const _PS_SELECT = `SELECT s.email,
 async function portalSessionLookup(psid) {
   if (!_psNoLastSeen) {
     try {
-      return (await pool.query(`WITH s AS (SELECT token, email FROM planner.portal_sessions WHERE token=$1 AND expires_at>now()),
+      return (await pool.query(`WITH s AS (SELECT token, email FROM planner.portal_sessions WHERE ${tokMatchSql('token', 1)} AND expires_at>now()),
           seen AS (UPDATE planner.portal_sessions p SET last_seen_at=now() FROM s WHERE p.token=s.token AND (p.last_seen_at IS NULL OR p.last_seen_at < now() - interval '5 minutes') RETURNING 1)
-        ${_PS_SELECT} FROM s`, [psid])).rows[0] || null;
+        ${_PS_SELECT} FROM s`, tokArgs(psid))).rows[0] || null;   // v28.210 (Ben, H2): hashed + legacy match
     } catch (e) { if (e && e.code === '42703') _psNoLastSeen = true; else throw e; }
   }
-  return (await pool.query(`${_PS_SELECT} FROM planner.portal_sessions s WHERE s.token=$1 AND s.expires_at>now()`, [psid])).rows[0] || null;
+  return (await pool.query(`${_PS_SELECT} FROM planner.portal_sessions s WHERE ${tokMatchSql('s.token', 1)} AND s.expires_at>now()`, tokArgs(psid))).rows[0] || null;
 }
 async function portalAuth(req, res, next) {
   try {
@@ -25399,7 +25440,7 @@ app.get('/portal', async (req, res) => {
   try {
     if (req.query.token) {
       const tok = String(req.query.token);
-      const ok = PORTAL_TOKEN_RE.test(tok) && (await pool.query(`SELECT 1 FROM planner.portal_magic_tokens WHERE token=$1 AND expires_at>now() AND used_at IS NULL`, [tok])).rowCount > 0;
+      const ok = PORTAL_TOKEN_RE.test(tok) && (await pool.query(`SELECT 1 FROM planner.portal_magic_tokens WHERE ${tokMatchSql('token', 1)} AND expires_at>now() AND used_at IS NULL`, tokArgs(tok))).rowCount > 0;   // v28.210 (Ben, H2): hashed + legacy match
       if (!ok) return res.redirect('/portal?e=expired');
       res.set('content-type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex');
       return res.send(portalContinuePage(tok));   // read-only: the token is consumed only by the POST below
@@ -25421,12 +25462,12 @@ app.post('/api/portal/redeem', express.urlencoded({ extended: false, limit: '4kb
   const fail = () => wantsJson ? res.status(410).json({ error: 'link expired' }) : res.redirect(303, '/portal?e=expired');
   try {
     if (!PORTAL_TOKEN_RE.test(tok)) return fail();
-    const t = (await pool.query(`UPDATE planner.portal_magic_tokens SET used_at=now() WHERE token=$1 AND used_at IS NULL AND expires_at>now() RETURNING email`, [tok])).rows[0];
+    const t = (await pool.query(`UPDATE planner.portal_magic_tokens SET used_at=now() WHERE ${tokMatchSql('token', 1)} AND used_at IS NULL AND expires_at>now() RETURNING email`, tokArgs(tok))).rows[0];   // v28.210 (Ben, H2): hashed + legacy match
     if (!t) return fail();
     const sups = await portalSuppliers(t.email);
     if (!sups.length) return fail();   // the user was deactivated after the link went out
     const psid = portalToken();
-    await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '7 days')`, [psid, t.email, sups[0].supplier_id]);
+    await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '7 days')`, [tokHash(psid), t.email, sups[0].supplier_id]);   // v28.210 (Ben, H2): stored hashed, raw only in the cookie
     res.setHeader('Set-Cookie', `psid=${psid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
     return wantsJson ? res.json({ ok: true }) : res.redirect(303, '/portal');
   } catch (e) { log500(e); return wantsJson ? res.status(500).json({ error: 'error' }) : res.redirect(303, '/portal?e=expired'); }
@@ -25448,7 +25489,7 @@ app.post('/api/portal/request-link', async (req, res) => {
     const sups = await portalSuppliers(email);
     if (!sups.length) return;
     const tok = portalToken();
-    await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tok, email, PORTAL_LINK_HOURS]);
+    await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(tok), email, PORTAL_LINK_HOURS]);   // v28.210 (Ben, H2): stored hashed
     const base = portalLinkBase(req);   // v28.151 (review B5)
     await sendMagicEmail(email, base + '/portal?token=' + tok);
   })().catch((e) => { log500(e); });
@@ -25458,7 +25499,7 @@ app.post('/api/portal/request-link', async (req, res) => {
 
 // v28.186 (Ben, M5e): Sign out. No portalAuth: an expired session must still be able to clear its cookie. Deletes the session row.
 app.post('/api/portal/logout', async (req, res) => {
-  try { const psid = cookieVal(req, 'psid'); if (psid) { _portalAuthMemo.delete(psid); await pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [psid]); } } catch (e) { log500(e); }
+  try { const psid = cookieVal(req, 'psid'); if (psid) { _portalAuthMemo.delete(psid); await pool.query(`DELETE FROM planner.portal_sessions WHERE ${tokMatchSql('token', 1)}`, tokArgs(psid)); } } catch (e) { log500(e); }   // v28.210 (Ben, H2): hashed + legacy match
   res.setHeader('Set-Cookie', `psid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
   res.json({ ok: true });
 });
@@ -25949,7 +25990,7 @@ app.post('/api/supply/onb/requests/:id/approve', async (req, res) => {
     const invites = [];
     for (const c of (f.contacts || [])) { const em = (c && c.portal && c.email) ? String(c.email).trim().toLowerCase() : ''; if (!em) continue;
       const ex = (await client.query(`SELECT id FROM planner.supplier_portal_users WHERE lower(email)=$1`, [em])).rows[0];
-      if (!ex) { await client.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name) VALUES ($1,$2,$3,$4)`, [em, sid, r.supplier_name, c.name || null]); const tok = portalToken(); await client.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tok, em, PORTAL_LINK_HOURS]); invites.push({ email: em, name: c.name || '', url: PORTAL_URL + '?token=' + tok }); } }
+      if (!ex) { await client.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name) VALUES ($1,$2,$3,$4)`, [em, sid, r.supplier_name, c.name || null]); const tok = portalToken(); await client.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(tok), em, PORTAL_LINK_HOURS]);   /* v28.210 (Ben, H2): stored hashed */ invites.push({ email: em, name: c.name || '', url: PORTAL_URL + '?token=' + tok }); } }
     const log = onbLogPush(r, 'Approved by ' + by + ' · supplier record updated' + (nProd ? ' · ' + nProd + ' product(s) queued for the PIM' : '') + (invites.length ? ' · ' + invites.length + ' portal invite(s) sent' : ''), by);
     await client.query(`UPDATE planner.supplier_onboarding_requests SET status='approved', decided_by=$2, decided_at=now(), log=$3::jsonb, updated_at=now() WHERE id=$1`, [r.id, by, JSON.stringify(log)]);
     await client.query('COMMIT'); client.release(); var _released = true;   // v28.116 (review S10): hoisted flag — the emails below run AFTER release; a throw there must not rollback/release again
