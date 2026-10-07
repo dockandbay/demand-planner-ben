@@ -49,13 +49,13 @@ fingerprints:
   artifact_v16.7.html::scanBIPatterns: d2ea6bd0080c
   artifact_v16.7.html::scanAnomalyAlerts: 371e8b968fc6
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
-  supply/inject.html::PO_ACTCOND: ebd71a6b1812
+  supply/inject.html::PO_ACTCOND: 9a5ea992d251
   supply/inject.html::cfUnpaidActions: fe40096c76b7
   supply/inject.html::renderRecsTab: cb6e7811b196
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: 96e3d735cbaf
+  server.mjs::buildActionsRows: cc552c111189
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 645a4102e9a0
@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.202
+verified_version: v28.207
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -265,6 +265,11 @@ verified_version: v28.202
   - Fires only when crossdock SKUs are empty and the PO is not complete or cancelled. Child POs raise nothing.
   - Clears by itself once crossdock SKUs are set, the shipment changes, or the PO completes.
   - Also counted in the open-actions metric po_actions.
+- fulfil_link, "Link Fulfil PO" (v28.207, red, Master data tab):
+  - A client PO (branch country DIRECT, a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a key account PO; the same set as the v28.199 Fulfil push guard) that has no manual Fulfil link (po_links system fulfil, found_by manual, numeric Fulfil id).
+  - Fulfil generates these POs from the sales order, so the guard refuses to push them until someone links the Fulfil PO (Master data > Linked records > Link Fulfil PO).
+  - Not on complete or cancelled POs; child POs raise nothing. Clears by itself once linked.
+  - Same SQL rule (FULFIL_LINK_NEEDED_SQL) in the PO grid, SUPPLY > Actions (type "Link Fulfil PO", priority, Client group) and the open-actions metric po_actions.
 (source: supply/inject.html :: PO_ACTCOND)
 
 ## ERP Compare (Fulfil only)

@@ -3446,6 +3446,12 @@ function withFulfilPushLock(po, fn) {
 // "sales_order_ref set" (stock FBA POs carry FBA shipment ids / crossdock refs there). Rule 2 still checks any PO's refs.
 const FULFIL_CLIENT_PO_SQL = (p, b) => `(upper(coalesce(${b}.country_code,''))='DIRECT' OR lower(coalesce(${p}.branch,'')) ~ '(direct to client|b2b jlew|b2b next)'
   OR coalesce(${p}.dtc_key_account,false))`;
+// v28.207 (Ben): "Link Fulfil PO" action. A client PO (same set as the v28.199 push guard) with no MANUAL Fulfil link is
+// blocked from pushing until someone links it to the Fulfil PO generated from its sales order. One rule for the PO grid
+// (fulfil_link_needed -> PO_ACTCOND.fulfil_link), SUPPLY > Actions (buildActionsRows) and the po_actions metric.
+const FULFIL_LINK_NEEDED_SQL = (po, branch, keyAcct) => `((coalesce((SELECT upper(coalesce(flb.country_code,''))='DIRECT' FROM planner.branches flb WHERE flb.name=${branch}),false)
+    OR lower(coalesce(${branch},'')) ~ '(direct to client|b2b jlew|b2b next)' OR coalesce(${keyAcct},false))
+  AND NOT EXISTS (SELECT 1 FROM planner.po_links fll WHERE fll.po=${po} AND fll.system='fulfil' AND fll.status='linked' AND fll.found_by='manual' AND coalesce(fll.external_id,'') ~ '^[0-9]+$'))`;
 function fulfilLookupFailed(what, e) {
   const err = new Error('Fulfil lookup failed (' + what + '): ' + ((e && e.message) || 'no answer') + '. Nothing was sent to Fulfil; try again in a minute.');
   err.code = 'FULFIL_LOOKUP_FAILED'; err.status = 503; return err;
@@ -8007,6 +8013,13 @@ async function buildActionsRows() {
           -- shipment that lands at a 3PL (shipment branch, or a 3PL rider PO when the shipment branch is blank) but has
           -- no crossdock SKUs. Same XDOCK_3PL_SQL as the PO grid row (PO_ACTCOND.crossdock_needed). Clears when
           -- crossdock SKUs are set, the shipment changes (FOB / all-direct / no 3PL) or the PO completes.
+          SELECT 'high','Link Fulfil PO', p.po,
+            'Link Fulfil PO: '||p.po||' is a client PO'||coalesce(' for '||nullif(trim(p.sales_order_ref),''),'')||' with no Fulfil PO linked, so it cannot be pushed. Link it to the Fulfil PO generated from the sales order (PO drawer > Master data > Linked records).',
+            'gotopo','po','', p.po
+            FROM planner.purchase_orders p
+            WHERE p.master_po IS NULL AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%'
+              AND ${FULFIL_LINK_NEEDED_SQL('p.po', 'p.branch', 'p.dtc_key_account')}
+          UNION ALL
           SELECT 'high','Crossdock likely required', xd.po,
             'Crossdock likely required: shipment '||xd.sref||' lands at '||xd.tpl||' (3PL) but this PO ships on to '
               ||CASE WHEN xd.branch ~* '(fba|awd)' THEN xd.branch ELSE 'the client'||coalesce(' ('||nullif(trim(xd.client),'')||')','') END||' and has no crossdock SKUs',
@@ -9425,7 +9438,7 @@ supplySectionHandler = async (req, res, next) => {
           if (r.fix === 'applysub') { r.status = 'open'; return; }
           r.key = r.type + '|' + (r.target_key || r.ref || '');
           // v28.187 (Ben): a crossdock action snoozed from the PO grid (poact|<po>|crossdock_needed) also snoozes this card
-          const s = astate[r.key] || (r.type === 'Crossdock likely required' ? astate['poact|' + r.ref + '|crossdock_needed'] : null); r.status = 'open'; r.snooze_until = null; r.snoozed_by = null; r.snoozed_at = null;
+          const s = astate[r.key] || (r.type === 'Crossdock likely required' ? astate['poact|' + r.ref + '|crossdock_needed'] : r.type === 'Link Fulfil PO' ? astate['poact|' + r.ref + '|fulfil_link'] : null); r.status = 'open'; r.snooze_until = null; r.snoozed_by = null; r.snoozed_at = null;
           if (s) { if (s.status === 'snoozed' && (!s.snooze_until || s.snooze_until >= dtoday)) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; }
             else if (s.status !== 'snoozed') { r.status = s.status; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; } } });
         return res.json(arows);
@@ -16375,7 +16388,8 @@ async function computeOpenActions() {
     one(`SELECT count(DISTINCT p.po) n FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND ${hasLines}
         AND (coalesce(p.supplier_name,'')='' OR (p.landing_date_overide < current_date AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%')
           -- v28.187 (Ben): + crossdock likely required (same XDOCK_3PL_SQL rule as the Actions feed / PO grid)
-          OR (trim(coalesce(p.crossdock_skus,''))='' AND ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', "coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1))")} IS NOT NULL))`),
+          OR (trim(coalesce(p.crossdock_skus,''))='' AND ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', "coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1))")} IS NOT NULL)
+          OR ${FULFIL_LINK_NEEDED_SQL('p.po', 'p.branch', 'p.dtc_key_account')})`),   // v28.207: + Link Fulfil PO
     one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
       LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(el.qty,0) IS DISTINCT FROM coalesce(l.qty,0)`),
     one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
@@ -22396,6 +22410,7 @@ const PO_ROWS_SQL = `
             -- v28.187 (Ben): 3PL a client-bound PO's shipment lands at (NULL = n/a) → PO_ACTCOND.crossdock_needed
             ${XDOCK_3PL_SQL('calc4.po', 'calc4.branch', 'calc4.dtc_key_account', "coalesce(nullif(calc4.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1))")} xdock_3pl,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
+            ${FULFIL_LINK_NEEDED_SQL('calc4.po', 'calc4.branch', 'calc4.dtc_key_account')} fulfil_link_needed,   -- v28.207 -> PO_ACTCOND.fulfil_link
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
             (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) master_po,                        -- master-PO grouping: a CHILD carries its master's po (filtered out of the grid in poRowsCache)
             (SELECT coalesce(po3.is_master,false) FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) is_master,        -- true on the consolidated MASTER row (shows the 'master' badge)

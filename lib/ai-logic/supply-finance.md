@@ -41,7 +41,7 @@ sources:
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
-  server.mjs::PO_ROWS_SQL: 6aec8d3a0a8b
+  server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -167,7 +167,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.204
+verified_version: v28.207
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -337,6 +337,7 @@ verified_version: v28.204
 - Price tiers by market: rt = products.<mkt>_rt (includes tax). ws = ex-tax retail ÷ 2, where ex-tax = RT ÷ 1.2 (UK, EU), ÷ 1.1 (AU) or ÷ 1.0 (US, CA). dist = ws × (1 − discount %), with the discount taken from distributor_offers by market and method (fob, exw or 3pl). If no discount is set, the price falls back to ws. With no tier set, the legacy client_price_lists is used. (source: server.mjs :: cpTierPrice, /api/cp/prices)
 - Client orders reject unknown and CLOSED SKUs. Non-whole cartons need explicit acceptance (sample orders are exempt). Samples are priced 0. The order is saved, then a Fulfil draft sale is attempted; if that fails it is flagged "needs keying". Stock shows in bands unless exact stock is configured. (source: server.mjs :: /api/cp/order)
 - Commissions are monthly runs per rep group. Rate = the per-order override, else the group default. Commission = commissionable × rate ÷ 100. A credit-note row has commission 0 and carries amount × rate ÷ 100 in credit_adj; net = commission + credit_adj. Fulfil rows come from done/processing sales in the month using the untaxed amount; they are "exception" until the invoice is paid. A run cannot be finalised while exceptions remain (unless forced). The Xero bill is GBP, in the UK org, named COMMISSION-<month>-<GROUP>. (source: server.mjs :: /api/client/commission/*)
+- Link Fulfil PO (v28.207): the PO grid payload carries fulfil_link_needed (client PO with no manual Fulfil link, FULFIL_LINK_NEEDED_SQL), which raises the "Link Fulfil PO" PO action; see the actions topic. (source: server.mjs :: PO_ROWS_SQL)
 - Order visibility and rep groups (v28.204): a client's orders are the Fulfil sales mirror rows matching ANY of its ticked modes: Agent Code (the Fulfil sales order metafield "Agent Code", code agent_code, copied by the sales import into fulfil_sales.agent_code; the client lists one or more codes, e.g. appelman), tag (sale metadata, legacy), channel + region, company / email. A user with scope 'self' ("own customers only") is NARROWED to orders where they are the customer email and the portal orders they placed, except when the client has an Agent Code: then every user of that rep group sees all the group's orders (Ben 07-Oct-26). Commission runs pick a rep group's orders through the same rule, so they follow the Agent Code too. (source: server.mjs :: cpVisibilitySql, cpAgentCodes, cpSelfNarrows, cpOrders, fulfilImportSales)
 - Order messages and documents (v28.200): one thread per client and order, keyed F<fulfil_id> (Fulfil sales mirror) or P<portal order id>; a portal submission's thread follows it into the mirror once its Fulfil number appears there. Documents are the thread's message attachments. A portal user may open an order's thread only if the order is visible to their client under the My orders rules; a scope 'self' user only for their OWN orders (mirror rows with their email as party email, portal orders they placed), except in a rep group with an Agent Code, whose users open every order of the group. Another client, or a non-own order for a 'self' user, gets 403. Staff can post internal messages or documents that the client never sees, counts or downloads. Unread counts (My orders, Messages, nav badge) all come from one thread list, so they agree. An order visible to two clients has two separate conversations. (source: server.mjs :: cpAllowedOrderKeys, cpPortalThreads, cpOrderThreadFind, cpOrderClients)
 

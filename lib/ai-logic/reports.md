@@ -74,7 +74,7 @@ fingerprints:
   supply/inject.html::renderProductCatalogue: e590a8dc271a
   supply/inject.html::renderPimWaitingRoom: d6c089a9c8e7
   server.mjs::_kpiBaseCompute: 8e09912ef657
-  server.mjs::computeOpenActions: 69fb8f4a7638
+  server.mjs::computeOpenActions: 378be156b1bc
   server.mjs::/api/supply/:section: 6338a43b5269
   server.mjs::/api/scenario/slow-moving: fb22071cbe1a
   server.mjs::/api/scenario/markdown-eos: bb925e0e2b9b
@@ -91,7 +91,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.187
+verified_version: v28.207
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -163,6 +163,7 @@ verified_version: v28.187
 - Open-actions scoreboard: a weekly snapshot every Thursday (GMT week ending) into planner.action_metrics_snapshot. The trend shows the last 52 weeks. Live values are cached for 5 minutes. (source: server.mjs :: computeOpenActions, snapshotOpenActions)
 - Scoreboard metrics. "Open PO" means not complete or cancelled, not a child PO, with lines qty > 0.
   - po_actions: no supplier, or landing override before today while not shipping or delivered, or (v28.187) crossdock likely required (the PO action items rule in actions).
+  - po_actions also counts (v28.207) client POs with no manual Fulfil link ("Link Fulfil PO", same rule as the PO grid).
   - order_plan: POs whose planner line qty differs from the ERP line qty.
   - shipments: no shipment_ref, status production or ready to ship, and production end (else today) within 21 days.
   - manufacturing: count of manufacturing mismatch actions.

@@ -1,3 +1,12 @@
+## v28.207 (Ben, branch review-fixes-2026-10-05): "Link Fulfil PO" action item for unlinked client POs
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/actions.md`, `lib/ai-logic/reports.md`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben 07-Oct (sandbox PO-1802892 had no such action): a client PO (Direct to Client / UK B2B JLEW / UK B2B NEXT / key account, the v28.199 guard set) with no manual Fulfil link now raises **Link Fulfil PO** (red PO action, snooze, "open" goes to Master data > Linked records). Not on complete / cancelled / child POs; clears once linked.
+- One rule `FULFIL_LINK_NEEDED_SQL` for the PO grid (`fulfil_link_needed` on the PO rows payload -> PO_ACTCOND.fulfil_link), SUPPLY > Actions (type "Link Fulfil PO", PRIORITY, Client group; snooze shared via poact|<po>|fulfil_link) and the po_actions open-actions metric.
+- Sandbox: 26 open client POs flagged (grid, Actions feed and metric agree); PO-1802892 now lists 6 action items incl. Link Fulfil PO.
+- **Live expectation after deploy:** about 32 active client POs will show the action until linked (0 manual links on live today apart from PO373).
+
 ## v28.206 (Ben, branch review-fixes-2026-10-05): Validate sales order push confirmation left-aligned
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.

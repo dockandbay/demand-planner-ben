@@ -1603,7 +1603,7 @@
   function startActionsWarm(){ if(_actWarmStarted)return; _actWarmStarted=true;
     setInterval(function(){ if(document.hidden)return; prewarmActions(true,true); }, 600000); }   // every 10 min, matching the server cache TTL; v28.151 (review F7): skipped while the tab is hidden
   var ACT_GROUP={ // PRIORITY — the highest-attention exceptions, surfaced first
-    'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY','Crossdock likely required':'PRIORITY',
+    'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY','Crossdock likely required':'PRIORITY','Link Fulfil PO':'PRIORITY',
     'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
     'Unpaid — last month':'PAYMENTS','Aged payment':'PAYMENTS',
     'Date conflict':'DATES','Production check-in':'DATES','Ship check-in':'DATES','Shipment missing dates':'DATES','Shipment ETA passed':'DATES','Shipment delivered — update PO':'DATES','Awaiting ERP receipt':'DATES','Supplier completion date':'DATES',
@@ -1622,6 +1622,7 @@
     'Date conflict':'dates','Production check-in':'dates','Supplier completion date':'dates','Awaiting ERP receipt':'dates',
     'Ship check-in':'shipments','Shipment missing dates':'shipments','Shipment ETA passed':'shipments','Shipment delivered — update PO':'shipments','Unassigned shipment':'shipments',
     'Crossdock likely required':'client',   // v28.187
+    'Link Fulfil PO':'client',   // v28.207
     'Order-plan change pending ERP push':'oplan','PO not in ERP':'oplan','Partial cartons need approval':'oplan' };
   function poTabForAction(t){ return ACT_POTAB[t]||null; }
   function actBuild(rows,c,partial){
@@ -2822,14 +2823,17 @@
     // v28.187 (Ben): Crossdock likely required. A client-bound PO (Direct to Client / B2B / key account) on a shipment that
     // lands at a 3PL (server xdock_3pl: the shipment's 3PL branch, or a 3PL rider PO when the shipment branch is blank; NULL
     // for FOB / manufacturing / all-direct shipments) with NO crossdock SKUs. Same rule as SUPPLY ▸ Actions (XDOCK_3PL_SQL).
-    crossdock_needed:function(r){ return !!r.xdock_3pl && !String(r.crossdock_skus||'').trim() && !poComplete(r) && !/cancel/i.test(r.status||''); }};
+    crossdock_needed:function(r){ return !!r.xdock_3pl && !String(r.crossdock_skus||'').trim() && !poComplete(r) && !/cancel/i.test(r.status||''); },
+    // v28.207 (Ben): client PO (direct / B2B / key account) with no manual Fulfil link; the v28.199 guard blocks its push until linked.
+    // Same rule as SUPPLY > Actions (server FULFIL_LINK_NEEDED_SQL). Child POs carry no actions.
+    fulfil_link:function(r){ return !!r.fulfil_link_needed && !r.master_po && !poComplete(r) && !/cancel/i.test(r.status||''); }};
   // v28.187 (Ben): the specific crossdock message (shipment, 3PL, client) shown on the PO drawer Client tab + tooltips.
   function xdockMsg(r){ return 'Crossdock likely required: shipment '+(r.shipment||'?')+' lands at '+(r.xdock_3pl||'?')+' (3PL) but this PO ships on to '+(/fba|awd/i.test(r.branch||'')?r.branch:'the client'+(String(r.client||'').trim()?' ('+String(r.client).trim()+')':''))+' and has no crossdock SKUs.'; }
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',missing_prod_start:'Production start date missing',missing_prod_end:'Production end date missing',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production',deposit_unassigned:'Deposit not assigned — link a production deposit (or mark No Deposit)',crossdock_needed:'Crossdock likely required'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',missing_prod_start:'dates',missing_prod_end:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata',deposit_unassigned:'masterdata',crossdock_needed:'client'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',missing_prod_start:'Production start date missing',missing_prod_end:'Production end date missing',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production',deposit_unassigned:'Deposit not assigned — link a production deposit (or mark No Deposit)',crossdock_needed:'Crossdock likely required',fulfil_link:'Link Fulfil PO'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',missing_prod_start:'dates',missing_prod_end:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata',deposit_unassigned:'masterdata',crossdock_needed:'client',fulfil_link:'masterdata'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false, _hidePayDue=false, _hideTimelineUnread=false;   // PO-grid ACTION ITEMS hide toggles
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -2930,6 +2934,7 @@
     erp_date:'ERP delivery date differs — the planner’s completion date doesn’t match Cin7’s EstimatedDeliveryDate. Resolve by pushing the date to Cin7 (⬆ Update ERP), or snooze to defer the reminder. Separate from the PO-grid ACTION ITEMS filter.',
     shipped_to_master:'Shipped to master — the supplier marked this rider PO shipped to the consolidator, but the master hasn’t sailed. Use the “→ set shipped to master” button to set our status (still upstream until the master ships).',
     crossdock_needed:'Crossdock likely required: this PO ships to the client (Direct to Client / B2B / key account) but its shipment lands at a 3PL warehouse, and it has no crossdock SKUs. Add the crossdock SKUs on the Client/FBA tab (or move it to a direct / FOB shipment). Clears automatically.',
+    fulfil_link:'Link Fulfil PO: this is a client PO (Direct to Client / B2B / key account) and Fulfil generates its PO from the sales order, so HORIZON will not push it until it is linked. Open Master data > Linked records and use "Link Fulfil PO" to pick the Fulfil PO. Clears automatically once linked.',
     payment_invalid:'Payment invalid — a payment amount is set with no payment date (start deposit, completion, a balance, or a final invoice with no final-payment-due date). Add the date in PLAN ▸ Payments.'
   };
   // Quick action for "Awaiting supplier confirmation" (Actions tab + Master & Docs): post a reminder to the
