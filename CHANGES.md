@@ -1,3 +1,9 @@
+## v28.206 (Ben, branch review-fixes-2026-10-05): Validate sales order push confirmation left-aligned
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- "Push N supplier changes ... to Fulfil" confirmation (single and batch): every header and cell is left-aligned (the popup sits outside #supply-root, so the `.l` class rule did not apply; now inline text-align:left). Checked on the sandbox, popup cancelled, nothing pushed.
+
 ## v28.205 (Ben, branch review-fixes-2026-10-05): Validate sales order drawer: supplier dropdown colours + clearer supplier summary
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
