@@ -1,3 +1,11 @@
+## v28.197 (Ben, branch review-fixes-2026-10-05): client portal commission statement: CSV, separate credit note columns, left-aligned
+
+**Files:** `supply/client-view.js` (+ package.json, CHANGES.md). Client only.
+
+- Client portal ▸ Commission (rep / agent groups): "⬇ CSV" downloads the visible statement (Order, Invoice, Customer, Paid dd-mmm-yy, Amount (net), Rate %, Commission, Credit note, Credit amount, Net, Status, Currency; plain numbers; total row; UTF-8 BOM for Excel; file "Commission <group> <month>.csv").
+- Credit note reference and credit amount are separate columns (were one cell); all headings and data left-aligned.
+- Verified in Chrome on sandbox (Ideco (TEST) agent group, 2026-07).
+
 ## v28.196 (Ben, branch review-fixes-2026-10-05): client portal "XLSX Line Sheet" label
 
 **Files:** `supply/client-view.js` (+ package.json, CHANGES.md). Label only.
