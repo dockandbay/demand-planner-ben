@@ -1,3 +1,10 @@
+## v28.219 (Ben, branch review-fixes-2026-10-05): Plan grid YTD + To go totals
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- New **YTD** (complete months of the current FY) and **To go** (current month to FY end) total columns beside the current FY total in the DEMAND Plan grid; YTD + To go = FY total. Same cell layout as H1 / H2 (LY, total, growth %, revenue) on every row type; sortable / filterable like other columns. On by default; Display settings ▸ "YTD + To go totals" to turn off. H1 / H2 stay under Display settings ▸ "Half-year totals".
+- Verified on sandbox (jsdom, real data): header and every row type (sub-category, grand total, subtotal, 27 SKU rows) 57 cells with the columns on, 55 off; Picnic Blanket UK DTC YTD + To go = FY total 14,132; 0 JS errors.
+
 ## v28.218 (Ben, branch review-fixes-2026-10-05): Plan grid column sort / filter
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.

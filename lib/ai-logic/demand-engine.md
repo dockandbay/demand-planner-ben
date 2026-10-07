@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.218
+verified_version: v28.219
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -297,3 +297,6 @@ verified_version: v28.218
 ## Plan grid column sort / filter (v28.218)
 - Click any month, current-month, quarter, half or FY header in the Plan grid: Sort high to low, Sort low to high, or Hide rows with 0. Only one column is active; choosing another replaces it. Shown as a removable chip; Reset filters clears it. Display only. (source: openPlanColSortMenu, setPlanColSort)
 - Value per column = actuals for past months and the forecast from the current month on (sub-category: calc().fu; SKU: the row's own forecast, skuMonthlyMap on the whole sub-category share pool + overrides). Sub-categories reorder within each category; SKUs reorder within each sub-category (masters still before sets). The SKU-level sort select (A-Z / volume / tier) still applies when no column sort is set. (source: _pcsSubVal, _pcsSkuVal, _pcsApplySubs, _pcsApplySkus)
+
+## Plan grid YTD + To go totals (v28.219)
+- Beside the current FY total the Plan grid shows **YTD** (complete months of the current FY, up to the last complete month) and **To go** (current month to the end of the FY). YTD + To go = the FY total. They use the same period-total cell as H1 / H2 / quarters (last-year units, total, growth %, revenue) on sub-category, SKU, category, grand-total and shown-SKU rows, and can be sorted or filtered like any column. On by default; Display settings ▸ "YTD + To go totals" turns them off (saved per browser). (source: buildTimeCols, setShowYtg, periodStackHTML)
