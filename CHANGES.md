@@ -1,3 +1,12 @@
+## v28.187 (Ben, branch review-fixes-2026-10-05): "Crossdock likely required" action; "set to" hidden when equal
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/actions.md` + `reports.md` + `supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- PO grid END date: the violet "set to <date>" button no longer shows when the supplier-submitted completion date equals the PO's current production end; the same equal-date submissions are dropped from the DATES "awaiting approve/reject" line and SUPPLY ▸ Actions "Supplier completion date" cards (read-side only; supplier_submissions rows unchanged). Live: PO-1845589, PO362, PO363.
+- New bright red action **"Crossdock likely required"**: a PO going to the client (Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a key-account PO not on a 3PL branch) on a shipment that lands at a 3PL (UK ILG, US Geneva, US AWD, EU iFulfillment, AU Coghlans: the shipment's branch, or a 3PL rider PO when the shipment branch is blank), not FOB / manufacturing, not complete, with no crossdock SKUs. Shows in the ACTION ITEMS counter, exception dropdown, row badge, PO Client/FBA tab (red box), open-actions strip, SUPPLY ▸ Actions (PRIORITY card) and `po_actions` metric; one shared SQL rule (`XDOCK_3PL_SQL`, grid field `xdock_3pl`) keeps counts equal; clears when crossdock SKUs are added, the shipment changes or the PO completes; snooze shared. Live today: 1 PO (PO-1845589, IS198 at US Geneva).
+- **Verified (sandbox):** counter +1, dropdown and Actions agree (2 and 2), scenarios (crossdock set / FOB / all-direct / complete clear; shipment branch 3PL fires; 3PL rider never fires), snooze both ways, 0 JS errors.
+- **Note:** once PO-1845589 gets crossdock SKUs, the existing "Crossdock destination exception" will fire because its ship-to is DIRECT; set its country to US.
+
 ## v28.186 (Ben, branch review-fixes-2026-10-05): SECURITY, deploy promptly. Supplier portal access fixes (07-Oct deep dive)
 
 **Files:** `server.mjs`, `supply/portal.html`, `supply/portal-view.js`, `supply/inject.html` (link wording), `lib/ai-logic/supply-finance.md`, `tests/portal-scope.cjs`, new `tests/portal-security.cjs` (+ package.json, CHANGES.md). No migrations. Optional env `PORTAL_LINK_HOURS` (default 24).
