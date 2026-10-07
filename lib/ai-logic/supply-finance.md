@@ -33,7 +33,7 @@ sources:
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
-  server.mjs::PO_ROWS_SQL: 98e39c2c85c0
+  server.mjs::PO_ROWS_SQL: 6aec8d3a0a8b
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -130,7 +130,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.186
+verified_version: v28.187
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -154,6 +154,7 @@ verified_version: v28.186
 - A PO links to a shipment through shipments.shipment_ref = purchase_orders.shipment_ref, or the PO's own number when shipment_ref is blank. (source: v_po_finance :: base join)
 - PO "late" = not complete, shipping or delivered, and the delivery date is in the past. (source: server.mjs :: PO_ROWS_SQL is_late)
 - Unassigned-shipment action: the PO is not complete, has no shipment, its branch is not Manufacturing, and its country is one of UK, US, EU, AU or CA. (source: server.mjs :: PO_ROWS_SQL unassigned_shipment)
+- xdock_3pl (v28.187): for a client-bound PO, the 3PL branch its shipment lands at (shipment branch, else a 3PL rider PO on the same shipment), else blank. Drives the "Crossdock likely required" action. sub_comp_date / sup_completion_pending skip a submitted completion date equal to the current production end. (source: server.mjs :: PO_ROWS_SQL xdock_3pl)
 
 ## DIRECT vs FOB
 - DIRECT (country_code DIRECT, branch "Direct to Client") is a real destination. It is not automatically FOB.

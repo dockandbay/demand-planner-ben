@@ -49,16 +49,16 @@ fingerprints:
   artifact_v16.7.html::scanBIPatterns: d2ea6bd0080c
   artifact_v16.7.html::scanAnomalyAlerts: 371e8b968fc6
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
-  supply/inject.html::PO_ACTCOND: 8aeba9d2007b
+  supply/inject.html::PO_ACTCOND: ebd71a6b1812
   supply/inject.html::cfUnpaidActions: fe40096c76b7
   supply/inject.html::renderRecsTab: cb6e7811b196
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: a79d996fb47e
+  server.mjs::buildActionsRows: fe619dd254d8
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
-  server.mjs::submissionActions: 86107ff0d881
+  server.mjs::submissionActions: 645a4102e9a0
   server.mjs::manufacturingActions: 66b6a0a35499
   server.mjs::fulfilCompareRows: 9afcbaf79bb7
   server.mjs::_dtcMismatchCompute: 5bd69a64946a
@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.181
+verified_version: v28.187
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -218,6 +218,7 @@ verified_version: v28.181
   - Supplier risk needs approval (amber): the line's supplier is not on the product's supplier list.
   - Discontinued arrival needs approval (amber): arrival after the per-country discontinue date.
   - Client deadline at risk (high): best arrival + 7 days later than the client deadline.
+  - Crossdock likely required (high, v28.187): see the crossdock rule under PO action items. Same SQL rule (XDOCK_3PL_SQL) as the PO grid, so counts agree. A snooze on the PO grid item also snoozes this card, and the other way round.
   - Shipment escalated (high).
   - Supplier created new shipment (amber).
   - Partial cartons (low).
@@ -242,6 +243,7 @@ verified_version: v28.181
     - Value = qty x average cost_price. Unverified: currency, though labelled £.
   - Add polybags (high): ships within 14 days, > 10,000 eligible units, no POLYBAG lines. (source: polybagActions)
   - Supplier completion date / invoice submissions (amber, with Apply). (source: submissionActions)
+    - v28.187: a submitted completion date equal to the PO's current production end is already in effect, so it raises no card, no "set to" button on the PO grid END cell, and no DATES pending line. The submission row itself is not changed.
   - Manufacturing mismatch: high if a component is short, else amber. (source: manufacturingActions)
 - Groups: PRIORITY, PAYMENTS, DATES, RECOMMENDATIONS, OTHER. The tab badge counts open high rows.
 
@@ -255,6 +257,14 @@ verified_version: v28.181
 - erp_date: drift >= max(5% of days out, 3 days).
 - preship: documents due from production end minus 7 days.
 - Also: not approved, missing production dates, missing master, payment invalid, shipped to master.
+- crossdock_needed, "Crossdock likely required" (v28.187, red, Client/FBA tab):
+  - The PO ships to the client: branch country DIRECT, or a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a key account PO whose own branch is not a 3PL.
+  - Its shipment lands at a 3PL. A 3PL branch has a market country (UK, US, EU, AU, CA) and a Fulfil id: UK ILG, US Geneva, US AWD, EU iFulfillment, AU Coghlans.
+  - Destination = the shipment's branch when set (only a 3PL counts). When the shipment branch is blank, any other PO on the same shipment with a 3PL branch.
+  - Not for a Manufacturing (FOB) PO or a FOB-mode shipment.
+  - Fires only when crossdock SKUs are empty and the PO is not complete or cancelled. Child POs raise nothing.
+  - Clears by itself once crossdock SKUs are set, the shipment changes, or the PO completes.
+  - Also counted in the open-actions metric po_actions.
 (source: supply/inject.html :: PO_ACTCOND)
 
 ## ERP Compare (Fulfil only)

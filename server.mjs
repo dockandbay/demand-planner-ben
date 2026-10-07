@@ -1051,6 +1051,26 @@ function sanitiseMoney(v) { const s = String(v == null ? '' : v).replace(/[^0-9.
 function numOrNull(v) { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
 // Same rule in SQL for casting a stored text value → numeric safely (garbage → NULL, never an error).
 const SAFE_NUM_SQL = col => `(CASE WHEN regexp_replace(coalesce(${col},''),'[^0-9.-]','','g') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${col},'[^0-9.-]','','g')::numeric END)`;
+// v28.187 (Ben): "Crossdock likely required". A 3PL branch = a market country_code (UK/US/EU/AU/CA) AND a fulfil_id
+// (UK ILG, US Geneva, US AWD, EU iFulfillment, AU Coghlans); Direct to Client (DIRECT), FBA, B2B, manufacturing etc. are not.
+const TPL_BRANCH_SQL = b => `(upper(coalesce(${b}.country_code,'')) IN ('UK','US','EU','AU','CA') AND coalesce(${b}.fulfil_id::text,'')<>'')`;
+// The 3PL branch a CLIENT-bound PO's shipment actually lands at, else NULL. Client-bound = branch country DIRECT, or a
+// Direct to Client / UK B2B JLEW / UK B2B NEXT branch (the directclient report set), or a key-account PO whose own branch
+// is not a 3PL. Never for a Manufacturing (FOB) PO or a FOB-mode shipment. Destination = the shipment's own branch when
+// set (only a 3PL counts); when the shipment branch is blank, any OTHER PO on the same shipment_ref with a 3PL branch
+// (e.g. IS198: PO-1845589 Direct to Client rides with PO-57USLX6 US Geneva). ONE definition shared by the PO grid row
+// (xdock_3pl → PO_ACTCOND.crossdock_needed) and SUPPLY ▸ Actions (buildActionsRows), so the counts agree.
+const XDOCK_3PL_SQL = (po, branch, keyAcct, ship) => `(SELECT CASE
+    WHEN NOT (upper(coalesce(xob.country_code,''))='DIRECT' OR lower(coalesce(${branch},'')) ~ '(direct to client|b2b jlew|b2b next)'
+              OR (coalesce(${keyAcct},false) AND NOT coalesce(${TPL_BRANCH_SQL('xob')},false))) THEN NULL
+    WHEN lower(coalesce(${branch},'')) LIKE '%manufactur%' OR lower(coalesce(xsh.mode,''))='fob' THEN NULL
+    WHEN coalesce(xsh.branch,'')<>'' THEN (SELECT xsb.name FROM planner.branches xsb WHERE xsb.name=xsh.branch AND ${TPL_BRANCH_SQL('xsb')})
+    ELSE (SELECT min(xrb.name) FROM planner.purchase_orders xrp JOIN planner.branches xrb ON xrb.name=xrp.branch
+          WHERE xrp.shipment_ref=xz.sref AND xrp.po<>${po} AND ${TPL_BRANCH_SQL('xrb')}) END
+  FROM (SELECT nullif(${ship},'') sref) xz
+  LEFT JOIN planner.branches xob ON xob.name=${branch}
+  LEFT JOIN planner.shipments xsh ON xsh.shipment_ref=xz.sref
+  WHERE xz.sref IS NOT NULL)`;
 
 // gzip large JSON responses (built-in zlib — no dependency). The PO grid payload is ~3.6MB of JSON;
 // gzip cuts it ~10x over the wire. Only kicks in when the client accepts gzip and the body is worth it.
@@ -2678,7 +2698,9 @@ async function submissionActions() {
     LEFT JOIN planner.suppliers s ON s.id=ss.supplier_id
     LEFT JOIN planner.purchase_orders po ON po.po=ss.po
     LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
-    WHERE ss.status='pending' AND ss.kind IN ('completion_date','invoice_value')`)).rows;
+    WHERE ss.status='pending' AND ss.kind IN ('completion_date','invoice_value')`)).rows
+    // v28.187 (Ben): a submitted completion date equal to the PO's current production-end is already in effect → no card
+    .filter(r => !(r.kind === 'completion_date' && r.cur_end && String(r.value || '').slice(0, 10) === r.cur_end));
   return rows.map(r => {
     // "(was <current end> - delay/brought forward of N days)" vs the PO's current production-end. Dates stay ISO;
     // the client's actDates() renders them dd-mmm-yy. No clause when there's no current end or no change.
@@ -7489,6 +7511,22 @@ async function buildActionsRows() {
             ) cd
             WHERE cd.completion IS NOT NULL AND cd.completion > cd.cdl
           UNION ALL
+          -- v28.187 (Ben): crossdock likely required. A client-bound PO (Direct to Client / B2B / key account) rides a
+          -- shipment that lands at a 3PL (shipment branch, or a 3PL rider PO when the shipment branch is blank) but has
+          -- no crossdock SKUs. Same XDOCK_3PL_SQL as the PO grid row (PO_ACTCOND.crossdock_needed). Clears when
+          -- crossdock SKUs are set, the shipment changes (FOB / all-direct / no 3PL) or the PO completes.
+          SELECT 'high','Crossdock likely required', xd.po,
+            'Crossdock likely required: shipment '||xd.sref||' lands at '||xd.tpl||' (3PL) but this PO ships to the client'
+              ||coalesce(' ('||nullif(trim(xd.client),'')||')','')||' and has no crossdock SKUs',
+            'gotopo','po','', xd.po
+            FROM (SELECT p.po, p.client, x.sref,
+                    ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', 'x.sref')} tpl
+                  FROM planner.purchase_orders p
+                  CROSS JOIN LATERAL (SELECT coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1)) sref) x
+                  WHERE p.master_po IS NULL AND trim(coalesce(p.crossdock_skus,''))=''
+                    AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%') xd
+            WHERE xd.tpl IS NOT NULL
+          UNION ALL
           -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated AND still live
           SELECT 'high','Shipment escalated', sh.shipment_ref,
             'Shipment '||sh.shipment_ref||' has been escalated — review', '','shipment','', sh.shipment_ref
@@ -8892,7 +8930,9 @@ supplySectionHandler = async (req, res, next) => {
         arows.forEach(r => {
           // portal-submission cards carry their own apply/dismiss (no generic snooze/dismiss lifecycle)
           if (r.fix === 'applysub') { r.status = 'open'; return; }
-          r.key = r.type + '|' + (r.target_key || r.ref || ''); const s = astate[r.key]; r.status = 'open'; r.snooze_until = null; r.snoozed_by = null; r.snoozed_at = null;
+          r.key = r.type + '|' + (r.target_key || r.ref || '');
+          // v28.187 (Ben): a crossdock action snoozed from the PO grid (poact|<po>|crossdock_needed) also snoozes this card
+          const s = astate[r.key] || (r.type === 'Crossdock likely required' ? astate['poact|' + r.ref + '|crossdock_needed'] : null); r.status = 'open'; r.snooze_until = null; r.snoozed_by = null; r.snoozed_at = null;
           if (s) { if (s.status === 'snoozed' && (!s.snooze_until || s.snooze_until >= dtoday)) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; }
             else if (s.status !== 'snoozed') { r.status = s.status; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; } } });
         return res.json(arows);
@@ -15815,7 +15855,9 @@ async function computeOpenActions() {
       WHERE ${DTC} AND p.dtc_accepted_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd} AND p.master_po IS NULL AND ${hasLines}`),
     // PO action items (first pass — PO housekeeping): missing supplier, or a past landing date while not yet shipping.
     one(`SELECT count(DISTINCT p.po) n FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND ${hasLines}
-        AND (coalesce(p.supplier_name,'')='' OR (p.landing_date_overide < current_date AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%'))`),
+        AND (coalesce(p.supplier_name,'')='' OR (p.landing_date_overide < current_date AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%')
+          -- v28.187 (Ben): + crossdock likely required (same XDOCK_3PL_SQL rule as the Actions feed / PO grid)
+          OR (trim(coalesce(p.crossdock_skus,''))='' AND ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', "coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1))")} IS NOT NULL))`),
     one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
       LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(el.qty,0) IS DISTINCT FROM coalesce(l.qty,0)`),
     one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
@@ -21828,6 +21870,8 @@ const PO_ROWS_SQL = `
             coalesce((SELECT px.po_contact_number    FROM planner.purchase_orders px WHERE px.po=calc4.po),'') po_contact_number,
             coalesce((SELECT px.po_freight_forwarder FROM planner.purchase_orders px WHERE px.po=calc4.po),'') po_freight_forwarder,
             coalesce(crossdock_skus,'') crossdock_skus,
+            -- v28.187 (Ben): 3PL a client-bound PO's shipment lands at (NULL = n/a) → PO_ACTCOND.crossdock_needed
+            ${XDOCK_3PL_SQL('calc4.po', 'calc4.branch', 'calc4.dtc_key_account', "coalesce(nullif(calc4.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1))")} xdock_3pl,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
             (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) master_po,                        -- master-PO grouping: a CHILD carries its master's po (filtered out of the grid in poRowsCache)
@@ -21838,8 +21882,9 @@ const PO_ROWS_SQL = `
             -- resolve-po-links cron / the Linked-Records "find"; a PO with no linked bill row is unmatched.
             (EXISTS (SELECT 1 FROM planner.po_links xl WHERE xl.po=calc4.po AND xl.system='xero' AND xl.status='linked' AND coalesce(xl.external_id,'')<>'')) xero_linked,
             -- Pending supplier-submitted completion (production-end) date → inline "set to …" quick-apply on the grid END cell
-            (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
-            (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_id,
+            -- v28.187 (Ben): a submitted date EQUAL to the PO's current effective end (eff_prod_end) is already in effect → not pending (no "set to" button, no DATES action)
+            (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' AND left(coalesce(ss.value,''),10) IS DISTINCT FROM to_char(calc4.eff_prod_end,'YYYY-MM-DD') ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
+            (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' AND left(coalesce(ss.value,''),10) IS DISTINCT FROM to_char(calc4.eff_prod_end,'YYYY-MM-DD') ORDER BY ss.id DESC LIMIT 1) sub_comp_id,
             -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
             (SELECT coalesce(ka.carton_label_format,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) client_label_format,   -- key-account link to a client-specific carton-label format (e.g. 'paper_store')
             (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
@@ -21915,6 +21960,7 @@ const PO_ROWS_SQL = `
             (SELECT round(${SAFE_NUM_SQL('value')},2) FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND ss.status='pending'
                ORDER BY ss.id DESC LIMIT 1) sup_invoice_pending,
             (SELECT value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending'
+               AND left(coalesce(ss.value,''),10) IS DISTINCT FROM to_char(calc4.eff_prod_end,'YYYY-MM-DD')   -- v28.187: equal to the current end = nothing to approve
                ORDER BY ss.id DESC LIMIT 1) sup_completion_pending,
             (SELECT count(*) FROM planner.supplier_notes sn WHERE sn.po=calc4.po AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
             (SELECT count(*) FROM planner.portal_line_costs plc WHERE plc.po=calc4.po
