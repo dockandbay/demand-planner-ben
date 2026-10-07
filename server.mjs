@@ -22974,13 +22974,18 @@ app.post('/api/client/clients', async (req, res) => {
 app.get('/api/client/clients/:id', async (req, res) => {
   try {
     const c = await cpClientById(req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
-    const [users, audit, orders, ka] = await Promise.all([
+    // v28.199 (Ben): header "last login" = latest of a user's portal sign-in and any live session's last_seen_at (migration 335), else its
+    // created_at; staff preview sessions (cppv_) excluded. Falls back to sign-ins + session created_at if 335 is not applied yet.
+    const lastQ = (seen) => pool.query(`SELECT to_char(GREATEST((SELECT max(u.last_login_at) FROM planner.client_users u WHERE u.client_id=$1),
+        (SELECT max(${seen ? 'COALESCE(s.last_seen_at, s.created_at)' : 's.created_at'}) FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE u.client_id=$1 AND s.token NOT LIKE 'cppv\\_%')),'YYYY-MM-DD HH24:MI') last_login`, [c.id]);
+    const [users, audit, orders, ka, last] = await Promise.all([
       pool.query(`SELECT id, name, email, scope, active, to_char(invited_at,'YYYY-MM-DD') invited_at, to_char(last_login_at,'YYYY-MM-DD HH24:MI') last_login_at FROM planner.client_users WHERE client_id=$1 ORDER BY active DESC, name, email`, [c.id]),
       pool.query(`SELECT to_char(changed_at,'YYYY-MM-DD HH24:MI') at, changed_by, event, detail FROM planner.client_audit WHERE client_id=$1 ORDER BY changed_at DESC LIMIT 60`, [c.id]),
       pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, error, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, submitted_by FROM planner.client_orders WHERE client_id=$1 ORDER BY created_at DESC LIMIT 30`, [c.id]),
       c.key_account_id ? pool.query(`SELECT id, name, consignee, contact_person, contact_number, address FROM planner.key_accounts WHERE id=$1`, [c.key_account_id]) : Promise.resolve({ rows: [] }),
+      lastQ(true).catch(() => lastQ(false)).catch(() => ({ rows: [] })),
     ]);
-    res.set('Cache-Control', 'no-store').json({ client: c, users: users.rows, audit: audit.rows, portal_orders: orders.rows, key_account: ka.rows[0] || null });
+    res.set('Cache-Control', 'no-store').json({ client: c, users: users.rows, audit: audit.rows, portal_orders: orders.rows, key_account: ka.rows[0] || null, last_login: (last.rows[0] && last.rows[0].last_login) || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', price_tier: 'text', price_method: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool' };
