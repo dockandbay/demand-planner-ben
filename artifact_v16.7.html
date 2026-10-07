@@ -5866,14 +5866,14 @@ function buildHdr(){
   TIME_COLS.forEach(function(tc){
     if(tc.t==='m'){
       var p=pa(tc.m),Y=fyStartOf(tc.m),isAct=isActualMonth(tc.m),first=(tc.m===fyMonths(Y)[0]);
-      s2(MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(isAct?' actual-hdr':' hz-fc-hdr'),null,isAct?'Actual':'Forecast');
+      s2(MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(isAct?' actual-hdr':' hz-fc-hdr'),null,isAct?'Actual':'Forecast'); try{ _pcsMark(r2.lastChild,tc.m,MN[p.mo-1]+'-'+String(p.y).slice(2)); }catch(e){}
     } else if(tc.t==='fc'){
-      var pf=pa(tc.m);s2(MN[pf.mo-1]+' '+String(pf.y).slice(2),fyBg(fyStartOf(tc.m))+' hz-cur-hdr',null,'Current');   // current month (holds actuals-to-date + forecast)
+      var pf=pa(tc.m);s2(MN[pf.mo-1]+' '+String(pf.y).slice(2),fyBg(fyStartOf(tc.m))+' hz-cur-hdr',null,'Current'); try{ _pcsMark(r2.lastChild,tc.m,MN[pf.mo-1]+'-'+String(pf.y).slice(2)); }catch(e){}   // current month (holds actuals-to-date + forecast)
     } else {
       // FY total column header — plain label; the expand/minimise control lives in the group bar above (r1).
       var th=document.createElement('th');th.className='sep2 '+((tc.t==='q')?'ptot-q':(tc.t==='h')?'ptot-h':fyTotBg(tc.startY));
       th.innerHTML='<span style="font-size:8px;font-weight:700;white-space:nowrap">'+tc.label+'</span>';
-      r2.appendChild(th);
+      r2.appendChild(th); try{ var _pms=(tc.t==='tot'?fyMonths(tc.startY):(tc.months||[])); if(_pms.length)_pcsMark(th,_pms.join(','),tc.t==='tot'?fyLabel(tc.startY):(tc.label+' '+fyLabel(tc.startY))); }catch(e){}
     }
   });
 
@@ -8067,6 +8067,40 @@ function lyoVisible(sku,co,ch){ var ss=skuSales(sku,co,ch)||{};
   var sd=SKU_FILTER.startDate?SKU_FILTER.startDate.slice(0,7).replace('-','_'):'', ed=SKU_FILTER.endDate?SKU_FILTER.endDate.slice(0,7).replace('-','_'):'';
   if(sd||ed){ for(var k in ss){ if((ss[k]||0)>0&&(!sd||k>=sd)&&(!ed||k<=ed))return true; } return false; }
   for(var i=0;i<TIME_COLS.length;i++){ var tc=TIME_COLS[i]; if(tc.t!=='m'&&tc.t!=='fc')continue; var q=pa(tc.m); if((ss[tc.m]||0)>0||(ss[ym(q.y-1,q.mo)]||0)>0)return true; } return false; }
+// v28.218 (Ben): Plan grid COLUMN SORT / FILTER. Click a month, quarter, half or FY header: Sort high to low, low to high,
+// or Hide rows with 0 in that column. Sub-categories are reordered within each category and SKUs within each sub-category
+// by that column's value (actuals for past months; forecast from the current month on, the same per-SKU forecast as the
+// rows). One column at a time: choosing another column replaces it. Display only (no data change).
+var PLAN_COLSORT=null, _PCS_MEMO={};
+function _pcsVal(a,fu,m){ return m>=CUR_MONTH?(fu[m]||0):((a[m]&&a[m][0])||0); }
+function _pcsSubVal(s,co,ch){ var k='S|'+s+'|'+co+'|'+ch; if(k in _PCS_MEMO)return _PCS_MEMO[k]; var a=ga(co,ch,s)||{}, fu={}; try{ fu=(calc(s,co,ch)||{}).fu||{}; }catch(e){}
+  var t=0; PLAN_COLSORT.ms.forEach(function(m){ t+=_pcsVal(a,fu,m); }); return (_PCS_MEMO[k]=t); }
+function _pcsSkuVal(sku,s,co,ch){ var k='K|'+sku+'|'+co+'|'+ch; if(k in _PCS_MEMO)return _PCS_MEMO[k]; var ms=PLAN_COLSORT.ms, fm=ms.filter(function(m){ return m>=CUR_MONTH; }), sales={}, fc={};
+  try{ sales=skuSales(sku,co,ch)||{}; }catch(e){}
+  if(fm.length){ var ck=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', sh=0; try{ sh=(hzSubShares(s,co,ch,ck,hzLyMonths()).shares()||{})[sku]||0; }catch(e){}
+    try{ fc=skuMonthlyMap(sku,co,ch,fm,(calc(s,co,ch)||{}).fu||{},sh,(SKUM[sku]&&SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0)||{}; }catch(e){}
+    fm.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fc[m]=parseInt(ov,10)||0; }); }
+  var t=0; ms.forEach(function(m){ t+=m>=CUR_MONTH?(Number(fc[m])||0):(Number(sales[m])||0); }); return (_PCS_MEMO[k]=t); }
+function _pcsApplySkus(skus,s,co,ch){ if(!PLAN_COLSORT)return skus; var v=function(x){ return _pcsSkuVal(x,s,co,ch); };
+  if(PLAN_COLSORT.mode==='nz')return skus.filter(function(x){ return v(x)!==0; });
+  var d=PLAN_COLSORT.mode==='asc'?1:-1; return skus.slice().sort(function(a,b){ return d*(v(a)-v(b))||a.localeCompare(b); }); }
+function _pcsApplySubs(rows,co){ if(!PLAN_COLSORT)return rows; var v=function(r){ return _pcsSubVal(r.s,co,r.ch); };
+  if(PLAN_COLSORT.mode==='nz')return rows.filter(function(r){ return v(r)!==0; });
+  var d=PLAN_COLSORT.mode==='asc'?1:-1; return rows.slice().sort(function(a,b){ return d*(v(a)-v(b))||a.s.localeCompare(b.s)||a.ch.localeCompare(b.ch); }); }
+var _PCS_LBL={desc:'high to low',asc:'low to high',nz:'hide 0'};
+function setPlanColSort(key,lbl,mode){ PLAN_COLSORT=mode?{key:key,ms:String(key).split(','),lbl:lbl,mode:mode}:null; _PCS_MEMO={};
+  try{ renderPlanChips(); }catch(e){} try{ _VIEW_ONLY_RENDER=true; render(); }catch(e){ try{ renderMain(true); }catch(_){} } }
+function openPlanColSortMenu(th,key,lbl){ var old=document.getElementById('pcs-pop'); if(old){ old.remove(); if(old.dataset.k===key)return; }
+  var cur=PLAN_COLSORT&&PLAN_COLSORT.key===key?PLAN_COLSORT.mode:null, p=document.createElement('div'); p.id='pcs-pop'; p.dataset.k=key;
+  p.style.cssText='position:fixed;z-index:200001;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:6px;font-size:12px;display:grid;gap:2px;min-width:190px;text-align:left';
+  var it=function(mode,txt){ return '<button data-m="'+mode+'" style="text-align:left;border:0;background:'+(cur===mode?'var(--blue-soft)':'none')+';color:var(--ink);font:inherit;font-weight:'+(cur===mode?700:500)+';padding:6px 10px;border-radius:6px;cursor:pointer">'+txt+'</button>'; };
+  p.innerHTML='<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 10px">'+esc(lbl)+'</div>'+it('desc','Sort high to low')+it('asc','Sort low to high')+it('nz','Hide rows with 0')+(PLAN_COLSORT?it('','Clear column sort / filter'):'');
+  document.body.appendChild(p); var r=th.getBoundingClientRect(); p.style.left=Math.max(8,Math.min(window.innerWidth-210,r.left))+'px'; p.style.top=(r.bottom+4)+'px';
+  p.querySelectorAll('[data-m]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); p.remove(); setPlanColSort(key,lbl,b.dataset.m); }; });
+  setTimeout(function(){ document.addEventListener('click',function off(e){ if(!p.contains(e.target)){ p.remove(); document.removeEventListener('click',off); } }); },0); }
+function _pcsMark(th,key,lbl){ th.dataset.pcs=key; th.style.cursor='pointer'; th.title=(th.title?th.title+' · ':'')+'Click to sort or filter by this column';
+  if(PLAN_COLSORT&&PLAN_COLSORT.key===key){ var sp=document.createElement('span'); sp.textContent=PLAN_COLSORT.mode==='asc'?' ▲':PLAN_COLSORT.mode==='desc'?' ▼':' ≠0'; sp.style.cssText='color:var(--blue);font-weight:800'; th.appendChild(sp); th.style.boxShadow='inset 0 -2px 0 var(--blue)'; }
+  th.addEventListener('click',function(e){ if(e.target.closest&&e.target.closest('.fy-toggle'))return; e.stopPropagation(); openPlanColSortMenu(th,key,lbl); }); }
 function filteredSkus(s,co,ch,all,inclLyo){
   var wh=skuWh(co,ch);
   var avKey=co.toLowerCase()+'_'+ch.toLowerCase();
@@ -8965,7 +8999,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   var wh=skuWh(co,ch);
   var ctry=co.toLowerCase();
   var _skuSp=aspF(s,co,ch);   // subcat avg selling price — used to show revenue on SKU FY/period totals (SKU units × subcat ASP)
-  var skus=filteredSkus(s,co,ch,false,true); // rows respect the SKU filters + CLOSED last-year-only SKUs that sold in the displayed window (v27.473); subtotal/gap (eff) covers ALL subcat SKUs
+  var skus=filteredSkus(s,co,ch,false,true); try{ skus=_pcsApplySkus(skus,s,co,ch); }catch(e){} // v28.218 column sort/filter. rows respect the SKU filters + CLOSED last-year-only SKUs that sold in the displayed window (v27.473); subtotal/gap (eff) covers ALL subcat SKUs
   if(typeof SETS_VIEW!=='undefined'&&SETS_VIEW!=='show'){ skus=skus.filter(function(sk){ var isS=SKUM[sk]&&SKUM[sk].vt==='SET'; return SETS_VIEW==='only'?isS:!isS; }); }   // Display settings ▸ Sets show/hide/only (also applied here, not just renderSkuView)
   // Share basis = the WHOLE subcat (activity + channel available), NOT the filtered rows — otherwise a search or
   // pill that narrows to one SKU gives it share 1.0, so its cell shows the entire subcat forecast (was a bug).
@@ -9834,6 +9868,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
 
 var _makeGrandTotRow=null;   // set by buildBody; lets refreshRow() rebuild the grand-total row in place on an edit
 function buildBody(){
+  _PCS_MEMO={};   // v28.218 column sort values are recomputed per grid build
   const cm=filteredCats(),frag=document.createDocumentFragment();
   // Grand total row — built by _makeGrandTotRow() so refreshRow() can rebuild it in place on an edit
   _makeGrandTotRow=function(){
@@ -9947,7 +9982,7 @@ function buildBody(){
   const fu_cache={};
   var _shownOn=hzPlanRowFilterOn(), _anyCat=false;   // v28.165 (Ben): "Shown SKUs" lines on/off for this build; _anyCat feeds the search empty-state hint
   Object.keys(cm).forEach(function(cat){
-    var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
+    var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));}); try{ rows=_pcsApplySubs(rows,CUR); if(!rows.length)return; }catch(e){}   // v28.218 column sort/filter
     var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()));   // Filter Rules: explode to matching SKUs; the subcat summary-totals row is removed below (see the rows loop). Drift rule = highlight-only → render the plan NORMALLY (subcat cells stay so they can be painted yellow).
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
     // Run-off (discontinued) CATEGORIES: hidden by default; revealed via Display Settings ▸ "Show run-off categories".
@@ -10310,10 +10345,10 @@ function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getE
     try{ var b=document.getElementById('plan-display-btn'); if(b){ var br=b.getBoundingClientRect(), w=p.offsetWidth||360; p.style.position='fixed'; p.style.top=(br.bottom+4)+'px'; p.style.right='auto'; p.style.left=Math.max(hzMinLeft(),Math.min(br.right-w, window.innerWidth-w-6))+'px'; p.style.zIndex='1100'; } }catch(e){} }   // clamp within the viewport (was right:0 → half off-screen on wide windows)
     var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); var _ro=document.getElementById('filt-runoff-cats'); if(_ro)_ro.checked=(typeof SHOW_RUNOFF_CATS!=='undefined'&&SHOW_RUNOFF_CATS); var _h1=document.getElementById('filt-hl-fclt'); if(_h1)_h1.checked=(typeof HL_FC_LT_ACT!=='undefined'&&HL_FC_LT_ACT); var _h2=document.getElementById('filt-hl-nofcinv'); if(_h2)_h2.checked=(typeof HL_NOFC_INV!=='undefined'&&HL_NOFC_INV); var _h3=document.getElementById('filt-hl-disc'); if(_h3)_h3.checked=(typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC); var _h4=document.getElementById('filt-hl-growthly'); if(_h4)_h4.checked=(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
-function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
+function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} try{ PLAN_COLSORT=null; _PCS_MEMO={}; }catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
   else if(k==='rw'){var s=document.getElementById('plan-rw-sel'); if(s)s.value='ALL'; setPlanRw('ALL');}
-  else if(k==='fromrep')setPlanFromRep(false); else if(k==='cattot')setShowCatTot(false); else if(k==='sort')setPlanSort('alpha');
+  else if(k==='fromrep')setPlanFromRep(false); else if(k==='cattot')setShowCatTot(false); else if(k==='sort')setPlanSort('alpha'); else if(k==='colsort')setPlanColSort(null,null,null);
   try{renderPlanChips();}catch(e){} }
 // Active-filter CHIPS — always show WHICH filters are applied (each removable with ×). Replaces the opaque count badge.
 function renderPlanChips(){ var c=document.getElementById('plan-chips'); if(!c)return; var chips=[];
@@ -10324,6 +10359,7 @@ function renderPlanChips(){ var c=document.getElementById('plan-chips'); if(!c)r
   var fr=document.getElementById('plan-fromrep-btn'); if(fr&&fr.classList.contains('active'))chips.push(chip('From replacement','fromrep'));
   // (no "Category totals" chip — the More-Filters Show toggle is the single control; the external chip was redundant per Ben)
   var ss=document.getElementById('plan-sort-sel'); if(ss&&ss.value&&ss.value!=='alpha')chips.push(chip('Sort: '+((ss.options[ss.selectedIndex]||{}).text||ss.value),'sort'));
+  if(typeof PLAN_COLSORT!=='undefined'&&PLAN_COLSORT)chips.push(chip('Column '+PLAN_COLSORT.lbl+': '+_PCS_LBL[PLAN_COLSORT.mode],'colsort'));
   c.innerHTML=chips.join('');
   c.querySelectorAll('[data-clr]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); _planClearFilter(x.getAttribute('data-clr')); }; });
   var fb=document.getElementById('plan-filters-btn'); if(fb){ var on=chips.length>0; fb.style.background=on?'var(--blue-soft)':'var(--hover)'; fb.style.borderColor=on?'#93c5fd':'var(--line)'; } }

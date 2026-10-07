@@ -1,3 +1,10 @@
+## v28.218 (Ben, branch review-fixes-2026-10-05): Plan grid column sort / filter
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Click any month, current-month, quarter, half or FY total header in the DEMAND Plan grid for: **Sort high to low**, **Sort low to high**, **Hide rows with 0**, or clear. Sub-categories reorder within each category and SKUs within each sub-category by that column (actuals for past months, forecast from the current month on). One column at a time: setting December replaces March. Active column shows ▼ / ▲ / ≠0 and a removable chip; Reset filters clears it.
+- Verified on sandbox (jsdom, real data): 41 sortable headers; Nov-26 high to low reorders Towel - Beach to CORE 6,960 > SEASONAL SUM 2,426 > SEASONAL 2,329 > BRIGHTS 1,338 on screen; SKUs 926 > 685 > 600; Hide 0 keeps 93 of 126 SKUs; 0 JS errors.
+
 ## v28.217 (Ben, branch review-fixes-2026-10-05): Plan download builder
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.

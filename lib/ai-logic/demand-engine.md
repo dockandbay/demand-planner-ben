@@ -101,7 +101,7 @@ fingerprints:
   artifact_v16.7.html::tierMix: c2167e52701b
   artifact_v16.7.html::skuHasAnyActivity: e319e553da16
   artifact_v16.7.html::filteredSkus: 77e32b0b2afc
-  artifact_v16.7.html::insertInlineSkuRows: c4e52d097c38
+  artifact_v16.7.html::insertInlineSkuRows: ea778ffcfec8
   artifact_v16.7.html::subcatSkuEffTotals: 86ce56a71691
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderSkuView: caf284ab5888
@@ -132,7 +132,7 @@ fingerprints:
   artifact_v16.7.html::getASP: c70881d04bde
   artifact_v16.7.html::priceUpliftFactor: f95d1b427cac
   artifact_v16.7.html::aspAdjFactor: 719869ba1e05
-  artifact_v16.7.html::buildBody: a57f1a107abd
+  artifact_v16.7.html::buildBody: 15c2678ac13e
   artifact_v16.7.html::_makeCatTotRow: 5d3d82f1593e
   artifact_v16.7.html::renderKeyAccountsView: 436578739eeb
   artifact_v16.7.html::kafPkaRefresh: 49573b9de89e
@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.217
+verified_version: v28.218
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -293,3 +293,7 @@ verified_version: v28.217
 - TY actuals fill months up to the current month (month to date); Forecast fills the current month onwards; LY actuals = same month a year earlier; TY combined = actuals then forecast, as the Plan. (source: _pdxBuild)
 - SKU level uses the same per-SKU forecast as the Plan grid and the Cross Market view (skuMonthlyMap on the whole sub-category share pool + overrides; sets in boxes; own actuals only). Sub-category level = calc().fu and sub-category actuals, exploded by default like the Plan sub-category cells (toggle off for raw). (source: _pdxBuild, expAct, expFc)
 - Revenue = units x the sub-category ASP (getASP); sub-category actual months use the actual sub-category revenue. (source: _pdxBuild, getASP)
+
+## Plan grid column sort / filter (v28.218)
+- Click any month, current-month, quarter, half or FY header in the Plan grid: Sort high to low, Sort low to high, or Hide rows with 0. Only one column is active; choosing another replaces it. Shown as a removable chip; Reset filters clears it. Display only. (source: openPlanColSortMenu, setPlanColSort)
+- Value per column = actuals for past months and the forecast from the current month on (sub-category: calc().fu; SKU: the row's own forecast, skuMonthlyMap on the whole sub-category share pool + overrides). Sub-categories reorder within each category; SKUs reorder within each sub-category (masters still before sets). The SKU-level sort select (A-Z / volume / tier) still applies when no column sort is set. (source: _pcsSubVal, _pcsSkuVal, _pcsApplySubs, _pcsApplySkus)
