@@ -1,3 +1,9 @@
+## v28.209 (Ben, branch review-fixes-2026-10-05): client portal header shows the logo only
+
+**Files:** `supply/client-view.js`, `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Removed the "Client portal" words beside the logo (top left). Logo links to Home as before.
+
 ## v28.208 (Ben, branch review-fixes-2026-10-05): client portal shows the Dock & Bay logo
 
 **Files:** `server.mjs`, `supply/client-view.js`, `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
