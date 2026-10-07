@@ -8981,7 +8981,18 @@
             +grid('pusers','Page usage: per user',d.page_users||[],[['user','User'],['visits','Visits'],['pages','Pages'],['active_s','Active time',function(r){ return esc(mins(r.active_s)); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
             +'<div class="sect-h" style="margin-top:14px">Pages with zero visits this period <span class="mut tiny">('+(d.unvisited||[]).length+')</span></div><div class="mut tiny">'+esc(d.unvisited_note||'')+'</div>'
             +((d.unvisited||[]).length?'<div style="margin-top:4px">'+d.unvisited.map(function(v){ return mono(v); }).join(' · ')+'</div>':'')
-            +grid('ver','Errors per version',d.per_version||[],[['app_version','Version'],['errors','Errors'],['server','Server'],['browser','Browser'],['api','API'],['integ','Integration'],['first_seen','First seen',function(r){ return esc(dt(r.first_seen)); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]]); }
+            +grid('ver','Errors per version',d.per_version||[],[['app_version','Version'],['errors','Errors'],['server','Server'],['browser','Browser'],['api','API'],['integ','Integration'],['first_seen','First seen',function(r){ return esc(dt(r.first_seen)); }],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
+            +drawPortal(d); }
+        // v28.188 (Ben): supplier portal activity (GET /api/health/weekly -> d.portal): sign-ins, sessions, active suppliers with last seen,
+        // slow views and failures from portal browsers (incl. the login page) and /api/portal/* server rows. Supplier names only, no emails.
+        function drawPortal(d){ var P=d.portal; if(!P)return ''; if(P.error)return '<div class="count" style="color:var(--neg);margin-top:14px">Supplier portal activity failed to load: '+esc(P.error)+'</div>';
+          var k=P.kpis||{}, msg=function(r){ return '<span style="white-space:pre-wrap">'+esc(r.message||'')+'</span>'; };
+          return '<div class="sect-h" style="margin-top:18px">Supplier portal</div>'
+            +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0">'+kpi(k.sign_ins||0,'Sign-ins',0)+kpi(k.live_sessions||0,'Live sessions',0)+kpi(k.active_suppliers||0,'Active suppliers',0)+kpi(k.page_views||0,'Page views',0)+kpi(k.slow_views||0,'Slow views',0)+kpi(k.failures||0,'Failures',1)+kpi(k.login_errors||0,'Login page errors',1)+kpi(k.dead_clicks||0,'Dead clicks',1)+'</div>'
+            +(P.no_last_seen?'<div class="mut tiny">Migration 332 is not applied: "last seen" shows the sign-in time.</div>':'')
+            +grid('psup','Portal: suppliers',P.suppliers||[],[['supplier','Supplier'],['users','Users'],['sign_ins','Sign-ins'],['last_seen','Last seen',function(r){ return esc(dtm(r.last_seen)); }],['page_views','Page views'],['slow_views','Slow views'],['slow_requests','Slow requests'],['failures','Failures']])
+            +grid('pview','Portal: slow views',P.views||[],[['path','View',function(r){ return mono(r.path); }],['n','Count'],['p95','p95 ms'],['max_ms','Max ms'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]])
+            +grid('pfail','Portal: failures',P.failures||[],[['kind','Kind'],['source','Source'],['path','Where',function(r){ return mono(r.path); }],['status','Status'],['message','Message',msg],['n','Count'],['last_seen','Last seen',function(r){ return esc(dt(r.last_seen)); }]]); }
         function draw(){ var d=D, k=d.kpis;
           var h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0">'+kpi(k.server_errors,'Server errors',1)+kpi(k.slow_requests,'Slow requests',0)+kpi(k.browser_errors,'Browser errors',1)+kpi(k.slow_views,'Slow views',0)+'</div>'
             +draw2(d)

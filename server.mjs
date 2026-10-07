@@ -851,11 +851,13 @@ function hzRbNote(name, ms) { const e = _hzRbStats[name] || (_hzRbStats[name] = 
 // or fails a request. Health routes, the App health sweep's own self-timed calls (x-hz-health-sweep) and non-/api paths are skipped.
 const HZ_HEALTH_SKIP = /^\/api\/(health\/|cron\/health-(weekly|checks)|config\/health-check|portal\/health\/|cp\/health\/)/;   // v28.162: + health-checks cron + portal capture posts
 const _hzHB = new Map(); let _hzHBn = 0, _hzHBlast = Date.now(), _hzHBbusy = null, _hzHBoffUntil = 0;
-function hzHealthNote(kind, method, path, status, ms, msg, example) {
-  const k = kind + '|' + method + '|' + path + '|' + status; let e = _hzHB.get(k);
-  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: null }; _hzHB.set(k, e); }
+// v28.188 (Ben): `sids` = the supplier id(s) of a supplier-portal request (/api/portal/*, from the psid session; never the email): kept
+// in meta.supplier_ids and part of the grouping key, so a slow or failing portal request can be tied to a supplier.
+function hzHealthNote(kind, method, path, status, ms, msg, example, sids) {
+  const k = kind + '|' + method + '|' + path + '|' + status + (sids ? '|' + sids : ''); let e = _hzHB.get(k);
+  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: sids ? { supplier_ids: sids } : null }; _hzHB.set(k, e); }
   e.count++; _hzHBn++; if (ms > e.ms) e.ms = ms; if (msg) e.message = String(msg).slice(0, 1000); e.ts = new Date().toISOString();
-  if (example && example !== e.path) e.meta = { example: String(example).slice(0, 300) };
+  if (example && example !== e.path) e.meta = Object.assign(e.meta || {}, { example: String(example).slice(0, 300) });
   if (kind === 'server_error') _hzAlertDirty = true;
 }
 // v28.163 (Ben): generic buffered event for the new server kinds (integration_error, db_pool, slow_query). Same buffer, same
@@ -904,8 +906,9 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
     // v28.159 (Ben): health log. Group by the matched route pattern (/api/supply/po/:po) so ids don't fragment the report.
     if ((ms >= HZ_SLOW_MS || res.statusCode >= 500) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
       const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
-      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path);
-      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path);
+      const sids = (path.startsWith('/api/portal/') && req.portal && Array.isArray(req.portal.supplierIds)) ? req.portal.supplierIds.slice(0, 5).join(',') : '';   // v28.188
+      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path, sids);
+      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path, sids);
       hzHealthFlush(false);
     }
   } catch (_) { /* measurement must never throw */ } });
@@ -1152,7 +1155,7 @@ function cookieVal(req, name) {
 }
 app.use((req, res, next) => {
   // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
-  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')
+  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/portal-icon.png' || req.path === '/api/version' || req.path.startsWith('/api/portal/')   // v28.189: + /portal-icon.png (static icon, no data)
       || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
@@ -1210,6 +1213,14 @@ function hzSecurityNote(req, status, reason) { try {
 // server-side with that reference (log500 has already logged the stack for handlers that call it). Every 403 is noted in the
 // App health log (hzSecurityNote) with the supplier id and the refusal reason.
 const PORTAL_ERR_GENERIC = 'Something went wrong on our side. Please try again; if it keeps happening, contact Dock & Bay and quote ref ';
+// v28.191 (Ben, deep dive M6): developer wording in portal 4xx answers ("po and data_base64/storage_path required", "not your sample",
+// "invalid status") becomes a sentence a supplier can act on. Messages already written for suppliers pass through unchanged.
+function portalFriendlyError(m) { const t = String(m || '');
+  let x = /^not your (\w[\w -]*)$/i.exec(t); if (x) return 'This ' + x[1].toLowerCase().replace(/^po\b/, 'PO') + ' is not on your account.';
+  if (/(^|[\s+\/])\w*_\w*.*\brequired$|^[a-z_\/ +]+ required$/.test(t)) return 'Something is missing. Please refresh the page and try again.';
+  if (/^invalid [a-z_ ]+$/i.test(t)) return 'That value is not allowed. Please check it and try again.';
+  if (/^not (found|allowed)$/i.test(t)) return t === 'not found' ? 'Not found. It may have been removed; please refresh the page.' : 'You can not do that here.';
+  return t; }
 const _PORTAL_INTERNAL_RE = /(relation "|column "|syntax error|violates|duplicate key|invalid input syntax|null value in column|does not exist|ECONN|file:\/\/|\/Users\/|\/var\/task|node_modules|\n\s+at |TypeError|ReferenceError|Cannot read propert)/i;
 app.use((req, res, next) => {
   if (!String(req.path || '').startsWith('/api/portal/')) return next();
@@ -1221,6 +1232,8 @@ app.use((req, res, next) => {
       const st = res.statusCode;
       if (st >= 400 && body && typeof body === 'object' && typeof body.error === 'string') {
         if (st === 403) res._hzErr = body.error;
+        else if (st === 401) body = Object.assign({}, body, { error: 'Your session has expired. Please sign in again.' });   // v28.191 (Ben, M6)
+        if (st >= 400 && st < 500 && st !== 401 && !_PORTAL_INTERNAL_RE.test(body.error)) { const f = portalFriendlyError(body.error); if (f !== body.error) { if (st === 403) res._hzErr = body.error; body = Object.assign({}, body, { error: f }); } }
         if (st >= 500 || _PORTAL_INTERNAL_RE.test(body.error)) { const r = _ref(); _log(r, body.error); res._hzPortalSan = true; body = { error: PORTAL_ERR_GENERIC + r + '.', ref: r }; }
       }
     } catch (_) {}
@@ -1389,7 +1402,10 @@ function _hzOnWrite(req, kind) {
   if (!names) return;                                                   // a portal route that never authenticated (no identity) wrote nothing
   _plCache.delete(names.slice().sort().join('|'));
   if (kind === 'portal-own') _lcInvalidateLocal(_pbNames({ names }));
-  else if (kind === 'portal-shipnote') _lcInvalidateLocal(_pbNames({}));
+  // v28.189 (Ben, M2): with per-supplier read state (migration 333) a shipment note / read / delete changes only the CALLER's payload (its
+  // unread badges; supplier-authored notes are in no payload), so only the caller's pb: entries are marked. Without 333 the shared read_at
+  // can change every supplier on the shipment: all pb: entries, as before. Never a shared epoch bump.
+  else if (kind === 'portal-shipnote') _lcInvalidateLocal(_snReadsMemo.v ? _pbNames({ names }) : _pbNames({}));
   else invalidateSupplyCaches('portal-po');
   // long-lived server: rebuild the writer's payload(s) right behind the write so their next load is warm (v27.879 prewarm). Not on
   // Vercel: a timer after the response may run in a frozen container (stranded pooled connections, Diviyaj 01-Sep); there the
@@ -3005,11 +3021,28 @@ app.get('/api/supply/img', proxyImage);
 // Google Fonts is blocked in mainland China (suppliers use the portal from there). v27.467
 function loadTheme() { try { return readFileSync(new URL('./supply/hz-theme.css', import.meta.url), 'utf8'); } catch { return ''; } }
 const HZ_THEME = DEV ? null : loadTheme();
-app.get('/hz-theme.css', (req, res) => {
-  res.setHeader('content-type', 'text/css; charset=utf-8');
-  res.setHeader('cache-control', DEV ? 'no-cache' : 'public, max-age=86400');   // URL carries ?v=<APP_VERSION>, so a day is safe
-  res.end(DEV ? loadTheme() : HZ_THEME);
-});
+// v28.189 (Ben, deep dive M4): static text assets (theme CSS, hz-health.js, portal-view.js) are sent brotli or gzip compressed (built
+// once per content, kept in memory), with a strong content ETag (a revalidation is a 304), and cached for a year as immutable when the
+// URL carries the current ?v=<APP_VERSION> (a deploy changes the URL). Without the version (or a stale one) they are always revalidated.
+const _hzAssetMemo = new Map();   // name -> { src, etag, gz, br }
+function hzSendAsset(req, res, name, type, src, opts) {
+  let m = _hzAssetMemo.get(name);
+  if (!m || m.src !== src) { const buf = Buffer.from(String(src || ''), 'utf8');
+    m = { src, etag: '"' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 20) + '"', raw: buf, gz: zlib.gzipSync(buf, { level: 9 }),
+      br: zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 10, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } }) };
+    _hzAssetMemo.set(name, m); }
+  const ae = String(req.headers['accept-encoding'] || ''), enc = /\bbr\b/.test(ae) ? 'br' : /\bgzip\b/.test(ae) ? 'gzip' : '';
+  res.set('Content-Type', type).set('Vary', 'Accept-Encoding').set('ETag', m.etag);
+  res.set('Cache-Control', (opts && opts.immutable) ? 'public, max-age=31536000, immutable' : 'no-cache');
+  if (String(req.headers['if-none-match'] || '').split(/\s*,\s*/).some(t => t.replace(/^W\//, '') === m.etag)) return res.status(304).end();
+  if (enc) res.set('Content-Encoding', enc);
+  return res.end(enc === 'br' ? m.br : enc === 'gzip' ? m.gz : m.raw);
+}
+const hzVerOk = (req) => String(req.query.v || '') === String(APP_VERSION);
+app.get('/hz-theme.css', (req, res) => hzSendAsset(req, res, 'hz-theme.css', 'text/css; charset=utf-8', DEV ? loadTheme() : HZ_THEME, { immutable: !DEV && hzVerOk(req) }));   // v28.189: compressed + ETag (was raw, a day's cache)
+// v28.189 (Ben): the supplier portal's icon as a cached file (the portal page embedded the same base64 image twice). Gate-exempt like /portal.
+app.get('/portal-icon.png', (req, res) => { try { res.set('Content-Type', 'image/png').set('Cache-Control', hzVerOk(req) ? 'public, max-age=31536000, immutable' : 'public, max-age=86400');
+  res.end(readFileSync(new URL('./supply/assets/portal-icon.png', import.meta.url))); } catch (e) { res.status(404).end(); } });
 app.get('/fonts/:name', (req, res) => {
   const files = { 'hanken-grotesk-latin.woff2': 1, 'hanken-grotesk-latin-ext.woff2': 1 };
   if (!files[req.params.name]) return res.status(404).end();
@@ -7922,6 +7955,7 @@ if (!process.env.VERCEL) {   // boot warm (long-lived server only — on Vercel 
 // (same "every edit marks the portal stale" rule as before), and the heavy global parts of a build come from shared base caches
 // ('portal:pos', 'portal:lines', 'sec:shipment-plan') filtered per supplier, so a rebuild is one round of small keyed queries.
 const PB_TTL_MS = SUPPLY_CACHE_TTL_MS, PB_HARD_MS = 60 * 60 * 1000;   // SWR inside 10 min, never older than 1 h (an idle supplier's first load waits)
+const PB_STALE_GRACE_MS = Math.max(0, Number(process.env.PORTAL_STALE_GRACE_MS || 1500));   // v28.189: how long a stale bootstrap request waits for its revalidation
 function _pbKeyParts(names, ids, inclArch) { return names.slice().sort().join('|') + '#' + (ids || []).map(String).sort().join('|') + '#' + (inclArch ? '1' : '0'); }
 function _pbCache(names, ids, inclArch) {
   const name = 'pb:' + _pbKeyParts(names, ids, inclArch);
@@ -10525,7 +10559,13 @@ app.get('/api/product/item/:ref', async (req, res) => {
 app.get('/api/portal/product-item/:ref', portalAuth, async (req, res) => {
   const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); portalScopeItem(req, p.item); res.json(p); }
+  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); portalScopeItem(req, p.item);
+    // v28.191 (Ben, H6): a document another supplier uploaded is not shown (Dock & Bay's own documents are); a component sampled by another
+    // supplier says "another supplier" instead of its name.
+    const ppl = await portalPeopleEmails(req), mine = new Set((req.portal.suppliers || []).map(x => String(x).toLowerCase().trim()));
+    p.docs = (p.docs || []).filter(d => d.uploader_kind !== 'supplier' || ppl.has(String(d.uploaded_by || '').toLowerCase()));
+    (p.components || []).forEach(c => { if (Array.isArray(c.req_suppliers)) c.req_suppliers = [...new Set(c.req_suppliers.map(n => mine.has(String(n).toLowerCase().trim()) ? n : 'another supplier'))]; });
+    res.json(p); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
@@ -11354,10 +11394,24 @@ async function unlinkSampleFromShipment(devSampleId, srId) {
   if (!srId) return;
   await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE dev_sample_id=$1 AND sample_request_id=$2::bigint`, [devSampleId, srId]);
 }
-async function portalOwnsProductSample(req, sampleId) {   // ownership: the product sample's item must belong to the caller's supplier
-  const r = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
-  return r ? portalOwnsProduct(req, r.item_ref) : false;
+// v28.191 (Ben, deep dive H6): ownership of a product SAMPLE VERSION is by its development REQUEST (the supplier that submitted it), not
+// the item: suppliers competing on one item must never change each other's versions (status, sizes, shipment, files). A version with no
+// request (older rows) is the caller's only when the item has no other supplier's request.
+async function portalOwnsProductSample(req, sampleId) {
+  const n = Number(sampleId); if (!Number.isSafeInteger(n) || n <= 0) return false;
+  const r = (await pool.query(`SELECT ps.item_ref, (SELECT rq.supplier_name FROM planner.product_dev_requests rq WHERE rq.id=ps.request_id) req_sup,
+      (SELECT count(*) FROM planner.product_dev_requests r2 JOIN planner.product_dev_items i ON i.id=r2.item_id WHERE i.ref=ps.item_ref AND NOT (r2.supplier_name = ANY($2)))::int others
+    FROM planner.product_dev_samples ps WHERE ps.id=$1`, [n, req.portal.suppliers || []])).rows[0];
+  if (!r) return false;
+  if (r.req_sup) return (req.portal.suppliers || []).includes(r.req_sup);
+  return r.others === 0 && portalOwnsProduct(req, r.item_ref);
 }
+// v28.191 (Ben, H6): the caller's development request(s) on an item (id + supplier id), and the emails of the caller's people.
+async function portalMyRequests(req, ref) { return (await pool.query(`SELECT r.id, r.supplier_id, r.supplier_name FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND r.supplier_name = ANY($2) ORDER BY r.id`, [ref, req.portal.suppliers || []])).rows; }
+async function portalMyNoteSupplierId(req, ref) { const m = await portalMyRequests(req, ref); const sid = m.find(x => x.supplier_id != null); return sid ? sid.supplier_id : ((req.portal.supplierIds || [])[0] || null); }
+async function portalPeopleEmails(req) { if (req._ppEmails) return req._ppEmails;
+  const rows = (await pool.query(`SELECT lower(email) e FROM planner.supplier_portal_users WHERE supplier_name = ANY($1) OR supplier_id = ANY($2::bigint[])`, [req.portal.suppliers || [], (req.portal.supplierIds || []).map(Number)])).rows;
+  req._ppEmails = new Set(rows.map(x => x.e).concat([String(req.portal.email || '').toLowerCase()])); return req._ppEmails; }
 async function setSampleDevSamples(sampleId, devs, by) {   // replace-all the dev-sample links on a sample shipment; devs = [{id,qty}] or [id]
   await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE sample_request_id=$1::bigint`, [sampleId]);
   for (const d of (Array.isArray(devs) ? devs : [])) { const id = (d && typeof d === 'object') ? d.id : d; if (!id) continue;
@@ -22858,7 +22912,7 @@ app.get('/api/config/health-check', async (req, res) => {
 
 // ── v28.159 (Ben): HEALTH LOG (migration 328): browser capture endpoints, the weekly report, the Health log UI data and the
 // weekly health email. Server-side capture lives in the perf middleware (hzHealthNote / hzHealthFlush).
-app.get('/hz-health.js', (req, res) => { res.set('Content-Type', 'application/javascript; charset=utf-8').set('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache').send(hzHealthJs() || '/* hz-health.js missing */'); });
+app.get('/hz-health.js', (req, res) => hzSendAsset(req, res, 'hz-health.js', 'application/javascript; charset=utf-8', hzHealthJs() || '/* hz-health.js missing */', { immutable: !!req.query.v }));   // v28.189: + brotli / gzip + ETag (immutable rule unchanged)
 // Browser events: one shared handler behind three AUTHENTICATED routes, never an anonymous write. Staff = the normal /api gate
 // (planner key cookie under PLANNER_KEY; identity via authUser); supplier portal = portalAuth (psid); client portal = cpAuth
 // (csid). Trade-off: errors on the portal LOGIN screens (no session yet) are not captured, which is acceptable vs an open
@@ -22874,25 +22928,31 @@ function hzCeAllow(key, max, want) { const now = Date.now(); let r = _hzCeRate.g
   if (!r || now - r.t > 60000) { r = { t: now, n: 0 }; _hzCeRate.set(key, r); }
   if (_hzCeRate.size > 5000) for (const [k, v] of _hzCeRate) if (now - v.t > 60000) _hzCeRate.delete(k);
   const ok = Math.max(0, Math.min(want, max - r.n)); r.n += ok; return ok; }
-async function hzClientEvents(req, res, source, email) {
+// v28.188 (Ben): opt.sids = the portal session's supplier id(s), stored in meta.supplier_ids (portal activity per supplier). opt.login = the
+// supplier portal LOGIN page (no session): only errors / page views / slow views / API failures, path tagged "/portal (login)", no user.
+async function hzClientEvents(req, res, source, email, opt) {
   try {
+    opt = opt || {};
     let arr = req.body; if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (_) { arr = null; } }
     if (!Array.isArray(arr)) return res.status(400).json({ error: 'expected a JSON array of events' });
     const clip = (v, n) => (v == null || v === '') ? null : String(v).slice(0, n);
     const ua = clip(req.get('user-agent'), 300), em = email ? String(email).toLowerCase().slice(0, 200) : null;
     const agg = new Map();
-    for (const e of arr.slice(0, 50)) {
+    for (const e of arr.slice(0, opt.login ? 20 : 50)) {
       if (!e || typeof e !== 'object' || !HZ_CE_KINDS.has(e.kind)) continue;
+      if (opt.login && !HZ_CE_LOGIN_KINDS.has(e.kind)) continue;
       const message = clip(e.message, 500); if (!message) continue;
-      const path = clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
+      const path = opt.login ? '/portal (login)' : clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
       const cnt = HZ_CE_AGG.has(e.kind) ? Math.max(1, Math.min(10000, Math.round(Number(e.count) || 1))) : 1;
       const ex = agg.get(k); if (ex) { ex.count += cnt; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
       let meta = null; if (e.meta && typeof e.meta === 'object') { try { const j = JSON.stringify(e.meta); if (j.length <= 1000) meta = e.meta; } catch (_) {} }
+      if (opt.sids) meta = Object.assign({}, meta, { supplier_ids: opt.sids }); if (opt.login) meta = Object.assign({}, meta, { login: true });   // v28.188
       agg.set(k, { kind: e.kind, source, path, ms, message, method: e.kind === 'api_failure' ? clip(e.method, 10) : null, status: (e.kind === 'api_failure' && e.status != null && Number.isInteger(Number(e.status)) && Number(e.status) >= 0 && Number(e.status) < 1000) ? Number(e.status) : null, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: cnt, meta });   // v28.162: client api_failure carries method + status
     }
     let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
     const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
     let n = hzCeAllow('ip|' + ip, 200, rows.length); n = hzCeAllow('u|' + source + '|' + ip + '|' + (em || ''), 60, n);
+    if (opt.login) { n = hzCeAllow('login|' + ip, 30, n); n = hzCeAllow('login|all', 300, n); }   // v28.188: anonymous endpoint, tighter caps (per IP and overall)
     rows = rows.slice(0, n); if (_hzNoDeadClick) rows = rows.filter(r => r.kind !== 'dead_click');
     if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
     try { await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]); }
@@ -22905,13 +22965,20 @@ async function hzClientEvents(req, res, source, email) {
 }
 const _hzText = express.text({ type: 'text/plain', limit: '256kb' });   // sendBeacon(string) arrives as text/plain
 app.post('/api/health/client-events', _hzText, (req, res) => hzClientEvents(req, res, 'staff', authUser(req)));
-app.post('/api/portal/health/client-events', _hzText, portalAuth, (req, res) => hzClientEvents(req, res, 'portal', req.portal && req.portal.email));
+app.post('/api/portal/health/client-events', _hzText, portalAuth, (req, res) => hzClientEvents(req, res, 'portal', req.portal && req.portal.email, { sids: (req.portal && req.portal.supplierIds || []).slice(0, 5).join(',') || null }));
+// v28.188 (Ben, deep dive H7): the supplier portal LOGIN page has no session, so its errors were dropped (portalAuth 401). This route takes
+// them without a session, as a deliberately narrow write: kinds client_error / console_error / slow_view / page_view / api_failure only,
+// <= 20 events a request (sendBeacon text body capped at 4 KB), 30 events a minute per IP and 300 a minute overall, path fixed to "/portal (login)", no user or
+// email stored. The page switches to it in showLogin (hz-health.js setEp). Gate: covered by the /api/portal/* exemption.
+const HZ_CE_LOGIN_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'page_view', 'api_failure']);
+const _hzTextSmall = express.text({ type: 'text/plain', limit: '4kb' });
+app.post('/api/portal/health/login-events', _hzTextSmall, (req, res) => hzClientEvents(req, res, 'portal', null, { login: true }));
 app.post('/api/cp/health/client-events', _hzText, cpAuth, (req, res) => hzClientEvents(req, res, 'client_portal', req.cp && req.cp.user && req.cp.user.email));
 
 // Likely file for a path / view, so the .md tells Claude Code where to start.
 function hzLikelyFile(path, source) {
   const p = String(path || '');
-  if (source === 'portal' || p.startsWith('/api/portal')) return 'server.mjs (supplier portal /api/portal routes) + supply/portal-view.js';
+  if (source === 'portal' || p.startsWith('/api/portal') || p.startsWith('/portal')) return 'server.mjs (supplier portal /api/portal routes) + supply/portal-view.js';   // v28.188: + portal views (/portal#...)
   if (source === 'client_portal' || p.startsWith('/api/cp')) return 'server.mjs (client portal /api/cp routes) + supply/client-view.js';
   if (/^\/api\/(demand|forecast|save-|kpi|scenario|preorders|price-changes|buy-|auto-forecast|trading-calendar|filter-rules)/.test(p)) return 'server.mjs + artifact_v16.7.html (DEMAND)';
   if (/^\/api\/(supply|config|product|client|me|inbox)/.test(p)) return 'server.mjs + supply/inject.html';
@@ -22949,7 +23016,52 @@ async function hzHealthReport(daysIn) {
   d.views.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); });
   d.days = days; d.version = APP_VERSION; d.slow_ms = HZ_SLOW_MS;
   try { Object.assign(d, await hzHealthReportExtra(days)); } catch (e) { d.extra_error = e.message; console.warn('[health] report extras failed: ' + e.message); }   // v28.162: never lose the v28.159 report
+  try { d.portal = await hzPortalActivity(days); } catch (e) { d.portal = { error: e.message }; console.warn('[health] portal activity failed: ' + e.message); }   // v28.188
   d.markdown = hzHealthMarkdown(d);
+  return d;
+}
+// v28.188 (Ben, deep dive H7): supplier portal activity for CONFIG > App health log and the weekly report. Sessions come from
+// planner.portal_sessions (created_at = a sign-in, last_seen_at = migration 332, stamped at most every 5 min while in use); events are
+// app_health_events rows from portal browsers (source 'portal', incl. the login page) and server rows for /api/portal/*. A row is
+// attributed to a supplier by meta.supplier_ids (server rows, v28.188 client rows) or by the portal user's email (older client rows).
+// Supplier names only: no emails leave this function. Without migration 332 the sign-in time stands in for "last seen".
+async function hzPortalActivity(days) {
+  const run = (LS) => pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int) AND (source = 'portal' OR path LIKE '/api/portal/%')),
+      us AS (SELECT lower(email) email, supplier_id::text sid, supplier_name FROM planner.supplier_portal_users WHERE active AND coalesce(supplier_name,'') <> ''),
+      ss AS (SELECT s.created_at, s.expires_at, coalesce(s.${LS}, s.created_at) seen, u.supplier_name, lower(s.email) email FROM planner.portal_sessions s JOIN us u ON u.email = lower(s.email)),
+      evs AS (SELECT ev.kind, ev.count, ev.ms, coalesce(sn.name, u.supplier_name) supplier_name FROM ev
+        LEFT JOIN LATERAL unnest(string_to_array(nullif(ev.meta->>'supplier_ids', ''), ',')) x(sid) ON true
+        LEFT JOIN planner.suppliers sn ON sn.id::text = trim(x.sid)
+        LEFT JOIN us u ON x.sid IS NULL AND u.email = lower(ev.user_email)),
+      per AS (SELECT supplier_name FROM ss WHERE seen >= now() - make_interval(days => $1::int) OR created_at >= now() - make_interval(days => $1::int)
+        UNION SELECT supplier_name FROM evs WHERE supplier_name IS NOT NULL)
+    SELECT json_build_object(
+      'kpis', json_build_object(
+        'sign_ins', (SELECT count(*) FROM planner.portal_sessions WHERE created_at >= now() - make_interval(days => $1::int)),
+        'live_sessions', (SELECT count(*) FROM planner.portal_sessions WHERE expires_at > now()),
+        'active_sessions', (SELECT count(*) FROM planner.portal_sessions WHERE coalesce(${LS}, created_at) >= now() - make_interval(days => $1::int)),
+        'active_suppliers', (SELECT count(DISTINCT supplier_name) FROM ss WHERE seen >= now() - make_interval(days => $1::int)),
+        'page_views', (SELECT coalesce(sum(coalesce((meta->>'visits')::int, count)), 0) FROM ev WHERE kind = 'page_view'),
+        'slow_views', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'slow_view'),
+        'slow_requests', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'slow_request'),
+        'failures', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind IN ('api_failure', 'server_error', 'client_error', 'console_error')),
+        'dead_clicks', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'dead_click'),
+        'login_errors', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind IN ('client_error', 'console_error', 'api_failure') AND meta->>'login' = 'true')),
+      'suppliers', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC NULLS LAST), '[]') FROM (SELECT p.supplier_name supplier,
+          (SELECT count(DISTINCT email) FROM ss WHERE ss.supplier_name = p.supplier_name AND ss.seen >= now() - make_interval(days => $1::int))::int users,
+          (SELECT count(*) FROM ss WHERE ss.supplier_name = p.supplier_name AND ss.created_at >= now() - make_interval(days => $1::int))::int sign_ins,
+          (SELECT max(seen) FROM ss WHERE ss.supplier_name = p.supplier_name) last_seen,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'page_view')::int page_views,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'slow_view')::int slow_views,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'slow_request')::int slow_requests,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind IN ('api_failure', 'server_error', 'client_error', 'console_error'))::int failures
+        FROM per p WHERE p.supplier_name IS NOT NULL) x),
+      'views', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, max(ms) max_ms, max(ts) last_seen
+        FROM ev WHERE kind = 'slow_view' GROUP BY path ORDER BY p95 DESC NULLS LAST, n DESC LIMIT 20) x),
+      'failures', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT kind, source, coalesce(method || ' ', '') || coalesce(path, '') path, status, split_part(coalesce(message, ''), E'\\n', 1) message, sum(count)::int n, max(ts) last_seen
+        FROM ev WHERE kind IN ('api_failure', 'server_error', 'client_error', 'console_error') GROUP BY 1, 2, 3, 4, 5 ORDER BY n DESC, last_seen DESC LIMIT 25) x)) d`, [days]);
+  let r; try { r = await run('last_seen_at'); } catch (e) { if (!(e && e.code === '42703')) throw e; r = await run('created_at'); r.rows[0].d.no_last_seen = true; }
+  const d = r.rows[0].d; for (const k in d.kpis) d.kpis[k] = Number(d.kpis[k]) || 0;
   return d;
 }
 // v28.163 (Ben): likely file per integration service (the .md is written for Claude Code).
@@ -22993,7 +23105,7 @@ async function hzHealthReportExtra(days) {
       'prev_version', (SELECT app_version FROM (SELECT app_version, min(ts) f FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1) v   -- the release deployed before this one (not a newer branch build writing to the same DB)
         WHERE f < coalesce((SELECT min(ts) FROM planner.app_health_events WHERE app_version = $2), now()) ORDER BY f DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
   for (const k in x.kpis2) x.kpis2[k] = Number(x.kpis2[k]) || 0;
-  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); }); x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
+  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { if (/^\/portal/.test(String(r.path || ''))) { r.file = 'supply/portal-view.js (#pp-secs / #pp-tabs nav)'; return; } const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); });   // v28.188: portal nav x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
   x.integ.forEach(r => { r.file = HZ_INTEG_FILE[r.service] || 'server.mjs _fetchT callers'; });
   x.new_since.forEach(r => { r.file = r.kind === 'integration_error' ? (HZ_INTEG_FILE[String(r.path).split(' ')[0]] || 'server.mjs') : hzLikelyFile(r.path ? String(r.path).replace(/^[A-Z]+ /, '') : (r.views || [])[0], r.path ? null : 'staff'); });
   x.page_users.forEach(r => { r.user = hzShortUser(r.user_email); delete r.user_email; });
@@ -23065,6 +23177,13 @@ function hzHealthMarkdown(d) {
     L.push('### Pages with zero visits this period', '', d.unvisited_note, '', (d.unvisited || []).length ? d.unvisited.map(v => '- `' + hzMdCode(v) + '`').join('\n') : 'None.', '');
     tbl('## 13. Errors per version', null, ['Version', 'Errors', 'Server', 'Browser', 'API', 'Integration', 'First seen', 'Last seen'], d.per_version.map(r => [r.app_version, r.errors, r.server, r.browser, r.api, r.integ, dt(r.first_seen), dt(r.last_seen)]));
   }
+  // v28.188 (Ben): supplier portal activity (hzPortalActivity).
+  const P = d.portal; if (P && P.kpis) { const pk = P.kpis;
+    tbl('## 14. Supplier portal activity', `Sign-ins ${pk.sign_ins} · live sessions ${pk.live_sessions} · sessions active in the period ${pk.active_sessions} · active suppliers ${pk.active_suppliers} · page views ${pk.page_views} · slow views ${pk.slow_views} · slow requests ${pk.slow_requests} · failures ${pk.failures} (login page ${pk.login_errors}) · dead clicks ${pk.dead_clicks}.` + (P.no_last_seen ? ' Migration 332 is not applied, so "last seen" is the sign-in time.' : '') + ' Fix portal issues in server.mjs (/api/portal routes) and supply/portal-view.js / supply/portal.html.',
+      ['Supplier', 'Users', 'Sign-ins', 'Last seen', 'Page views', 'Slow views', 'Slow requests', 'Failures'], (P.suppliers || []).map(r => [r.supplier, r.users, r.sign_ins, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.slow_requests, r.failures]));
+    tbl('### Portal slow views', null, ['View', 'Count', 'p95 ms', 'Max ms', 'Last seen'], (P.views || []).map(r => [r.path, r.n, r.p95, r.max_ms, dt(r.last_seen)]));
+    tbl('### Portal failures', null, ['Kind', 'Source', 'Where', 'Status', 'Message', 'Count', 'Last seen'], (P.failures || []).map(r => [r.kind, r.source, r.path, r.status || '', String(r.message || '').slice(0, 160), r.n, dt(r.last_seen)]));
+  } else if (P && P.error) L.push('## 14. Supplier portal activity', '', `> Failed to load: ${hzMdCode(P.error)}`, '');
   L.push('## Suggested next steps', '');
   const s = [];
   if (d.new_since && d.new_since[0]) s.push(`Start with what ${d.version} introduced: ${d.new_since[0].kind} "${hzMdCode(d.new_since[0].message).slice(0, 120)}" (${d.new_since[0].n}x) in ${d.new_since[0].file}. Diff against ${d.prev_version || 'the previous release'} (git log -p) around that code.`);   // v28.162
@@ -23120,6 +23239,10 @@ async function hzHealthEmail(days, to) {
       + tbl('API failures seen by browsers', ['Endpoint', 'Status', 'Count', 'Users'], d.api.slice(0, 5).map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.users]))
       + tbl('Database', ['What', 'Count', 'Max'], d.db_pool.slice(0, 3).map(r => [r.message || r.path, r.n, (r.max_waiting || 0) + ' waiting']).concat(d.slow_q.slice(0, 5 - Math.min(3, d.db_pool.length)).map(r => [r.sql, r.n, r.max_ms + ' ms'])))
       + tbl('Top pages', ['View', 'Visits', 'Users', 'Active min'], d.pages.slice(0, 5).map(r => [r.path, r.visits, r.users, Math.round((r.active_s || 0) / 60)])) : '')
+    // v28.188 (Ben): supplier portal activity (sign-ins, suppliers active, last seen, slow views, failures)
+    + ((d.portal && d.portal.kpis) ? `<h3 style="font-size:14px;margin:18px 0 6px">Supplier portal</h3><div style="font-size:12px;color:#64748b">${E(d.portal.kpis.sign_ins + ' sign-ins · ' + d.portal.kpis.active_suppliers + ' active suppliers · ' + d.portal.kpis.slow_views + ' slow views · ' + d.portal.kpis.failures + ' failures')}</div>`
+      + tbl('Portal suppliers', ['Supplier', 'Users', 'Last seen', 'Page views', 'Slow views', 'Failures'], (d.portal.suppliers || []).slice(0, 10).map(r => [r.supplier, r.users, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.failures]))
+      + tbl('Portal failures', ['Kind', 'Where', 'Status', 'Count'], (d.portal.failures || []).slice(0, 5).map(r => [r.kind, r.path, r.status || '', r.n])) : '')
     + `<p style="font-size:13px;margin-top:18px;padding:10px 12px;background:#eff6ff;border-radius:8px">Full details attached: upload the .md to Claude Code.</p></div>`;
   const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html,
     attachments: [{ filename, content: Buffer.from(d.markdown, 'utf8').toString('base64') }] };
@@ -24314,17 +24437,41 @@ app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []
 // by an admin therefore takes at most a minute to reach an open portal session, which is fine.
 const _portalAuthMemo = new Map();   // psid -> { t, v: {email, suppliers, supplierIds} }
 const PORTAL_AUTH_TTL_MS = 60000;
+// v28.188 (Ben): session -> {email, sups:[{supplier_id, supplier_name}] (same rows / order / types as portalSuppliers), zh} in one
+// statement, plus the throttled last_seen_at stamp. zh = the EN / 中文 flag /me used to look up separately (any linked supplier in China).
+let _psNoLastSeen = false;   // migration 332 not applied yet (42703): stop trying the stamp
+const _PS_SELECT = `SELECT s.email,
+    coalesce((SELECT json_agg(json_build_object('supplier_id', u.supplier_id::text, 'supplier_name', u.supplier_name)) FROM planner.supplier_portal_users u
+      WHERE lower(u.email)=lower(s.email) AND u.active=true AND coalesce(u.supplier_name,'')<>''), '[]') sups,
+    coalesce((SELECT bool_or(coalesce(x.country,'') ILIKE '%china%' OR upper(coalesce(x.country,''))='CN' OR x.country LIKE '%中国%') FROM planner.suppliers x
+      WHERE x.name IN (SELECT u2.supplier_name FROM planner.supplier_portal_users u2 WHERE lower(u2.email)=lower(s.email) AND u2.active=true AND coalesce(u2.supplier_name,'')<>'')), false) zh,
+    (SELECT upper(x.default_currency) FROM planner.suppliers x JOIN planner.supplier_portal_users u3 ON u3.supplier_name = x.name
+      WHERE lower(u3.email)=lower(s.email) AND u3.active=true AND coalesce(x.default_currency,'')<>'' ORDER BY u3.supplier_name LIMIT 1) ccy`;   // v28.190 (Ben, H9): the supplier's currency for portal amounts
+async function portalSessionLookup(psid) {
+  if (!_psNoLastSeen) {
+    try {
+      return (await pool.query(`WITH s AS (SELECT token, email FROM planner.portal_sessions WHERE token=$1 AND expires_at>now()),
+          seen AS (UPDATE planner.portal_sessions p SET last_seen_at=now() FROM s WHERE p.token=s.token AND (p.last_seen_at IS NULL OR p.last_seen_at < now() - interval '5 minutes') RETURNING 1)
+        ${_PS_SELECT} FROM s`, [psid])).rows[0] || null;
+    } catch (e) { if (e && e.code === '42703') _psNoLastSeen = true; else throw e; }
+  }
+  return (await pool.query(`${_PS_SELECT} FROM planner.portal_sessions s WHERE s.token=$1 AND s.expires_at>now()`, [psid])).rows[0] || null;
+}
 async function portalAuth(req, res, next) {
   try {
     const psid = cookieVal(req, 'psid');
     if (!psid) return res.status(401).json({ error: 'not signed in' });
     const hit = _portalAuthMemo.get(psid);
     if (hit && Date.now() - hit.t < PORTAL_AUTH_TTL_MS) { req.portal = hit.v; return next(); }
-    const s = (await pool.query(`SELECT email FROM planner.portal_sessions WHERE token=$1 AND expires_at>now()`, [psid])).rows[0];
+    // v28.188 (Ben): ONE round trip (was 2 serial: session, then its suppliers; /me added a 3rd for the China flag). The same statement
+    // stamps portal_sessions.last_seen_at (migration 332) at most once per 5 minutes per session (the WHERE guard makes repeat calls
+    // and other instances no-ops), for "who is using the portal" in CONFIG > App health log. Until 332 is applied (column missing,
+    // 42703) it falls back to the read-only form, so the code can deploy first.
+    const s = await portalSessionLookup(psid);
     if (!s) { _portalAuthMemo.delete(psid); return res.status(401).json({ error: 'session expired' }); }
-    const sups = await portalSuppliers(s.email);
+    const sups = s.sups || [];
     if (!sups.length) return res.status(403).json({ error: 'no supplier linked to this account' });
-    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null) };
+    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null), zh: !!s.zh, ccy: s.ccy || null };
     _portalAuthMemo.set(psid, { t: Date.now(), v: req.portal });
     if (_portalAuthMemo.size > 2000) { for (const [k, e] of _portalAuthMemo) if (Date.now() - e.t > PORTAL_AUTH_TTL_MS) _portalAuthMemo.delete(k); }
     next();
@@ -24375,7 +24522,9 @@ async function portalCanReadAttachment(req, id) {
   if (/^onboarding/.test(a.category)) return false;
   if (await portalOwnsPO(req, a.po)) return true;
   if ((a.category === 'sample' || a.category === 'timeline') && await portalOwnsSampleRef(req, a.po)) return true;
-  if (a.category === 'product' && await portalOwnsProduct(req, a.po)) return true;
+  if (a.category === 'product' && await portalOwnsProduct(req, a.po)) {   // v28.191 (Ben, H6): another supplier's upload on a shared item stays theirs
+    const u = (await pool.query(`SELECT coalesce(uploader_kind,'internal') k, lower(coalesce(uploaded_by,'')) b FROM planner.portal_attachments WHERE id=$1`, [n])).rows[0];
+    return !u || u.k !== 'supplier' || (await portalPeopleEmails(req)).has(u.b); }
   if (a.category === 'product_sample' && /^PSAMPLE-\d+$/.test(a.po)) {
     const sid = a.po.slice(8);
     const s = (await pool.query(`SELECT ps.item_ref, (SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id) req_sup FROM planner.product_dev_samples ps WHERE ps.id=$1`, [sid])).rows[0];
@@ -24492,7 +24641,7 @@ app.get('/api/portal/me', portalAuth, async (req, res) => {
   let zh = false;
   if (req.portal.zh !== undefined) zh = req.portal.zh;   // v27.879: computed once per memoised session (see portalAuth)
   else try { const r = await pool.query(`SELECT bool_or(coalesce(country,'') ILIKE '%china%' OR upper(coalesce(country,''))='CN' OR country LIKE '%中国%') z FROM planner.suppliers WHERE name = ANY($1)`, [req.portal.suppliers || []]); zh = !!(r.rows[0] && r.rows[0].z); req.portal.zh = zh; } catch (e) { zh = false; }
-  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh });
+  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh, currency: req.portal.ccy || 'USD' });   // v28.190: + currency
 });
 // ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
 // The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
@@ -24659,17 +24808,12 @@ app.get('/favicon-sbx.svg', (req, res) => {   // orange-bordered sandbox favicon
 const _pvjs = { src: null, gz: null, etag: null };
 function portalViewAsset() {
   const src = DEV ? (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* missing */'; } })() : PORTAL_VIEW_JS;
-  if (_pvjs.src !== src) { _pvjs.src = src; _pvjs.gz = zlib.gzipSync(Buffer.from(src, 'utf8')); _pvjs.etag = '"' + crypto.createHash('sha1').update(src).digest('hex').slice(0, 20) + '"'; }
+  if (_pvjs.src !== src) { _pvjs.src = src; _pvjs.etag = '"' + crypto.createHash('sha1').update(src).digest('hex').slice(0, 20) + '"'; }
   return _pvjs;
 }
 app.get('/portal-view.js', (req, res) => {
   const a = portalViewAsset();
-  res.set('content-type', 'application/javascript; charset=utf-8');
-  res.set('ETag', a.etag); res.set('Vary', 'Accept-Encoding');
-  res.set('Cache-Control', String(req.query.v || '') === String(APP_VERSION) ? 'public, max-age=31536000, immutable' : 'no-cache, must-revalidate');
-  if (req.headers['if-none-match'] === a.etag) return res.status(304).end();
-  if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.set('Content-Encoding', 'gzip'); return res.end(a.gz); }
-  res.send(a.src);
+  return hzSendAsset(req, res, 'portal-view.js', 'application/javascript; charset=utf-8', a.src, { immutable: hzVerOk(req) });   // v28.189 (Ben, M4): + brotli (was gzip only); same versioned immutable rule
 });
 // Notes for the renderer's post-note refetch (path sid ignored — scoped to the session's supplier).
 app.get('/api/portal/notes/:sid', portalAuth, async (req, res) => {
@@ -24745,18 +24889,42 @@ async function onbNotifyTeam(subject, html, ref) {
   if (!to.length && !cc.length) { console.log('[onboarding] no reviewers configured (app_settings.onboarding_notify_to) — not emailing: ' + subject); return { sent: 0 }; }
   return sendResendEmail({ to: to.length ? to : cc, cc: to.length ? cc : [], subject, html, kind: 'onboarding', ref });
 }
-async function onbLoadRules() { return (await pool.query(`SELECT id, title, coalesce(detail,'') detail, warehouse, active, sort, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.warehouse_requirements ORDER BY sort, id`)).rows; }
-function onbRulesVersion(rules) { const act = rules.filter(r => r.active); const mx = act.reduce((a, r) => (r.updated_at > a ? r.updated_at : a), ''); return 'v' + act.length + '·' + mx; }
-async function onbSupplierProfile(sid) {
-  const s = (await pool.query(`SELECT id, name, business_name, kind, country, address_1, address_2, city, state, postcode, contact_name, email, phone,
+// v28.189 (Ben): the onboarding SQL as constants, shared by the step-by-step helpers (admin routes) and the portal's one-round-trip load.
+const ONB_RULES_SQL = `SELECT id, title, coalesce(detail,'') detail, warehouse, active, sort, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.warehouse_requirements ORDER BY sort, id`;
+const ONB_SUP_SQL = `SELECT id, name, business_name, kind, country, address_1, address_2, city, state, postcode, contact_name, email, phone,
       registration_no, vat_id, website, trading_since, employees, capabilities, incoterm, export_port, pickup_address, production_days, sample_lead_days, moq,
       default_currency, payment_terms_text, credit_days, start_deposit_pct, completion_pct, balance_pct, bank_doc_attachment_id,
-      to_char(profile_approved_at,'YYYY-MM-DD') profile_approved_at FROM planner.suppliers WHERE id=$1`, [sid])).rows[0];
+      to_char(profile_approved_at,'YYYY-MM-DD') profile_approved_at FROM planner.suppliers WHERE id=$1`;
+const ONB_CONTACTS_SQL = `SELECT id, name, coalesce(role,'') role, coalesce(email,'') email, coalesce(phone,'') phone, portal_access FROM planner.supplier_contacts WHERE supplier_id=$1 ORDER BY id`;
+const ONB_CERTS_SQL = `SELECT c.id, c.kind, coalesce(c.reference,'') reference, to_char(c.valid_to,'YYYY-MM-DD') valid_to, c.attachment_id, a.filename FROM planner.supplier_certificates c LEFT JOIN planner.portal_attachments a ON a.id=c.attachment_id WHERE c.supplier_id=$1 ORDER BY c.id`;
+const ONB_BANKDOC_SQL = `SELECT filename FROM planner.portal_attachments WHERE id=$1`;
+const ONB_ACK_SQL = `SELECT rules_version, to_char(acked_at,'YYYY-MM-DD') acked_at, acked_by FROM planner.supplier_warehouse_acks WHERE supplier_id=$1 ORDER BY acked_at DESC LIMIT 1`;
+const ONB_OPEN_SQL = `SELECT * FROM planner.supplier_onboarding_requests WHERE supplier_id=$1 AND status = ANY($2::text[]) ORDER BY id DESC LIMIT 1`;
+const ONB_LAST_SQL = `SELECT ref, status, type, to_char(decided_at,'YYYY-MM-DD') decided_at, return_note, log FROM planner.supplier_onboarding_requests WHERE supplier_id=$1 AND status IN ('approved','rejected') ORDER BY id DESC LIMIT 1`;
+async function onbLoadRules() { return (await pool.query(ONB_RULES_SQL)).rows; }
+function onbRulesVersion(rules) { const act = rules.filter(r => r.active); const mx = act.reduce((a, r) => (r.updated_at > a ? r.updated_at : a), ''); return 'v' + act.length + '·' + mx; }
+async function onbSupplierProfile(sid) {
+  const s = (await pool.query(ONB_SUP_SQL, [sid])).rows[0];
   if (!s) return null;
-  s.contacts = (await pool.query(`SELECT id, name, coalesce(role,'') role, coalesce(email,'') email, coalesce(phone,'') phone, portal_access FROM planner.supplier_contacts WHERE supplier_id=$1 ORDER BY id`, [sid])).rows;
-  s.certificates = (await pool.query(`SELECT c.id, c.kind, coalesce(c.reference,'') reference, to_char(c.valid_to,'YYYY-MM-DD') valid_to, c.attachment_id, a.filename FROM planner.supplier_certificates c LEFT JOIN planner.portal_attachments a ON a.id=c.attachment_id WHERE c.supplier_id=$1 ORDER BY c.id`, [sid])).rows;
-  s.bank_doc = s.bank_doc_attachment_id ? ((await pool.query(`SELECT filename FROM planner.portal_attachments WHERE id=$1`, [s.bank_doc_attachment_id])).rows[0] || {}).filename || null : null;
+  s.contacts = (await pool.query(ONB_CONTACTS_SQL, [sid])).rows;
+  s.certificates = (await pool.query(ONB_CERTS_SQL, [sid])).rows;
+  s.bank_doc = s.bank_doc_attachment_id ? ((await pool.query(ONB_BANKDOC_SQL, [s.bank_doc_attachment_id])).rows[0] || {}).filename || null : null;
   return s;
+}
+// v28.189 (Ben, deep dive M1): everything GET /api/portal/onboarding needs in ONE round trip (was 7 serial queries: 2.2 to 2.9 s on the
+// sandbox pooler, every time). One multi-statement simple query on one connection (no pool fan-out, so Vercel's pool max 4 is not
+// taken over): the same SQL and the same row types as the step-by-step helpers. The supplier id comes from the session and is
+// checked to be a positive integer before it is written into the text (simple-query protocol has no bind parameters).
+async function onbPortalLoad(sid) {
+  const n = Number(sid); if (!Number.isSafeInteger(n) || n <= 0) return null;
+  const S = (sql) => sql.replace(/\$1\b/g, String(n));
+  const rs = await pool.query([S(ONB_SUP_SQL), S(ONB_CONTACTS_SQL), S(ONB_CERTS_SQL),
+    S(ONB_BANKDOC_SQL.replace('id=$1', 'id=(SELECT bank_doc_attachment_id FROM planner.suppliers WHERE id=$1)')),
+    ONB_RULES_SQL, S(ONB_ACK_SQL), S(ONB_OPEN_SQL).replace('$2::text[]', "ARRAY['" + ONB_OPEN.join("','") + "']::text[]"), S(ONB_LAST_SQL)].join(';\n'));
+  const [sup, contacts, certs, bank, rules, ack, open, last] = rs.map(r => r.rows);
+  const s = sup[0]; if (!s) return { profile: null };
+  s.contacts = contacts; s.certificates = certs; s.bank_doc = s.bank_doc_attachment_id ? ((bank[0] || {}).filename || null) : null;
+  return { profile: s, rules, ack: ack[0] || null, open: open[0] || null, last: last[0] || null };
 }
 // Build the wizard's form from the approved supplier record (used when there is no open request)
 function onbFormFromProfile(s) {
@@ -24771,7 +24939,7 @@ function onbFormFromProfile(s) {
     certs, warehouse: {}, products: [], declared: false,
   };
 }
-async function onbOpenRequest(sid) { return (await pool.query(`SELECT * FROM planner.supplier_onboarding_requests WHERE supplier_id=$1 AND status = ANY($2::text[]) ORDER BY id DESC LIMIT 1`, [sid, ONB_OPEN])).rows[0] || null; }
+async function onbOpenRequest(sid) { return (await pool.query(ONB_OPEN_SQL, [sid, ONB_OPEN])).rows[0] || null; }
 async function onbNextRef() { const r = (await pool.query(`SELECT coalesce(max(id),0)+1 n FROM planner.supplier_onboarding_requests`)).rows[0]; return 'ONB-' + String(r.n).padStart(4, '0'); }
 function onbLogPush(row, m, by) { const log = Array.isArray(row.log) ? row.log : []; log.push({ t: onbNow(), m, by: by || null }); return log; }
 
@@ -24781,12 +24949,12 @@ function onbLogPush(row, m, by) { const log = Array.isArray(row.log) ? row.log :
 app.get('/api/portal/onboarding', portalAuth, async (req, res) => {
   try {
     const sid = req.portal.supplierIds[0]; if (!sid) return res.status(403).json({ error: 'no supplier linked' });
-    const profile = await onbSupplierProfile(sid); if (!profile) return res.status(404).json({ error: 'supplier not found' });
-    const rules = (await onbLoadRules()).filter(r => r.active);
+    const L = await onbPortalLoad(sid); if (!L) return res.status(403).json({ error: 'no supplier linked' });   // v28.189: one round trip
+    const profile = L.profile; if (!profile) return res.status(404).json({ error: 'supplier not found' });
+    const rules = L.rules.filter(r => r.active);
     const version = onbRulesVersion(rules);
-    const ack = (await pool.query(`SELECT rules_version, to_char(acked_at,'YYYY-MM-DD') acked_at, acked_by FROM planner.supplier_warehouse_acks WHERE supplier_id=$1 ORDER BY acked_at DESC LIMIT 1`, [sid])).rows[0] || null;
-    const open = await onbOpenRequest(sid);
-    const last = (await pool.query(`SELECT ref, status, type, to_char(decided_at,'YYYY-MM-DD') decided_at, return_note, log FROM planner.supplier_onboarding_requests WHERE supplier_id=$1 AND status IN ('approved','rejected') ORDER BY id DESC LIMIT 1`, [sid])).rows[0] || null;
+    const ack = L.ack, open = L.open, last = L.last;
+    res.set('Cache-Control', 'private, no-cache');   // v28.189: always revalidated (the wizard autosaves the whole form, so a stale copy must never be shown); an unchanged payload is a 304 via the content ETag
     const form = open ? open.form : onbFormFromProfile(profile);
     if (!open && ack && ack.rules_version === version) rules.forEach(r => { form.warehouse[String(r.id)] = true; });   // current rules already acknowledged → pre-ticked
     res.json({ ok: true, supplier: { id: profile.id, name: profile.name, profile_approved_at: profile.profile_approved_at }, form, request: open ? { ref: open.ref, status: open.status, type: open.type, sections: open.sections, return_note: open.return_note, submitted_at: open.submitted_at, log: open.log } : null,
@@ -24827,13 +24995,14 @@ app.post('/api/portal/onboarding/submit', portalAuth, async (req, res) => {
     if (!open) { const ref = await onbNextRef(); open = (await pool.query(`INSERT INTO planner.supplier_onboarding_requests (ref, supplier_id, supplier_name, type, status, form, sections, log) VALUES ($1,$2,$3,$4,'draft',$5::jsonb,'{}'::jsonb,'[]'::jsonb) RETURNING *`,
       [ref, sid, req.portal.suppliers[0] || (prof && prof.name) || '', (prof && prof.profile_approved_at) ? 'change' : 'new', JSON.stringify(form)])).rows[0]; }
     const log = onbLogPush(open, (open.status === 'returned' ? 'Resubmitted' : 'Submitted') + ' by ' + by, by);
-    await pool.query(`UPDATE planner.supplier_onboarding_requests SET form=$2::jsonb, sections=$3::jsonb, status='submitted', submitted_by=$4, submitted_at=now(), return_note=NULL, log=$5::jsonb, updated_at=now() WHERE id=$1`,
-      [open.id, JSON.stringify(form), JSON.stringify(sections), by, JSON.stringify(log)]);
-    await pool.query(`INSERT INTO planner.supplier_warehouse_acks (supplier_id, rules_version, acked_by) VALUES ($1,$2,$3)`, [sid, version, by]);
+    // v28.191 (Ben, M7): submit + warehouse acknowledgement in one statement, so a failure never leaves a submitted request without its ack
+    await pool.query(`WITH u AS (UPDATE planner.supplier_onboarding_requests SET form=$2::jsonb, sections=$3::jsonb, status='submitted', submitted_by=$4, submitted_at=now(), return_note=NULL, log=$5::jsonb, updated_at=now() WHERE id=$1 RETURNING id)
+      INSERT INTO planner.supplier_warehouse_acks (supplier_id, rules_version, acked_by) SELECT $6, $7, $4 FROM u`,
+      [open.id, JSON.stringify(form), JSON.stringify(sections), by, JSON.stringify(log), sid, version]);
     const nProd = Array.isArray(f.products) ? f.products.filter(p => p && p.name).length : 0;
     const link = PORTAL_URL.replace(/\/portal$/, '') + '/#/supply/config/onboarding/' + open.ref;
-    await onbNotifyTeam('[Horizon] Onboarding request ' + open.ref + ' · ' + escHtml(open.supplier_name) + (open.type === 'change' ? ' (profile change)' : ' (new supplier)'),
-      '<p><b>' + escHtml(open.supplier_name) + '</b> ' + (open.status === 'returned' ? 'resubmitted' : 'submitted') + ' their ' + (open.type === 'change' ? 'profile changes' : 'supplier profile') + (nProd ? ' with ' + nProd + ' product' + (nProd === 1 ? '' : 's') : '') + '. ' + ONB_SECTIONS.filter(k => sections[k] !== 'approved').length + ' section(s) await review.</p><p><a href="' + link + '">Open in Horizon → CONFIG ▸ Onboarding</a></p>', open.ref);
+    try { await onbNotifyTeam('[Horizon] Onboarding request ' + open.ref + ' · ' + escHtml(open.supplier_name) + (open.type === 'change' ? ' (profile change)' : ' (new supplier)'),
+      '<p><b>' + escHtml(open.supplier_name) + '</b> ' + (open.status === 'returned' ? 'resubmitted' : 'submitted') + ' their ' + (open.type === 'change' ? 'profile changes' : 'supplier profile') + (nProd ? ' with ' + nProd + ' product' + (nProd === 1 ? '' : 's') : '') + '. ' + ONB_SECTIONS.filter(k => sections[k] !== 'approved').length + ' section(s) await review.</p><p><a href="' + link + '">Open in Horizon → CONFIG ▸ Onboarding</a></p>', open.ref); } catch (e) { console.warn('[onboarding] notify failed: ' + (e && e.message)); }   // v28.191 (Ben, M7): the submit is saved; the email is best-effort
     try { portalCacheMarkStale(open.supplier_name); } catch (_) {}
     res.json({ ok: true, ref: open.ref, status: 'submitted' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -25036,43 +25205,80 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
   try {
     // Hide archived (completed, pre-cutoff) POs by default — same cutoff as the admin grid — to keep the portal
     // payload small; ?includeArchived=1 reveals them (portal "Show archived" toggle).
-    const _inclArch = String(req.query.includeArchived || '') === '1', _fresh = String(req.query.fresh || '') === '1';
+    // v28.189 (Ben): the fresh re-fetch may also come as the X-HZ-Fresh: 1 header on the SAME URL, so the browser revalidates it with the
+    // ETag of the copy it already has (If-None-Match) and an unchanged rebuild is a 304 with no body (was a second full download).
+    const _inclArch = String(req.query.includeArchived || '') === '1', _fresh = String(req.query.fresh || '') === '1' || req.get('x-hz-fresh') === '1';
     // v28.175 (Ben): per-supplier-set cache in the v28.167 machinery, keyed ONLY by the authenticated identity (req.portal from the
     // psid session, never a header): names + ids + archived flag. Stale (an edit not absorbed yet, or past TTL) → served at once with
     // `X-HZ-Stale: 1` and revalidated behind; the page re-fetches ?fresh=1 (which waits for a fresh build) and repaints in place
     // (v27.880 protocol unchanged). The writer of a portal edit gets read-your-writes (waits for the rebuild, never the old payload).
     _lcSweep('pb:', 30 * 60 * 1000, 300);
     const st = _pbCache(names, ids, _inclArch);
-    const v = await _lcGet(st, _fresh ? _lcFreshNeed(st) : null);
+    let v = await _lcGet(st, _fresh ? _lcFreshNeed(st) : null);
+    // v28.189 (Ben, deep dive M3): a stale payload used to go out at once and the page then fetched the whole payload again. Now the
+    // request first gives the revalidation (already started by _lcGet) up to PB_STALE_GRACE_MS: usually a rebuild of one supplier's
+    // payload from the shared bases finishes inside it, and the page gets the fresh payload in ONE fetch. Only a slower rebuild still
+    // goes out stale (X-HZ-Stale) for the page's background refresh, as before.
+    if (!_fresh && _lcIsStale(st, v) && st.job) {
+      const j = st.job.p.catch(() => null); await Promise.race([j, new Promise(r => setTimeout(r, PB_STALE_GRACE_MS).unref?.())]);
+      if (st.entry && st.entry.v !== v && !_lcIsStale(st, st.entry.v)) v = st.entry.v;
+    }
     if (!_fresh && _lcIsStale(st, v)) res.set('X-HZ-Stale', '1');
     sendJsonMemo(req, res, v, () => v);   // serialised + gzipped once per build; strong ETag → 304 on an unchanged payload
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-async function portalBootstrapBuild(names, ids, _inclArch) {
-  const q = (sql, p) => pool.query(sql, p).then(r => r.rows);
-  {
-    // ── Round A: everything keyed only by supplier names / ids — fired together, awaited after the PO rows.
-    const pCutoff = poArchiveCutoff();
-    const pDeps = names.length ? q(`
-            WITH draw AS (SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
-              FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL GROUP BY po.deposit_ref),
-            pool AS (SELECT reference, sum(coalesce(amount,0)) pool_amount
-              FROM planner.deposits WHERE is_deposit AND reference IS NOT NULL GROUP BY reference)
-            SELECT d.reference, d.amount, d.is_deposit, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
-              CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
-              CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining
-            FROM planner.deposits d
-            LEFT JOIN draw dr ON dr.deposit_ref=d.reference
-            LEFT JOIN pool p ON p.reference=d.reference
-            WHERE d.supplier_name = ANY($1)
-            ORDER BY d.date_paid DESC NULLS LAST, d.reference DESC`, [names]).catch(() => []) : Promise.resolve([]);
-    const pNotes = ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [ids]) : Promise.resolve([]);
-    const pSubs = ids.length ? q(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]) : Promise.resolve([]);
-    const pSupSkus = q(`SELECT sku, coalesce(product_name_final,product_name,'') product_name, coalesce(product_ean,'') ean,
-          coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long, coalesce(colour_long,'') colour,
-          coalesce(release_window,'') release_window
-        FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).catch(() => []);
-    const pSamples = names.length ? q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
+// v28.189 (Ben, deep dive H2): the detail of the caller's own POs, on demand: the full rows (incl. the detail-only fields a completed PO's
+// light row leaves out), lines, line costs, extra costs, approved snapshot, documents, crossdock qtys, and the supplier's SKU list
+// (?skus=all: every SKU, for the MANAGE "add a line" picker; ?skus=lines: only those on the returned lines). Same bases and SQL as the
+// bootstrap, so a card built from this is identical. A PO that is not the caller's is simply not returned. <= 300 POs a call.
+app.get('/api/portal/po-detail', portalAuth, async (req, res) => {
+  const names = req.portal.suppliers || [];
+  const want = [...new Set(String(req.query.pos || '').split(',').map(x => x.trim()).filter(Boolean))].slice(0, 300), skus = String(req.query.skus || '');
+  try {
+    const [allPos, allLines] = (want.length ? await Promise.all([_lcGet(_portalPosSt), _lcGet(_portalLinesSt)]) : [[], []]);
+    const ns = new Set(names), ws = new Set(want);
+    const pos = allPos.filter(r => ns.has(r.supplier_name) && ws.has(r.po)).map(r => Object.assign({}, r)), poList = pos.map(p => p.po), ps = new Set(poList);
+    const lines = allLines.filter(l => ps.has(l.po)).map(l => Object.assign({}, l));
+    const [xd, parts, supAll] = await Promise.all([poList.length ? pool.query(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`, [poList]).then(r => r.rows) : [],
+      portalPoDetailParts(poList), (skus === 'all' || skus === 'lines') ? portalSupSkusQ(names) : null]);
+    const lb = {}; lines.forEach(l => { (lb[l.po] = lb[l.po] || []).push(l); });
+    const xdByPo = {}; xd.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
+    const out = Object.assign({ pos, lb, xdByPo }, portalPoDetailMaps(parts, pos));
+    if (supAll) { const ls = new Set(lines.map(l => l.sku)); out.supSkus = skus === 'all' ? supAll : supAll.filter(x => ls.has(x.sku)); out.supSkusAll = skus === 'all'; }
+    res.set('Cache-Control', 'private, no-cache').json(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.189 (Ben): the Payments tab's runs hidden by the archive cutoff (?archived=1 = every payment, as before the trim), on request.
+app.get('/api/portal/payments', portalAuth, async (req, res) => {
+  try { res.set('Cache-Control', 'private, no-cache').json({ payments: await portalPaymentsQ(req.portal.suppliers || []) }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.189 (Ben, deep dive M3): after a sample write the Samples tab refreshes this list only (was a full bootstrap reload).
+app.get('/api/portal/samples', portalAuth, async (req, res) => {
+  try { res.set('Cache-Control', 'private, no-cache').json({ samples: await portalSamplesQ(req.portal.suppliers || [], req.portal.supplierIds || []) }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.189 (Ben): the portal samples list and the supplier's SKU list as functions (same SQL as before), shared by the bootstrap build,
+// GET /api/portal/samples (a sample write refreshes just this list, not the whole bootstrap) and GET /api/portal/po-detail (full SKU list).
+function portalPaymentsQ(names) { const _pnames = names.map(n => String(n).toLowerCase().trim()); return names.length ? pool.query(`SELECT dt payment_date, dt payment_run_ref, reference, type, amount, deposit_ref FROM (
+        SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, o.supplier_name sname
+          FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
+          FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
+          FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', supplier_name
+          FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', supplier_name
+          FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
+      ) t WHERE EXISTS (SELECT 1 FROM planner.payment_fx f WHERE f.run_date=t.dt::date AND lower(trim(f.supplier))=lower(trim(t.sname))
+                          AND f.paid_amount IS NOT NULL AND coalesce(f.paid_currency,'')<>'')
+      ORDER BY payment_date DESC NULLS LAST`, [_pnames]).then(r => r.rows).catch(() => []) : Promise.resolve([]); }
+function portalSamplesQ(names, ids) { return names.length ? pool.query(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
         coalesce(s.recipient_company,'') recipient_company, trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name,
         coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2, coalesce(s.city,'') city,
         coalesce(s.region,'') region, coalesce(s.postcode,'') postcode, coalesce(s.country,'') country, coalesce(s.phone,'') phone,
@@ -25105,32 +25311,91 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
         WHERE (coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2))
           AND upper(coalesce(s.status,'')) <> 'FUTURE'   -- FUTURE samples are D&B-only; the supplier sees it once it moves to PRODUCTION
           AND coalesce(s.fulfilment_source,'supplier') NOT IN ('warehouse','po')   -- v27.692 (Ben): warehouse/PO-fulfilled samples are internal-only, hidden from the supplier portal
-        ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : Promise.resolve([]);
+        ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]).then(r => r.rows) : Promise.resolve([]); }
+function portalSupSkusQ(names) { return pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') product_name, coalesce(product_ean,'') ean,
+          coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long, coalesce(colour_long,'') colour,
+          coalesce(release_window,'') release_window
+        FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).then(r => r.rows).catch(() => []); }
+// v28.189 (Ben, deep dive H2): PO fields only the MANAGE card (ppExpand / wireDetail in supply/portal-view.js) reads. Found by recording
+// every field the list views read (Proxy over each PO while every tab, status pill, batch and filter rendered) and checked against the
+// source (a field used outside the card stays, e.g. dispatch_order_ref in the Shipment Plan DTC block, supplier_confirmed_by in Productions).
+const PORTAL_PO_DETAIL_FIELDS = ['barcode_projects', 'branch_delivery_notes', 'client_po_ref', 'credit_amount', 'custom_dev_ref', 'balance_owing',
+  'dtc_accepted_by', 'dtc_approved_snapshot', 'dtc_cartons', 'dtc_cbm', 'dtc_custom', 'dtc_dimensions', 'dtc_weight', 'final_invoice',
+  'forwarder_email', 'forwarder_name', 'forwarder_phone', 'pack_client_carton', 'pack_client_carton_notes', 'pack_dnb_barcodes', 'pack_dnb_barcodes_notes',
+  'pack_dnb_carton', 'pack_dnb_carton_notes', 'pack_other_notes', 'pack_pallet_notes', 'pack_polybags', 'pack_polybags_notes', 'pack_rfid_barcodes', 'pack_rfid_barcodes_notes'];
+function portalPoIsSlim(p) { return /complete/i.test(String((p && p.status) || '')); }   // completed (incl. archived) POs = same test as archivedSql's status part
+// The per-PO detail datasets of a PO list (same SQL the bootstrap always ran): line costs, extra costs, approved snapshot, documents, barcode projects.
+async function portalPoDetailParts(poList) {
+  const q = (sql, p) => pool.query(sql, p).then(r => r.rows);
+  const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
+  const [lc, ac, _ap, drows, bps] = await Promise.all([
+    grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
+    grab(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
+    // snapshot of the SKUs/qtys the supplier last approved (set on confirm) → portal diffs the current plan against it
+    grab(`SELECT po, approved_lines FROM planner.purchase_orders WHERE po = ANY($1) AND approved_lines IS NOT NULL`),
+    // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
+    // powers the Documents list + the "submit for approval" workflow in the portal.
+    grab(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at,
+          coalesce(approval_status,'draft') approval_status, coalesce(review_notes,'') review_notes,
+          to_char(reviewed_at,'YYYY-MM-DD') reviewed_at, (supplier_id IS NOT NULL) mine FROM planner.portal_attachments
+          WHERE po = ANY($1) AND coalesce(category,'') <> 'client'
+            AND NOT (coalesce(category,'') = 'timeline' AND (EXISTS (SELECT 1 FROM planner.shipment_notes sn WHERE sn.attachment_id = portal_attachments.id)
+              OR (supplier_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p JOIN planner.suppliers su ON su.name = p.supplier_name WHERE p.po = portal_attachments.po AND su.id = portal_attachments.supplier_id))))
+          ORDER BY uploaded_at DESC`),   // v28.186 (Ben, C1): shipment-timeline files (and another supplier's uploads keyed on this PO) are not this PO's documents
+    grab(`SELECT bp.id, bp.name, coalesce(bp.batch,'') batch, x.po, (SELECT count(*) FROM jsonb_object_keys(coalesce(bp.overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects bp, unnest(bp.pos) x(po) WHERE bp.pos && $1::text[]`).catch(() => null),   // v27.570 fix: the portal reads this payload, not po-detail; null = mig 268 not applied → no buttons
+  ]);
+  return { lc, ac, _ap, drows, bps };
+}
+// Group the detail datasets per PO and attach barcode_projects to each (full) PO row. Same shapes as before.
+function portalPoDetailMaps(parts, fullPos) {
+  const { lc, ac, _ap, drows, bps } = parts;
+  const addByPo = ac.reduce((m, r) => { (m[r.po] = m[r.po] || []).push(r); return m; }, {});
+  const costsByPo = {}; lc.forEach(x => { (costsByPo[x.po] = costsByPo[x.po] || {})[x.sku] = x; });
+  const approvedByPo = {}; _ap.forEach(r => { approvedByPo[r.po] = r.approved_lines; });
+  const docsByPo = {}; drows.forEach(d => { (docsByPo[d.po] = docsByPo[d.po] || []).push(d); });
+  if (bps) { const byBp = {}; bps.forEach(b => { (byBp[b.po] = byBp[b.po] || []).push({ id: b.id, name: b.name, batch: b.batch, n: b.n }); }); fullPos.forEach(p => { p.barcode_projects = byBp[p.po] || []; }); }
+  else fullPos.forEach(p => { p.barcode_projects = []; });
+  return { costsByPo, addByPo, approvedByPo, docsByPo };
+}
+// v28.189: payment runs (grouped like the Payments tab: payment_run_ref, else date) whose every line is a Completion / Balance milestone of
+// an archived PO. Returns the rows to send and the hidden runs' size and total.
+function portalPaymentsTrim(rows, archivedPos) {
+  const arch = new Set(archivedPos), key = (r) => r.payment_run_ref || r.payment_date || '—', runs = new Map();
+  rows.forEach(r => { const k = key(r); const g = runs.get(k) || { all: true }; if (!((r.type === 'Completion' || r.type === 'Balance') && arch.has(r.reference))) g.all = false; runs.set(k, g); });
+  const keep = [], hidden = { runs: 0, rows: 0, total: 0 }, seen = new Set();
+  rows.forEach(r => { const k = key(r); if (runs.get(k).all) { hidden.rows++; hidden.total += Number(r.amount) || 0; if (!seen.has(k)) { seen.add(k); hidden.runs++; } } else keep.push(r); });
+  hidden.total = Math.round(hidden.total * 100) / 100;
+  return { rows: keep, hidden };
+}
+async function portalBootstrapBuild(names, ids, _inclArch) {
+  const q = (sql, p) => pool.query(sql, p).then(r => r.rows);
+  {
+    // ── Round A: everything keyed only by supplier names / ids — fired together, awaited after the PO rows.
+    const pCutoff = poArchiveCutoff();
+    const pDeps = names.length ? q(`
+            WITH draw AS (SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
+              FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL GROUP BY po.deposit_ref),
+            pool AS (SELECT reference, sum(coalesce(amount,0)) pool_amount
+              FROM planner.deposits WHERE is_deposit AND reference IS NOT NULL GROUP BY reference)
+            SELECT d.reference, d.amount, d.is_deposit, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+              CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
+              CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining
+            FROM planner.deposits d
+            LEFT JOIN draw dr ON dr.deposit_ref=d.reference
+            LEFT JOIN pool p ON p.reference=d.reference
+            WHERE d.supplier_name = ANY($1)
+            ORDER BY d.date_paid DESC NULLS LAST, d.reference DESC`, [names]).catch(() => []) : Promise.resolve([]);
+    const pNotes = ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [ids]) : Promise.resolve([]);
+    const pSubs = ids.length ? q(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]) : Promise.resolve([]);
+    const pSupSkus = portalSupSkusQ(names);
+    const pSamples = portalSamplesQ(names, ids);
     // Payments for this supplier — DERIVED from the same source-of-truth as the admin Payments Report (PO
     // completion + balance milestones, the deposit register, and Other payments), NOT the payment_transactions
     // ledger (which is import-only and doesn't capture plan-entered dates/amounts). Starting deposits are
     // excluded (they're a drawdown against a register deposit, not a separate cash payment).
-    const _pnames = names.map(n => String(n).toLowerCase().trim());
     // Only CONFIRMED runs show in the portal — a run (date+supplier) appears once its bank amount + currency are
     // applied in the Payments Report (planner.payment_fx). Each line carries its supplier (sname) to match the run.
-    const pPayments = names.length ? q(`SELECT dt payment_date, dt payment_run_ref, reference, type, amount, deposit_ref FROM (
-        SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, o.supplier_name sname
-          FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
-        UNION ALL
-        SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
-          FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
-        UNION ALL
-        SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
-          FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
-        UNION ALL
-        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', supplier_name
-          FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
-        UNION ALL
-        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', supplier_name
-          FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
-      ) t WHERE EXISTS (SELECT 1 FROM planner.payment_fx f WHERE f.run_date=t.dt::date AND lower(trim(f.supplier))=lower(trim(t.sname))
-                          AND f.paid_amount IS NOT NULL AND coalesce(f.paid_currency,'')<>'')
-      ORDER BY payment_date DESC NULLS LAST`, [_pnames]).catch(() => []) : Promise.resolve([]);
+    const pPayments = portalPaymentsQ(names);   // v28.189: same SQL, now a function (also serves /api/portal/payments)
     // Shipment Plan tab: all shipments this supplier is on — as consolidator (master) OR with a PO aboard
     // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
     // Unread Dock&Bay (internal) shipment-note counts are attached as soon as the plan lands (powers the badges).
@@ -25142,8 +25407,9 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
       const shipmentPlan = all.filter(s => (s.suppliers || []).some(n => nameSet.has(String(n).toLowerCase()))).map(s => JSON.parse(JSON.stringify(s)));
       const shipRefs = shipmentPlan.filter(s => s.shipment_ref).map(s => s.shipment_ref);
       if (shipRefs.length) {
-        const un = await q(`SELECT shipment_ref, count(*)::int unread FROM planner.shipment_notes
-          WHERE shipment_ref = ANY($1) AND author_kind='internal' AND read_at IS NULL GROUP BY 1`, [shipRefs]);
+        const _snOk = ids.length > 0 && await snReadsOk();   // v28.189 (Ben, M2): unread for THIS supplier (shipment_note_reads), not the shared read_at
+        const un = await q(`SELECT shipment_ref, count(*)::int unread FROM planner.shipment_notes n
+          WHERE shipment_ref = ANY($1) AND author_kind='internal' AND ${shipNoteUnreadSql(_snOk, 'n', '$2')} GROUP BY 1`, _snOk ? [shipRefs, ids] : [shipRefs]);
         const um = {}; un.forEach(r => { um[r.shipment_ref] = r.unread; });
         shipmentPlan.forEach(s => { if (s.shipment_ref) s.unread_dnb = um[s.shipment_ref] || 0; });
       }
@@ -25209,38 +25475,34 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
     const [_cutoff, _allPos, _allLines] = await Promise.all([pCutoff, _lcGet(_portalPosSt), _lcGet(_portalLinesSt)]);
     const _nameSet = new Set(names);
     const pos = _allPos.filter(r => _nameSet.has(r.supplier_name) && !(_cutoff && !_inclArch && portalPoArchived(r, _cutoff))).map(r => Object.assign({}, r));
-    const poList = pos.map(p => p.po), _poSet = new Set(poList);
-    const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
-    const lines = _allLines.filter(l => _poSet.has(l.po)).map(l => Object.assign({}, l));
-    const [lc, xd, ac, _ap, drows, bps] = await Promise.all([
-      grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
-      grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
-      grab(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
-      // snapshot of the SKUs/qtys the supplier last approved (set on confirm) → portal diffs the current plan against it
-      grab(`SELECT po, approved_lines FROM planner.purchase_orders WHERE po = ANY($1) AND approved_lines IS NOT NULL`),
-      // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
-      // powers the Documents list + the "submit for approval" workflow in the portal.
-      grab(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at,
-          coalesce(approval_status,'draft') approval_status, coalesce(review_notes,'') review_notes,
-          to_char(reviewed_at,'YYYY-MM-DD') reviewed_at FROM planner.portal_attachments
-          WHERE po = ANY($1) AND coalesce(category,'') <> 'client'
-            AND NOT (coalesce(category,'') = 'timeline' AND (EXISTS (SELECT 1 FROM planner.shipment_notes sn WHERE sn.attachment_id = portal_attachments.id)
-              OR (supplier_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p JOIN planner.suppliers su ON su.name = p.supplier_name WHERE p.po = portal_attachments.po AND su.id = portal_attachments.supplier_id))))
-          ORDER BY uploaded_at DESC`),   // v28.186 (Ben, C1): shipment-timeline files (and another supplier's uploads keyed on this PO) are not this PO's documents
-      grab(`SELECT bp.id, bp.name, coalesce(bp.batch,'') batch, x.po, (SELECT count(*) FROM jsonb_object_keys(coalesce(bp.overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects bp, unnest(bp.pos) x(po) WHERE bp.pos && $1::text[]`).catch(() => null),   // v27.570 fix: the portal reads this payload, not po-detail; null = mig 268 not applied → no buttons
-    ]);
-    const [deps, notes, subs, supSkus, samples, payments, shipmentPlan, productEnabled, productsAll, specs] = await Promise.all([pDeps, pNotes, pSubs, pSupSkus, pSamples, pPayments, pShipPlan, pProductEnabled, pProducts, pSpecs]);
+    // v28.189 (Ben, deep dive H2): COMPLETED POs go as a light row: every field the list views read (grid, filters, action counts, Shipment
+    // Plan, Productions, Deposits) but not the detail-only ones (PORTAL_PO_DETAIL_FIELDS), and without their lines, costs, extra costs,
+    // approved snapshot, documents and barcode projects. __slim marks them; the MANAGE card / a batch's order plan fetch the rest from
+    // GET /api/portal/po-detail first (the same rows, so the card is identical). Notes, submissions and crossdock qtys stay for every PO
+    // (they drive the action badges). Open POs are unchanged.
+    pos.forEach(p => { if (portalPoIsSlim(p)) { for (const f of PORTAL_PO_DETAIL_FIELDS) delete p[f]; p.__slim = true; } });
+    const poList = pos.map(p => p.po), fullPos = pos.filter(p => !p.__slim), fullList = fullPos.map(p => p.po), _fullSet = new Set(fullList);
+    const lines = _allLines.filter(l => _fullSet.has(l.po)).map(l => Object.assign({}, l));
+    const [xd, parts] = await Promise.all([poList.length ? q(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`, [poList]) : Promise.resolve([]), portalPoDetailParts(fullList)]);
+    const [deps, notes, subs, supSkusAll, samples, paymentsAll, shipmentPlan, productEnabled, productsAll, specs] = await Promise.all([pDeps, pNotes, pSubs, pSupSkus, pSamples, pPayments, pShipPlan, pProductEnabled, pProducts, pSpecs]);
     const products = productEnabled ? productsAll : [];
     const byPo = (rows) => rows.reduce((m, r) => { (m[r.po] = m[r.po] || []).push(r); return m; }, {});
-    const lb = byPo(lines), notesByPo = byPo(notes), subsByPo = byPo(subs), addByPo = byPo(ac);
-    const costsByPo = {}; lc.forEach(x => { (costsByPo[x.po] = costsByPo[x.po] || {})[x.sku] = x; });
+    const lb = byPo(lines), notesByPo = byPo(notes), subsByPo = byPo(subs);
     const xdByPo = {}; xd.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
-    const approvedByPo = {}; _ap.forEach(r => { approvedByPo[r.po] = r.approved_lines; });
-    const docsByPo = {}; drows.forEach(d => { (docsByPo[d.po] = docsByPo[d.po] || []).push(d); });
-    if (bps) { const byBp = {}; bps.forEach(b => { (byBp[b.po] = byBp[b.po] || []).push({ id: b.id, name: b.name, batch: b.batch, n: b.n }); }); pos.forEach(p => { p.barcode_projects = byBp[p.po] || []; }); }
-    else pos.forEach(p => { p.barcode_projects = []; });
-    return { pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products, specs };
+    const { costsByPo, addByPo, approvedByPo, docsByPo } = portalPoDetailMaps(parts, fullPos);
+    // v28.189: the supplier's SKU list only for the SKUs on the lines sent (the Productions order plan reads their EAN / size / carton qty);
+    // the full list (the MANAGE "add a line" picker) comes with /api/portal/po-detail?skus=all. Same rows, same order.
+    const _lineSkus = new Set(lines.map(l => l.sku)), supSkus = supSkusAll.filter(x => _lineSkus.has(x.sku));
+    // v28.189: payments trimmed by the PO archive cutoff (same rule as the PO list): a payment run whose every line is a milestone of an
+    // ARCHIVED PO is left out (deposit / other lines never are), so every run shown keeps its exact lines and total; the tab adds the
+    // hidden runs' count and total to its headline figures and loads them on request (/api/portal/payments?archived=1).
+    let payments = paymentsAll, paymentsArchived = null;
+    if (_cutoff && !_inclArch) { const pt = portalPaymentsTrim(paymentsAll, _allPos.filter(r => _nameSet.has(r.supplier_name) && portalPoArchived(r, _cutoff)).map(r => r.po));
+      payments = pt.rows; if (pt.hidden.rows) paymentsArchived = Object.assign({ cutoff: _cutoff }, pt.hidden); }
+    const out = { pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products, specs, supSkusPartial: true };
+    if (paymentsArchived) out.paymentsArchived = paymentsArchived;
+    return out;
   }
 }
 // SUG-0019 P3: supplier confirms a spec — record a per-supplier acknowledgement for each of their directed names.
@@ -25311,6 +25573,9 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
 app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
   const names = req.portal.suppliers; if (!names.length) return res.json([]);
   try {
+    // v28.189 (Ben, M2): shipment messages are unread per supplier (shipment_note_reads) and listed for every shipment the supplier is on
+    // (master or rider, the v28.186 rule the Shipment Plan uses), so the Inbox matches the Shipment Plan badges.
+    const ids = (req.portal.supplierIds || []).map(Number).filter(n => Number.isSafeInteger(n) && n > 0), snOk = ids.length > 0 && await snReadsOk();
     res.json((await pool.query(`
       SELECT type, ref, note_id, author, body, to_char(created_at,'YYYY-MM-DD HH24:MI') at FROM (
         SELECT 'po' type, n.po ref, n.id note_id, coalesce(n.author_email,'') author, n.body, n.created_at
@@ -25320,8 +25585,9 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
         UNION ALL
         SELECT 'shipment', n.shipment_ref, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.shipment_notes n
-          WHERE n.author_kind='internal' AND n.read_at IS NULL
-            AND EXISTS (SELECT 1 FROM planner.purchase_orders po WHERE po.shipment_ref=n.shipment_ref AND po.supplier_name = ANY($1))
+          WHERE n.author_kind='internal' AND ${shipNoteUnreadSql(snOk, 'n', '$2')}
+            AND (EXISTS (SELECT 1 FROM planner.purchase_orders po WHERE po.shipment_ref=n.shipment_ref AND po.supplier_name = ANY($1))
+              OR EXISTS (SELECT 1 FROM planner.purchase_orders mp WHERE mp.po = coalesce((SELECT nullif(sh.master_po,'') FROM planner.shipments sh WHERE sh.shipment_ref=n.shipment_ref), n.shipment_ref) AND mp.supplier_name = ANY($1)))
         UNION ALL
         SELECT 'sample', sr.ref, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id
@@ -25330,7 +25596,8 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
         SELECT 'product', n.po, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
           WHERE n.author_kind='internal' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=pdi.id AND r.supplier_name = ANY($1))
-      ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names])).rows);
+            AND (n.supplier_id IS NULL OR n.supplier_id = ANY($2::bigint[]))   -- v28.191 (Ben, H6): never another supplier's request notes
+      ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names, ids])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
@@ -25353,11 +25620,11 @@ app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { cons
 app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   if (!String(b.body || '').trim()) return res.status(400).json({ error: 'body required' });
-  try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [ref, req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }
+  try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [ref, await portalMyNoteSupplierId(req, ref), req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }   // v28.191 (Ben, H6): scoped to the caller's supplier
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
+  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL AND (supplier_id IS NULL OR supplier_id = ANY($2::bigint[]))`, [ref, (req.portal.supplierIds || []).map(Number)]); res.json({ ok: true }); }   // v28.191 (Ben, H6): only notes the caller can see
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // v27.761 (Ben): supplier ACCEPTS a product development request. Whole-product grain — marks every request this supplier
 // holds for the item as accepted. Plain acknowledgement (no gating). Recorded on the timeline AND the change log.
@@ -25392,6 +25659,7 @@ app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  if (b.request_id != null && b.request_id !== '' && !(await portalMyRequests(req, ref)).some(r => Number(r.id) === Number(b.request_id))) return res.status(403).json({ error: 'That development request is not yours.' });   // v28.191 (Ben, H6)
   try { res.json({ ok: true, ...(await createProductSample(Object.assign({}, b, { supplier_names: req.portal.suppliers }), req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });   // v27.702: portal sample → the submitting supplier's request
 // Supplier sets the manual lifecycle status of a sample version (in_development / completed / cancelled — 'shipped' is derived).
 app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) => { const id = req.params.id, st = ((req.body || {}).supplier_status || '').trim();
@@ -25423,11 +25691,11 @@ app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) =
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if ((!b.data_base64 && !b.storage_path) || !id) return res.status(400).json({ error: 'sample_id + data_base64/storage_path required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
-    if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
+    if (!sr || !(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });   // v28.191 (H6): the caller's own version
     const attId = await insertProductSamplePhoto(id, b, req.portal.email || null, 'supplier');
     // timeline note → admin PRODUCT ✉ unread
-    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
-      [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
+      [sr.item_ref, await portalMyNoteSupplierId(req, sr.item_ref), req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);   // v28.191 (H6)
     res.json({ ok: true, id: attId }); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
 app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
@@ -25447,8 +25715,8 @@ app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = 
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'product','supplier') RETURNING id`,
       [ref, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email || null]);
-    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
-      [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
+      [ref, await portalMyNoteSupplierId(req, ref), req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);   // v28.191 (H6)
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
@@ -25470,7 +25738,7 @@ app.get('/api/portal/sample/:id/contents', portalAuth, async (req, res) => {
     res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
-async function portalOwnsSample(req, id){ if(!id)return null;
+async function portalOwnsSample(req, id){ if(!id||!/^\d{1,18}$/.test(String(id).trim()))return null;   // v28.191 (Ben, M6): a malformed id is "not yours" (403), not a database error (500)
   const r = await pool.query(`SELECT id, ref, coalesce(supplier_name,'') supplier_name, supplier_id, status FROM planner.sample_requests WHERE id=$1::bigint`, [id]);
   const s = r.rows[0]; if(!s) return null;
   const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
@@ -25494,6 +25762,21 @@ app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) =>
     if(!a || a.category!=='sample' || !await portalOwnsSampleRef(req, a.po)) return res.status(403).json({ error: 'not allowed' });
     await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok:true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.190 (Ben, deep dive H4): the PO card's document "remove" posted to a route that did not exist (the file vanished from the screen only).
+// A supplier may remove a document IT uploaded to its own PO while it is a draft or was rejected; one sent for approval or approved stays.
+app.post('/api/portal/doc-remove', portalAuth, async (req, res) => {
+  const id = Number(req.body && req.body.id); if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Which document? (id missing)' });
+  try {
+    const a = (await pool.query(`SELECT id, po, coalesce(category,'') category, coalesce(approval_status,'draft') st, supplier_id, storage_path FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
+    const ids = (req.portal.supplierIds || []).map(Number);
+    if (!a || a.supplier_id == null || !ids.includes(Number(a.supplier_id)) || /^(client|timeline|sample|product|product_sample|product_dim|onboarding.*)$/.test(a.category) || !(await portalOwnsPO(req, a.po)))
+      return res.status(403).json({ error: 'You can only remove documents you uploaded to your own orders.' });
+    if (!['draft', 'rejected'].includes(a.st)) return res.status(409).json({ error: 'This document has been sent to Dock & Bay for approval, so it can not be removed here. Please contact Dock & Bay if it is wrong.' });
+    const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(approval_status,'draft') IN ('draft','rejected')`, [id]);
+    if (r.rowCount && a.storage_path) storageDelete(a.storage_path);
+    res.json({ ok: true, deleted: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
@@ -25517,6 +25800,7 @@ app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    if (b.supplier_expected_completion != null && b.supplier_expected_completion !== '' && !(/^\d{4}-\d{2}-\d{2}$/.test(String(b.supplier_expected_completion)) && !isNaN(Date.parse(String(b.supplier_expected_completion))))) return res.status(400).json({ error: 'The expected completion date is not a valid date.' });   // v28.191 (Ben, M7): before the notes are written
     await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
@@ -25596,15 +25880,37 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); } finally { client.release(); } });
 
 // Supplier marks a shipment's Dock&Bay (internal) timeline notes as read → clears the shipment's notification.
+// v28.189 (Ben, deep dive M2 / M9): marks Dock & Bay's notes on a shipment read for THE CALLER only (one shipment_note_reads row per note
+// and per caller supplier id, migration 333), never for the other suppliers on a shared shipment. upto_id (optional) = the newest note the
+// supplier had on screen, so a note that arrived after the view stays unread. shipment_notes.read_at still records the first supplier
+// read for Dock & Bay's own view. Without migration 333 it falls back to the old shared read_at.
 app.post('/api/portal/shipment-notes-read', portalAuth, async (req, res) => {
   const ref = ((req.body && req.body.shipment_ref) || '').trim();
   if (!ref) return res.status(400).json({ error: 'shipment_ref required' });
+  const upto = Number(req.body && req.body.upto_id); const uptoId = (Number.isSafeInteger(upto) && upto > 0) ? upto : null;
   try {
     if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });   // v28.186 (Ben, H3): master or rider
-    await pool.query(`UPDATE planner.shipment_notes SET read_at=now() WHERE shipment_ref=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]);
+    const ids = (req.portal.supplierIds || []).map(Number).filter(n => Number.isSafeInteger(n) && n > 0);
+    if (ids.length && await snReadsOk()) {
+      await pool.query(`WITH n AS (SELECT id FROM planner.shipment_notes WHERE shipment_ref=$1 AND author_kind='internal' AND ($2::bigint IS NULL OR id <= $2)),
+          ins AS (INSERT INTO planner.shipment_note_reads (note_id, supplier_id) SELECT n.id, s.sid FROM n CROSS JOIN unnest($3::bigint[]) s(sid) ON CONFLICT DO NOTHING RETURNING 1)
+        UPDATE planner.shipment_notes x SET read_at=now() FROM n WHERE x.id=n.id AND x.read_at IS NULL`, [ref, uptoId, ids]);
+    } else await pool.query(`UPDATE planner.shipment_notes SET read_at=now() WHERE shipment_ref=$1 AND author_kind='internal' AND read_at IS NULL AND ($2::bigint IS NULL OR id <= $2)`, [ref, uptoId]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.189 (Ben): is migration 333 (planner.shipment_note_reads) applied? Checked at most once a minute; until it is, the shared read_at rules.
+let _snReadsMemo = { t: 0, v: false };
+async function snReadsOk() {
+  if (Date.now() - _snReadsMemo.t < 60000) return _snReadsMemo.v;
+  try { const r = (await pool.query(`SELECT to_regclass('planner.shipment_note_reads') IS NOT NULL ok`)).rows[0]; _snReadsMemo = { t: Date.now(), v: !!(r && r.ok) }; }
+  catch (_) { _snReadsMemo = { t: Date.now(), v: _snReadsMemo.v }; }
+  return _snReadsMemo.v;
+}
+// SQL condition "this internal shipment note is unread for the supplier ids in parameter idsParam" (n = the shipment_notes alias).
+function shipNoteUnreadSql(ok, alias, idsParam) {
+  return ok ? `NOT EXISTS (SELECT 1 FROM planner.shipment_note_reads r WHERE r.note_id = ${alias}.id AND r.supplier_id = ANY(array_append(${idsParam}::bigint[], 0::bigint)))` : `${alias}.read_at IS NULL`;
+}
 
 // v28.186 (Ben, H3): portalOwnsShipmentRef / portalShipmentRole (next to portalOwnsPO) = master (consolidator) or rider on the shipment.
 app.get('/api/portal/shipment-notes/:ref', portalAuth, async (req, res) => {   // supplier: a shipment's timeline notes
@@ -25891,8 +26197,11 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     const sid = req.portal.supplierIds[0] || null;
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [b.po, sid, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email]);
+    // v28.190 (Ben): store the document type the supplier picked (it was dropped: every portal document became 'invoice' after a reload);
+    // reserved categories (client / timeline / sample / product / onboarding files) can not be chosen here.
+    const cat = String(b.category || '').trim().slice(0, 60), category = (!cat || /^(client|timeline|sample|product|product_sample|product_dim|onboarding.*)$/i.test(cat)) ? 'invoice' : cat;
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by,category,uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'supplier') RETURNING id`,
+      [b.po, sid, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email, category]);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -25928,6 +26237,10 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   if (b.invoice_value != null && String(b.invoice_value).trim() !== '' && sanitiseMoney(b.invoice_value) == null) return res.status(400).json({ error: 'Invoice value must be a number (no currency symbols or letters).' });
+  // v28.191 (Ben, deep dive M7): every input is checked BEFORE the first write (a bad production status used to come back as a 400 after
+  // the completion date, invoice, notes, emails and tracking had already been saved, and the 400 skipped the cache refresh).
+  if (b.production_status != null && String(b.production_status).trim() !== '' && !PROD_STATUSES.includes(String(b.production_status).trim())) return res.status(400).json({ error: 'That production status is not one of the options. Please refresh the page and choose again.' });
+  if (b.completion_date != null && b.completion_date !== '' && !(/^\d{4}-\d{2}-\d{2}$/.test(String(b.completion_date)) && !isNaN(Date.parse(String(b.completion_date))))) return res.status(400).json({ error: 'The completion date is not a valid date.' });
   const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   try {
     if (!await portalAttachmentOk(req, b.invoice_attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
@@ -25989,7 +26302,11 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
     }
     if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e);
+    // v28.191 (Ben, M7): if part of it was already saved, say exactly what (and refresh the caches for it) instead of a bare error
+    const done = out.staged.concat(out.applied);
+    if (done.length) { try { invalidateSupplyCaches('portal-po'); } catch (_) {} return res.status(409).json({ error: 'Only part of this was saved (' + done.join(', ') + '). Please refresh the page, check it, and send the rest again.', partial: out }); }
+    res.status(500).json({ error: e.message }); }
 });
 
 // Local dev: listen. On Vercel (serverless) the platform imports `app` instead.

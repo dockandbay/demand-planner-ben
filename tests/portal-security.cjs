@@ -120,6 +120,73 @@ const internal = (t) => /relation "|column "|syntax error|violates|duplicate key
     await new Promise((r) => setTimeout(r, 200));
     ok((await get('/api/portal/me', { cookie: c })).status === 401, 'M5e: the signed-out token no longer works');
   }
+  // ── v28.189 (Ben, M2 / M9): Dock & Bay's shipment messages are read PER SUPPLIER. Needs HZ_TEST_SHIP_UNREAD_NOTE = an internal note on
+  // a shipment both MASTER and RIDER see in their Shipment Plan (HZ_TEST_SHIP_UNREAD_REF, default SHIP) that neither has read (sandbox:
+  // insert one, delete it after) and HZ_TEST_WRITES=1 (the rider marks it read).
+  if (E.HZ_TEST_WRITES === '1' && E.HZ_TEST_SHIP_UNREAD_NOTE) {
+    const nid = Number(E.HZ_TEST_SHIP_UNREAD_NOTE), SR = E.HZ_TEST_SHIP_UNREAD_REF || SHIP;
+    const unread = async (c) => { const b = await get('/api/portal/bootstrap?fresh=1', { cookie: c }); const s = ((b.json && b.json.shipmentPlan) || []).find((x) => x.shipment_ref === SR); return s ? s.unread_dnb : null; };
+    const inbox = async (c) => ((await get('/api/portal/unread-messages', { cookie: c })).json || []).some((x) => x.type === 'shipment' && Number(x.note_id) === nid);
+    ok((await unread(M)) >= 1 && (await unread(Rd)) >= 1, 'M2: the new D&B shipment note is unread for master and rider');
+    ok(await inbox(M) && await inbox(Rd), 'M2: it is in both Inboxes');
+    ok((await post('/api/portal/shipment-notes-read', { shipment_ref: SR, upto_id: nid }, { cookie: O })).status === 403, 'M2: an outsider can not mark it read -> 403');
+    ok((await post('/api/portal/shipment-notes-read', { shipment_ref: SR, upto_id: nid }, { cookie: Rd })).status === 200, 'M2: rider views the shipment (marks read) -> 200');
+    ok((await unread(Rd)) === 0 && !(await inbox(Rd)), 'M2: read for the rider (badge 0, gone from its Inbox)');
+    ok((await unread(M)) >= 1 && await inbox(M), 'M2/M9: STILL unread for the master (a rider\'s view no longer clears it for everyone)');
+  }
+
+  // ── v28.190 (Ben, H4): a supplier removes its OWN draft PO document (the button used to post to a route that did not exist). Needs
+  // HZ_TEST_WRITES=1 and HZ_TEST_RIDER_PO (one of RIDER's POs): uploads a tiny file, checks the stored type, removes it.
+  if (E.HZ_TEST_WRITES === '1' && E.HZ_TEST_RIDER_PO) {
+    const up = await post('/api/portal/upload', { po: E.HZ_TEST_RIDER_PO, filename: 'v28190 test.pdf', mime: 'application/pdf', data_base64: Buffer.from('%PDF-1.4 test').toString('base64'), category: 'Packing list' }, { cookie: Rd });
+    ok(up.status === 200 && up.json && up.json.id, 'H4: rider uploads a document to its own PO');
+    if (up.json && up.json.id) {
+      const b = await get('/api/portal/po-detail?pos=' + encodeURIComponent(E.HZ_TEST_RIDER_PO), { cookie: Rd });
+      const doc = (((b.json && b.json.docsByPo) || {})[E.HZ_TEST_RIDER_PO] || []).find((x) => String(x.id) === String(up.json.id));
+      ok(doc && doc.category === 'Packing list' && doc.mine === true, 'the chosen document type is stored (was always "invoice") and flagged as the supplier\'s own');
+      ok((await post('/api/portal/doc-remove', { id: up.json.id }, { cookie: M })).status === 403, 'H4: another supplier can not remove it -> 403');
+      const rm = await post('/api/portal/doc-remove', { id: up.json.id }, { cookie: Rd }); ok(rm.status === 200 && rm.json && rm.json.deleted === 1, 'H4: the rider removes its own draft document -> 200, deleted');
+      ok((await get('/api/portal/attachment/' + up.json.id, { cookie: Rd })).status === 403, 'H4: the removed document is gone');
+    }
+    ok((await post('/api/portal/doc-remove', { id: E.HZ_TEST_ATT_MASTER_DOC }, { cookie: Rd })).status === 403, 'H4: removing the master\'s document -> 403');
+  }
+
+  // ── v28.191 (Ben, H6): suppliers competing on ONE product-dev item. Needs HZ_TEST_PSID_COMPETITOR (a session of another supplier with
+  // its own development request on HZ_TEST_SHARED_ITEM), HZ_TEST_OTHER_SAMPLE_VERSION (a sample version of OTHER's request on that item)
+  // and HZ_TEST_OTHER_REQUEST (OTHER's request id on it). Refused writes only, unless HZ_TEST_WRITES=1 (OTHER posts one product note).
+  if (E.HZ_TEST_PSID_COMPETITOR && E.HZ_TEST_SHARED_ITEM && E.HZ_TEST_OTHER_SAMPLE_VERSION) {
+    const C = 'psid=' + E.HZ_TEST_PSID_COMPETITOR, item = E.HZ_TEST_SHARED_ITEM, ver = E.HZ_TEST_OTHER_SAMPLE_VERSION;
+    ok((await get('/api/portal/product-item/' + encodeURIComponent(item), { cookie: C })).status === 200, 'H6: the competitor can open the shared item (it has its own request)');
+    ok((await post('/api/portal/product-sample/' + ver + '/status', { supplier_status: 'cancelled' }, { cookie: C })).status === 403, 'H6: competitor changing OTHER\'s sample version status -> 403');
+    ok((await post('/api/portal/product-sample/' + ver + '/meta', { sample_sizes: [], sampled_aspects: [] }, { cookie: C })).status === 403, 'H6: competitor editing OTHER\'s sample version -> 403');
+    ok((await post('/api/portal/product-sample/' + ver + '/assign', { mode: 'not_shipped' }, { cookie: C })).status === 403, 'H6: competitor assigning OTHER\'s sample version -> 403');
+    if (E.HZ_TEST_OTHER_REQUEST) ok((await post('/api/portal/product-sample', { item_ref: item, request_id: E.HZ_TEST_OTHER_REQUEST, colour_verified: true, quality_verified: true, sampled_aspects: ['product'] }, { cookie: C })).status === 403, 'H6: competitor creating a sample version on OTHER\'s request -> 403');
+    const pi = await get('/api/portal/product-item/' + encodeURIComponent(item), { cookie: C });
+    const others = [].concat(...(((pi.json && pi.json.components) || []).map((c) => c.req_suppliers || [])));
+    const meC = ((await get('/api/portal/me', { cookie: C })).json || {}).suppliers || [], meO = ((await get('/api/portal/me', { cookie: O })).json || {}).suppliers || [];
+    ok(!others.some((n) => meO.includes(n)), 'H6: the competitor never sees OTHER\'s supplier name on components (got ' + [...new Set(others)].join(', ') + ')');
+    ok(!((pi.json && pi.json.samples) || []).some((s) => meO.includes(s.supplier)), 'H6: the competitor sees none of OTHER\'s sample versions');
+    if (E.HZ_TEST_WRITES === '1') {
+      ok((await post('/api/portal/product-note', { ref: item, body: 'v28191 test: OTHER\'s private product note' }, { cookie: O })).status === 200, 'H6: OTHER posts a product note');
+      const cn = (await get('/api/portal/product-notes/' + encodeURIComponent(item), { cookie: C })).json || [];
+      ok(!cn.some((n) => /v28191 test/.test(n.body || '')), 'H6: the competitor does NOT see OTHER\'s note (was product-wide)');
+      const on = (await get('/api/portal/product-notes/' + encodeURIComponent(item), { cookie: O })).json || [];
+      ok(on.some((n) => /v28191 test/.test(n.body || '')), 'H6: OTHER sees its own note');
+    }
+    void meC;
+  }
+
+  // ── v28.188 (Ben, H7): health capture. The session route still needs a session; the login-page route takes no session but only
+  // the allowed kinds (a 'metric' row is dropped), at most 20 events, and never answers with an error page.
+  const tx = { 'content-type': 'text/plain' };
+  ok((await req('POST', '/api/portal/health/client-events', { body: [{ kind: 'client_error', message: 'v28187 test' }] })).status === 401, 'H7: session capture route without a session -> 401');
+  const le = await req('POST', '/api/portal/health/login-events', { headers: tx, body: undefined, form: undefined }).catch(() => null);
+  const le2 = await new Promise((res) => { const h = { 'content-type': 'text/plain' }; const data = JSON.stringify([{ kind: 'client_error', message: 'v28187 test: login page error', path: '/portal' }, { kind: 'metric', message: 'v28187 test: not allowed' }]);
+    const r = http.request({ host: BASE.hostname, port: BASE.port, path: '/api/portal/health/login-events', method: 'POST', headers: h }, (resp) => { const ch = []; resp.on('data', (c) => ch.push(c)); resp.on('end', () => { let j = null; try { j = JSON.parse(Buffer.concat(ch).toString('utf8')); } catch (_) {} res({ status: resp.statusCode, json: j }); }); });
+    r.on('error', () => res({ status: 0 })); r.write(data); r.end(); });
+  ok(le2.status === 202 && le2.json && le2.json.accepted === 1, 'H7: login-page capture without a session -> 202, only the allowed kind accepted (got ' + le2.status + ' ' + JSON.stringify(le2.json) + ')');
+  ok(!le || le.status === 400 || le.status === 202, 'H7: login-page capture with an empty body never errors (got ' + (le && le.status) + ')');
+
   console.log((fails ? 'FAILED' : 'OK') + ': ' + passes + ' checks passed, ' + fails + ' failed');
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

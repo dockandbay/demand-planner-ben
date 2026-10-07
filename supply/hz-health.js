@@ -10,7 +10,8 @@
   var sc=document.currentScript, SRC=(sc&&sc.getAttribute('data-hz-src'))||'staff', VER=(sc&&sc.getAttribute('data-hz-ver'))||'';
   var EP=SRC==='portal'?'/api/portal/health/client-events':SRC==='client_portal'?'/api/cp/health/client-events':'/api/health/client-events';
   var _fetch=window.fetch, _cerr=console.error, q=[], seen={}, winT=0, winN=0, SLOW_VIEW_MS=3000;
-  window.__hzHealth={src:SRC,ep:EP,queue:q,flush:function(){flush(false);}};
+  // v28.188 (Ben): setEp lets the supplier portal LOGIN page (no session yet) send to the unauthenticated, rate-limited login endpoint.
+  window.__hzHealth={src:SRC,ep:EP,queue:q,flush:function(){flush(false);},setEp:function(u){ if(typeof u==='string'&&/^\/api\//.test(u)){ EP=u; window.__hzHealth.ep=u; } }};
   function view(){ var h=String(location.hash||'').split('?')[0].slice(0,200); return SRC==='staff'?(h||'#/'):(String(location.pathname||'/')+h).slice(0,200); }
   function str(a){ try{ if(a instanceof Error)return a.message||String(a); if(a&&typeof a==='object')return JSON.stringify(a).slice(0,300); }catch(e){} return String(a); }
   function add(kind,msg,stack,ms,meta){ try{
@@ -31,16 +32,20 @@
   // slow views: from nav (hash change) or first load until no visible "Loading…" panel remains
   // v28.179 (Ben): + any visible [data-hz-loading] panel (the DEMAND / BUY & MOVE / REPORTS cold-entry panels have no .count text, so
   // slow BUY & MOVE > Actions entries were never seen) and "⏳ Loading…" style text (a leading symbol defeated /^\s*Loading/).
-  var LOADSEL='.count,.mut,.cp-lead,.pv-empty,.ask-empty', pend=null;
-  function loading(){ var els=document.querySelectorAll(LOADSEL); for(var i=0;i<els.length;i++){ var t=els[i].textContent; if(t&&t.length<120&&/^[^A-Za-z0-9]{0,4}Loading/.test(t)&&els[i].offsetParent!==null)return true; }
+  // v28.188 (Ben): + the Chinese portal text "加载中…" (the portal translates "Loading…" in 中文 mode, so slow views never matched there).
+  var LOADSEL='.count,.mut,.cp-lead,.pv-empty,.ask-empty', pend=null, manualAt=0;
+  function loading(){ var els=document.querySelectorAll(LOADSEL); for(var i=0;i<els.length;i++){ var t=els[i].textContent; if(t&&t.length<120&&/^[^A-Za-z0-9]{0,4}(Loading|加载中)/.test(t)&&els[i].offsetParent!==null)return true; }
     var pn=document.querySelectorAll('[data-hz-loading]'); for(var j=0;j<pn.length;j++)if(pn[j].offsetParent!==null)return true; return false; }
   function watch(t0,first){ var id={}; pend=id; var quiet=0, qms=0;   // two quiet ticks in a row = rendered (the app's own hashchange handler may run after ours)
     (function tick(){ if(pend!==id)return; var ms=(first?performance.now():Date.now()-t0);
       if(ms>60000){ pend=null; add('slow_view','View still loading after 60s: '+view(),null,ms,{timeout:true,first:!!first}); return; }
       if(document.readyState!=='loading'&&!loading()){ if(!quiet++)qms=ms; if(quiet>=2){ pend=null; if(qms>SLOW_VIEW_MS)add('slow_view','Slow view load: '+view(),null,qms,{first:!!first}); return; } } else quiet=0;
       setTimeout(tick,300); })(); }
-  window.addEventListener('hashchange',function(){ watch(Date.now(),false); });
+  window.addEventListener('hashchange',function(){ if(Date.now()-manualAt<1000)return; watch(Date.now(),false); });   // v28.188: a view that started its own watch (hzHealthWatch) just before changing the hash keeps that start time
   watch(0,true);
+  // v28.188 (Ben): hzHealthWatch(): an app that renders a view BEFORE it changes the hash (the supplier portal's tab click renders, then
+  // sets #/<section>/<tab>) starts the slow-view timer itself at the click; the hashchange that follows within 1s does not restart it.
+  window.hzHealthWatch=function(){ try{ manualAt=Date.now(); watch(manualAt,false); }catch(e){} };
   // v28.163 (Ben): AGGREGATED captures, kept in memory and sent as one row per group every 60s and on pagehide / tab hidden:
   //  long_task  : main-thread tasks >= 1s (PerformanceObserver 'longtask', buffered), per normalised view: count, max, sum; <= 10 a minute.
   //  api_failure: same-origin /api calls seen by THIS browser that failed: network error, timeout, status >= 500, 408 / 429, or
@@ -60,11 +65,14 @@
     new PerformanceObserver(function(l){ try{ var es=l.getEntries(); for(var i=0;i<es.length;i++)if(es[i].duration>=1000)ltNote(es[i].duration); }catch(_){} }).observe({type:'longtask',buffered:true}); }catch(e){}
   function apiPath(u){ var s=String(u||''); if(/^https?:/i.test(s)){ if(s.indexOf(location.origin+'/')!==0)return null; s=s.slice(location.origin.length); }
     if(s.indexOf('/api/')!==0||API_SKIP.test(s))return null; return nv(s); }
+  // v28.188 (Ben): the supplier portal also records 4xx (session expired 401, "not your shipment" 403, 404, validation 400 / 409):
+  // to a supplier these are failures too. The sign-in probe (GET /api/portal/me answering 401 on the login page) is expected, not a failure.
+  function PORTAL4xx(m,p,s){ return SRC==='portal'&&!(s===401&&m==='GET'&&p==='/api/portal/me'); }
   function apiNote(m,p,st,ms,err){ var k=m+' '+p+' '+st, a=API[k]; if(!a){ if(Object.keys(API).length>=40)return; a=API[k]={m:m,p:p,s:st,n:0,max:0,err:null}; } a.n++; if(ms>a.max)a.max=ms; if(err)a.err=err; }
   if(typeof _fetch==='function'){ window.fetch=function(input,init){
     var t0=0, u='', m='GET'; try{ t0=performance.now(); u=(typeof input==='string')?input:((input&&input.url)||String(input||'')); m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase(); }catch(e){}
     var p=_fetch.apply(window,arguments);
-    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000)apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?'slow':null); }catch(_){} },
+    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000||(s>=400&&PORTAL4xx(m,path,s)))apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?'slow':null); }catch(_){} },
       function(e){ try{ var n=e&&e.name; if(n==='AbortError')return; apiNote(m,path,0,Math.round(performance.now()-t0),n==='TimeoutError'?'timeout':'network'); }catch(_){} }); }catch(e){}
     return p; }; }
   // v28.179 (Ben): dead_click: a press on a NAV item (left rail L1 / L2 / L3, top view toggles, L2 / L3 tab bars) that is not
@@ -72,7 +80,8 @@
   // 1.5 s. Aggregated per view + label like long_task (count, <= 10 a minute). Clicks on anything else are never looked at.
   var DC={}, dcT=0, dcN=0, dcPend=null, DEAD_MS=1500;
   var NAVSEL='#hz-leftrail .rl1,#hz-leftrail .rl2,#hz-leftrail .rl3,#view-tabs-row .view-toggle,.hz-l2 .dnav,.d3nav .d3tab,#supply-subnav .stab,#rep-subnav .rtab,#act-subnav .rtab,#product-subnav .stab,#client-subnav .stab,#config-subs .rtab,#config-subs-l3 .rtab,#perf-subnav .rtab'
-    +',#hz-drawer .hz-nav,#prod-subtabs .rtab,#pcfg-subs-l3 .rtab,#client-l3 .rtab,#tpl-subnav .dnav3';   // v28.184 (Ben): + the phone drawer tree (L1 / L2 / L3) and the L3 bars the drawer mirrors
+    +',#hz-drawer .hz-nav,#prod-subtabs .rtab,#pcfg-subs-l3 .rtab,#client-l3 .rtab,#tpl-subnav .dnav3'   // v28.184 (Ben): + the phone drawer tree (L1 / L2 / L3) and the L3 bars the drawer mirrors
+    +',#pp-secs .pp-sec,#pp-tabs .rtab';   // v28.188 (Ben): + the supplier portal's section menu and tab row (same rules, touch-aware)
   function navLabel(el){ try{ var l=el.querySelector('.lab,.hz-lab'), t=l?l.textContent:Array.prototype.filter.call(el.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');
     return String(t||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60); }catch(e){ return '?'; } }   // v28.184 (Ben): .hz-lab = drawer row label (without its count badge)
   function navOn(el){ var c=el.classList; return !!(c&&(c.contains('active')||c.contains('on'))); }
@@ -89,7 +98,7 @@
   // v28.184 (Ben): phones. A tap is taken at touchend (a drag / scroll of the drawer is not a press); the compatibility mousedown the
   // browser fires right after the same tap is then ignored, so one tap never counts twice (which would read as "pressed again: dead").
   var dcTouch=null, dcTouchAt=0;
-  if(SRC==='staff'){
+  if(SRC==='staff'||SRC==='portal'){   // v28.188 (Ben): + the supplier portal
     document.addEventListener('mousedown',function(e){ try{ if(e.button!==0||!e.target||!e.target.closest)return; if(Date.now()-dcTouchAt<1000)return; dcPress(e.target.closest(NAVSEL)); }catch(_){} },true);
     document.addEventListener('touchstart',function(e){ try{ var t=e.touches&&e.touches[0]; dcTouch=(e.touches&&e.touches.length===1&&e.target&&e.target.closest)?{el:e.target.closest(NAVSEL),x:t?t.clientX:0,y:t?t.clientY:0,moved:false}:null; }catch(_){ dcTouch=null; } },{capture:true,passive:true});
     document.addEventListener('touchmove',function(e){ try{ var t=e.touches&&e.touches[0]; if(dcTouch&&t&&(Math.abs(t.clientX-dcTouch.x)>10||Math.abs(t.clientY-dcTouch.y)>10))dcTouch.moved=true; }catch(_){} },{capture:true,passive:true});
