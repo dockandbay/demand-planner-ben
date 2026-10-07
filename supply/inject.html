@@ -516,10 +516,11 @@
 #supply-root .pog-pill:hover{color:var(--blue);border-color:#bfdbfe}
 #supply-root .pog-pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
-#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
-#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open,#supply-root #erpdrawer-bg.open{background:rgba(15,23,42,.32)}
-#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
-#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer{transform:translateX(0)}
+#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg,#supply-root #sovdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
+#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open,#supply-root #erpdrawer-bg.open,#supply-root #sovdrawer-bg.open{background:rgba(15,23,42,.32)}
+#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer,#supply-root #sovdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer,#supply-root #sovdrawer-bg.open #sovdrawer{transform:translateX(0)}
+#supply-root #sovdrawer{width:max(50vw, min(560px,100vw))}   /* v28.192 (Ben): Validate sales order drawer = 50% of the screen (full width on phones, below) */
 #supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
 /* Drawer-overlay mode: PO drawer opened from DEMAND/BUY (supply hidden). supply-root is shown ONLY to host the
    fixed drawer overlay — every other supply child is hidden, so the drawer floats over the current view (e.g. the
@@ -538,9 +539,9 @@
 @media (max-width:640px){
   #supply-root #sup-count{display:none}            /* PO count line — hide on mobile */
   #supply-root .po-erp-match{display:none}         /* ERP-match summary — hide on mobile */
-  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{background:transparent!important}
-  #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
-  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer{transform:translateY(0)}
+  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg,#supply-root #sovdrawer-bg{background:transparent!important}
+  #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer,#supply-root #sovdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
+  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer,#supply-root #sovdrawer-bg.open #sovdrawer{transform:translateY(0)}
   #supply-root .shipdrawer-head{padding:13px 14px;background:var(--nav);border-bottom:none;position:sticky;top:0;z-index:3}
   #supply-root .shipdrawer-title{color:#fff;font-size:15px}
   #supply-root .shipdrawer-x{color:#fff;font-size:22px;padding:6px 10px}
@@ -7367,7 +7368,7 @@
   // resets once everything is closed so it never grows unbounded.
   var _drawerZTop=6100;
   function nextDrawerZ(){ _drawerZTop+=10; return _drawerZTop; }
-  function maybeResetDrawerZ(){ if(document.getElementById('shipdrawer-bg')||document.getElementById('podrawer-bg')||document.getElementById('sampdrawer-bg'))return;
+  function maybeResetDrawerZ(){ if(document.getElementById('sovdrawer-bg')||document.getElementById('shipdrawer-bg')||document.getElementById('podrawer-bg')||document.getElementById('sampdrawer-bg'))return;
     var ov=document.getElementById('mob-sheet-ov'); if(ov&&ov.dataset.podrawer&&ov.style.display!=='none')return; _drawerZTop=6100; }
   // ── Sample DRAWER: open an editable sample shipment (SR) in a right-side slide-in popout — used from the PRODUCT
   // module (grid "Sample shipment" column + the item's Samples sub-tab) so the user isn't navigated to SUPPLY ▸ Samples.
@@ -7519,6 +7520,113 @@
         renderFulfilCompare(d, el, load); try{ if(typeof d.count==='number'){ _erpcCount=d.count; _erpcAt=Date.now(); paintErpcBadge(); paintReportsL2Badge(); } }catch(e){} })
         .catch(function(e){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load Fulfil compare: '+esc(e.message||e)+'</div>'; }); }
     load(); }
+  // v28.192 (Ben): VALIDATE SALES ORDER drawer (SUPPLY ▸ Purchase Orders ▸ Direct to Client). Paste a Fulfil sales order
+  // number / link / reference → Analyse lists every line with its ship method and, for drop-ship lines, a supplier picker
+  // limited to the suppliers set up on that product in Fulfil. Summary chips follow the CURRENT picks. Push = one in-app
+  // confirm listing every change, then the server writes each line and reads it back (per-line ok / failed / blocked).
+  function openSoValDrawer(){ var old=document.getElementById('sovdrawer-bg'); if(old&&old.parentNode)old.parentNode.removeChild(old);
+    var root=document.getElementById('supply-root')||document.body; var bg=document.createElement('div'); bg.id='sovdrawer-bg'; bg.style.zIndex=nextDrawerZ();
+    bg.innerHTML='<div id="sovdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">Validate sales order</div><div><button class="shipdrawer-x" title="close (Esc)">✕</button></div></div>'
+      +'<div class="shipdrawer-body"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><label class="pill-lbl" for="sov-q">Sales order</label>'
+      +'<input class="flt" id="sov-q" placeholder="SO number, Fulfil link or reference" style="flex:1 1 260px;min-width:0;background:var(--blue-soft);border-color:#93c5fd">'
+      +'<button class="save-btn" id="sov-go" style="background:var(--nav);color:#fff;border-color:var(--nav)">Analyse</button></div><div id="sov-body"></div></div></div>';
+    root.appendChild(bg); requestAnimationFrame(function(){ bg.classList.add('open'); });
+    var S={data:null, sel:{}, chk:{}, res:{}, busy:false};
+    var onKey=function(e){ if(e.key!=='Escape')return; var cf=document.getElementById('sov-confirm'); if(cf){ cf.remove(); return; } close(); };
+    var close=function(){ bg.classList.remove('open'); document.removeEventListener('keydown',onKey); setTimeout(function(){ if(bg.parentNode)bg.parentNode.removeChild(bg); maybeResetDrawerZ(); },220); };
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg)close(); }); bg.querySelector('.shipdrawer-x').onclick=close; document.addEventListener('keydown',onKey);
+    var qi=bg.querySelector('#sov-q'), body=bg.querySelector('#sov-body');
+    function jget(u){ return fetch(u,{cache:'no-store'}).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }); }
+    function n0(v){ return Number(v||0).toLocaleString(); }
+    function editable(l){ return l.mode==='dropship' && !l.service && !l.blocked; }
+    function curId(l){ return l.supplier?l.supplier.id:null; }
+    function optName(l,id){ if(id==null)return ''; var o=(l.options||[]).filter(function(x){return x.id===id;})[0]; return o?o.name:(l.supplier&&l.supplier.id===id?l.supplier.name:('Party '+id)); }
+    function changed(l){ return editable(l) && S.sel[l.line_id]!=null && S.sel[l.line_id]!==curId(l); }
+    function analyse(q,id){ if(S.busy)return; body.innerHTML='<div class="count">Reading Fulfil…</div>';
+      jget('/api/supply/fulfil/sales-order/analyse?'+(id?('id='+encodeURIComponent(id)):('q='+encodeURIComponent(q)))).then(function(d){
+        if(d.candidates){ body.innerHTML='<div class="mut tiny" style="margin-bottom:6px">'+d.candidates.length+' sales orders match. Pick one:</div>'+d.candidates.map(function(c){
+            return '<div><button class="lnk-btn sov-pick" data-id="'+c.id+'" style="padding:3px 0"><b>'+esc(c.number||('#'+c.id))+'</b> '+esc(c.customer||'')+' <span class="mut tiny">'+esc(c.reference||'')+' · '+esc(c.state||'')+(c.sale_date?' · '+fd(c.sale_date):'')+'</span></button></div>'; }).join('');
+          body.querySelectorAll('.sov-pick').forEach(function(b){ b.onclick=function(){ analyse('',b.dataset.id); }; }); return; }
+        S.data=d; S.sel={}; S.chk={};
+        (d.lines||[]).forEach(function(l){ var c=curId(l); S.sel[l.line_id]=c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null); });
+        draw(); })
+        .catch(function(e){ body.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
+    function chips(){ var d=S.data, by={}, none={u:0,n:0}, stock={u:0,n:0};
+      (d.lines||[]).forEach(function(l){ if(l.service)return;
+        if(l.mode!=='dropship'){ stock.u+=l.qty; stock.n++; return; }
+        var id=S.sel[l.line_id]; if(id==null){ none.u+=l.qty; none.n++; return; }
+        var k=optName(l,id); (by[k]=by[k]||{u:0,n:0}); by[k].u+=l.qty; by[k].n++; });
+      var ch=function(lbl,o,cls){ return '<span class="tool-badge '+cls+'" style="margin:0 6px 4px 0;display:inline-block">'+lbl+' '+n0(o.u)+'u ('+o.n+' line'+(o.n===1?'':'s')+')</span>'; };
+      return Object.keys(by).sort().map(function(k){ return ch(esc(k),by[k],'bg-blue'); }).join('')+(none.n?ch('No supplier <b>!</b>',none,'bg-red'):'')+ch('Ship from stock',stock,'bg-neutral'); }
+    function statusCell(l){ if(l.mode!=='dropship'||l.service)return '<span class="mut">-</span>';
+      var c=curId(l), s=S.sel[l.line_id], nm=l.supplier?esc(l.supplier.name):'<span class="mut">none</span>';
+      var inOpts=c==null||(l.options||[]).some(function(o){return o.id===c;});
+      var st=c==null?'<span class="tool-badge bg-red">missing</span>':(s!=null&&s!==c?'<span class="tool-badge bg-amber">differs</span>':'<span class="tool-badge bg-green">ok</span>');
+      return nm+' '+st+(inOpts?'':' <span class="mut tiny" title="the current Fulfil supplier is not set up as a supplier on this product">(not a product supplier)</span>'); }
+    function supCell(l){ if(l.service)return '<span class="mut">(service)</span>'; if(l.mode!=='dropship')return '<span class="mut">(from stock)</span>';
+      var opts=(l.options||[]).slice(), c=curId(l), s=S.sel[l.line_id];
+      if(c!=null&&!opts.some(function(o){return o.id===c;}))opts.unshift({id:c,name:l.supplier.name+' (current)'});
+      var h='<select class="flt sov-sel" data-l="'+l.line_id+'"'+(editable(l)?'':' disabled')+' style="min-width:130px;max-width:100%">'+(s==null?'<option value="">Choose…</option>':'')
+        +opts.map(function(o){ return '<option value="'+o.id+'"'+(o.id===s?' selected':'')+'>'+esc(o.name)+(o.drop_shipment===false?' (no drop ship)':'')+'</option>'; }).join('')+'</select>';
+      if((l.options||[]).length>1)h+=' <b title="more than one supplier possible" style="color:var(--blue)">*</b>';
+      if(s==null&&editable(l))h+=' <b title="no supplier chosen" style="color:var(--neg)">!</b>';
+      if(!(l.options||[]).length&&!l.blocked)h+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
+      var hz=l.horizon&&l.horizon.main; if(hz&&String(hz).toLowerCase()!==String(optName(l,s)).toLowerCase())h+='<div class="mut tiny" title="HORIZON SKU supplier'+(l.horizon.multi?' (all: '+esc(l.horizon.multi)+')':'')+'">HORIZON: '+esc(hz)+'</div>';
+      if(l.blocked)h+='<div class="mut tiny" style="color:var(--amber)">🔒 '+esc(l.blocked)+'</div>';
+      return h; }
+    function resCell(l){ var r=S.res[l.line_id]; if(!r)return ''; var cls=r.result==='ok'?'bg-green':r.result==='unchanged'?'bg-neutral':r.result==='blocked'?'bg-amber':'bg-red';
+      return '<div style="margin-top:3px"><span class="tool-badge '+cls+'">'+esc(r.result)+'</span> <span class="mut tiny">'+esc(r.message||'')+'</span></div>'; }
+    function draw(){ var d=S.data, s=d.sale, L=d.lines||[], goods=L.filter(function(l){return !l.service;});
+      var nChanged=L.filter(changed).length, nSel=L.filter(function(l){return S.chk[l.line_id]&&changed(l);}).length;
+      var g=d.gate||{}, gateNote=g.stub?'<div class="tool-badge bg-amber" style="display:block;margin:8px 0">TEST STUB: pushes are simulated on this server, nothing is sent to Fulfil.</div>'
+        :(!g.live_writes?'<div class="tool-badge bg-amber" style="display:block;margin:8px 0">LIVE Fulfil writes are disabled (FULFIL_LIVE_WRITES). Analyse works; push will be refused.</div>':'');
+      var h='<div style="margin-bottom:6px;font-size:13px"><b>'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.number||('#'+s.id))+'</a>':esc(s.number))+'</b> '+esc(s.customer)
+        +' · '+goods.length+' line'+(goods.length===1?'':'s')+' · '+n0(goods.reduce(function(a,l){return a+l.qty;},0))+' units'
+        +' <span class="mut tiny">'+esc(s.reference||'')+' · '+esc(s.state||'')+(s.sale_date?' · '+fd(s.sale_date):'')+'</span></div>'
+        +'<div style="margin-bottom:8px"><span class="pill-lbl" style="margin-right:6px">Suppliers</span>'+chips()+'</div>'+gateNote
+        +'<div class="tw"><table style="width:100%"><thead><tr><th class="l" style="width:22px"></th><th class="l">SKU</th><th class="r">Qty</th><th class="l">Ship method</th><th class="l">Supplier</th><th class="l">Fulfil</th></tr></thead><tbody>'
+        +L.map(function(l){ var grey=l.mode!=='dropship'||l.service;
+          return '<tr data-l="'+l.line_id+'"'+(grey?' style="background:var(--hover);color:var(--muted)"':'')+'><td class="l">'+(editable(l)?'<input type="checkbox" class="sov-chk" data-l="'+l.line_id+'"'+(S.chk[l.line_id]?' checked':'')+'>':'')+'</td>'
+            +'<td class="l"><b>'+esc(l.sku||'?')+'</b><div class="mut tiny">'+esc(l.name||'')+'</div>'+resCell(l)+'</td><td class="r">'+n0(l.qty)+'</td>'
+            +'<td class="l">'+esc(l.service?'Service':l.mode_label)+'</td><td class="l">'+supCell(l)+'</td><td class="l">'+statusCell(l)+'</td></tr>'; }).join('')
+        +'</tbody></table></div><div class="mut tiny" style="margin:6px 0">* = more than one supplier possible · ! = no supplier chosen</div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="save-btn" id="sov-push-sel"'+(nSel&&!S.busy?'':' disabled')+'>Push selected to Fulfil'+(nSel?' ('+nSel+')':'')+'</button>'
+        +'<button class="save-btn" id="sov-push-all" style="background:var(--nav);color:#fff;border-color:var(--nav)"'+(nChanged&&!S.busy?'':' disabled')+'>Push all changed ('+nChanged+')</button></div><div id="sov-log" style="margin-top:14px"></div>';
+      body.innerHTML=h;
+      body.querySelectorAll('.sov-sel').forEach(function(el){ el.onchange=function(){ var id=Number(el.value)||null; S.sel[el.dataset.l]=id; if(id!=null&&changed(lineById(el.dataset.l)))S.chk[el.dataset.l]=true; delete S.res[el.dataset.l]; draw(); }; });
+      body.querySelectorAll('.sov-chk').forEach(function(el){ el.onchange=function(){ S.chk[el.dataset.l]=el.checked; draw(); }; });
+      var ps=body.querySelector('#sov-push-sel'), pa=body.querySelector('#sov-push-all');
+      if(ps)ps.onclick=function(){ confirmPush(L.filter(function(l){return S.chk[l.line_id]&&changed(l);})); };
+      if(pa)pa.onclick=function(){ confirmPush(L.filter(changed)); };
+      loadLog(s.id); }
+    function lineById(id){ return (S.data.lines||[]).filter(function(l){return String(l.line_id)===String(id);})[0]; }
+    function loadLog(saleId){ jget('/api/supply/fulfil/sales-order/pushes?sale_id='+encodeURIComponent(saleId)).then(function(j){ var el=document.getElementById('sov-log'); if(!el||!(j.rows||[]).length)return;
+      el.innerHTML='<div class="pill-lbl" style="margin-bottom:4px">Push history</div>'+j.rows.slice(0,20).map(function(r){ return '<div class="mut tiny">'+fd(r.pushed_at)+' '+esc(String(r.pushed_at||'').slice(11,16))+' · '+esc(r.pushed_by||'')+' · '+esc(r.sku||'')+': '+esc(r.old_supplier||'none')+' to '+esc(r.new_supplier||'none')+' · '+esc(r.result)+(r.stub?' (stub)':'')+'</div>'; }).join(''); }).catch(function(){}); }
+    function confirmPush(list){ if(!list.length)return; var ex=document.getElementById('sov-confirm'); if(ex)ex.remove();
+      var g=S.data.gate||{}, ov=document.createElement('div'); ov.id='sov-confirm'; ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:'+(nextDrawerZ()+200000)+';display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.innerHTML='<div style="background:var(--card);border-radius:10px;max-width:560px;width:100%;max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+        +'<div style="font-size:14px;font-weight:700;color:var(--nav);margin-bottom:6px">Push '+list.length+' supplier change'+(list.length===1?'':'s')+' to Fulfil'+(g.stub?' (TEST STUB)':'')+'</div>'
+        +'<div class="mut tiny" style="margin-bottom:8px">'+esc(S.data.sale.number)+' '+esc(S.data.sale.customer)+'. Each line is written to Fulfil, then read back to confirm it saved.</div>'
+        +'<table style="width:100%;font-size:12px"><thead><tr><th class="l">SKU</th><th class="l">Old supplier</th><th class="l">New supplier</th></tr></thead><tbody>'
+        +list.map(function(l){ return '<tr class="sov-cf-row"><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.supplier?esc(l.supplier.name):'<span class="mut">none</span>')+'</td><td class="l"><b>'+esc(optName(l,S.sel[l.line_id]))+'</b></td></tr>'; }).join('')
+        +'</tbody></table><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
+        +'<button id="sov-cf-cancel" style="font-size:12px;padding:6px 14px;border:1px solid var(--line);border-radius:5px;background:var(--card);cursor:pointer">Cancel</button>'
+        +'<button id="sov-cf-yes" style="font-size:12px;padding:6px 14px;border:1px solid var(--nav);border-radius:5px;background:var(--nav);color:#fff;cursor:pointer;font-weight:600">Push to Fulfil</button></div></div>';
+      document.body.appendChild(ov); var cl=function(){ ov.remove(); };
+      ov.addEventListener('click',function(e){ if(e.target===ov)cl(); }); ov.querySelector('#sov-cf-cancel').onclick=cl;
+      ov.querySelector('#sov-cf-yes').onclick=function(){ cl(); push(list); }; }
+    function push(list){ S.busy=true; var saleId=S.data.sale.id; draw();
+      fetch('/api/supply/fulfil/sales-order/push-suppliers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sale_id:saleId,lines:list.map(function(l){return {line_id:l.line_id,supplier_party_id:S.sel[l.line_id]};})})})
+        .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ var res={}; (j.results||[]).forEach(function(x){ res[x.line_id]=x; }); S.busy=false;
+          return jget('/api/supply/fulfil/sales-order/analyse?id='+encodeURIComponent(saleId)).then(function(d){ var keep=S.sel; S.data=d; S.sel={}; S.chk={};
+            (d.lines||[]).forEach(function(l){ var c=curId(l), r=res[l.line_id]; S.sel[l.line_id]=(r&&r.result==='failed'&&keep[l.line_id]!=null)?keep[l.line_id]:(c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null)); });
+            S.res=res; draw(); var lg=document.getElementById('sov-log');
+            if(lg)lg.insertAdjacentHTML('beforebegin','<div class="tool-badge '+(j.failed?'bg-red':'bg-green')+'" style="display:block;margin-top:10px">'+(j.stub?'TEST STUB: ':'')+j.saved+' saved · '+j.failed+' failed · '+j.blocked+' blocked</div>'); }); })
+        .catch(function(e){ S.busy=false; draw(); var lg=document.getElementById('sov-log'); if(lg)lg.insertAdjacentHTML('beforebegin','<div style="color:var(--neg);margin-top:10px">Push failed: '+esc(e.message||e)+'</div>'); }); }
+    bg.querySelector('#sov-go').onclick=function(){ var q=qi.value.trim(); if(q)analyse(q); };
+    qi.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); var q=qi.value.trim(); if(q)analyse(q); } };
+    setTimeout(function(){ try{ qi.focus(); }catch(e){} },50); }
   function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
     closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
     if(isPhone()){ buildPOMobSheet(po,tab); }
@@ -9704,8 +9812,9 @@
       +'<span class="pill-lbl" style="margin-left:10px">Type</span>'+[['','All'],['key','Key account'],['custom','Custom']].map(function(o){return '<span class="pill dc-tag'+(o[0]===''?' active':'')+'" data-tag="'+o[0]+'">'+o[1]+'</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:12px">Group by</span><select class="flt" id="dc-group" style="min-width:130px"><option value="client">Client</option><option value="completion">Completion date</option></select>'
       +'<button class="save-btn" id="dc-edi" style="margin-left:12px;background:var(--nav);color:#fff;border-color:var(--nav)" title="Split Dillards / EZY COM SSCC label PDFs into SUPPLIER / PO / SKU folders">🏷 EDI LABELS</button>'
+      +'<button class="save-btn" id="dc-sov" style="margin-left:8px" title="Check a Fulfil sales order: ship method + drop-ship supplier per line, fix and push suppliers to Fulfil">Validate sales order</button>'   // v28.192 (Ben)
       +'<span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
-    var _edb=document.getElementById('dc-edi'); if(_edb)_edb.onclick=function(){ showPoSub('edi-labels'); };
+    var _edb=document.getElementById('dc-edi'); if(_edb)_edb.onclick=function(){ showPoSub('edi-labels'); }; var _sovb=document.getElementById('dc-sov'); if(_sovb)_sovb.onclick=function(){ openSoValDrawer(); };
     function view(){ var f=filt(base.filter(function(r){ return st.tag==='key'?r.dtc_key_account:st.tag==='custom'?r.dtc_custom:true; }), st.q);
       document.getElementById('dc-count').textContent=f.length+(st.q?' / '+base.length:'')+' in-progress direct-to-client / B2B orders'+(dcActSum?' · '+dcActSum+' open timeline / Client-FBA action'+(dcActSum>1?'s':''):'');
       document.getElementById('dc-grid').innerHTML=f.length?dcTable(f):'<div class="count">'+(st.q?'No matches.':'No in-progress direct-to-client orders.')+'</div>';
