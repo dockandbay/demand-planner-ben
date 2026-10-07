@@ -24137,13 +24137,19 @@ async function fulfilImportSales(days) {
   for (let i = 0; i < lineIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['id', 'in', lineIds.slice(i, i + 400)]], 0, 500, null, ['id', 'sale', 'product.code', 'quantity', 'unit_price', 'amount']]); (rows || []).forEach(l => { linesById[l.id] = l; }); }
   for (let i = 0; i < shipIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/stock.shipment.out/search_read', [[['id', 'in', shipIds.slice(i, i + 400)]], 0, 500, null, ['id', 'number', 'state', 'tracking_number', 'carrier.rec_name', 'effective_date', 'planned_date']]); (rows || []).forEach(s => { shipsById[s.id] = s; }); }
   // v28.008: multi-row upsert in chunks (one round trip per 150 sales instead of one per sale)
-  const COLS = ['fulfil_id','number','reference','state','party_name','party_email','ship_name','invoice_name','channel','channel_source','warehouse_code','country_code','currency','total','untaxed','invoice_state','shipment_state','sale_date','fulfil_created','carrier','shipments','lines','metadata','tags','comment'];
+  // v28.204 (Ben): the rep group = metafield agent_code on sale.sale (metafield.value rows; read only). Skipped until migration 337.
+  const agentBy = {}; const withAgent = await cpCheckAgentCol();
+  if (withAgent) { const def = await fulfilSearchOne('metafield.field', [['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], ['id']).catch(() => null);
+    if (def) { const res = sales.map(s => 'sale.sale,' + s.id);
+      for (let i = 0; i < res.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', 'in', res.slice(i, i + 400)]], 0, 500, null, ['resource', 'value_char']]);
+        (rows || []).forEach(r => { const id = String(r.resource || '').split(',')[1]; const v = String(r.value_char || '').trim(); if (id && v) agentBy[id] = v; }); } } }
+  const COLS = ['fulfil_id','number','reference','state','party_name','party_email','ship_name','invoice_name','channel','channel_source','warehouse_code','country_code','currency','total','untaxed','invoice_state','shipment_state','sale_date','fulfil_created','carrier','shipments','lines','metadata','tags','comment'].concat(withAgent ? ['agent_code'] : []);
   const CAST = { shipments: '::jsonb', lines: '::jsonb', metadata: '::jsonb', tags: '::text[]', sale_date: '::date', fulfil_created: '::timestamptz', total: '::numeric', untaxed: '::numeric', fulfil_id: '::bigint' };
   const rowOf = (s) => {
     const lines = (s.lines || []).map(i => linesById[i]).filter(Boolean).map(l => ({ sku: l['product.code'] || null, qty: Number(l.quantity) || 0, price: _fulfilNum(l.unit_price), amount: _fulfilNum(l.amount) }));
     const ships = (s.shipments || []).map(i => shipsById[i]).filter(Boolean).map(x => ({ number: x.number, state: x.state, tracking: x.tracking_number || null, carrier: x['carrier.rec_name'] || null, date: fulfilUnwrap(x.effective_date) || fulfilUnwrap(x.planned_date) || null }));
     const meta = (s.metadata && typeof s.metadata === 'object') ? s.metadata : null;
-    return [s.id, s.number || null, s.reference || null, s.state || null, s['party.name'] || null, s['party.email'] || null, s['shipment_address.name'] || null, s['invoice_address.name'] || null, s['channel.name'] || null, s['channel.source'] || null, s['warehouse.code'] || null, s['shipment_address.country.code'] || null, s['currency.code'] || null, _fulfilNum(s.total_amount), _fulfilNum(s.untaxed_amount), s.invoice_state || null, s.shipment_state || null, fulfilUnwrap(s.sale_date) || null, fulfilUnwrap(s.create_date) || null, s['carrier.rec_name'] || null, JSON.stringify(ships), JSON.stringify(lines), meta ? JSON.stringify(meta) : null, cpTagsFromMeta(meta), s.comment || null];
+    return [s.id, s.number || null, s.reference || null, s.state || null, s['party.name'] || null, s['party.email'] || null, s['shipment_address.name'] || null, s['invoice_address.name'] || null, s['channel.name'] || null, s['channel.source'] || null, s['warehouse.code'] || null, s['shipment_address.country.code'] || null, s['currency.code'] || null, _fulfilNum(s.total_amount), _fulfilNum(s.untaxed_amount), s.invoice_state || null, s.shipment_state || null, fulfilUnwrap(s.sale_date) || null, fulfilUnwrap(s.create_date) || null, s['carrier.rec_name'] || null, JSON.stringify(ships), JSON.stringify(lines), meta ? JSON.stringify(meta) : null, cpTagsFromMeta(meta), s.comment || null].concat(withAgent ? [agentBy[String(s.id)] || null] : []);
   };
   let n = 0;
   for (let i = 0; i < sales.length; i += 150) {
@@ -24153,13 +24159,31 @@ async function fulfilImportSales(days) {
       ON CONFLICT (fulfil_id) DO UPDATE SET ${COLS.filter(c => c !== 'fulfil_id').map(c => c + '=excluded.' + c).join(', ')}, last_synced_at=now(), source='cron'`, params);
     n += chunk.length;
   }
-  return { ok: true, env: cfg.env, since, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length };
+  return { ok: true, env: cfg.env, since, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length, agent_codes: withAgent ? Object.keys(agentBy).length : 'migration 337 not applied' };
 }
 app.post('/api/client/fulfil/import-sales', async (req, res) => {
   // v28.008 (Ben, 28-Sep): REAL order data is NOT imported until the import parameters are defined — the route is held behind
   // app_settings.cp_sales_import_enabled='true' (CLIENT ▸ Config). Test data comes from /api/client/seed-test-data instead.
   if (String(await cpSetting('cp_sales_import_enabled', 'false')) !== 'true') return res.status(423).json({ error: 'Fulfil sales import is switched off until the order-import parameters are agreed (CLIENT ▸ Config ▸ Order import).', gated: true });
   try { res.json(await fulfilImportSales(req.query.days || (req.body && req.body.days))); } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
+});
+// v28.204 (Ben): the Agent Codes in use, for the client Access & visibility picker. Read only: Fulfil metafield.value counts
+// (all sales orders), merged with the mirror's counts; cached 10 min.
+let _cpAgentCodesCache = null;
+app.get('/api/client/agent-codes', async (req, res) => {
+  try {
+    if (!_cpAgentCodesCache || Date.now() - _cpAgentCodesCache.at > 10 * 60000 || req.query.fresh) {
+      const by = {}; let fulfilErr = null;
+      try { const def = await fulfilSearchOne('metafield.field', [['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], ['id']);
+        if (def) for (let off = 0; off < 20000; off += 500) { const rows = await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id]], off, 500, null, ['value_char']]);
+          (rows || []).forEach(r => { const k = String(r.value_char || '').trim().toLowerCase(); if (k) by[k] = (by[k] || 0) + 1; }); if (!rows || rows.length < 500) break; }
+      } catch (e) { fulfilErr = e.message; }
+      if (await cpCheckAgentCol()) (await pool.query(`SELECT lower(agent_code) k, count(*)::int n FROM planner.fulfil_sales WHERE coalesce(agent_code,'')<>'' GROUP BY 1`)).rows.forEach(r => { if (!(r.k in by)) by[r.k] = r.n; });
+      const used = {}; (await pool.query(`SELECT name, visibility FROM planner.clients`)).rows.forEach(c => cpAgentCodes(cpJson(c.visibility, {})).forEach(k => { (used[k] = used[k] || []).push(c.name); }));
+      _cpAgentCodesCache = { at: Date.now(), codes: Object.keys(by).sort().map(k => ({ code: k, orders: by[k], clients: used[k] || [] })), fulfil_error: fulfilErr, migration: _cpAgentCol };
+    }
+    res.set('Cache-Control', 'no-store').json(_cpAgentCodesCache);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // cron entry (webhook-secret gated like import-pos; exempt from the planner key in the gate above)
 app.post('/api/cron/client-sales', async (req, res) => {
@@ -24196,7 +24220,7 @@ app.post('/api/client/seed-test-data', async (req, res) => {
     const mk = async (name, code, type, market, extra) => (await pool.query(`INSERT INTO planner.clients (name, code, type, owner_email, market, currency, price_list, warehouse_code, visibility, stock_scope, features, rep_group_id, fulfil_channel, notes, created_by, updated_by)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,'seeded test client',$14,$14) ON CONFLICT (code) DO UPDATE SET visibility=excluded.visibility, stock_scope=excluded.stock_scope, features=excluded.features, price_list=excluded.price_list RETURNING id`,
       [name, code, type, extra.owner || 'sarah@dockandbay.com', market, CP_MARKETS[market].currency, extra.price_list, extra.wh || CP_MARKETS[market].wh, JSON.stringify(extra.visibility), JSON.stringify(extra.stock || { mode: 'default' }), JSON.stringify(Object.assign({}, CP_FEATURE_DEFAULTS, extra.features || {})), extra.rep || null, extra.channel || null, by])).rows[0].id;
-    const ideco = await mk('Ideco (TEST)', 'test-ideco', 'agent', 'EU', { price_list: 'TEST-EU-WS', visibility: { modes: ['tag', 'channel_region'], tag: 'agent_ideco', channels: [{ channel: 'EUWS', country: 'FR' }], companies: [], emails: [] }, features: { view_commission: true }, rep: g1, channel: 'dockandbay-eu-ws' });
+    const ideco = await mk('Ideco (TEST)', 'test-ideco', 'agent', 'EU', { price_list: 'TEST-EU-WS', visibility: { modes: ['tag', 'channel_region', 'agent_code'], agent_codes: ['ideco'], tag: 'agent_ideco', channels: [{ channel: 'EUWS', country: 'FR' }], companies: [], emails: [] }, features: { view_commission: true }, rep: g1, channel: 'dockandbay-eu-ws' });
     const dill = await mk("Dillard's (TEST)", 'test-dillards', 'key_account', 'US', { price_list: 'TEST-US-WS', visibility: { modes: ['company_email'], companies: ["Dillard's"], emails: [] }, stock: { mode: 'custom', region: 'us_all', sku_list: pick(12).map(p => p.sku), exact: true }, channel: 'dockandbay-us-ws' });
     const nordic = await mk('Nordic Living ApS (TEST)', 'test-nordic', 'distributor', 'EU', { price_list: 'TEST-DIST-FOB', visibility: { modes: ['company_email'], companies: ['Nordic Living'], emails: [] }, features: { view_stock: false, view_commission: false }, channel: 'dockandbay-eu-ws', owner: 'ben@dockandbay.com' });
     // users
@@ -24216,6 +24240,7 @@ app.post('/api/client/seed-test-data', async (req, res) => {
     for (const s of sales) await pool.query(`INSERT INTO planner.fulfil_sales (fulfil_id, number, reference, state, party_name, party_email, ship_name, invoice_name, channel, channel_source, warehouse_code, country_code, currency, total, untaxed, invoice_state, shipment_state, sale_date, fulfil_created, carrier, shipments, lines, metadata, tags, comment, source)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,'cms_shopify',$9,$10,$11,$12,$13,$14,$15,$16::date,$16::date,$17,$18::jsonb,$19::jsonb,$20::jsonb,$21::text[],'seeded test order','seed') ON CONFLICT (fulfil_id) DO UPDATE SET lines=excluded.lines, state=excluded.state, invoice_state=excluded.invoice_state, shipment_state=excluded.shipment_state, sale_date=excluded.sale_date, shipments=excluded.shipments, tags=excluded.tags, source='seed'`,
       [s.fulfil_id, s.number, s.reference, s.state, s.party_name, s.party_email, s.ship_name, s.channel, s.warehouse_code, s.country_code, s.currency, Math.round(s.total * 100) / 100, s.untaxed, s.invoice_state, s.shipment_state, s.sale_date, s.shipments[0] ? s.shipments[0].carrier : null, JSON.stringify(s.shipments), JSON.stringify(s.lines), s.metadata ? JSON.stringify(s.metadata) : null, s.tags]);
+    if (await cpCheckAgentCol()) await pool.query(`UPDATE planner.fulfil_sales SET agent_code='ideco' WHERE source='seed' AND 'agent_ideco' = ANY(tags)`);   // v28.204: seeded Ideco orders carry the Agent Code
     // grey-window list sample + a portal order + a commission run + threads
     await pool.query(`INSERT INTO planner.client_cin7_refs (order_ref, note) VALUES ('TEST-EUWS-19301','seed'),('TEST-EUWS-19302','seed') ON CONFLICT DO NOTHING`);
     const ls = line(3); await pool.query(`INSERT INTO planner.client_orders (client_id, user_id, order_type, status, customer_po, ship_to, requested_date, ship_from, method, lines, units, total, currency, submitted_by, error) VALUES ($1,$2,'standard','submitted','NL-2026-091',$3::jsonb, current_date + 14, 'eu_3pl', 'Pallet · DHL', $4::jsonb, $5, $6, 'EUR', 'lars@test-nordic.example', 'seed: no Fulfil draft (test data)')`, [nordic, uid['lars@test-nordic.example'], JSON.stringify({ company: 'Nordic Living ApS', contact: 'Lars Holm', address: 'Havnegade 12, Aarhus' }), JSON.stringify(ls.map(l => ({ sku: l.sku, qty: l.qty, cartons: null, price: l.price, amount: l.amount, flags: [] }))), ls.reduce((s, l) => s + l.qty, 0), tot(ls)]);
@@ -24247,11 +24272,24 @@ function cpVisibilitySql(client, user, params) {
     const emails = (Array.isArray(v.emails) ? v.emails : []).map(x => String(x).trim().toLowerCase()).filter(Boolean);
     comps.forEach(cn => { params.push('%' + cn.toLowerCase() + '%'); ors.push(`(lower(coalesce(s.party_name,'')) LIKE $${params.length} OR lower(coalesce(s.ship_name,'')) LIKE $${params.length} OR lower(coalesce(s.invoice_name,'')) LIKE $${params.length})`); });
     if (emails.length) { params.push(emails); ors.push(`lower(coalesce(s.party_email,'')) = ANY($${params.length}::text[])`); }
-    if (user && user.scope === 'self' && user.email) { params.push(String(user.email).toLowerCase()); ors.push(`lower(coalesce(s.party_email,''))=$${params.length}`); }
   }
-  if (user && user.scope === 'self' && user.email && !modes.includes('company_email')) { params.push(String(user.email).toLowerCase()); ors.push(`lower(coalesce(s.party_email,''))=$${params.length}`); }   // rep narrowing without the company mode
-  return ors.length ? '(' + ors.join(' OR ') + ')' : 'false';
+  // v28.204 (Ben): Agent Code = the Fulfil sale.sale metafield agent_code (rep group). Every order with one of the client's codes.
+  const codes = cpAgentCodes(v);
+  if (codes.length && _cpAgentCol) { params.push(codes); ors.push(`lower(coalesce(s.agent_code,'')) = ANY($${params.length}::text[])`); }
+  const base = ors.length ? '(' + ors.join(' OR ') + ')' : 'false';
+  // v28.204 (Ben): scope 'self' ("own customers only") NARROWS the client's orders to the user's own (was OR'd in, which widened
+  // the list). Exception: a rep group with an Agent Code, whose users all see every order of the group ("if Paul is a user for a
+  // sales rep group he should see all orders linked to his rep group").
+  if (cpSelfNarrows(client, user)) { params.push(String(user.email).toLowerCase()); return `(${base} AND lower(coalesce(s.party_email,''))=$${params.length})`; }
+  return base;
 }
+function cpAgentCodes(v) { v = v || {}; const m = Array.isArray(v.modes) ? v.modes : []; return m.includes('agent_code') && Array.isArray(v.agent_codes) ? [...new Set(v.agent_codes.map(x => String(x || '').trim().toLowerCase()).filter(Boolean))] : []; }
+// does scope 'self' narrow this user to their own orders? (no for a rep group with an Agent Code: the whole group sees all its orders)
+function cpSelfNarrows(client, user) { return !!(user && user.scope === 'self' && String(user.email || '').trim() && !cpAgentCodes((client || {}).visibility).length); }
+// migration 337 present? (checked at boot and every 10 min; cpVisibilitySql is synchronous)
+let _cpAgentCol = false;
+async function cpCheckAgentCol() { try { _cpAgentCol = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='fulfil_sales' AND column_name='agent_code'`)).rowCount > 0; } catch (e) {} return _cpAgentCol; }
+cpCheckAgentCol(); setInterval(cpCheckAgentCol, 10 * 60000).unref();
 async function cpOrders(opts) {
   const { client, user, q, from, to, status } = opts || {};
   const rule = await cpOriginRule(!!(opts && opts.cachedRule)); const params = []; const where = [];
@@ -24279,7 +24317,7 @@ async function cpOrders(opts) {
   });
   // portal-submitted orders not yet in the mirror (drafts waiting on Ops) — shown at the top
   // v28.200 (Ben): every row carries okey ('F<fulfil_id>' | 'P<client_orders.id>'), the order identity its messages / documents hang on
-  if (client) { const subs = (await pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, requested_date, to_char(created_at,'YYYY-MM-DD') created, ship_to, lines FROM planner.client_orders WHERE client_id=$1 AND created_at > now() - interval '120 days' ORDER BY created_at DESC`, [client.id])).rows;
+  if (client) { const subs = (await pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, requested_date, to_char(created_at,'YYYY-MM-DD') created, ship_to, lines FROM planner.client_orders WHERE client_id=$1 AND created_at > now() - interval '120 days'${cpSelfNarrows(client, user) ? ' AND user_id=$2' : ''} ORDER BY created_at DESC`, cpSelfNarrows(client, user) ? [client.id, user.id] : [client.id])).rows;   // v28.204: an own-customers-only user sees only the portal orders they placed
     const known = new Set(out.map(o => o.number).filter(Boolean));
     subs.forEach(o => { if (o.fulfil_number && known.has(o.fulfil_number)) return; const st = cpJson(o.ship_to, {});
       out.unshift({ id: 'cp-' + o.id, okey: 'P' + o.id, ref: o.fulfil_number || ('CP-' + o.id), number: o.fulfil_number, origin: 'fulfil', state: o.status === 'fulfil_draft' ? 'draft' : 'submitted', bucket: 'draft', unpaid: false, company: st.company || client.name, customer: st.contact || st.company || client.name, channel: client.fulfil_channel, country: null, currency: o.currency, amount: Number(o.total) || 0, net: Number(o.total) || 0,
@@ -24625,7 +24663,7 @@ function cpOkeyToPortalId(k) { const p = cpParseOkey(k); return !p ? '' : p.kind
 async function cpAllowedOrderKeys(client, user, keys) {
   const out = new Set(); const ks = [...new Set((keys || []).map(cpParseOkey).filter(Boolean).map(x => x.key))];
   const f = ks.filter(k => k[0] === 'F').map(k => k.slice(1)), p = ks.filter(k => k[0] === 'P').map(k => k.slice(1));
-  const self = !!(user && user.scope === 'self');
+  const self = !!(user && user.scope === 'self') && !cpAgentCodes((client || {}).visibility).length;   // v28.204: rep group with an Agent Code sees all
   if (self && !String(user.email || '').trim()) return out;
   if (f.length) { const params = [f]; const vis = cpVisibilitySql(client, user, params); let own = '';
     if (self) { params.push(String(user.email).trim().toLowerCase()); own = ` AND lower(coalesce(s.party_email,''))=$${params.length}`; }
@@ -25049,7 +25087,7 @@ app.get('/api/cp/order-threads', cpAuth, async (req, res) => {
     if (!(await cpHas336())) return res.set('Cache-Control', 'no-store').json({ counts: {}, migration: false });
     const ts = (await cpPortalThreads(req.cp)).filter(t => t.order_key);
     let own = null;
-    if (u.scope === 'self') { own = []; const em = String(u.email || '').trim().toLowerCase();
+    if (u.scope === 'self' && !cpAgentCodes(c.visibility).length) { own = []; const em = String(u.email || '').trim().toLowerCase();
       if (em) { const params = []; const vis = cpVisibilitySql(c, u, params); params.push(em);
         (await pool.query(`SELECT 'F'||s.fulfil_id k FROM planner.fulfil_sales s WHERE ${vis} AND lower(coalesce(s.party_email,''))=$${params.length} AND coalesce(s.state,'') <> 'cancel' LIMIT 2000`, params)).rows.forEach(r => own.push(r.k)); }
       (await pool.query(`SELECT 'P'||id k FROM planner.client_orders WHERE client_id=$1 AND user_id=$2`, [c.id, u.id])).rows.forEach(r => own.push(r.k)); }

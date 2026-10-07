@@ -1,3 +1,17 @@
+## v28.204 (Ben, branch review-fixes-2026-10-05): client portal rep groups see their orders by Fulfil Agent Code
+
+**Files:** `migrations/337_fulfil_sales_agent_code.sql`, `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 337** (additive, idempotent). No env vars.
+
+- Ben 07-Oct: "reps see orders assigned to their rep group in Fulfil ... set in a metafield Agent Code"; "if Paul is a user for a sales rep group he should be able to see all orders linked to his rep group".
+- Fulfil sales orders carry metafield `agent_code` on sale.sale (135 orders on live Fulfil: appelman 69, harpergroup 18, ideco 16, patrick 16, TJ 12, roadrunners 2, harpers 2). SALES_REP_GROUP / SALES_REP metafields exist but are empty, so not used.
+- Sales import (`fulfilImportSales`, read only) now copies each order's Agent Code into `fulfil_sales.agent_code` (skipped until migration 337; the import result reports how many it found).
+- CLIENT ▸ Clients & agents ▸ Edit ▸ Access & features: new visibility mode **Agent Code (rep group)** with one or more codes; the codes in use are read live from Fulfil and shown as click-to-add chips with order counts (amber dot = already used by another client). Warning if ticked with no code. New read-only route `GET /api/client/agent-codes` (Fulfil + mirror counts, cached 10 min).
+- With an Agent Code set, **every** user of that client, including "own customers only" users, sees all the group's orders, can open their order conversations and gets their order emails. Commission runs use the same rule, so a rep group's commission follows its Agent Code.
+- Fix: "own customers only" (scope self) used to WIDEN the list (own email OR'd in). For clients without an Agent Code it now narrows to orders where the user is the customer email, plus the portal orders they placed. View-as picker labels a rep-group user "rep (whole rep group)".
+- Tested on sandbox: Ideco (TEST) with code ideco: Marie and Paul (self) both 16 orders, all threads open; without the code Paul sees 0 (none are his), Marie 16. Admin Access tab shows the 7 live Fulfil codes.
+- **Diviyaj:** apply migration 337, then the next sales import fills agent_code. Note the live sales import is still switched off (`cp_sales_import_enabled`), so live `fulfil_sales` has 0 rows and no client sees orders until it is enabled.
+- **Live set-up after deploy:** SHAUBEN (the only live client, type agent, one 'self' user) has no Agent Code; tick Agent Code and pick its code once known.
+
 ## v28.203 (Ben, branch review-fixes-2026-10-05): client portal New Order grid fits on screen
 
 **Files:** `supply/client-view.js`, `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
