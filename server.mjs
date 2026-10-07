@@ -1307,6 +1307,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
+  if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.195 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
@@ -4026,10 +4027,18 @@ app.post('/api/supply/fulfil/sales-order/push-suppliers', async (req, res) => {
     const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
     const gate = sovGate(cfg);
     if (!gate.stub && !gate.live_writes) return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: want.length });
-    const out = await _withXactLock('fulfil_so_push:' + saleId, { code: 'FULFIL_PUSH_BUSY', message: 'A supplier push for this sales order is already in progress. Wait for it to finish, then analyse again.' }, async () => {
+    const by = (me && me.email) || authUser(req) || 'admin';
+    res.json(await sovPushOrder(saleId, want, { cfg, gate, by }));
+  } catch (e) { if (e.code === 'FULFIL_PUSH_BUSY') return res.status(409).json({ error: e.message }); log500(e); res.status(e.status === 404 ? 404 : e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+// v28.195 (Ben): one order's push, shared by the single push and the batch push. Per-order single-flight lock (409 busy),
+// re-reads the order, writes each allowed line, reads every written line back, audits. Throws on order-level failures.
+async function sovPushOrder(saleId, want, ctx) {
+  const { cfg, gate, by } = ctx;
+  return _withXactLock('fulfil_so_push:' + saleId, { code: 'FULFIL_PUSH_BUSY', message: 'A supplier push for this sales order is already in progress. Wait for it to finish, then analyse again.' }, async () => {
       const cur = await sovAnalyse(saleId);   // never trust the client's view: re-read the order, lines, options and blocks now
       if (!cur) { const e = new Error('Fulfil sales order ' + saleId + ' not found.'); e.status = 404; throw e; }
-      const by = (me && me.email) || authUser(req) || 'admin', byId = {}; cur.lines.forEach(l => { byId[l.line_id] = l; });
+      const byId = {}; cur.lines.forEach(l => { byId[l.line_id] = l; });
       const results = [], writes = [];
       for (const w of want) {
         const l = byId[Number(w.line_id)], pid = Number(w.supplier_party_id) || null;
@@ -4062,9 +4071,80 @@ app.post('/api/supply/fulfil/sales-order/push-suppliers', async (req, res) => {
       }
       await sovAudit(results.filter(r => r.result !== 'unchanged').map(r => ({ ...r, sale_id: saleId, sale_number: cur.sale.number, env: cfg.env, stub: gate.stub, by })));
       return { ok: true, stub: gate.stub, env: cfg.env, sale: cur.sale, results, saved: results.filter(r => r.result === 'ok').length, failed: results.filter(r => r.result === 'failed').length, blocked: results.filter(r => r.result === 'blocked').length };
+  });
+}
+// v28.195 (Ben): BATCH validate. The user pastes a list (no automatic list); the drawer sends it in small chunks so it can
+// show progress, and this resolves + analyses each item with at most SOV_BATCH_CONC Fulfil orders in flight. Read-only.
+// Per item: ok (sale + lines, same shape as the single analyse) | not_found | ambiguous (candidates to pick) | duplicate
+// (resolves to an order already in this call) | error. A transient Fulfil failure (429 / 5xx / timeout) is retried with
+// back-off before the item is reported as an error.
+const SOV_BATCH_MAX = 50, SOV_BATCH_CONC = 3;
+const _sovSleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function sovRetry(fn) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) { const st = Number(e.status) || 0, transient = st === 429 || st >= 500 || /abort|timeout|ECONNRESET|ETIMEDOUT|fetch failed/i.test(String(e.message || e));
+      if (!transient || i >= 2 || e.code === 'NO_FULFIL_CFG') throw e; await _sovSleep(st === 429 ? 2000 * (i + 1) : 800 * (i + 1)); }
+  }
+}
+async function sovMapLimit(arr, n, fn) {
+  const out = new Array(arr.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, arr.length) }, async () => { while (next < arr.length) { const i = next++; out[i] = await fn(arr[i], i); } }));
+  return out;
+}
+const sovCand = s => ({ id: s.id, number: s.number || '', reference: s.reference || '', customer: s['party.name'] || '', state: s.state || '', sale_date: fulfilUnwrap(s.sale_date) || null });
+app.post('/api/supply/fulfil/sales-order/analyse-batch', async (req, res) => {
+  const raw = Array.isArray((req.body || {}).items) ? req.body.items : null;
+  if (!raw || !raw.length) return res.status(400).json({ error: 'items[] required: sales order numbers, Fulfil links or references.' });
+  // item = "SO56641" | "https://.../sales_order/284762" | "reference" | { id } (a pick from an ambiguous list). Exact repeats dropped.
+  const seen = new Set(), items = [];
+  raw.forEach(x => { const it = (x && typeof x === 'object') ? { q: String(x.q || x.id || ''), id: Number(x.id) || null } : { q: String(x == null ? '' : x).trim(), id: null };
+    const k = it.id ? 'id:' + it.id : it.q.toUpperCase(); if (!it.q && !it.id) return; if (seen.has(k)) return; seen.add(k); items.push(it); });
+  if (items.length > SOV_BATCH_MAX) return res.status(400).json({ error: items.length + ' sales orders entered; the limit is ' + SOV_BATCH_MAX + ' per batch. Split the list.' });
+  try {
+    const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    const got = new Map();   // sale id → item index that took it (duplicates resolve to the first)
+    const results = await sovMapLimit(items, SOV_BATCH_CONC, async (it) => {
+      const r = { item: it.q || String(it.id) };
+      try {
+        let saleId = it.id;
+        if (!saleId) { const hits = await sovRetry(() => sovFindSales(it.q));
+          if (!hits.length) return { ...r, status: 'not_found', error: 'No Fulfil sales order matches "' + it.q + '".' };
+          if (hits.length > 1) return { ...r, status: 'ambiguous', error: hits.length + ' sales orders match: pick one.', candidates: hits.slice(0, 20).map(sovCand) };
+          saleId = hits[0].id; }
+        if (got.has(saleId)) return { ...r, status: 'duplicate', sale_id: saleId, error: 'Same order as "' + got.get(saleId) + '"' };
+        got.set(saleId, r.item);
+        const out = await sovRetry(() => sovAnalyse(saleId));
+        if (!out) { got.delete(saleId); return { ...r, status: 'not_found', error: 'Fulfil sales order ' + saleId + ' not found.' }; }
+        return { ...r, status: 'ok', sale_id: saleId, ...out };
+      } catch (e) { if (e.code === 'NO_FULFIL_CFG') throw e; return { ...r, status: 'error', error: String(e.message || e).slice(0, 300) }; }
     });
-    res.json(out);
-  } catch (e) { if (e.code === 'FULFIL_PUSH_BUSY') return res.status(409).json({ error: e.message }); log500(e); res.status(e.status === 404 ? 404 : e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+    res.set('Cache-Control', 'no-store').json({ ok: true, gate: sovGate(cfg), max: SOV_BATCH_MAX, results });
+  } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+// v28.195 (Ben): BATCH push. orders = [{ sale_id, lines:[{line_id, supplier_party_id}] }]. Same admin / live-writes gate as
+// the single push, checked once; then ORDER BY ORDER (sequential) through sovPushOrder (per-order lock, re-read, write,
+// read-back, audit). One order failing (busy, not found, Fulfil error) is reported on that order and the rest carry on.
+app.post('/api/supply/fulfil/sales-order/push-batch', async (req, res) => {
+  const b = req.body || {}, orders = Array.isArray(b.orders) ? b.orders : [];
+  const list = orders.map(o => ({ sale_id: Number(o && o.sale_id) || 0, lines: Array.isArray(o && o.lines) ? o.lines.slice(0, 300) : [] })).filter(o => o.sale_id && o.lines.length);
+  if (!list.length) return res.status(400).json({ error: 'orders[] with sale_id and lines[] required' });
+  if (list.length > SOV_BATCH_MAX) return res.status(400).json({ error: 'At most ' + SOV_BATCH_MAX + ' orders per push.' });
+  let me; try { me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to write suppliers to Fulfil' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try {
+    const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    const gate = sovGate(cfg);
+    if (!gate.stub && !gate.live_writes) return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: list.reduce((a, o) => a + o.lines.length, 0) });
+    const by = (me && me.email) || authUser(req) || 'admin', done = new Set(), out = [];
+    for (const o of list) {
+      if (done.has(o.sale_id)) { out.push({ sale_id: o.sale_id, ok: false, error: 'Order listed twice in this push; pushed once.' }); continue; }
+      done.add(o.sale_id);
+      try { out.push({ sale_id: o.sale_id, ...(await sovPushOrder(o.sale_id, o.lines, { cfg, gate, by })) }); }
+      catch (e) { if (e.code !== 'FULFIL_PUSH_BUSY' && e.status !== 404) log500(e); out.push({ sale_id: o.sale_id, ok: false, busy: e.code === 'FULFIL_PUSH_BUSY', error: String(e.message || e).slice(0, 300) }); }
+    }
+    const sum = k => out.reduce((a, o) => a + (Number(o[k]) || 0), 0);
+    res.json({ ok: true, stub: gate.stub, env: cfg.env, orders: out, saved: sum('saved'), failed: sum('failed'), blocked: sum('blocked'), orders_failed: out.filter(o => !o.ok).length });
+  } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
 });
 app.get('/api/supply/fulfil/sales-order/pushes', async (req, res) => {   // audit trail for one order (drawer footer)
   try { const r = await pool.query(`SELECT line_id, sku, old_supplier, new_supplier, result, message, fulfil_env, stub, pushed_by, to_char(pushed_at,'YYYY-MM-DD"T"HH24:MI') pushed_at

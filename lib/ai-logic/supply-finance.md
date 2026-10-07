@@ -18,7 +18,7 @@ sources:
   - migrations/330_supplier_xero_contacts.sql :: planner.suppliers.xero_contact_uk/au
   - server.mjs :: /api/supply/tpl/data, /api/supply/tpl/goods-in, _tplGridSummary, _tplConsumablesInside (3PL invoices)
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
-  - server.mjs :: sovAnalyse, sovLineBlock, sovFindSales, /api/supply/fulfil/sales-order/push-suppliers (Validate sales order)
+  - server.mjs :: sovAnalyse, sovLineBlock, sovFindSales, sovPushOrder, /api/supply/fulfil/sales-order/push-suppliers, /api/supply/fulfil/sales-order/analyse-batch, /api/supply/fulfil/sales-order/push-batch (Validate sales order)
   - migrations/334_so_supplier_pushes.sql :: planner.so_supplier_pushes
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
   - server.mjs :: /api/portal/submit, /api/portal/line-cost, /api/supply/submission/:id/apply, /api/supply/po-line-accept, /api/supply/po-line-reject
@@ -85,7 +85,10 @@ fingerprints:
   server.mjs::sovAnalyse: f7dd288a3ddc
   server.mjs::sovLineBlock: 889239e00674
   server.mjs::sovFindSales: 18cf17b8bb06
-  server.mjs::/api/supply/fulfil/sales-order/push-suppliers: 18b9af3a7ab3
+  server.mjs::sovPushOrder: b6d5807dc617
+  server.mjs::/api/supply/fulfil/sales-order/push-suppliers: ba6d7a4f3b01
+  server.mjs::/api/supply/fulfil/sales-order/analyse-batch: 0b121beebc47
+  server.mjs::/api/supply/fulfil/sales-order/push-batch: 8d7875782e0b
   migrations/334_so_supplier_pushes.sql::planner.so_supplier_pushes: 193e21992ae8
   server.mjs::/api/supply/received-pos/process: 39c24ef889e6
   server.mjs::/api/portal/submit: 08ea62191222
@@ -148,7 +151,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.192
+verified_version: v28.195
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -289,6 +292,9 @@ verified_version: v28.192
 - Summary chips: units and line counts per CURRENTLY picked supplier, plus No supplier and Ship from stock. (source: supply/inject.html :: openSoValDrawer)
 - A line cannot be changed when: it is not drop ship (inter-company drop ship included), the order is done or cancelled, the line has shipped, or its purchase request is already on a purchase order (any PO state). If the request is still draft (no PO line), the request's supplier is changed together with the line. (source: server.mjs :: sovLineBlock, /api/supply/fulfil/sales-order/push-suppliers)
 - Push: admin only; needs FULFIL_LIVE_WRITES=true on live Fulfil; one push per order at a time. The server re-reads the order and refuses any line that is blocked, not on the order, or given a supplier not set up on the product. Each change is a write of sale.line.supplier, then every written line is READ BACK; a line only counts as saved when Fulfil shows the new supplier. Every attempt (ok, failed, blocked) is logged in planner.so_supplier_pushes with old and new supplier and the user. (source: server.mjs :: /api/supply/fulfil/sales-order/push-suppliers)
+- Many orders at once (v28.195): paste a list (one per line, or separated by commas, spaces or semicolons); each item is an order number, Fulfil link or reference, resolved exactly as for one order. Repeats are dropped (same text, or two items that resolve to the same order: the later one shows as "duplicate"); at most 50 per batch (the rest are listed as not analysed). Orders are read 3 at a time; a busy or failing Fulfil call is retried with back-off before the order is reported as an error. One item keeps the single-order view. (source: server.mjs :: /api/supply/fulfil/sales-order/analyse-batch; supply/inject.html :: openSoValDrawer)
+- Batch results: items that did not resolve come first with the reason (not found, ambiguous with the matching orders to pick, duplicate, error). The summary adds up every analysed order: orders, lines and units (service lines left out, as for one order), supplier chips by current pick, No supplier, Ship from stock, and blocked drop-ship lines. Each order is a collapsible section with its ok / differs / missing / blocked counts; orders needing attention (missing or differing supplier, no supplier picked, a failed push) sort first. (source: supply/inject.html :: openSoValDrawer)
+- Batch push: "Push all changed" or one order's "Push changed"; one confirm lists every change grouped by order. Orders are pushed one after another, each exactly as a single push (same gate, per-order lock, server re-read, write, read-back, audit row); a failure on one order (busy, not found, Fulfil error, failed line) is shown on that order and the others carry on. (source: server.mjs :: sovPushOrder, /api/supply/fulfil/sales-order/push-batch)
 
 ## Supplier portal
 - Suppliers submit a completion date and an invoice value. These wait as pending submissions until D&B applies them: completion goes to end_production_overide, invoice to supplier_invoice_total. Carrier and tracking update the shipment immediately when the supplier is the shipment's master (consolidating) supplier; a rider's carrier and tracking wait as a pending submission. Production status applies immediately. (source: server.mjs :: /api/portal/submit, submission/:id/apply)
