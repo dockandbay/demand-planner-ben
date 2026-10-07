@@ -1,3 +1,42 @@
+## v28.191 (Ben, branch review-fixes-2026-10-05): supplier portal product-dev access, errors, translations (deep dive H6, M6, M7, M12)
+
+**Files:** `server.mjs`, `supply/portal-view.js`, `lib/ai-logic/supply-finance.md`, `tests/portal-security.cjs`. No migrations, no env vars.
+
+- H6: competing suppliers on one product-development item can't act on each other's sample versions, notes or files (scoped to the supplier's own development request; notes / uploads carry supplier id; another supplier's components say "another supplier").
+- M6: developer-style error texts become supplier sentences; a malformed sample id is a 403, not a 500.
+- M7: `/api/portal/submit` validates every input before saving; a later failure reports exactly what was saved (409); profile submit and warehouse acknowledgement saved in one statement.
+- M12: 317 Chinese UI strings added (Profile, PO card, Shipment Plan, product development, toasts, confirms).
+
+## v28.190 (Ben): supplier portal experience (deep dive H4, H5, H8, H9, M10, M11, M13-M16)
+
+**Files:** `server.mjs`, `supply/portal-view.js`, `supply/portal.html`, `lib/ai-logic/supply-finance.md`, `tests/portal-security.cjs`. No migrations, no env vars.
+
+- Every portal date dd-mmm-yy, times in the supplier's local time, "today" local (was UTC). Amounts in the supplier's currency (`suppliers.default_currency`), 2 decimals, unit costs up to 4; price list knows CNY / RMB / HKD.
+- Failed saves restore the button and the production-status dropdown; non-JSON replies treated as errors; expired session shows a clear message with a sign-in link; network blips offer "Try again".
+- Document "remove" works via new `POST /api/portal/doc-remove` (own draft / rejected only); uploads keep the chosen document type (bug: all became "invoice").
+- Auto-reload never wipes typing; comma decimals parsed ("12,5" = 12.5, "1,200" = 1200, "1.234,50" = 1234.5); phones: pinch-zoom, text >= 12 px, controls >= 40 px, dialogs scroll; Payments tab builds lines on open, 50 runs per page (11,887 DOM nodes to 360).
+- **Diviyaj:** let `POST /api/portal/doc-remove` through the gate if `/api/portal/*` isn't a prefix exemption.
+
+## v28.189 (Ben): supplier portal speed (deep dive M1-M4, H2)
+
+**Files:** `server.mjs`, `supply/portal-view.js`, `supply/portal.html`, new `supply/assets/portal-icon.png`, `lib/ai-logic/supply-finance.md`, tests, new `migrations/333_shipment_note_reads.sql`. Optional env `PORTAL_STALE_GRACE_MS` (default 1500).
+
+- Profile in one round trip (2.2 s to 0.3 s on sandbox). First load about half the size (XR 984 KB to 497 KB raw): completed POs as a light row, detail on MANAGE via new `GET /api/portal/po-detail`; archived payment runs via new `GET /api/portal/payments` ("Show them"); headline totals unchanged.
+- Stale first load is one fetch; background refresh gets a 304 when unchanged. Sample writes refresh only the samples list (new `GET /api/portal/samples`).
+- Shipment Plan: messages load when a card is opened (was one request per shipment on every render); read marks per supplier (migration 333) and only that supplier's cache refreshes.
+- Theme CSS, hz-health.js and portal-view.js compressed (brotli/gzip), content ETag, immutable on the ?v= URL; portal icon is one file `/portal-icon.png`.
+- **Diviyaj:** apply migration 333 (backfills existing reads only while the table is empty); exempt `/portal-icon.png` from the gate; check Vercel passes Cache-Control / ETag / Content-Encoding through.
+
+## v28.188 (Ben): supplier portal health-log coverage (deep dive H7)
+
+**Files:** `server.mjs`, `supply/hz-health.js`, `supply/portal.html`, `supply/portal-view.js`, `supply/inject.html`, tests, new `migrations/332_portal_sessions_last_seen.sql`. No env vars.
+
+- Portal slow screens timed (loading screen, each tab, Chinese 加载中); 4xx failures recorded (not the expected sign-in 401); dead clicks on portal menu / tabs (touch too); login page errors via `POST /api/portal/health/login-events` (no session, rate-limited, few event types, stores no user).
+- Server portal rows carry supplier id (never email). Session check one round trip (/me 1,250 ms to 320 ms) and stamps `portal_sessions.last_seen_at` (max once per 5 min).
+- CONFIG ▸ App health log, weekly email and .md report gain a "Supplier portal" section (sign-ins, live sessions, active suppliers, last seen, slow screens, failures). Fixed: Price List tab error when left before loading.
+- **Verified (all four):** portal-security 85/85, portal-scope 129/129, portal-inplace pass; jsdom /portal for 3 suppliers, every tab, Chinese mode, phone width, login page: 0 JS errors. Buy-map harness currently fails on the served page ("SKUM is not defined"); no buy-plan code was touched.
+- **Diviyaj:** apply migration 332 (additive; code works before it); `POST /api/portal/health/login-events` through the gate (covered by a `/api/portal/*` prefix exemption).
+
 ## v28.187 (Ben, branch review-fixes-2026-10-05): "Crossdock likely required" action; "set to" hidden when equal
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/actions.md` + `reports.md` + `supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
