@@ -862,9 +862,13 @@ const HZ_HEALTH_SKIP = /^\/api\/(health\/|cron\/health-(weekly|checks)|config\/h
 const _hzHB = new Map(); let _hzHBn = 0, _hzHBlast = Date.now(), _hzHBbusy = null, _hzHBoffUntil = 0;
 // v28.188 (Ben): `sids` = the supplier id(s) of a supplier-portal request (/api/portal/*, from the psid session; never the email): kept
 // in meta.supplier_ids and part of the grouping key, so a slow or failing portal request can be tied to a supplier.
-function hzHealthNote(kind, method, path, status, ms, msg, example, sids) {
-  const k = kind + '|' + method + '|' + path + '|' + status + (sids ? '|' + sids : ''); let e = _hzHB.get(k);
-  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: sids ? { supplier_ids: sids } : null }; _hzHB.set(k, e); }
+// v28.195 (Ben): `ctag` = the client-portal tag of a /api/cp/* request ({ client_id, rep_group_id }, from the csid session; never the
+// email): merged into meta and part of the grouping key. Messages on client-portal rows are scrubbed (hzCpScrub).
+function hzHealthNote(kind, method, path, status, ms, msg, example, sids, ctag) {
+  const ck = ctag ? JSON.stringify(ctag) : '';
+  const k = kind + '|' + method + '|' + path + '|' + status + (sids ? '|' + sids : '') + (ck ? '|c' + ck : ''); let e = _hzHB.get(k);
+  if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: (sids || ctag) ? Object.assign({}, sids ? { supplier_ids: sids } : null, ctag || null) : null }; _hzHB.set(k, e); }
+  if (msg && ctag) msg = hzCpScrub(msg);
   e.count++; _hzHBn++; if (ms > e.ms) e.ms = ms; if (msg) e.message = String(msg).slice(0, 1000); e.ts = new Date().toISOString();
   if (example && example !== e.path) e.meta = Object.assign(e.meta || {}, { example: String(example).slice(0, 300) });
   if (kind === 'server_error') _hzAlertDirty = true;
@@ -916,8 +920,18 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
     if ((ms >= HZ_SLOW_MS || res.statusCode >= 500) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
       const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
       const sids = (path.startsWith('/api/portal/') && req.portal && Array.isArray(req.portal.supplierIds)) ? req.portal.supplierIds.slice(0, 5).join(',') : '';   // v28.188
-      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path, sids);
-      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path, sids);
+      const ctag = path.startsWith('/api/cp/') ? hzCpTag(req) : null;   // v28.195
+      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path, sids, ctag);
+      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path, sids, ctag);
+      hzHealthFlush(false);
+    }
+    // v28.195 (Ben): client portal 4xx answers (refused feature 403, not found 404, validation 400 / 409, rate limit 429) as server
+    // api_failure rows tagged with the client id. 401 (signed out / session expired) is the normal sign-in path and is not recorded.
+    // The message is the status + route only: never the response body (it can name SKUs or order details).
+    if (res.statusCode >= 400 && res.statusCode < 500 && res.statusCode !== 401 && path.startsWith('/api/cp/') && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
+      const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path, ct = hzCpTag(req) || {};
+      hzHealthEvt('api_failure', 'cp|' + req.method + '|' + route + '|' + res.statusCode + '|' + JSON.stringify(ct), { method: req.method, path: route, status: res.statusCode, ms,
+        message: 'HTTP ' + res.statusCode + ' ' + req.method + ' ' + route + (ct.client_id ? ' (client id ' + ct.client_id + ')' : ''), meta: Object.assign({ client_portal: true }, ct) });
       hzHealthFlush(false);
     }
   } catch (_) { /* measurement must never throw */ } });
@@ -1216,6 +1230,13 @@ function hzSecurityNote(req, status, reason) { try {
     message: 'access refused: ' + String(reason || '').slice(0, 120) + (sids ? ' (supplier id ' + sids + ')' : ''), meta: { security: true, supplier_ids: sids || null, reason: String(reason || '').slice(0, 120) } });
   hzHealthFlush(false);
 } catch (_) {} }
+
+// v28.195 (Ben): client-portal health tag: ids only (client id, rep group id, client user id; preview sessions flagged). Never the email,
+// never prices or order contents. hzCpScrub blanks quoted literals and email addresses in a client-portal error message (a failed
+// order insert can quote a value).
+function hzCpTag(req) { try { const c = req.cp; if (!c || !c.client) return null; const t = { client_id: c.client.id };
+  if (c.client.rep_group_id) t.rep_group_id = c.client.rep_group_id; if (c.user && c.user.id) t.client_user_id = c.user.id; if (c.preview) t.preview = true; return t; } catch (_) { return null; } }
+function hzCpScrub(m) { return String(m == null ? '' : m).replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '<email>').replace(/"[^"\n]{0,200}"|'[^'\n]{0,200}'/g, '<value>').replace(/\(([^()]{0,200})\)=\(([^()]{0,400})\)/g, '($1)=(<value>)'); }
 
 // v28.186 (Ben, deep dive M6): suppliers never see raw error text. On /api/portal/* any 5xx body, and any 4xx whose message looks
 // internal (SQL / pg / stack / file path), is replaced with a generic message plus a short reference; the original is logged
@@ -23205,17 +23226,18 @@ async function hzClientEvents(req, res, source, email, opt) {
       if (!e || typeof e !== 'object' || !HZ_CE_KINDS.has(e.kind)) continue;
       if (opt.login && !HZ_CE_LOGIN_KINDS.has(e.kind)) continue;
       const message = clip(e.message, 500); if (!message) continue;
-      const path = opt.login ? '/portal (login)' : clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
+      const path = opt.login ? (source === 'client_portal' ? '/client (login)' : '/portal (login)') : clip(e.path, 300), k = e.kind + '|' + message + '|' + (path || ''); const ms = Number.isFinite(Number(e.ms)) ? Math.max(0, Math.min(2147483647, Math.round(Number(e.ms)))) : null;
       const cnt = HZ_CE_AGG.has(e.kind) ? Math.max(1, Math.min(10000, Math.round(Number(e.count) || 1))) : 1;
       const ex = agg.get(k); if (ex) { ex.count += cnt; if (ms != null && ms > (ex.ms || 0)) ex.ms = ms; continue; }
       let meta = null; if (e.meta && typeof e.meta === 'object') { try { const j = JSON.stringify(e.meta); if (j.length <= 1000) meta = e.meta; } catch (_) {} }
       if (opt.sids) meta = Object.assign({}, meta, { supplier_ids: opt.sids }); if (opt.login) meta = Object.assign({}, meta, { login: true });   // v28.188
+      if (opt.ctag) meta = Object.assign({}, meta, opt.ctag);   // v28.195: client portal ids (client / rep group / client user), never the email
       agg.set(k, { kind: e.kind, source, path, ms, message, method: e.kind === 'api_failure' ? clip(e.method, 10) : null, status: (e.kind === 'api_failure' && e.status != null && Number.isInteger(Number(e.status)) && Number(e.status) >= 0 && Number(e.status) < 1000) ? Number(e.status) : null, stack: clip(e.stack, 2000), user_email: em, app_version: clip(e.v, 40) || APP_VERSION, user_agent: ua, count: cnt, meta });   // v28.162: client api_failure carries method + status
     }
     let rows = Array.from(agg.values()); if (!rows.length) return res.status(202).json({ ok: true, accepted: 0 });
     const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
-    let n = hzCeAllow('ip|' + ip, 200, rows.length); n = hzCeAllow('u|' + source + '|' + ip + '|' + (em || ''), 60, n);
-    if (opt.login) { n = hzCeAllow('login|' + ip, 30, n); n = hzCeAllow('login|all', 300, n); }   // v28.188: anonymous endpoint, tighter caps (per IP and overall)
+    let n = hzCeAllow('ip|' + ip, 200, rows.length); n = hzCeAllow('u|' + source + '|' + ip + '|' + (em || opt.who || ''), 60, n);   // v28.195: opt.who = client user id (no email stored)
+    if (opt.login) { n = hzCeAllow('login|' + source + '|' + ip, 30, n); n = hzCeAllow('login|' + source + '|all', 300, n); }   // v28.188: anonymous endpoint, tighter caps (per IP and overall). v28.195: per portal
     rows = rows.slice(0, n); if (_hzNoDeadClick) rows = rows.filter(r => r.kind !== 'dead_click');
     if (!rows.length) return res.status(202).json({ ok: true, accepted: 0, rate_limited: true });
     try { await pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]); }
@@ -23236,13 +23258,18 @@ app.post('/api/portal/health/client-events', _hzText, portalAuth, (req, res) => 
 const HZ_CE_LOGIN_KINDS = new Set(['client_error', 'console_error', 'slow_view', 'page_view', 'api_failure']);
 const _hzTextSmall = express.text({ type: 'text/plain', limit: '4kb' });
 app.post('/api/portal/health/login-events', _hzTextSmall, (req, res) => hzClientEvents(req, res, 'portal', null, { login: true }));
-app.post('/api/cp/health/client-events', _hzText, cpAuth, (req, res) => hzClientEvents(req, res, 'client_portal', req.cp && req.cp.user && req.cp.user.email));
+// v28.195 (Ben): client portal rows carry ids only (meta.client_id, rep_group_id, client_user_id, preview), NOT the user's email (was
+// user_email = the client user's address). The login page reports to /api/cp/health/login-events: same narrow anonymous write as the
+// supplier portal's (kinds client_error / console_error / slow_view / page_view / api_failure, <= 20 events and 4 KB a request, 30 events
+// a minute per IP, 300 a minute overall, path fixed to "/client (login)", no user). Gate: covered by the /api/cp/* exemption.
+app.post('/api/cp/health/client-events', _hzText, cpAuth, (req, res) => { const t = hzCpTag(req); hzClientEvents(req, res, 'client_portal', null, { ctag: t, who: t && t.client_user_id ? 'cu' + t.client_user_id : null }); });
+app.post('/api/cp/health/login-events', _hzTextSmall, (req, res) => hzClientEvents(req, res, 'client_portal', null, { login: true }));
 
 // Likely file for a path / view, so the .md tells Claude Code where to start.
 function hzLikelyFile(path, source) {
   const p = String(path || '');
   if (source === 'portal' || p.startsWith('/api/portal') || p.startsWith('/portal')) return 'server.mjs (supplier portal /api/portal routes) + supply/portal-view.js';   // v28.188: + portal views (/portal#...)
-  if (source === 'client_portal' || p.startsWith('/api/cp')) return 'server.mjs (client portal /api/cp routes) + supply/client-view.js';
+  if (source === 'client_portal' || p.startsWith('/api/cp') || p.startsWith('/client')) return 'server.mjs (client portal /api/cp routes) + supply/client-view.js';
   if (/^\/api\/(demand|forecast|save-|kpi|scenario|preorders|price-changes|buy-|auto-forecast|trading-calendar|filter-rules)/.test(p)) return 'server.mjs + artifact_v16.7.html (DEMAND)';
   if (/^\/api\/(supply|config|product|client|me|inbox)/.test(p)) return 'server.mjs + supply/inject.html';
   if (p.startsWith('/api/')) return 'server.mjs';
@@ -23280,6 +23307,7 @@ async function hzHealthReport(daysIn) {
   d.days = days; d.version = APP_VERSION; d.slow_ms = HZ_SLOW_MS;
   try { Object.assign(d, await hzHealthReportExtra(days)); } catch (e) { d.extra_error = e.message; console.warn('[health] report extras failed: ' + e.message); }   // v28.162: never lose the v28.159 report
   try { d.portal = await hzPortalActivity(days); } catch (e) { d.portal = { error: e.message }; console.warn('[health] portal activity failed: ' + e.message); }   // v28.188
+  try { d.client_portal = await hzClientPortalActivity(days); } catch (e) { d.client_portal = { error: e.message }; console.warn('[health] client portal activity failed: ' + e.message); }   // v28.195
   d.markdown = hzHealthMarkdown(d);
   return d;
 }
@@ -23319,6 +23347,50 @@ async function hzPortalActivity(days) {
           (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind = 'slow_request')::int slow_requests,
           (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.supplier_name = p.supplier_name AND kind IN ('api_failure', 'server_error', 'client_error', 'console_error'))::int failures
         FROM per p WHERE p.supplier_name IS NOT NULL) x),
+      'views', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, max(ms) max_ms, max(ts) last_seen
+        FROM ev WHERE kind = 'slow_view' GROUP BY path ORDER BY p95 DESC NULLS LAST, n DESC LIMIT 20) x),
+      'failures', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT kind, source, coalesce(method || ' ', '') || coalesce(path, '') path, status, split_part(coalesce(message, ''), E'\\n', 1) message, sum(count)::int n, max(ts) last_seen
+        FROM ev WHERE kind IN ('api_failure', 'server_error', 'client_error', 'console_error') GROUP BY 1, 2, 3, 4, 5 ORDER BY n DESC, last_seen DESC LIMIT 25) x)) d`, [days]);
+  let r; try { r = await run('last_seen_at'); } catch (e) { if (!(e && e.code === '42703')) throw e; r = await run('created_at'); r.rows[0].d.no_last_seen = true; }
+  const d = r.rows[0].d; for (const k in d.kpis) d.kpis[k] = Number(d.kpis[k]) || 0;
+  return d;
+}
+// v28.195 (Ben): client portal activity, the client-portal twin of hzPortalActivity. Sessions from planner.client_sessions (created_at =
+// a sign-in, last_seen_at = migration 335; admin preview sessions cppv_ excluded); events = app_health_events rows from client portal
+// browsers (source 'client_portal', incl. the login page) and server rows for /api/cp/*. A row is attributed to a client by meta.client_id
+// (v28.195 rows) or, for older browser rows, by the client user's email. Client NAMES only leave this function: no emails, prices or orders.
+// Page views from admin previews (meta.preview) are left out of the counts; their failures still count (they are real bugs).
+async function hzClientPortalActivity(days) {
+  const run = (LS) => pool.query(`WITH ev AS (SELECT * FROM planner.app_health_events WHERE ts >= now() - make_interval(days => $1::int) AND (source = 'client_portal' OR path LIKE '/api/cp/%')),
+      cs AS (SELECT * FROM planner.client_sessions WHERE token NOT LIKE 'cppv\\_%'),
+      ss AS (SELECT s.created_at, s.expires_at, coalesce(s.${LS}, s.created_at) seen, s.user_id, c.id client_id, c.name client_name, c.type client_type FROM cs s JOIN planner.client_users u ON u.id = s.user_id JOIN planner.clients c ON c.id = u.client_id),
+      evs AS (SELECT ev.kind, ev.count, ev.ms, ev.meta, coalesce(c1.id, c2.id) client_id, coalesce(c1.name, c2.name) client_name FROM ev
+        LEFT JOIN planner.clients c1 ON ev.meta->>'client_id' ~ '^[0-9]+$' AND c1.id = (ev.meta->>'client_id')::int
+        LEFT JOIN planner.client_users u ON ev.meta->>'client_id' IS NULL AND ev.user_email IS NOT NULL AND lower(u.email) = lower(ev.user_email)
+        LEFT JOIN planner.clients c2 ON c2.id = u.client_id),
+      per AS (SELECT client_id, client_name FROM ss WHERE seen >= now() - make_interval(days => $1::int) OR created_at >= now() - make_interval(days => $1::int)
+        UNION SELECT client_id, client_name FROM evs WHERE client_id IS NOT NULL)
+    SELECT json_build_object(
+      'kpis', json_build_object(
+        'sign_ins', (SELECT count(*) FROM cs WHERE created_at >= now() - make_interval(days => $1::int)),
+        'live_sessions', (SELECT count(*) FROM cs WHERE expires_at > now()),
+        'active_sessions', (SELECT count(*) FROM cs WHERE coalesce(${LS}, created_at) >= now() - make_interval(days => $1::int)),
+        'active_clients', (SELECT count(DISTINCT client_id) FROM ss WHERE seen >= now() - make_interval(days => $1::int)),
+        'page_views', (SELECT coalesce(sum(coalesce((meta->>'visits')::int, count)), 0) FROM ev WHERE kind = 'page_view' AND coalesce(meta->>'preview', '') <> 'true'),
+        'slow_views', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'slow_view'),
+        'slow_requests', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'slow_request'),
+        'failures', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind IN ('api_failure', 'server_error', 'client_error', 'console_error')),
+        'dead_clicks', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind = 'dead_click'),
+        'login_errors', (SELECT coalesce(sum(count), 0) FROM ev WHERE kind IN ('client_error', 'console_error', 'api_failure') AND meta->>'login' = 'true')),
+      'clients', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC NULLS LAST), '[]') FROM (SELECT p.client_name client, (SELECT max(client_type) FROM ss WHERE ss.client_id = p.client_id) type,
+          (SELECT count(DISTINCT user_id) FROM ss WHERE ss.client_id = p.client_id AND ss.seen >= now() - make_interval(days => $1::int))::int users,
+          (SELECT count(*) FROM ss WHERE ss.client_id = p.client_id AND ss.created_at >= now() - make_interval(days => $1::int))::int sign_ins,
+          (SELECT max(seen) FROM ss WHERE ss.client_id = p.client_id) last_seen,
+          (SELECT coalesce(sum(coalesce((meta->>'visits')::int, count)), 0) FROM evs WHERE evs.client_id = p.client_id AND kind = 'page_view' AND coalesce(meta->>'preview', '') <> 'true')::int page_views,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.client_id = p.client_id AND kind = 'slow_view')::int slow_views,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.client_id = p.client_id AND kind = 'slow_request')::int slow_requests,
+          (SELECT coalesce(sum(count), 0) FROM evs WHERE evs.client_id = p.client_id AND kind IN ('api_failure', 'server_error', 'client_error', 'console_error'))::int failures
+        FROM (SELECT DISTINCT client_id, client_name FROM per WHERE client_id IS NOT NULL) p) x),
       'views', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, max(ms) max_ms, max(ts) last_seen
         FROM ev WHERE kind = 'slow_view' GROUP BY path ORDER BY p95 DESC NULLS LAST, n DESC LIMIT 20) x),
       'failures', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT kind, source, coalesce(method || ' ', '') || coalesce(path, '') path, status, split_part(coalesce(message, ''), E'\\n', 1) message, sum(count)::int n, max(ts) last_seen
@@ -23368,7 +23440,7 @@ async function hzHealthReportExtra(days) {
       'prev_version', (SELECT app_version FROM (SELECT app_version, min(ts) f FROM planner.app_health_events WHERE app_version IS NOT NULL GROUP BY 1) v   -- the release deployed before this one (not a newer branch build writing to the same DB)
         WHERE f < coalesce((SELECT min(ts) FROM planner.app_health_events WHERE app_version = $2), now()) ORDER BY f DESC LIMIT 1)) d`, [days, APP_VERSION, HZ_ERR_KINDS])).rows[0].d;
   for (const k in x.kpis2) x.kpis2[k] = Number(x.kpis2[k]) || 0;
-  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { if (/^\/portal/.test(String(r.path || ''))) { r.file = 'supply/portal-view.js (#pp-secs / #pp-tabs nav)'; return; } const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); });   // v28.188: portal nav x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
+  x.freezes.forEach(r => { r.file = hzLikelyFile(r.path, (r.sources || [])[0]); }); (x.dead_clicks || []).forEach(r => { if (/^\/portal/.test(String(r.path || ''))) { r.file = 'supply/portal-view.js (#pp-secs / #pp-tabs nav)'; return; } if (/^\/client/.test(String(r.path || ''))) { r.file = 'supply/client-view.js (#cp-nav, .cp-seg, .cp-chip)'; return; }   /* v28.195 */ const f = hzLikelyFile(r.path, 'staff'); r.file = 'supply/inject.html (left rail / nav)' + (f === 'supply/inject.html' ? '' : ' + ' + f); });   // v28.188: portal nav x.api.forEach(r => { r.file = hzLikelyFile(r.path); });
   x.integ.forEach(r => { r.file = HZ_INTEG_FILE[r.service] || 'server.mjs _fetchT callers'; });
   x.new_since.forEach(r => { r.file = r.kind === 'integration_error' ? (HZ_INTEG_FILE[String(r.path).split(' ')[0]] || 'server.mjs') : hzLikelyFile(r.path ? String(r.path).replace(/^[A-Z]+ /, '') : (r.views || [])[0], r.path ? null : 'staff'); });
   x.page_users.forEach(r => { r.user = hzShortUser(r.user_email); delete r.user_email; });
@@ -23447,6 +23519,13 @@ function hzHealthMarkdown(d) {
     tbl('### Portal slow views', null, ['View', 'Count', 'p95 ms', 'Max ms', 'Last seen'], (P.views || []).map(r => [r.path, r.n, r.p95, r.max_ms, dt(r.last_seen)]));
     tbl('### Portal failures', null, ['Kind', 'Source', 'Where', 'Status', 'Message', 'Count', 'Last seen'], (P.failures || []).map(r => [r.kind, r.source, r.path, r.status || '', String(r.message || '').slice(0, 160), r.n, dt(r.last_seen)]));
   } else if (P && P.error) L.push('## 14. Supplier portal activity', '', `> Failed to load: ${hzMdCode(P.error)}`, '');
+  // v28.195 (Ben): client portal activity (hzClientPortalActivity). Client names only.
+  const C = d.client_portal; if (C && C.kpis) { const ck = C.kpis;
+    tbl('## 15. Client portal activity', `Sign-ins ${ck.sign_ins} · live sessions ${ck.live_sessions} · sessions active in the period ${ck.active_sessions} · active clients ${ck.active_clients} · page views ${ck.page_views} · slow views ${ck.slow_views} · slow requests ${ck.slow_requests} · failures ${ck.failures} (login page ${ck.login_errors}) · dead clicks ${ck.dead_clicks}.` + (C.no_last_seen ? ' Migration 335 is not applied, so "last seen" is the sign-in time.' : '') + ' Fix client portal issues in server.mjs (/api/cp routes) and supply/client-view.js / supply/client.html.',
+      ['Client', 'Type', 'Users', 'Sign-ins', 'Last seen', 'Page views', 'Slow views', 'Slow requests', 'Failures'], (C.clients || []).map(r => [r.client, r.type || '', r.users, r.sign_ins, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.slow_requests, r.failures]));
+    tbl('### Client portal slow views', null, ['View', 'Count', 'p95 ms', 'Max ms', 'Last seen'], (C.views || []).map(r => [r.path, r.n, r.p95, r.max_ms, dt(r.last_seen)]));
+    tbl('### Client portal failures', null, ['Kind', 'Source', 'Where', 'Status', 'Message', 'Count', 'Last seen'], (C.failures || []).map(r => [r.kind, r.source, r.path, r.status || '', String(r.message || '').slice(0, 160), r.n, dt(r.last_seen)]));
+  } else if (C && C.error) L.push('## 15. Client portal activity', '', `> Failed to load: ${hzMdCode(C.error)}`, '');
   L.push('## Suggested next steps', '');
   const s = [];
   if (d.new_since && d.new_since[0]) s.push(`Start with what ${d.version} introduced: ${d.new_since[0].kind} "${hzMdCode(d.new_since[0].message).slice(0, 120)}" (${d.new_since[0].n}x) in ${d.new_since[0].file}. Diff against ${d.prev_version || 'the previous release'} (git log -p) around that code.`);   // v28.162
@@ -23506,6 +23585,10 @@ async function hzHealthEmail(days, to) {
     + ((d.portal && d.portal.kpis) ? `<h3 style="font-size:14px;margin:18px 0 6px">Supplier portal</h3><div style="font-size:12px;color:#64748b">${E(d.portal.kpis.sign_ins + ' sign-ins · ' + d.portal.kpis.active_suppliers + ' active suppliers · ' + d.portal.kpis.slow_views + ' slow views · ' + d.portal.kpis.failures + ' failures')}</div>`
       + tbl('Portal suppliers', ['Supplier', 'Users', 'Last seen', 'Page views', 'Slow views', 'Failures'], (d.portal.suppliers || []).slice(0, 10).map(r => [r.supplier, r.users, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.failures]))
       + tbl('Portal failures', ['Kind', 'Where', 'Status', 'Count'], (d.portal.failures || []).slice(0, 5).map(r => [r.kind, r.path, r.status || '', r.n])) : '')
+    // v28.195 (Ben): client portal activity (sign-ins, clients active, last seen, slow views, failures). Client names only.
+    + ((d.client_portal && d.client_portal.kpis) ? `<h3 style="font-size:14px;margin:18px 0 6px">Client portal</h3><div style="font-size:12px;color:#64748b">${E(d.client_portal.kpis.sign_ins + ' sign-ins · ' + d.client_portal.kpis.active_clients + ' active clients · ' + d.client_portal.kpis.slow_views + ' slow views · ' + d.client_portal.kpis.failures + ' failures')}</div>`
+      + tbl('Portal clients', ['Client', 'Users', 'Last seen', 'Page views', 'Slow views', 'Failures'], (d.client_portal.clients || []).slice(0, 10).map(r => [r.client, r.users, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.failures]))
+      + tbl('Client portal failures', ['Kind', 'Where', 'Status', 'Count'], (d.client_portal.failures || []).slice(0, 5).map(r => [r.kind, r.path, r.status || '', r.n])) : '')
     + `<p style="font-size:13px;margin-top:18px;padding:10px 12px;background:#eff6ff;border-radius:8px">Full details attached: upload the .md to Claude Code.</p></div>`;
   const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html,
     attachments: [{ filename, content: Buffer.from(d.markdown, 'utf8').toString('base64') }] };
@@ -24329,11 +24412,26 @@ function _cpMemo(sig, parts, fn) {
 const _cpSig = (...a) => JSON.stringify(a);
 const _cpHash = (x) => crypto.createHash('sha1').update(x).digest('base64url').slice(0, 24);
 const _cpAuthMemo = new Map(); const CP_AUTH_TTL_MS = 60000;
+// v28.195 (Ben): the session lookup also stamps client_sessions.last_seen_at (migration 335) at most once per 5 minutes per session,
+// in the SAME statement (a guarded UPDATE in a CTE: repeat calls and other instances are no-ops), for "which clients use the portal, when"
+// in CONFIG > App health log. Admin preview sessions (cppv_) are never stamped. Until 335 is applied (42703) the read-only form is used.
+let _csNoLastSeen = false;
+const _CS_SELECT = `SELECT s.user_id, u.email, u.name, u.scope, u.client_id, u.active`;
+async function cpSessionLookup(csid) {
+  if (!_csNoLastSeen) {
+    try {
+      return (await pool.query(`WITH s AS (SELECT token, user_id FROM planner.client_sessions WHERE token=$1 AND expires_at>now()),
+          seen AS (UPDATE planner.client_sessions c SET last_seen_at=now() FROM s WHERE c.token=s.token AND c.token NOT LIKE 'cppv\\_%' AND (c.last_seen_at IS NULL OR c.last_seen_at < now() - interval '5 minutes') RETURNING 1)
+        ${_CS_SELECT} FROM s JOIN planner.client_users u ON u.id=s.user_id`, [csid])).rows[0] || null;
+    } catch (e) { if (e && e.code === '42703') _csNoLastSeen = true; else throw e; }
+  }
+  return (await pool.query(`${_CS_SELECT} FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>now()`, [csid])).rows[0] || null;
+}
 async function cpAuth(req, res, next) {
   try {
     const csid = cookieVal(req, 'csid'); if (!csid) return res.status(401).json({ error: 'not signed in' });
     const hit = _cpAuthMemo.get(csid); if (hit && Date.now() - hit.t < CP_AUTH_TTL_MS) { req.cp = hit.v; return next(); }
-    const s = (await pool.query(`SELECT s.user_id, u.email, u.name, u.scope, u.client_id, u.active FROM planner.client_sessions s JOIN planner.client_users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>now()`, [csid])).rows[0];
+    const s = await cpSessionLookup(csid);   // v28.195 (Ben): + the throttled last_seen_at stamp
     if (!s) { _cpAuthMemo.delete(csid); return res.status(401).json({ error: 'session expired' }); }
     if (!s.active) return res.status(403).json({ error: 'this login has been deactivated' });
     const client = await cpClientById(s.client_id); if (!client || !client.active) return res.status(403).json({ error: 'client account inactive' });
