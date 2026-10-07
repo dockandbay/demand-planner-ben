@@ -3893,6 +3893,174 @@ app.post('/api/supply/po/:po/cin7-not-required', async (req, res) => {
     res.json({ ok: true, cin7_not_required: !!b.value }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── v28.192 (Ben): VALIDATE SALES ORDER (SUPPLY ▸ Purchase Orders ▸ Direct to Client) ──────────────────────────────────
+// Reads one Fulfil sales order (sale.sale) + its lines (sale.line) and, for every DROP-SHIP line, the suppliers set up on
+// that product in Fulfil (purchase.product_supplier). The user picks the supplier per line; the push writes it back to
+// Fulfil and READS EACH LINE BACK to prove it saved. Fields verified read-only on live Fulfil 07-Oct-26 (SO59854 = id
+// 284762, SO56619 = id 280631, SO58297 = id 282353):
+//   sale.line.delivery_mode   'ship' | 'dropship' | 'pick_up' | 'backorder' | 'make_on_order' | 'inter_company_dropship'
+//   sale.line.supplier        party id of the drop-ship supplier (writable many2one to party)
+//   sale.line.purchase_request → purchase.request {state draft|purchased|done|cancel|exception, party, purchase_line}
+//                               purchase_line.purchase.state/number = the drop-ship PO it already sits on
+//   purchase.product_supplier {product, party, drop_shipment, sequence, company, active} = the product's suppliers
+// Push rules (sovLineBlock): only 'dropship' lines; never when the order is done/cancelled, the line has shipped, or the
+// line's purchase request is already on a purchase order (any PO state). A request still in draft (no PO line) has its
+// party changed together with the sale line, otherwise Fulfil would still buy from the old supplier.
+// Safety: admin gate, LIVE writes need FULFIL_LIVE_WRITES=true (same gate as every Fulfil write), per-order single-flight.
+// HZ_FULFIL_WRITE_STUB=1 (ignored on Vercel) swaps every write for an in-memory stub so the push + read-back can be tested
+// without touching Fulfil. _STUB_FAIL=<ids> makes those writes reject; _STUB_DROP=<ids> accepts but does not save them.
+const sovStubOn = () => !process.env.VERCEL && String(process.env.HZ_FULFIL_WRITE_STUB || '') === '1';
+const _sovStub = new Map();   // 'model:id' → fields the stub "saved" (merged into later reads so the read-back sees them)
+const _sovIdList = (k) => String(process.env[k] || '').split(',').map(s => s.trim()).filter(Boolean);
+async function sovSearch(model, domain, fields, limit) {
+  const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, 0, Math.min(limit || 500, 500), null, fields]);
+  const out = Array.isArray(rows) ? rows : [];
+  if (sovStubOn()) out.forEach(r => { const p = _sovStub.get(model + ':' + r.id); if (p) Object.assign(r, p); });
+  return out;
+}
+async function sovWrite(model, id, patch, stubNames) {
+  if (sovStubOn()) {
+    if (_sovIdList('HZ_FULFIL_WRITE_STUB_FAIL').includes(String(id))) { const e = new Error('Fulfil 400: (stub) write rejected for ' + model + ' ' + id); e.status = 400; throw e; }
+    if (_sovIdList('HZ_FULFIL_WRITE_STUB_DROP').includes(String(id))) return { stub: true, dropped: true };
+    _sovStub.set(model + ':' + id, Object.assign({}, _sovStub.get(model + ':' + id), patch, stubNames || {}));
+    return { stub: true };
+  }
+  return fulfilFetch('PUT', '/model/' + model + '/' + Number(id), patch);
+}
+// Input → search plan. A Fulfil link (…/sales_order/284762, …/sale.sale/284762, "sale.sale,284762") is an exact id.
+function sovParseQuery(q) {
+  q = String(q || '').trim();
+  const m = /(?:sales_order|sale_order|sale\.sale)\/(\d+)/i.exec(q) || /sale\.sale,(\d+)/i.exec(q);
+  if (m) return { id: Number(m[1]), link: true, text: '' };
+  return { id: /^\d+$/.test(q) ? Number(q) : null, link: false, text: q };
+}
+const SOV_SALE_FIELDS = ['id', 'number', 'reference', 'party', 'party.name', 'state', 'shipment_state', 'sale_date', 'company', 'channel.name'];
+async function sovFindSales(q) {
+  const p = sovParseQuery(q); const found = new Map();
+  const add = rows => rows.forEach(r => { if (r && r.id != null && !found.has(r.id)) found.set(r.id, r); });
+  if (p.id != null) add(await sovSearch('sale.sale', [['id', '=', p.id]], SOV_SALE_FIELDS, 1));
+  if (!p.link && p.text) {
+    const t = p.text, nums = Array.from(new Set([t, t.toUpperCase(), /^\d+$/.test(t) ? 'SO' + t : null].filter(Boolean)));
+    add(await sovSearch('sale.sale', [['number', 'in', nums]], SOV_SALE_FIELDS, 20));
+    add(await sovSearch('sale.sale', [['reference', '=', t]], SOV_SALE_FIELDS, 20));
+    if (!found.size && t.length >= 3) add(await sovSearch('sale.sale', [['reference', 'ilike', '%' + t.replace(/([\\%_])/g, '\\$1') + '%']], SOV_SALE_FIELDS, 20));
+  }
+  return Array.from(found.values());
+}
+const SOV_MODE_LABEL = { dropship: 'Drop ship', ship: 'Ship from stock', pick_up: 'Pick up', backorder: 'Backorder', make_on_order: 'Make on order', inter_company_dropship: 'Inter-company drop ship' };
+const SOV_SALE_LOCKED = ['done', 'cancel', 'cancelled', 'canceled'];
+// Why a line's supplier cannot be changed (null = it can). Shared by analyse (UI) and push (server re-check).
+function sovLineBlock(sale, l, pr) {
+  if (l.service) return 'Service line';
+  if (l.mode !== 'dropship') return l.mode === 'inter_company_dropship' ? 'Inter-company drop ship (supplied by a company, not a supplier)' : (SOV_MODE_LABEL[l.mode] || l.mode || 'Not drop ship') + ': no supplier';
+  if (SOV_SALE_LOCKED.includes(String(sale.state || '').toLowerCase())) return 'Sales order is ' + sale.state;
+  if ((Number(l.qty_shipped) || 0) > 0 || l.move_done) return 'Line already shipped';
+  if (pr && pr.purchase_line) return 'Already on purchase order ' + (pr.po_number || ('#' + pr.purchase)) + ' (' + (pr.po_state || pr.state) + '): change it on the PO in Fulfil';
+  if (pr && ['done', 'purchased'].includes(pr.state)) return 'Purchase request is ' + pr.state;
+  return null;
+}
+// One sales order → lines + supplier options + blocks. Pure reads.
+async function sovAnalyse(saleId) {
+  const sale = (await sovSearch('sale.sale', [['id', '=', saleId]], SOV_SALE_FIELDS, 1))[0];
+  if (!sale) return null;
+  const raw = await sovSearch('sale.line', [['sale', '=', saleId]], ['id', 'type', 'sequence', 'product', 'product.code', 'product.name', 'product_type', 'quantity', 'quantity_shipped', 'move_done',
+    'delivery_mode', 'supplier', 'supplier.name', 'purchase_request', 'purchase_request_state'], 500);
+  const goods = raw.filter(l => (l.type || 'line') === 'line');
+  const prIds = goods.map(l => l.purchase_request).filter(Boolean), prs = {};
+  if (prIds.length) (await sovSearch('purchase.request', [['id', 'in', prIds]], ['id', 'state', 'party', 'party.name', 'purchase_line', 'purchase_line.purchase', 'purchase_line.purchase.number', 'purchase_line.purchase.state'], 500))
+    .forEach(r => { prs[r.id] = { id: r.id, state: r.state, party: r.party || null, party_name: r['party.name'] || null, purchase_line: r.purchase_line || null, purchase: r['purchase_line.purchase'] || null, po_number: r['purchase_line.purchase.number'] || null, po_state: r['purchase_line.purchase.state'] || null }; });
+  const pids = Array.from(new Set(goods.map(l => l.product).filter(Boolean))), opts = {};
+  if (pids.length) (await sovSearch('purchase.product_supplier', [['product', 'in', pids], ['active', '=', true]], ['id', 'product', 'party', 'party.name', 'drop_shipment', 'sequence', 'company'], 500))
+    .forEach(r => { (opts[r.product] = opts[r.product] || []).push({ id: r.party, name: r['party.name'] || ('Party ' + r.party), drop_shipment: r.drop_shipment !== false, sequence: r.sequence == null ? 99 : r.sequence, company: r.company }); });
+  const skus = Array.from(new Set(goods.map(l => String(l['product.code'] || '').trim()).filter(Boolean))), hz = {};
+  if (skus.length) { try { (await pool.query(`SELECT trim(sku) sku, coalesce(main_supplier_final,'') main, coalesce(supplier_multiple_all,'') multi FROM planner.products WHERE trim(sku) = ANY($1::text[])`, [skus])).rows.forEach(r => { hz[r.sku] = { main: r.main, multi: r.multi }; }); } catch (e) { /* hint only */ } }
+  const lines = goods.sort((a, z) => (a.sequence || 0) - (z.sequence || 0) || a.id - z.id).map(l => {
+    let o = (opts[l.product] || []).slice();
+    if (o.some(x => x.company === sale.company)) o = o.filter(x => x.company === sale.company);   // the sale's own company first (UK 1 / AU 3); all if none match
+    const seen = new Set(); o = o.sort((a, z) => a.sequence - z.sequence || a.name.localeCompare(z.name)).filter(x => !seen.has(x.id) && seen.add(x.id)).map(x => ({ id: x.id, name: x.name, drop_shipment: x.drop_shipment }));
+    const sku = String(l['product.code'] || '').trim(), pr = l.purchase_request ? (prs[l.purchase_request] || { id: l.purchase_request, state: l.purchase_request_state || '' }) : null;
+    const row = { line_id: l.id, sku, name: l['product.name'] || '', qty: fulfilUnwrap(l.quantity) || 0, qty_shipped: fulfilUnwrap(l.quantity_shipped) || 0, move_done: !!l.move_done,
+      mode: l.delivery_mode || 'ship', mode_label: SOV_MODE_LABEL[l.delivery_mode] || l.delivery_mode || '', service: String(l.product_type || '') === 'service',
+      supplier: l.supplier ? { id: l.supplier, name: l['supplier.name'] || ('Party ' + l.supplier) } : null, options: o, pr, horizon: hz[sku] || null };
+    row.blocked = sovLineBlock(sale, row, pr);
+    return row;
+  });
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  return { sale: { id: sale.id, number: sale.number || '', reference: sale.reference || '', customer: sale['party.name'] || '', state: sale.state || '', shipment_state: sale.shipment_state || '', sale_date: fulfilUnwrap(sale.sale_date) || null, company: sale.company, channel: sale['channel.name'] || '',
+    url: cfg.subdomain ? ('https://' + cfg.subdomain + '.fulfil.io/v2/erp/model/sales_order/' + sale.id) : '' }, lines };
+}
+function sovGate(cfg) { return { env: cfg.env, stub: sovStubOn(), live_writes: cfg.env !== 'live' || String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() === 'true' }; }
+app.get('/api/supply/fulfil/sales-order/analyse', async (req, res) => {
+  const q = String(req.query.q || '').trim(), id = Number(req.query.id) || null;
+  if (!q && !id) return res.status(400).json({ error: 'Enter a sales order number, Fulfil link or reference.' });
+  try {
+    const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    let saleId = id;
+    if (!saleId) { const hits = await sovFindSales(q);
+      if (!hits.length) return res.status(404).json({ error: 'No Fulfil sales order matches "' + q + '".' });
+      if (hits.length > 1) return res.set('Cache-Control', 'no-store').json({ ok: true, candidates: hits.slice(0, 20).map(s => ({ id: s.id, number: s.number || '', reference: s.reference || '', customer: s['party.name'] || '', state: s.state || '', sale_date: fulfilUnwrap(s.sale_date) || null })) });
+      saleId = hits[0].id; }
+    const out = await sovAnalyse(saleId); if (!out) return res.status(404).json({ error: 'Fulfil sales order ' + saleId + ' not found.' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, gate: sovGate(cfg), ...out });
+  } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+async function sovAudit(rows) {   // migration 334; non-fatal (the Fulfil result is what the user sees)
+  for (const r of rows) { try { await pool.query(`INSERT INTO planner.so_supplier_pushes (sale_id, sale_number, line_id, sku, old_supplier_id, old_supplier, new_supplier_id, new_supplier, result, message, fulfil_env, stub, pushed_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [r.sale_id, r.sale_number, r.line_id, r.sku, r.old_id, r.old_name, r.new_id, r.new_name, r.result, r.message || null, r.env, r.stub, r.by]); } catch (e) { /* table absent pre-migration 334 */ } }
+}
+app.post('/api/supply/fulfil/sales-order/push-suppliers', async (req, res) => {
+  const b = req.body || {}, saleId = Number(b.sale_id), want = Array.isArray(b.lines) ? b.lines.slice(0, 300) : [];
+  if (!saleId || !want.length) return res.status(400).json({ error: 'sale_id and lines[] required' });
+  let me; try { me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to write suppliers to Fulfil' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try {
+    const cfg = fulfilConfigFor(await activeFulfilEnv()); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    const gate = sovGate(cfg);
+    if (!gate.stub && !gate.live_writes) return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). No write performed.', gated: true, would_write: want.length });
+    const out = await _withXactLock('fulfil_so_push:' + saleId, { code: 'FULFIL_PUSH_BUSY', message: 'A supplier push for this sales order is already in progress. Wait for it to finish, then analyse again.' }, async () => {
+      const cur = await sovAnalyse(saleId);   // never trust the client's view: re-read the order, lines, options and blocks now
+      if (!cur) { const e = new Error('Fulfil sales order ' + saleId + ' not found.'); e.status = 404; throw e; }
+      const by = (me && me.email) || authUser(req) || 'admin', byId = {}; cur.lines.forEach(l => { byId[l.line_id] = l; });
+      const results = [], writes = [];
+      for (const w of want) {
+        const l = byId[Number(w.line_id)], pid = Number(w.supplier_party_id) || null;
+        const base = { line_id: Number(w.line_id), sku: l ? l.sku : '', old_id: l && l.supplier ? l.supplier.id : null, old_name: l && l.supplier ? l.supplier.name : null, new_id: pid, new_name: null };
+        if (!l) { results.push({ ...base, result: 'blocked', message: 'Line is not on this sales order' }); continue; }
+        if (l.blocked) { results.push({ ...base, result: 'blocked', message: l.blocked }); continue; }
+        const opt = l.options.find(o => o.id === pid);
+        if (!opt) { results.push({ ...base, result: 'blocked', message: 'Supplier is not set up on this product in Fulfil' }); continue; }
+        base.new_name = opt.name;
+        if (base.old_id === pid) { results.push({ ...base, result: 'unchanged', message: 'Already ' + opt.name + ' in Fulfil' }); continue; }
+        writes.push({ base, l, opt });
+      }
+      for (const x of writes) {
+        try {
+          await sovWrite('sale.line', x.l.line_id, { supplier: x.opt.id }, { 'supplier.name': x.opt.name });
+          if (x.l.pr && x.l.pr.id && !x.l.pr.purchase_line && ['draft', 'exception'].includes(x.l.pr.state) && x.l.pr.party !== x.opt.id) {
+            await sovWrite('purchase.request', x.l.pr.id, { party: x.opt.id }, { 'party.name': x.opt.name }); x.prWritten = true; }
+          x.sent = true;
+        } catch (e) { results.push({ ...x.base, result: 'failed', message: String(e.message || e).slice(0, 300) }); }
+      }
+      const sent = writes.filter(x => x.sent);
+      if (sent.length) {   // READ BACK every written line (and draft purchase request) from Fulfil
+        const back = {}; (await sovSearch('sale.line', [['id', 'in', sent.map(x => x.l.line_id)]], ['id', 'supplier', 'supplier.name'], 500)).forEach(r => { back[r.id] = r; });
+        const prBack = {}, prIds = sent.filter(x => x.prWritten).map(x => x.l.pr.id);
+        if (prIds.length) (await sovSearch('purchase.request', [['id', 'in', prIds]], ['id', 'party'], 500)).forEach(r => { prBack[r.id] = r; });
+        sent.forEach(x => { const r = back[x.l.line_id], got = r ? (r.supplier || null) : undefined;
+          if (got !== x.opt.id) { results.push({ ...x.base, result: 'failed', message: 'Read-back mismatch: Fulfil line shows ' + (r ? (r['supplier.name'] || (got ? 'party ' + got : 'no supplier')) : 'no line') + ', expected ' + x.opt.name }); return; }
+          if (x.prWritten && (prBack[x.l.pr.id] || {}).party !== x.opt.id) { results.push({ ...x.base, result: 'failed', message: 'Line saved, but purchase request ' + x.l.pr.id + ' still shows the old supplier' }); return; }
+          results.push({ ...x.base, result: 'ok', message: 'Saved and read back' + (x.prWritten ? ' (purchase request updated too)' : '') }); });
+      }
+      await sovAudit(results.filter(r => r.result !== 'unchanged').map(r => ({ ...r, sale_id: saleId, sale_number: cur.sale.number, env: cfg.env, stub: gate.stub, by })));
+      return { ok: true, stub: gate.stub, env: cfg.env, sale: cur.sale, results, saved: results.filter(r => r.result === 'ok').length, failed: results.filter(r => r.result === 'failed').length, blocked: results.filter(r => r.result === 'blocked').length };
+    });
+    res.json(out);
+  } catch (e) { if (e.code === 'FULFIL_PUSH_BUSY') return res.status(409).json({ error: e.message }); log500(e); res.status(e.status === 404 ? 404 : e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+app.get('/api/supply/fulfil/sales-order/pushes', async (req, res) => {   // audit trail for one order (drawer footer)
+  try { const r = await pool.query(`SELECT line_id, sku, old_supplier, new_supplier, result, message, fulfil_env, stub, pushed_by, to_char(pushed_at,'YYYY-MM-DD"T"HH24:MI') pushed_at
+      FROM planner.so_supplier_pushes WHERE sale_id=$1 ORDER BY pushed_at DESC, id DESC LIMIT 100`, [Number(req.query.sale_id) || 0]); res.json({ ok: true, rows: r.rows }); }
+  catch (e) { res.json({ ok: true, rows: [] }); }   // pre-migration 334
+});
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,

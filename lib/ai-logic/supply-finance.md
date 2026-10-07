@@ -18,6 +18,8 @@ sources:
   - migrations/330_supplier_xero_contacts.sql :: planner.suppliers.xero_contact_uk/au
   - server.mjs :: /api/supply/tpl/data, /api/supply/tpl/goods-in, _tplGridSummary, _tplConsumablesInside (3PL invoices)
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
+  - server.mjs :: sovAnalyse, sovLineBlock, sovFindSales, /api/supply/fulfil/sales-order/push-suppliers (Validate sales order)
+  - migrations/334_so_supplier_pushes.sql :: planner.so_supplier_pushes
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
   - server.mjs :: /api/portal/submit, /api/portal/line-cost, /api/supply/submission/:id/apply, /api/supply/po-line-accept, /api/supply/po-line-reject
   - server.mjs :: portalShipmentRole, portalCanReadAttachment, /api/portal/shipment/:ref, /api/portal/attachment/:id, staffOnly, /api/portal/redeem (portal access rules)
@@ -80,6 +82,11 @@ fingerprints:
   server.mjs::/api/supply/fulfil/grid-status: 29e8325d5f40
   server.mjs::fulfilCompareRows: 9afcbaf79bb7
   server.mjs::fulfilImportPOs: 17755776cb38
+  server.mjs::sovAnalyse: f7dd288a3ddc
+  server.mjs::sovLineBlock: 889239e00674
+  server.mjs::sovFindSales: 18cf17b8bb06
+  server.mjs::/api/supply/fulfil/sales-order/push-suppliers: 18b9af3a7ab3
+  migrations/334_so_supplier_pushes.sql::planner.so_supplier_pushes: 193e21992ae8
   server.mjs::/api/supply/received-pos/process: 39c24ef889e6
   server.mjs::/api/portal/submit: 08ea62191222
   server.mjs::/api/portal/line-cost: 7d91a415da96
@@ -141,7 +148,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.191
+verified_version: v28.192
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -274,6 +281,14 @@ verified_version: v28.191
 - Mirror: fulfil_purchase_orders is refreshed every 6 hours, or by n8n. Drift covers active POs only (PRODUCTION, READY TO SHIP, SHIPPING) and flags: missing from Fulfil, line count difference, or per-SKU qty difference. Price differences are never flagged. A "drift approved" sign-off lapses once the lines change. (source: server.mjs :: fulfil/drift, grid-status)
 - ERP date drift: completion vs the Fulfil requested date (Cin7-era date for POs not in Fulfil). It flags when the gap is at least max(3 days, 5% of the days from today to completion). (source: server.mjs :: PO_ROWS_SQL erp_date_pending)
 - Compare (Fulfil POs not in HORIZON): open Fulfil POs from product suppliers. A Fulfil PO counts as already in HORIZON when its number or reference matches a HORIZON PO, an erp_po, or a linked po_links ref/id. (source: server.mjs :: fulfilCompareRows)
+
+## Validate sales order (from v28.192)
+- Where: SUPPLY > Purchase Orders > Direct to Client > "Validate sales order" drawer. Input = a Fulfil sales order number (SO59854, so59854 or 59854), a Fulfil link (.../sales_order/284762) or the order reference. A link is an exact id; otherwise id, number and exact reference are searched, then a partial reference match; more than one hit lists them to pick. (source: server.mjs :: sovFindSales)
+- Lines: every sale.line of type "line". Ship method = sale.line.delivery_mode (dropship = Drop ship; ship / pick_up / backorder / make_on_order = from stock or other, shown grey with no supplier). Service products (e.g. SHIPPING) are shown grey and left out of line and unit totals. The Fulfil supplier = sale.line.supplier. (source: server.mjs :: sovAnalyse)
+- Supplier choices for a drop-ship line = the active purchase.product_supplier rows of that product, limited to the sale's company when any match. Pre-selected: the current Fulfil supplier, else the only option, else none ("Choose..." with a red !). * = more than one supplier possible. The HORIZON SKU supplier (main_supplier_final) shows as a hint when it differs. Fulfil status: ok (same), differs (pick differs from Fulfil), missing (no Fulfil supplier). (source: server.mjs :: sovAnalyse)
+- Summary chips: units and line counts per CURRENTLY picked supplier, plus No supplier and Ship from stock. (source: supply/inject.html :: openSoValDrawer)
+- A line cannot be changed when: it is not drop ship (inter-company drop ship included), the order is done or cancelled, the line has shipped, or its purchase request is already on a purchase order (any PO state). If the request is still draft (no PO line), the request's supplier is changed together with the line. (source: server.mjs :: sovLineBlock, /api/supply/fulfil/sales-order/push-suppliers)
+- Push: admin only; needs FULFIL_LIVE_WRITES=true on live Fulfil; one push per order at a time. The server re-reads the order and refuses any line that is blocked, not on the order, or given a supplier not set up on the product. Each change is a write of sale.line.supplier, then every written line is READ BACK; a line only counts as saved when Fulfil shows the new supplier. Every attempt (ok, failed, blocked) is logged in planner.so_supplier_pushes with old and new supplier and the user. (source: server.mjs :: /api/supply/fulfil/sales-order/push-suppliers)
 
 ## Supplier portal
 - Suppliers submit a completion date and an invoice value. These wait as pending submissions until D&B applies them: completion goes to end_production_overide, invoice to supplier_invoice_total. Carrier and tracking update the shipment immediately when the supplier is the shipment's master (consolidating) supplier; a rider's carrier and tracking wait as a pending submission. Production status applies immediately. (source: server.mjs :: /api/portal/submit, submission/:id/apply)
