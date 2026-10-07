@@ -2824,7 +2824,7 @@
     // for FOB / manufacturing / all-direct shipments) with NO crossdock SKUs. Same rule as SUPPLY ▸ Actions (XDOCK_3PL_SQL).
     crossdock_needed:function(r){ return !!r.xdock_3pl && !String(r.crossdock_skus||'').trim() && !poComplete(r) && !/cancel/i.test(r.status||''); }};
   // v28.187 (Ben): the specific crossdock message (shipment, 3PL, client) shown on the PO drawer Client tab + tooltips.
-  function xdockMsg(r){ return 'Crossdock likely required: shipment '+(r.shipment||'?')+' lands at '+(r.xdock_3pl||'?')+' (3PL) but this PO ships to the client'+(String(r.client||'').trim()?' ('+String(r.client).trim()+')':'')+' and has no crossdock SKUs.'; }
+  function xdockMsg(r){ return 'Crossdock likely required: shipment '+(r.shipment||'?')+' lands at '+(r.xdock_3pl||'?')+' (3PL) but this PO ships on to '+(/fba|awd/i.test(r.branch||'')?r.branch:'the client'+(String(r.client||'').trim()?' ('+String(r.client).trim()+')':''))+' and has no crossdock SKUs.'; }
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.

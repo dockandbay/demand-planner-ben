@@ -1078,16 +1078,18 @@ function numOrNull(v) { if (v === '' || v == null) return null; const n = Number
 // Same rule in SQL for casting a stored text value → numeric safely (garbage → NULL, never an error).
 const SAFE_NUM_SQL = col => `(CASE WHEN regexp_replace(coalesce(${col},''),'[^0-9.-]','','g') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${col},'[^0-9.-]','','g')::numeric END)`;
 // v28.187 (Ben): "Crossdock likely required". A 3PL branch = a market country_code (UK/US/EU/AU/CA) AND a fulfil_id
-// (UK ILG, US Geneva, US AWD, EU iFulfillment, AU Coghlans); Direct to Client (DIRECT), FBA, B2B, manufacturing etc. are not.
-const TPL_BRANCH_SQL = b => `(upper(coalesce(${b}.country_code,'')) IN ('UK','US','EU','AU','CA') AND coalesce(${b}.fulfil_id::text,'')<>'')`;
+// (UK ILG, US Geneva, EU iFulfillment, AU Coghlans); Direct to Client (DIRECT), FBA, B2B, manufacturing etc. are not.
+// v28.202 (Ben): US AWD is an Amazon destination, not a 3PL, so it is excluded here (AWD has a Fulfil id).
+const TPL_BRANCH_SQL = b => `(upper(coalesce(${b}.country_code,'')) IN ('UK','US','EU','AU','CA') AND coalesce(${b}.fulfil_id::text,'')<>'' AND ${b}.name !~* 'awd')`;
 // The 3PL branch a CLIENT-bound PO's shipment actually lands at, else NULL. Client-bound = branch country DIRECT, or a
-// Direct to Client / UK B2B JLEW / UK B2B NEXT branch (the directclient report set), or a key-account PO whose own branch
+// Direct to Client / UK B2B JLEW / UK B2B NEXT branch (the directclient report set), v28.202 an Amazon FBA / AWD branch
+// (Ben: FBA and AWD stock routed through a 3PL needs a crossdock too), or a key-account PO whose own branch
 // is not a 3PL. Never for a Manufacturing (FOB) PO or a FOB-mode shipment. Destination = the shipment's own branch when
 // set (only a 3PL counts); when the shipment branch is blank, any OTHER PO on the same shipment_ref with a 3PL branch
 // (e.g. IS198: PO-1845589 Direct to Client rides with PO-57USLX6 US Geneva). ONE definition shared by the PO grid row
 // (xdock_3pl → PO_ACTCOND.crossdock_needed) and SUPPLY ▸ Actions (buildActionsRows), so the counts agree.
 const XDOCK_3PL_SQL = (po, branch, keyAcct, ship) => `(SELECT CASE
-    WHEN NOT (upper(coalesce(xob.country_code,''))='DIRECT' OR lower(coalesce(${branch},'')) ~ '(direct to client|b2b jlew|b2b next)'
+    WHEN NOT (upper(coalesce(xob.country_code,''))='DIRECT' OR lower(coalesce(${branch},'')) ~ '(direct to client|b2b jlew|b2b next|fba|awd)'
               OR (coalesce(${keyAcct},false) AND NOT coalesce(${TPL_BRANCH_SQL('xob')},false))) THEN NULL
     WHEN lower(coalesce(${branch},'')) LIKE '%manufactur%' OR lower(coalesce(xsh.mode,''))='fob' THEN NULL
     WHEN coalesce(xsh.branch,'')<>'' THEN (SELECT xsb.name FROM planner.branches xsb WHERE xsb.name=xsh.branch AND ${TPL_BRANCH_SQL('xsb')})
@@ -8006,10 +8008,10 @@ async function buildActionsRows() {
           -- no crossdock SKUs. Same XDOCK_3PL_SQL as the PO grid row (PO_ACTCOND.crossdock_needed). Clears when
           -- crossdock SKUs are set, the shipment changes (FOB / all-direct / no 3PL) or the PO completes.
           SELECT 'high','Crossdock likely required', xd.po,
-            'Crossdock likely required: shipment '||xd.sref||' lands at '||xd.tpl||' (3PL) but this PO ships to the client'
-              ||coalesce(' ('||nullif(trim(xd.client),'')||')','')||' and has no crossdock SKUs',
+            'Crossdock likely required: shipment '||xd.sref||' lands at '||xd.tpl||' (3PL) but this PO ships on to '
+              ||CASE WHEN xd.branch ~* '(fba|awd)' THEN xd.branch ELSE 'the client'||coalesce(' ('||nullif(trim(xd.client),'')||')','') END||' and has no crossdock SKUs',
             'gotopo','po','', xd.po
-            FROM (SELECT p.po, p.client, x.sref,
+            FROM (SELECT p.po, p.client, p.branch, x.sref,
                     ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', 'x.sref')} tpl
                   FROM planner.purchase_orders p
                   CROSS JOIN LATERAL (SELECT coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1)) sref) x

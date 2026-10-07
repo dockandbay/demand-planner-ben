@@ -55,7 +55,7 @@ fingerprints:
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: fe619dd254d8
+  server.mjs::buildActionsRows: 96e3d735cbaf
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 645a4102e9a0
@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.187
+verified_version: v28.202
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -258,8 +258,8 @@ verified_version: v28.187
 - preship: documents due from production end minus 7 days.
 - Also: not approved, missing production dates, missing master, payment invalid, shipped to master.
 - crossdock_needed, "Crossdock likely required" (v28.187, red, Client/FBA tab):
-  - The PO ships to the client: branch country DIRECT, or a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a key account PO whose own branch is not a 3PL.
-  - Its shipment lands at a 3PL. A 3PL branch has a market country (UK, US, EU, AU, CA) and a Fulfil id: UK ILG, US Geneva, US AWD, EU iFulfillment, AU Coghlans.
+  - The PO ships past the 3PL: branch country DIRECT, or a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or (v28.202) an Amazon FBA or AWD branch (UK/US/AU/CA FBA, US AWD), or a key account PO whose own branch is not a 3PL.
+  - Its shipment lands at a 3PL. A 3PL branch has a market country (UK, US, EU, AU, CA) and a Fulfil id, and is not AWD (v28.202): UK ILG, US Geneva, EU iFulfillment, AU Coghlans. US AWD is an Amazon destination, not a 3PL.
   - Destination = the shipment's branch when set (only a 3PL counts). When the shipment branch is blank, any other PO on the same shipment with a 3PL branch.
   - Not for a Manufacturing (FOB) PO or a FOB-mode shipment.
   - Fires only when crossdock SKUs are empty and the PO is not complete or cancelled. Child POs raise nothing.

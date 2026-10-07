@@ -1,3 +1,12 @@
+## v28.202 (Ben, branch review-fixes-2026-10-05): "Crossdock likely required" covers FBA and AWD POs
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/actions.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben 07-Oct: Amazon FBA / AWD stock routed through a 3PL on a shipment needs a crossdock. A PO on a UK/US/AU/CA FBA or US AWD branch now raises "Crossdock likely required" (PO grid red action, SUPPLY ▸ Actions, po_actions metric) when its shipment lands at a 3PL and it has no crossdock SKUs, same as Direct to Client / B2B.
+- US AWD no longer counts as a 3PL landing point (it is the Amazon destination): a PO riding a shipment to US AWD is not flagged.
+- Message names the onward branch for FBA/AWD ("ships on to UK FBA") instead of "the client".
+- Live impact today: 0 new actions (all 25 FBA/AWD POs on live are complete). Sandbox (stale data) shows e.g. PO-54UKJM1-FBA on PO-54UKXR2-FEB landing at UK ILG.
+
 ## v28.201 (Ben, branch review-fixes-2026-10-05): client portal New Order screen, quantities can be entered + carton notification
 
 **Files:** `supply/client-view.js` (+ package.json, CHANGES.md). No migration, no env vars. (v28.199 / v28.200 are reserved for the Fulfil push guard and per-order messages, merging separately.)
