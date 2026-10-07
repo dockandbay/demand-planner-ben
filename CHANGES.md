@@ -26,6 +26,18 @@
 - Carton quantity: "Ctn qty" column (units per carton), Qty placeholder "×20", spinner steps in whole cartons. A quantity that is not a whole number of cartons shows an amber cell hint while typing, a toast on commit ("25 is not a whole number of cartons (20 per carton). Whole cartons preferred: 20 or 40."), and a cart line warning. Preferred, not blocked (review step still asks to round or tick "submit anyway"). Sample requests show cartons without warnings.
 - Top nav "Order" renamed "New Order".
 
+## v28.200 (Ben, branch review-fixes-2026-10-05): CLIENT messages and documents per order
+
+**Files:** `migrations/336_client_order_threads.sql`, `server.mjs`, `supply/inject.html`, `supply/client-view.js`, `supply/client.html`, `tests/portal-security.cjs`, `tests/portal-scope.cjs`, `lib/ai-logic/supply-finance.md`. **Migration 336** (additive, idempotent). No env vars.
+
+- Each order has its own conversation with documents, shared between CLIENT ▸ Orders (💬 / 📎 column; click opens a 50% drawer with order header, documents, thread and compose, including staff-only "Internal" notes and files; deep link `#/client/orders/<key>`), the client portal My orders (chips on each order, "Messages & documents" panel on the order page, phone friendly) and Messages on both sides (Order tag, All / Orders / General filter, "Open order"; replying in Messages replies on the order).
+- One thread per client and order, keyed `F<fulfil_id>` (Fulfil mirror) or `P<portal order id>` (portal submission; follows the order into the mirror once it has a Fulfil number).
+- Visibility: a portal user sees an order's thread only if the order is visible to their client under the My orders rules; a scope 'self' user only for their own orders. Anything else is 403 (thread and attachment routes now answer 403 instead of 404). Internal items are never shown, counted, emailed or downloadable for the client. Order-thread emails go only to users who can see the order.
+- Unread counts for the nav badge, Messages and My orders come from one thread list.
+- Routes: portal `/api/cp/order-threads`, `/api/cp/order-thread/:key[/post]` (cpAuth, under the existing /api/cp/* gate exemption); admin `/api/client/order-threads`, `/api/client/order-thread/:key[/post]` (cpAdminGate, in HZ_CLIENT_W_SKIP). `/api/client/threads` gains `?kind=order|general`.
+- **Diviyaj:** apply migration 336 (until applied the order routes return 503 and Messages work as before). Upload size limit ~4.5 MB on Vercel (base64 JSON), same as Messages.
+- Open question for Ben: a scope 'self' user currently sees ALL of their client's orders in My orders (cpVisibilitySql ORs their email in, widening not narrowing); threads already apply the narrower rule.
+
 ## v28.199 (Ben, branch review-fixes-2026-10-05) URGENT, deploy with v28.186: Fulfil push guard
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`. No migration, no env vars (`HZ_FULFIL_WRITE_STUB=1` stubs the PO push, dev only).

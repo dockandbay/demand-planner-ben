@@ -1414,7 +1414,7 @@ const HZ_PORTAL_W_SKIP = new Set(['health', 'storage', 'parse-invoice', 'request
 const HZ_PORTAL_W_OWN = new Set(['note', 'note-read', 'note-delete', 'sample-note-delete', 'product-notes-read', 'product-note', 'sample-note-read',
   'sample-note', 'spec-approve', 'quality-doc', 'price-list', 'onboarding']);   // price list / onboarding: not in the payload (own endpoints); onboarding handlers mark what they need
 const HZ_PORTAL_W_SHIPNOTE = new Set(['shipment-note', 'shipment-notes-read', 'shipment-note-delete']);   // own, but a shipment's unread badge is shared
-const HZ_CLIENT_W_SKIP = /^\/api\/client\/(threads|preview|users\/[^/]+\/(magic|invite)|price-preview)/;
+const HZ_CLIENT_W_SKIP = /^\/api\/client\/(threads|order-thread|preview|users\/[^/]+\/(magic|invite)|price-preview)/;   // v28.200 (Ben): + order-thread (messages / documents change no cached CLIENT data)
 function _hzWriteKind(req) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return null;
   const p = String(req.path || '');
@@ -24272,16 +24272,17 @@ async function cpOrders(opts) {
     const days = d ? Math.round((Date.parse(today) - Date.parse(d)) / 86400000) : null;
     let bucket = 'open'; if (fulfilled) bucket = 'fulfilled'; if (r.state === 'draft' || r.state === 'quotation') bucket = 'draft';
     const unpaid = fulfilled && r.invoice_state && r.invoice_state !== 'paid' && r.invoice_state !== 'none';
-    return { id: r.fulfil_id, ref: r.reference || r.number, number: r.number, origin, state: r.state, bucket, unpaid: !!unpaid, company: r.party_name, customer: r.ship_name || r.party_name, email: r.party_email, channel: r.channel, country: r.country_code, currency: r.currency, amount: Number(r.total) || 0, net: Number(r.untaxed) || 0,
+    return { id: r.fulfil_id, okey: 'F' + r.fulfil_id, ref: r.reference || r.number, number: r.number, origin, state: r.state, bucket, unpaid: !!unpaid, company: r.party_name, customer: r.ship_name || r.party_name, email: r.party_email, channel: r.channel, country: r.country_code, currency: r.currency, amount: Number(r.total) || 0, net: Number(r.untaxed) || 0,
       created: d, days, fulfilled_date: last ? last.date : null, tracking: last ? last.tracking : null, carrier: last ? (last.carrier || r.carrier) : r.carrier, shipment: last ? last.number : null, invoice_state: r.invoice_state, shipment_state: r.shipment_state,
       document: origin === 'cin7' ? { kind: 'xero', label: 'Xero invoice', url: null, note: 'Xero link: pending the Xero mirror (Diviyaj)' } : { kind: 'fulfil', label: 'Fulfil document', url: null },
       lines: cpJson(r.lines, []) };
   });
   // portal-submitted orders not yet in the mirror (drafts waiting on Ops) — shown at the top
+  // v28.200 (Ben): every row carries okey ('F<fulfil_id>' | 'P<client_orders.id>'), the order identity its messages / documents hang on
   if (client) { const subs = (await pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, requested_date, to_char(created_at,'YYYY-MM-DD') created, ship_to, lines FROM planner.client_orders WHERE client_id=$1 AND created_at > now() - interval '120 days' ORDER BY created_at DESC`, [client.id])).rows;
     const known = new Set(out.map(o => o.number).filter(Boolean));
     subs.forEach(o => { if (o.fulfil_number && known.has(o.fulfil_number)) return; const st = cpJson(o.ship_to, {});
-      out.unshift({ id: 'cp-' + o.id, ref: o.fulfil_number || ('CP-' + o.id), number: o.fulfil_number, origin: 'fulfil', state: o.status === 'fulfil_draft' ? 'draft' : 'submitted', bucket: 'draft', unpaid: false, company: st.company || client.name, customer: st.contact || st.company || client.name, channel: client.fulfil_channel, country: null, currency: o.currency, amount: Number(o.total) || 0, net: Number(o.total) || 0,
+      out.unshift({ id: 'cp-' + o.id, okey: 'P' + o.id, ref: o.fulfil_number || ('CP-' + o.id), number: o.fulfil_number, origin: 'fulfil', state: o.status === 'fulfil_draft' ? 'draft' : 'submitted', bucket: 'draft', unpaid: false, company: st.company || client.name, customer: st.contact || st.company || client.name, channel: client.fulfil_channel, country: null, currency: o.currency, amount: Number(o.total) || 0, net: Number(o.total) || 0,
         created: o.created, days: Math.round((Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(o.created)) / 86400000), requested: o.requested_date ? String(o.requested_date).slice(0, 10) : null, sample: o.order_type === 'sample', customer_po: o.customer_po, portal_order_id: o.id, document: { kind: 'fulfil', label: o.status === 'fulfil_draft' ? 'Draft in Fulfil' : 'Submitted · awaiting Ops', url: null }, lines: cpJson(o.lines, []) }); }); }
   return status ? out.filter(o => status === 'unpaid' ? o.unpaid : o.bucket === status) : out;
 }
@@ -24520,30 +24521,52 @@ app.post('/api/client/commission/runs/:id/push-fulfil', async (req, res) => {
 });
 
 // ── messaging (admin side) ──
-async function cpThreadList(clientId) {
-  const params = []; let w = ''; if (clientId) { params.push(clientId); w = 'WHERE t.client_id=$1'; }
+// v28.200 (Ben): order threads carry order_key / order_ref (migration 336); `okey` = the key the /orders lists show the order under
+// today (a portal submission whose Fulfil draft has reached the mirror is shown as its mirror row 'F<id>'). Internal (staff-only)
+// messages count for staff only. Until 336 is applied the order columns read as null (_cp336 probe below).
+const CP_OKEY_SQL = `coalesce((SELECT 'F'||s.fulfil_id FROM planner.client_orders o JOIN planner.fulfil_sales s ON s.number=o.fulfil_number WHERE t.order_key='P'||o.id LIMIT 1), t.order_key)`;
+let _cp336 = null;   // null = unknown, true = migration 336 applied, false = not yet (order features answer 503, the rest works as before)
+async function cpHas336() { if (_cp336 === true) return true; try { await pool.query(`SELECT order_key FROM planner.client_threads LIMIT 0`); await pool.query(`SELECT internal FROM planner.client_messages LIMIT 0`); _cp336 = true; } catch (e) { if (e && e.code === '42703') _cp336 = false; else throw e; } return _cp336; }
+async function cpThreadList(clientId, opts) {
+  const has = await cpHas336(); const params = []; const w = [];
+  if (clientId) { params.push(clientId); w.push('t.client_id=$' + params.length); }
+  if (has && opts && opts.kind === 'order') w.push('t.order_key IS NOT NULL'); else if (has && opts && opts.kind === 'general') w.push('t.order_key IS NULL');
   return (await pool.query(`SELECT t.id, t.client_id, c.name client, c.type client_type, t.subject, t.context, to_char(t.last_at,'YYYY-MM-DD HH24:MI') last_at, t.last_sender,
+      ${has ? `t.order_key, t.order_ref, ${CP_OKEY_SQL} okey,` : 'null::text order_key, null::text order_ref, null::text okey,'}
       (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id AND m.sender_kind='client' AND m.read_by_ops_at IS NULL) unread_ops,
-      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id AND m.sender_kind='ops' AND m.read_by_client_at IS NULL) unread_client,
+      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id AND m.sender_kind='ops' AND m.read_by_client_at IS NULL${has ? ' AND NOT m.internal' : ''}) unread_client,
+      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id) msgs,
+      (SELECT count(*)::int FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id WHERE m.thread_id=t.id) files,
       (SELECT left(m.body,140) FROM planner.client_messages m WHERE m.thread_id=t.id ORDER BY m.created_at DESC LIMIT 1) preview,
       (SELECT m.sender FROM planner.client_messages m WHERE m.thread_id=t.id ORDER BY m.created_at DESC LIMIT 1) preview_by
-    FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id ${w} ORDER BY t.last_at DESC LIMIT 300`, params)).rows;
+    FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY t.last_at DESC LIMIT 300`, params)).rows;
 }
-async function cpThreadMessages(threadId) {
-  const msgs = (await pool.query(`SELECT m.id, m.sender_kind, m.sender, m.body, to_char(m.created_at,'YYYY-MM-DD HH24:MI') at, m.read_by_ops_at IS NOT NULL read_ops, m.read_by_client_at IS NOT NULL read_client FROM planner.client_messages m WHERE m.thread_id=$1 ORDER BY m.created_at`, [threadId])).rows;
-  const files = (await pool.query(`SELECT f.id, f.message_id, f.filename, f.mime, f.byte_size FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id WHERE m.thread_id=$1`, [threadId])).rows;
+// opts.client: the portal view (internal messages and their files left out; v28.200).
+async function cpThreadMessages(threadId, opts) {
+  const has = await cpHas336(); const forClient = !!(opts && opts.client) && has;
+  const [mr, fr] = await Promise.all([pool.query(`SELECT m.id, m.sender_kind, m.sender, m.body, to_char(m.created_at,'YYYY-MM-DD HH24:MI') at, m.read_by_ops_at IS NOT NULL read_ops, m.read_by_client_at IS NOT NULL read_client${has ? ', m.internal' : ', false internal'} FROM planner.client_messages m WHERE m.thread_id=$1${forClient ? ' AND NOT m.internal' : ''} ORDER BY m.created_at`, [threadId]),
+    pool.query(`SELECT f.id, f.message_id, f.filename, f.mime, f.byte_size FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id WHERE m.thread_id=$1${forClient ? ' AND NOT m.internal' : ''}`, [threadId])]);
+  const msgs = mr.rows, files = fr.rows;
   msgs.forEach(m => { m.files = files.filter(f => f.message_id === m.id); }); return msgs;
 }
-async function cpPostMessage(threadId, senderKind, sender, body, atts) {
-  const m = (await pool.query(`INSERT INTO planner.client_messages (thread_id, sender_kind, sender, body) VALUES ($1,$2,$3,$4) RETURNING id`, [threadId, senderKind, sender || null, String(body || '').trim() || null])).rows[0];
+// v28.200 (Ben): the thread's documents = every file on its messages, newest first, with uploader + date (portal: shared ones only).
+function cpThreadDocs(msgs) { const out = []; msgs.forEach(m => (m.files || []).forEach(f => out.push({ id: f.id, filename: f.filename, mime: f.mime, byte_size: f.byte_size, by: m.sender, by_kind: m.sender_kind, at: m.at, internal: !!m.internal, message_id: m.id }))); return out.reverse(); }
+// v28.200 (Ben): cpPostMessageX = cpPostMessage + opts.internal (staff-only message / document; needs 336), returning { id, files }
+// (files = attachments actually saved). cpPostMessage keeps returning the message id for the existing callers.
+async function cpPostMessageX(threadId, senderKind, sender, body, atts, opts) {
+  const internal = !!(opts && opts.internal) && senderKind === 'ops' && await cpHas336();
+  const m = (await pool.query(`INSERT INTO planner.client_messages (thread_id, sender_kind, sender, body${internal ? ', internal' : ''}) VALUES ($1,$2,$3,$4${internal ? ', true' : ''}) RETURNING id`, [threadId, senderKind, sender || null, String(body || '').trim() || null])).rows[0];
+  let files = 0;
   for (const a of (Array.isArray(atts) ? atts : []).slice(0, 6)) { try { const up = resolveUpload(a, { maxInline: 8 * 1024 * 1024 }); const buf = up.storagePath ? null : up.buf; if (!buf && !up.storagePath) continue;
-      await pool.query(`INSERT INTO planner.client_message_files (message_id, filename, mime, byte_size, data, storage_path) VALUES ($1,$2,$3,$4,$5,$6)`, [m.id, String(a.filename || 'file').slice(0, 200), safeMime(a.mime), up.storagePath ? up.byteSize : buf.length, buf, up.storagePath || null]); } catch (e) {} }
-  await pool.query(`UPDATE planner.client_threads SET last_at=now(), last_sender=$2 WHERE id=$1`, [threadId, senderKind]);
-  return m.id;
+      await pool.query(`INSERT INTO planner.client_message_files (message_id, filename, mime, byte_size, data, storage_path) VALUES ($1,$2,$3,$4,$5,$6)`, [m.id, String(a.filename || 'file').slice(0, 200), safeMime(a.mime), up.storagePath ? up.byteSize : buf.length, buf, up.storagePath || null]); files++; } catch (e) {} }
+  // an internal note does not move the thread for the client (last_at / last_sender are what the portal list sorts and labels by)
+  if (!internal) await pool.query(`UPDATE planner.client_threads SET last_at=now(), last_sender=$2 WHERE id=$1`, [threadId, senderKind]);
+  return { id: m.id, files };
 }
-app.get('/api/client/threads', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.query.client_id || null) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+async function cpPostMessage(threadId, senderKind, sender, body, atts) { return (await cpPostMessageX(threadId, senderKind, sender, body, atts)).id; }
+app.get('/api/client/threads', async (req, res) => { try { res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.query.client_id || null, { kind: req.query.kind }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });   // v28.200 (Ben): + ?kind=order|general
 app.get('/api/client/threads/:id', async (req, res) => {
-  try { const t = (await pool.query(`SELECT t.*, c.name client, c.owner_email FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [req.params.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
+  try { const t = (await pool.query(`SELECT t.*, c.name client, c.owner_email${(await cpHas336()) ? ', ' + CP_OKEY_SQL + ' okey' : ''} FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [req.params.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });   // v28.200 (Ben): + okey (order threads open the order drawer)
     await pool.query(`UPDATE planner.client_messages SET read_by_ops_at=now() WHERE thread_id=$1 AND sender_kind='client' AND read_by_ops_at IS NULL`, [req.params.id]);
     res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(req.params.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -24555,7 +24578,9 @@ app.post('/api/client/threads', async (req, res) => {
 });
 app.post('/api/client/threads/:id/reply', async (req, res) => {
   const b = req.body || {}; if (!String(b.body || '').trim() && !(Array.isArray(b.attachments) && b.attachments.length)) return res.status(400).json({ error: 'empty message' });
-  try { const id = await cpPostMessage(req.params.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments); await cpNotifyClientMessage(req.params.id, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  // v28.200 (Ben): + internal (staff-only note / document: not shown to the client, no client email). Replying here on an order
+  // thread IS replying on the order (same thread as CLIENT > Orders and the portal's My orders).
+  try { const r = await cpPostMessageX(req.params.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments, { internal: !!b.internal }); if (!(b.internal && _cp336)) await cpNotifyClientMessage(req.params.id, req); res.json({ ok: true, id: r.id, files: r.files }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/client/attachment/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.client_message_files WHERE id=$1`, [req.params.id])).rows[0]; if (!r) return res.status(404).send('not found');
@@ -24563,15 +24588,137 @@ app.get('/api/client/attachment/:id', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function cpNotifyClientMessage(threadId, req) {   // email the client's active users that Dock & Bay replied (best-effort)
-  try { const t = (await pool.query(`SELECT t.subject, t.client_id, c.name FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [threadId])).rows[0]; if (!t) return;
-    const users = (await pool.query(`SELECT email FROM planner.client_users WHERE client_id=$1 AND active`, [t.client_id])).rows.map(u => u.email); if (!users.length) return;
-    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to: users, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${t.subject || 'your message'}</b> in the client portal.</p><p><a href="${cpBase(req)}/client#/messages/${threadId}">Open the conversation</a></p>` }); } catch (e) {}
+  try { const has = await cpHas336();
+    const t = (await pool.query(`SELECT t.subject, t.client_id, c.name, c.visibility${has ? `, t.order_key, t.order_ref, ${CP_OKEY_SQL} okey` : ''} FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [threadId])).rows[0]; if (!t) return;
+    let users = (await pool.query(`SELECT id, email, scope FROM planner.client_users WHERE client_id=$1 AND active`, [t.client_id])).rows;
+    // v28.200 (Ben): an order thread only emails the users who can see that order (scope 'self' = their own orders only)
+    if (t.order_key) { const cl = { id: t.client_id, visibility: t.visibility || {} }; const keep = [];
+      for (const u of users) { if ((await cpAllowedOrderKeys(cl, u, [t.order_key, t.okey])).size) keep.push(u); } users = keep; }
+    const to = users.map(u => u.email); if (!to.length) return;
+    const link = t.order_key ? cpBase(req) + '/client#/orders/' + encodeURIComponent(cpOkeyToPortalId(t.okey || t.order_key)) : cpBase(req) + '/client#/messages/' + threadId;
+    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${escHtml(t.subject || 'your message')}</b> in the client portal.</p><p><a href="${escHtml(link)}">Open the conversation</a></p>` }); } catch (e) {}
 }
 async function cpNotifyOpsMessage(threadId, client, req) {
   try { const to = String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean); if (client.owner_email && !to.includes(client.owner_email)) to.push(client.owner_email); if (!to.length) { console.log('[client portal] message from ' + client.name + ' — no cp_message_default_to / owner set, not emailed'); return; }
     const t = (await pool.query(`SELECT subject FROM planner.client_threads WHERE id=$1`, [threadId])).rows[0];
-    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Client message — ' + client.name + ': ' + ((t && t.subject) || ''), html: `<p><b>${client.name}</b> sent a message in the client portal: <b>${(t && t.subject) || ''}</b>.</p><p><a href="${adminBase(req)}/#/client/messages/${threadId}">Open in HORIZON ▸ CLIENT ▸ Messages</a></p>` }); } catch (e) {}
+    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Client message — ' + client.name + ': ' + ((t && t.subject) || ''), html: `<p><b>${escHtml(client.name)}</b> sent a message in the client portal: <b>${escHtml((t && t.subject) || '')}</b>.</p><p><a href="${adminBase(req)}/#/client/messages/${threadId}">Open in HORIZON ▸ CLIENT ▸ Messages</a></p>` }); } catch (e) {}
 }
+
+// ── v28.200 (Ben): MESSAGES + DOCUMENTS PER CLIENT ORDER ─────────────────────────────────────────────────────────────────────
+// Ben (07-Oct): "share messages and documents related to each order; shows in Messages but also on /orders on both admin and client
+// portal". One thread per (client, order) in planner.client_threads (migration 336: order_key / order_ref), created on the first
+// message or document. Order identity = the key both /orders lists use: 'F<fulfil_id>' (Fulfil sales mirror row) or 'P<client_orders.id>'
+// (portal submission not yet in the mirror; once its draft reaches the mirror the thread is found from the mirror row: CP_OKEY_SQL /
+// cpOrderThreadFind). Documents = the thread's message attachments (same storage + serveFile as Messages). Staff may mark a message /
+// document internal (never shown to, counted for, emailed to or downloadable by the client).
+// Visibility (portal): a user may open an order's thread only if the order is visible to their client (cpVisibilitySql, the My orders
+// rule; portal submissions: own client) and, for scope 'self' (rep: own customers only), only their OWN orders: mirror rows whose
+// party_email is theirs, portal submissions they placed. Everything else answers 403. Staff (CLIENT access) see every thread.
+// Caching: nothing here is cached (no-store, live queries), so a new message / document is read back at once on both sides; the
+// cached order payloads (cpu:orders) are untouched because no order data changes. The admin writes are in HZ_CLIENT_W_SKIP so a
+// message does not bust every CLIENT cache. Health: the v28.195 /api/cp/* capture tags these routes by client id; route patterns
+// (:key) keep order refs out of the path; no message text or email is ever logged.
+const CP_OKEY_RE = /^([FP])(\d{1,18})$/;
+function cpParseOkey(k) { const m = CP_OKEY_RE.exec(String(k || '')); return m ? { kind: m[1], id: m[2], key: m[1] + m[2] } : null; }
+function cpOkeyToPortalId(k) { const p = cpParseOkey(k); return !p ? '' : p.kind === 'F' ? p.id : 'cp-' + p.id; }
+// keys -> Set of the keys this portal identity may open (see the rule above). `user` null = the client as a whole.
+async function cpAllowedOrderKeys(client, user, keys) {
+  const out = new Set(); const ks = [...new Set((keys || []).map(cpParseOkey).filter(Boolean).map(x => x.key))];
+  const f = ks.filter(k => k[0] === 'F').map(k => k.slice(1)), p = ks.filter(k => k[0] === 'P').map(k => k.slice(1));
+  const self = !!(user && user.scope === 'self');
+  if (self && !String(user.email || '').trim()) return out;
+  if (f.length) { const params = [f]; const vis = cpVisibilitySql(client, user, params); let own = '';
+    if (self) { params.push(String(user.email).trim().toLowerCase()); own = ` AND lower(coalesce(s.party_email,''))=$${params.length}`; }
+    (await pool.query(`SELECT s.fulfil_id FROM planner.fulfil_sales s WHERE s.fulfil_id = ANY($1::bigint[]) AND coalesce(s.state,'') <> 'cancel' AND ${vis}${own}`, params)).rows.forEach(r => out.add('F' + r.fulfil_id)); }
+  if (p.length) { const params = [p, client.id]; let own = ''; if (self) { params.push(user.id); own = ' AND o.user_id=$3'; }
+    (await pool.query(`SELECT o.id FROM planner.client_orders o WHERE o.id = ANY($1::bigint[]) AND o.client_id=$2${own}`, params)).rows.forEach(r => out.add('P' + r.id)); }
+  return out;
+}
+// the one thread of (client, order), following a portal submission into the mirror (either direction)
+async function cpOrderThreadFind(clientId, key) {
+  const k = cpParseOkey(key); if (!k) return null;
+  return (await pool.query(`SELECT t.* FROM planner.client_threads t WHERE t.client_id=$1 AND (t.order_key=$2
+      OR ($3='F' AND t.order_key IN (SELECT 'P'||o.id FROM planner.client_orders o JOIN planner.fulfil_sales s ON s.number=o.fulfil_number WHERE s.fulfil_id=$4::bigint AND o.client_id=$1))
+      OR ($3='P' AND t.order_key IN (SELECT 'F'||s.fulfil_id FROM planner.client_orders o JOIN planner.fulfil_sales s ON s.number=o.fulfil_number WHERE o.id=$4::bigint)))
+    ORDER BY t.created_at LIMIT 1`, [clientId, k.key, k.kind, k.id])).rows[0] || null;
+}
+// order header for the drawer / thread (staff side; the portal renders its own row). null = no such order.
+async function cpOrderHeader(key) {
+  const k = cpParseOkey(key); if (!k) return null;
+  if (k.kind === 'F') { const r = (await pool.query(`SELECT fulfil_id, number, reference, state, party_name, ship_name, party_email, channel, country_code, currency, total, untaxed, invoice_state, shipment_state, to_char(sale_date,'YYYY-MM-DD') sale_date, to_char(fulfil_created,'YYYY-MM-DD') created, shipments FROM planner.fulfil_sales WHERE fulfil_id=$1::bigint`, [k.id])).rows[0]; if (!r) return null;
+    const ships = cpJson(r.shipments, []); const last = ships.filter(x => x.state === 'done').pop() || ships[ships.length - 1] || null;
+    return { key: k.key, kind: 'fulfil', ref: r.reference || r.number, number: r.number, company: r.party_name, customer: r.ship_name || r.party_name, state: r.state, invoice_state: r.invoice_state, shipment_state: r.shipment_state, channel: r.channel, country: r.country_code, currency: r.currency, amount: Number(r.total) || 0, net: Number(r.untaxed) || 0, created: r.sale_date || r.created, shipped: last ? last.date : null, tracking: last ? last.tracking : null, carrier: last ? last.carrier : null }; }
+  const r = (await pool.query(`SELECT o.id, o.client_id, c.name client, o.order_type, o.status, o.customer_po, o.units, o.total, o.currency, o.fulfil_number, to_char(o.requested_date,'YYYY-MM-DD') requested, to_char(o.created_at,'YYYY-MM-DD') created, o.ship_to FROM planner.client_orders o JOIN planner.clients c ON c.id=o.client_id WHERE o.id=$1::bigint`, [k.id])).rows[0]; if (!r) return null;
+  const st = cpJson(r.ship_to, {});
+  return { key: k.key, kind: 'portal', ref: r.fulfil_number || ('CP-' + r.id), number: r.fulfil_number, company: st.company || r.client, customer: st.contact || st.company || r.client, state: r.status === 'fulfil_draft' ? 'draft' : 'submitted', currency: r.currency, amount: Number(r.total) || 0, created: r.created, requested: r.requested, customer_po: r.customer_po, sample: r.order_type === 'sample', units: r.units, client_id: r.client_id };
+}
+// staff: which clients this order belongs to = clients whose visibility includes it (portal submission: its client), plus any client
+// that already has a thread on it. One query for every active client (a few dozen at most).
+async function cpOrderClients(key) {
+  const k = cpParseOkey(key); if (!k) return [];
+  const [clients, thr] = await Promise.all([pool.query(`SELECT id, name, type, visibility, features, active FROM planner.clients WHERE active ORDER BY name`).then(r => r.rows),
+    pool.query(`SELECT t.client_id, t.id FROM planner.client_threads t WHERE t.order_key=$1
+      OR ($2='F' AND t.order_key IN (SELECT 'P'||o.id FROM planner.client_orders o JOIN planner.fulfil_sales s ON s.number=o.fulfil_number WHERE s.fulfil_id=$3::bigint))
+      OR ($2='P' AND t.order_key IN (SELECT 'F'||s.fulfil_id FROM planner.client_orders o JOIN planner.fulfil_sales s ON s.number=o.fulfil_number WHERE o.id=$3::bigint)) ORDER BY t.created_at`, [k.key, k.kind, k.id]).then(r => r.rows)]);
+  const vis = new Set();
+  if (k.kind === 'P') { const r = (await pool.query(`SELECT client_id FROM planner.client_orders WHERE id=$1::bigint`, [k.id])).rows[0]; if (r) vis.add(r.client_id); }
+  else if (clients.length) { const params = [k.id]; const parts = clients.map(c => { const v = cpVisibilitySql(c, null, params); return `SELECT ${Number(c.id)} cid WHERE EXISTS (SELECT 1 FROM planner.fulfil_sales s WHERE s.fulfil_id=$1::bigint AND ${v})`; });
+    (await pool.query(parts.join(' UNION ALL '), params)).rows.forEach(r => vis.add(Number(r.cid))); }
+  const withThread = new Map(); thr.forEach(r => { if (!withThread.has(r.client_id)) withThread.set(r.client_id, Number(r.id)); });
+  return clients.filter(c => vis.has(c.id) || withThread.has(c.id)).map(c => ({ id: c.id, name: c.name, type: c.type, visible: vis.has(c.id), messaging: !!(c.features && c.features.messaging), thread_id: withThread.get(c.id) || null }));
+}
+// create (or find) the thread for (client, order). The unique index (client_id, order_key) makes a double first-post race safe.
+async function cpOrderThreadEnsure(clientId, key, by, senderKind) {
+  const found = await cpOrderThreadFind(clientId, key); if (found) return found;
+  const h = await cpOrderHeader(key); const ref = (h && h.ref) || key;
+  await pool.query(`INSERT INTO planner.client_threads (client_id, subject, context, created_by, last_sender, order_key, order_ref) VALUES ($1,$2,$3,$4,$5,$6,$7)
+    ON CONFLICT (client_id, order_key) WHERE order_key IS NOT NULL DO NOTHING`, [clientId, ('Order ' + ref).slice(0, 200), String(ref).slice(0, 200), by || null, senderKind, key, String(ref).slice(0, 200)]);
+  return await cpOrderThreadFind(clientId, key);
+}
+// per-order counts for a list of threads, keyed by the key the /orders lists show (okey). staff: unread = client messages not read
+// by Dock & Bay; portal: unread = Dock & Bay messages the client has not read (internal never counted).
+function cpOrderCounts(threads, side) {
+  const out = {}; threads.forEach(t => { if (!t.order_key) return; const k = t.okey || t.order_key; const e = out[k] || (out[k] = { msgs: 0, files: 0, unread: 0, threads: 0, thread_id: t.id, clients: [] });
+    e.msgs += t.msgs || 0; e.files += t.files || 0; e.unread += (side === 'ops' ? t.unread_ops : t.unread_client) || 0; e.threads++; if (t.client_id != null && e.clients.indexOf(t.client_id) < 0) e.clients.push(t.client_id); });
+  return out;
+}
+// how many of the posted attachments cpPostMessageX will be able to store (same resolveUpload rule, nothing written)
+function cpAttReadable(atts) { return (Array.isArray(atts) ? atts : []).slice(0, 6).filter(a => { try { resolveUpload(a, { maxInline: 8 * 1024 * 1024 }); return true; } catch (e) { return false; } }).length; }
+const _cp503 = (res) => res.status(503).json({ error: 'order messages need migration 336 (client_order_threads) on this database' });
+// staff: counts for CLIENT > Orders (one client, or every client when unscoped)
+app.get('/api/client/order-threads', async (req, res) => {
+  try { if (!(await cpHas336())) return res.set('Cache-Control', 'no-store').json({ counts: {}, migration: false });
+    const ts = await cpThreadList(req.query.client_id || null, { kind: 'order' });
+    res.set('Cache-Control', 'no-store').json({ counts: cpOrderCounts(ts, 'ops') }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// staff: the order drawer. ?client_id picks whose conversation (an order can be visible to more than one client, e.g. an agent and
+// the key account); default = the client with an existing thread, else the first client that can see it. Opening marks the
+// client's messages read by Dock & Bay.
+app.get('/api/client/order-thread/:key', async (req, res) => {
+  try { if (!(await cpHas336())) return _cp503(res); const k = cpParseOkey(req.params.key); if (!k) return res.status(400).json({ error: 'bad order key' });
+    const [header, clients] = await Promise.all([cpOrderHeader(k.key), cpOrderClients(k.key)]); if (!header) return res.status(404).json({ error: 'order not found' });
+    const want = req.query.client_id ? clients.find(c => String(c.id) === String(req.query.client_id)) : (clients.find(c => c.thread_id) || clients.find(c => c.visible) || null);
+    if (req.query.client_id && !want) return res.status(404).json({ error: 'that client can not see this order' });
+    let thread = null, messages = [];
+    if (want) { thread = await cpOrderThreadFind(want.id, k.key);
+      if (thread) { await pool.query(`UPDATE planner.client_messages SET read_by_ops_at=now() WHERE thread_id=$1 AND sender_kind='client' AND read_by_ops_at IS NULL`, [thread.id]); messages = await cpThreadMessages(thread.id); } }
+    res.set('Cache-Control', 'no-store').json({ key: k.key, header, clients, client_id: want ? want.id : null, thread: thread ? { id: thread.id, subject: thread.subject, order_ref: thread.order_ref } : null, messages, documents: cpThreadDocs(messages) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// staff: post a message and / or documents on the order (creates the thread on first use). internal = staff-only.
+app.post('/api/client/order-thread/:key/post', async (req, res) => {
+  const b = req.body || {}; const nAtt = cpAttReadable(b.attachments);
+  if (Array.isArray(b.attachments) && b.attachments.length && !nAtt && !String(b.body || '').trim()) return res.status(400).json({ error: 'the document could not be read (over 8 MB, or empty)' });
+  if (!String(b.body || '').trim() && !nAtt) return res.status(400).json({ error: 'empty message' });
+  try { if (!(await cpHas336())) return _cp503(res); const k = cpParseOkey(req.params.key); if (!k) return res.status(400).json({ error: 'bad order key' });
+    const clients = await cpOrderClients(k.key); const c = clients.find(x => String(x.id) === String(b.client_id || '')) || (clients.length === 1 ? clients[0] : null);
+    if (!c) return res.status(400).json({ error: clients.length ? 'pick which client this message is for' : 'no client can see this order' });
+    const t = await cpOrderThreadEnsure(c.id, k.key, req.me.email || null, 'ops'); if (!t) return res.status(500).json({ error: 'could not create the order thread' });
+    const r = await cpPostMessageX(t.id, 'ops', req.me.email || 'Dock & Bay', b.body, b.attachments, { internal: !!b.internal });
+    if (!b.internal) await cpNotifyClientMessage(t.id, req);
+    res.json({ ok: true, thread_id: t.id, id: r.id, files: r.files, client_id: c.id });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 
 // ═════════════════════════════════════ PORTAL (client-facing) ═════════════════════════════════════
 // v28.175 (Ben, perf roadmap #5): client-portal caches, all in the v28.167 machinery (lazy SWR, single-flight, rebuild cap,
@@ -24677,7 +24824,9 @@ app.post('/api/cp/request-link', async (req, res) => {
 });
 app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cookieVal(req, 'csid'); if (csid) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE token=$1`, [csid]); } } catch {} res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true }); });
 app.get('/api/cp/me', cpAuth, async (req, res) => {
-  try { const c = req.cp.client; const unread = (await pool.query(`SELECT count(*)::int n FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=$1 AND m.sender_kind='ops' AND m.read_by_client_at IS NULL`, [c.id])).rows[0].n;
+  // v28.200 (Ben): unread = the sum over the SAME thread list Messages shows (cpPortalThreads: order threads scoped to the user, internal
+  // notes never counted), so the nav badge, Messages and My orders agree. 0 when messaging is off.
+  try { const c = req.cp.client; const unread = c.features.messaging ? (await cpPortalThreads(req.cp)).reduce((s, t) => s + (t.unread_client || 0), 0) : 0;
     const stockScope = c.stock_scope || { mode: 'default' }; const wh = c.warehouse_code || CP_MARKETS[c.market].wh;
     res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSettingC('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSettingC('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -24833,11 +24982,42 @@ app.get('/api/cp/commission', cpAuth, async (req, res) => {
     const v = _cpMemo(_cpSig('comm', gid, qm, c.rep_group_name || null, c.currency), [base], () => ({ group: c.rep_group_name, runs: base.runs, month: base.month, run: base.run, rows: base.rows, currency: c.currency }));
     sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.get('/api/cp/threads', cpAuth, async (req, res) => { try { if (!req.cp.client.features.messaging) return res.status(403).json({ error: 'messaging not enabled' }); res.set('Cache-Control', 'no-store').json({ threads: await cpThreadList(req.cp.client.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.200 (Ben): the portal's thread list. Internal (staff-only) messages are invisible here: not in the counts, the preview or the
+// sort time. Order threads are kept only when the user may open that order (cpAllowedOrderKeys: My orders visibility, scope 'self' =
+// own orders only) and once they hold a shared message. The same list feeds Messages, the My orders counts and the nav badge (/me),
+// so the three always agree.
+async function cpPortalThreads(cp) {
+  const has = await cpHas336(); const NI = has ? ' AND NOT m.internal' : '';
+  const rows = (await pool.query(`SELECT t.id, t.client_id, t.subject, t.context, t.last_sender,
+      ${has ? `t.order_key, t.order_ref, ${CP_OKEY_SQL} okey,` : 'null::text order_key, null::text order_ref, null::text okey,'}
+      to_char(coalesce((SELECT max(m.created_at) FROM planner.client_messages m WHERE m.thread_id=t.id${NI}), t.created_at),'YYYY-MM-DD HH24:MI') last_at,
+      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id AND m.sender_kind='ops' AND m.read_by_client_at IS NULL${NI}) unread_client,
+      (SELECT count(*)::int FROM planner.client_messages m WHERE m.thread_id=t.id${NI}) msgs,
+      (SELECT count(*)::int FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id WHERE m.thread_id=t.id${NI}) files,
+      (SELECT left(m.body,140) FROM planner.client_messages m WHERE m.thread_id=t.id${NI} ORDER BY m.created_at DESC LIMIT 1) preview,
+      (SELECT m.sender FROM planner.client_messages m WHERE m.thread_id=t.id${NI} ORDER BY m.created_at DESC LIMIT 1) preview_by
+    FROM planner.client_threads t WHERE t.client_id=$1 ORDER BY last_at DESC LIMIT 300`, [cp.client.id])).rows;
+  const ord = rows.filter(t => t.order_key && t.msgs > 0); if (!ord.length) return rows.filter(t => !t.order_key);
+  const ok = await cpAllowedOrderKeys(cp.client, cp.user, [].concat(...ord.map(t => [t.order_key, t.okey])));
+  return rows.filter(t => !t.order_key || (t.msgs > 0 && (ok.has(t.order_key) || ok.has(t.okey))));
+}
+// one thread for this portal identity: 403 for another client's thread, an unknown id, or an order the user may not open (no
+// existence oracle, as the supplier portal since v28.186).
+async function cpPortalThread(cp, id) {
+  if (!/^\d{1,18}$/.test(String(id || ''))) return null;
+  const has = await cpHas336();
+  const t = (await pool.query(`SELECT t.*${has ? ', ' + CP_OKEY_SQL + ' okey' : ''} FROM planner.client_threads t WHERE t.id=$1 AND t.client_id=$2`, [id, cp.client.id])).rows[0];
+  if (!t) return null;
+  if (t.order_key && !(await cpAllowedOrderKeys(cp.client, cp.user, [t.order_key, t.okey])).size) return null;
+  return t;
+}
+const _cpNoMsg = (res) => res.status(403).json({ error: 'messaging not enabled' });
+app.get('/api/cp/threads', cpAuth, async (req, res) => { try { if (!req.cp.client.features.messaging) return _cpNoMsg(res); res.set('Cache-Control', 'no-store').json({ threads: await cpPortalThreads(req.cp) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });   // v28.200 (Ben): cpPortalThreads (order threads scoped, internal hidden)
 app.get('/api/cp/threads/:id', cpAuth, async (req, res) => {
-  try { const t = (await pool.query(`SELECT * FROM planner.client_threads WHERE id=$1 AND client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
-    await pool.query(`UPDATE planner.client_messages SET read_by_client_at=now() WHERE thread_id=$1 AND sender_kind='ops' AND read_by_client_at IS NULL`, [t.id]);
-    res.set('Cache-Control', 'no-store').json({ thread: t, messages: await cpThreadMessages(t.id) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { if (!req.cp.client.features.messaging) return _cpNoMsg(res);
+    const t = await cpPortalThread(req.cp, req.params.id); if (!t) return res.status(403).json({ error: 'not found' });   // v28.200 (Ben): 403 (was 404), + order scope
+    if (!req.cp.preview) await pool.query(`UPDATE planner.client_messages SET read_by_client_at=now() WHERE thread_id=$1 AND sender_kind='ops' AND read_by_client_at IS NULL${(await cpHas336()) ? ' AND NOT internal' : ''}`, [t.id]);   // v28.200 (Ben): an admin preview never marks read
+    res.set('Cache-Control', 'no-store').json({ thread: { id: t.id, subject: t.subject, context: t.context, order_key: t.order_key || null, order_ref: t.order_ref || null, okey: t.okey || null, portal_order_id: t.order_key ? cpOkeyToPortalId(t.okey || t.order_key) : null }, messages: await cpThreadMessages(t.id, { client: true }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/cp/threads', cpAuth, async (req, res) => {
   if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — messaging is disabled while an admin is viewing as the client.', preview: true });
@@ -24847,13 +25027,56 @@ app.post('/api/cp/threads', cpAuth, async (req, res) => {
 });
 app.post('/api/cp/threads/:id/reply', cpAuth, async (req, res) => {
   if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only) — messaging is disabled while an admin is viewing as the client.', preview: true });
-  const b = req.body || {}; try { const t = (await pool.query(`SELECT id FROM planner.client_threads WHERE id=$1 AND client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!t) return res.status(404).json({ error: 'not found' });
-    if (!String(b.body || '').trim() && !(Array.isArray(b.attachments) && b.attachments.length)) return res.status(400).json({ error: 'empty message' });
+  const b = req.body || {}; try { if (!req.cp.client.features.messaging) return _cpNoMsg(res);
+    const t = await cpPortalThread(req.cp, req.params.id); if (!t) return res.status(403).json({ error: 'not found' });   // v28.200 (Ben): + order scope (replying in Messages = replying on the order)
+    if (!String(b.body || '').trim() && !cpAttReadable(b.attachments)) return res.status(400).json({ error: 'empty message' });
     const id = await cpPostMessage(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments); await cpNotifyOpsMessage(t.id, req.cp.client, req); res.json({ ok: true, id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/cp/attachment/:id', cpAuth, async (req, res) => {
-  try { const r = (await pool.query(`SELECT f.filename, f.mime, f.data, f.storage_path FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id JOIN planner.client_threads t ON t.id=m.thread_id WHERE f.id=$1 AND t.client_id=$2`, [req.params.id, req.cp.client.id])).rows[0]; if (!r) return res.status(404).send('not found');
+  // v28.200 (Ben): never an internal file, and an order thread's file only for a user who may open that order. 403 for anything
+  // else (unknown, another client's, malformed), no existence oracle.
+  try { if (!/^\d{1,18}$/.test(String(req.params.id || ''))) return res.status(403).send('not found');
+    const has = await cpHas336();
+    const r = (await pool.query(`SELECT f.filename, f.mime, f.data, f.storage_path, t.id thread_id${has ? ', t.order_key' : ''} FROM planner.client_message_files f JOIN planner.client_messages m ON m.id=f.message_id JOIN planner.client_threads t ON t.id=m.thread_id WHERE f.id=$1 AND t.client_id=$2${has ? ' AND NOT m.internal' : ''}`, [req.params.id, req.cp.client.id])).rows[0]; if (!r) return res.status(403).send('not found');
+    if (r.order_key && !(await cpPortalThread(req.cp, r.thread_id))) return res.status(403).send('not found');
     return serveFile(res, r);   // v28.151 (review B1): serveFile = allowlisted mime, nosniff, CSP sandbox, attachment unless image/PDF
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── v28.200 (Ben): messages + documents per order, portal side (rule: see "MESSAGES + DOCUMENTS PER CLIENT ORDER" above) ──
+// counts for My orders, keyed by the order's okey; `own` = the order keys a scope 'self' user may open (others see the 💬 on every row)
+app.get('/api/cp/order-threads', cpAuth, async (req, res) => {
+  try { const c = req.cp.client, u = req.cp.user; if (!c.features.messaging) return _cpNoMsg(res);
+    if (!(await cpHas336())) return res.set('Cache-Control', 'no-store').json({ counts: {}, migration: false });
+    const ts = (await cpPortalThreads(req.cp)).filter(t => t.order_key);
+    let own = null;
+    if (u.scope === 'self') { own = []; const em = String(u.email || '').trim().toLowerCase();
+      if (em) { const params = []; const vis = cpVisibilitySql(c, u, params); params.push(em);
+        (await pool.query(`SELECT 'F'||s.fulfil_id k FROM planner.fulfil_sales s WHERE ${vis} AND lower(coalesce(s.party_email,''))=$${params.length} AND coalesce(s.state,'') <> 'cancel' LIMIT 2000`, params)).rows.forEach(r => own.push(r.k)); }
+      (await pool.query(`SELECT 'P'||id k FROM planner.client_orders WHERE client_id=$1 AND user_id=$2`, [c.id, u.id])).rows.forEach(r => own.push(r.k)); }
+    res.set('Cache-Control', 'no-store').json({ counts: cpOrderCounts(ts, 'client'), own });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/cp/order-thread/:key', cpAuth, async (req, res) => {
+  try { const c = req.cp.client; if (!c.features.messaging) return _cpNoMsg(res); if (!(await cpHas336())) return _cp503(res);
+    const k = cpParseOkey(req.params.key); if (!k || !(await cpAllowedOrderKeys(c, req.cp.user, [k.key])).has(k.key)) return res.status(403).json({ error: 'not found' });
+    const t = await cpOrderThreadFind(c.id, k.key); let messages = [];
+    if (t) { if (!req.cp.preview) await pool.query(`UPDATE planner.client_messages SET read_by_client_at=now() WHERE thread_id=$1 AND sender_kind='ops' AND read_by_client_at IS NULL AND NOT internal`, [t.id]);
+      messages = await cpThreadMessages(t.id, { client: true }); }
+    res.set('Cache-Control', 'no-store').json({ key: k.key, thread: t ? { id: t.id, subject: t.subject, order_ref: t.order_ref } : null, messages, documents: cpThreadDocs(messages) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cp/order-thread/:key/post', cpAuth, async (req, res) => {
+  if (req.cp.preview) return res.status(423).json({ error: 'Preview mode (read-only): messaging is disabled while an admin is viewing as the client.', preview: true });
+  const b = req.body || {}; const c = req.cp.client;
+  try { if (!c.features.messaging) return _cpNoMsg(res); if (!(await cpHas336())) return _cp503(res);
+    const k = cpParseOkey(req.params.key); if (!k || !(await cpAllowedOrderKeys(c, req.cp.user, [k.key])).has(k.key)) return res.status(403).json({ error: 'not found' });
+    const nAtt = cpAttReadable(b.attachments);
+    if (Array.isArray(b.attachments) && b.attachments.length && !nAtt && !String(b.body || '').trim()) return res.status(400).json({ error: 'the document could not be read (over 8 MB, or empty)' });
+    if (!String(b.body || '').trim() && !nAtt) return res.status(400).json({ error: 'empty message' });
+    const t = await cpOrderThreadEnsure(c.id, k.key, req.cp.user.email, 'client'); if (!t) return res.status(500).json({ error: 'could not create the order thread' });
+    const r = await cpPostMessageX(t.id, 'client', req.cp.user.name || req.cp.user.email, b.body, b.attachments);
+    await cpNotifyOpsMessage(t.id, c, req);
+    res.json({ ok: true, thread_id: t.id, id: r.id, files: r.files });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ═══════════════════════════════════════════ end CLIENT PORTAL ═══════════════════════════════════════════
