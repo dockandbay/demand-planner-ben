@@ -1,3 +1,13 @@
+## v28.203 (Ben, branch review-fixes-2026-10-05): client portal New Order grid fits on screen
+
+**Files:** `supply/client-view.js`, `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Columns now: image, SKU (full product name on hover), Type, Colour · size, Ctn qty (with the "2 ctn ✓" / "⚠ 1.3 ctn" check underneath), Qty, Price · stock (stock on hand underneath), Season · disc. (disc date underneath). Was 11 columns, now 8.
+- Product type = the product name before its colour ("Canvas Beach Bag", "Cooling Bag"); the long product title is dropped from the row.
+- Long SKUs / colours wrap instead of stretching the table; tighter padding, smaller thumbnails; cart fixed at 300px on the order step. On a 1,728px screen the grid is 938px wide with no sideways scroll (was 1,333px in an 825px box). Phones keep the single-column layout.
+- Negative stock shows as 0 to clients.
+- Sandbox data: planner.products refreshed from live 07-Oct (read-only SELECT on live; sandbox backup planner._bak_products_20261007). 875 SKUs added, 2,054 updated (1,188 status changes, e.g. BAGBCH-MD-MNTID now CLOSED and off the portal); 24 sandbox-only SS27 test sets kept.
+
 ## v28.202 (Ben, branch review-fixes-2026-10-05): "Crossdock likely required" covers FBA and AWD POs
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/actions.md` (+ package.json, CHANGES.md). No migration, no env vars.
