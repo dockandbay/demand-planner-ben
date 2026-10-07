@@ -74,9 +74,9 @@
 </style>
 </head>
 <body>
-<div id="cp-root"><div class="cp-login"><div class="cp-lcard"><div class="tiny mut" style="letter-spacing:.14em;text-transform:uppercase;font-weight:700">Dock &amp; Bay</div><h1>Client portal</h1><p>Loading…</p></div></div></div>
+<div id="cp-root"><div class="cp-login"><div class="cp-lcard" data-hz-loading="1"><div class="tiny mut" style="letter-spacing:.14em;text-transform:uppercase;font-weight:700">Dock &amp; Bay</div><h1>Client portal</h1><p>Loading…</p></div></div></div>
 <div id="cp-toast" role="status"></div>
 <script>window.CP_VERSION='__APP_VERSION__';</script>
-<script src="/client-view.js?v=__APP_VERSION__"></script>
+<script src="/client-view.js?v=__APP_VERSION__"></script><!-- v28.195 (Ben): the boot card carries data-hz-loading, so hz-health.js times the first screen until /me + the first view have rendered -->
 </body>
 </html>

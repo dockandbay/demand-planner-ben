@@ -12,7 +12,12 @@
     return fetch(path,o).then(function(r){ if(r.status===401){ showLogin(); throw new Error('signed out'); } return r.json().then(function(j){ if(!r.ok||(j&&j.error&&!opts.allowError)){ var e=new Error((j&&j.error)||('HTTP '+r.status)); e.payload=j; throw e; } return j; }); }); }
   var root=document.getElementById('cp-root'), ME=null, CACHE={};
   // ── login ──
-  function showLogin(msg){ ME=null; root.innerHTML='<div class="cp-login"><div class="cp-lcard"><div class="tiny mut" style="letter-spacing:.14em;text-transform:uppercase;font-weight:700">Dock &amp; Bay</div><h1>Client portal</h1><p>'+esc(msg||'Enter your email and we will send you a sign-in link.')+'</p>'
+  // v28.195 (Ben): health capture endpoints. Signed out (login page) there is no csid, so hz-health.js sends to the anonymous, rate-limited
+  // /api/cp/health/login-events; once /me succeeds it goes back to the session route (tagged with the client id server-side, no email).
+  function hzEp(u){ try{ if(window.__hzHealth&&window.__hzHealth.setEp)window.__hzHealth.setEp(u); }catch(e){} }
+  // v28.195 (Ben): a screen that re-renders without a hash change (order filter chips / dates) starts the slow-view timer itself.
+  function hzWatch(){ try{ if(typeof window.hzHealthWatch==='function')window.hzHealthWatch(); }catch(e){} }
+  function showLogin(msg){ ME=null; hzEp('/api/cp/health/login-events'); root.innerHTML='<div class="cp-login"><div class="cp-lcard"><div class="tiny mut" style="letter-spacing:.14em;text-transform:uppercase;font-weight:700">Dock &amp; Bay</div><h1>Client portal</h1><p>'+esc(msg||'Enter your email and we will send you a sign-in link.')+'</p>'
       +'<input id="cp-email" type="email" placeholder="you@company.com" autocomplete="email"><button class="cp-btn acc" id="cp-send" style="width:100%">Email me a link</button><div class="tiny mut" style="margin-top:12px">Links are valid for 7 days. No password needed.</div></div></div>';
     var b=document.getElementById('cp-send'), i=document.getElementById('cp-email');
     function go(){ var em=(i.value||'').trim(); if(!em||em.indexOf('@')<0){ toast('Enter a valid email',true); return; } b.disabled=true; b.textContent='Sending…'; fetch('/api/cp/request-link',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em})}).then(function(){ b.textContent='Sent — check your inbox'; }).catch(function(){ b.disabled=false; b.textContent='Email me a link'; toast('Could not send, try again',true); }); }
@@ -30,7 +35,7 @@
   function route(){ if(!ME)return; var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); var t=seg[0]||'home'; var allowed=navItems().map(function(n){return n[0];}); if(allowed.indexOf(t)<0)t='home'; setActive(t);
     ({home:vHome,catalogue:vCatalogue,order:vOrder,orders:vOrders,commission:vCommission,messages:vMessages})[t](seg.slice(1)); window.scrollTo(0,0); }
   window.addEventListener('hashchange',route);
-  function boot(){ api('/api/cp/me').then(function(j){ ME=j; shell(); route(); }).catch(function(e){ if(e.message!=='signed out')showLogin(/expired/.test(location.search)?'That link has expired. Request a new one.':undefined); }); }
+  function boot(){ api('/api/cp/me').then(function(j){ ME=j; hzEp('/api/cp/health/client-events'); shell(); route(); }).catch(function(e){ if(e.message!=='signed out')showLogin(/expired/.test(location.search)?'That link has expired. Request a new one.':undefined); }); }
   // ── shared data ──
   function products(force){ if(CACHE.products&&!force)return Promise.resolve(CACHE.products); return api('/api/cp/line-sheet').then(function(j){ CACHE.products=j; return j; }); }
   function prices(){ if(CACHE.prices)return Promise.resolve(CACHE.prices); return api('/api/cp/prices').then(function(j){ CACHE.prices=j; return j; }); }
@@ -42,8 +47,9 @@
   function statusBadge(p){ if(p.status==='PHASE OUT')return '<span class="badge b-a">Phase out</span>'; if(p.status==='LAST SEASON')return '<span class="badge b-a">Last season</span>'; if(p.launch&&String(p.launch)>new Date().toISOString().slice(0,10))return '<span class="badge b-b">'+esc(p.season||'New')+' · '+fd(p.launch)+'</span>'; return '<span class="badge b-g">Active</span>'; }
   function dimsTxt(p){ var d=p.dims||{}; var c=d.carton||[]; if(c.every(function(x){return x==null;}))return ''; return c.map(function(x){return x==null?'–':x;}).join('×')+' '+d.unit; }
   // ── HOME ──
-  function vHome(){ var m=main(); m.innerHTML='<div class="cp-lead">Loading…</div>';
-    Promise.all([orders(),products().catch(function(){return null;})]).then(function(r){ var os=r[0].orders||[], ps=(r[1]&&r[1].products)||[];
+  // v28.195 (Ben): no line sheet feature = no /line-sheet call (it answered 403 on every Home visit, which is now a recorded failure).
+  function vHome(){ var m=main(), f0=ME.client.features; m.innerHTML='<div class="cp-lead">Loading…</div>';
+    Promise.all([orders(),f0.view_line_sheet?products().catch(function(){return null;}):null]).then(function(r){ var os=r[0].orders||[], ps=(r[1]&&r[1].products)||[];
       var open=os.filter(function(o){return o.bucket==='open'||o.bucket==='draft';}), drafts=os.filter(function(o){return o.bucket==='draft';}), unpaid=os.filter(function(o){return o.unpaid;}), ful=os.filter(function(o){return o.bucket==='fulfilled'&&o.fulfilled_date&&(Date.parse(new Date().toISOString().slice(0,10))-Date.parse(o.fulfilled_date))<30*86400000;});
       var newest=ps.filter(function(p){return p.launch&&String(p.launch)>new Date().toISOString().slice(0,7);}); var season=newest[0]&&newest[0].season; var heroImg=(newest.find(function(p){return p.image;})||ps.find(function(p){return p.image;})||{}).image;
       var f=ME.client.features; var hello=(ME.user.name||'').split(' ')[0];
@@ -152,8 +158,8 @@
       m.innerHTML='<h1 class="cp-h">My orders</h1><p class="cp-lead">Open, fulfilled and unpaid in one list. Orders before the Fulfil cut-over carry a Xero invoice; later orders carry a Fulfil document.</p>'
         +'<div class="cp-bar">'+['all','open','fulfilled','unpaid'].map(function(t){return '<span class="cp-chip'+(OV.tab===t?' active':'')+'" data-t="'+t+'">'+t[0].toUpperCase()+t.slice(1)+'</span>';}).join('')+'<input class="cp-in" id="ovq" placeholder="order ref / PO / customer" value="'+esc(OV.q)+'" style="width:220px"><input class="cp-in" id="ovf" type="date" value="'+esc(OV.from)+'"><input class="cp-in" id="ovt" type="date" value="'+esc(OV.to)+'"><span class="tiny mut" style="margin-left:auto">'+list.length+' orders</span><button class="cp-btn" id="ovcsv">⬇ CSV</button></div>'
         +(list.map(orderRow).join('')||'<div class="cp-card mut">No orders match.</div>');
-      m.querySelectorAll('.cp-chip[data-t]').forEach(function(c){ c.onclick=function(){ OV.tab=c.dataset.t; vOrders([]); }; });
-      var q=document.getElementById('ovq'); q.onchange=function(){ OV.q=q.value; vOrders([]); }; document.getElementById('ovf').onchange=function(){ OV.from=this.value; vOrders([]); }; document.getElementById('ovt').onchange=function(){ OV.to=this.value; vOrders([]); };
+      m.querySelectorAll('.cp-chip[data-t]').forEach(function(c){ c.onclick=function(){ OV.tab=c.dataset.t; hzWatch(); vOrders([]); }; });
+      var q=document.getElementById('ovq'); q.onchange=function(){ OV.q=q.value; hzWatch(); vOrders([]); }; document.getElementById('ovf').onchange=function(){ OV.from=this.value; hzWatch(); vOrders([]); }; document.getElementById('ovt').onchange=function(){ OV.to=this.value; hzWatch(); vOrders([]); };
       document.getElementById('ovcsv').onclick=function(){ var rows=['order,origin,company,customer,created,status,tracking,carrier,amount,currency,document'].concat(list.map(function(o){ return [o.ref,o.origin,o.company,o.customer,o.created,o.bucket+(o.unpaid?' unpaid':''),o.tracking,o.carrier,o.amount,o.currency,o.document.label].map(function(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(','); })); var blob=new Blob([rows.join('\n')],{type:'text/csv'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='orders.csv'; document.body.appendChild(a); a.click(); a.remove(); };
       function detail(o){ var tl=o.bucket==='draft'?['Submitted','Confirmation','Picked','Shipped']:['Confirmed','Picked','Shipped','Delivered']; var at=o.bucket==='draft'?1:(o.bucket==='fulfilled'?3:1);
         m.innerHTML='<div class="cp-bar"><a class="cp-btn sm" href="#/orders">← My orders</a></div><h1 class="cp-h">'+esc(o.ref)+(o.sample?' <span class="badge b-a">Sample</span>':'')+'</h1><p class="cp-lead">'+esc(o.customer||o.company||'')+' · created '+fd(o.created)+(o.customer_po?' · your PO '+esc(o.customer_po):'')+'</p>'

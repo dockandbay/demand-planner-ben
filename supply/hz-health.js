@@ -67,7 +67,8 @@
     if(s.indexOf('/api/')!==0||API_SKIP.test(s))return null; return nv(s); }
   // v28.188 (Ben): the supplier portal also records 4xx (session expired 401, "not your shipment" 403, 404, validation 400 / 409):
   // to a supplier these are failures too. The sign-in probe (GET /api/portal/me answering 401 on the login page) is expected, not a failure.
-  function PORTAL4xx(m,p,s){ return SRC==='portal'&&!(s===401&&m==='GET'&&p==='/api/portal/me'); }
+  // v28.195 (Ben): the client portal too (its sign-in probe is GET /api/cp/me answering 401).
+  function PORTAL4xx(m,p,s){ return (SRC==='portal'&&!(s===401&&m==='GET'&&p==='/api/portal/me'))||(SRC==='client_portal'&&!(s===401&&m==='GET'&&p==='/api/cp/me')); }
   function apiNote(m,p,st,ms,err){ var k=m+' '+p+' '+st, a=API[k]; if(!a){ if(Object.keys(API).length>=40)return; a=API[k]={m:m,p:p,s:st,n:0,max:0,err:null}; } a.n++; if(ms>a.max)a.max=ms; if(err)a.err=err; }
   if(typeof _fetch==='function'){ window.fetch=function(input,init){
     var t0=0, u='', m='GET'; try{ t0=performance.now(); u=(typeof input==='string')?input:((input&&input.url)||String(input||'')); m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase(); }catch(e){}
@@ -81,7 +82,8 @@
   var DC={}, dcT=0, dcN=0, dcPend=null, DEAD_MS=1500;
   var NAVSEL='#hz-leftrail .rl1,#hz-leftrail .rl2,#hz-leftrail .rl3,#view-tabs-row .view-toggle,.hz-l2 .dnav,.d3nav .d3tab,#supply-subnav .stab,#rep-subnav .rtab,#act-subnav .rtab,#product-subnav .stab,#client-subnav .stab,#config-subs .rtab,#config-subs-l3 .rtab,#perf-subnav .rtab'
     +',#hz-drawer .hz-nav,#prod-subtabs .rtab,#pcfg-subs-l3 .rtab,#client-l3 .rtab,#tpl-subnav .dnav3'   // v28.184 (Ben): + the phone drawer tree (L1 / L2 / L3) and the L3 bars the drawer mirrors
-    +',#pp-secs .pp-sec,#pp-tabs .rtab';   // v28.188 (Ben): + the supplier portal's section menu and tab row (same rules, touch-aware)
+    +',#pp-secs .pp-sec,#pp-tabs .rtab'   // v28.188 (Ben): + the supplier portal's section menu and tab row (same rules, touch-aware)
+    +',#cp-nav .cp-nl,#cp .cp-seg span,#cp .cp-chip';   // v28.195 (Ben): + the client portal's top nav, view / tab toggles and order filter chips
   function navLabel(el){ try{ var l=el.querySelector('.lab,.hz-lab'), t=l?l.textContent:Array.prototype.filter.call(el.childNodes,function(n){ return n.nodeType===3; }).map(function(n){ return n.textContent; }).join('');
     return String(t||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60); }catch(e){ return '?'; } }   // v28.184 (Ben): .hz-lab = drawer row label (without its count badge)
   function navOn(el){ var c=el.classList; return !!(c&&(c.contains('active')||c.contains('on'))); }
@@ -98,7 +100,7 @@
   // v28.184 (Ben): phones. A tap is taken at touchend (a drag / scroll of the drawer is not a press); the compatibility mousedown the
   // browser fires right after the same tap is then ignored, so one tap never counts twice (which would read as "pressed again: dead").
   var dcTouch=null, dcTouchAt=0;
-  if(SRC==='staff'||SRC==='portal'){   // v28.188 (Ben): + the supplier portal
+  if(SRC==='staff'||SRC==='portal'||SRC==='client_portal'){   // v28.188 (Ben): + the supplier portal. v28.195 (Ben): + the client portal
     document.addEventListener('mousedown',function(e){ try{ if(e.button!==0||!e.target||!e.target.closest)return; if(Date.now()-dcTouchAt<1000)return; dcPress(e.target.closest(NAVSEL)); }catch(_){} },true);
     document.addEventListener('touchstart',function(e){ try{ var t=e.touches&&e.touches[0]; dcTouch=(e.touches&&e.touches.length===1&&e.target&&e.target.closest)?{el:e.target.closest(NAVSEL),x:t?t.clientX:0,y:t?t.clientY:0,moved:false}:null; }catch(_){ dcTouch=null; } },{capture:true,passive:true});
     document.addEventListener('touchmove',function(e){ try{ var t=e.touches&&e.touches[0]; if(dcTouch&&t&&(Math.abs(t.clientX-dcTouch.x)>10||Math.abs(t.clientY-dcTouch.y)>10))dcTouch.moved=true; }catch(_){} },{capture:true,passive:true});
