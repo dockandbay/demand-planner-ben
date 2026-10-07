@@ -110,7 +110,7 @@ fingerprints:
   server.mjs::/api/portal/shipment/:ref: f6ee876e945f
   server.mjs::/api/portal/attachment/:id: 386ae75896e8
   server.mjs::staffOnly: 0df84ff342f4
-  server.mjs::/api/portal/redeem: 6a098ae2a3e9
+  server.mjs::/api/portal/redeem: 1b6cd55e81c1
   server.mjs::portalPoIsSlim: 17fefe2c8da5
   server.mjs::portalPaymentsTrim: 0527feb03955
   server.mjs::/api/portal/po-detail: 22521cd4b8ba
@@ -167,7 +167,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.207
+verified_version: v28.210
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -325,7 +325,7 @@ verified_version: v28.207
 - Line cost, qty and added-SKU changes go to portal_line_costs. D&B accepts them (they update the order-plan line, and the supplier cost becomes final_cost) or rejects them. Only confirmed final_cost feeds PO value. (source: server.mjs :: po-line-accept, po-line-reject)
 - Shipment access: a supplier is on a shipment as its master (they supply the master PO: shipments.master_po, else the shipment ref when it is a PO number) or as a rider (one of their POs has that shipment_ref). Both may read and post shipment notes, add charges, see the shipment's tracking and add timeline files. Only the master may change shipment-level fields (Shipping status, ship date, carrier, tracking); setting Shipping moves every PO aboard to SHIPPING. A supplier sees only the shipment charges raised by its own supplier, and may delete only a shipment message written by its own people. (source: server.mjs :: portalShipmentRole, /api/portal/shipment/:ref)
 - File access in the portal: a file is served when its PO is the supplier's, or it belongs to the supplier's sample request, product development item (sample versions by the supplier's own development request), or it is a shipment timeline file (attached to a note on that shipment, or uploaded by the supplier) on a shipment the supplier is on. Sharing a shipment never opens another supplier's PO documents. A note may only reference a file the supplier can open. Staff file and DTC routes refuse portal sessions; the portal uses its own /api/portal routes. (source: server.mjs :: portalCanReadAttachment, /api/portal/attachment/:id, staffOnly)
-- Sign-in links: valid 24 hours (PORTAL_LINK_HOURS) and single use. Opening the link only shows a "Continue to portal" page; the button redeems it once (atomic), so email scanners cannot use it up. The session lasts 7 days; Sign out deletes it. (source: server.mjs :: /api/portal/redeem)
+- Sign-in links: valid 24 hours (PORTAL_LINK_HOURS) and single use. Opening the link only shows a "Continue to portal" page; the button redeems it once (atomic), so email scanners cannot use it up. The session lasts 7 days; Sign out deletes it. Link and session tokens (supplier and client portal) are stored only as a SHA-256 hash ('h1:...'), never the raw value, so reading the tables cannot sign anyone in; tokens written raw before v28.210 are still accepted until they expire. Expired links are purged hourly; expired sessions are kept 90 days for the portal activity report (raw ones hashed in place), then purged. (source: server.mjs :: /api/portal/redeem)
 - Portal first load (v28.189): completed POs come as light rows (every list field, no lines / documents / costs / detail-only fields); opening one (MANAGE) or a batch order plan fetches the rest first, so what is shown is unchanged. Payment runs made up only of archived POs' milestones (archive cutoff, same as the PO list) are not sent: the Payments headline still includes them and "Show them" loads them. (source: server.mjs :: portalPoIsSlim, portalPaymentsTrim, /api/portal/po-detail)
 - Product development with competing suppliers (v28.191): a sample version belongs to the supplier whose development request it was made under; only that supplier can change it, add files to it, or create versions on that request. A supplier's product notes and uploads are tied to its own supplier id, so a competitor on the same item never sees them; a document another supplier uploaded is neither listed nor downloadable; components sampled by another supplier show "another supplier". (source: server.mjs :: portalOwnsProductSample, portalCanReadAttachment)
 - Supplier submissions (completion date, invoice value, tracking, production status, confirmation) are checked before anything is saved; if a later step fails after something was saved, the supplier is told exactly what was saved (409) and the caches are refreshed. (source: server.mjs :: /api/portal/submit)
