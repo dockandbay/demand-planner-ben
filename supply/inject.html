@@ -7630,8 +7630,14 @@
         if(l.mode!=='dropship'){ stock.u+=l.qty; stock.n++; return; }
         var id=S.sel[l.line_id]; if(id==null){ none.u+=l.qty; none.n++; return; }
         var k=optName(l,id); (by[k]=by[k]||{u:0,n:0}); by[k].u+=l.qty; by[k].n++; });
-      var ch=function(lbl,o,cls){ return '<span class="tool-badge '+cls+'" style="margin:0 6px 4px 0;display:inline-block">'+lbl+' '+n0(o.u)+'u ('+o.n+' line'+(o.n===1?'':'s')+')</span>'; };
-      return Object.keys(by).sort().map(function(k){ return ch(esc(k),by[k],'bg-blue'); }).join('')+(none.n?ch('No supplier <b>!</b>',none,'bg-red'):'')+ch('Ship from stock',stock,'bg-neutral'); }
+      // v28.205 (Ben): clearer, larger summary: one card per supplier (name, units, lines); red card for lines with no supplier,
+      // grey for ship-from-stock (faded when there are none).
+      var ch=function(lbl,o,kind){ var c=kind==='red'?['var(--neg)','var(--neg-bg)']:kind==='stock'?['var(--line)','var(--band)']:['var(--blue)','var(--card)'];
+        return '<div style="display:inline-flex;flex-direction:column;gap:1px;min-width:118px;margin:0 8px 8px 0;padding:7px 12px;border:1px solid '+c[0]+';border-left-width:4px;border-radius:8px;background:'+c[1]+(kind==='stock'&&!o.n?';opacity:.55':'')+'">'
+          +'<span style="font-size:13px;font-weight:700;color:'+(kind==='red'?'var(--neg)':'var(--ink)')+'">'+lbl+'</span>'
+          +'<span style="font-size:17px;font-weight:700;line-height:1.2">'+n0(o.u)+' <span style="font-size:11px;font-weight:600;color:var(--muted)">units</span></span>'
+          +'<span style="font-size:11px;color:var(--muted)">'+o.n+' line'+(o.n===1?'':'s')+'</span></div>'; };
+      return '<div style="display:flex;flex-wrap:wrap;align-items:stretch">'+Object.keys(by).sort().map(function(k){ return ch(esc(k),by[k],'sup'); }).join('')+(none.n?ch('No supplier !',none,'red'):'')+ch('Ship from stock',stock,'stock')+'</div>'; }
     function statusCell(l){ if(l.mode!=='dropship'||l.service)return '<span class="mut">-</span>';
       var c=curId(l), s=S.sel[l.line_id], nm=l.supplier?esc(l.supplier.name):'<span class="mut">none</span>';
       var inOpts=c==null||(l.options||[]).some(function(o){return o.id===c;});
@@ -7639,8 +7645,18 @@
       return nm+' '+st+(inOpts?'':' <span class="mut tiny" title="the current Fulfil supplier is not set up as a supplier on this product">(not a product supplier)</span>'); }
     function supCell(l){ if(l.service)return '<span class="mut">(service)</span>'; if(l.mode!=='dropship')return '<span class="mut">(from stock)</span>';
       var opts=(l.options||[]).slice(), c=curId(l), s=S.sel[l.line_id];
+      // v28.205 (Ben): no dropdown when there is nothing to choose: no supplier set up on the product in Fulfil, or the only
+      // option is already the line's supplier. Plain text (current supplier or none) + the existing notes instead.
+      var noChoice=!opts.length||(opts.length===1&&c!=null&&opts[0].id===c&&(s==null||s===c));
+      if(noChoice){ var t=c!=null?esc(l.supplier.name):(opts.length?esc(opts[0].name):'<span class="mut">none</span>');
+        if(!opts.length&&!l.blocked)t+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
+        var hz0=l.horizon&&l.horizon.main; if(hz0&&String(hz0).toLowerCase()!==String(c!=null?l.supplier.name:'').toLowerCase())t+='<div class="mut tiny" title="HORIZON SKU supplier'+(l.horizon.multi?' (all: '+esc(l.horizon.multi)+')':'')+'">HORIZON: '+esc(hz0)+'</div>';
+        if(l.blocked)t+='<div class="mut tiny" style="color:var(--amber)">🔒 '+esc(l.blocked)+'</div>';
+        return t; }
       if(c!=null&&!opts.some(function(o){return o.id===c;}))opts.unshift({id:c,name:l.supplier.name+' (current)'});
-      var h='<select class="flt sov-sel" data-l="'+l.line_id+'"'+(editable(l)?'':' disabled')+' style="min-width:130px;max-width:100%">'+(s==null?'<option value="">Choose…</option>':'')
+      // v28.205 (Ben): a line with a choice of suppliers gets the Create Buy Plan "multiple suppliers" colouring (amber, --prod border)
+      var multi=(l.options||[]).length>1;
+      var h='<select class="flt sov-sel" data-l="'+l.line_id+'"'+(editable(l)?'':' disabled')+(multi?' title="multiple suppliers — pick one"':'')+' style="min-width:130px;max-width:100%'+(multi?';border:1px solid var(--prod);border-radius:4px;background:var(--amber-bg);color:var(--amber);font-weight:600':'')+'">'+(s==null?'<option value="">Choose…</option>':'')
         +opts.map(function(o){ return '<option value="'+o.id+'"'+(o.id===s?' selected':'')+'>'+esc(o.name)+(o.drop_shipment===false?' (no drop ship)':'')+'</option>'; }).join('')+'</select>';
       if((l.options||[]).length>1)h+=' <b title="more than one supplier possible" style="color:var(--blue)">*</b>';
       if(s==null&&editable(l))h+=' <b title="no supplier chosen" style="color:var(--neg)">!</b>';
@@ -7657,7 +7673,7 @@
       var h='<div style="margin-bottom:6px;font-size:13px"><b>'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.number||('#'+s.id))+'</a>':esc(s.number))+'</b> '+esc(s.customer)
         +' · '+goods.length+' line'+(goods.length===1?'':'s')+' · '+n0(goods.reduce(function(a,l){return a+l.qty;},0))+' units'
         +' <span class="mut tiny">'+esc(s.reference||'')+' · '+esc(s.state||'')+(s.sale_date?' · '+fd(s.sale_date):'')+'</span></div>'
-        +'<div style="margin-bottom:8px"><span class="pill-lbl" style="margin-right:6px">Suppliers</span>'+chips(L)+'</div>'+gateNote
+        +'<div style="margin-bottom:6px"><div class="pill-lbl" style="margin-bottom:6px">Suppliers</div>'+chips(L)+'</div>'+gateNote
         +linesTable(L,true)+'<div class="mut tiny" style="margin:6px 0">* = more than one supplier possible · ! = no supplier chosen</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="save-btn" id="sov-push-sel"'+(nSel&&!S.busy?'':' disabled')+'>Push selected to Fulfil'+(nSel?' ('+nSel+')':'')+'</button>'
         +'<button class="save-btn" id="sov-push-all" style="background:var(--nav);color:#fff;border-color:var(--nav)"'+(nChanged&&!S.busy?'':' disabled')+'>Push all changed ('+nChanged+')</button></div><div id="sov-log" style="margin-top:14px"></div>';
@@ -7733,7 +7749,7 @@
             +(x.status==='ambiguous'?(x.candidates||[]).map(function(c){ return '<div style="margin-left:14px"><button class="lnk-btn sov-bpick" data-i="'+idx+'" data-id="'+c.id+'" style="padding:2px 0"><b>'+esc(c.number||('#'+c.id))+'</b> '+esc(c.customer||'')+' <span class="mut tiny">'+esc(c.reference||'')+' · '+esc(c.state||'')+(c.sale_date?' · '+fd(c.sale_date):'')+'</span></button></div>'; }).join(''):'')+'</div>'; }).join('')+'</div>';
       h+='<div id="sov-bsum" style="margin-bottom:6px;font-size:13px"><b>'+oks.length+' order'+(oks.length===1?'':'s')+'</b> · '+goods.length+' line'+(goods.length===1?'':'s')+' · '+n0(goods.reduce(function(a,l){return a+l.qty;},0))+' units'
         +(nBlocked?' · <span class="tool-badge bg-neutral">'+nBlocked+' blocked</span>':'')+'</div>'
-        +'<div style="margin-bottom:8px"><span class="pill-lbl" style="margin-right:6px">Suppliers</span>'+chips(L)+'</div>'+gateNote+(B.note||'')
+        +'<div style="margin-bottom:6px"><div class="pill-lbl" style="margin-bottom:6px">Suppliers</div>'+chips(L)+'</div>'+gateNote+(B.note||'')
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 10px"><button class="save-btn" id="sov-bpush-all" style="background:var(--nav);color:#fff;border-color:var(--nav)"'+(nChanged&&!S.busy?'':' disabled')+'>Push all changed ('+nChanged+' across '+nOrdCh+' order'+(nOrdCh===1?'':'s')+')</button>'
         +'<span id="sov-bprog" class="mut tiny"></span><span style="flex:1"></span><button class="lnk-btn" id="sov-bexp">Expand all</button><button class="lnk-btn" id="sov-bcol">Collapse all</button></div>';
       var sorted=oks.map(function(o,i){ return {o:o,i:i,st:ordStats(o)}; }).sort(function(a,z){ return (z.st.attention?1:0)-(a.st.attention?1:0)||a.i-z.i; });

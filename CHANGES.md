@@ -1,3 +1,12 @@
+## v28.205 (Ben, branch review-fixes-2026-10-05): Validate sales order drawer: supplier dropdown colours + clearer supplier summary
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- A line with a choice of suppliers gets the Create Buy Plan "multiple suppliers" colouring (amber background, amber bold text, --prod border, tooltip "multiple suppliers, pick one").
+- No dropdown when there is nothing to choose: no supplier set up on the product in Fulfil, or the only option is already the line's supplier. Shown as plain text with the existing notes (e.g. Weierken on SO54481, Fulfil sandbox).
+- Suppliers summary is now a row of cards (supplier name, units large, lines), red card for lines with no supplier, grey card for ship from stock (faded at 0). Same in single and batch view.
+- Checked on the Fulfil sandbox with SO54481 (Lixin / XR Textile amber dropdown; Weierken plain text).
+
 ## v28.204 (Ben, branch review-fixes-2026-10-05): client portal rep groups see their orders by Fulfil Agent Code
 
 **Files:** `migrations/337_fulfil_sales_agent_code.sql`, `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 337** (additive, idempotent). No env vars.
