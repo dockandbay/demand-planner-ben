@@ -808,6 +808,8 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
       <button class="pill" data-ch="TIK" style="display:none">TIK</button>
       <button class="pill" data-ch="ZAL" style="display:none">ZAL</button>
     </div>
+    <span style="width:1px;height:16px;background:var(--line);margin:0 6px;flex-shrink:0"></span>
+    <button class="pill" id="agg-btn" aria-pressed="false" onclick="setPlanAgg(!PLAN_AGG.on)" title="Combine: pick several countries and channels to see a read-only topline summed across them">&#8853; Combine</button>
   </div>
   <div id="filters-row2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span class="pill-lbl" title="Active: today &rarr; today+180 days. All: everything not permanently inactive.">Show</span>
@@ -9872,6 +9874,54 @@ function insertInlineSkuRows(s,co,ch,afterTr){
 }
 
 var _makeGrandTotRow=null;   // set by buildBody; lets refreshRow() rebuild the grand-total row in place on an edit
+// v28.220 (Ben): Plan grid COMBINED (topline) mode. "⊕ Combine" next to the Channel pills turns the Country and Channel
+// pills into multi-select; the grid then shows a READ-ONLY topline summed over every selected country x channel
+// (real combinations only): grand total, category and sub-category rows, same columns as the Plan (months, quarters,
+// halves, YTD / To go, FY totals). Units only (revenue is in each market's own currency, so it is not summed).
+// Sub-category units exploded like the normal Plan sub-category cells. Editing, SKU rows and smoothing stay in the
+// normal single-market view.
+var PLAN_AGG=(function(){ try{ var j=JSON.parse(localStorage.getItem('hzPlanAgg')||'null'); if(j&&j.co&&j.ch)return {on:false,co:j.co,ch:j.ch}; }catch(e){} return {on:false,co:{UK:1,US:1,EU:1,AU:1},ch:{DTC:1,FBA:1,B2B:1}}; })();
+var PLAN_AGG_COMBOS=[['UK','DTC'],['UK','FBA'],['UK','B2B'],['UK','TIK'],['US','DTC'],['US','FBA'],['US','B2B'],['US','TIK'],['EU','DTC'],['EU','FBA'],['EU','B2B'],['EU','ZAL'],['AU','DTC'],['AU','FBA'],['CA','FBA']];
+function _aggSave(){ try{ localStorage.setItem('hzPlanAgg',JSON.stringify({co:PLAN_AGG.co,ch:PLAN_AGG.ch})); }catch(e){} }
+function setPlanAgg(on){ PLAN_AGG.on=!!on; _aggSave(); try{ hzRowCacheClear(); }catch(e){} _VIEW_ONLY_RENDER=true; render(); }
+function planAggToggle(kind,v){ var m=PLAN_AGG[kind]; if(m[v])delete m[v]; else m[v]=1; _aggSave(); _VIEW_ONLY_RENDER=true; render(); }
+function _aggSyncPills(){ var b=document.getElementById('agg-btn'); if(b){ b.classList.toggle('active',PLAN_AGG.on); b.setAttribute('aria-pressed',PLAN_AGG.on?'true':'false'); }
+  if(!PLAN_AGG.on)return;
+  document.querySelectorAll('#ctabs .pill').forEach(function(x){ x.className='pill'+(PLAN_AGG.co[x.dataset.co]?' active':''); });
+  document.querySelectorAll('#chtabs .pill').forEach(function(x){ x.style.display=''; x.className='pill'+(PLAN_AGG.ch[x.dataset.ch]?' active':''); }); }
+function _aggCombos(){ return PLAN_AGG_COMBOS.filter(function(c){ return PLAN_AGG.co[c[0]]&&PLAN_AGG.ch[c[1]]; }); }
+function renderPlanTopline(tw){
+  var combos=_aggCombos(), selAll=SEL.has('ALL');
+  var subs={}; DATA.forEach(function(d){ if(!d||!d.s)return; if(!combos.some(function(c){ return c[0]===d.co&&c[1]===d.ch; }))return; var cat=parentCat(d.c)||_subcatParent(d.s)||d.c||'Other';
+    if(!selAll&&!(SEL.has(cat)||SEL.has(d.s)))return; try{ if(!SHOW_RUNOFF_CATS&&RUNOFF_CATS.has(d.c))return; }catch(e){} (subs[d.s]=subs[d.s]||{cat:cat,rows:[]}).rows.push(d); });
+  var memo={};
+  function unitsOf(d,m){ var k=d.s+'|'+d.co+'|'+d.ch, a=ga(d.co,d.ch,d.s)||{}, fu=memo[k]; if(!fu){ try{ fu=memo[k]=(calc(d.s,d.co,d.ch)||{}).fu||{}; }catch(e){ fu=memo[k]={}; } }
+    if(m<CUR_MONTH){ var raw=(a[m]&&a[m][0])||0; try{ return expAct(d.s,d.co,d.ch,m,raw).E; }catch(e){ return raw; } }
+    var f=fu[m]||0; try{ return expFc(d.s,d.co,d.ch,m,f,a).E; }catch(e){ return f; } }
+  function lyOf(d,m){ var lm=lyMonth(m), a=ga(d.co,d.ch,d.s)||{}, raw=(a[lm]&&a[lm][0])||0; if(lm>=CUR_MONTH)return unitsOf(d,lm); try{ return expAct(d.s,d.co,d.ch,lm,raw).E; }catch(e){ return raw; } }
+  function mtdOf(d){ var a=ga(d.co,d.ch,d.s)||{}; return (a[CUR_MONTH]&&a[CUR_MONTH][0])||0; }
+  var cols=TIME_COLS.map(function(tc){ return {tc:tc,ms:tc.t==='m'||tc.t==='fc'?[tc.m]:tc.t==='tot'?fyMonths(tc.startY):(tc.months||[])}; });
+  function vec(rows){ return cols.map(function(c){ var u=0, ly=0, mtd=0; rows.forEach(function(d){ c.ms.forEach(function(m){ u+=unitsOf(d,m); ly+=lyOf(d,m); }); if(c.tc.t==='fc')mtd+=mtdOf(d); }); return {u:u,ly:ly,mtd:mtd}; }); }
+  var fmtU=function(n){ return n?Math.round(n).toLocaleString():'<span style="color:var(--faint)">-</span>'; };
+  function cell(v,c,bold){ var per=c.tc.t!=='m'&&c.tc.t!=='fc', g=(v.ly>0)?Math.round((v.u-v.ly)/v.ly*100):null;
+    var gx=g==null?'':'<div style="font-size:10px;color:'+(g>=0?'var(--pos)':'var(--neg)')+'">'+(g>=0?'+':'')+g+'%</div>';
+    var lyx='<div style="font-size:10px;color:var(--faint)">'+(v.ly?Math.round(v.ly).toLocaleString():'')+'</div>';
+    var mtd=c.tc.t==='fc'&&v.mtd?' <span style="color:var(--pos);font-size:10px">('+Math.round(v.mtd).toLocaleString()+')</span>':'';
+    return '<td class="'+(per?'agg-per':'')+'" style="text-align:left">'+lyx+'<div style="font-weight:'+(bold?800:per?700:500)+'">'+fmtU(v.u)+mtd+'</div>'+gx+'</td>'; }
+  var cats={}; Object.keys(subs).forEach(function(s){ (cats[subs[s].cat]=cats[subs[s].cat]||[]).push(s); });
+  var catOrder=Object.keys(cats).sort();
+  var hdr1='<tr><th rowspan="2" class="agg-st" style="text-align:left">Category / Sub-category</th>'+(function(){ var g=[], cur=null; cols.forEach(function(c){ var Y=c.tc.startY!=null?c.tc.startY:fyStartOf(c.tc.m); if(cur&&cur.Y===Y)cur.n++; else { cur={Y:Y,n:1}; g.push(cur); } }); return g.map(function(x){ return '<th colspan="'+x.n+'" class="'+fyBg(x.Y)+'" style="text-align:left">'+fyLabel(x.Y)+'</th>'; }).join(''); })()+'</tr>';
+  var hdr2='<tr>'+cols.map(function(c){ var tc=c.tc, l=tc.t==='m'||tc.t==='fc'?(function(p){ return MN[p.mo-1]+' '+String(p.y).slice(2); })(pa(tc.m)):tc.label; return '<th class="'+(tc.t==='m'||tc.t==='fc'?fyBg(fyStartOf(tc.m)):'agg-per')+'" style="text-align:left">'+l+(tc.t==='fc'?' <span style="font-size:9px">(MTD)</span>':'')+'</th>'; }).join('')+'</tr>';
+  var allRows=[]; Object.keys(subs).forEach(function(s){ allRows=allRows.concat(subs[s].rows); });
+  var body='<tr class="agg-gt"><td class="agg-st"><b>Grand total</b></td>'+vec(allRows).map(function(v,i){ return cell(v,cols[i],true); }).join('')+'</tr>';
+  catOrder.forEach(function(cat){ var ss=cats[cat].sort(), cr=[]; ss.forEach(function(s){ cr=cr.concat(subs[s].rows); });
+    body+='<tr class="agg-cat"><td class="agg-st"><b>'+hzEscH(cat)+'</b></td>'+vec(cr).map(function(v,i){ return cell(v,cols[i],true); }).join('')+'</tr>';
+    ss.forEach(function(s){ var n=subs[s].rows.length; body+='<tr><td class="agg-st" style="padding-left:18px">'+hzEscH(s)+' <span style="font-size:10px;color:var(--faint)" title="'+subs[s].rows.map(function(d){ return d.co+' '+d.ch; }).join(', ')+'">'+n+' market'+(n===1?'':'s')+'</span></td>'+vec(subs[s].rows).map(function(v,i){ return cell(v,cols[i],false); }).join('')+'</tr>'; }); });
+  var lbl=combos.map(function(c){ return c[0]+' '+c[1]; }).join(', ');
+  tw.innerHTML='<style>#agg-t{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums;width:max-content}#agg-t th,#agg-t td{padding:5px 9px;border-bottom:1px solid var(--line2);white-space:nowrap;vertical-align:top}#agg-t th{background:var(--hdr-tint);font-size:11px;position:sticky;top:0;z-index:2}#agg-t thead tr:nth-child(2) th{top:26px}'
+    +'#agg-t .agg-st{position:sticky;left:0;background:var(--card);z-index:1;border-right:1px solid var(--line);min-width:220px}#agg-t th.agg-st{z-index:3;background:var(--hdr-tint)}#agg-t tr.agg-gt td{background:var(--hdr-cur)}#agg-t tr.agg-cat td{background:var(--row-alt)}#agg-t .agg-per{background:var(--blue-soft)}</style>'
+    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 4px;font-size:12px"><b>Combined topline</b><span style="color:var(--muted)">'+(combos.length?combos.length+' market x channel: '+hzEscH(lbl):'Pick at least one country and channel above.')+'</span><span style="color:var(--muted)">Read-only, units (sets exploded). Each cell: last year (faint), this year (actuals then forecast), growth %. Switch off Combine to edit.</span></div>'
+    +(combos.length?'<table id="agg-t"><thead>'+hdr1+hdr2+'</thead><tbody>'+body+'</tbody></table>':''); }
 function buildBody(){
   _PCS_MEMO={};   // v28.218 column sort values are recomputed per grid build
   const cm=filteredCats(),frag=document.createDocumentFragment();
@@ -10208,6 +10258,7 @@ function renderMain(viewOnly){
   function _hzBuildGrid(){
     // Always reset tw — SKU view replaces its contents so we can't rely on #t existing
     var tw=document.querySelector('.tw'); if(!tw)return;
+    if(typeof PLAN_AGG!=='undefined'&&PLAN_AGG.on&&DEMAND_VIEW==='plan'){ try{ renderPlanTopline(tw); }catch(e){ tw.innerHTML='<div style="padding:12px;color:var(--neg)">Combined view failed: '+hzEscH(String(e&&e.message||e))+'</div>'; } try{ syncTabs(); }catch(e){} return; }   // v28.220 combined (topline) mode
     tw.innerHTML='<table id="t"></table>';
     const t=document.getElementById('t');
     t.appendChild(buildColgroup());
@@ -10384,6 +10435,7 @@ function syncTabs(){
   var _tp=document.querySelector('#chtabs .pill[data-ch="TIK"]'); if(_tp)_tp.style.display=(typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(CUR)>=0)?'':'none';
   document.querySelectorAll('#ctabs .pill').forEach(function(b){b.className='pill'+(b.dataset.co===CUR?' active':'');});
   document.querySelectorAll('#chtabs .pill').forEach(function(b){b.className='pill'+(b.dataset.ch===CF?' active':'');});
+  try{ _aggSyncPills(); }catch(e){}   // v28.220 combined mode: pills show the multi-selection
   renderCatControl();
   fillPlanRwSel();
 }
@@ -18428,13 +18480,13 @@ var FLAGS={'UK':'🇬🇧','US':'🇺🇸','EU':'🇪🇺','AU':'🇦🇺','CA':
 CTRS.forEach(function(co){
   const b=document.createElement('button');b.className='pill'+(co===CUR?' active':'');b.dataset.co=co;
   b.innerHTML=(FLAGS[co]||'')+' '+co;
-  b.onclick=function(){remapExpanded('co',co);CUR=co;_VIEW_ONLY_RENDER=true;render();try{refreshDispCcy();}catch(e){}if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
+  b.onclick=function(){ if(typeof PLAN_AGG!=='undefined'&&PLAN_AGG.on){ planAggToggle('co',co); return; } remapExpanded('co',co);CUR=co;_VIEW_ONLY_RENDER=true;render();try{refreshDispCcy();}catch(e){}if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
   document.getElementById('ctabs').appendChild(b);
 });
 
 // Channel tabs
 document.querySelectorAll('#chtabs .pill').forEach(function(b){
-  b.onclick=function(){remapExpanded('ch',b.dataset.ch);CF=b.dataset.ch;_VIEW_ONLY_RENDER=true;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
+  b.onclick=function(){ if(typeof PLAN_AGG!=='undefined'&&PLAN_AGG.on){ planAggToggle('ch',b.dataset.ch); return; } remapExpanded('ch',b.dataset.ch);CF=b.dataset.ch;_VIEW_ONLY_RENDER=true;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
 });
 
 // ── Category multiselect (Option A: compact dropdown + chips; "All" pinned top) ──

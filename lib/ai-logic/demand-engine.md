@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.219
+verified_version: v28.220
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -300,3 +300,7 @@ verified_version: v28.219
 
 ## Plan grid YTD + To go totals (v28.219)
 - Beside the current FY total the Plan grid shows **YTD** (complete months of the current FY, up to the last complete month) and **To go** (current month to the end of the FY). YTD + To go = the FY total. They use the same period-total cell as H1 / H2 / quarters (last-year units, total, growth %, revenue) on sub-category, SKU, category, grand-total and shown-SKU rows, and can be sorted or filtered like any column. On by default; Display settings ▸ "YTD + To go totals" turns them off (saved per browser). (source: buildTimeCols, setShowYtg, periodStackHTML)
+
+## Plan grid Combined topline (v28.220)
+- "⊕ Combine" beside the Channel pills turns the Country and Channel pills into multi-select. The grid becomes a read-only topline summed over every selected country x channel (real combinations only): grand total, category and sub-category rows, with the same columns as the Plan (months, quarters, halves, YTD / To go, FY totals). Category filter and run-off hiding still apply. Selection is remembered per browser. (source: setPlanAgg, planAggToggle, renderPlanTopline)
+- Units only, exploded like the Plan sub-category cells: past months = actuals, current month on = forecast (current-month cell also shows month-to-date actuals); each cell shows last year, this year and growth %. Revenue is not summed (each market's revenue is in its own currency). Editing, SKU rows and smoothing stay in the normal single-market view. (source: renderPlanTopline, expAct, expFc)

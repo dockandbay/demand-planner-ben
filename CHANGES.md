@@ -1,3 +1,10 @@
+## v28.220 (Ben, branch review-fixes-2026-10-05): Plan grid Combined topline (multiple countries / channels)
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- New **⊕ Combine** button beside the Channel pills in the DEMAND Plan. When on, Country and Channel pills become multi-select (e.g. all countries + all channels) and the grid shows a **read-only topline** summed across them: grand total, category and sub-category rows, same columns as the Plan (months, quarters, halves, YTD / To go, FY totals). Each cell: last year, this year (actuals then forecast; current month shows MTD), growth %. Units only (revenue is per-market currency). Turn Combine off to edit.
+- Verified on sandbox (jsdom, real data): Picnic Blanket FY total UK DTC 14,132; UK + US DTC 17,729 = 14,132 + US 3,597 (independent calc); switching off returns to the editable grid; 0 JS errors.
+
 ## v28.219 (Ben, branch review-fixes-2026-10-05): Plan grid YTD + To go totals
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
