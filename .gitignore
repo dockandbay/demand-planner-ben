@@ -28,6 +28,7 @@ server.log
 
 # ad-hoc data files / sample exports
 UK - Forecast Analysis*.csv
+/analysis/
 
 # one-off live data update — never track
 po_client_master_update_2026-07-01.sql
