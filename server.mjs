@@ -1307,7 +1307,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
-  if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.195 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
+  if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
@@ -4031,7 +4031,7 @@ app.post('/api/supply/fulfil/sales-order/push-suppliers', async (req, res) => {
     res.json(await sovPushOrder(saleId, want, { cfg, gate, by }));
   } catch (e) { if (e.code === 'FULFIL_PUSH_BUSY') return res.status(409).json({ error: e.message }); log500(e); res.status(e.status === 404 ? 404 : e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
 });
-// v28.195 (Ben): one order's push, shared by the single push and the batch push. Per-order single-flight lock (409 busy),
+// v28.194 (Ben): one order's push, shared by the single push and the batch push. Per-order single-flight lock (409 busy),
 // re-reads the order, writes each allowed line, reads every written line back, audits. Throws on order-level failures.
 async function sovPushOrder(saleId, want, ctx) {
   const { cfg, gate, by } = ctx;
@@ -4073,7 +4073,7 @@ async function sovPushOrder(saleId, want, ctx) {
       return { ok: true, stub: gate.stub, env: cfg.env, sale: cur.sale, results, saved: results.filter(r => r.result === 'ok').length, failed: results.filter(r => r.result === 'failed').length, blocked: results.filter(r => r.result === 'blocked').length };
   });
 }
-// v28.195 (Ben): BATCH validate. The user pastes a list (no automatic list); the drawer sends it in small chunks so it can
+// v28.194 (Ben): BATCH validate. The user pastes a list (no automatic list); the drawer sends it in small chunks so it can
 // show progress, and this resolves + analyses each item with at most SOV_BATCH_CONC Fulfil orders in flight. Read-only.
 // Per item: ok (sale + lines, same shape as the single analyse) | not_found | ambiguous (candidates to pick) | duplicate
 // (resolves to an order already in this call) | error. A transient Fulfil failure (429 / 5xx / timeout) is retried with
@@ -4122,7 +4122,7 @@ app.post('/api/supply/fulfil/sales-order/analyse-batch', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, gate: sovGate(cfg), max: SOV_BATCH_MAX, results });
   } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
 });
-// v28.195 (Ben): BATCH push. orders = [{ sale_id, lines:[{line_id, supplier_party_id}] }]. Same admin / live-writes gate as
+// v28.194 (Ben): BATCH push. orders = [{ sale_id, lines:[{line_id, supplier_party_id}] }]. Same admin / live-writes gate as
 // the single push, checked once; then ORDER BY ORDER (sequential) through sovPushOrder (per-order lock, re-read, write,
 // read-back, audit). One order failing (busy, not found, Fulfil error) is reported on that order and the rest carry on.
 app.post('/api/supply/fulfil/sales-order/push-batch', async (req, res) => {

@@ -7528,10 +7528,10 @@
     var root=document.getElementById('supply-root')||document.body; var bg=document.createElement('div'); bg.id='sovdrawer-bg'; bg.style.zIndex=nextDrawerZ();
     bg.innerHTML='<div id="sovdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">Validate sales order</div><div><button class="shipdrawer-x" title="close (Esc)">✕</button></div></div>'
       +'<div class="shipdrawer-body"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><label class="pill-lbl" for="sov-q">Sales order</label>'
-      +'<textarea class="flt" id="sov-q" rows="1" placeholder="SO number, Fulfil link or reference (paste a list to validate many)" title="One order, or a list: one per line or separated by commas / spaces / semicolons (max 50). Enter = Analyse, Shift+Enter = new line" style="flex:1 1 260px;min-width:0;background:var(--blue-soft);border-color:#93c5fd;resize:vertical;max-height:140px;font-family:inherit;line-height:1.35"></textarea>'   // v28.195 (Ben): textarea so a pasted list keeps its line breaks
+      +'<textarea class="flt" id="sov-q" rows="1" placeholder="SO number, Fulfil link or reference (paste a list to validate many)" title="One order, or a list: one per line or separated by commas / spaces / semicolons (max 50). Enter = Analyse, Shift+Enter = new line" style="flex:1 1 260px;min-width:0;background:var(--blue-soft);border-color:#93c5fd;resize:vertical;max-height:140px;font-family:inherit;line-height:1.35"></textarea>'   // v28.194 (Ben): textarea so a pasted list keeps its line breaks
       +'<button class="save-btn" id="sov-go" style="background:var(--nav);color:#fff;border-color:var(--nav)">Analyse</button></div><div id="sov-body"></div></div></div>';
     root.appendChild(bg); requestAnimationFrame(function(){ bg.classList.add('open'); });
-    var S={data:null, sel:{}, chk:{}, res:{}, busy:false, mode:'single'}, B=null;   // v28.195 (Ben): B = batch state (pasted list)
+    var S={data:null, sel:{}, chk:{}, res:{}, busy:false, mode:'single'}, B=null;   // v28.194 (Ben): B = batch state (pasted list)
     var onKey=function(e){ if(e.key!=='Escape')return; var cf=document.getElementById('sov-confirm'); if(cf){ cf.remove(); return; } close(); };
     var close=function(){ bg.classList.remove('open'); document.removeEventListener('keydown',onKey); setTimeout(function(){ if(bg.parentNode)bg.parentNode.removeChild(bg); maybeResetDrawerZ(); },220); };
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)close(); }); bg.querySelector('.shipdrawer-x').onclick=close; document.addEventListener('keydown',onKey);
@@ -7551,7 +7551,7 @@
         (d.lines||[]).forEach(function(l){ var c=curId(l); S.sel[l.line_id]=c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null); });
         draw(); })
         .catch(function(e){ body.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
-    function chips(L){ var by={}, none={u:0,n:0}, stock={u:0,n:0};   // v28.195 (Ben): takes the lines (one order or every order in a batch)
+    function chips(L){ var by={}, none={u:0,n:0}, stock={u:0,n:0};   // v28.194 (Ben): takes the lines (one order or every order in a batch)
       (L||S.data.lines||[]).forEach(function(l){ if(l.service)return;
         if(l.mode!=='dropship'){ stock.u+=l.qty; stock.n++; return; }
         var id=S.sel[l.line_id]; if(id==null){ none.u+=l.qty; none.n++; return; }
@@ -7593,7 +7593,7 @@
       if(pa)pa.onclick=function(){ confirmPush(L.filter(changed)); };
       loadLog(s.id); }
     function lineById(id){ return allLines().filter(function(l){return String(l.line_id)===String(id);})[0]; }
-    // v28.195 (Ben): shared by the single view and every order section of a batch (line ids are unique across orders)
+    // v28.194 (Ben): shared by the single view and every order section of a batch (line ids are unique across orders)
     function allLines(){ return S.mode==='batch'?okOrders().reduce(function(a,o){ return a.concat(o.lines||[]); },[]):((S.data&&S.data.lines)||[]); }
     function redraw(){ if(S.mode==='batch')drawBatch(); else draw(); }
     function linesTable(L,withChk){
@@ -7608,7 +7608,7 @@
       body.querySelectorAll('.sov-chk').forEach(function(el){ el.onchange=function(){ S.chk[el.dataset.l]=el.checked; redraw(); }; }); }
     function initSel(L,keep,res){ (L||[]).forEach(function(l){ var c=curId(l), r=res&&res[l.line_id]; S.sel[l.line_id]=(r&&r.result==='failed'&&keep&&keep[l.line_id]!=null)?keep[l.line_id]:(c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null)); }); }
     function jpost(u,b){ return fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok||j.error){ var e=new Error(j.error||('HTTP '+r.status)); e.status=r.status; throw e; } return j; }); }); }
-    // v28.195 (Ben): BATCH mode. The pasted list is split (lines / commas / spaces / semicolons), de-duplicated and capped
+    // v28.194 (Ben): BATCH mode. The pasted list is split (lines / commas / spaces / semicolons), de-duplicated and capped
     // at SOV_MAX; it is analysed in chunks of 3 (server: 3 Fulfil orders in flight) so progress can show. One item = the
     // single view above, unchanged.
     var SOV_MAX=50, SOV_CHUNK=3, SOV_PUSH_CHUNK=5;
@@ -7746,7 +7746,7 @@
             S.res=res; draw(); var lg=document.getElementById('sov-log');
             if(lg)lg.insertAdjacentHTML('beforebegin','<div class="tool-badge '+(j.failed?'bg-red':'bg-green')+'" style="display:block;margin-top:10px">'+(j.stub?'TEST STUB: ':'')+j.saved+' saved · '+j.failed+' failed · '+j.blocked+' blocked</div>'); }); })
         .catch(function(e){ S.busy=false; draw(); var lg=document.getElementById('sov-log'); if(lg)lg.insertAdjacentHTML('beforebegin','<div style="color:var(--neg);margin-top:10px">Push failed: '+esc(e.message||e)+'</div>'); }); }
-    function go(){ var q=qi.value.trim(); if(!q||S.busy)return; var items=parseItems(q);   // v28.195 (Ben): one item = single view (unchanged); more = batch
+    function go(){ var q=qi.value.trim(); if(!q||S.busy)return; var items=parseItems(q);   // v28.194 (Ben): one item = single view (unchanged); more = batch
       if(items.length>1)return batchAnalyse(items); S.mode='single'; B=null; analyse(q); }
     bg.querySelector('#sov-go').onclick=go;
     qi.onkeydown=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); go(); } };

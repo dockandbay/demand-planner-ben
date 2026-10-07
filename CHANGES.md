@@ -1,3 +1,14 @@
+## v28.194 (Ben, branch review-fixes-2026-10-05): Validate sales order, many orders at once
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- "Validate sales order" takes a pasted list: one per line, or separated by commas / spaces / semicolons; each item an SO number, Fulfil link or reference. Repeats dropped (an order entered twice in different forms shows as "duplicate"); max 50 per batch. One item keeps the single-order view unchanged.
+- "Analyse" reads every order (3 at a time, retry with back-off), with progress. Unresolved items listed first with the reason (not found / ambiguous with orders to pick / duplicate / error). Combined summary (orders, lines, units, supplier chips, No supplier, Ship from stock, blocked) above one collapsible section per order (ok / differs / missing / blocked; orders needing attention first) with the usual line table and pickers.
+- "Push all changed (N across M orders)" or per-order "Push changed": one confirm grouped by order; server pushes order by order with the same gate, per-order lock, read-back and audit as a single push (shared `sovPushOrder`); one failing order does not stop the others.
+- New endpoints: `POST /api/supply/fulfil/sales-order/analyse-batch` (read-only), `POST /api/supply/fulfil/sales-order/push-batch` (admin, `FULFIL_LIVE_WRITES`).
+- **Verified:** read-only against live Fulfil (mixed list incl. link, reference, junk, duplicate, ambiguous TAG10793; batch analysis identical to single per order; summary = sum of orders); pushes only through the stub (2 orders in one confirm, read-back ok; a stubbed failure on one order left the other saved). **No live Fulfil write was made.**
+- **Diviyaj:** let `POST /api/supply/fulfil/sales-order/analyse-batch` and `/push-batch` through the gate (push is admin-checked in the handler).
+
 ## v28.193 (Ben, branch review-fixes-2026-10-05): Fulfil Sandbox / Live switch on the sandbox only; production fixed to Live
 
 **Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migrations, no env vars.
