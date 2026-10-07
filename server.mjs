@@ -56,7 +56,16 @@ if (process.env.VERCEL) {
 // Environment marker: show a SANDBOX banner unless we're pointed at the PRODUCTION Supabase (ref oolwklahstnvocaugryg).
 // Keyed off the real prod DB ref so it's correct wherever it runs — live never shows it, any non-prod DB does.
 const IS_SANDBOX = !String(CONN).includes('oolwklahstnvocaugryg');
-const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar,#hz-leftrail,#hz-drawer,#app #view-tabs-row,[id$="-drawer"],[id$="-bg"],#insights-panel,#narrative-panel,#ask-dw,[style*="position:fixed;top:0"],[style*="position:fixed;inset:0"]{top:20px!important}[id$="-drawer"],#hz-drawer,#ask-dw,#insights-panel,#narrative-panel,[style*="position:fixed;top:0"]{max-height:calc(100% - 20px)!important}@media (min-width:641px){:root{--hz-sticky-top:90px}html{scroll-padding-top:82px}#app #product-root .smp-rail{top:82px}}html body #sbx-banner{top:0!important;max-height:none!important}</style>';   // v28.172 (Ben): EVERYTHING fixed sits below the sandbox banner (top bar, rail, drawers, popups, backdrops, sticky offsets)
+const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar,#hz-leftrail,#hz-drawer,#app #view-tabs-row,[id$="-drawer"],[id$="-bg"],#insights-panel,#narrative-panel,#ask-dw,[style*="position:fixed;top:0"],[style*="position:fixed;inset:0"]{top:20px!important}[id$="-drawer"],#hz-drawer,#ask-dw,#insights-panel,#narrative-panel,[style*="position:fixed;top:0"]{max-height:calc(100% - 20px)!important}@media (min-width:641px){:root{--hz-sticky-top:90px}html{scroll-padding-top:82px}#app #product-root .smp-rail{top:82px}}html body #sbx-banner,html body #sbx-fulfil{top:0!important;max-height:none!important}</style>';   // v28.172 (Ben): EVERYTHING fixed sits below the sandbox banner (top bar, rail, drawers, popups, backdrops, sticky offsets)
+// v28.193 (Ben): sandbox-only "Fulfil: Sandbox | Live" switch in the orange banner (writes app_settings fulfil_env via
+// /api/app-settings, which refuses it on production). Live is shown in red so it's obvious reads/pushes hit real Fulfil
+// (live WRITES still also need FULFIL_LIVE_WRITES=true in the server env).
+const SANDBOX_FULFIL_TOGGLE = '<div id="sbx-fulfil" style="position:fixed;top:0;right:8px;height:20px;z-index:100002;display:flex;align-items:center;gap:4px;font:700 10.5px/18px system-ui,-apple-system,sans-serif;color:#fff">'
+  + '<span>Fulfil:</span><button type="button" data-env="sandbox" style="font:inherit;border:1px solid #fff;border-radius:4px;padding:0 7px;cursor:pointer;background:transparent;color:#fff">Sandbox</button>'
+  + '<button type="button" data-env="live" style="font:inherit;border:1px solid #fff;border-radius:4px;padding:0 7px;cursor:pointer;background:transparent;color:#fff">Live</button></div>'
+  + '<script>(function(){var w=document.getElementById("sbx-fulfil");if(!w)return;function paint(env){w.querySelectorAll("button").forEach(function(b){var on=b.dataset.env===env;b.style.background=on?(env==="live"?"#b91c1c":"#fff"):"transparent";b.style.color=on&&env!=="live"?"#c2410c":"#fff";b.title=on?"Active":(b.dataset.env==="live"?"Switch reads and pushes to LIVE Fulfil":"Switch to the Fulfil sandbox");});}'
+  + 'fetch("/api/supply/erp-status").then(function(r){return r.json();}).then(function(j){paint(j&&j.fulfil_env||"sandbox");}).catch(function(){});'
+  + 'w.querySelectorAll("button").forEach(function(b){b.onclick=function(){var env=b.dataset.env;fetch("/api/app-settings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:"fulfil_env",value:env})}).then(function(r){return r.json();}).then(function(j){if(j&&j.error){alert(j.error);return;}paint(env);}).catch(function(e){alert("Switch failed: "+e.message);});};});})();</script>';
 // Sandbox favicon: the normal app logo (favicon.png) wrapped in an orange border, so sandbox tabs are visually
 // distinct from live. Served at /favicon-sbx.svg and swapped into the page only when IS_SANDBOX.
 const FAVICON_SBX_SVG = (() => {
@@ -2344,7 +2353,7 @@ app.get('/', async (req, res) => {
     const EARLY_DA = '<script>try{if(/^#\\/demand\\/actions(\\/|$)/.test(location.hash||"")){window.__HZ_DAP=Promise.all([fetch("/api/demand-actions").then(function(r){return r.json();}),fetch("/api/demand-actions/state").then(function(r){return r.json();}).catch(function(){return {state:{}};})]);window.__HZ_DAP.catch(function(){});}}catch(e){}</script>';
     html = html.replace('<head>', () => '<head>' + hzHealthTag('staff') + HEAD_NOFLASH + G_JS + EARLY_SKU + EARLY_DA);   // G_JS in <head>: the data must exist before the first (static) body script runs. v28.159: health capture first, so boot errors are caught
     if (IS_SANDBOX) {
-      html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
+      html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER + SANDBOX_FULFIL_TOGGLE);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
     }
     // gzip the (large, live-data-injected) HTML over the wire — ~6.3MB → ~1MB. The JSON middleware only wraps
@@ -3148,6 +3157,7 @@ async function activeErp() {
 // ~120/chunk). The ERP toggle is rare, so a config flip takes effect within 10s.
 let _fulfilEnvCache = { v: null, t: 0 };
 async function activeFulfilEnv() {
+  if (!IS_SANDBOX) return 'live';   // v28.193 (Ben): production always talks to LIVE Fulfil; the Sandbox/Live switch exists on the sandbox only
   const now = Date.now();
   if (_fulfilEnvCache.v && (now - _fulfilEnvCache.t) < 10000) return _fulfilEnvCache.v;
   try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fulfil_env'`)).rows[0]; const v = (r && r.value === 'live') ? 'live' : 'sandbox'; _fulfilEnvCache = { v, t: now }; return v; } catch (e) { return _fulfilEnvCache.v || 'sandbox'; } }
@@ -3167,7 +3177,7 @@ const archivedSql = (alias, param) =>
   `${alias}.status ILIKE '%complete%' AND (CASE WHEN coalesce(${alias}.prod_no,'') ~ '^[0-9]+$' THEN ${alias}.prod_no::int ELSE 999999 END) < ${param}`;
 // Status for CONFIG ▸ General settings — active ERP, Fulfil env, and whether the env keys are configured (no live call).
 app.get('/api/supply/erp-status', async (req, res) => {
-  try { res.json({ erp: await activeErp(), fulfil_env: await activeFulfilEnv(),
+  try { res.json({ erp: await activeErp(), fulfil_env: await activeFulfilEnv(), sandbox: IS_SANDBOX,
     fulfil: { sandbox: fulfilConfigFor('sandbox').configured, live: fulfilConfigFor('live').configured } }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -9723,6 +9733,11 @@ app.get('/api/app-settings', async (req, res) => {
 app.post('/api/app-settings', async (req, res) => {
   const b = req.body || {}, key = (b.key || '').trim();
   if (!key) return res.status(400).json({ error: 'key required' });
+  if (key === 'fulfil_env') {   // v28.193 (Ben): sandbox-only switch; production is fixed to live
+    if (!IS_SANDBOX) return res.status(403).json({ error: 'The Fulfil environment is fixed to Live on production' });
+    if (!['sandbox', 'live'].includes(String(b.value || ''))) return res.status(400).json({ error: 'value must be sandbox or live' });
+    _fulfilEnvCache = { v: null, t: 0 };
+  }
   try {
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now())
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, b.value || '', authUser(req) || null]);

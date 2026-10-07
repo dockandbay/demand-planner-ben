@@ -1,3 +1,12 @@
+## v28.193 (Ben, branch review-fixes-2026-10-05): Fulfil Sandbox / Live switch on the sandbox only; production fixed to Live
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- Production (`IS_SANDBOX` false): `activeFulfilEnv()` always returns `live`, ignoring `app_settings.fulfil_env`; `/api/app-settings` refuses `fulfil_env` (403); CONFIG ▸ General shows "Live (fixed on production)" instead of the dropdown. Before, the dropdown existed on live and an unset or "sandbox" value would have pointed production at the Fulfil sandbox.
+- Sandbox: "Fulfil: Sandbox | Live" switch in the orange SANDBOX banner (Live shown red). It writes `fulfil_env` and takes effect at once. Live writes from the sandbox still also need `FULFIL_LIVE_WRITES=true` in the server env (not set locally).
+- `/api/supply/erp-status` returns `sandbox`.
+- Verified in Chrome on sandbox: switch flips Sandbox / Live and the server follows; restored to Live.
+
 ## v28.192 (Ben, branch review-fixes-2026-10-05): Validate sales order
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, new `migrations/334_so_supplier_pushes.sql` (+ package.json, CHANGES.md). No new required env vars.
