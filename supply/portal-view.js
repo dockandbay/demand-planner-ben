@@ -1498,6 +1498,24 @@
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
       return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'+bar+panels+'</div>'; }
+    // v28.189 (Ben, deep dive H2): completed POs arrive as light rows (__slim: no detail-only fields, lines, costs, documents...) and the
+    // SKU list only for the lines sent (supSkusPartial). ppEnsureDetail(list, allSkus, cb, onErr) fetches what a MANAGE card or a batch's
+    // order plan needs from /api/portal/po-detail (the same rows the bootstrap used to carry), merges it into _ppData in the bootstrap's
+    // shapes, then calls cb. Concurrent calls for the same set share one request; a payload swapped in meanwhile is left alone.
+    var _ppDetInflight={};
+    function ppNeedsDetail(list, allSkus){ return (list||[]).some(function(p){ return p&&p.__slim; })||!!(allSkus&&_ppData&&_ppData.supSkusPartial); }
+    function ppEnsureDetail(list, allSkus, cb, onErr){ var D=_ppData; if(!D){ if(cb)cb(); return; }
+      var slim=(list||[]).filter(function(p){ return p&&p.__slim; }).map(function(p){ return p.po; }), needSk=!!(allSkus&&D.supSkusPartial);
+      if(!slim.length&&!needSk){ if(cb)cb(); return; }
+      var key=slim.join(',')+'|'+(needSk?1:0);
+      var url=(EP.poDetail||'/api/portal/po-detail')+'?pos='+encodeURIComponent(slim.join(','))+(needSk?'&skus=all':'&skus=lines');
+      var pr=_ppDetInflight[key]||(_ppDetInflight[key]=fetch(url).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json(); }));
+      pr.then(function(j){ delete _ppDetInflight[key]; if(_ppData!==D||!j||j.error){ if(j&&j.error)throw new Error(j.error); if(cb)cb(); return; }
+        var byPo={}; (D.pos||[]).forEach(function(p){ byPo[p.po]=p; });
+        (j.pos||[]).forEach(function(r){ var p=byPo[r.po]; if(!p||!p.__slim)return; Object.keys(r).forEach(function(k){ p[k]=r[k]; }); delete p.__slim; });
+        ['lb','costsByPo','addByPo','approvedByPo','docsByPo','xdByPo'].forEach(function(k){ var src=j[k]||{}; D[k]=D[k]||{}; Object.keys(src).forEach(function(po){ D[k][po]=src[po]; }); });
+        if(j.supSkus){ if(j.supSkusAll){ D.supSkus=j.supSkus; delete D.supSkusPartial; } else { var have={}; (D.supSkus||[]).forEach(function(s){ have[s.sku]=1; }); D.supSkus=(D.supSkus||[]).concat(j.supSkus.filter(function(s){ return !have[s.sku]; })); } }
+        if(cb)cb(); }).catch(function(e){ delete _ppDetInflight[key]; if(onErr)onErr(e); else ppNotice('Could not load the order details. Please try again.'); }); }
     // Shared per-PO open-action count (row badge + top PO badge + "show all exceptions" filter all use this).
     // Productions 54 and earlier raise nothing. Mirrors the SHIPMENTS-tab rules (no "no shipment yet" term).
     function poActionCount(p){ if(!prodActionable(p))return 0; var po=p.po, D=_ppData||{};
@@ -1544,7 +1562,7 @@
       scope.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });
       scope.querySelectorAll('.pp-ship-inv').forEach(function(btn){ btn.onclick=function(){ window.open(EP.shipmentInvoice+encodeURIComponent(btn.dataset.ref),'_blank'); }; });
       var cl=scope.querySelector('.sp-chg-list'); if(cl){ fetch(EP.shipmentChargesBase+encodeURIComponent(cl.dataset.ref)).then(function(r){return r.json();}).then(function(cs){ cl.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(function(c){var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0);return '<div class="tiny" style="margin:2px 0">'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>';}).join(''):'<span class="mut tiny">No charges yet.</span>'; }).catch(function(){}); }
-      var tl=scope.querySelector('.sp-timeline'); if(tl&&typeof ppShipTimeline==='function')ppShipTimeline(tl.dataset.ref);
+      var tl=scope.querySelector('.sp-timeline'); if(tl&&typeof ppShipTimeline==='function')ppShipTimeline(tl.dataset.ref,{view:true});   // v28.189: opening the drawer = viewing the shipment
     }
 
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
@@ -1565,7 +1583,7 @@
             ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+'<span class="pp-grp-cnt"> — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</span></td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="pp-skel" data-hz-loading="1" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -1624,12 +1642,15 @@
       return cards+'<div class="tw" style="max-width:720px"><table style="width:auto;min-width:0"><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
     // Master PAYMENTS tab: payments MADE to this supplier (the ledger), grouped by payment run and expandable to
     // the per-line breakdown (PO reference, type, amount, deposit ref).
-    function ppPayments(rows){ rows=rows||[];
-      if(!rows.length)return '<div class="count">No payments recorded against your account yet.</div>';
+    // v28.189 (Ben): arch = the bootstrap's paymentsArchived ({runs, rows, total, cutoff}): payment runs made up only of archived orders'
+    // milestones are not sent; the headline figures still include them, and "Show them" loads them (/api/portal/payments).
+    function ppPayments(rows, arch){ rows=rows||[];
+      if(!rows.length&&!arch)return '<div class="count">No payments recorded against your account yet.</div>';
       function poRef(r){ return r.reference||r.po_completion||r.po_balance_1||r.po_balance_2||r.po_balance_3||''; }
       var groups={}, order=[]; rows.forEach(function(r){ var k=r.payment_run_ref||r.payment_date||'—'; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
-      var total=rows.reduce(function(a,r){return a+(Number(r.amount)||0);},0);
-      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+money(total))+ppCard('Payments',String(rows.length))+'</div>';
+      var total=rows.reduce(function(a,r){return a+(Number(r.amount)||0);},0)+(arch?Number(arch.total)||0:0);
+      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+money(total))+ppCard('Payments',String(rows.length+(arch?Number(arch.rows)||0:0)))+'</div>';
+      var more=arch?'<div class="pp-pay-arch" style="margin:10px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="mut tiny">'+esc(String(arch.runs))+' older payment run'+(arch.runs===1?'':'s')+' for archived orders (before P'+esc(String(arch.cutoff))+') not shown.</span><button class="save-btn pp-pay-more">Show them</button></div>':'';
       var cards=order.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
         var body=items.map(function(r){ return '<tr><td class="l" style="white-space:normal;overflow-wrap:anywhere;word-break:break-word">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
         return '<div class="sp-card" style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:#fff">'
@@ -1641,7 +1662,7 @@
           +'<div class="pay-body" style="display:none;padding:0 12px 12px"><table style="font-size:12px;border-collapse:collapse;text-align:left;width:100%;max-width:720px;table-layout:fixed">'
             +'<colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
             +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table></div></div>'; }).join('');
-      return '<div style="max-width:560px">'+head+cards+'</div>'; }   // cap the tab to ~half width so it doesn't span full screen
+      return '<div style="max-width:560px">'+head+cards+more+'</div>'; }   // cap the tab to ~half width so it doesn't span full screen
     // ── PRODUCTIONS tab: pick a batch → order-plan pivot (SKUs × POs × qty) for that batch, + XLSX download ──
     function prodBatchesList(){ var s={}; (_ppData.pos||[]).forEach(function(p){ var b=(p.batch_id==null?'':String(p.batch_id)).trim(); if(b)s[b]=1; }); return Object.keys(s).sort().reverse(); }
     function prodPOsInBatch(b){ return (_ppData.pos||[]).filter(function(p){ return ((p.batch_id==null?'':String(p.batch_id)).trim())===b; }); }
@@ -1691,6 +1712,9 @@
       if(!batches.length) return sel+'<div class="count">No batches on your purchase orders yet.</div>';
       if(!PORTAL_PROD_BATCH) return sel+'<div class="count">Choose a batch to see its order plan.</div>';
       var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
+      // v28.189 (Ben): a batch with completed POs (light rows) loads their lines + SKU details first, then draws the same order plan.
+      if(ppNeedsDetail(bp,false)){ var _b=PORTAL_PROD_BATCH; ppEnsureDetail(bp,false,function(){ if(PORTAL_TAB==='productions'&&PORTAL_PROD_BATCH===_b)renderPP(); },function(){ var c=document.querySelector('#pp-body .pv-prod-wait'); if(c){ c.style.color='var(--neg)'; c.textContent='Could not load the order plan for batch '+_b+'. Choose the batch again to retry.'; } });
+        return sel+'<div class="count pv-prod-wait">Loading…</div>'; }
       var d=prodPivotData(bp);
       if(!d.skus.length) return sel+'<div class="count">No SKUs ordered in that batch.</div>';
       // v27.705 (Ben): TOTAL column after Size = the SKU's units across every PO in the batch; footer row = per-PO totals + grand total
@@ -1868,7 +1892,9 @@
             var _out='', _cur=-1;
             _sorted.forEach(function(o){ if(o.b!==_cur){ _cur=o.b; var g=_BKT[o.b]; _out+='<div class="sp-grp" style="margin:14px 0 8px;padding:7px 12px;background:'+g.bg+';border:1px solid '+g.bd+';border-radius:6px;font-weight:700;font-size:12px;color:'+g.c+'">'+(g.t?g.t+'. ':'')+g.d+'</div>'; } _out+=cardHtml(o.s); });
             return _out; }
-          function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
+          // v28.189 (Ben, deep dive M2): o.view = the supplier opened this shipment's card (or its drawer): only then are Dock & Bay's
+          // notes marked read, and only those on screen (up to the newest one shown), for THIS supplier (server: shipment_note_reads).
+          function ppShipTimeline(ref, o){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var _supN=(notes||[]).filter(function(n){return n.author_kind==='supplier';});   // escalate only on the supplier's OWN latest note
               var recentSupId=_supN.length?_supN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
@@ -1888,7 +1914,8 @@
                 postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               // opening the timeline marks Dock&Bay notes read → clears this shipment's notification
               var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
-              if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
+              var _uptoId=(notes||[]).reduce(function(m,n){ return (n.author_kind==='internal'&&Number(n.id)>m)?Number(n.id):m; },0);
+              if(o&&o.view&&EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0&&_uptoId){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref,upto_id:_uptoId},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
               (function(){ var inp=box.querySelector('.sp-note-in'), pb=box.querySelector('.sp-note-post'), att=hzTlAttach(inp,{after:inp.parentNode,upload:hzTlUploader('shipment',ref)});   // v27.571
                 pb.onclick=function(){ var v=(inp.value||'').trim(); if(!v&&!att.count())return; pb.disabled=true;
                   hzTlSend(att,v,function(bodyTxt,attId,next){ postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:bodyTxt,attachment_id:attId||null},next); },function(){ ppShipTimeline(ref); }); }; })(); }).catch(function(){}); }
@@ -2066,8 +2093,8 @@
               np.onclick=function(){ var inp=_sin; var v=(inp.value||'').trim(); if(!v&&!(_satt&&_satt.count()))return; np.disabled=true;
                 hzTlSend(_satt,v,function(bodyTxt,attId,next){ postJSON(EP.sampleNote,{id:id,body:bodyTxt,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail,attachment_id:attId||null},next); },function(){ np.disabled=false; inp.value=''; ppSampleTimeline(id); }); }; }
             var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');
-            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){ppNotice('Choose a file to upload.');return;} au.disabled=true; hzUpload(f,{field:'data_base64',category:'sample',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.sampleAttachment,Object.assign({id:id},up),function(){ reload(); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); au.disabled=false; }); };
-            scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=async function(){ if(!(await _ppConfirm('Remove this attachment?')))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ reload(); }); }; });
+            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){ppNotice('Choose a file to upload.');return;} au.disabled=true; hzUpload(f,{field:'data_base64',category:'sample',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.sampleAttachment,Object.assign({id:id},up),function(){ ppRefreshSamples(); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); au.disabled=false; }); };
+            scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=async function(){ if(!(await _ppConfirm('Remove this attachment?')))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ ppRefreshSamples(); }); }; });
             ppSampleTimeline(id); }
           function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
             var _s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0], sref=_s?_s.ref:'';
@@ -2116,7 +2143,7 @@
             box.querySelector('.snf-save').onclick=function(){ var btn=this, msg=box.querySelector('.snf-msg'); function V(k){var f=box.querySelector('.snf-'+k);return f?f.value.trim():'';}
               var purpose=Array.prototype.map.call(box.querySelectorAll('.snf-purpose:checked'),function(x){return x.value;});
               btn.disabled=true; msg.textContent='Creating…';
-              postJSON(EP.sampleCreate,{supplier_name:STATE.supplierName||null,recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,supplier_expected_completion:V('expected')||null,production_status:V('status')||'not_started',purpose:purpose,notes:V('notes')||null,lines:col.lines,dev_samples:col.dev_samples},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;btn.disabled=false;return;} reload(); }); }; }
+              postJSON(EP.sampleCreate,{supplier_name:STATE.supplierName||null,recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,supplier_expected_completion:V('expected')||null,production_status:V('status')||'not_started',purpose:purpose,notes:V('notes')||null,lines:col.lines,dev_samples:col.dev_samples},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;btn.disabled=false;return;} ppRefreshSamples(); }); }; }
           function wireSamples(){
             var nb=document.getElementById('samp-new-btn'); if(nb)nb.onclick=ppSampleNewForm;
             body.querySelectorAll('.ps-filt').forEach(function(p){ p.onclick=function(){ PORTAL_SAMP_F=p.dataset.f; renderPP(); }; });
@@ -2756,18 +2783,22 @@
                   var list=body.querySelector('.sp-chg-list[data-ref="'+_rfEsc(ref)+'"]'); if(list){ list.dataset.loaded=''; loadShipCharges(list); } }); }; });
               // lazy-load a card's freight charges the first time it is expanded
               body.querySelectorAll('.sp-card .sp-head').forEach(function(h){ var prev=h.onclick; h.addEventListener('click',function(e){ if(e.target.closest('button,input,textarea,select,a'))return;
-                var card=h.closest('.sp-card'), bd=card&&card.querySelector('.sp-body'); if(bd&&bd.style.display!=='none'){ var el=card.querySelector('.sp-chg-list'); if(el)loadShipCharges(el); } }); });
+                var card=h.closest('.sp-card'), bd=card&&card.querySelector('.sp-body'); if(bd&&bd.style.display!=='none'){ var el=card.querySelector('.sp-chg-list'); if(el)loadShipCharges(el);
+                  var tl=card.querySelector('.sp-timeline'); if(tl&&!tl.dataset.loaded){ tl.dataset.loaded='1'; ppShipTimeline(tl.dataset.ref,{view:true}); } } }); });   // v28.189 (Ben, M2): the timeline loads when its card is opened (was one request per shipment on every tab render)
               // Direct-to-Client label downloads on shipment-plan cards (Ships-With shipment labels + crossdock)
               body.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });
               body.querySelectorAll('.sp-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true;
                 fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){ppNotice('No crossdock barcodes found');return;}
                   BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){ppNotice('Could not load crossdock labels');btn.disabled=false;}); }; });
-              spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
+              return; }   // v28.189 (Ben, M2): no eager timeline load per shipment (and no read-marking) on render; see the card-open handler above
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep);
               body.querySelectorAll('.pp-dep-exp').forEach(function(a){ a.onclick=function(){ var k=a.dataset.k, det=body.querySelector('.pp-dep-det[data-k="'+k+'"]'); if(!det)return; var open=det.style.display!=='none'; det.style.display=open?'none':''; a.textContent=open?'▸':'▾'; }; });   // expand each deposit → POs that drew it down
               return; }
-            if(PORTAL_TAB==='payments'){ body.innerHTML=ppPayments(_ppData.payments||[]);
+            if(PORTAL_TAB==='payments'){ body.innerHTML=ppPayments(_ppData.payments||[], _ppData.paymentsArchived||null);
               body.querySelectorAll('.pay-head').forEach(function(h){ h.onclick=function(){ var c=h.closest('.sp-card'), bd=c&&c.querySelector('.pay-body'), tg=h.querySelector('.pay-toggle'); if(!bd)return; var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
+              var _pm=body.querySelector('.pp-pay-more'); if(_pm)_pm.onclick=function(){ var D=_ppData; _pm.disabled=true; _pm.textContent='Loading…';   // v28.189: load the archived payment runs
+                fetch(EP.payments||'/api/portal/payments').then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json(); }).then(function(j){ if(_ppData!==D)return; D.payments=j.payments||[]; delete D.paymentsArchived; renderPP(); })
+                  .catch(function(){ _pm.disabled=false; _pm.textContent='Show them'; ppNotice('Could not load the older payments. Please try again.'); }); };
               return; }
             if(PORTAL_TAB==='productions'){ body.innerHTML=ppProductions();
               var pb=body.querySelector('.pv-prod-batch'); if(pb)pb.onchange=function(){ PORTAL_PROD_BATCH=this.value; renderPP(); };
@@ -2891,11 +2922,16 @@
             var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
             if(_ppOpenPO){ var _ob=body.querySelector('.pp-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(_ppOpenPO):_ppOpenPO)+'"]'); _ppOpenPO=null; if(_ob)setTimeout(function(){_ob.click();},0); }   // came from a Shipment Plan PO link → auto-open it
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
+              // v28.189 (Ben, deep dive H2): a completed PO is a light row and the SKU list is partial until a card needs them: fetch the
+              // PO's detail (+ the full SKU list for the "add a line" picker) first, keeping the skeleton up, then build the same card.
               if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[0];
-                if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
+                var build=function(){ if(!(p&&cell&&cell.isConnected))return; cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell);
+                  ex.dataset.ready='1'; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); } applyPortalPin(); };
+                if(p&&ppNeedsDetail([p],true))ppEnsureDetail([p],true,build,function(){ ex.dataset.built=''; if(cell)cell.innerHTML='<div class="count" style="color:var(--neg)">Could not load this order. Close it and open it again.</div>'; });
+                else build(); }
               ex.style.display=(ex.style.display!=='none')?'none':''; var _poOpen=ex.style.display!=='none'; var _poRow=btn.closest('.pp-row'); if(_poRow)_poRow.classList.toggle('row-open',_poOpen);   // highlight the open PO row (light yellow, like the main supply grid)
               ppSetHash('pos', _poOpen?btn.dataset.po:'');   // keep the URL shareable — #/pos/<PO> when open
-              if(_poOpen&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
+              if(_poOpen&&ex.dataset.ready&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
               applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
             // production grouping rows expand / collapse their POs (default expanded) — collapse hides the group's
             // PO rows + any open detail cards; expand shows the PO rows again (detail cards stay closed)
@@ -3177,11 +3213,16 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP();
         // v27.880: the server handed us its last payload because an admin edit moved on since it was built (d.__stale) → pull the fresh
         // one in the background and repaint in place, unless the supplier is typing or has a PO / product / sample detail open.
-        if(d&&d.__stale&&typeof opts.getData==='function'){ opts.getData({fresh:true}).then(function(d2){ if(!d2||d2.error)return; if(d2.notesByPo)Object.keys(d2.notesByPo).forEach(function(k){ shortNotes(d2.notesByPo[k]); }); _ppData=d2;
+        if(d&&d.__stale&&typeof opts.getData==='function'){ opts.getData({fresh:true}).then(function(d2){ if(!d2||d2.error)return; if(d.__etag&&d2.__etag===d.__etag&&_ppData===d)return;   // v28.189: revalidated and unchanged (a 304): nothing to repaint
+          if(d2.notesByPo)Object.keys(d2.notesByPo).forEach(function(k){ shortNotes(d2.notesByPo[k]); }); _ppData=d2;
           var a=document.activeElement, pb=document.getElementById('pp-body'); var typing=!!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&pb&&pb.contains(a)); var detail=/^#\/(pos|products?|samples?|shipments?|productions?)\/[^/]+/.test(location.hash||'');
           if(!typing&&!detail)renderPP(); }).catch(function(){}); }
       }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
+    // v28.189 (Ben, deep dive M3): a sample write (attachment added / removed, new sample shipment) refreshes the samples list only, not
+    // the whole bootstrap; falls back to the full reload if that call fails or the host has no such endpoint (admin preview).
+    function ppRefreshSamples(){ var D=_ppData; if(!EP.samplesList){ reload(); return; }
+      fetch(EP.samplesList).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json(); }).then(function(j){ if(_ppData!==D)return; D.samples=(j&&j.samples)||[]; if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} renderPP(); }).catch(function(){ reload(); }); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ ppHealthWatch(); PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();
     loadPreview();
   }

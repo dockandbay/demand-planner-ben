@@ -60,6 +60,26 @@ function checkSupplierPayload(tag, d, names) {
     ok(a1.text === a2.text, 'A cold and warm payloads identical' + q);
     if (a1.etag && a1.text !== b1.text) { const x = await get('/api/portal/bootstrap' + q, { cookie: 'psid=' + PB, 'if-none-match': a1.etag }); ok(x.status === 200 && x.text === b1.text, 'B presenting A\'s ETag gets B\'s own 200, never a 304' + q); }
   }
+  // v28.189 (Ben, deep dive H2): completed POs are light rows; their detail comes from /api/portal/po-detail, which must answer ONLY the
+  // caller's own POs (another supplier's PO numbers are silently left out) and only key its maps by the returned POs.
+  {
+    const bA = await get('/api/portal/bootstrap', { cookie: 'psid=' + PA }), bB = await get('/api/portal/bootstrap', { cookie: 'psid=' + PB });
+    const slimA = ((bA.json && bA.json.pos) || []).filter((p) => p.__slim).map((p) => p.po).slice(0, 40), allB = ((bB.json && bB.json.pos) || []).map((p) => p.po).slice(0, 40);
+    ok(((bA.json && bA.json.pos) || []).every((p) => !p.__slim || /complete/i.test(p.status || '')), 'only completed POs are light rows');
+    if (slimA.length) {
+      const dA = await get('/api/portal/po-detail?skus=all&pos=' + encodeURIComponent(slimA.join(',')), { cookie: 'psid=' + PA });
+      ok(dA.status === 200 && dA.json && dA.json.pos.length === slimA.length && dA.json.pos.every((p) => nA.includes(p.supplier_name)), 'A gets the detail of its own light POs');
+      const own = new Set(dA.json.pos.map((p) => p.po));
+      for (const k of ['lb', 'costsByPo', 'xdByPo', 'addByPo', 'approvedByPo', 'docsByPo']) ok(sub(new Set(Object.keys(dA.json[k] || {})), own), 'po-detail ' + k + ' keyed only by the returned POs');
+      const dB = await get('/api/portal/po-detail?skus=lines&pos=' + encodeURIComponent(slimA.join(',')), { cookie: 'psid=' + PB });
+      ok(dB.status === 200 && dB.json && dB.json.pos.length === 0 && !Object.keys(dB.json.lb || {}).length && !Object.keys(dB.json.docsByPo || {}).length, 'B asking for A\'s POs gets nothing');
+      const mix = await get('/api/portal/po-detail?pos=' + encodeURIComponent(slimA.concat(allB).join(',')), { cookie: 'psid=' + PB });
+      ok(mix.status === 200 && mix.json.pos.every((p) => nB.includes(p.supplier_name)), 'a mixed list returns only the caller\'s POs');
+    }
+    ok((await get('/api/portal/po-detail?pos=' + encodeURIComponent(slimA.join(',')))).status === 401, 'po-detail needs a session');
+    const pA = await get('/api/portal/payments', { cookie: 'psid=' + PA }); ok(pA.status === 200 && Array.isArray(pA.json && pA.json.payments), 'payments route answers the caller');
+    const sA = await get('/api/portal/samples', { cookie: 'psid=' + PA }); ok(sA.status === 200 && (sA.json.samples || []).every((s) => !s.supplier_name || nA.includes(s.supplier_name)), 'samples route: own samples only');
+  }
   // v28.186 (Ben, deep dive C1 / C2): the portal's own file + swatch routes serve only the caller's records, and the staff routes
   // the portal used to call refuse a portal session (with or without a /portal referer).
   {

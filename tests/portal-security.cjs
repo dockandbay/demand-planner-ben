@@ -120,6 +120,21 @@ const internal = (t) => /relation "|column "|syntax error|violates|duplicate key
     await new Promise((r) => setTimeout(r, 200));
     ok((await get('/api/portal/me', { cookie: c })).status === 401, 'M5e: the signed-out token no longer works');
   }
+  // ── v28.189 (Ben, M2 / M9): Dock & Bay's shipment messages are read PER SUPPLIER. Needs HZ_TEST_SHIP_UNREAD_NOTE = an internal note on
+  // a shipment both MASTER and RIDER see in their Shipment Plan (HZ_TEST_SHIP_UNREAD_REF, default SHIP) that neither has read (sandbox:
+  // insert one, delete it after) and HZ_TEST_WRITES=1 (the rider marks it read).
+  if (E.HZ_TEST_WRITES === '1' && E.HZ_TEST_SHIP_UNREAD_NOTE) {
+    const nid = Number(E.HZ_TEST_SHIP_UNREAD_NOTE), SR = E.HZ_TEST_SHIP_UNREAD_REF || SHIP;
+    const unread = async (c) => { const b = await get('/api/portal/bootstrap?fresh=1', { cookie: c }); const s = ((b.json && b.json.shipmentPlan) || []).find((x) => x.shipment_ref === SR); return s ? s.unread_dnb : null; };
+    const inbox = async (c) => ((await get('/api/portal/unread-messages', { cookie: c })).json || []).some((x) => x.type === 'shipment' && Number(x.note_id) === nid);
+    ok((await unread(M)) >= 1 && (await unread(Rd)) >= 1, 'M2: the new D&B shipment note is unread for master and rider');
+    ok(await inbox(M) && await inbox(Rd), 'M2: it is in both Inboxes');
+    ok((await post('/api/portal/shipment-notes-read', { shipment_ref: SR, upto_id: nid }, { cookie: O })).status === 403, 'M2: an outsider can not mark it read -> 403');
+    ok((await post('/api/portal/shipment-notes-read', { shipment_ref: SR, upto_id: nid }, { cookie: Rd })).status === 200, 'M2: rider views the shipment (marks read) -> 200');
+    ok((await unread(Rd)) === 0 && !(await inbox(Rd)), 'M2: read for the rider (badge 0, gone from its Inbox)');
+    ok((await unread(M)) >= 1 && await inbox(M), 'M2/M9: STILL unread for the master (a rider\'s view no longer clears it for everyone)');
+  }
+
   // ── v28.188 (Ben, H7): health capture. The session route still needs a session; the login-page route takes no session but only
   // the allowed kinds (a 'metric' row is dropped), at most 20 events, and never answers with an error page.
   const tx = { 'content-type': 'text/plain' };

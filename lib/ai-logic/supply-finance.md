@@ -21,6 +21,7 @@ sources:
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
   - server.mjs :: /api/portal/submit, /api/portal/line-cost, /api/supply/submission/:id/apply, /api/supply/po-line-accept, /api/supply/po-line-reject
   - server.mjs :: portalShipmentRole, portalCanReadAttachment, /api/portal/shipment/:ref, /api/portal/attachment/:id, staffOnly, /api/portal/redeem (portal access rules)
+  - server.mjs :: portalPoIsSlim, portalPaymentsTrim, /api/portal/po-detail, /api/portal/shipment-notes-read, shipNoteUnreadSql (portal payload + per-supplier shipment reads)
   - server.mjs :: cpTierPrice, /api/cp/prices, /api/cp/order, cpCreateFulfilDraft
   - server.mjs :: /api/client/commission/runs/build, /api/client/commission/runs/:id/xero-bill (client commission)
   - server.mjs :: /api/supply/charge/:id/accept, /api/supply/po-polybags/:po
@@ -89,6 +90,11 @@ fingerprints:
   server.mjs::/api/portal/attachment/:id: 386ae75896e8
   server.mjs::staffOnly: 0df84ff342f4
   server.mjs::/api/portal/redeem: 6a098ae2a3e9
+  server.mjs::portalPoIsSlim: 17fefe2c8da5
+  server.mjs::portalPaymentsTrim: 0527feb03955
+  server.mjs::/api/portal/po-detail: 22521cd4b8ba
+  server.mjs::/api/portal/shipment-notes-read: 46a5ba85ff73
+  server.mjs::shipNoteUnreadSql: a728facfa589
   server.mjs::cpTierPrice: a2b9b629bb4a
   server.mjs::/api/cp/prices: 1445d08c02f9
   server.mjs::/api/cp/order: d604b61b8633
@@ -130,7 +136,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.187
+verified_version: v28.189
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -271,6 +277,8 @@ verified_version: v28.187
 - Shipment access: a supplier is on a shipment as its master (they supply the master PO: shipments.master_po, else the shipment ref when it is a PO number) or as a rider (one of their POs has that shipment_ref). Both may read and post shipment notes, add charges, see the shipment's tracking and add timeline files. Only the master may change shipment-level fields (Shipping status, ship date, carrier, tracking); setting Shipping moves every PO aboard to SHIPPING. A supplier sees only the shipment charges raised by its own supplier, and may delete only a shipment message written by its own people. (source: server.mjs :: portalShipmentRole, /api/portal/shipment/:ref)
 - File access in the portal: a file is served when its PO is the supplier's, or it belongs to the supplier's sample request, product development item (sample versions by the supplier's own development request), or it is a shipment timeline file (attached to a note on that shipment, or uploaded by the supplier) on a shipment the supplier is on. Sharing a shipment never opens another supplier's PO documents. A note may only reference a file the supplier can open. Staff file and DTC routes refuse portal sessions; the portal uses its own /api/portal routes. (source: server.mjs :: portalCanReadAttachment, /api/portal/attachment/:id, staffOnly)
 - Sign-in links: valid 24 hours (PORTAL_LINK_HOURS) and single use. Opening the link only shows a "Continue to portal" page; the button redeems it once (atomic), so email scanners cannot use it up. The session lasts 7 days; Sign out deletes it. (source: server.mjs :: /api/portal/redeem)
+- Portal first load (v28.189): completed POs come as light rows (every list field, no lines / documents / costs / detail-only fields); opening one (MANAGE) or a batch order plan fetches the rest first, so what is shown is unchanged. Payment runs made up only of archived POs' milestones (archive cutoff, same as the PO list) are not sent: the Payments headline still includes them and "Show them" loads them. (source: server.mjs :: portalPoIsSlim, portalPaymentsTrim, /api/portal/po-detail)
+- Dock & Bay's shipment messages are read per supplier: opening a shipment card marks the notes shown read for that supplier only; other suppliers on the same shipment still see them unread. shipment_notes.read_at still means "a supplier has read it" for Dock & Bay. (source: server.mjs :: /api/portal/shipment-notes-read, shipNoteUnreadSql)
 - Portal "Amount due" = final invoice − milestones with a paid date, + credit_amount. It is 0 until a final invoice exists. Amounts always show "$" even for non-USD suppliers. (source: supply/portal-view.js :: PAYMENTS tab)
 
 ## Client portal pricing, orders, commissions
