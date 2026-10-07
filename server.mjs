@@ -24414,7 +24414,9 @@ const _PS_SELECT = `SELECT s.email,
     coalesce((SELECT json_agg(json_build_object('supplier_id', u.supplier_id::text, 'supplier_name', u.supplier_name)) FROM planner.supplier_portal_users u
       WHERE lower(u.email)=lower(s.email) AND u.active=true AND coalesce(u.supplier_name,'')<>''), '[]') sups,
     coalesce((SELECT bool_or(coalesce(x.country,'') ILIKE '%china%' OR upper(coalesce(x.country,''))='CN' OR x.country LIKE '%中国%') FROM planner.suppliers x
-      WHERE x.name IN (SELECT u2.supplier_name FROM planner.supplier_portal_users u2 WHERE lower(u2.email)=lower(s.email) AND u2.active=true AND coalesce(u2.supplier_name,'')<>'')), false) zh`;
+      WHERE x.name IN (SELECT u2.supplier_name FROM planner.supplier_portal_users u2 WHERE lower(u2.email)=lower(s.email) AND u2.active=true AND coalesce(u2.supplier_name,'')<>'')), false) zh,
+    (SELECT upper(x.default_currency) FROM planner.suppliers x JOIN planner.supplier_portal_users u3 ON u3.supplier_name = x.name
+      WHERE lower(u3.email)=lower(s.email) AND u3.active=true AND coalesce(x.default_currency,'')<>'' ORDER BY u3.supplier_name LIMIT 1) ccy`;   // v28.190 (Ben, H9): the supplier's currency for portal amounts
 async function portalSessionLookup(psid) {
   if (!_psNoLastSeen) {
     try {
@@ -24439,7 +24441,7 @@ async function portalAuth(req, res, next) {
     if (!s) { _portalAuthMemo.delete(psid); return res.status(401).json({ error: 'session expired' }); }
     const sups = s.sups || [];
     if (!sups.length) return res.status(403).json({ error: 'no supplier linked to this account' });
-    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null), zh: !!s.zh };
+    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null), zh: !!s.zh, ccy: s.ccy || null };
     _portalAuthMemo.set(psid, { t: Date.now(), v: req.portal });
     if (_portalAuthMemo.size > 2000) { for (const [k, e] of _portalAuthMemo) if (Date.now() - e.t > PORTAL_AUTH_TTL_MS) _portalAuthMemo.delete(k); }
     next();
@@ -24607,7 +24609,7 @@ app.get('/api/portal/me', portalAuth, async (req, res) => {
   let zh = false;
   if (req.portal.zh !== undefined) zh = req.portal.zh;   // v27.879: computed once per memoised session (see portalAuth)
   else try { const r = await pool.query(`SELECT bool_or(coalesce(country,'') ILIKE '%china%' OR upper(coalesce(country,''))='CN' OR country LIKE '%中国%') z FROM planner.suppliers WHERE name = ANY($1)`, [req.portal.suppliers || []]); zh = !!(r.rows[0] && r.rows[0].z); req.portal.zh = zh; } catch (e) { zh = false; }
-  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh });
+  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh, currency: req.portal.ccy || 'USD' });   // v28.190: + currency
 });
 // ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
 // The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
@@ -25302,7 +25304,7 @@ async function portalPoDetailParts(poList) {
     // powers the Documents list + the "submit for approval" workflow in the portal.
     grab(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at,
           coalesce(approval_status,'draft') approval_status, coalesce(review_notes,'') review_notes,
-          to_char(reviewed_at,'YYYY-MM-DD') reviewed_at FROM planner.portal_attachments
+          to_char(reviewed_at,'YYYY-MM-DD') reviewed_at, (supplier_id IS NOT NULL) mine FROM planner.portal_attachments
           WHERE po = ANY($1) AND coalesce(category,'') <> 'client'
             AND NOT (coalesce(category,'') = 'timeline' AND (EXISTS (SELECT 1 FROM planner.shipment_notes sn WHERE sn.attachment_id = portal_attachments.id)
               OR (supplier_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p JOIN planner.suppliers su ON su.name = p.supplier_name WHERE p.po = portal_attachments.po AND su.id = portal_attachments.supplier_id))))
@@ -25725,6 +25727,21 @@ app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) =>
     if(!a || a.category!=='sample' || !await portalOwnsSampleRef(req, a.po)) return res.status(403).json({ error: 'not allowed' });
     await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok:true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.190 (Ben, deep dive H4): the PO card's document "remove" posted to a route that did not exist (the file vanished from the screen only).
+// A supplier may remove a document IT uploaded to its own PO while it is a draft or was rejected; one sent for approval or approved stays.
+app.post('/api/portal/doc-remove', portalAuth, async (req, res) => {
+  const id = Number(req.body && req.body.id); if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Which document? (id missing)' });
+  try {
+    const a = (await pool.query(`SELECT id, po, coalesce(category,'') category, coalesce(approval_status,'draft') st, supplier_id, storage_path FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
+    const ids = (req.portal.supplierIds || []).map(Number);
+    if (!a || a.supplier_id == null || !ids.includes(Number(a.supplier_id)) || /^(client|timeline|sample|product|product_sample|product_dim|onboarding.*)$/.test(a.category) || !(await portalOwnsPO(req, a.po)))
+      return res.status(403).json({ error: 'You can only remove documents you uploaded to your own orders.' });
+    if (!['draft', 'rejected'].includes(a.st)) return res.status(409).json({ error: 'This document has been sent to Dock & Bay for approval, so it can not be removed here. Please contact Dock & Bay if it is wrong.' });
+    const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(approval_status,'draft') IN ('draft','rejected')`, [id]);
+    if (r.rowCount && a.storage_path) storageDelete(a.storage_path);
+    res.json({ ok: true, deleted: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
@@ -26144,8 +26161,11 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     const sid = req.portal.supplierIds[0] || null;
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [b.po, sid, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email]);
+    // v28.190 (Ben): store the document type the supplier picked (it was dropped: every portal document became 'invoice' after a reload);
+    // reserved categories (client / timeline / sample / product / onboarding files) can not be chosen here.
+    const cat = String(b.category || '').trim().slice(0, 60), category = (!cat || /^(client|timeline|sample|product|product_sample|product_dim|onboarding.*)$/i.test(cat)) ? 'invoice' : cat;
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by,category,uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'supplier') RETURNING id`,
+      [b.po, sid, b.filename || 'invoice', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email, category]);
     res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

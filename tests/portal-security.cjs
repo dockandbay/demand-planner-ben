@@ -135,6 +135,22 @@ const internal = (t) => /relation "|column "|syntax error|violates|duplicate key
     ok((await unread(M)) >= 1 && await inbox(M), 'M2/M9: STILL unread for the master (a rider\'s view no longer clears it for everyone)');
   }
 
+  // ── v28.190 (Ben, H4): a supplier removes its OWN draft PO document (the button used to post to a route that did not exist). Needs
+  // HZ_TEST_WRITES=1 and HZ_TEST_RIDER_PO (one of RIDER's POs): uploads a tiny file, checks the stored type, removes it.
+  if (E.HZ_TEST_WRITES === '1' && E.HZ_TEST_RIDER_PO) {
+    const up = await post('/api/portal/upload', { po: E.HZ_TEST_RIDER_PO, filename: 'v28190 test.pdf', mime: 'application/pdf', data_base64: Buffer.from('%PDF-1.4 test').toString('base64'), category: 'Packing list' }, { cookie: Rd });
+    ok(up.status === 200 && up.json && up.json.id, 'H4: rider uploads a document to its own PO');
+    if (up.json && up.json.id) {
+      const b = await get('/api/portal/po-detail?pos=' + encodeURIComponent(E.HZ_TEST_RIDER_PO), { cookie: Rd });
+      const doc = (((b.json && b.json.docsByPo) || {})[E.HZ_TEST_RIDER_PO] || []).find((x) => String(x.id) === String(up.json.id));
+      ok(doc && doc.category === 'Packing list' && doc.mine === true, 'the chosen document type is stored (was always "invoice") and flagged as the supplier\'s own');
+      ok((await post('/api/portal/doc-remove', { id: up.json.id }, { cookie: M })).status === 403, 'H4: another supplier can not remove it -> 403');
+      const rm = await post('/api/portal/doc-remove', { id: up.json.id }, { cookie: Rd }); ok(rm.status === 200 && rm.json && rm.json.deleted === 1, 'H4: the rider removes its own draft document -> 200, deleted');
+      ok((await get('/api/portal/attachment/' + up.json.id, { cookie: Rd })).status === 403, 'H4: the removed document is gone');
+    }
+    ok((await post('/api/portal/doc-remove', { id: E.HZ_TEST_ATT_MASTER_DOC }, { cookie: Rd })).status === 403, 'H4: removing the master\'s document -> 403');
+  }
+
   // ── v28.188 (Ben, H7): health capture. The session route still needs a session; the login-page route takes no session but only
   // the allowed kinds (a 'metric' row is dropped), at most 20 events, and never answers with an error page.
   const tx = { 'content-type': 'text/plain' };

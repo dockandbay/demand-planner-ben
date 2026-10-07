@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <script src="/hz-health.js?v=__APP_VERSION__" data-hz-src="portal" data-hz-ver="__APP_VERSION__"></script><!-- v28.159 (Ben): browser health capture -> /api/portal/health/client-events (psid session) -->
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1"><!-- v28.190 (Ben, deep dive M11): pinch-zoom allowed (was maximum-scale=1, user-scalable=no) -->
 <title>Dock &amp; Bay — Supplier Portal</title>
 <link rel="icon" type="image/png" href="/portal-icon.png?v=__APP_VERSION__"><!-- v28.189 (Ben, M4): one cached icon file (the page embedded the same 13 KB base64 image twice) -->
 <link rel="apple-touch-icon" href="/portal-icon.png?v=__APP_VERSION__">
@@ -63,6 +63,16 @@
   .pv-msg{margin-top:14px;font-size:13px;padding:10px 12px;border-radius:8px}
   .pv-msg.ok{background:#ecfdf5;color:#15803d;border:1px solid #bbf7d0}
   .pv-empty{padding:30px;text-align:center;color:#64748b}
+  /* v28.190 (Ben, deep dive M11): a dialog taller than the screen scrolls inside itself (the price proposal Submit was unreachable with the
+     phone keyboard open); on phones every text is at least 12px and every control at least 40px tall to tap. */
+  #pv-confirm-box, div[style*="position:fixed;inset:0"][style*="justify-content:center"] > div{max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box}
+  @media (max-width:640px){
+    body .tiny, body small, #supply-root th, .ex-badge, .tool-badge, .pp-sec-n, header.pv-top .pv-ver, header.pv-top #pp-secs .pp-sec,
+    [style*="font-size:8"], [style*="font-size:9"], [style*="font-size:10"], [style*="font-size:11"], [style*="font: 600 9"], [style*="font:600 9"]{font-size:12px !important}
+    header.pv-top #pp-secs .pp-sec, #pp-tabs .rtab, #supply-root .pill, #supply-root .pptab{min-height:40px;display:inline-flex;align-items:center;box-sizing:border-box}
+    .pv-btn, #supply-root button:not(.lnk-btn), #supply-root select, #supply-root input:not([type=checkbox]):not([type=radio]):not([type=file]), .pv-card input, #pv-confirm-box button{min-height:40px;box-sizing:border-box}
+    #supply-root .lnk-btn{padding:10px 4px !important}
+  }
 </style>
 </head>
 <body>
@@ -71,6 +81,7 @@
 (function(){
   var root=document.getElementById('root');
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function ppNum(v){ if(typeof window.ppNum==='function')return window.ppNum(v); var n=parseFloat(v); return isNaN(n)?null:n; }   // v28.190: shared parser from portal-view.js (comma decimals)
   function api(p,b){ if(p.indexOf('/price-list/')>=0)window.__plData=null;   // a price-list write invalidates the client cache (v27.505)
     return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();}); }
   function get(p){ return fetch(p).then(function(r){ if(r.status===401) throw {auth:true}; return r.json(); }); }
@@ -113,7 +124,7 @@
     productOpenSamples:'/api/portal/product-open-samples', productSkus:'/api/portal/product-skus', sampleContentsBase:'/api/portal/sample/',
     specApprove:'/api/portal/spec-approve', specFileBase:'/api/portal/spec-file/',
     productDocBase:'/api/portal/attachment/', dtcShipment:'/api/portal/dtc-shipment',
-    poDetail:'/api/portal/po-detail', payments:'/api/portal/payments', samplesList:'/api/portal/samples' };   // v28.189 (Ben): on-demand PO detail / archived payments / samples refresh   // v28.186 (Ben, C2): swatch / note images / product docs / DTC details via portal-scoped routes (were staff-only /api/supply, /api/product routes)
+    docRemove:'/api/portal/doc-remove', poDetail:'/api/portal/po-detail', payments:'/api/portal/payments', samplesList:'/api/portal/samples' };   // v28.189 (Ben): on-demand PO detail / archived payments / samples refresh   // v28.186 (Ben, C2): swatch / note images / product docs / DTC details via portal-scoped routes (were staff-only /api/supply, /api/product routes)
 
   // Anonymise mode (for screenshots only): ?anon=1 → header "ACME Inc" + PO supplier codes shown as CM; ?as=Name
   // sets a custom name; ?anon=0 turns it off. Sticky via localStorage. Display only — data & filtering unchanged.
@@ -152,7 +163,7 @@
     _jsP.then(function(){
       window.DBPortalView.mount({
         root: document.getElementById('pv'),
-        ep: EP, by: me.email, sid: null, supplierName: realSup,
+        ep: EP, by: me.email, sid: null, supplierName: realSup, currency: me.currency||'USD',   // v28.190: amounts in the supplier's currency
         anon: ANON_NAME ? {name:ANON_NAME, realNames:(me.suppliers||[])} : null,
         getData: function(o){ var fresh=!!(o&&o.fresh); var pre=_bootP; _bootP=null;
           return (pre&&!fresh&&!window.__ppInclArch)?pre.catch(function(){ return bootFetch(false); }):bootFetch(fresh); }   // first call: the payload prefetched at page start (live fetch if that failed); later calls: live; {fresh:true} forces a rebuild
@@ -183,7 +194,10 @@
     var STEPS=[['company','Company','Legal entity, address'],['contacts','Contacts','Who we talk to for what'],['logistics','Logistics & terms','Port, incoterm, payment terms'],['certs','Certificates','GRS, BSCI, audits — with files'],['warehouse','Warehouse requirements','Acknowledge before your first PO'],['products','Products & packaging','Dimensions, weights, HS codes'],['review','Review & submit','Sent to Dock & Bay for approval']];
     var CERTS=[['grs','GRS (Global Recycled Standard)','Certificate no.'],['bsci','BSCI / SMETA social audit','Audit ref · rating'],['oeko','OEKO-TEX','Certificate no.'],['iso','ISO 9001 / 14001','Certificate no.'],['other','Other licences','Export licence, FSC, …']];
     function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-    function num(v){ v=parseFloat(v); return isNaN(v)?0:v; }
+    function num(v){ v=ppNum(v); return v==null?0:v; }   // v28.190: "12,5" / "1,200" parse correctly (ppNum below)
+    var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];   // v28.190 (Ben, H8): dates as dd-Mmm-yy, times local
+    function pfD(v){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||'')); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(v||''); }
+    function pfDT(v){ var d=new Date(v); if(!v||isNaN(d.getTime()))return pfD(v); function p(n){return (n<10?'0':'')+n;} return p(d.getDate())+'-'+MON[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
     function fmt(v,d){ return (Math.round(v*Math.pow(10,d||0))/Math.pow(10,d||0)).toLocaleString(); }
     function post(url,body){ return fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){ return r.json().then(function(j){ if(!r.ok||(j&&j.error&&!j.problems))throw new Error((j&&j.error)||('HTTP '+r.status)); return j; }); }); }
     function toast(m,bad){ var t=document.createElement('div'); t.textContent=m; t.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:'+(bad?'#991b1b':'#0d1626')+';color:#fff;padding:10px 16px;border-radius:8px;font:600 13px system-ui;z-index:300000;box-shadow:0 6px 20px rgba(0,0,0,.3);max-width:90vw;text-align:center'; document.body.appendChild(t); setTimeout(function(){ t.remove(); },3200); }
@@ -202,8 +216,8 @@
     function render(){ var f=S.form, req=S.request, shown=req||(S.last?{ref:S.last.ref,status:S.last.status,type:S.last.type}:null); var nDone=STEPS.slice(0,6).filter(function(s){return done(s[0]);}).length;
       var stPill=function(){ var req=shown; if(!req)return '<span class="ex-badge" style="background:#eef1f6;color:#5b6b83">Not started</span>'; var m={draft:['#eef1f6','#5b6b83','Draft'],submitted:['#eaf1fd','#1a4fb5','Submitted'],in_review:['#f1ebfc','#7048c9','In review'],returned:['#fdf3d7','#b45309','Returned'],approved:['#e8f6ee','#118a4e','Approved']}[req.status]||['#eef1f6','#5b6b83',req.status]; return '<span class="ex-badge" style="background:'+m[0]+';color:'+m[1]+'">'+m[2]+'</span>'; };
       var banner=''; if(req&&req.status==='returned')banner='<div style="background:#fdf3d7;border:1px solid #f3dfa0;color:#b45309;border-radius:8px;padding:10px 14px;margin-top:10px"><b>Returned for corrections.</b> '+esc(req.return_note||'')+' Fix that section and resubmit; everything else you entered is kept.</div>';
-      else if(locked())banner='<div style="background:#eaf1fd;color:#1a4fb5;border-radius:8px;padding:10px 14px;margin-top:10px"><b>Submitted'+(req.submitted_at?' '+esc(String(req.submitted_at).slice(0,16).replace('T',' ')):'')+'.</b> Dock &amp; Bay is reviewing each section; you will get an email per decision. The form is read-only until then.</div>';
-      else if(S.last&&S.last.status==='approved'&&!req)banner='<div style="background:#e8f6ee;border:1px solid #bfe3cd;color:#118a4e;border-radius:8px;padding:10px 14px;margin-top:10px"><b>Profile approved '+esc(S.last.decided_at||'')+'.</b> You can edit any section at any time; changed sections go back through review as a change request while the approved values stay in force.</div>';
+      else if(locked())banner='<div style="background:#eaf1fd;color:#1a4fb5;border-radius:8px;padding:10px 14px;margin-top:10px"><b>Submitted'+(req.submitted_at?' '+esc(pfDT(req.submitted_at)):'')+'.</b> Dock &amp; Bay is reviewing each section; you will get an email per decision. The form is read-only until then.</div>';
+      else if(S.last&&S.last.status==='approved'&&!req)banner='<div style="background:#e8f6ee;border:1px solid #bfe3cd;color:#118a4e;border-radius:8px;padding:10px 14px;margin-top:10px"><b>Profile approved '+esc(pfD(S.last.decided_at||''))+'.</b> You can edit any section at any time; changed sections go back through review as a change request while the approved values stay in force.</div>';
       host.innerHTML='<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px;margin-bottom:14px" class="pf-intro"><div style="background:#fff;border:1px solid #e5e9f0;border-radius:10px;padding:14px 16px"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:#8b98ad;font-weight:600">'+esc(S.supplier.name)+' · '+(S.is_new?'new supplier':'supplier profile')+'</div><h2 style="font-size:20px;margin:4px 0 6px">'+(S.is_new?'Set up your supplier profile':'Your supplier profile')+'</h2><p style="margin:0;color:#5b6b83;max-width:62ch">Enter your company, logistics and product details. The Dock &amp; Bay team reviews each section, approves it or returns it with a note, and approved data flows into Horizon and our product system. This profile stays editable at any time.</p>'+banner+'</div>'
         +'<div style="background:#fff;border:1px solid #e5e9f0;border-radius:10px;padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b style="font-family:ui-monospace,Menlo,monospace">'+esc(shown?shown.ref:'—')+'</b><div style="font-size:12px;color:#5b6b83">'+(shown?(shown.type==='change'?'Change request':'Onboarding request')+(shown.status==='approved'?' · approved':''):'No request yet')+'</div></div>'+stPill()+'</div><div style="margin-top:12px;font-size:12.5px;color:#5b6b83">Sections complete: <b style="color:#101828">'+nDone+' / 6</b> <span id="pf-saved" style="margin-left:8px;color:#8b98ad"></span></div><div style="height:6px;background:#eef1f6;border-radius:999px;margin-top:6px;overflow:hidden"><div style="height:100%;width:'+(nDone/6*100)+'%;background:#2361d8;border-radius:999px"></div></div><div style="margin-top:10px"><a href="/api/portal/warehouse-requirements.pdf" style="color:#2361d8;font-size:12.5px;font-weight:600">⤓ Warehouse requirements (PDF)</a></div></div></div>'
         +'<div style="display:grid;grid-template-columns:230px 1fr;gap:14px" class="pf-layout"><div style="background:#fff;border:1px solid #e5e9f0;border-radius:10px;padding:8px"><ol style="list-style:none;margin:0;padding:0" id="pf-steps">'+STEPS.map(function(s,i){ var sec=req&&req.sections&&req.sections[s[0]]; var isDone=s[0]!=='review'&&done(s[0]); return '<li data-step="'+s[0]+'" style="display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border-radius:8px;cursor:pointer;'+(STEP===s[0]?'background:#f0f6ff;font-weight:600;':'')+'"><span style="flex:0 0 22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;'+(sec==='approved'?'background:#118a4e;color:#fff;':sec==='returned'?'background:#b45309;color:#fff;':isDone?'background:#2361d8;color:#fff;':'border:1.5px solid #e5e9f0;color:#5b6b83;')+'">'+(sec==='approved'?'✓':sec==='returned'?'!':(i<6?i+1:'✓'))+'</span><div>'+esc(s[1])+'<small style="display:block;color:#8b98ad;font-weight:400;font-size:11.5px">'+esc(s[2])+'</small></div></li>'; }).join('')+'</ol></div><div id="pf-panel" style="background:#fff;border:1px solid #e5e9f0;border-radius:10px"></div></div>'
@@ -250,14 +264,16 @@
   }
   function ppPriceList(me,host){
     var _prods=[], _cur=0, OPEN={};
-    function CCY(c){ return ({USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$'})[String(c||'').toUpperCase()]||''; }
+    // v28.190 (Ben, H9): + CNY / RMB / HKD (Chinese suppliers' prices showed with no symbol); an unknown code shows the code itself.
+    function CCY(c){ c=String(c||'').trim().toUpperCase(); return ({USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$',CNY:'¥',RMB:'¥',HKD:'HK$'})[c]||(c?c+' ':''); }
+    function uc(v){ return Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}); }   // v28.190: unit costs keep up to 4 decimals (were cut to 2)
     function applicable(list){ if(!list||!list.length)return {cur:null,pending:false}; var act=list.filter(function(e){return e.status==='active';}),pend=list.filter(function(e){return e.status==='pending';}),pick=null;
       act.slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}).forEach(function(e){pick=e;}); return {cur:pick,pending:pend.length>0,pendEntry:pend[0]}; }
     function priceDisp(e){ if(!e||!e.tiers||!e.tiers.length)return ''; var sym=CCY(e.currency), t=e.tiers.map(function(x){return Number(x.unit_cost);}), mn=Math.min.apply(null,t),mx=Math.max.apply(null,t);
-      if(t.length<2||mn===mx)return '<b>'+sym+mx.toFixed(2)+'</b>'; return '<span style="font-size:11px;color:#64748b">'+sym+mn.toFixed(2)+'</span> – <b style="font-size:14px">'+sym+mx.toFixed(2)+'</b>'; }
+      if(t.length<2||mn===mx)return '<b>'+sym+uc(mx)+'</b>'; return '<span style="font-size:11px;color:#64748b">'+sym+uc(mn)+'</span> – <b style="font-size:14px">'+sym+uc(mx)+'</b>'; }
     function fd2(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/.exec(String(s)); var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)+(m[4]?(' '+m[4]):'')):String(s); }
     function outcome(s){ return s==='active'?'<span style="color:#15803d;font-weight:700">✓ Approved</span>':s==='rejected'?'<span style="color:#b91c1c;font-weight:700">✕ Rejected</span>':s==='pending'?'<span style="color:#b45309;font-weight:700">⏳ Pending</span>':'<span style="color:#64748b">⤴ Superseded</span>'; }
-    function tierStr(e){ if(!e.tiers||!e.tiers.length)return '—'; var sym=CCY(e.currency); return e.tiers.map(function(t){return t.min_qty+':'+sym+Number(t.unit_cost).toFixed(2);}).join(' · '); }
+    function tierStr(e){ if(!e.tiers||!e.tiers.length)return '—'; var sym=CCY(e.currency); return e.tiers.map(function(t){return t.min_qty+':'+sym+uc(t.unit_cost);}).join(' · '); }
     function logBtn(scope,key){ return ' <span class="pl-rowlog" data-scope="'+scope+'" data-key="'+esc(key)+'" title="Change log for this '+(scope==='sku'?'SKU':'price type')+'" style="opacity:.4;cursor:pointer;font-size:12px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.4">🕘</span>'; }
     function plPointLog(scope,key,label){ var exm=document.getElementById('pl-plog-ov'); if(exm)exm.remove();
       var mv=document.createElement('div'); mv.id='pl-plog-ov'; mv.style.cssText='position:fixed;inset:0;z-index:9600;background:rgba(15,23,42,.4);display:flex;align-items:center;justify-content:center;padding:16px';
@@ -339,7 +355,12 @@
     load();
   }
 
-  get('/api/portal/me').then(showPortal).catch(function(){ showLogin(); });
+  // v28.190 (Ben, deep dive M10): only a 401 (no / expired session) shows the sign-in page; a network or server blip offers a retry instead
+  // of throwing the supplier out to the login screen.
+  function bootMe(){ get('/api/portal/me').then(showPortal).catch(function(e){ if(e&&e.auth){ showLogin(); return; }
+    root.innerHTML='<div class="pv-login"><div class="pv-card"><h1>Dock &amp; Bay</h1><h2>Supplier Portal</h2><p>We could not reach Dock &amp; Bay just now. Check your connection and try again.</p><button class="pv-btn" type="button" id="pv-retry">Try again</button></div></div>';
+    var rb=document.getElementById('pv-retry'); if(rb)rb.onclick=function(){ root.innerHTML='<div class="pv-empty">Loading…</div>'; bootMe(); }; }); }
+  bootMe();
 })();
 // ── Silent auto-update (supplier portal) ── mirrors the main app: reload on a new deploy or a >30-min stale
 // session, silently when backgrounded/idle, else a small Refresh nudge.
@@ -351,7 +372,12 @@
     d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483000;background:#fde047;color:#111827;font:700 15px system-ui;padding:11px 18px;display:flex;gap:16px;align-items:center;justify-content:center;box-shadow:0 3px 14px rgba(0,0,0,.28);border-bottom:2px solid #eab308';
     d.innerHTML='<span style="font-size:16px">🔄 '+nagMsg+'</span><button id="hz-pu-go" style="background:#111827;color:#fde047;border:0;border-radius:6px;padding:8px 18px;font-weight:700;font-size:14px;cursor:pointer">Refresh now</button>';
     document.body.appendChild(d); document.getElementById('hz-pu-go').onclick=function(){location.reload();}; }
-  function apply(){ if(!pending)return; if(document.hidden){location.reload();return;} if(Date.now()-lastAct>IDLE_MS){location.reload();return;} nag(); }
+  // v28.190 (Ben, deep dive M13): never reload over unsaved typing. A focused field, or any text field / textarea whose value differs from
+  // what the page drew, holds the silent reload; the supplier gets the Refresh banner instead and chooses when.
+  function typing(){ try{ var a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.type!=='button'&&a.type!=='submit')return true;
+    var els=document.querySelectorAll('textarea, input:not([type]), input[type=text], input[type=number], input[type=email], input[type=date]');
+    for(var i=0;i<els.length;i++){ var e=els[i]; if(e.closest&&e.closest('.pp-po-bar,.bar'))continue; if(String(e.value||'')!==String(e.defaultValue||''))return true; } }catch(e){} return false; }
+  function apply(){ if(!pending)return; var t=typing(); if(document.hidden&&!t){location.reload();return;} if(Date.now()-lastAct>IDLE_MS&&!t){location.reload();return;} nag(); }
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){ if(j&&j.version&&j.version!==BOOT){pending=true;apply();} }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){apply();}else{lastAct=Date.now();check();} });
   window.addEventListener('focus',function(){lastAct=Date.now();check();});

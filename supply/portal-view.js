@@ -110,6 +110,35 @@
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
+  // v28.190 (Ben, deep dive H8 / M14): ONE formatter for every portal date and time. Server times are 'YYYY-MM-DD HH:MM' in UTC (the DB
+  // session is UTC): shown in the supplier's own local time as dd-Mmm-yy HH:MM. A plain date is dd-Mmm-yy. Anything else (e.g. 'just
+  // now') is shown as it is. ppToday() = today's date where the supplier is (was toISOString(), i.e. UTC: a day behind in China from
+  // 00:00 to 08:00). ppNowStamp() = now in the server's format (UTC), so a note added in the page sorts and shows like a saved one.
+  function _pp2(n){ return (n<10?'0':'')+n; }
+  function ppToday(){ var d=new Date(); return d.getFullYear()+'-'+_pp2(d.getMonth()+1)+'-'+_pp2(d.getDate()); }
+  function ppNowStamp(){ return new Date().toISOString().slice(0,16).replace('T',' '); }
+  function ppDT(v){ if(v==null||v==='')return ''; var t=String(v), m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?$/.exec(t.trim());
+    if(!m)return t; if(m[4]==null)return fd(t);
+    var d=new Date(m[1]+'-'+m[2]+'-'+m[3]+'T'+m[4]+':'+m[5]+':00'+(m[6]?(m[6]==='Z'?'Z':m[6].replace(/^([+-]\d{2})(\d{2})$/,'$1:$2')):'Z')); if(isNaN(d.getTime()))return fd(t);
+    return _pp2(d.getDate())+'-'+MON[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+_pp2(d.getHours())+':'+_pp2(d.getMinutes()); }
+  // v28.190 (Ben, deep dive H9): money in the supplier's own currency (planner.suppliers.default_currency via /api/portal/me; USD when unset),
+  // 2 decimals for amounts everywhere (was whole units in some places), up to 4 for unit costs (money4).
+  var PP_CCY_SYM={USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$',CNY:'¥',RMB:'¥',HKD:'HK$',NZD:'NZ$',JPY:'¥',INR:'₹',TRY:'₺',VND:'₫'}, CUR='$';
+  function ppCurSym(c){ c=String(c||'').trim().toUpperCase(); return PP_CCY_SYM[c]||(c?c+' ':'$'); }
+  // v28.190 (Ben, deep dive M15): numbers typed by suppliers. "12,5" = 12.5 (comma decimal), "1,200" / "1.234.567" = thousands, "1.234,50" and
+  // "1,234.50" = the last separator is the decimal one. Currency symbols / spaces ignored. null when it is not a number.
+  function ppNum(v){ if(v==null)return null; var t=String(v).replace(/[\s\u00a0'’]/g,'').replace(/[^0-9.,\-]/g,''); if(!t||!/\d/.test(t))return null;
+    var c=t.lastIndexOf(','), d=t.lastIndexOf('.');
+    if(c>=0&&d>=0){ t=c>d?t.replace(/\./g,'').replace(',','.'):t.replace(/,/g,''); }
+    else if(c>=0){ t=/^-?\d{1,3}(,\d{3})+$/.test(t)?t.replace(/,/g,''):(t.split(',').length===2?t.replace(',','.'):t.replace(/,/g,'')); }
+    else if((t.match(/\./g)||[]).length>1){ t=t.replace(/\./g,''); }
+    var n=Number(t); return isFinite(n)?n:null; }
+  function ppNumS(v){ var n=ppNum(v); return n==null?'':String(n); }   // the same, as the plain string the server's numeric fields take
+  try{ window.ppNum=ppNum; }catch(e){}
+  // v28.190 (Ben, deep dive H5): the button the supplier last pressed (captured before its handler runs). When a save fails, postJSON
+  // re-enables it and puts its label back, so a failed save no longer leaves a dead "Saving…" button (the only recovery was a refresh).
+  var _ppLastPress=null;
+  function money4(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4});}
   // Dynamic tracking URL for a carrier + code (DHL / FedEx / UPS / SF Express); '' when the carrier has no tracker.
   function carrierTrackUrl(carrier,code){ var c=String(carrier||'').toLowerCase(), r=String(code||'').trim(); if(!r)return ''; var e=encodeURIComponent(r);
     if(/dhl/.test(c)) return 'https://www.dhl.com/en/express/tracking.html?AWB='+e+'&brand=DHL';
@@ -163,7 +192,7 @@
   function dtcActionDue(p){ return ppIsDtc(p) && !(p&&p.dtc_accepted_at) && !ppShipped(p); }
   // DTC shipment details (carton count / CBM / weight / dims) become a supplier action once production has ended
   // and nothing's been entered yet (migration 127; entered under portal ▸ SHIPMENT).
-  function dtcShipDataDue(p){ return ppIsDtc(p) && !!(p&&p.prod_end) && p.prod_end<new Date().toISOString().slice(0,10) && !(p&&p.dtc_entered_at); }
+  function dtcShipDataDue(p){ return ppIsDtc(p) && !!(p&&p.prod_end) && p.prod_end<ppToday() && !(p&&p.dtc_entered_at); }
   // Action notifications only apply from production 55 onward — productions 54 and earlier raise nothing.
   function prodActionable(p){ var pn=parseInt(p&&p.prod_no,10); return !(isFinite(pn) && pn<=54); }
   // FOB pickup — mirrors the main app's isFOBdest: no shipment AND (Manufacturing branch OR a destination that
@@ -188,7 +217,7 @@
   function paintProdSel(el){ if(!el)return; var c=PROD_STATUS_COL[el.value||'']||PROD_STATUS_COL['']; el.style.background=c[0]; el.style.color=c[1]; el.style.borderColor=c[2]; el.style.fontWeight='600'; }
   function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:11px;text-align:left;width:130px;min-width:0;'+prodStatusStyle(val)+'"><option value=""'+(val?'':' selected')+'>—</option>'
     +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
-  function prodStatusException(ps, prodStart, prodEnd){ ps=ps||''; var today=new Date().toISOString().slice(0,10);
+  function prodStatusException(ps, prodStart, prodEnd){ ps=ps||''; var today=ppToday();
     if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set');
     if(ps!=='ready_to_ship' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past completion date ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
     return ''; }
@@ -808,6 +837,7 @@
 
   function mount(opts){
     injectStyle();
+    CUR=ppCurSym(opts.currency);   // v28.190 (Ben, H9): the supplier's currency (USD when the host does not say)
     var EP=opts.ep, STATE={supplierName:opts.supplierName||'', sid:opts.sid||null, by:opts.by||'portal'};
     // Anonymise mode (screenshots only): rewrite displayed text — PO supplier code → CM, real supplier name → the
     // demo name. Display only; underlying data / requests are unchanged.
@@ -855,9 +885,9 @@
         var s=d.sample;
         var DEC={approved:'Approved',approved_with_comments:'Approved with comments',rejected_new_sample:'Rejected — new sample needed',stop_development:'Development stopped',sample_in_review:'In review',sample_development:'In development'};
         var swatch=s.swatch_url?'<img src="'+esc(s.swatch_url)+'" alt="swatch" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;border:1px solid #e5e7eb;background:#f3f4f6" onerror="this.style.display=\'none\'">':'<div style="width:100%;height:150px;border-radius:12px;background:#f3f4f6;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:12px">no swatch</div>';
-        var idRows=[['Colour',s.colour_name],['Season',s.season],['Type',s.category],['Sample date',s.sample_date]].filter(function(r){return r[1];});
+        var idRows=[['Colour',s.colour_name],['Season',s.season],['Type',s.category],['Sample date',ppDT(s.sample_date)]].filter(function(r){return r[1];});
         var recv=s.received_at
-          ? '<div style="display:flex;align-items:center;gap:8px;background:#ecfdf5;border:1px solid #10b981;border-radius:10px;padding:11px 14px"><span style="font-size:18px">✓</span><b style="color:#059669"><span class="pp-i18n">Received</span></b><span style="color:#6b7280;font-size:12px">'+esc(s.received_at)+'</span></div>'
+          ? '<div style="display:flex;align-items:center;gap:8px;background:#ecfdf5;border:1px solid #10b981;border-radius:10px;padding:11px 14px"><span style="font-size:18px">✓</span><b style="color:#059669"><span class="pp-i18n">Received</span></b><span style="color:#6b7280;font-size:12px">'+esc(ppDT(s.received_at))+'</span></div>'
           : '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:11px 14px;color:#6b7280"><span class="pp-i18n">Awaiting receipt at Dock &amp; Bay</span></div>';
         var afMap={}; (s.aspect_feedback||[]).forEach(function(x){ afMap[x.aspect]=x; });
         var aspects=(s.aspects&&s.aspects.length)?s.aspects:[];
@@ -968,6 +998,7 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='dev_actions';   // Product grid: search + season + status (default: in development + items with open D&B actions)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
+    if(!window.__ppPressHook){ window.__ppPressHook=1; document.addEventListener('click',function(e){ try{ var b=e.target&&e.target.closest&&e.target.closest('button'); if(b)_ppLastPress={el:b,html:b.innerHTML,t:Date.now()}; }catch(_){} },true); }   // v28.190: see _ppLastPress
     try{ var _stkMq=window.matchMedia&&window.matchMedia('(max-width:640px)'), _stkObs=null, _stkT=0;   // v27.511: stack tables into cards on phones only
       var _stkArm=function(){ if(!_stkMq||!_stkMq.matches){ if(_stkObs){_stkObs.disconnect();_stkObs=null;} return; }
         if(_stkObs)return; _stkObs=new MutationObserver(function(){ clearTimeout(_stkT); _stkT=setTimeout(function(){ try{ ppStackTables(rootEl); }catch(e){} },30); });
@@ -1082,9 +1113,14 @@
   function hzTlSend(att,text,postOne,done){ function run(ids){ var first=ids.shift(); if(!text&&!first){ done(); return; } postOne(text||('📎 '+first.name), first?first.id:null, function(){ (function extra(){ if(!ids.length){ if(att)att.clear(); done(); return; } var x=ids.shift(); postOne('📎 '+x.name, x.id, extra); })(); }); } if(att&&att.count())att.uploadAll(run); else run([]); }
   function hzTlUploader(kind,ref,extra){ return function(f,fields,cb){ var body=Object.assign({kind:kind,ref:ref},fields,extra||{}); fetch((EP.timelineAttachment||'/api/portal/timeline-attachment'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
     // v28.151 (review C4): optional onErr(msg) runs on every failure path (error JSON, non-2xx, network), so callers can re-enable buttons / tally failures
-    function postJSON(ep,b2,cb,onErr){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
-      .then(function(r){ return r.text().then(function(t){ var j; try{ j=t?JSON.parse(t):{}; }catch(_){ j=r.ok?{}:{error:'Server error ('+r.status+')'}; } if(!r.ok&&!(j&&j.error)) j={error:'Server error ('+r.status+')'}; return j; }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
-      .then(function(j){ if(j&&j.error){ppNotice(j.error);onErr&&onErr(j.error);return;} cb&&cb(j); }).catch(function(e){ var m='Failed: '+(e&&e.message||e); ppNotice(m); onErr&&onErr(m); }); }
+    // v28.190 (Ben, H4 / H5 / M10): a 2xx answer that is not JSON is an error (was success: a gate or proxy page made the PO document
+    // "remove" look done); 401 = the session expired (clear message, not "Server error"); on any failure the pressed button comes back.
+    function postJSON(ep,b2,cb,onErr){ var press=(_ppLastPress&&Date.now()-_ppLastPress.t<60000)?_ppLastPress:null;
+      var fail=function(m){ ppNotice(m); try{ if(press&&press.el&&press.el.disabled){ press.el.disabled=false; press.el.innerHTML=press.html; } }catch(_){} if(onErr)onErr(m); };
+      fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
+      .then(function(r){ return r.text().then(function(t){ var j; try{ j=t?JSON.parse(t):{}; }catch(_){ j={error:r.ok?'Unexpected answer from the server. Please try again.':'Server error ('+r.status+')'}; } if(r.status===401)j={error:'Your session has expired. Please sign in again.'}; else if(!r.ok&&!(j&&j.error)) j={error:'Server error ('+r.status+')'}; return j; }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
+      .then(function(j){ if(j&&j.error){ fail(j.error); return; } cb&&cb(j); }, function(){ fail('Could not reach the server. Check your connection and try again.'); })
+      .catch(function(e){ try{ console.error(e); }catch(_){} fail('Failed: '+(e&&e.message||e)); }); }   // an error in the page's own follow-up (cb), as before
     // GET that tolerates empty / non-JSON (404 HTML etc.) — returns [] instead of throwing Safari's "did not match the expected pattern"
     function getJSON(url){ return fetch(url).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):[]; }catch(_){ return []; } }); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
@@ -1097,7 +1133,7 @@
       var supEnd=''; subsArr.forEach(function(s){ if(s.kind==='completion_date' && s.status!=='dismissed' && s.value) supEnd=s.value; });   // latest supplier-submitted production end
       var effEnd = supEnd || p.prod_end || '';
       if(!effEnd) return false;   // no production end date (supplier or calculated) → nothing to invoice against yet
-      return effEnd < new Date().toISOString().slice(0,10); }
+      return effEnd < ppToday(); }
     // Completion date the supplier has provided: latest non-dismissed completion_date submission, else the
     // applied end_production_overide (p.completion_date). Blank = supplier hasn't entered one yet.
     function poCdVal(p, subsArr){ subsArr=subsArr||[]; var v=''; subsArr.forEach(function(s){ if(s.kind==='completion_date'&&s.status!=='dismissed'&&s.value) v=s.value; }); return v||(p&&(p.prod_completion_date||p.completion_date))||''; }
@@ -1158,7 +1194,7 @@
       return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
     function ppCard(l,v){ return '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
     // portal payment cell: only show a payment once it's been MADE (a paid date exists), with that date
-    function ppPay(amt,dt){ return dt ? '$'+units(amt||0)+'<br><span class="mut tiny">'+esc(fd(dt))+'</span>' : '<span class="mut">—</span>'; }
+    function ppPay(amt,dt){ return dt ? ''+CUR+money(amt||0)+'<br><span class="mut tiny">'+esc(fd(dt))+'</span>' : '<span class="mut">—</span>'; }
     // Pin an expanded PO's detail panel (its sub-tabs + content) to the left while the wide portal grid scrolls
     // sideways — same JS-translate approach as the main PURCHASE ORDERS grid (CSS sticky can't: the detail cell
     // spans the full table width, so it has no containing-block slack). transform is compositor-only + rAF-coalesced.
@@ -1182,9 +1218,9 @@
         var qVal=(aq!=null?aq:(orderQty!=null?orderQty:''));
         return '<tr><td class="l" style="white-space:nowrap;min-width:30ch">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:10px">added</span>':'')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-qty" data-po="'+po+'" data-sku="'+esc(sku)+'" value="'+esc(qVal)+'" style="width:62px;text-align:right" inputmode="numeric"></td>'
-          +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
+          +'<td style="text-align:right">'+(est!=null?''+CUR+money(est):'<span class="mut">—</span>')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-cost" data-po="'+po+'" data-sku="'+esc(sku)+'" data-est="'+(est!=null?est:0)+'" value="'+(act!=null?esc(act):'')+'" placeholder="'+(est!=null?money(est):'0.00')+'" style="width:80px;text-align:right" inputmode="decimal"></td>'
-          +'<td style="text-align:right" class="pp-lt" data-sku="'+esc(sku)+'">$'+money(lt)+'</td>'
+          +'<td style="text-align:right" class="pp-lt" data-sku="'+esc(sku)+'">'+CUR+money(lt)+'</td>'
           +'<td class="l">'+(added?'<button class="lnk-btn pp-rm" data-po="'+po+'" data-sku="'+esc(sku)+'" title="remove this added SKU" style="color:var(--neg)">✕</button>':'')+'</td></tr>';
       }
       var rws=lines.map(function(l){ return planRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null), costs[l.sku], false); }).join('');
@@ -1221,7 +1257,7 @@
         +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:12px">⤓ Download to CSV</button></div>'
         +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:12px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap;min-width:30ch">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
-        +'<tr style="font-weight:700;border-top:2px solid var(--faint)"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
+        +'<tr style="font-weight:700;border-top:2px solid var(--faint)"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">'+CUR+money(totP)+'</td><td></td></tr>'
         +'</tbody></table></div>'
         +'<div style="margin:6px 0"><button class="save-btn pp-op-addline" data-po="'+po+'">+ Add new line</button></div>'
         +'<div class="pp-op-picker" data-po="'+po+'" style="display:none"></div>'
@@ -1231,19 +1267,19 @@
         return '<tr><td class="l"><input class="fci pp-ac-desc" data-id="'+a.id+'" data-po="'+po+'" value="'+esc(a.description||'')+'" placeholder="description" style="width:190px;text-align:left"></td>'
           +'<td style="text-align:right"><input class="fci pp-ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" style="width:56px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right"><input class="fci pp-ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" style="width:74px;text-align:right" inputmode="decimal"></td>'
-          +'<td style="text-align:right">$'+money(lt)+'</td>'
+          +'<td style="text-align:right">'+CUR+money(lt)+'</td>'
           +'<td class="l"><button class="lnk-btn pp-ac-rm" data-id="'+a.id+'" title="remove" style="color:var(--neg)">✕</button></td></tr>'; }).join('');
       var invTot=totP+addTot;
       skus+='<div class="sect-h" style="margin-top:12px">Additional costs <span class="mut tiny">(freight, tooling, surcharges… — added to the invoice)</span></div>'
         +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:540px;max-width:100%"><colgroup><col style="width:200px"><col style="width:72px"><col style="width:90px"><col style="width:88px"><col style="width:70px"></colgroup><thead><tr><th class="l">Description</th><th class="l">Qty</th><th class="l">Price</th><th class="l">Total</th><th></th></tr></thead><tbody>'
         +acRows
         +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px;text-align:left"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
-        +(add.length?'<tr style="font-weight:700;border-top:1px solid var(--line)"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
+        +(add.length?'<tr style="font-weight:700;border-top:1px solid var(--line)"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">'+CUR+money(addTot)+'</td><td></td></tr>':'')
         +'</tbody></table>'
-        +'<div style="margin:12px 0 4px;padding:10px 12px;background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:8px;font-weight:800;font-size:15px">Total invoice amount: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut" style="font-weight:400;font-size:12px">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
+        +'<div style="margin:12px 0 4px;padding:10px 12px;background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:8px;font-weight:800;font-size:15px">Total invoice amount: <span class="pp-inv-tot" data-add="'+addTot+'">'+CUR+money(invTot)+'</span> <span class="mut" style="font-weight:400;font-size:12px">(line items '+CUR+money(totP)+' + additional '+CUR+money(addTot)+')</span></div>';
       // ---- crossdock SKUs → shipped-qty entry lives in the SHIPMENT tab (becomes an open action once shipping) ----
       var cdSkus=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-      var today=new Date().toISOString().slice(0,10);
+      var today=ppToday();
       var xdReq = cdSkus.length>0 && (/shipping/i.test(p.status||'') || (p.prod_end && p.prod_end<today));
       var xdMissing = cdSkus.filter(function(s){ var q=xd[s]; return q==null||q===''; }).length;
       var xdAction = (xdReq && xdMissing>0) ? 1 : 0;
@@ -1286,7 +1322,7 @@
             : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
           return '<div style="font-size:12px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
             +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-            +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div>'
+            +'<div style="flex:1"><span class="mut tiny">'+esc(ppDT(n.created_at))+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div>'
             +'</div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>');
       // ---- INVOICE (the submitted value persists here with its approval status) ----
       var invSubsAll=subs.filter(function(s){return s.kind==='invoice_value';}); var invSub=invSubsAll.length?invSubsAll[invSubsAll.length-1]:null;
@@ -1298,13 +1334,13 @@
       var _invNow=(Number(String(invDefault).replace(/,/g,''))||0);
       var invMismatch=(Math.abs(_invNow-(Number(invTot)||0))>0.01);   // current field value ≠ calculated
       var invStep2='<div class="sect-h" style="font-size:15px;margin:18px 0 8px;padding-top:12px;border-top:2px solid var(--line)">Step 2 — Confirm invoice amount</div>'
-        +'<div class="pp-inv-warn" data-po="'+po+'" data-calc="'+_invCalc+'" style="'+(invMismatch?'':'display:none;')+'margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg)"><b>⚠ Invoice amount doesn\'t match the order plan.</b> Your invoice amount differs from the calculated total <b>$'+money(invTot)+'</b>. Please update the order plan in Step 1 above (SKUs / quantities / costs) so they match.</div>'
+        +'<div class="pp-inv-warn" data-po="'+po+'" data-calc="'+_invCalc+'" style="'+(invMismatch?'':'display:none;')+'margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg)"><b>⚠ Invoice amount doesn\'t match the order plan.</b> Your invoice amount differs from the calculated total <b>'+CUR+money(invTot)+'</b>. Please update the order plan in Step 1 above (SKUs / quantities / costs) so they match.</div>'
         +(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--amber-bg);border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment.</div>':'')
         +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
         +'<label class="tiny">Invoice amount (USD) <span class="mut">— defaults to the calculated total above</span><br><input class="fci pp-inv" data-po="'+po+'" data-calc="'+_invCalc+'" placeholder="0.00" value="'+invDefault+'" style="width:150px;font-size:15px;font-weight:700"></label>'
         +'<label class="tiny">Invoice doc <span class="mut">(optional)</span><br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:12px;width:200px"></label>'
         +'<button class="save-btn pp-inv-go" data-po="'+po+'" style="background:var(--pos);color:#fff;border-color:var(--pos);font-weight:700">SUBMIT TO DOCK &amp; BAY FOR APPROVAL</button></div>'
-        +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:var(--hover);border:1px solid var(--line);border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'')
+        +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:var(--hover);border:1px solid var(--line);border-radius:6px">Submitted: <b>'+CUR+esc(invSub.value)+'</b> · '+esc(ppDT(invSub.submitted_at||''))+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'')
         +'<div style="margin-top:12px"><button class="save-btn pp-po-inv" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:600">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
       // DOCUMENTS — moved to the PAYMENTS & DOCUMENTS tab
       var pdocs=(_ppData&&_ppData.docsByPo&&_ppData.docsByPo[po])||[];
@@ -1313,13 +1349,13 @@
       // (with notes) show here and on the timeline. Rejected docs can be revised & re-submitted.
       function docStatusCell(d){ var s=d.approval_status||'draft';
         if(s==='submitted') return '<span class="tool-badge bg-amber">⏳ Awaiting Dock &amp; Bay approval</span>';
-        if(s==='approved') return '<span class="tool-badge bg-green">✓ Approved</span>'+(d.reviewed_at?' <span class="mut tiny">'+esc(d.reviewed_at)+'</span>':'');
+        if(s==='approved') return '<span class="tool-badge bg-green">✓ Approved</span>'+(d.reviewed_at?' <span class="mut tiny">'+esc(ppDT(d.reviewed_at))+'</span>':'');
         if(s==='rejected') return '<span class="tool-badge" style="background:var(--neg-bg);color:var(--neg)">✗ Rejected</span>'+(d.review_notes?' <span class="mut tiny">'+esc(d.review_notes)+'</span>':'');
         return '<span class="mut tiny">Draft</span>'; }
       function docActionCell(d){ var s=d.approval_status||'draft', canSubmit=(s==='draft'||s==='rejected')&&EP.docSubmit;
         return (canSubmit?'<button class="save-btn pp-doc-submit" data-id="'+d.id+'" data-po="'+po+'" title="send this document to Dock &amp; Bay for approval">'+(s==='rejected'?'Re-submit':'Submit for approval')+'</button> ':'')
-          +'<button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:var(--neg)">remove</button>'; }
-      var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l">'+docStatusCell(d)+'</td><td class="l">'+docActionCell(d)+'</td></tr>'; }).join('')
+          +((EP.docRemove&&d.mine&&(s==='draft'||s==='rejected'))?'<button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:var(--neg)">remove</button>':''); }   // v28.190 (Ben, H4): only your own draft / rejected documents (the route now exists)
+      var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(ppDT(d.uploaded_at||''))+'</td><td class="l">'+docStatusCell(d)+'</td><td class="l">'+docActionCell(d)+'</td></tr>'; }).join('')
         :'<tr><td colspan="5" class="mut tiny">No documents uploaded yet.</td></tr>';
       var docsBlock='<div class="sect-h" style="margin-top:16px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos… then submit for Dock &amp; Bay approval</span></div>'
         +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">'
@@ -1382,7 +1418,7 @@
       // Direct-to-Client shipment details (carton count / CBM / gross weight / dimensions). Supplier-entered;
       // saving posts a PO timeline note (→ D&B ✉ bell). Overdue badge once production has ended with data missing.
       // Shipment details — PALLETS shows for ALL POs; carton count / CBM / weight / dimensions are Direct-to-Client only.
-      { var _isDtcSd=ppIsDtc(p), _dtcToday=new Date().toISOString().slice(0,10), _dtcOverdue=(_isDtcSd&&p.prod_end&&p.prod_end<_dtcToday&&!p.dtc_entered_at);
+      { var _isDtcSd=ppIsDtc(p), _dtcToday=ppToday(), _dtcOverdue=(_isDtcSd&&p.prod_end&&p.prod_end<_dtcToday&&!p.dtc_entered_at);
         shipment += '<div class="sect-h" style="margin-top:16px">Shipment details'+(_dtcOverdue?' <span class="ex-badge" title="production has ended — please enter your shipment details">!</span>':'')+'</div>'
           +'<div class="tiny'+(_dtcOverdue?'':' mut')+'" style="margin-bottom:6px'+(_dtcOverdue?';color:var(--amber)':'')+'">'+(_dtcOverdue?'⚠ Production has ended — please enter the shipment details for this direct-to-client order.':(_isDtcSd?'Enter the pallet count, cartons, cargo volume, gross weight and dimensions for this shipment.':'Enter the number of pallets for this shipment.'))+'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
@@ -1394,7 +1430,7 @@
             +'<label class="tiny">Total shipment dimensions<br><input class="fci pp-dtc" data-po="'+po+'" data-f="dimensions" value="'+esc(p.dtc_dimensions||'')+'" placeholder="e.g. 120x100x80cm total" style="width:230px;text-align:left"></label>'
             +'<button class="save-btn pp-dtc-go" data-po="'+po+'">Save shipment details</button>'):'')
           +'</div>'
-          +(_isDtcSd&&p.dtc_entered_at?'<div class="tiny mut" style="margin-top:4px">Last updated '+esc(p.dtc_entered_at)+'</div>':''); }
+          +(_isDtcSd&&p.dtc_entered_at?'<div class="tiny mut" style="margin-top:4px">Last updated '+esc(ppDT(p.dtc_entered_at))+'</div>':''); }
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
         shipment += '<div class="sect-h" style="margin-top:14px">Crossdock SKUs on this shipment'+(xdAction?' <span class="ex-badge" title="enter the quantity shipped for each crossdock SKU">'+xdMissing+'</span>':'')+'</div>'
@@ -1446,7 +1482,7 @@
       // approve bar — same format as the Confirm-order banner (green button, yellow box), at the TOP of the tab
       var dtcApproveBar='<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;'+(dtcAccepted?'background:var(--pos-bg);border:1px solid var(--pos-bg)':'background:var(--amber-bg);border:1px solid #fcd34d')+'">'
         +(dtcAccepted
-           ? '✓ <b>Direct to Client details approved</b>'+(p.dtc_accepted_at?' on '+esc(p.dtc_accepted_at):'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')
+           ? '✓ <b>Direct to Client details approved</b>'+(p.dtc_accepted_at?' on '+esc(ppDT(p.dtc_accepted_at)):'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')
            : (dtcHasChange?'<b>A change has been made.</b> ':'')+'⏳ <b>Please approve these Direct to Client details.</b> Review the packing &amp; labelling below'+(dtcHasChange?' (changes highlighted)':'')+', then approve. &nbsp; <button class="save-btn pp-dtc-accept" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Approve Direct to Client details</button>')
         +'</div>';
       var dtcPackTbl='<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay:</div>'
@@ -1458,7 +1494,7 @@
       var dtc='<div class="dtc-wrap">'+dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
         +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl+'</div>';
       // ---- PAYMENTS tab: invoice value + due date, the deposit/completion/balance milestones, and a paid/due summary
-      var _pm=function(v){ return (v==null||v==='')?'<span class="mut">—</span>':'$'+units(v); };
+      var _pm=function(v){ return (v==null||v==='')?'<span class="mut">—</span>':''+CUR+money(v); };
       var _pd=function(v){ return v?esc(fd(v)):'<span class="mut">—</span>'; };
       var startAmt=(p.start_assigned!=null?p.start_assigned:p.start_dep), compAmt=(p.completion_assigned!=null?p.completion_assigned:p.completion), balAmt=p.balance_1_amount;
       var paidTot=(p.start_date?Number(startAmt)||0:0)+(p.completion_date?Number(compAmt)||0:0)+(p.balance_1_date?Number(balAmt)||0:0);
@@ -1477,7 +1513,7 @@
           +'<thead><tr>'
           +'<th class="l" style="padding:3px 10px 3px 0">Milestone</th><th class="l" style="padding:3px 10px 3px 0">Amount</th><th class="l" style="padding:3px 10px 3px 0">Date</th><th class="l">Deposit reference</th></tr></thead><tbody>'
         +_prow('Total invoice value', p.final_invoice, p.balance_due, '')
-        +(_credit>0?'<tr><td class="l" style="padding:4px 16px 4px 0;white-space:normal;word-break:break-word">Additional credit / charge</td><td class="l" style="padding:4px 16px 4px 0"><b>+$'+units(_credit)+'</b></td><td class="l" style="padding:4px 16px 4px 0"><span class="mut">—</span></td><td class="l" style="padding:4px 0"><span class="mut">—</span></td></tr>':'')
+        +(_credit>0?'<tr><td class="l" style="padding:4px 16px 4px 0;white-space:normal;word-break:break-word">Additional credit / charge</td><td class="l" style="padding:4px 16px 4px 0"><b>+'+CUR+money(_credit)+'</b></td><td class="l" style="padding:4px 16px 4px 0"><span class="mut">—</span></td><td class="l" style="padding:4px 0"><span class="mut">—</span></td></tr>':'')
         // only show a deposit/balance milestone once it's a CONFIRMED payment (a paid date is set) — the
         // calculated-but-undated amounts are projections, not payments to show the supplier
         +(p.start_date?_prow('Starting deposit', startAmt, p.start_date, p.deposit_ref):'')
@@ -1485,7 +1521,7 @@
         +(p.balance_1_date?_prow('Balance payment', balAmt, p.balance_1_date, ''):'')
         +((!p.start_date&&!p.completion_date&&!p.balance_1_date)?'<tr><td class="l mut" colspan="4" style="padding:4px 0">No payments recorded yet.</td></tr>':'')
         +'</tbody></table>'
-        +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid','$'+units(paidTot))+ppCard('Amount due',dueTot!=null?'$'+units(dueTot):'—')+'</div>'
+        +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid',''+CUR+money(paidTot))+ppCard('Amount due',dueTot!=null?''+CUR+money(dueTot):'—')+'</div>'
         +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>'
         +docsBlock;   // Documents moved here (PAYMENTS & DOCUMENTS)
       // ---- tabs + action badges ----
@@ -1521,7 +1557,7 @@
     function poActionCount(p){ if(!prodActionable(p))return 0; var po=p.po, D=_ppData||{};
       var sb=(D.subsByPo&&D.subsByPo[po])||[], nts=(D.notesByPo&&D.notesByPo[po])||[];
       var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
-      var today=new Date().toISOString().slice(0,10);
+      var today=ppToday();
       var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=(D.xdByPo&&D.xdByPo[po])||{};
       var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
       var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
@@ -1555,7 +1591,7 @@
           if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref); }); }
       scope.querySelectorAll('.sp-e-carrier, .sp-e-trk, .sp-e-date').forEach(function(inp){ inp.onchange=function(){ saveShipD(inp.dataset.ref); }; });
       scope.querySelectorAll('.sp-e-status').forEach(function(sel){ sel.onchange=function(){ var sh=sel.value==='Shipping'; sel.style.background=sh?'#dcfce7':'#ffedd5'; sel.style.color=sh?'#15803d':'#9a3412'; sel.style.borderColor=sh?'#86efac':'#fdba74'; saveShipD(sel.dataset.ref); }; });
-      scope.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref, cEl=scope.querySelector('.sp-chg-cost[data-ref="'+esq(ref)+'"]'), dEl=scope.querySelector('.sp-chg-desc[data-ref="'+esq(ref)+'"]'); var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ ppNotice('Enter a freight cost greater than 0.'); return; }
+      scope.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref, cEl=scope.querySelector('.sp-chg-cost[data-ref="'+esq(ref)+'"]'), dEl=scope.querySelector('.sp-chg-desc[data-ref="'+esq(ref)+'"]'); var fc=ppNum(cEl&&cEl.value)||0; if(fc<=0){ ppNotice('Enter a freight cost greater than 0.'); return; }
         btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false; if(j&&j.error){ ppNotice('Failed: '+j.error); return; } if(cEl)cEl.value=''; if(dEl)dEl.value='';
           var list=scope.querySelector('.sp-chg-list[data-ref="'+esq(ref)+'"]'); if(list){ fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){ list.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(function(c){var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0);return '<div class="tiny" style="margin:2px 0">'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>';}).join(''):'<span class="mut tiny">No charges yet.</span>'; }); } }); }; });
       scope.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); close(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; ppSetHash('pos',b.dataset.po); renderPP(); }; });
@@ -1567,7 +1603,7 @@
 
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
-      var today=new Date().toISOString().slice(0,10);
+      var today=ppToday();
       var _spMasters={}, _spArr={}; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.master_po){ _spMasters[s.master_po]=1; if(s.arrival)_spArr[s.master_po]={d:s.arrival,est:!!s.arrival_est}; } });   // v27.514: arrival per master PO for the phone card   // shipments in THIS supplier's plan → ships-with can open them
       return '<div class="tw"><table class="pp-tbl pp-pos"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l" style="width:38px;min-width:38px" title="Production number">P#</th><th class="l">Status</th><th class="l" title="Ship to country">CTRY</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~';
@@ -1623,11 +1659,11 @@
             +'<td style="text-align:right">'+ppPay(p.start_assigned!=null?p.start_assigned:p.start_dep, p.start_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.completion_assigned!=null?p.completion_assigned:p.completion, p.completion_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.balance_1_amount, p.balance_1_date)+'</td>'
-            +'<td style="text-align:right">'+(_gDue!=null?'$'+units(_gDue):'<span class="mut">—</span>')+'</td>'
+            +'<td style="text-align:right">'+(_gDue!=null?''+CUR+money(_gDue):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+dcell(p.balance_due)+'</td><td class="l">'+(p.deposit_ref?esc(p.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'+det; }).join('')
         +'</tbody></table></div>'; }
     function ppDeposits(deps){ var paid=0,used=0,rem=0,seenRef={}; deps.forEach(function(d,di){ if(!d.is_deposit)return; paid+=Number(d.amount)||0; var k=d.reference||('__'+di); if(seenRef[k])return; seenRef[k]=1; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; });
-      var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+money(paid))+ppCard('Drawn down','$'+money(used))+ppCard('Remaining','$'+money(rem))+'</div>';
+      var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits',''+CUR+money(paid))+ppCard('Drawn down',''+CUR+money(used))+ppCard('Remaining',''+CUR+money(rem))+'</div>';
       // each PO that drew its starting deposit from this reference (deposit_ref match), with the amount drawn
       var _pos=(_ppData&&_ppData.pos)||[];
       function drawdownsFor(ref){ ref=String(ref||'').trim(); if(!ref)return []; var out=[];
@@ -1636,32 +1672,38 @@
       var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d,i){
         var dd=drawdownsFor(d.reference), rk='dep'+i;
         var caret=dd.length?'<a class="pp-dep-exp" data-k="'+rk+'" style="cursor:pointer;color:var(--blue);margin-right:6px;user-select:none;font-weight:700" title="show the purchase orders that drew down this deposit">▸</a>':'<span style="display:inline-block;width:14px"></span>';
-        var main='<tr><td class="l">'+caret+esc(d.reference||'—')+'</td><td style="text-align:right">$'+money(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+money(d.deposit_used||0)+'</td><td style="text-align:right">$'+money(d.deposit_remaining||0)+'</td></tr>';
-        var det=dd.length?'<tr class="pp-dep-det" data-k="'+rk+'" style="display:none"><td colspan="5" style="padding:0"><div style="padding:6px 10px 8px 26px;background:var(--hover);border-bottom:1px solid var(--line2)"><div class="mut tiny" style="margin-bottom:3px">Drawn down by '+dd.length+' purchase order'+(dd.length===1?'':'s')+'</div><table style="font-size:12px;border-collapse:collapse">'+dd.map(function(x){return '<tr><td class="l" style="padding:2px 22px 2px 0;font-family:ui-monospace,Menlo,monospace">'+esc(x.po)+'</td><td style="text-align:right;padding:2px 0"><b>$'+money(x.amt)+'</b></td></tr>';}).join('')+'</table></div></td></tr>':'';
+        var main='<tr><td class="l">'+caret+esc(d.reference||'—')+'</td><td style="text-align:right">'+CUR+money(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">'+CUR+money(d.deposit_used||0)+'</td><td style="text-align:right">'+CUR+money(d.deposit_remaining||0)+'</td></tr>';
+        var det=dd.length?'<tr class="pp-dep-det" data-k="'+rk+'" style="display:none"><td colspan="5" style="padding:0"><div style="padding:6px 10px 8px 26px;background:var(--hover);border-bottom:1px solid var(--line2)"><div class="mut tiny" style="margin-bottom:3px">Drawn down by '+dd.length+' purchase order'+(dd.length===1?'':'s')+'</div><table style="font-size:12px;border-collapse:collapse">'+dd.map(function(x){return '<tr><td class="l" style="padding:2px 22px 2px 0;font-family:ui-monospace,Menlo,monospace">'+esc(x.po)+'</td><td style="text-align:right;padding:2px 0"><b>'+CUR+money(x.amt)+'</b></td></tr>';}).join('')+'</table></div></td></tr>':'';
         return main+det; }).join('');
       return cards+'<div class="tw" style="max-width:720px"><table style="width:auto;min-width:0"><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
     // Master PAYMENTS tab: payments MADE to this supplier (the ledger), grouped by payment run and expandable to
     // the per-line breakdown (PO reference, type, amount, deposit ref).
     // v28.189 (Ben): arch = the bootstrap's paymentsArchived ({runs, rows, total, cutoff}): payment runs made up only of archived orders'
     // milestones are not sent; the headline figures still include them, and "Show them" loads them (/api/portal/payments).
+    var _ppPayGroups=null, PP_PAY_PAGE=50, _ppPayShow=PP_PAY_PAGE;
+    function ppPayBody(k){ var G=_ppPayGroups; if(!G||!G.groups[k])return ''; var items=G.groups[k], poRef=G.poRef;
+      var body=items.map(function(r){ return '<tr><td class="l" style="white-space:normal;overflow-wrap:anywhere;word-break:break-word">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">'+CUR+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+      return '<table style="font-size:12px;border-collapse:collapse;text-align:left;width:100%;max-width:720px;table-layout:fixed"><colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
+        +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table>'; }
     function ppPayments(rows, arch){ rows=rows||[];
       if(!rows.length&&!arch)return '<div class="count">No payments recorded against your account yet.</div>';
       function poRef(r){ return r.reference||r.po_completion||r.po_balance_1||r.po_balance_2||r.po_balance_3||''; }
       var groups={}, order=[]; rows.forEach(function(r){ var k=r.payment_run_ref||r.payment_date||'—'; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
       var total=rows.reduce(function(a,r){return a+(Number(r.amount)||0);},0)+(arch?Number(arch.total)||0:0);
-      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+money(total))+ppCard('Payments',String(rows.length+(arch?Number(arch.rows)||0:0)))+'</div>';
+      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid',''+CUR+money(total))+ppCard('Payments',String(rows.length+(arch?Number(arch.rows)||0:0)))+'</div>';
       var more=arch?'<div class="pp-pay-arch" style="margin:10px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="mut tiny">'+esc(String(arch.runs))+' older payment run'+(arch.runs===1?'':'s')+' for archived orders (before P'+esc(String(arch.cutoff))+') not shown.</span><button class="save-btn pp-pay-more">Show them</button></div>':'';
-      var cards=order.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
-        var body=items.map(function(r){ return '<tr><td class="l" style="white-space:normal;overflow-wrap:anywhere;word-break:break-word">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+      // v28.190 (Ben, deep dive M16): the tab built every run's hidden line table up front (1,351 lines = ~12,000 DOM nodes). Now each run
+      // is one header; its lines are built when it is opened (ppPayBody), and runs come PP_PAY_PAGE at a time ("Show more").
+      _ppPayGroups={groups:groups, poRef:poRef}; var shown=order.slice(0,_ppPayShow);
+      var cards=shown.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
         return '<div class="sp-card" style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:#fff">'
           +'<div class="pay-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:9px 12px;cursor:pointer">'
             +'<span class="pay-toggle" style="font-size:12px;color:var(--muted)">▸</span>'
             +'<div style="font-weight:700">'+esc(dt?fd(dt):k)+'</div>'
             +'<span class="mut tiny">'+items.length+' payment'+(items.length>1?'s':'')+'</span>'
-            +'<div style="margin-left:auto;font-weight:700">$'+money(gtot)+'</div></div>'
-          +'<div class="pay-body" style="display:none;padding:0 12px 12px"><table style="font-size:12px;border-collapse:collapse;text-align:left;width:100%;max-width:720px;table-layout:fixed">'
-            +'<colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
-            +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table></div></div>'; }).join('');
+            +'<div style="margin-left:auto;font-weight:700">'+CUR+money(gtot)+'</div></div>'
+          +'<div class="pay-body" data-k="'+esc(k)+'" style="display:none;padding:0 12px 12px"></div></div>'; }).join('')
+        +(order.length>shown.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn pp-pay-page">Show '+Math.min(PP_PAY_PAGE,order.length-shown.length)+' more of '+(order.length-shown.length)+' payment runs</button></div>':'');
       return '<div style="max-width:560px">'+head+cards+more+'</div>'; }   // cap the tab to ~half width so it doesn't span full screen
     // ── PRODUCTIONS tab: pick a batch → order-plan pivot (SKUs × POs × qty) for that batch, + XLSX download ──
     function prodBatchesList(){ var s={}; (_ppData.pos||[]).forEach(function(p){ var b=(p.batch_id==null?'':String(p.batch_id)).trim(); if(b)s[b]=1; }); return Object.keys(s).sort().reverse(); }
@@ -1756,13 +1798,13 @@
       var colDefs=[30,15,10,18,34,26,12,18].map(function(w,i){ return {min:i+1,max:i+1,width:w}; }); colDefs.push({min:9, max:8+poList.length, width:12.6});
       var bytes=buildXlsx('Order Plan', grid, {x:1,y:8}, colDefs);   // freeze col A + rows 1-8 (7 meta rows + SKU header)
       var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-      var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+String(PORTAL_PROD_BATCH).replace(/[^A-Za-z0-9_-]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
+      var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+String(PORTAL_PROD_BATCH).replace(/[^A-Za-z0-9_-]/g,'_')+'_'+ppToday()+'.xlsx'; document.body.appendChild(a); a.click();
       setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
             var sup=nts.filter(function(n){return n.author_kind==='supplier';}); var recent=sup.length?sup.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0]:null;
             return nts.length?nts.map(function(n){ var flag=(EP.escalate&&recent&&n===recent)?' <button class="save-btn light sp-fob-flag" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap;font-size:10.5px;padding:0 5px">⚑ Escalate</button>':'';
-              return '<div style="margin:6px 0"><span class="mut" style="font-size:10.5px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> '+flag+'<div class="tl-msg">'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
+              return '<div style="margin:6px 0"><span class="mut" style="font-size:10.5px">'+esc(ppDT(n.created_at))+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> '+flag+'<div class="tl-msg">'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
           function ppShipmentPlan(rows){ rows=rows||[];
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
             // a prominent "label / big value" cell for the dates & Flexport strip
@@ -1903,7 +1945,7 @@
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
                 +((notes&&notes.length)?tlDesc(notes).map(function(n){ var flag=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-flag-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'';
-                  return '<div style="margin:6px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:10.5px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span><div class="tl-msg">'+esc(n.body)+'</div>'+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
+                  return '<div style="margin:6px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:10.5px">'+esc(ppDT(n.created_at))+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span><div class="tl-msg">'+esc(n.body)+'</div>'+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=async function(){ if(!(await _ppConfirm('Escalate this shipment to Dock & Bay by email?')))return;
                 _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'shipment',ref:ref,message:'Escalation requested for shipment '+ref,initiator:'supplier',set_escalated:true,post_note:true},function(j){ _se.textContent='✓ Escalated';
@@ -1943,7 +1985,7 @@
             return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;background:#fff;text-align:left">'
               +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><b style="font-size:15px">'+esc(s.ref)+'</b>'+sampChip(s.status_calc)+' <span class="mut tiny">Dock &amp; Bay status</span>'
                 +(function(){ var cr=s.completion_required; if(!cr)return '<span class="mut tiny">No completion date set</span>';
-                    var past=cr<new Date().toISOString().slice(0,10);
+                    var past=cr<ppToday();
                     return '<span style="display:inline-block;background:'+(past?'#fee2e2':'#fef3c7')+';color:'+(past?'#991b1b':'#92400e')+';border:1px solid '+(past?'#fca5a5':'#fcd34d')+';border-radius:8px;font-size:12.5px;font-weight:700;padding:4px 12px">📅 Completion required '+fd(cr)+(past?' — overdue':'')+'</span>'; })()+'</div>'
               +(sampNeedsAccept(s)?('<div style="margin:0 0 12px;padding:9px 12px;border-radius:8px;font-size:12px;background:var(--amber-bg);border:1px solid #fcd34d">'
                 +'<div style="margin-bottom:8px">⏳ <b>'+(s.change_requested?'A change has been made. Please re-confirm this sample request.':'Please confirm this sample request.')+'</b> Review the SKUs &amp; quantities'+(_sampChgList.length?' (changes highlighted below)':'')+', then confirm.</div>'
@@ -1997,7 +2039,7 @@
           function sampCdMissing(s){ return sampActive(s) && !s.supplier_expected; }   // must enter expected completion date
           function sampStMissing(s){ return sampActive(s) && !s.production_status; }     // must set their production status
           // logic conflict: the expected completion date has passed but the supplier still says "In production".
-          function sampDateConflict(s){ return sampActive(s) && !!s.supplier_expected && s.supplier_expected<new Date().toISOString().slice(0,10) && s.production_status==='in_production'; }
+          function sampDateConflict(s){ return sampActive(s) && !!s.supplier_expected && s.supplier_expected<ppToday() && s.production_status==='in_production'; }
           // supplier actions on a sample: unread D&B message, missing expected date / production status, or a
           // past-expected-date-while-in-production conflict. (Accept step removed.)
           function sampActions(s){ return ((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0)+(sampDateConflict(s)?1:0); }
@@ -2088,7 +2130,7 @@
             // completion date + status auto-save silently on change (no reload / no screen refresh)
             var sexp=scope.querySelector('.samp-exp'); if(sexp)sexp.onchange=function(){ var v=sexp.value||null; postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:v},function(){ var s=sampById(id); if(s)s.supplier_expected=v||''; refreshSampleCard(id); }); };
             var sprod=scope.querySelector('.samp-prod'); if(sprod)sprod.onchange=function(){ var v=sprod.value||null; postJSON(EP.sampleUpdate,{id:id,production_status:v},function(){ var s=sampById(id); if(s)s.production_status=v||''; refreshSampleCard(id); }); };
-            var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){ppNotice('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(j){ if(j&&j.error){ppNotice(j.error);ch.disabled=false;return;} var s=sampById(id); if(s)s.charges=(s.charges||[]).concat([{status:'pending',freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null}]); refreshSampleCard(id); }); };   // silent: add the charge in place, no full reload
+            var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){ppNotice('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:ppNum(f)||0,product_cost:ppNum(p)||0,description:d||null},function(j){ if(j&&j.error){ppNotice(j.error);ch.disabled=false;return;} var s=sampById(id); if(s)s.charges=(s.charges||[]).concat([{status:'pending',freight_cost:ppNum(f)||0,product_cost:ppNum(p)||0,description:d||null}]); refreshSampleCard(id); }); };   // silent: add the charge in place, no full reload
             var np=scope.querySelector('.samp-note-post'); if(np){ var _sin=scope.querySelector('.samp-note-in'), _satt=_sin?hzTlAttach(_sin,{after:_sin.parentNode,upload:hzTlUploader('sample',null,{sample_id:id}),maxWidth:'480px'}):null;   // v27.571
               np.onclick=function(){ var inp=_sin; var v=(inp.value||'').trim(); if(!v&&!(_satt&&_satt.count()))return; np.disabled=true;
                 hzTlSend(_satt,v,function(bodyTxt,attId,next){ postJSON(EP.sampleNote,{id:id,body:bodyTxt,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail,attachment_id:attId||null},next); },function(){ np.disabled=false; inp.value=''; ppSampleTimeline(id); }); }; }
@@ -2105,7 +2147,7 @@
                 var who=onBehalf?('D&amp;B as '+esc(STATE.supplierName||'supplier')):(dnb?'Dock &amp; Bay':'You');
                 var ctrl = nu ? '<button class="save-btn light ps-note-read" data-id="'+n.id+'" style="flex:0 0 auto">Mark read</button>'
                               : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
-                return '<div style="font-size:12.5px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:12px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
+                return '<div style="font-size:12.5px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:12px">'+esc(ppDT(n.created_at))+' · '+who+'</span>'+(nu?' <span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
               box.querySelectorAll('.ps-note-read').forEach(function(b){ b.onclick=function(){ postJSON(EP.sampleNoteReadBase+b.dataset.id,{read:true},function(){ var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(s&&s.unread_dnb>0)s.unread_dnb--; setSampBadge(); ppSampleTimeline(id); }); }; });
               var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=async function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!(await _ppConfirm('Email this note to the supply planner?')))return; _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
@@ -2213,13 +2255,13 @@
               +'<span style="font-weight:700;color:var(--amber)">⏳ <span>New development request — please accept</span></span>'
               +'<span class="mut" style="min-width:120px;flex:1">Confirm you have received this product development request and will begin sampling.</span>'
               +'<button class="save-btn pp-prod-accept" data-ref="'+esc(ref)+'" style="margin-left:auto;background:var(--pos);color:#fff;border:0;font-weight:800;box-shadow:0 6px 16px -6px rgba(17,138,78,.55)">Accept development request</button></div>';   // v27.843 (Ben): green like the PO "Confirm order" button
-            if(it.dev_accepted_at) return '<div class="pp-acc-bar" style="margin:0 0 10px;padding:8px 12px;border-radius:var(--r-sm,8px);background:var(--pos-bg);border:1px solid var(--pos-bd);font-size:12px;color:var(--pos);font-weight:600">✓ <span>Development request accepted</span> '+esc(it.dev_accepted_at)+(it.dev_accepted_by?' · '+esc(it.dev_accepted_by):'')+'</div>';
+            if(it.dev_accepted_at) return '<div class="pp-acc-bar" style="margin:0 0 10px;padding:8px 12px;border-radius:var(--r-sm,8px);background:var(--pos-bg);border:1px solid var(--pos-bd);font-size:12px;color:var(--pos);font-weight:600">✓ <span>Development request accepted</span> '+esc(ppDT(it.dev_accepted_at))+(it.dev_accepted_by?' · '+esc(it.dev_accepted_by):'')+'</div>';
             return ''; }
           function ppProdDetail(box, ref){ var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.request_ref===ref;})[0]||((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{}; var _un=Number(_it.unread_dnb)||0;
             var itemRef=_it.ref||ref;   // v27.861 (Ben): `ref` here is the development-REQUEST ref (SS27-…-BL) used for display/accept/URL; the data endpoints (item / samples / notes) are keyed by the ITEM ref inherited from the linked product
             var tabs=[['master','Master data'],['samples','Samples'],['documents','Documents'],['timeline','Timeline'+(_un?' <span class="ex-badge">'+_un+'</span>':'')]];
             box.innerHTML=ppProdAcceptBar(ref,_it)+'<div class="po-subnav pp-prod-nav">'+tabs.map(function(t,ti){return '<button class="rtab pd2-tab'+(ti===0?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
-            var _ab=box.querySelector('.pp-prod-accept'); if(_ab)_ab.onclick=function(){ if(!EP.productAccept){ppNotice('Not available in preview.');return;} _ab.disabled=true; postJSON(EP.productAccept,{ref:itemRef},function(j){ if(j&&j.error){ _ab.disabled=false; ppNotice(j.error); return; } _it.dev_unaccepted=0; _it.dev_accepted_at=(j&&j.accepted_at)||new Date().toISOString().slice(0,10); _it.dev_accepted_by=STATE.supplierName||''; try{ setProdBadge(); }catch(e){} ppNotice('Development request accepted','ok'); ppProdDetail(box, ref); try{ drawProdGrid(); }catch(e){} }); };   /* v27.843 (Ben): success toast = green, not the red error style */
+            var _ab=box.querySelector('.pp-prod-accept'); if(_ab)_ab.onclick=function(){ if(!EP.productAccept){ppNotice('Not available in preview.');return;} _ab.disabled=true; postJSON(EP.productAccept,{ref:itemRef},function(j){ if(j&&j.error){ _ab.disabled=false; ppNotice(j.error); return; } _it.dev_unaccepted=0; _it.dev_accepted_at=(j&&j.accepted_at)||ppToday(); _it.dev_accepted_by=STATE.supplierName||''; try{ setProdBadge(); }catch(e){} ppNotice('Development request accepted','ok'); ppProdDetail(box, ref); try{ drawProdGrid(); }catch(e){} }); };   /* v27.843 (Ben): success toast = green, not the red error style */
             var bd=box.querySelector('.pd2-body');
             function sel(t){ box.querySelectorAll('.pd2-tab').forEach(function(b){ b.classList.toggle('active',b.dataset.t===t); });
               if(t==='timeline')ppProdTimeline(bd,itemRef); else if(t==='documents')ppProdDocs(bd,itemRef); else if(t==='master')ppProdMaster(bd,itemRef,ref); else ppProdSamples(bd,itemRef); }
@@ -2282,7 +2324,7 @@
           // One document/photo row: image → thumbnail (click to enlarge) + download; other → download link.
           function docRow(x){ var att=(EP.attachImgBase||'/api/supply/portal-attachment/')+x.id, dl=EP.productDocBase?(EP.productDocBase+x.id+'?download=1'):('/api/product/doc/'+x.id), kb=Math.max(1,Math.round((x.byte_size||0)/1024));
             var gutter=isImgMime(x.mime)?'<img class="pp-doc-img" data-src="'+att+'" src="'+att+'" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;flex:none" title="click to enlarge">':'<div style="width:46px;height:46px;border-radius:6px;border:1px solid var(--line2);background:#fafbfc;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--line);flex:none">📄</div>';
-            return '<div style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid #f4f4f5">'+gutter+'<div style="min-width:0"><a href="'+dl+'" download style="color:var(--blue);text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a> <span style="color:var(--faint)" title="download">⤓</span><div class="mut tiny">'+kb+' KB · '+esc(x.uploaded_at||'')+'</div></div></div>'; }
+            return '<div style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid #f4f4f5">'+gutter+'<div style="min-width:0"><a href="'+dl+'" download style="color:var(--blue);text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a> <span style="color:var(--faint)" title="download">⤓</span><div class="mut tiny">'+kb+' KB · '+esc(ppDT(x.uploaded_at||''))+'</div></div></div>'; }
           function ppProdDocs(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
               var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
@@ -2320,7 +2362,7 @@
             Promise.all([getJSON(EP.productSamplesBase+encodeURIComponent(ref)), fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};}), fetch('/api/portal/product-components/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var list=Array.isArray(_res[0])?_res[0]:[];
               var _mySup=String(STATE.supplierName||'').trim().toLowerCase(); if(_mySup)list=list.filter(function(s){ return String(s.supplier||'').trim().toLowerCase()===_mySup; });   // v27.845 (Ben): a supplier only sees their OWN sample versions
               var sizesList=(((_res[1]||{}).sizes)||[]).map(function(s){return s.size_label;}).filter(Boolean);
-              var today=new Date().toISOString().slice(0,10);
+              var today=ppToday();
               // v27.533 (Ben): "Aspects sampled" = the components assigned to THIS supplier on this product (falls back to the fixed list when none are configured)
               var _COMPS=(((_res[2]||{}).components)||[]);
               var ASPECTS=_COMPS.length?_COMPS.map(function(c){return [c.key,c.name];}):[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
@@ -2367,7 +2409,7 @@
                   return isImgMime(p.mime)
                     ? '<span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;margin:2px;vertical-align:top"><img class="pp-samp-img" data-src="'+url+'" src="'+url+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid var(--line);cursor:zoom-in" title="click to enlarge"><span style="display:flex;gap:8px;align-items:center">'+dl+del+'</span></span>'
                     : '<span style="display:inline-flex;align-items:center;gap:6px;margin:2px;padding:4px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px"><a href="'+url+'" download style="color:var(--blue);text-decoration:underline">'+esc(p.filename||'file')+'</a>'+del+'</span>'; }).join('');
-                return '<div style="border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-bottom:14px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+(s.short_code?'<span style="font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:12.5px;background:var(--nav);color:#fff;border-radius:5px;padding:1px 7px;letter-spacing:.08em" title="sample-card code">'+esc(s.short_code)+'</span>':'')+'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.item_ref||s.ref)+'</b><span class="mut tiny">· Sample '+esc(s.version)+'</span>'+stBadge(s)+'<span class="mut tiny">'+esc(s.sample_date||'')+'</span>'   /* v27.850 (Ben): short-code chip + Sample N in the heading for shared code visibility */
+                return '<div style="border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-bottom:14px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+(s.short_code?'<span style="font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:12.5px;background:var(--nav);color:#fff;border-radius:5px;padding:1px 7px;letter-spacing:.08em" title="sample-card code">'+esc(s.short_code)+'</span>':'')+'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.item_ref||s.ref)+'</b><span class="mut tiny">· Sample '+esc(s.version)+'</span>'+stBadge(s)+'<span class="mut tiny">'+esc(ppDT(s.sample_date||''))+'</span>'   /* v27.850 (Ben): short-code chip + Sample N in the heading for shared code visibility */
                   +'<span style="font-size:10.5px">'+(s.colour_verified?'<span style="color:var(--pos)">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:var(--pos)">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
                   +'<a class="save-btn pp-samp-card" href="/api/portal/product-sample/'+s.id+'/card.pdf" style="font-size:12px;text-decoration:none;display:inline-block" title="download the sample card (same card Dock &amp; Bay sees)">⤓ Sample card</a></div>'
                   +'<div class="pp-samp-cols" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px"><div style="flex:1 1 340px;min-width:0">'
@@ -2501,7 +2543,7 @@
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
               var unread=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
               var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); var isNew=(!sup&&!n.read);
-                return '<div style="padding:7px 0;border-bottom:1px solid var(--line2);text-align:left'+(isNew?';background:var(--amber-bg)':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+ppSmpChip(n.sample_version)+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:var(--faint)">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+ppFmtFb(n.body||'',n.pantone)+'</div>'+ppNoteAtt(n)+'</div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
+                return '<div style="padding:7px 0;border-bottom:1px solid var(--line2);text-align:left'+(isNew?';background:var(--amber-bg)':'')+'"><div class="mut tiny">'+esc(ppDT(n.created_at||''))+' · '+(sup?'you':'Dock &amp; Bay')+ppSmpChip(n.sample_version)+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:var(--faint)">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+ppFmtFb(n.body||'',n.pantone)+'</div>'+ppNoteAtt(n)+'</div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
               box.innerHTML='<div style="max-width:640px;text-align:left">'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div>'
                 +'<div style="font-weight:700;font-size:12.5px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
@@ -2541,7 +2583,7 @@
               var ICO={po_created:'🆕',po_confirmed:'✅',shipment_created:'🚢',payment:'💰',sample_created:'🧪'};
               d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--line2);font-size:12px">Recent changes</div>'
                 +rows.map(function(r){ var kind=(r.typ==='payment')?'payments':(r.typ==='sample_created')?'sample':(r.typ==='shipment_created')?'shipment':'po';
-                  return '<div class="pp-recent-row" data-kind="'+kind+'" data-ref="'+esc(r.ref||'')+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--hover);font-size:12px"><div>'+(ICO[r.typ]||'•')+' '+esc(r.label)+'</div><div style="color:var(--faint);font-size:10.5px;margin-top:1px">'+esc(r.at||'')+'</div></div>'; }).join('');
+                  return '<div class="pp-recent-row" data-kind="'+kind+'" data-ref="'+esc(r.ref||'')+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--hover);font-size:12px"><div>'+(ICO[r.typ]||'•')+' '+esc(r.label)+'</div><div style="color:var(--faint);font-size:10.5px;margin-top:1px">'+esc(ppDT(r.at||''))+'</div></div>'; }).join('');
               d.querySelectorAll('.pp-recent-row').forEach(function(row){ row.onclick=function(e){ e.stopPropagation(); notifGo(row.dataset.kind, row.dataset.ref); }; });
             }).catch(function(){ d.innerHTML='<div style="padding:10px 12px;color:var(--neg);font-size:12px">Could not load recent changes.</div>'; }); }
           // Inbox drawer: fetch the actual UNREAD Dock & Bay messages (body, sender, date/time, clickable ref +
@@ -2572,7 +2614,7 @@
                 return '<div style="padding:8px 12px;border-bottom:1px solid var(--hover);font-size:12px">'
                   +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">'
                     +'<a class="pp-un-go" data-kind="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-weight:600">'+esc((UNREAD_LBL[m.type]||'')+' '+(m.ref||''))+'</a>'
-                    +'<span style="color:var(--faint);font-size:10.5px;white-space:nowrap">'+esc(fmtDT(m.at))+'</span></div>'
+                    +'<span style="color:var(--faint);font-size:10.5px;white-space:nowrap">'+esc(ppDT(m.at))+'</span></div>'
                   +'<div style="color:var(--muted);font-size:10.5px;margin:1px 0 2px">from '+esc(shortAuthor(m.author))+'</div>'
                   +'<div style="color:var(--ink-soft);white-space:pre-wrap;word-break:break-word">'+esc(body)+'</div>'
                   +'<div style="margin-top:4px"><button class="pp-un-read save-btn light" data-type="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" data-id="'+esc(String(m.note_id))+'" style="font-size:10.5px">Mark as read</button></div>'
@@ -2649,7 +2691,7 @@
             function load(){ fetch('/api/portal/quality-docs').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
               var body=rows.map(function(d){
                 var del=d.deletable?('<button class="pq-del" data-id="'+d.id+'" style="border:1px solid var(--neg-cell);background:#fff;color:var(--neg);border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">Delete</button>'):'';
-                return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(d.created_at||'')+'</td><td class="l">'+del+'</td></tr>'; }).join('');
+                return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(ppDT(d.created_at||''))+'</td><td class="l">'+del+'</td></tr>'; }).join('');
               var el=document.getElementById('pq-list'); if(!el)return;
               el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Prod</th><th class="l">Batch</th><th class="l">Uploaded</th><th class="l"></th></tr></thead><tbody>'+(body||'<tr><td colspan="7" class="mut tiny">No documents uploaded yet.</td></tr>')+'</tbody></table></div>';
               Array.prototype.forEach.call(el.querySelectorAll('.pq-del'),function(b){ b.onclick=async function(){ var id=b.getAttribute('data-id'); if(!(await _ppConfirm('Delete this document? Files can only be deleted within 24 hours of uploading.')))return; b.disabled=true; b.textContent='…'; fetch('/api/portal/quality-doc/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Delete'; window.alert(j.error); return; } load(); }).catch(function(){ b.disabled=false; b.textContent='Delete'; }); }; });
@@ -2690,7 +2732,7 @@
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
-              var today=new Date().toISOString().slice(0,10);
+              var today=ppToday();
               var allSp=_ppData.shipmentPlan||[];
               // a shipment has "shipped" once it has a departure date that has passed
               function spShipped(s){ return (String(s.status||'').toLowerCase()==='shipping') || !!(s.departure && !s.departure_est && s.departure<=today); }
@@ -2740,13 +2782,13 @@
                 btn.disabled=true; btn.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'po',ref:po,message:msg,initiator:'supplier',post_note:true},function(j){ btn.textContent='✓ Escalated';
                   var noteBody=(by||'The supplier')+' escalated this shipment';   // mirror the note the server posted so the timeline shows it
-                  (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:noteBody,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
+                  (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:noteBody,created_at:ppNowStamp()});
                   var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po);
                   if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); }; });
               // FOB cards: timeline note → PO note (author supplier)
               body.querySelectorAll('.sp-fob-note-post').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, ta=body.querySelector('.sp-fob-note-body[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); var v=ta?(ta.value||'').trim():''; if(!v)return; btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;
-                  (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:v,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
+                  (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:v,created_at:ppNowStamp()});
                   if(ta)ta.value=''; var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po); }); }; });
               // Real shipments: supplier edits carrier / tracking / ship date / status → direct write to the shipment
               var _rfEsc=function(r){ return window.CSS&&CSS.escape?CSS.escape(r):r; };
@@ -2776,7 +2818,7 @@
               body.querySelectorAll('.sp-e-carrier, .sp-e-trk, .sp-e-date').forEach(function(inp){ inp.onchange=function(){ saveShip(inp.dataset.ref); }; });
               body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var cEl=body.querySelector('.sp-chg-cost[data-ref="'+_rfEsc(ref)+'"]'), dEl=body.querySelector('.sp-chg-desc[data-ref="'+_rfEsc(ref)+'"]');
-                var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ ppNotice('Enter a freight cost greater than 0.'); return; }
+                var fc=ppNum(cEl&&cEl.value)||0; if(fc<=0){ ppNotice('Enter a freight cost greater than 0.'); return; }
                 btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false;
                   if(j&&j.error){ ppNotice('Failed: '+j.error); return; }
                   if(cEl)cEl.value=''; if(dEl)dEl.value='';
@@ -2795,7 +2837,8 @@
               body.querySelectorAll('.pp-dep-exp').forEach(function(a){ a.onclick=function(){ var k=a.dataset.k, det=body.querySelector('.pp-dep-det[data-k="'+k+'"]'); if(!det)return; var open=det.style.display!=='none'; det.style.display=open?'none':''; a.textContent=open?'▸':'▾'; }; });   // expand each deposit → POs that drew it down
               return; }
             if(PORTAL_TAB==='payments'){ body.innerHTML=ppPayments(_ppData.payments||[], _ppData.paymentsArchived||null);
-              body.querySelectorAll('.pay-head').forEach(function(h){ h.onclick=function(){ var c=h.closest('.sp-card'), bd=c&&c.querySelector('.pay-body'), tg=h.querySelector('.pay-toggle'); if(!bd)return; var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
+              body.querySelectorAll('.pay-head').forEach(function(h){ h.onclick=function(){ var c=h.closest('.sp-card'), bd=c&&c.querySelector('.pay-body'), tg=h.querySelector('.pay-toggle'); if(!bd)return; var open=bd.style.display!=='none'; if(!open&&!bd.dataset.built){ bd.dataset.built='1'; bd.innerHTML=ppPayBody(bd.dataset.k); } bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });   // v28.190: lines built on open
+              var _pg=body.querySelector('.pp-pay-page'); if(_pg)_pg.onclick=function(){ _ppPayShow+=PP_PAY_PAGE; var y=window.scrollY; renderPP(); try{ window.scrollTo(0,y); }catch(e){} };   // v28.190: next page of payment runs
               var _pm=body.querySelector('.pp-pay-more'); if(_pm)_pm.onclick=function(){ var D=_ppData; _pm.disabled=true; _pm.textContent='Loading…';   // v28.189: load the archived payment runs
                 fetch(EP.payments||'/api/portal/payments').then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json(); }).then(function(j){ if(_ppData!==D)return; D.payments=j.payments||[]; delete D.paymentsArchived; renderPP(); })
                   .catch(function(){ _pm.disabled=false; _pm.textContent='Show them'; ppNotice('Could not load the older payments. Please try again.'); }); };
@@ -3025,7 +3068,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                     // (and survive a production-status change, which re-renders the detail from _ppData)
                     (_ppData.subsByPo=_ppData.subsByPo||{}); var arr=(_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]);
                     arr.forEach(function(s){ if(s.kind==='completion_date'&&s.status==='pending')s.status='superseded'; });
-                    arr.push({kind:'completion_date',value:v,status:'pending',submitted_at:new Date().toISOString().slice(0,10)});
+                    arr.push({kind:'completion_date',value:v,status:'pending',submitted_at:ppToday()});
                     var pe=(window.CSS&&CSS.escape)?CSS.escape(po):po;
                     rootEl.querySelectorAll('.pp-cd-grid[data-po="'+pe+'"]').forEach(function(o){ o.value=v; o.style.borderColor='#16a34a'; o.style.background='#eff6ff'; });
                     var ex=body.querySelector('tr[id^="pp-"][data-po="'+pe+'"]'); if(ex && ex.dataset.built && ex.style.display!=='none') rerenderRow(ex,po);
@@ -3043,12 +3086,12 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-cost,.pp-qty').forEach(function(inp){
                 function recalc(box){ if(!box)return; var tot=0,tq=0;
                   box.querySelectorAll('.pp-qty').forEach(function(qel){ var sku=qel.dataset.sku; var cel=box.querySelector('.pp-cost[data-sku="'+CSS.escape(sku)+'"]');
-                    var est=cel?(Number(cel.dataset.est)||0):0, q=Number(qel.value)||0, v=(cel&&cel.value.trim()!=='')?(Number(cel.value)||0):est, lt=q*v; tq+=q; tot+=lt;
-                    var cell=box.querySelector('.pp-lt[data-sku="'+CSS.escape(sku)+'"]'); if(cell)cell.textContent='$'+money(lt); });
-                  var tp=box.querySelector('.pp-totp'); if(tp)tp.textContent='$'+money(tot); var tqc=box.querySelector('.pp-totq'); if(tqc)tqc.textContent=units(tq);
-                  var it=box.querySelector('.pp-inv-tot'); if(it){ var addT=Number(it.dataset.add)||0; it.textContent='$'+money(tot+addT); } }
+                    var est=cel?(Number(cel.dataset.est)||0):0, q=ppNum(qel.value)||0, v=(cel&&cel.value.trim()!=='')?(ppNum(cel.value)||0):est, lt=q*v; tq+=q; tot+=lt;
+                    var cell=box.querySelector('.pp-lt[data-sku="'+CSS.escape(sku)+'"]'); if(cell)cell.textContent=''+CUR+money(lt); });
+                  var tp=box.querySelector('.pp-totp'); if(tp)tp.textContent=''+CUR+money(tot); var tqc=box.querySelector('.pp-totq'); if(tqc)tqc.textContent=units(tq);
+                  var it=box.querySelector('.pp-inv-tot'); if(it){ var addT=Number(it.dataset.add)||0; it.textContent=''+CUR+money(tot+addT); } }
                 function saveLine(box,po,sku){ var qel=box.querySelector('.pp-qty[data-sku="'+CSS.escape(sku)+'"]'); var cel=box.querySelector('.pp-cost[data-sku="'+CSS.escape(sku)+'"]');
-                  postJSON(EP.lineCost,{po:po,sku:sku,amended_qty:(qel&&qel.value.trim())||null,actual_cost:(cel&&cel.value.trim())||null,submitted_by:by},function(){   }); }
+                  postJSON(EP.lineCost,{po:po,sku:sku,amended_qty:(qel&&ppNumS(qel.value))||null,actual_cost:(cel&&ppNumS(cel.value))||null,submitted_by:by},function(){   }); }   // v28.190 (Ben, M15): parsed numbers
                 inp.oninput=function(){ recalc(inp.closest('.ppx')); };
                 inp.onchange=function(){ var box=inp.closest('.ppx'); recalc(box); saveLine(box,inp.dataset.po,inp.dataset.sku); }; });
               // add-SKU search: a filterable dropdown of the supplier's SKUs not already on the order (standard picker UX)
@@ -3101,9 +3144,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                     _invFiles[po]=up; var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
                     var rows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:10.5px">NEW</span>':'<span class="mut tiny">changed</span>')+(l.dup?' <span class="tool-badge" style="font-size:10px;background:#fef3c7;color:#92400e;border:1px solid #f59e0b" title="this SKU was on '+(l.dup_lines||[]).length+' invoice lines — summed">Σ '+(l.dup_lines||[]).length+' lines</span>':'')+'</td>'
                       +'<td style="text-align:right">'+(l.cur_qty==null?'—':units(l.cur_qty))+' → <b>'+units(l.inv_qty)+'</b></td>'
-                      +'<td style="text-align:right">'+(l.cur_cost==null?'—':'$'+money(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':'$'+money(l.inv_price))+'</b></td></tr>'; }).join('');
-                    var dupBox=(j.duplicates&&j.duplicates.length)?'<div class="pp-inv-dupwarn" style="margin:0 0 8px;padding:10px 12px;border-radius:8px;background:#fef3c7;border:2px solid #f59e0b;color:#7c2d12;font-size:12px"><div style="font-weight:800;font-size:13px">⚠ Duplicate SKU codes on your invoice — the quantities have been added up</div><ul style="margin:4px 0 0 16px;padding:0">'+j.duplicates.map(function(d){ return '<li><b>'+esc(d.sku)+'</b>: '+d.lines.join(' + ')+' = <b>'+units(d.qty)+'</b>'+(d.price_mixed?' <i>(different unit prices → weighted average $'+money(d.price)+')</i>':'')+'</li>'; }).join('')+'</ul><div style="margin-top:4px">The summed quantity is what goes to your order plan. Please check it matches your invoice total. Dock &amp; Bay will be notified.</div></div>':'';   // v27.707
-                    out.innerHTML=dupBox+'<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · $'+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
+                      +'<td style="text-align:right">'+(l.cur_cost==null?'—':''+CUR+money4(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':''+CUR+money4(l.inv_price))+'</b></td></tr>'; }).join('');
+                    var dupBox=(j.duplicates&&j.duplicates.length)?'<div class="pp-inv-dupwarn" style="margin:0 0 8px;padding:10px 12px;border-radius:8px;background:#fef3c7;border:2px solid #f59e0b;color:#7c2d12;font-size:12px"><div style="font-weight:800;font-size:13px">⚠ Duplicate SKU codes on your invoice — the quantities have been added up</div><ul style="margin:4px 0 0 16px;padding:0">'+j.duplicates.map(function(d){ return '<li><b>'+esc(d.sku)+'</b>: '+d.lines.join(' + ')+' = <b>'+units(d.qty)+'</b>'+(d.price_mixed?' <i>(different unit prices → weighted average '+CUR+money4(d.price)+')</i>':'')+'</li>'; }).join('')+'</ul><div style="margin-top:4px">The summed quantity is what goes to your order plan. Please check it matches your invoice total. Dock &amp; Bay will be notified.</div></div>':'';   // v27.707
+                    out.innerHTML=dupBox+'<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · '+CUR+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
                       +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:12px;width:auto"><thead><tr><th class="l">SKU</th><th class="l"></th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
                         +'<button class="save-btn pp-inv-apply" data-po="'+esc(po)+'" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) to my order plan</button>'
                         :'<span class="mut tiny">Everything matches your order plan — nothing to change.</span>');
@@ -3120,7 +3163,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 var txt=((ta&&ta.value)||'').trim(); if(!txt){ if(msg)msg.textContent='Paste some rows first.'; return; }
                 var known={}; scope.querySelectorAll('.pp-qty[data-po="'+CSS.escape(po)+'"]').forEach(function(q){ known[String(q.dataset.sku).toUpperCase()]=1; });
                 var parsed=txt.split(/\r?\n/).map(function(ln){ return ln.split(/\t|,|;/).map(function(x){return x.trim();}); })
-                  .map(function(r){ return { sku:(r[0]||''), qty:(r[1]!=null?r[1].replace(/[^0-9.\-]/g,''):''), price:(r[2]!=null?r[2].replace(/[^0-9.\-]/g,''):'') }; })
+                  .map(function(r){ return { sku:(r[0]||''), qty:(r[1]!=null?ppNumS(r[1]):''), price:(r[2]!=null?ppNumS(r[2]):'') }; })
                   .filter(function(r){ return r.sku && (r.qty!==''||r.price!==''); });
                 if(parsed.length && /^(sku|code|item|product)$/i.test(parsed[0].sku) && parsed[0].qty===''){ parsed.shift(); }   // drop a header row
                 if(!parsed.length){ if(msg)msg.textContent='No SKU / Qty / Price rows found.'; return; }
@@ -3154,12 +3197,13 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // supplier production status dropdown (grid AND timeline share class .pp-prod) → save + sync BOTH
               // selects + badge in place (no reload, no full-cell flash from the grid)
               scope.querySelectorAll('.pp-prod').forEach(function(sel){ paintProdSel(sel); sel.onchange=function(){ var po=sel.dataset.po, val=sel.value; paintProdSel(sel); sel.disabled=true;
+                var _pp=_ppData.pos.filter(function(x){return x.po===po;})[0], _prev=(_pp&&_pp.production_status)||'';   // v28.190 (Ben, H5): revert on failure
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:val},function(){ applyProdStatus(po,val);
                   // a master PO marked 'shipped' advances its shipment to Shipping server-side → refresh _ppData silently
                   if(val==='shipped'){ opts.getData().then(function(d){ if(d){ if(d.notesByPo)Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); _ppData=d; } }).catch(function(){}); }
-                }); }; });
+                },function(){ body.querySelectorAll('.pp-prod[data-po="'+CSS.escape(po)+'"]').forEach(function(x){ x.value=_prev; x.disabled=false; paintProdSel(x); }); }); }; });
               scope.querySelectorAll('.pp-ownship').forEach(function(cb){ cb.onchange=function(){ var bx=scope.querySelector('.pp-ownship-box[data-po="'+cb.dataset.po+'"]'); if(bx)bx.style.display=cb.checked?'':'none'; }; });
-              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ ppNotice('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
+              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ ppNotice('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?ppNum(fcEl.value)||0:0; btn.disabled=true;
                 var row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){
                   // update the PO card in place (shipment now linked); the new master shipment ref = the PO number
@@ -3175,12 +3219,12 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   refreshRow(row,po); }); }; });
               scope.querySelectorAll('.pp-fchg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var ci=scope.querySelector('.pp-fcost[data-ref="'+CSS.escape(ref)+'"]'), ni=scope.querySelector('.pp-fnote[data-ref="'+CSS.escape(ref)+'"]');
-                var fc=ci?Number(ci.value)||0:0; if(fc<=0){ ppNotice('Enter a freight amount.'); return; } btn.disabled=true;
+                var fc=ci?ppNum(ci.value)||0:0; if(fc<=0){ ppNotice('Enter a freight amount.'); return; } btn.disabled=true;
                 postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(ni&&ni.value)||null},function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;} if(ci)ci.value=''; if(ni)ni.value=''; btn.disabled=false; loadFreightCharges(scope); }); }; });
               // approve the Direct to Client details (packing & labelling)
               scope.querySelectorAll('.pp-dtc-accept').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.dtcAccept,{po:po},function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;}
-                  var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.dtc_accepted_at=new Date().toISOString().slice(0,16).replace('T',' '); p.dtc_accepted_by=STATE.by;
+                  var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.dtc_accepted_at=ppNowStamp(); p.dtc_accepted_by=STATE.by;
                     // re-snapshot the approved DtC details locally (server does the same) so the change highlights clear
                     p.dtc_approved_snapshot={pack_polybags:!!p.pack_polybags,pack_polybags_notes:p.pack_polybags_notes||'',pack_dnb_barcodes:!!p.pack_dnb_barcodes,pack_dnb_barcodes_notes:p.pack_dnb_barcodes_notes||'',pack_rfid_barcodes:!!p.pack_rfid_barcodes,pack_rfid_barcodes_notes:p.pack_rfid_barcodes_notes||'',pack_dnb_carton:!!p.pack_dnb_carton,pack_dnb_carton_notes:p.pack_dnb_carton_notes||'',pack_client_carton:!!p.pack_client_carton,pack_client_carton_notes:p.pack_client_carton_notes||'',pack_pallet_notes:p.pack_pallet_notes||'',pack_other_notes:p.pack_other_notes||'',client_requirements:p.client_requirements||'',sales_order_ref:p.sales_order_ref||'',client_po_ref:p.client_po_ref||'',client:p.client||'',final_delivery_address:p.final_delivery_address||''}; } refreshRow(row,po); }); }; });
               // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)
@@ -3188,15 +3232,15 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // live: warn when the invoice amount differs from the Step-1 calculated total
               scope.querySelectorAll('.pp-inv').forEach(function(inp){ inp.oninput=function(){ var w=inp.closest('.ppx').querySelector('.pp-inv-warn'); if(!w)return;
                 var calc=Number(inp.dataset.calc)||0, v=Number(String(inp.value||'').replace(/,/g,''))||0; w.style.display=(inp.value!==''&&Math.abs(v-calc)>0.01)?'':'none'; }; });
-              scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _rawv=(pick('pp-inv',po).value||'').trim(); var val=_rawv.replace(/[^0-9.\-]/g,''); if(_rawv!==''&&!/^-?[0-9]+(\.[0-9]+)?$/.test(val)){ ppNotice('Invoice amount must be a number (no currency symbols or letters).'); return; } var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
-                var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ (_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]).push({kind:'invoice_value',value:val,status:'pending',submitted_at:new Date().toISOString().slice(0,10)}); refreshRow(row,po); }); };
+              scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _rawv=(pick('pp-inv',po).value||'').trim(); var val=ppNumS(_rawv);   /* v28.190 (Ben, M15): "1.234,50" was read as 1.2345 */ if(_rawv!==''&&!/^-?[0-9]+(\.[0-9]+)?$/.test(val)){ ppNotice('Invoice amount must be a number (no currency symbols or letters).'); return; } var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
+                var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ (_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]).push({kind:'invoice_value',value:val,status:'pending',submitted_at:ppToday()}); refreshRow(row,po); }); };
                 if(f){ hzUpload(f,{field:'data_base64',category:'po',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.upload,Object.assign({po:po,supplier_id:sid,uploaded_by:by},up),function(j){ go(j.id); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); btn.disabled=false; }); } else go(null); }; });
               // upload a typed document (Commercial Invoice / Packing List / …) → store + show in the Documents list
               scope.querySelectorAll('.pp-doc-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
                 var typeEl=pick('pp-doc-type',po), fin=pick('pp-doc-file',po), f=fin&&fin.files&&fin.files[0];
                 if(!f){ ppNotice('Choose a file to upload.'); return; } var cat=typeEl?typeEl.value:'Other'; var row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 hzUpload(f,{field:'data_base64',category:'po',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.upload,Object.assign({po:po,supplier_id:sid,uploaded_by:by,category:cat},up),function(j){
-                  (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:'',approval_status:'draft'});
+                  (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:ppNowStamp(),approval_status:'draft',mine:true});
                   rerenderRow(row,po,'invoice'); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); btn.disabled=false; }); }; });
               // remove a supplier document
               scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=async function(){ if(!(await _ppConfirm('Remove this document?')))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
@@ -3217,7 +3261,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
           if(d2.notesByPo)Object.keys(d2.notesByPo).forEach(function(k){ shortNotes(d2.notesByPo[k]); }); _ppData=d2;
           var a=document.activeElement, pb=document.getElementById('pp-body'); var typing=!!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&pb&&pb.contains(a)); var detail=/^#\/(pos|products?|samples?|shipments?|productions?)\/[^/]+/.test(location.hash||'');
           if(!typing&&!detail)renderPP(); }).catch(function(){}); }
-      }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
+      }).catch(function(e){ body.innerHTML=(e&&e.auth)   // v28.190 (Ben, M10): an expired session said "[object Object]"
+        ?'<div class="count" style="color:var(--neg)">Your session has expired. Please sign in again. <a href="/portal" style="color:var(--blue);font-weight:600">Sign in</a></div>'
+        :'<div class="count" style="color:var(--neg)">Could not load your orders: '+esc((e&&e.message)||'please try again')+'. <a href="#" class="pp-retry" style="color:var(--blue);font-weight:600">Try again</a></div>';
+        var rt=body.querySelector('.pp-retry'); if(rt)rt.onclick=function(ev){ ev.preventDefault(); loadPreview(); }; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     // v28.189 (Ben, deep dive M3): a sample write (attachment added / removed, new sample shipment) refreshes the samples list only, not
     // the whole bootstrap; falls back to the full reload if that call fails or the host has no such endpoint (admin preview).
