@@ -1213,6 +1213,14 @@ function hzSecurityNote(req, status, reason) { try {
 // server-side with that reference (log500 has already logged the stack for handlers that call it). Every 403 is noted in the
 // App health log (hzSecurityNote) with the supplier id and the refusal reason.
 const PORTAL_ERR_GENERIC = 'Something went wrong on our side. Please try again; if it keeps happening, contact Dock & Bay and quote ref ';
+// v28.191 (Ben, deep dive M6): developer wording in portal 4xx answers ("po and data_base64/storage_path required", "not your sample",
+// "invalid status") becomes a sentence a supplier can act on. Messages already written for suppliers pass through unchanged.
+function portalFriendlyError(m) { const t = String(m || '');
+  let x = /^not your (\w[\w -]*)$/i.exec(t); if (x) return 'This ' + x[1].toLowerCase().replace(/^po\b/, 'PO') + ' is not on your account.';
+  if (/(^|[\s+\/])\w*_\w*.*\brequired$|^[a-z_\/ +]+ required$/.test(t)) return 'Something is missing. Please refresh the page and try again.';
+  if (/^invalid [a-z_ ]+$/i.test(t)) return 'That value is not allowed. Please check it and try again.';
+  if (/^not (found|allowed)$/i.test(t)) return t === 'not found' ? 'Not found. It may have been removed; please refresh the page.' : 'You can not do that here.';
+  return t; }
 const _PORTAL_INTERNAL_RE = /(relation "|column "|syntax error|violates|duplicate key|invalid input syntax|null value in column|does not exist|ECONN|file:\/\/|\/Users\/|\/var\/task|node_modules|\n\s+at |TypeError|ReferenceError|Cannot read propert)/i;
 app.use((req, res, next) => {
   if (!String(req.path || '').startsWith('/api/portal/')) return next();
@@ -1224,6 +1232,8 @@ app.use((req, res, next) => {
       const st = res.statusCode;
       if (st >= 400 && body && typeof body === 'object' && typeof body.error === 'string') {
         if (st === 403) res._hzErr = body.error;
+        else if (st === 401) body = Object.assign({}, body, { error: 'Your session has expired. Please sign in again.' });   // v28.191 (Ben, M6)
+        if (st >= 400 && st < 500 && st !== 401 && !_PORTAL_INTERNAL_RE.test(body.error)) { const f = portalFriendlyError(body.error); if (f !== body.error) { if (st === 403) res._hzErr = body.error; body = Object.assign({}, body, { error: f }); } }
         if (st >= 500 || _PORTAL_INTERNAL_RE.test(body.error)) { const r = _ref(); _log(r, body.error); res._hzPortalSan = true; body = { error: PORTAL_ERR_GENERIC + r + '.', ref: r }; }
       }
     } catch (_) {}
@@ -10549,7 +10559,13 @@ app.get('/api/product/item/:ref', async (req, res) => {
 app.get('/api/portal/product-item/:ref', portalAuth, async (req, res) => {
   const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); portalScopeItem(req, p.item); res.json(p); }
+  try { const p = await productItemPayload(ref, req.portal.suppliers); if (!p) return res.status(404).json({ error: 'not found' }); portalScopeItem(req, p.item);
+    // v28.191 (Ben, H6): a document another supplier uploaded is not shown (Dock & Bay's own documents are); a component sampled by another
+    // supplier says "another supplier" instead of its name.
+    const ppl = await portalPeopleEmails(req), mine = new Set((req.portal.suppliers || []).map(x => String(x).toLowerCase().trim()));
+    p.docs = (p.docs || []).filter(d => d.uploader_kind !== 'supplier' || ppl.has(String(d.uploaded_by || '').toLowerCase()));
+    (p.components || []).forEach(c => { if (Array.isArray(c.req_suppliers)) c.req_suppliers = [...new Set(c.req_suppliers.map(n => mine.has(String(n).toLowerCase().trim()) ? n : 'another supplier'))]; });
+    res.json(p); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
@@ -11378,10 +11394,24 @@ async function unlinkSampleFromShipment(devSampleId, srId) {
   if (!srId) return;
   await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE dev_sample_id=$1 AND sample_request_id=$2::bigint`, [devSampleId, srId]);
 }
-async function portalOwnsProductSample(req, sampleId) {   // ownership: the product sample's item must belong to the caller's supplier
-  const r = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
-  return r ? portalOwnsProduct(req, r.item_ref) : false;
+// v28.191 (Ben, deep dive H6): ownership of a product SAMPLE VERSION is by its development REQUEST (the supplier that submitted it), not
+// the item: suppliers competing on one item must never change each other's versions (status, sizes, shipment, files). A version with no
+// request (older rows) is the caller's only when the item has no other supplier's request.
+async function portalOwnsProductSample(req, sampleId) {
+  const n = Number(sampleId); if (!Number.isSafeInteger(n) || n <= 0) return false;
+  const r = (await pool.query(`SELECT ps.item_ref, (SELECT rq.supplier_name FROM planner.product_dev_requests rq WHERE rq.id=ps.request_id) req_sup,
+      (SELECT count(*) FROM planner.product_dev_requests r2 JOIN planner.product_dev_items i ON i.id=r2.item_id WHERE i.ref=ps.item_ref AND NOT (r2.supplier_name = ANY($2)))::int others
+    FROM planner.product_dev_samples ps WHERE ps.id=$1`, [n, req.portal.suppliers || []])).rows[0];
+  if (!r) return false;
+  if (r.req_sup) return (req.portal.suppliers || []).includes(r.req_sup);
+  return r.others === 0 && portalOwnsProduct(req, r.item_ref);
 }
+// v28.191 (Ben, H6): the caller's development request(s) on an item (id + supplier id), and the emails of the caller's people.
+async function portalMyRequests(req, ref) { return (await pool.query(`SELECT r.id, r.supplier_id, r.supplier_name FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND r.supplier_name = ANY($2) ORDER BY r.id`, [ref, req.portal.suppliers || []])).rows; }
+async function portalMyNoteSupplierId(req, ref) { const m = await portalMyRequests(req, ref); const sid = m.find(x => x.supplier_id != null); return sid ? sid.supplier_id : ((req.portal.supplierIds || [])[0] || null); }
+async function portalPeopleEmails(req) { if (req._ppEmails) return req._ppEmails;
+  const rows = (await pool.query(`SELECT lower(email) e FROM planner.supplier_portal_users WHERE supplier_name = ANY($1) OR supplier_id = ANY($2::bigint[])`, [req.portal.suppliers || [], (req.portal.supplierIds || []).map(Number)])).rows;
+  req._ppEmails = new Set(rows.map(x => x.e).concat([String(req.portal.email || '').toLowerCase()])); return req._ppEmails; }
 async function setSampleDevSamples(sampleId, devs, by) {   // replace-all the dev-sample links on a sample shipment; devs = [{id,qty}] or [id]
   await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE sample_request_id=$1::bigint`, [sampleId]);
   for (const d of (Array.isArray(devs) ? devs : [])) { const id = (d && typeof d === 'object') ? d.id : d; if (!id) continue;
@@ -24492,7 +24522,9 @@ async function portalCanReadAttachment(req, id) {
   if (/^onboarding/.test(a.category)) return false;
   if (await portalOwnsPO(req, a.po)) return true;
   if ((a.category === 'sample' || a.category === 'timeline') && await portalOwnsSampleRef(req, a.po)) return true;
-  if (a.category === 'product' && await portalOwnsProduct(req, a.po)) return true;
+  if (a.category === 'product' && await portalOwnsProduct(req, a.po)) {   // v28.191 (Ben, H6): another supplier's upload on a shared item stays theirs
+    const u = (await pool.query(`SELECT coalesce(uploader_kind,'internal') k, lower(coalesce(uploaded_by,'')) b FROM planner.portal_attachments WHERE id=$1`, [n])).rows[0];
+    return !u || u.k !== 'supplier' || (await portalPeopleEmails(req)).has(u.b); }
   if (a.category === 'product_sample' && /^PSAMPLE-\d+$/.test(a.po)) {
     const sid = a.po.slice(8);
     const s = (await pool.query(`SELECT ps.item_ref, (SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id) req_sup FROM planner.product_dev_samples ps WHERE ps.id=$1`, [sid])).rows[0];
@@ -24963,13 +24995,14 @@ app.post('/api/portal/onboarding/submit', portalAuth, async (req, res) => {
     if (!open) { const ref = await onbNextRef(); open = (await pool.query(`INSERT INTO planner.supplier_onboarding_requests (ref, supplier_id, supplier_name, type, status, form, sections, log) VALUES ($1,$2,$3,$4,'draft',$5::jsonb,'{}'::jsonb,'[]'::jsonb) RETURNING *`,
       [ref, sid, req.portal.suppliers[0] || (prof && prof.name) || '', (prof && prof.profile_approved_at) ? 'change' : 'new', JSON.stringify(form)])).rows[0]; }
     const log = onbLogPush(open, (open.status === 'returned' ? 'Resubmitted' : 'Submitted') + ' by ' + by, by);
-    await pool.query(`UPDATE planner.supplier_onboarding_requests SET form=$2::jsonb, sections=$3::jsonb, status='submitted', submitted_by=$4, submitted_at=now(), return_note=NULL, log=$5::jsonb, updated_at=now() WHERE id=$1`,
-      [open.id, JSON.stringify(form), JSON.stringify(sections), by, JSON.stringify(log)]);
-    await pool.query(`INSERT INTO planner.supplier_warehouse_acks (supplier_id, rules_version, acked_by) VALUES ($1,$2,$3)`, [sid, version, by]);
+    // v28.191 (Ben, M7): submit + warehouse acknowledgement in one statement, so a failure never leaves a submitted request without its ack
+    await pool.query(`WITH u AS (UPDATE planner.supplier_onboarding_requests SET form=$2::jsonb, sections=$3::jsonb, status='submitted', submitted_by=$4, submitted_at=now(), return_note=NULL, log=$5::jsonb, updated_at=now() WHERE id=$1 RETURNING id)
+      INSERT INTO planner.supplier_warehouse_acks (supplier_id, rules_version, acked_by) SELECT $6, $7, $4 FROM u`,
+      [open.id, JSON.stringify(form), JSON.stringify(sections), by, JSON.stringify(log), sid, version]);
     const nProd = Array.isArray(f.products) ? f.products.filter(p => p && p.name).length : 0;
     const link = PORTAL_URL.replace(/\/portal$/, '') + '/#/supply/config/onboarding/' + open.ref;
-    await onbNotifyTeam('[Horizon] Onboarding request ' + open.ref + ' · ' + escHtml(open.supplier_name) + (open.type === 'change' ? ' (profile change)' : ' (new supplier)'),
-      '<p><b>' + escHtml(open.supplier_name) + '</b> ' + (open.status === 'returned' ? 'resubmitted' : 'submitted') + ' their ' + (open.type === 'change' ? 'profile changes' : 'supplier profile') + (nProd ? ' with ' + nProd + ' product' + (nProd === 1 ? '' : 's') : '') + '. ' + ONB_SECTIONS.filter(k => sections[k] !== 'approved').length + ' section(s) await review.</p><p><a href="' + link + '">Open in Horizon → CONFIG ▸ Onboarding</a></p>', open.ref);
+    try { await onbNotifyTeam('[Horizon] Onboarding request ' + open.ref + ' · ' + escHtml(open.supplier_name) + (open.type === 'change' ? ' (profile change)' : ' (new supplier)'),
+      '<p><b>' + escHtml(open.supplier_name) + '</b> ' + (open.status === 'returned' ? 'resubmitted' : 'submitted') + ' their ' + (open.type === 'change' ? 'profile changes' : 'supplier profile') + (nProd ? ' with ' + nProd + ' product' + (nProd === 1 ? '' : 's') : '') + '. ' + ONB_SECTIONS.filter(k => sections[k] !== 'approved').length + ' section(s) await review.</p><p><a href="' + link + '">Open in Horizon → CONFIG ▸ Onboarding</a></p>', open.ref); } catch (e) { console.warn('[onboarding] notify failed: ' + (e && e.message)); }   // v28.191 (Ben, M7): the submit is saved; the email is best-effort
     try { portalCacheMarkStale(open.supplier_name); } catch (_) {}
     res.json({ ok: true, ref: open.ref, status: 'submitted' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -25563,7 +25596,8 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
         SELECT 'product', n.po, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
           WHERE n.author_kind='internal' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=pdi.id AND r.supplier_name = ANY($1))
-      ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, snOk ? [names, ids] : [names])).rows);
+            AND (n.supplier_id IS NULL OR n.supplier_id = ANY($2::bigint[]))   -- v28.191 (Ben, H6): never another supplier's request notes
+      ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names, ids])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
@@ -25586,11 +25620,11 @@ app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { cons
 app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   if (!String(b.body || '').trim()) return res.status(400).json({ error: 'body required' });
-  try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [ref, req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }
+  try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [ref, await portalMyNoteSupplierId(req, ref), req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }   // v28.191 (Ben, H6): scoped to the caller's supplier
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
+  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL AND (supplier_id IS NULL OR supplier_id = ANY($2::bigint[]))`, [ref, (req.portal.supplierIds || []).map(Number)]); res.json({ ok: true }); }   // v28.191 (Ben, H6): only notes the caller can see
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // v27.761 (Ben): supplier ACCEPTS a product development request. Whole-product grain — marks every request this supplier
 // holds for the item as accepted. Plain acknowledgement (no gating). Recorded on the timeline AND the change log.
@@ -25625,6 +25659,7 @@ app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  if (b.request_id != null && b.request_id !== '' && !(await portalMyRequests(req, ref)).some(r => Number(r.id) === Number(b.request_id))) return res.status(403).json({ error: 'That development request is not yours.' });   // v28.191 (Ben, H6)
   try { res.json({ ok: true, ...(await createProductSample(Object.assign({}, b, { supplier_names: req.portal.suppliers }), req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });   // v27.702: portal sample → the submitting supplier's request
 // Supplier sets the manual lifecycle status of a sample version (in_development / completed / cancelled — 'shipped' is derived).
 app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) => { const id = req.params.id, st = ((req.body || {}).supplier_status || '').trim();
@@ -25656,11 +25691,11 @@ app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) =
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if ((!b.data_base64 && !b.storage_path) || !id) return res.status(400).json({ error: 'sample_id + data_base64/storage_path required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
-    if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
+    if (!sr || !(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });   // v28.191 (H6): the caller's own version
     const attId = await insertProductSamplePhoto(id, b, req.portal.email || null, 'supplier');
     // timeline note → admin PRODUCT ✉ unread
-    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
-      [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
+      [sr.item_ref, await portalMyNoteSupplierId(req, sr.item_ref), req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);   // v28.191 (H6)
     res.json({ ok: true, id: attId }); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
 app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
@@ -25680,8 +25715,8 @@ app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = 
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'product','supplier') RETURNING id`,
       [ref, b.filename || 'document', safeMime(b.mime), up.byteSize, up.buf, up.storagePath, req.portal.email || null]);
-    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
-      [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
+      [ref, await portalMyNoteSupplierId(req, ref), req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);   // v28.191 (H6)
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
@@ -25703,7 +25738,7 @@ app.get('/api/portal/sample/:id/contents', portalAuth, async (req, res) => {
     res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
-async function portalOwnsSample(req, id){ if(!id)return null;
+async function portalOwnsSample(req, id){ if(!id||!/^\d{1,18}$/.test(String(id).trim()))return null;   // v28.191 (Ben, M6): a malformed id is "not yours" (403), not a database error (500)
   const r = await pool.query(`SELECT id, ref, coalesce(supplier_name,'') supplier_name, supplier_id, status FROM planner.sample_requests WHERE id=$1::bigint`, [id]);
   const s = r.rows[0]; if(!s) return null;
   const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
@@ -25765,6 +25800,7 @@ app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    if (b.supplier_expected_completion != null && b.supplier_expected_completion !== '' && !(/^\d{4}-\d{2}-\d{2}$/.test(String(b.supplier_expected_completion)) && !isNaN(Date.parse(String(b.supplier_expected_completion))))) return res.status(400).json({ error: 'The expected completion date is not a valid date.' });   // v28.191 (Ben, M7): before the notes are written
     await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
@@ -26201,6 +26237,10 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   if (b.invoice_value != null && String(b.invoice_value).trim() !== '' && sanitiseMoney(b.invoice_value) == null) return res.status(400).json({ error: 'Invoice value must be a number (no currency symbols or letters).' });
+  // v28.191 (Ben, deep dive M7): every input is checked BEFORE the first write (a bad production status used to come back as a 400 after
+  // the completion date, invoice, notes, emails and tracking had already been saved, and the 400 skipped the cache refresh).
+  if (b.production_status != null && String(b.production_status).trim() !== '' && !PROD_STATUSES.includes(String(b.production_status).trim())) return res.status(400).json({ error: 'That production status is not one of the options. Please refresh the page and choose again.' });
+  if (b.completion_date != null && b.completion_date !== '' && !(/^\d{4}-\d{2}-\d{2}$/.test(String(b.completion_date)) && !isNaN(Date.parse(String(b.completion_date))))) return res.status(400).json({ error: 'The completion date is not a valid date.' });
   const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   try {
     if (!await portalAttachmentOk(req, b.invoice_attachment_id)) return res.status(403).json({ error: 'that attachment is not on your account' });   // v28.186 (Ben, M8)
@@ -26262,7 +26302,11 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
     }
     if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
     res.json(out);
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e);
+    // v28.191 (Ben, M7): if part of it was already saved, say exactly what (and refresh the caches for it) instead of a bare error
+    const done = out.staged.concat(out.applied);
+    if (done.length) { try { invalidateSupplyCaches('portal-po'); } catch (_) {} return res.status(409).json({ error: 'Only part of this was saved (' + done.join(', ') + '). Please refresh the page, check it, and send the rest again.', partial: out }); }
+    res.status(500).json({ error: e.message }); }
 });
 
 // Local dev: listen. On Vercel (serverless) the platform imports `app` instead.

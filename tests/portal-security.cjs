@@ -151,6 +151,31 @@ const internal = (t) => /relation "|column "|syntax error|violates|duplicate key
     ok((await post('/api/portal/doc-remove', { id: E.HZ_TEST_ATT_MASTER_DOC }, { cookie: Rd })).status === 403, 'H4: removing the master\'s document -> 403');
   }
 
+  // ── v28.191 (Ben, H6): suppliers competing on ONE product-dev item. Needs HZ_TEST_PSID_COMPETITOR (a session of another supplier with
+  // its own development request on HZ_TEST_SHARED_ITEM), HZ_TEST_OTHER_SAMPLE_VERSION (a sample version of OTHER's request on that item)
+  // and HZ_TEST_OTHER_REQUEST (OTHER's request id on it). Refused writes only, unless HZ_TEST_WRITES=1 (OTHER posts one product note).
+  if (E.HZ_TEST_PSID_COMPETITOR && E.HZ_TEST_SHARED_ITEM && E.HZ_TEST_OTHER_SAMPLE_VERSION) {
+    const C = 'psid=' + E.HZ_TEST_PSID_COMPETITOR, item = E.HZ_TEST_SHARED_ITEM, ver = E.HZ_TEST_OTHER_SAMPLE_VERSION;
+    ok((await get('/api/portal/product-item/' + encodeURIComponent(item), { cookie: C })).status === 200, 'H6: the competitor can open the shared item (it has its own request)');
+    ok((await post('/api/portal/product-sample/' + ver + '/status', { supplier_status: 'cancelled' }, { cookie: C })).status === 403, 'H6: competitor changing OTHER\'s sample version status -> 403');
+    ok((await post('/api/portal/product-sample/' + ver + '/meta', { sample_sizes: [], sampled_aspects: [] }, { cookie: C })).status === 403, 'H6: competitor editing OTHER\'s sample version -> 403');
+    ok((await post('/api/portal/product-sample/' + ver + '/assign', { mode: 'not_shipped' }, { cookie: C })).status === 403, 'H6: competitor assigning OTHER\'s sample version -> 403');
+    if (E.HZ_TEST_OTHER_REQUEST) ok((await post('/api/portal/product-sample', { item_ref: item, request_id: E.HZ_TEST_OTHER_REQUEST, colour_verified: true, quality_verified: true, sampled_aspects: ['product'] }, { cookie: C })).status === 403, 'H6: competitor creating a sample version on OTHER\'s request -> 403');
+    const pi = await get('/api/portal/product-item/' + encodeURIComponent(item), { cookie: C });
+    const others = [].concat(...(((pi.json && pi.json.components) || []).map((c) => c.req_suppliers || [])));
+    const meC = ((await get('/api/portal/me', { cookie: C })).json || {}).suppliers || [], meO = ((await get('/api/portal/me', { cookie: O })).json || {}).suppliers || [];
+    ok(!others.some((n) => meO.includes(n)), 'H6: the competitor never sees OTHER\'s supplier name on components (got ' + [...new Set(others)].join(', ') + ')');
+    ok(!((pi.json && pi.json.samples) || []).some((s) => meO.includes(s.supplier)), 'H6: the competitor sees none of OTHER\'s sample versions');
+    if (E.HZ_TEST_WRITES === '1') {
+      ok((await post('/api/portal/product-note', { ref: item, body: 'v28191 test: OTHER\'s private product note' }, { cookie: O })).status === 200, 'H6: OTHER posts a product note');
+      const cn = (await get('/api/portal/product-notes/' + encodeURIComponent(item), { cookie: C })).json || [];
+      ok(!cn.some((n) => /v28191 test/.test(n.body || '')), 'H6: the competitor does NOT see OTHER\'s note (was product-wide)');
+      const on = (await get('/api/portal/product-notes/' + encodeURIComponent(item), { cookie: O })).json || [];
+      ok(on.some((n) => /v28191 test/.test(n.body || '')), 'H6: OTHER sees its own note');
+    }
+    void meC;
+  }
+
   // ── v28.188 (Ben, H7): health capture. The session route still needs a session; the login-page route takes no session but only
   // the allowed kinds (a 'metric' row is dropped), at most 20 events, and never answers with an error page.
   const tx = { 'content-type': 'text/plain' };
