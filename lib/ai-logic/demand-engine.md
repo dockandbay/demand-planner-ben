@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.216
+verified_version: v28.217
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -287,3 +287,9 @@ verified_version: v28.216
 - Worksheet mode: drafts over SKU and sub-category range totals, never written until applied. "Move sub-category forecast with SKU changes" (default on) adds the SKU draft deltas to the sub-category draft, floored at 0. Applying a SKU line on its own freezes that amount as a pending sub-category draft, applied separately. (source: renderCrossMarketView, applyLines)
 - Apply is month by month: each line is pre-filled with the change spread over the forecast months in the current forecast's shape (sub-category curve when the current forecast is 0); actual months are locked. SKU lines save as SKU forecast overrides (skuOvSet, x set size for sets); sub-category lines save as literal sub-category forecasts (IV "'n"); both log to the change record and persist via saveForecasts. (source: applyLines, _cmvSpread, skuOvSet)
 - Saved worksheets are shared (planner.demand_worksheets, migration 338): anyone can open them; saving or deleting needs demand edit rights. (source: server.mjs :: /api/demand/worksheets)
+
+## Plan download builder (DEMAND ▸ Plan ▸ Import / Export ▸ Download plan, v28.217)
+- Choose markets, channels (only real market x channel combinations), categories, level (SKU or sub-category), FROM-TO months, measures (TY actuals, Forecast, LY actuals, TY combined), optional revenue, xlsx or csv. One row per item x market x channel x measure (x Units / Revenue), months across, optional Total. Not tied to the on-screen filters. (source: openPlanDownload, _pdxBuild)
+- TY actuals fill months up to the current month (month to date); Forecast fills the current month onwards; LY actuals = same month a year earlier; TY combined = actuals then forecast, as the Plan. (source: _pdxBuild)
+- SKU level uses the same per-SKU forecast as the Plan grid and the Cross Market view (skuMonthlyMap on the whole sub-category share pool + overrides; sets in boxes; own actuals only). Sub-category level = calc().fu and sub-category actuals, exploded by default like the Plan sub-category cells (toggle off for raw). (source: _pdxBuild, expAct, expFc)
+- Revenue = units x the sub-category ASP (getASP); sub-category actual months use the actual sub-category revenue. (source: _pdxBuild, getASP)

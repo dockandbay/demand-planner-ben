@@ -7819,20 +7819,107 @@ function buildPlanDownload(fyStarts){
   var bytes=buildXlsx('Demand plan', grid), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150);
 }
-function openPlanDownload(ev){ if(ev)ev.stopPropagation(); var p=document.getElementById('plan-dl-pop');
-  if(p&&p.style.display==='block'){ p.style.display='none'; return; }
-  if(!p){ p=document.createElement('div'); p.id='plan-dl-pop'; p.style.cssText='position:fixed;z-index:200001;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:12px;width:300px;text-align:left'; document.body.appendChild(p); }
-  var fys=DISP_FY_STARTS.filter(function(Y){ return Y<=CUR_FY_START+1; });
-  var boxes=fys.map(function(Y){ var def=(Y===CUR_FY_START||Y===CUR_FY_START-1); return '<label style="display:block;padding:2px 0;cursor:pointer"><input type="checkbox" class="pdl-fy" value="'+Y+'"'+(def?' checked':'')+'> '+fyLabel(Y)+'</label>'; }).join('');
-  p.innerHTML='<div style="font-weight:700;margin-bottom:5px">Download demand plan</div>'
-    +'<div class="mut" style="font-size:10px;margin-bottom:7px;line-height:1.4">SKU × month, Units + Revenue. Past months = actuals, future = forecast (flagged A/F). Uses the current country ('+CUR+') / channel ('+CF+') / category filters.</div>'
-    +'<div style="font-weight:600;margin-bottom:3px">Fiscal year(s)</div>'+boxes
-    +'<div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button id="pdl-go" style="background:var(--pos);color:#fff;border:1px solid var(--pos);border-radius:5px;padding:4px 12px;font-weight:700;cursor:pointer">&#11015; Download</button><a id="pdl-cancel" style="color:var(--neg);cursor:pointer">Cancel</a><span id="pdl-msg" class="mut" style="font-size:10px"></span></div>';
-  var r=(ev&&ev.target&&ev.target.getBoundingClientRect)?ev.target.getBoundingClientRect():{left:200,bottom:110};
-  p.style.left=Math.max(8,Math.min(window.innerWidth-320,r.left))+'px'; p.style.top=(r.bottom+6)+'px'; p.style.display='block';
-  p.querySelector('#pdl-cancel').onclick=function(){ p.style.display='none'; };
-  p.querySelector('#pdl-go').onclick=function(){ var ys=Array.prototype.slice.call(p.querySelectorAll('.pdl-fy:checked')).map(function(x){return parseInt(x.value);}); if(!ys.length){ p.querySelector('#pdl-msg').textContent='Pick at least one FY.'; return; } p.querySelector('#pdl-msg').textContent='Building…'; setTimeout(function(){ try{ buildPlanDownload(ys); p.style.display='none'; }catch(e){ p.querySelector('#pdl-msg').textContent='Failed: '+(e&&e.message||e); if(window.console)console.error('plan download failed',e); } },20); };
-}
+// v28.217 (Ben): DEMAND ▸ Plan ▸ Import / Export ▸ Download plan — a proper download builder instead of "what's in view".
+// Pick markets, channels, categories, level (SKU or sub-category), time period and the metrics (TY actuals, forecast,
+// LY actuals, TY combined; revenue optional), then XLSX or CSV. Numbers are the Plan's: SKU forecast = skuMonthlyMap on
+// the whole sub-category share pool + overrides (sets in boxes, as Plan SKU rows); sub-category = calc().fu / actuals,
+// exploded like the Plan sub-category cells. Revenue = units x the sub-category ASP (actual sub-category revenue for
+// sub-category actual months).
+var PDX={mk:null,ch:null,cats:null,level:'sku',from:null,to:null,m:{act:true,fc:true,ly:true,ty:false},rev:false,fmt:'xlsx',skipEmpty:true,total:true,expl:true};
+var PDX_COMBOS=[['UK','DTC'],['UK','FBA'],['UK','B2B'],['UK','TIK'],['US','DTC'],['US','FBA'],['US','B2B'],['US','TIK'],['EU','DTC'],['EU','FBA'],['EU','B2B'],['EU','ZAL'],['AU','DTC'],['AU','FBA'],['CA','FBA']];
+var PDX_CHL={DTC:'DTC',FBA:'FBA',B2B:'B2B',TIK:'TikTok',ZAL:'Zalando'};
+function _pdxMonths(){ var o=[]; for(var y=2024;y<=2028;y++)for(var m=1;m<=12;m++)o.push(ym(y,m)); return o; }
+function _pdxCats(){ var o=[]; try{ Object.keys(SKUM).forEach(function(s){ var p=SKUM[s], c=p&&p.s&&(_subcatParent(p.s)||p.c); if(c&&o.indexOf(c)<0)o.push(c); }); }catch(e){} return o.sort(); }
+function openPlanDownload(ev){ if(ev&&ev.stopPropagation)ev.stopPropagation();
+  var esc=hzEscH, CATS=_pdxCats();
+  if(!PDX.from){ var cy=+String(CUR_MONTH).slice(0,4), cm=+String(CUR_MONTH).slice(5,7), fy=fyMonths(cm>=3?cy:cy-1); PDX.from=fy[0]; PDX.to=fy[11]; }
+  if(!PDX.mk){ PDX.mk={}; PDX.mk[CUR]=1; } if(!PDX.ch){ PDX.ch={}; PDX.ch[CF]=1; }
+  if(!PDX.cats){ PDX.cats={}; try{ if(SEL.has('ALL'))CATS.forEach(function(c){ PDX.cats[c]=1; }); else SEL.forEach(function(x){ if(CATS.indexOf(x)>=0)PDX.cats[x]=1; else { var pc=_subcatParent(x); if(pc)PDX.cats[pc]=1; } }); }catch(e){} if(!Object.keys(PDX.cats).length)CATS.forEach(function(c){ PDX.cats[c]=1; }); }
+  var old=document.getElementById('pdx-modal'); if(old)old.remove(); try{ var pp=document.getElementById('plan-dl-pop'); if(pp)pp.style.display='none'; }catch(e){}
+  var host=document.createElement('div'); host.id='pdx-modal'; document.body.appendChild(host);
+  var mopts=_pdxMonths().map(function(m){ return '<option value="'+m+'">'+_planMonLabel(m)+'</option>'; }).join('');
+  var pill=function(cls,val,lbl,on){ return '<label class="pdx-pill'+(on?' on':'')+'"><input type="checkbox" class="'+cls+'" value="'+esc(val)+'"'+(on?' checked':'')+'> '+esc(lbl)+'</label>'; };
+  host.innerHTML='<style>#pdx-modal{position:fixed;inset:0;background:rgba(10,15,27,.45);display:grid;place-items:center;z-index:200002;padding:16px}#pdx-modal .m{background:var(--card);color:var(--ink);border-radius:14px;width:min(760px,100%);max-height:90vh;display:grid;grid-template-rows:auto 1fr auto;box-shadow:0 20px 60px -20px rgba(0,0,0,.5);text-align:left}'
+    +'#pdx-modal header,#pdx-modal footer{padding:12px 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}#pdx-modal header{border-bottom:1px solid var(--line)}#pdx-modal footer{border-top:1px solid var(--line)}#pdx-modal h3{margin:0;font-size:16px}'
+    +'#pdx-modal .b{overflow:auto;padding:14px 18px;display:grid;gap:14px}#pdx-modal .sec{display:grid;gap:6px}#pdx-modal .lab{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;gap:10px;align-items:center}#pdx-modal .lab a{text-transform:none;letter-spacing:0;font-weight:600;color:var(--blue);cursor:pointer}'
+    +'#pdx-modal .row{display:flex;flex-wrap:wrap;gap:6px}#pdx-modal .pdx-pill{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;background:var(--card)}#pdx-modal .pdx-pill.on{background:var(--blue-soft);border-color:var(--blue);color:var(--blue-ink);font-weight:600}#pdx-modal .pdx-pill input{margin:0}'
+    +'#pdx-modal .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:2px 12px;max-height:180px;overflow:auto;border:1px solid var(--line2);border-radius:8px;padding:6px 8px;font-size:12px}#pdx-modal .cats label{display:flex;gap:6px;align-items:center;padding:2px 0;cursor:pointer}'
+    +'#pdx-modal select,#pdx-modal input[type=search]{font:500 13px inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 9px}#pdx-modal .btn{font:700 12px inherit;border-radius:8px;padding:8px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);cursor:pointer}#pdx-modal .btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}#pdx-modal .btn:disabled{opacity:.5;cursor:default}'
+    +'#pdx-modal .hint{font-size:11px;color:var(--muted);line-height:1.45}#pdx-modal .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:620px){#pdx-modal .two{grid-template-columns:1fr}}</style>'
+    +'<div class="m" role="dialog" aria-modal="true" aria-labelledby="pdx-h"><header><h3 id="pdx-h">Download demand plan</h3><span style="flex:1"></span><button class="btn" id="pdx-x" aria-label="Close">&times;</button></header><div class="b">'
+    +'<div class="sec"><div class="lab">Markets <a data-all="pdx-mk">All</a><a data-none="pdx-mk">None</a></div><div class="row">'+['UK','US','EU','AU','CA'].map(function(c){ return pill('pdx-mk',c,c,!!PDX.mk[c]); }).join('')+'</div></div>'
+    +'<div class="sec"><div class="lab">Channels <a data-all="pdx-ch">All</a><a data-none="pdx-ch">None</a></div><div class="row">'+['DTC','FBA','B2B','TIK','ZAL'].map(function(c){ return pill('pdx-ch',c,PDX_CHL[c],!!PDX.ch[c]); }).join('')+'</div><div class="hint">Only real market x channel combinations are exported (AU has no B2B, CA is FBA only, TikTok is UK / US, Zalando is EU).</div></div>'
+    +'<div class="sec"><div class="lab">Categories <a data-all="pdx-cat">All</a><a data-none="pdx-cat">None</a><input type="search" id="pdx-cq" placeholder="Filter" style="margin-left:auto;width:160px;text-transform:none"></div><div class="cats" id="pdx-cats">'+CATS.map(function(c){ return '<label data-n="'+esc(c.toLowerCase())+'"><input type="checkbox" class="pdx-cat" value="'+esc(c)+'"'+(PDX.cats[c]?' checked':'')+'> '+esc(c)+'</label>'; }).join('')+'</div></div>'
+    +'<div class="two"><div class="sec"><div class="lab">Level</div><div class="row">'+pill('pdx-lv','sku','SKU',PDX.level==='sku').replace('type="checkbox"','type="radio" name="pdx-lv"')+pill('pdx-lv','sub','Sub-category',PDX.level==='sub').replace('type="checkbox"','type="radio" name="pdx-lv"')+'</div>'
+      +'<label class="hint" id="pdx-explw"><input type="checkbox" id="pdx-expl"'+(PDX.expl?' checked':'')+'> Sub-category units exploded (sets x set size), as the Plan shows them</label></div>'
+    +'<div class="sec"><div class="lab">Time period</div><div class="row" style="align-items:center"><select id="pdx-from" aria-label="From">'+mopts+'</select><span>to</span><select id="pdx-to" aria-label="To">'+mopts+'</select></div><div class="hint" id="pdx-per"></div></div></div>'
+    +'<div class="sec"><div class="lab">Data</div><div class="row">'+pill('pdx-m','act','TY actuals',PDX.m.act)+pill('pdx-m','fc','Forecast',PDX.m.fc)+pill('pdx-m','ly','LY actuals',PDX.m.ly)+pill('pdx-m','ty','TY combined (actuals + forecast)',PDX.m.ty)+pill('pdx-rev','1','Add revenue',PDX.rev)+'</div>'
+      +'<div class="hint">One row per item x market x channel x measure, months across, plus a total. TY actuals fill months up to '+_planMonLabel(CUR_MONTH)+' (current month to date). Forecast fills '+_planMonLabel(CUR_MONTH)+' onwards. LY actuals = the same month a year earlier. TY combined = what the Plan shows (actuals, then forecast).</div></div>'
+    +'<div class="two"><div class="sec"><div class="lab">Options</div><label class="hint"><input type="checkbox" id="pdx-skip"'+(PDX.skipEmpty?' checked':'')+'> Skip rows that are all zero</label><label class="hint"><input type="checkbox" id="pdx-tot"'+(PDX.total?' checked':'')+'> Add a Total column</label></div>'
+    +'<div class="sec"><div class="lab">Format</div><div class="row">'+pill('pdx-fmt','xlsx','Excel (.xlsx)',PDX.fmt==='xlsx').replace('type="checkbox"','type="radio" name="pdx-fmt"')+pill('pdx-fmt','csv','CSV',PDX.fmt==='csv').replace('type="checkbox"','type="radio" name="pdx-fmt"')+'</div></div></div>'
+    +'</div><footer><span class="hint" id="pdx-msg"></span><span style="flex:1"></span><button class="btn" id="pdx-cancel">Cancel</button><button class="btn pri" id="pdx-go">&#11015; Download</button></footer></div>';
+  var q=function(s){ return host.querySelector(s); }, qa=function(s){ return Array.prototype.slice.call(host.querySelectorAll(s)); };
+  q('#pdx-from').value=PDX.from; q('#pdx-to').value=PDX.to;
+  function read(){ PDX.mk={}; qa('.pdx-mk:checked').forEach(function(x){ PDX.mk[x.value]=1; }); PDX.ch={}; qa('.pdx-ch:checked').forEach(function(x){ PDX.ch[x.value]=1; });
+    PDX.cats={}; qa('.pdx-cat:checked').forEach(function(x){ PDX.cats[x.value]=1; }); var lv=q('.pdx-lv:checked'); PDX.level=lv?lv.value:'sku';
+    PDX.m={}; qa('.pdx-m').forEach(function(x){ PDX.m[x.value]=x.checked; }); PDX.rev=q('.pdx-rev').checked; var f=q('.pdx-fmt:checked'); PDX.fmt=f?f.value:'xlsx';
+    PDX.skipEmpty=q('#pdx-skip').checked; PDX.total=q('#pdx-tot').checked; PDX.expl=q('#pdx-expl').checked; PDX.from=q('#pdx-from').value; PDX.to=q('#pdx-to').value; }
+  function sync(){ read(); qa('.pdx-pill').forEach(function(l){ var i=l.querySelector('input'); l.classList.toggle('on',!!(i&&i.checked)); });
+    q('#pdx-explw').style.display=PDX.level==='sub'?'':'none';
+    var ms=_pdxRange(), combos=_pdxCombos(), nc=Object.keys(PDX.cats).length, nm=Object.keys(PDX.m).filter(function(k){ return PDX.m[k]; }).length;
+    q('#pdx-per').textContent=ms.length?ms.length+' months ('+_planMonLabel(ms[0])+' to '+_planMonLabel(ms[ms.length-1])+')':'Pick a valid range';
+    var why=!combos.length?'Pick at least one market and channel.':!nc?'Pick at least one category.':!nm?'Pick at least one data option.':!ms.length?'Pick a valid time period.':'';
+    q('#pdx-msg').textContent=why||(combos.length+' market x channel combinations · '+nc+' categor'+(nc===1?'y':'ies')+' · '+nm*(PDX.rev?2:1)+' measure'+(nm*(PDX.rev?2:1)===1?'':'s')+' per row');
+    q('#pdx-go').disabled=!!why; }
+  qa('input,select').forEach(function(i){ i.addEventListener('change',sync); });
+  qa('[data-all]').forEach(function(a){ a.onclick=function(){ qa('.'+a.dataset.all).forEach(function(x){ if(x.closest('label').style.display!=='none')x.checked=true; }); sync(); }; });
+  qa('[data-none]').forEach(function(a){ a.onclick=function(){ qa('.'+a.dataset.none).forEach(function(x){ x.checked=false; }); sync(); }; });
+  q('#pdx-cq').oninput=function(){ var v=this.value.trim().toLowerCase(); qa('#pdx-cats label').forEach(function(l){ l.style.display=!v||l.dataset.n.indexOf(v)>=0?'':'none'; }); };
+  var close=function(){ host.remove(); document.removeEventListener('keydown',onEsc); }; function onEsc(e){ if(e.key==='Escape')close(); } document.addEventListener('keydown',onEsc);
+  q('#pdx-x').onclick=close; q('#pdx-cancel').onclick=close; host.onmousedown=function(e){ if(e.target===host)close(); };
+  q('#pdx-go').onclick=function(){ read(); var b=q('#pdx-go'); b.disabled=true; q('#pdx-msg').textContent='Building…';
+    setTimeout(function(){ try{ var r=_pdxBuild(); if(!r.rows){ q('#pdx-msg').textContent='Nothing to download for these choices.'; b.disabled=false; return; } _pdxSave(r.grid); q('#pdx-msg').textContent='Downloaded '+r.rows.toLocaleString()+' rows.'; b.disabled=false; }
+      catch(e){ q('#pdx-msg').textContent='Download failed: '+(e&&e.message||e); b.disabled=false; try{ console.error(e); }catch(_){} } },30); };
+  sync(); }
+try{ window.openPlanDownload=openPlanDownload; }catch(_e){}
+function _pdxRange(){ var all=_pdxMonths(), a=all.indexOf(PDX.from), b=all.indexOf(PDX.to); if(a<0||b<0||a>b)return []; return all.slice(a,b+1); }
+function _pdxCombos(){ return PDX_COMBOS.filter(function(c){ return PDX.mk[c[0]]&&PDX.ch[c[1]]; }); }
+function _pdxBuild(){
+  try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}
+  var months=_pdxRange(), combos=_pdxCombos(), lyM=hzLyMonths(), fM=months.filter(function(m){ return m>=CUR_MONTH; });
+  var MEAS=[['act','TY actual'],['fc','Forecast'],['ly','LY actual'],['ty','TY (actual + forecast)']].filter(function(x){ return PDX.m[x[0]]; });
+  var isSku=PDX.level==='sku';
+  var head=(isSku?['SKU','Product']:['Sub-category']).concat(isSku?['Sub-category','Category']:['Category']).concat(['Market','Channel','Measure','Metric']).concat(months.map(function(m){ return _planMonLabel(m); })).concat(PDX.total?['Total']:[]);
+  var title='Demand plan download: '+Object.keys(PDX.mk).join(', ')+' · '+Object.keys(PDX.ch).map(function(c){ return PDX_CHL[c]; }).join(', ')+' · '+_planMonLabel(months[0])+' to '+_planMonLabel(months[months.length-1])+' · '+(isSku?'SKU':'Sub-category')+' level · built '+new Date().toISOString().slice(0,10);
+  var grid=[[title],head], n=0;
+  var subs={}; DATA.forEach(function(d){ if(!d||!d.s)return; var pc=_subcatParent(d.s); if(pc&&PDX.cats[pc])subs[d.s]=pc; });
+  var subList=Object.keys(subs).sort();
+  var aspOf=function(co,ch,s,m){ var p=pa(m); try{ return getASP(co,ch,s,p.y,p.mo)||0; }catch(e){ return 0; } };
+  function emit(lead,co,ch,vals,revFn){ MEAS.forEach(function(ms){ var u=vals[ms[0]]; if(!u)return; var tot=0, any=false; u.forEach(function(v){ if(v!==''&&v!=null){ tot+=v; if(v)any=true; } });
+      if(PDX.skipEmpty&&!any)return; grid.push(lead.concat([co,PDX_CHL[ch],ms[1],'Units']).concat(u.map(function(v){ return v===''?'':Math.round(v); })).concat(PDX.total?[Math.round(tot)]:[])); n++;
+      if(PDX.rev){ var r=u.map(function(v,i){ return v===''?'':Math.round(revFn(ms[0],i,v)); }), rt=0; r.forEach(function(v){ if(v!=='')rt+=v; }); grid.push(lead.concat([co,PDX_CHL[ch],ms[1],'Revenue']).concat(r).concat(PDX.total?[rt]:[])); n++; } }); }
+  combos.forEach(function(cc){ var co=cc[0], ch=cc[1], ctry=co.toLowerCase(), ck=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
+    subList.forEach(function(s){ var hasRow=DATA.some(function(d){ return d.co===co&&d.ch===ch&&d.s===s; }); if(!hasRow)return;
+      var a=ga(co,ch,s)||{}, fu={}; try{ fu=(calc(s,co,ch)||{}).fu||{}; }catch(e){}
+      if(!isSku){
+        var actU=function(m){ var raw=(a[m]&&a[m][0])||0; return PDX.expl?expAct(s,co,ch,m,raw).E:raw; }, fcU=function(m){ var f=fu[m]||0; return PDX.expl?expFc(s,co,ch,m,f,a).E:f; };
+        var v={act:months.map(function(m){ return m<=CUR_MONTH?actU(m):''; }), fc:months.map(function(m){ return m>=CUR_MONTH?fcU(m):''; }), ly:months.map(function(m){ return actU(lyMonth(m)); }), ty:months.map(function(m){ return isActualMonth(m)?actU(m):fcU(m); })};
+        emit([s,subs[s]],co,ch,v,function(k,i,u){ var m=months[i], am=k==='ly'?lyMonth(m):m, act=(k==='act'||k==='ly'||(k==='ty'&&isActualMonth(m))); if(act){ var ar=(a[am]&&a[am][1])||0, au=(a[am]&&a[am][0])||0; return au?ar*(u/((PDX.expl?expAct(s,co,ch,am,au).E:au)||1)):0; } return u*aspOf(co,ch,s,m); });
+        return; }
+      var pool=Object.keys(SKUM).filter(function(sk){ var q=SKUM[sk]; return q&&q.s===s&&skuHasAnyActivity(sk,co,co)&&(((q.av||{})[ctry])||'').indexOf(ck)>=0; }), shares={};
+      try{ shares=buildSkuShares(pool,co,ch,lyM)||{}; }catch(e){}
+      Object.keys(SKUM).filter(function(sk){ return SKUM[sk]&&SKUM[sk].s===s; }).sort().forEach(function(sku){ var p=SKUM[sku], avail=(((p.av||{})[ctry])||'').indexOf(ck)>=0, ss=p.vt==='SET'?Math.max(1,_setSize(sku)):1, sales={}, fc={};
+        try{ sales=_skuSalesRaw(sku,co,ch)||{}; }catch(e){}
+        if(avail&&fM.length){ try{ fc=skuMonthlyMap(sku,co,ch,fM,fu,shares[sku]||0,(p.inv&&p.inv[skuWh(co,ch)])||0)||{}; fM.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fc[m]=parseInt(ov,10)||0; }); }catch(e){} }
+        var fcU=function(m){ return (Number(fc[m])||0)/ss; }, acU=function(m){ return Number(sales[m])||0; };
+        var v={act:months.map(function(m){ return m<=CUR_MONTH?acU(m):''; }), fc:months.map(function(m){ return m>=CUR_MONTH&&avail?fcU(m):''; }), ly:months.map(function(m){ return acU(lyMonth(m)); }), ty:months.map(function(m){ return isActualMonth(m)?acU(m):(avail?fcU(m):0); })};
+        emit([sku,p.n||'',s,subs[s]],co,ch,v,function(k,i,u){ var m=months[i]; return u*aspOf(co,ch,s,k==='ly'?lyMonth(m):m); }); }); }); });
+  return {grid:grid,rows:n}; }
+function _pdxSave(grid){ var stamp=_planMonLabel(_pdxRange()[0])+'_to_'+_planMonLabel(_pdxRange().slice(-1)[0]), name='demand_plan_'+(PDX.level==='sku'?'sku':'subcategory')+'_'+stamp, blob;
+  if(PDX.fmt==='csv'){ var csv=grid.map(function(r){ return r.map(function(v){ var s=v==null?'':String(v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(','); }).join('\r\n');
+    blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}); name+='.csv'; }
+  else { blob=new Blob([buildXlsx('Demand plan',grid)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}); name+='.xlsx'; }
+  var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); }
 
 // Active SKU months (past 6 actuals: Nov25-May26, next 12 forecast: Jun26-May27)
 // Dynamic: last 6 completed actuals months + current month

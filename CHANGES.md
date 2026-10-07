@@ -1,3 +1,13 @@
+## v28.217 (Ben, branch review-fixes-2026-10-05): Plan download builder
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- DEMAND ▸ Plan ▸ Import / Export ▸ **Download plan** now opens a download builder instead of downloading only what is in view:
+  - Markets (multi), channels (multi; only real combinations), categories (multi, with filter / All / None), level SKU or sub-category, FROM-TO months.
+  - Data toggles: TY actuals, Forecast, LY actuals, TY combined (actuals + forecast), Add revenue. Options: skip all-zero rows, Total column, sub-category exploded (default, as the Plan) or raw.
+  - Excel (.xlsx) or CSV (UTF-8 with BOM so Excel opens it cleanly). One row per item x market x channel x measure, months across.
+- Same numbers as the Plan: verified on sandbox that a SKU's TY (PICNIC-DES-XL-BRGTSIDE UK DTC 1,516) and the sub-category TY (Picnic Blanket UK DTC 14,132) equal the Cross Market view. UK+US, all channels, Picnic Blanket, all measures + revenue = 1,178 rows; 0 JS errors.
+
 ## v28.216 (Ben, branch review-fixes-2026-10-05): DEMAND ▸ Cross Market view + worksheet mode
 
 **Files:** `artifact_v16.7.html`, `server.mjs`, `migrations/338_demand_worksheets.sql`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). **Migration 338** (additive, idempotent). No env vars.
