@@ -38,6 +38,7 @@ sources:
   - server.mjs :: /api/scenario/markdown-eos
   - server.mjs :: /api/scenario/otb
   - server.mjs :: /api/scenario/key-arrivals
+  - server.mjs :: /api/scenario/prime-day
   - server.mjs :: poDeliveryDelays (/api/supply/po-delays)
   - server.mjs :: /api/demand/trends/plan-sanity, /multi-year, /channel-mix, /type-mix
   - server.mjs :: buildLockedFc
@@ -80,6 +81,7 @@ fingerprints:
   server.mjs::/api/scenario/markdown-eos: bb925e0e2b9b
   server.mjs::/api/scenario/otb: 2e30af6efc34
   server.mjs::/api/scenario/key-arrivals: 944c5a8c92c7
+  server.mjs::/api/scenario/prime-day: aadbbe216447
   server.mjs::poDeliveryDelays: 6f0ecd0f731a
   server.mjs::/api/demand/trends/plan-sanity: 9af35110c4cf
   server.mjs::/api/demand/trends/multi-year: ce0a578fb83c
@@ -91,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.207
+verified_version: v28.213
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -192,6 +194,14 @@ verified_version: v28.207
 - Value = on hand x average PO-line cost_price, shown as "£ tied up". Not FX-converted.
 - Defaults: UK, 3PL, trailing basis, cover >= 26 weeks, units >= 50. The screen shows the top 400 rows; the CSV has all of them.
 (source: server.mjs :: /api/scenario/slow-moving; artifact_v16.7.html :: renderSlowMovingReport)
+
+## Prime Day (DEMAND > Scenario > Prime Day)
+- Per SKU, available stock in the selected market (All, UK, US, EU, AU, CA): FBA, AWD (US only, n/a for other markets), 3PL and Total.
+- Inbound FBA (v28.213) = open inbound shipments to {country}_fba (quantity minus received, excluded references dropped) plus in-flight FBA transfers (fba_pending_transfers) that are not received and not yet on an inbound shipment. It is not dated: everything open counts, whatever the ETA. Open POs with no shipment are not included.
+- One Inbound FBA column per country when the market is All (plus a total); just that country's column when a market is picked. The Inbound FBA KPI is the total for the columns shown.
+- SKUs with no stock but with FBA inbound in the shown markets are listed too.
+- CSV downloads the grid as shown (same market, category and SKU list).
+(source: server.mjs :: /api/scenario/prime-day; supply/inject.html :: renderPrimeDay)
 
 ## Markdown & EOS (REPORTS > Markdown & EOS)
 - Season end defaults to the next 31 Aug.

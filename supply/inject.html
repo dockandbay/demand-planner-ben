@@ -14653,7 +14653,7 @@
   var scenExp=new Set();   // Financial Forecast: which channel rows are expanded to countries
   var scenExpCo=new Set();  // Financial Forecast: which channel|country rows are expanded to sub-categories
   var SCEN_ANNOT={
-    prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL.',
+    prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL, plus stock inbound to FBA per country (open shipments + in-flight transfers). ⬇ CSV downloads the grid as shown.',
     b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rush rate is an editable USD $/kg (£ equivalent from the settings USD→GBP rate).',
     finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.',
     postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a <b>production</b> PO (not yet shipped) to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.',
@@ -14827,20 +14827,28 @@
        +['','UK','US','EU','AU','CA'].map(function(co){return '<span class="pill'+(co===''?' active':'')+'" data-co="'+co+'">'+(co||'All')+'</span>';}).join('')
        +'<span style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;margin-left:8px"><span class="pill-lbl">Category</span><select class="fci" id="pd-cat" style="text-align:left;width:auto;min-width:0;max-width:130px"><option value="">All</option></select></span></div>'
      +'<div class="bar"><textarea id="pd-skus" placeholder="paste SKUs (one per line or comma-separated) — optional" style="width:320px;height:46px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
-       +'<button class="pill active" id="pd-run" style="background:var(--nav);color:#fff">Analyse</button></div>'
+       +'<button class="pill active" id="pd-run" style="background:var(--nav);color:#fff">Analyse</button><button class="save-btn light" id="pd-csv" style="margin-left:8px" disabled>⬇ CSV</button></div>'
      +'<div id="pd-kpis"></div><div id="pd-grid"></div>';
     var st={co:''};
     c.querySelectorAll('.bar .pill[data-co]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.co=p.dataset.co;run();};});
     function fillCats(){var sel=document.getElementById('pd-cat');if(!sel||!CATS_CACHE)return;CATS_CACHE.forEach(function(cat){var o=document.createElement('option');o.textContent=cat;sel.appendChild(o);});}
     if(CATS_CACHE)fillCats(); else fetch('/api/supply/skus').then(function(r){return r.json();}).then(function(rows){var s={};rows.forEach(function(x){if(x.category)s[x.category]=1;});CATS_CACHE=Object.keys(s).sort();fillCats();});
-    function run(){ var skus=(document.getElementById('pd-skus').value||'').split(/[\s,]+/).map(function(x){return x.trim();}).filter(Boolean);
+    var pdSeq=0;
+    function run(){ var seq=++pdSeq; var skus=(document.getElementById('pd-skus').value||'').split(/[\s,]+/).map(function(x){return x.trim();}).filter(Boolean);
       var cat=document.getElementById('pd-cat').value||'';
       var _pg=document.getElementById('pd-grid'); if(_pg&&!_pg.innerHTML)_pg.innerHTML='<div class="count">Loading Prime Day stock…</div>';   // v28.179 (Ben): first open showed an empty grid for the whole request (and the App health log could not time it)
       fetch('/api/scenario/prime-day',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({skus:skus,category:cat,country:st.co})})
-        .then(function(r){return r.json();}).then(pdRender).catch(function(e){var g=document.getElementById('pd-grid'); if(g)g.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
+        .then(function(r){return r.json();}).then(function(d){ if(seq===pdSeq)pdRender(d); }).catch(function(e){var g=document.getElementById('pd-grid'); if(g)g.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>';}); }
     document.getElementById('pd-run').onclick=run;
     document.getElementById('pd-cat').onchange=run;
+    var pdLast=null;   // v28.213 (Ben): CSV of the grid as shown (current market / category / SKU list)
+    document.getElementById('pd-csv').onclick=function(){ if(!pdLast||!(pdLast.rows||[]).length)return; var cos=pdLast.inb_countries||[], awdOn=pdLast.awd_available;
+      csv(pdLast.rows.map(function(r){ var o={SKU:r.sku, Name:r.name, Category:r.category, FBA:r.fba}; if(awdOn)o.AWD=r.awd; o['3PL']=r.three_pl; o.Total=r.total;
+        cos.forEach(function(co){ o['Inbound FBA '+co.toUpperCase()]=r['inb_'+co]; }); if(cos.length>1)o['Inbound FBA total']=r.inb_fba; return o; }),
+        'prime_day_'+(st.co||'all')+'_'+new Date().toISOString().slice(0,10)+'.csv'); };
     function pdRender(d){ if(!document.getElementById('pd-grid'))return;   // view switched away before fetch resolved
+      pdLast=d; var _cb=document.getElementById('pd-csv'); if(_cb)_cb.disabled=!(d.rows||[]).length;
+      var cos=d.inb_countries||[], multi=cos.length>1;
       var t=d.totals||{fba:0,three_pl:0,awd:0,total:0}; var awdOn=d.awd_available;
       var awdCell=function(v){return awdOn?units(v):'<span class="mut">n/a</span>';};
       document.getElementById('pd-kpis').innerHTML='<div class="kpibar">'
@@ -14848,12 +14856,16 @@
         +'<div class="kpi"><div class="l">FBA</div><div class="v">'+units(t.fba)+'</div></div>'
         +'<div class="kpi"><div class="l">AWD <span class="tiny mut">US</span></div><div class="v"'+(awdOn?'':' style="color:var(--faint)"')+'>'+(awdOn?units(t.awd):'n/a')+'</div></div>'
         +'<div class="kpi"><div class="l">3PL</div><div class="v">'+units(t.three_pl)+'</div></div>'
-        +'<div class="kpi"><div class="l">Total available</div><div class="v">'+units(t.total)+'</div></div></div>';
+        +'<div class="kpi"><div class="l">Total available</div><div class="v">'+units(t.total)+'</div></div>'
+        +'<div class="kpi" title="Open inbound shipments to Amazon FBA plus in-flight FBA transfers not yet received"><div class="l">Inbound FBA</div><div class="v">'+units(t.inb_fba||0)+'</div></div></div>';
       var rows=d.rows||[];
-      if(!rows.length){document.getElementById('pd-grid').innerHTML='<div class="count">No matching SKUs with inventory.</div>';return;}
-      var h='<div class="tw"><table><thead><tr><th class="l">SKU</th><th class="l">Name</th><th class="l">Category</th><th>FBA</th><th>AWD</th><th>3PL</th><th>Total</th></tr></thead><tbody>';
-      h+=rows.map(function(r){return '<tr><td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.name)+'</td><td class="l">'+esc(r.category)+'</td><td>'+units(r.fba)+'</td><td>'+awdCell(r.awd)+'</td><td>'+units(r.three_pl)+'</td><td><b>'+units(r.total)+'</b></td></tr>';}).join('');
-      h+='<tr class="total-row"><td class="l" colspan="3">TOTAL</td><td>'+units(t.fba)+'</td><td>'+(awdOn?units(t.awd):'n/a')+'</td><td>'+units(t.three_pl)+'</td><td>'+units(t.total)+'</td></tr>';
+      if(!rows.length){document.getElementById('pd-grid').innerHTML='<div class="count">No matching SKUs with inventory or FBA inbound.</div>';return;}
+      var h='<div class="tw"><table><thead><tr><th class="l">SKU</th><th class="l">Name</th><th class="l">Category</th><th>FBA</th><th>AWD</th><th>3PL</th><th>Total</th>'
+        +cos.map(function(co){return '<th title="Inbound to FBA '+co.toUpperCase()+': open shipments + in-flight transfers">Inb FBA '+co.toUpperCase()+'</th>';}).join('')+(multi?'<th>Inb FBA total</th>':'')+'</tr></thead><tbody>';
+      h+=rows.map(function(r){return '<tr><td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.name)+'</td><td class="l">'+esc(r.category)+'</td><td>'+units(r.fba)+'</td><td>'+awdCell(r.awd)+'</td><td>'+units(r.three_pl)+'</td><td><b>'+units(r.total)+'</b></td>'
+        +cos.map(function(co){var v=r['inb_'+co]||0;return '<td'+(v?'':' class="mut"')+'>'+units(v)+'</td>';}).join('')+(multi?'<td><b>'+units(r.inb_fba||0)+'</b></td>':'')+'</tr>';}).join('');
+      h+='<tr class="total-row"><td class="l" colspan="3">TOTAL</td><td>'+units(t.fba)+'</td><td>'+(awdOn?units(t.awd):'n/a')+'</td><td>'+units(t.three_pl)+'</td><td>'+units(t.total)+'</td>'
+        +cos.map(function(co){return '<td>'+units(t['inb_'+co]||0)+'</td>';}).join('')+(multi?'<td>'+units(t.inb_fba||0)+'</td>':'')+'</tr>';
       document.getElementById('pd-grid').innerHTML=h+'</tbody></table></div>'; }
     run(); }
   // FINANCIAL FORECAST MODEL — exec-summary style, subcategory × period, % growth + price change on

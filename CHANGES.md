@@ -1,3 +1,13 @@
+## v28.213 (Ben, branch review-fixes-2026-10-05): Prime Day scenario: CSV download + inbound to FBA per country
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- DEMAND > Scenario > Prime Day: new Inbound FBA columns. Market All shows one column per country (UK, US, EU, AU, CA) plus a total; a picked market shows its own column. Inbound = open inbound shipments to that country's FBA (unreceived qty, excluded refs dropped) + in-flight FBA transfers not yet on a shipment. New Inbound FBA KPI.
+- SKUs with no stock but FBA inbound now appear (left joins; market filter moved into the join).
+- New CSV button: downloads the grid as shown, file prime_day_<market>_<date>.csv.
+- Fix: switching market quickly could show the previous market's grid (slower earlier request landed last); now only the latest request renders.
+- Market parameter is whitelisted (uk/us/eu/au/ca) server side.
+
 ## v28.212 (Ben, branch review-fixes-2026-10-05): client portal wider on desktop
 
 **Files:** `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
