@@ -17,7 +17,7 @@ sources:
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.178
+verified_version: v28.221
 fingerprints:
   artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
@@ -32,7 +32,7 @@ fingerprints:
   artifact_v16.7.html::_hzDemandGen: 625a066042de
   artifact_v16.7.html::bpBuildFeedAsync: 92861a0bf15d
   server.mjs::buildPROD_CONST: b8b131b6ad8b
-  server.mjs::buildSKURAW: bcbc97d69507
+  server.mjs::buildSKURAW: 3fa61dca6e8a
 ---
 
 # Buy plan rules
@@ -111,3 +111,6 @@ A: Buys the engine has scheduled for later placement months. They are planned, n
 
 Q: Why is the buy lower than the forecast?
 A: Usually one or more of: stock on hand and on-order cover part of it; current month and months before the earliest standard arrival are served by stock (or Urgent); demand at/after the discontinue cutoff is never bought; the end-of-life cap. Show the arithmetic from explain_buy.
+
+## Size split feeds buy demand (v28.221)
+- The SKU master now carries the product size type (`sz`, products.size_short). When a Contribution model size split is set for a sub-category, the SKU shares that build each SKU's forecast (and therefore the buy plan's SKU demand) follow that size mix; with no split set, buy demand is unchanged. (source: server.mjs :: buildSKURAW, applySizeSplit)
