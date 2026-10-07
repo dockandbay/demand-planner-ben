@@ -1,3 +1,12 @@
+## v28.214 (Ben, branch review-fixes-2026-10-05): Prime Day inbound = shipped only + "arriving by" date
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Inbound FBA now counts SHIPPED stock only, with a reference and an ETA: open inbound shipments, plus in-flight FBA transfers once dispatched (undispatched transfers no longer count). Unshipped POs and AWD are not counted (Ben).
+- A shipment of an FBA-branch PO counts as that country's FBA even when it lands at a 3PL first (routed via crossdock).
+- New "FBA inbound arriving by" date (with clear button): only ETAs on or before it. The KPI, column tooltips and CSV headers show the date (dd-mmm-yy).
+- Verified on sandbox: UK by 30-Jun-26 = 33,113 and by 05-Oct-26 = 74,824, both equal to a direct SQL count; a 99,999-unit undispatched test transfer no longer inflates UK.
+
 ## v28.213 (Ben, branch review-fixes-2026-10-05): Prime Day scenario: CSV download + inbound to FBA per country
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.

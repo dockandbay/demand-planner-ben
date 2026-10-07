@@ -81,7 +81,7 @@ fingerprints:
   server.mjs::/api/scenario/markdown-eos: bb925e0e2b9b
   server.mjs::/api/scenario/otb: 2e30af6efc34
   server.mjs::/api/scenario/key-arrivals: 944c5a8c92c7
-  server.mjs::/api/scenario/prime-day: aadbbe216447
+  server.mjs::/api/scenario/prime-day: a97ff1a33a71
   server.mjs::poDeliveryDelays: 6f0ecd0f731a
   server.mjs::/api/demand/trends/plan-sanity: 9af35110c4cf
   server.mjs::/api/demand/trends/multi-year: ce0a578fb83c
@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.213
+verified_version: v28.214
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -197,7 +197,8 @@ verified_version: v28.213
 
 ## Prime Day (DEMAND > Scenario > Prime Day)
 - Per SKU, available stock in the selected market (All, UK, US, EU, AU, CA): FBA, AWD (US only, n/a for other markets), 3PL and Total.
-- Inbound FBA (v28.213) = open inbound shipments to {country}_fba (quantity minus received, excluded references dropped) plus in-flight FBA transfers (fba_pending_transfers) that are not received and not yet on an inbound shipment. It is not dated: everything open counts, whatever the ETA. Open POs with no shipment are not included.
+- Inbound FBA (v28.214) = SHIPPED stock only, with a reference and an ETA: open (unreceived) inbound shipments to {country}_fba (excluded references dropped), plus in-flight FBA transfers (fba_pending_transfers) once dispatched and not yet on an inbound shipment. A shipment of an FBA-branch PO counts as that country's FBA even when it lands at a 3PL first (routed via crossdock). Unshipped POs and AWD inbound are NOT counted (Ben 07-Oct-26).
+- Optional "FBA inbound arriving by" date: only ETAs on or before it. Blank = all shipped inbound.
 - One Inbound FBA column per country when the market is All (plus a total); just that country's column when a market is picked. The Inbound FBA KPI is the total for the columns shown.
 - SKUs with no stock but with FBA inbound in the shown markets are listed too.
 - CSV downloads the grid as shown (same market, category and SKU list).

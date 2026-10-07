@@ -19283,21 +19283,30 @@ app.post('/api/scenario/prime-day', async (req, res) => {
   const wsql = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const awdApplies = (country === '' || country === 'us'); // AWD is a US warehouse
   const pAwd = i++, pSkuFlag = i; // param indexes for awdApplies + "skus listed" flag
-  // v28.213 (Ben): inbound to FBA per country = open (unreceived) inbound shipments to {co}_fba + in-flight
-  // FBA transfers not yet on an inbound shipment (fba_pending_transfers, same pool the FBA transfer calc uses).
+  // v28.213 (Ben): inbound to FBA per country. v28.214 (Ben): SHIPPED stock only, with an ETA and a reference: open (unreceived)
+  // inbound shipments, plus in-flight FBA transfers once dispatched and not yet on a shipment. Unshipped POs and AWD are NOT
+  // counted (Ben 07-Oct). A shipment of an FBA-branch PO counts as that country's FBA even when it lands at a 3PL first
+  // (routed via crossdock). Optional "arriving by" date: only ETAs on or before it.
+  const by = /^\d{4}-\d{2}-\d{2}$/.test(String(b.by || '')) ? b.by : null;
   const inbSel = country ? `coalesce(ib.${country},0)` : FBA_COS.map(c => `coalesce(ib.${c},0)`).join('+');
+  const pBy = pSkuFlag + 1;   // last param
   try {
     const { rows } = await pool.query(`
-      WITH inb AS (
-        SELECT sku, ${FBA_COS.map(c => `sum(q) FILTER (WHERE wh='${c}_fba')::int ${c}`).join(', ')} FROM (
-          SELECT sku, destination_warehouse wh, (quantity-coalesce(received_quantity,0)) q FROM planner.inbound_shipments
-            WHERE coalesce(received_quantity,0) < quantity AND destination_warehouse LIKE '%\\_fba'
-              AND reference NOT IN (${EXCL_REF_LIST})
-          UNION ALL
-          SELECT t.sku, t.warehouse, t.qty FROM planner.fba_pending_transfers t
-            WHERE t.received_date IS NULL AND t.warehouse LIKE '%\\_fba'
-              AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments s WHERE s.reference=t.reference)
-        ) z GROUP BY sku)
+      WITH src AS (
+        SELECT i.sku, CASE WHEN po.branch ILIKE '%fba%' THEN lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_fba'
+                           ELSE i.destination_warehouse END wh,
+          (i.quantity-coalesce(i.received_quantity,0)) q, i.estimated_delivery_date::date eta
+        FROM planner.inbound_shipments i
+        LEFT JOIN planner.purchase_orders po ON po.po=i.reference
+        LEFT JOIN planner.branches b ON b.name=po.branch
+        WHERE coalesce(i.received_quantity,0) < i.quantity AND i.reference NOT IN (${EXCL_REF_LIST})
+          AND coalesce(trim(i.reference),'') <> '' AND i.estimated_delivery_date IS NOT NULL
+        UNION ALL
+        SELECT t.sku, t.warehouse, t.qty, t.eta::date FROM planner.fba_pending_transfers t
+          WHERE t.received_date IS NULL AND t.dispatched_date IS NOT NULL AND t.eta IS NOT NULL AND coalesce(trim(t.reference),'') <> ''
+            AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments s WHERE s.reference=t.reference)),
+      inb AS (SELECT sku, ${FBA_COS.map(c => `sum(q) FILTER (WHERE wh='${c}_fba')::int ${c}`).join(', ')} FROM src
+        WHERE wh LIKE '%\\_fba' AND ($${pBy}::date IS NULL OR eta <= $${pBy}::date) GROUP BY sku)
       SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
         coalesce(sum(pi.available) FILTER (WHERE pi.warehouse LIKE '%\\_fba'),0)::int fba,
         coalesce(sum(pi.available) FILTER (WHERE pi.warehouse LIKE '%\\_3pl'),0)::int three_pl,
@@ -19310,9 +19319,9 @@ app.post('/api/scenario/prime-day', async (req, res) => {
       ${wsql}
       GROUP BY p.sku, p.product_name, p.category, p.inventory_us_awd, ${FBA_COS.map(c => 'ib.' + c).join(', ')}
       HAVING coalesce(sum(pi.available),0) > 0 OR coalesce(p.inventory_us_awd,0)::int > 0 OR (${inbSel}) > 0 OR $${pSkuFlag} = true
-      ORDER BY total DESC, inb_fba DESC`, [...vals, awdApplies, skus.length > 0]);
+      ORDER BY total DESC, inb_fba DESC`, [...vals, awdApplies, skus.length > 0, by]);
     const tot = rows.reduce((a, r) => { ['fba', 'three_pl', 'awd', 'total', 'inb_fba', ...FBA_COS.map(c => 'inb_' + c)].forEach(k => { a[k] = (a[k] || 0) + r[k]; }); return a; }, { fba: 0, three_pl: 0, awd: 0, total: 0, inb_fba: 0 });
-    res.json({ rows, totals: tot, sku_count: rows.length, awd_available: awdApplies, inb_countries: country ? [country] : FBA_COS });
+    res.json({ rows, totals: tot, sku_count: rows.length, awd_available: awdApplies, inb_countries: country ? [country] : FBA_COS, by });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
