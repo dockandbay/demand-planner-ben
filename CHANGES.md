@@ -1,3 +1,14 @@
+## v28.210 (Ben, branch review-fixes-2026-10-05): hash portal login tokens (DB hardening H2)
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Supplier and client portal login tokens (session cookies psid / csid, magic links, admin "view portal as" previews) are no longer stored in plain text: `portal_sessions`, `portal_magic_tokens`, `client_sessions`, `client_magic_tokens` hold `h1:` + SHA-256 of the token (previews `cppv_h1:...`). Reading these tables (SQL editor, backups, planner_ro) no longer lets anyone sign in. Every lookup, logout, link redemption and preview stop matches the hash.
+- Transition: a token stored raw by the old build is still accepted (only when the presented value looks like a token we mint, so a stored hash cannot be replayed), so existing sessions and unexpired links keep working. Legacy branch marked in server.mjs for removal 14 days after deploy.
+- Client magic link is now consumed in one atomic UPDATE (two tabs can no longer redeem one link). A 500 error log no longer prints a `?token=` value.
+- Built-in purge (at most hourly per instance, 500-row batches): expired magic links and preview sessions deleted; expired sessions kept 90 days for the portal activity report (raw token rewritten to its hash), then deleted.
+- Tests: 43/43 token checks; portal-scope 144/144; portal-security 109/115 with writes (the 6 failures are fixture data: the only "own customers" test user is on Ideco, which now has an Agent Code so v28.204 lets it see the whole rep group; the fixture needs a self user on a client without an Agent Code).
+- **For Diviyaj:** no migration, no env vars. Existing sessions keep working; raw tokens disappear as they expire (sessions 7 days max, links 24 h / 7 days). On first request the purge clears the expired backlog. Optional immediate SQL: `DELETE FROM planner.portal_magic_tokens WHERE expires_at < now(); DELETE FROM planner.client_magic_tokens WHERE expires_at < now();`. `planner.external_access_tokens` is not used by HORIZON (another app: Trade Board / China / n8n) and still holds raw tokens; its owner needs the same fix. Rollback note: sessions created under v28.210 stop working if rolled back (users request a new link).
+
 ## v28.209 (Ben, branch review-fixes-2026-10-05): client portal header shows the logo only
 
 **Files:** `supply/client-view.js`, `supply/client.html` (+ package.json, CHANGES.md). No migration, no env vars.
