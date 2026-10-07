@@ -1,3 +1,18 @@
+## v28.216 (Ben, branch review-fixes-2026-10-05): DEMAND ▸ Cross Market view + worksheet mode
+
+**Files:** `artifact_v16.7.html`, `server.mjs`, `migrations/338_demand_worksheets.sql`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). **Migration 338** (additive, idempotent). No env vars.
+
+- New DEMAND tab **Cross Market view** right after Plan (`#/demand/crossmarket`), built from Ben's Picnic Blanket review sheet (mockup https://claude.ai/artifact/3gQZ9NV2Y3aYtv3ZFrK4RE approved).
+  - Columns: market x channel (UK/US DTC, FBA, B2B, TikTok; EU DTC, FBA, B2B, Zalando; AU DTC, FBA), country header boxes in the CONFIG market colours. Show/hide any channel; empty channels hidden by default.
+  - Filters: FROM / TO months (default current FY), category, SKU search (Enter keeps a chip).
+  - Active SKUs on top, discontinued below (collapsible), each with totals. Sub-category forecast row(s) plus a gap row vs the active SKUs. Footer: TY, LY, variance (units and %), TY and LY channel mix. Summary boxes incl. size mix (LG / XL etc. from the SKU code). Everything left-aligned, no inner scroll.
+  - TY = actuals + the Plan's SKU forecast (same per-SKU forecast as the Plan grid); LY = same months last year, summed for the SKUs in view.
+  - Export xlsx.
+- **Worksheet mode:** Excel-style grid (same keys as Key accounts: select, drag, arrows, type / F2, Delete, copy / paste with Excel, one value fills a selection, undo; status bar with sum / avg, Adjust %, Set). Totals, variance, mix and signals (C above A avg / A below C avg) update live. Sub-category forecast editable and, by default, moves with SKU changes (floored at 0).
+  - Apply per line (blue Apply on each changed SKU or sub-category row) or Review & apply all. The popup is **month by month**: suggestion pre-filled in the current forecast's shape, every forecast month editable, actual months locked, To allocate per line, reason saved to the change record. SKU lines save as SKU overrides, sub-category lines as the sub-category forecast, then save immediately (same paths as Plan edits, so Plan, Buy, Undo and the R record follow). A SKU applied on its own leaves its sub-category change pending.
+  - **Saved worksheets are shared** (anyone can open; save / delete needs demand edit rights): `GET/POST /api/demand/worksheets`, `DELETE /api/demand/worksheets/:id` (503 until migration 338).
+- Verified on sandbox (jsdom with real data): Picnic Blanket renders 53 SKUs / 12 months, 0 JS errors; edit + per-line monthly apply wrote the overrides, logged 4 change rows and saved once; sub-category apply wrote literal forecasts; worksheet save / list / delete round trip OK.
+
 ## v28.215 (Ben, branch review-fixes-2026-10-05): mirror Diviyaj's live hotfixes + port-conflict fixes
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `vercel.json`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.

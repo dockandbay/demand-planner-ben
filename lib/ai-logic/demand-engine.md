@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.215
+verified_version: v28.216
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -277,3 +277,13 @@ verified_version: v28.215
 
 **Q:** Why do Preorder or Key Account orders from earlier months not appear?
 **A:** Only months inside the 18-month window are folded into B2B. Past-dated months are treated as past forecasts and never roll forward.
+
+## Cross Market view (DEMAND ▸ Cross Market view, v28.216)
+- One category (or a SKU search) across every market x channel (UK/US DTC, FBA, B2B, TikTok; EU DTC, FBA, B2B, Zalando; AU DTC, FBA; CA left out) for a FROM-TO month range. Default range = the current fiscal year. (source: renderCrossMarketView, _cmvCompute)
+- TY per SKU = own actual units for months up to the current month + the Plan grid's SKU forecast for later months: skuMonthlyMap on the whole sub-category share pool (activity + channel availability, not the screen filters), with SKU overrides on top. Sets show in boxes (forecast / set size). Actual months use the SKU's own sales (no replacement-SKU inheritance) so a replacement and its predecessor are not double counted. (source: _cmvCompute, skuMonthlyMap, _skuSalesRaw)
+- LY = actual units for the same months a year earlier, summed over the SKUs in view; a SKU filter therefore shows only those SKUs' LY. (source: _cmvCompute)
+- Active vs discontinued: discontinued = last-year-only SKU, no available country, or every available country's discontinue date is in the past. (source: _cmvDisc)
+- Sub-category forecast rows = the Plan's sub-category forecast (calc().fu) for forecast months and sub-category actuals for past months, with a gap row (sub-category minus its active SKUs). (source: _cmvCompute, calc)
+- Worksheet mode: drafts over SKU and sub-category range totals, never written until applied. "Move sub-category forecast with SKU changes" (default on) adds the SKU draft deltas to the sub-category draft, floored at 0. Applying a SKU line on its own freezes that amount as a pending sub-category draft, applied separately. (source: renderCrossMarketView, applyLines)
+- Apply is month by month: each line is pre-filled with the change spread over the forecast months in the current forecast's shape (sub-category curve when the current forecast is 0); actual months are locked. SKU lines save as SKU forecast overrides (skuOvSet, x set size for sets); sub-category lines save as literal sub-category forecasts (IV "'n"); both log to the change record and persist via saveForecasts. (source: applyLines, _cmvSpread, skuOvSet)
+- Saved worksheets are shared (planner.demand_worksheets, migration 338): anyone can open them; saving or deleting needs demand edit rights. (source: server.mjs :: /api/demand/worksheets)

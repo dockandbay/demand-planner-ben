@@ -10271,7 +10271,7 @@ function render(){
   // v28.148: same for a COLD DEMAND visit (demand not built yet): deferred behind a loading panel after renderDemandTabs() below.
   // v28.150: only the DEMAND views that use the demand overlay wait for it (Inputs / Calendar / Config etc. do not, so they
   // neither show the loading panel nor pay the one-time prepack-cover build). REPORTS gets the same deferred loading panel.
-  var _NEEDD={plan:1,exceptions:1,safetystock:1,shipbags:1,fcanom:1};
+  var _NEEDD={plan:1,crossmarket:1,exceptions:1,safetystock:1,shipbags:1,fcanom:1};
   var _cold=(typeof DEMAND_BUILT!=='undefined' && !DEMAND_BUILT && typeof buildLiveDemand==='function');
   var _dmCold=(VIEW_MODE==='planning' && _cold && !!_NEEDD[DEMAND_VIEW]);
   var _rpCold=(VIEW_MODE==='exec' && _cold);
@@ -10414,6 +10414,7 @@ function render(){
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
+    else if(DEMAND_VIEW==='crossmarket') renderCrossMarketView(body);   // v28.216 DEMAND ▸ Cross Market view (#/demand/crossmarket)
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
     else if(DEMAND_VIEW==='accuracy') renderAccuracyView(body);   // DEMAND ▸ Accuracy — forecast accuracy & bias vs locked snapshots (#/demand/accuracy)
     else if(DEMAND_VIEW==='fcanom') renderForecastAnomaliesView(body);   // DEMAND ▸ Analysis ▸ Forecast anomalies — sustained (2+ mo) actual-vs-forecast divergence per SKU×country×channel
@@ -12236,6 +12237,389 @@ var FR=(function(){
   return {toggle:toggle,add:add,edit:edit,cancel:cancel,addCond:addCond,rmCond:rmCond,fieldChange:fieldChange,opChange:opChange,preset:preset,apply:apply,applySaved:applySaved,clear:clear,save:save,del:del,updateBtn:updateBtn};
 })();
 try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){ try{FR.updateBtn();}catch(e){} }); } }catch(e){}
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.216 (Ben): DEMAND ▸ Cross Market view (#/demand/crossmarket). One category (or a SKU search) across every
+// market x channel for a FROM-TO month range. TY = actuals for past months + forecast for future months (the Plan
+// grid's per-SKU forecast: skuMonthlyMap on the whole-subcat share pool + overrides). LY = the same months a year
+// earlier, actual units, summed over the SKUs in view. Active SKUs on top, discontinued below (collapsible).
+// Sub-category forecast rows (calc().fu; actual months = sub-category actuals) with a gap row vs the active SKUs.
+// WORKSHEET MODE: Excel-style grid (same keys as Key accounts) over SKU and sub-category range totals; a draft until
+// applied month by month in a popup (per line, per sub-category, or all). SKU lines save as SKU forecast overrides
+// (skuOvSet), sub-category lines as literal sub-category forecasts (IV "'n"). Drafts can be saved as SHARED
+// worksheets (planner.demand_worksheets, migration 338). Units are SKU units (sets in boxes, as Plan SKU rows).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+var CMV={from:null,to:null,cat:null,q:'',chips:[],off:{},hideEmpty:true,openDisc:false,ws:false,follow:true,dr:{},sdr:{},wsId:null,wsName:'',undo:[],cache:null,sig:''};
+var CMV_COLS=[['UK','DTC'],['UK','FBA'],['UK','B2B'],['UK','TIK'],['US','DTC'],['US','FBA'],['US','B2B'],['US','TIK'],['EU','DTC'],['EU','FBA'],['EU','B2B'],['EU','ZAL'],['AU','DTC'],['AU','FBA']];
+var CMV_CHL={DTC:'DTC',FBA:'FBA',B2B:'B2B',TIK:'TikTok',ZAL:'Zalando'};
+function _cmvChKey(ch){ return ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b'; }
+function _cmvMonths(){ var o=[]; for(var y=2025;y<=2028;y++)for(var m=1;m<=12;m++)o.push(ym(y,m)); return o; }
+function _cmvRange(){ var all=_cmvMonths(), a=all.indexOf(CMV.from), b=all.indexOf(CMV.to); if(a<0||b<0)return []; if(a>b){var t=a;a=b;b=t;} return all.slice(a,b+1); }
+function _cmvDisc(sku){ var p=SKUM[sku]||{}; if(p.lyo)return true; var today=new Date().toISOString().slice(0,10), av=p.av||{}, ctrs=Object.keys(av).filter(function(c){return av[c];});
+  if(!ctrs.length)return true; var d=p.disc||{}; return ctrs.every(function(c){ return d[c]&&d[c]<today; }); }
+function _cmvSize(sku){ var m=String(sku).toUpperCase().match(/-(XXS|XS|SM|S|MD|M|LG|L|XL|XXL|2XL|3XL|OS)(?=-|$)/); return m?m[1]:''; }
+// Heavy part, cached per filters + range + data change: per-SKU per-column monthly TY (cur), LY total, and sub-category rows.
+function _cmvCompute(){
+  var months=_cmvRange(), cat=CMV.cat, qs=CMV.chips.slice(); if(CMV.q.trim())qs.push(CMV.q.trim());
+  var sig=[cat,months[0],months[months.length-1],qs.join('~'),Object.keys(FC_OUTPUTS).length,(typeof _hzShareSig!=='undefined'?_hzShareSig:'')].join('|');
+  if(CMV.cache&&CMV.sig===sig)return CMV.cache;
+  try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}
+  var lyM=hzLyMonths(), fM=months.filter(function(m){return !isActualMonth(m);});
+  var skus=Object.keys(SKUM).filter(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return false;
+    if(cat&&cat!=='ALL'){ var pc=_subcatParent(p.s)||p.c; if(pc!==cat&&p.c!==cat)return false; }
+    if(qs.length&&!qs.some(function(q){return skuMatchQ(sku,q);}))return false; return true; });
+  var pools={}, shares={}, fus={};
+  function shareOf(sku,co,ch){ var s=SKUM[sku].s, k=s+'|'+co+'|'+ch; if(!pools[k]){ var ctry=co.toLowerCase(), ck=_cmvChKey(ch);
+      var pool=Object.keys(SKUM).filter(function(sk){ var q=SKUM[sk]; return q&&q.s===s&&skuHasAnyActivity(sk,co,co)&&(((q.av||{})[ctry])||'').indexOf(ck)>=0; });
+      pools[k]=pool; try{ shares[k]=buildSkuShares(pool,co,ch,lyM)||{}; }catch(e){ shares[k]={}; } try{ fus[k]=(calc(s,co,ch)||{}).fu||{}; }catch(e){ fus[k]={}; } }
+    return {share:shares[k][sku]||0, fu:fus[k]}; }
+  var rows=[];
+  skus.forEach(function(sku){ var p=SKUM[sku], isSet=p.vt==='SET', ss=isSet?Math.max(1,_setSize(sku)):1, r={sku:sku,p:p,sub:p.s,set:isSet,cur:{},ly:{},disc:_cmvDisc(sku)}, any=false;
+    CMV_COLS.forEach(function(c){ var co=c[0], ch=c[1], k=co+'|'+ch, ctry=co.toLowerCase(), avail=(((p.av||{})[ctry])||'').indexOf(_cmvChKey(ch))>=0, sales={}, fc={};
+      try{ sales=_skuSalesRaw(sku,co,ch)||{}; }catch(e){}
+      if(avail&&fM.length){ try{ var sh=shareOf(sku,co,ch), inv=(p.inv&&p.inv[skuWh(co,ch)])||0; fc=skuMonthlyMap(sku,co,ch,fM,sh.fu,sh.share,inv)||{};
+        fM.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fc[m]=parseInt(ov,10)||0; }); }catch(e){} }
+      var arr=months.map(function(m){ var v=isActualMonth(m)?(Number(sales[m])||0):(Number(fc[m])||0)/(isActualMonth(m)?1:ss); return Math.round(v); });
+      var ly=months.reduce(function(s,m){ return s+(Number(sales[lyMonth(m)])||0); },0);
+      r.cur[k]=arr; r.ly[k]=Math.round(ly); r.avail=r.avail||{}; r.avail[k]=avail; if(ly||arr.some(function(v){return v;}))any=true; });
+    if(any)rows.push(r); });
+  var subs={}; rows.forEach(function(r){ subs[r.sub]=1; });
+  var subRows=Object.keys(subs).sort().map(function(s){ var o={sub:s,cur:{},has:{}};
+    CMV_COLS.forEach(function(c){ var co=c[0], ch=c[1], k=co+'|'+ch, has=DATA.some(function(d){return d.co===co&&d.ch===ch&&d.s===s;}); o.has[k]=has;
+      if(!has){ o.cur[k]=months.map(function(){return 0;}); return; }
+      var a=ga(co,ch,s)||{}, fu={}; try{ fu=(calc(s,co,ch)||{}).fu||{}; }catch(e){}
+      o.cur[k]=months.map(function(m){ return Math.round(isActualMonth(m)?((a[m]&&a[m][0])||0):(fu[m]||0)); }); });
+    return o; });
+  CMV.cache={months:months,rows:rows,subRows:subRows}; CMV.sig=sig; return CMV.cache; }
+function _cmvSum(a){ var t=0; for(var i=0;i<a.length;i++)t+=a[i]; return t; }
+
+function renderCrossMarketView(body){
+  var esc=hzEscH, nf=function(n){ return Math.round(n).toLocaleString('en-GB'); }, fmt=function(n){ return n?nf(n):'<span class="cmv-z">-</span>'; };
+  var sgn=function(d){ return d?'<span class="'+(d>0?'cmv-pos':'cmv-neg')+'">'+(d>0?'+':'')+nf(d)+'</span>':'<span class="cmv-z">-</span>'; };
+  var pct=function(a,b){ if(!b)return a?'<span class="cmv-pos">new</span>':'<span class="cmv-z">-</span>'; var v=(a-b)/b*100; return '<span class="'+(v>=0?'cmv-pos':'cmv-neg')+'">'+(v>=0?'+':'')+v.toFixed(0)+'%</span>'; };
+  var num=function(v){ var n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:Math.max(0,Math.round(n)); };
+  var mlbl=function(m){ return _planMonLabel(m); };
+  // defaults: current fiscal year; category = the plan's single selected category, else the first active category
+  if(!CMV.from){ var cy=+String(CUR_MONTH).slice(0,4), cm=+String(CUR_MONTH).slice(5,7), fy=fyMonths(cm>=3?cy:cy-1); CMV.from=fy[0]; CMV.to=fy[11]; }
+  var CATS=[]; try{ Object.keys(SKUM).forEach(function(s){ var p=SKUM[s]; var c=p&&p.s&&(_subcatParent(p.s)||p.c); if(c&&CATS.indexOf(c)<0)CATS.push(c); }); }catch(e){} CATS.sort();
+  if(!CMV.cat){ var sel=null; try{ SEL.forEach(function(x){ if(x!=='ALL'&&CATS.indexOf(x)>=0&&!sel)sel=x; }); }catch(e){} CMV.cat=sel||CATS[0]||'ALL'; }
+  var MKC=function(co){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[co])||'var(--line2)'; };
+  var STY='<style>#cmv{display:grid;gap:12px;padding:4px 0 24px}#cmv *{box-sizing:border-box}#cmv .cmv-ctl{display:flex;flex-wrap:wrap;gap:10px;align-items:end}#cmv .cmv-f{display:grid;gap:4px}#cmv .cmv-f>label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}'
+    +'#cmv select,#cmv input[type=search],#cmv input[type=text]{font:500 13px inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 9px;min-height:32px}#cmv .cmv-sp{flex:1}'
+    +'#cmv .cmv-btn{font:700 12px inherit;border-radius:8px;padding:7px 12px;min-height:32px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);cursor:pointer;white-space:nowrap}#cmv .cmv-btn.pri,#cmv-modal .cmv-btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}#cmv .cmv-btn:disabled,#cmv-modal .cmv-btn:disabled{opacity:.45;cursor:default}'
+    +'#cmv .cmv-btn.ws{border-color:var(--blue);color:var(--blue-ink)}#cmv .cmv-btn.ws.on{background:var(--blue);color:#fff}#cmv .cmv-pop{position:relative}'
+    +'#cmv .cmv-panel{position:absolute;z-index:40;top:calc(100% + 6px);right:0;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:10px 12px;font-size:12px;min-width:min(420px,88vw)}'
+    +'#cmv .cmv-chgrid{display:grid;grid-template-columns:repeat(4,auto);gap:6px 18px}#cmv .cmv-chgrid div{display:grid;gap:4px}'
+    +'#cmv .cmv-chips{display:flex;gap:6px;flex-wrap:wrap}#cmv .cmv-chip{background:var(--blue-soft);color:var(--blue-ink);border-radius:999px;padding:3px 6px 3px 10px;font-size:12px;font-weight:600;display:inline-flex;gap:6px;align-items:center}#cmv .cmv-chip button{border:0;background:none;color:inherit;cursor:pointer}'
+    +'#cmv .cmv-sum{display:flex;gap:10px;flex-wrap:wrap}#cmv .cmv-k{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;display:grid;gap:2px;min-width:120px}#cmv .cmv-k span{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}#cmv .cmv-k b{font-size:17px;font-variant-numeric:tabular-nums}'
+    +'#cmv .cmv-wsbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--blue-soft);color:var(--blue-ink);border:1px solid var(--blue);border-radius:10px;padding:8px 12px;font-size:12px}'
+    +'#cmv .cmv-wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow-x:auto}#cmv table.cmv-t{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;width:max-content;min-width:100%;font-size:12px}'
+    +'#cmv .cmv-t th,#cmv .cmv-t td{padding:6px 9px;border-bottom:1px solid var(--line2);white-space:nowrap;text-align:left}#cmv .cmv-t th{background:var(--hdr-tint);font-size:11px;color:var(--ink-soft)}#cmv .cmv-t thead tr:first-child th{letter-spacing:.08em;text-transform:uppercase}'
+    +'#cmv .cmv-t th.mk{color:#101828;font-weight:800}#cmv .cmv-st{position:sticky;left:0;z-index:2;background:var(--card);border-right:1px solid var(--line)}#cmv .cmv-t th.cmv-st{z-index:3;background:var(--hdr-tint)}#cmv .cg0{border-left:1px solid var(--line)}'
+    +'#cmv td.sku{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}#cmv tr.grp td{background:var(--hdr-cur);font-weight:800;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-soft);cursor:pointer}'
+    +'#cmv tr.gt td{font-weight:700;background:var(--row-alt)}#cmv tr.sub td{background:var(--blue-soft)}#cmv tfoot td{font-weight:700;background:var(--hdr-tint)}#cmv tfoot tr:first-child td{border-top:2px solid var(--line)}'
+    +'#cmv .cmv-z{color:var(--faint)}#cmv .cmv-pos,#cmv-modal .cmv-pos{color:var(--pos)}#cmv .cmv-neg,#cmv-modal .cmv-neg{color:var(--neg)}#cmv .tag{font-size:10px;font-weight:700;border-radius:6px;padding:1px 6px;background:var(--hdr-tint);color:var(--muted)}#cmv .disc{font-size:10px;font-weight:700;color:var(--neg);background:var(--neg-bg);border-radius:6px;padding:1px 6px;margin-left:6px}'
+    +'#cmv .sig{font-size:10px;font-weight:700;border-radius:6px;padding:1px 6px}#cmv .sig.up{background:var(--pos-bg);color:var(--pos)}#cmv .sig.dn{background:var(--neg-bg);color:var(--neg)}'
+    +'.cmv-xg{outline:none}.cmv-xg td.xc{cursor:cell;user-select:none;-webkit-user-select:none;position:relative;min-width:62px}.cmv-xg td.xc.sel{background:var(--blue-soft)!important}.cmv-xg td.xc.act{box-shadow:inset 0 0 0 2px var(--blue)}.cmv-xg td.xc.chg{background:var(--amber-bg)}'
+    +'.cmv-xg td.xc .ed{position:absolute;inset:1px;width:calc(100% - 2px);font:600 12px inherit;border:0;outline:2px solid var(--blue);padding:0 6px;background:var(--card);color:var(--ink)}.cmv-was{display:block;font-size:10px;color:var(--faint)}.cmv-was.x{text-decoration:line-through}'
+    +'#cmv .cmv-sb{position:sticky;bottom:0;z-index:30;display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12px;box-shadow:var(--shadow)}#cmv .cmv-sb input{width:64px}'
+    +'#cmv .cmv-hint{font-size:11px;color:var(--muted);line-height:1.5}#cmv .cmv-wsl{display:grid;gap:4px;min-width:min(400px,88vw)}#cmv .cmv-wsi{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:6px 8px;border-radius:8px}#cmv .cmv-wsi:hover{background:var(--hover)}#cmv .cmv-wsi small{display:block;color:var(--muted)}'
+    +'#cmv-modal{position:fixed;inset:0;background:rgba(10,15,27,.45);display:grid;place-items:center;z-index:9000;padding:16px}#cmv-modal .m{background:var(--card);color:var(--ink);border-radius:14px;width:min(1180px,100%);max-height:90vh;display:grid;grid-template-rows:auto 1fr auto;box-shadow:0 20px 60px -20px rgba(0,0,0,.5)}'
+    +'#cmv-modal header,#cmv-modal footer{padding:12px 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}#cmv-modal header{border-bottom:1px solid var(--line)}#cmv-modal footer{border-top:1px solid var(--line)}#cmv-modal h3{margin:0;font-size:16px}'
+    +'#cmv-modal .b{overflow:auto;padding:12px 18px;display:grid;gap:10px;min-height:0}#cmv-modal table{border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;width:max-content;min-width:100%}#cmv-modal th,#cmv-modal td{padding:5px 8px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap}#cmv-modal th{background:var(--hdr-tint);font-size:11px}'
+    +'#cmv-modal td.lock{color:var(--faint);background:var(--row-alt)}#cmv-modal .how{font-size:12px;color:var(--ink-soft);background:var(--hover);border-radius:8px;padding:8px 10px;line-height:1.5}#cmv-modal textarea{width:100%;min-height:50px;font:13px inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px}'
+    +'#cmv-modal .cmv-btn{font:700 12px inherit;border-radius:8px;padding:7px 12px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);cursor:pointer}#cmv-modal .bad{color:var(--neg);font-weight:700}#cmv-modal .ok{color:var(--pos);font-weight:700}#cmv-modal input.cmv-in{width:70px;font:600 12px inherit;border:1px solid var(--line);border-radius:6px;padding:5px;background:var(--card);color:var(--ink)}'
+    +'</style>';
+  var opts=_cmvMonths().map(function(m){ return '<option value="'+m+'">'+mlbl(m)+'</option>'; }).join('');
+  body.innerHTML=STY+'<div id="cmv"><div class="cmv-ctl">'
+    +'<div class="cmv-f"><label for="cmv-from">From</label><select id="cmv-from">'+opts+'</select></div>'
+    +'<div class="cmv-f"><label for="cmv-to">To</label><select id="cmv-to">'+opts+'</select></div>'
+    +'<div class="cmv-f"><label for="cmv-cat">Category</label><select id="cmv-cat"><option value="ALL">All categories</option>'+CATS.map(function(c){ return '<option value="'+esc(c)+'">'+esc(c)+'</option>'; }).join('')+'</select></div>'
+    +'<div class="cmv-f"><label for="cmv-q">SKU search</label><input id="cmv-q" type="search" placeholder="Type, Enter to add" autocomplete="off" value="'+esc(CMV.q)+'"></div>'
+    +'<span class="cmv-sp"></span><button class="cmv-btn ws" id="cmv-ws" aria-pressed="false">Worksheet mode</button>'
+    +'<div class="cmv-pop"><button class="cmv-btn" id="cmv-wslb" aria-expanded="false">Saved worksheets &#9662;</button><div class="cmv-panel cmv-wsl" id="cmv-wsl" hidden></div></div>'
+    +'<div class="cmv-pop"><button class="cmv-btn" id="cmv-chb" aria-expanded="false">Channels: <span id="cmv-chn"></span> &#9662;</button><div class="cmv-panel" id="cmv-chp" hidden></div></div>'
+    +'<button class="cmv-btn pri" id="cmv-xl">Export xlsx</button></div>'
+    +'<div class="cmv-wsbar" id="cmv-wsbar" hidden></div><div class="cmv-chips" id="cmv-chips"></div><div class="cmv-sum" id="cmv-sum"></div>'
+    +'<div class="cmv-wrap"><table class="cmv-t" id="cmv-t"></table></div><div class="cmv-sb" id="cmv-sb" hidden></div>'
+    +'<div class="cmv-hint">TY = actuals for past months plus forecast for future months, as in the Plan grid (SKU units; sets in boxes). LY = actual units for the same months a year earlier, summed over the SKUs in view, so a SKU filter shows only those SKUs\' LY. Sub-category forecast = the Plan\'s sub-category forecast (actual months = sub-category actuals). '
+    +'Worksheet keys, as in Key accounts: click, drag, Shift or Ctrl/Cmd+click to select; arrows and Tab move; type, Enter or F2 to edit; Delete sets 0; Ctrl/Cmd+C / V copy and paste with Excel (one value fills the selection); Ctrl/Cmd+Z undoes. Click a SKU to select its row, or a channel header for the column. Signals: a C player planned above the A-player average, or an A player below the C-player average.</div></div>';
+  var $=function(id){ return document.getElementById(id); };
+  $('cmv-from').value=CMV.from; $('cmv-to').value=CMV.to; $('cmv-cat').value=CMV.cat;
+  var V={act:[],dis:[],cols:[],subs:[]};
+  var D=null;
+  var key=function(r,c){ return r.sku+'|'+c[0]+'|'+c[1]; }, ck=function(c){ return c[0]+'|'+c[1]; };
+  var base=function(r,c){ return _cmvSum(r.cur[ck(c)]); };
+  var tyv=function(r,c){ var k=key(r,c); return (CMV.ws&&CMV.dr[k]!=null)?CMV.dr[k]:base(r,c); };
+  var lyv=function(r,c){ return r.ly[ck(c)]||0; };
+  var rowT=function(r,f){ return CMV_COLS.reduce(function(s,c){ return s+f(r,c); },0); };
+  var editable=function(r,c){ return !r.set&&!r.disc&&r.avail[ck(c)]; };
+  var sbase=function(o,c){ return _cmvSum(o.cur[ck(c)]); };
+  var skuDelta=function(sub,c){ if(!CMV.ws||!CMV.follow)return 0; return V.act.reduce(function(s,r){ if(r.sub!==sub)return s; var k=key(r,c); return s+(CMV.dr[k]!=null?CMV.dr[k]-base(r,c):0); },0); };
+  var subv=function(o,c){ var k=o.sub+'|'+ck(c); if(CMV.ws&&CMV.sdr[k]!=null)return CMV.sdr[k]; return Math.max(0,sbase(o,c)+skuDelta(o.sub,c)); };   // a sub-category forecast never goes below 0, even when SKU cuts exceed it
+  function changes(){ var out=[]; if(!D)return out;
+    D.rows.forEach(function(r){ CMV_COLS.forEach(function(c){ var k=key(r,c); if(CMV.dr[k]!=null&&CMV.dr[k]!==base(r,c))out.push({kind:'sku',r:r,c:c,k:k,from:base(r,c),to:CMV.dr[k]}); }); });
+    if(CMV.ws)D.subRows.forEach(function(o){ CMV_COLS.forEach(function(c){ if(!o.has[ck(c)])return; var v=subv(o,c), b=sbase(o,c); if(v!==b)out.push({kind:'sub',o:o,c:c,k:o.sub+'|'+ck(c),from:b,to:v,follow:CMV.sdr[o.sub+'|'+ck(c)]==null}); }); });
+    return out; }
+  function visCols(){ return CMV_COLS.filter(function(c){ var k=ck(c); if(CMV.off[k])return false; if(!CMV.hideEmpty)return true;
+    return D.rows.some(function(r){ return base(r,c)||lyv(r,c)||CMV.dr[key(r,c)]; })||D.subRows.some(function(o){ return sbase(o,c); }); }); }
+  function signals(){ var avg=function(t){ var a=V.act.filter(function(r){return r.p.ti===t;}); return a.length?a.reduce(function(s,r){return s+rowT(r,tyv);},0)/a.length:0; }, A=avg('A'), C=avg('C'), o={};
+    V.act.forEach(function(r){ var t=rowT(r,tyv); if(r.p.ti==='C'&&A&&t>A)o[r.sku]='<span class="sig dn" title="C player planned above the A-player average ('+nf(A)+')">C above A avg</span>'; else if(r.p.ti==='A'&&C&&t<C)o[r.sku]='<span class="sig up" title="A player planned below the C-player average ('+nf(C)+')">A below C avg</span>'; }); return o; }
+  function sizeMix(list,f){ var by={}, t=0; list.forEach(function(r){ var s=_cmvSize(r.sku); if(!s)return; var v=rowT(r,f); by[s]=(by[s]||0)+v; t+=v; }); if(!t||Object.keys(by).length<2)return null;
+    return Object.keys(by).map(function(s){ return s+' '+(by[s]/t*100).toFixed(0)+'%'; }).join(' / '); }
+
+  // ---- Excel-style grid engine (same keys as DEMAND ▸ Inputs ▸ Key accounts) ----
+  function XG(o){ var G={sel:{},anchor:null,act:null,drag:false,ed:null,mount:false}, api={};
+    var cl=function(v,a,b){ return Math.max(a,Math.min(b,v)); };
+    function td(r,c){ var t=o.table(); return t?t.querySelector('td.xc[data-r="'+r+'"][data-c="'+c+'"]'):null; }
+    function rect(a,b){ var s={}; for(var r=Math.min(a.r,b.r);r<=Math.max(a.r,b.r);r++)for(var c=Math.min(a.c,b.c);c<=Math.max(a.c,b.c);c++)s[r+','+c]=1; return s; }
+    function paint(){ var t=o.table(); if(!t)return; t.querySelectorAll('td.xc').forEach(function(x){ var k=x.dataset.r+','+x.dataset.c; x.classList.toggle('sel',!!G.sel[k]); x.classList.toggle('act',!!G.act&&G.act.r==x.dataset.r&&G.act.c==x.dataset.c); }); if(o.onSel)o.onSel(api); }
+    api.keys=function(){ return Object.keys(G.sel).map(function(k){ var p=k.split(','); return {r:+p[0],c:+p[1]}; }).filter(function(p){ return p.r<o.nR()&&p.c<o.nC(); }); };
+    api.editable=function(p){ var x=td(p.r,p.c); return !!x&&x.dataset.e==='1'; };
+    api.select=function(a,b){ G.sel=rect(a,b); G.anchor=a; G.act=a; paint(); foc(); };
+    api.clear=function(){ G.sel={}; G.act=null; G.anchor=null; G.ed=null; };
+    function foc(){ var t=o.table(); if(t&&document.activeElement!==t&&!G.ed)try{ t.focus({preventScroll:true}); }catch(e){ t.focus(); } }
+    function move(dr,dc,ext){ if(!o.nR()||!o.nC())return; var a=G.act||{r:0,c:0}, p={r:cl(a.r+dr,0,o.nR()-1),c:cl(a.c+dc,0,o.nC()-1)}; G.act=p; if(ext&&G.anchor)G.sel=rect(G.anchor,p); else { G.sel={}; G.sel[p.r+','+p.c]=1; G.anchor=p; } paint(); var x=td(p.r,p.c); if(x)try{ x.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} }
+    function edit(init){ if(!G.act)return; var x=td(G.act.r,G.act.c); if(!x||x.dataset.e!=='1')return; var orig=o.get(G.act.r,G.act.c); G.ed={r:G.act.r,c:G.act.c,orig:orig,val:init==null?String(orig):init,caret:null,sel:init==null}; mountEd(); }
+    function mountEd(){ var e=G.ed; if(!e)return; var x=td(e.r,e.c); if(!x){ G.ed=null; return; } var inp=document.createElement('input'); inp.className='ed'; inp.setAttribute('inputmode','numeric'); inp.setAttribute('aria-label','Edit cell'); inp.value=e.val; x.appendChild(inp); inp.focus();
+      if(e.sel){ inp.select(); e.sel=false; } else { var p=e.caret==null?inp.value.length:e.caret; try{ inp.setSelectionRange(p,p); }catch(_){} }
+      inp.onkeydown=function(ev){ ev.stopPropagation(); if(ev.key==='Enter'){ ev.preventDefault(); end(true); move(1,0); } else if(ev.key==='Tab'){ ev.preventDefault(); end(true); move(0,ev.shiftKey?-1:1); } else if(ev.key==='Escape'){ ev.preventDefault(); end(false); } };
+      inp.oninput=function(){ e.val=inp.value; e.caret=inp.selectionStart; if(o.live){ G.mount=true; o.live(e.r,e.c,num(inp.value)); G.mount=false; } };
+      inp.onblur=function(){ if(G.mount)return; if(G.ed===e)end(true); }; }
+    function end(save){ var e=G.ed; if(!e)return; G.ed=null; o.commit([{r:e.r,c:e.c,v:save?num(e.val):e.orig}],[{r:e.r,c:e.c,prev:e.orig}]); foc(); }
+    function selVals(list,f){ var ch=[],prev=[]; list.forEach(function(p){ if(!api.editable(p))return; var cur=o.get(p.r,p.c); prev.push({r:p.r,c:p.c,prev:cur}); ch.push({r:p.r,c:p.c,v:f(cur)}); }); if(ch.length)o.commit(ch,prev); }
+    api.apply=function(f){ selVals(api.keys(),f); };
+    api.copy=function(){ var ks=api.keys(); if(!ks.length)return; var rs=ks.map(function(p){return p.r;}), cs=ks.map(function(p){return p.c;}), r0=Math.min.apply(null,rs), r1=Math.max.apply(null,rs), c0=Math.min.apply(null,cs), c1=Math.max.apply(null,cs), L=[];
+      for(var r=r0;r<=r1;r++){ var a=[]; for(var c=c0;c<=c1;c++)a.push(G.sel[r+','+c]?o.get(r,c):''); L.push(a.join('\t')); } _CMV_CLIP=L.join('\n'); try{ navigator.clipboard.writeText(_CMV_CLIP).catch(function(){}); }catch(e){} };
+    function paste(text){ if(!G.act)return; var grid=String(text).replace(/\r/g,'').replace(/\n$/,'').split('\n').map(function(l){ return l.split(/\t|,/); }), ks=api.keys();
+      if(grid.length===1&&grid[0].length===1&&ks.length>1){ var v=num(grid[0][0]); selVals(ks,function(){ return v; }); return; }
+      var ch=[],prev=[]; grid.forEach(function(line,i){ line.forEach(function(val,j){ var p={r:G.act.r+i,c:G.act.c+j}; if(p.r>=o.nR()||p.c>=o.nC()||!api.editable(p))return; prev.push({r:p.r,c:p.c,prev:o.get(p.r,p.c)}); ch.push({r:p.r,c:p.c,v:num(val)}); }); });
+      if(ch.length)o.commit(ch,prev); }
+    api.bind=function(){ var t=o.table(); if(!t)return; t.tabIndex=0; t.classList.add('cmv-xg'); t.setAttribute('role','grid');
+      t.onmousedown=function(e){ var x=e.target.closest('td.xc'); if(!x||e.target.classList.contains('ed'))return; e.preventDefault(); if(G.ed)end(true); foc(); var p={r:+x.dataset.r,c:+x.dataset.c};
+        if(e.shiftKey&&G.anchor)G.sel=rect(G.anchor,p); else if(e.metaKey||e.ctrlKey){ var k=p.r+','+p.c; if(G.sel[k])delete G.sel[k]; else G.sel[k]=1; G.anchor=p; } else { G.sel={}; G.sel[p.r+','+p.c]=1; G.anchor=p; G.drag=true; } G.act=p; paint(); };
+      t.onmouseover=function(e){ if(!G.drag)return; var x=e.target.closest('td.xc'); if(!x)return; var p={r:+x.dataset.r,c:+x.dataset.c}; G.sel=rect(G.anchor,p); G.act=p; paint(); };
+      t.ondblclick=function(e){ if(e.target.closest('td.xc'))edit(null); };
+      t.onkeydown=function(e){ if(G.ed)return; var k=e.key, mod=e.metaKey||e.ctrlKey;
+        if(k==='ArrowUp'||k==='ArrowDown'||k==='ArrowLeft'||k==='ArrowRight'){ e.preventDefault(); move(k==='ArrowUp'?-1:k==='ArrowDown'?1:0,k==='ArrowLeft'?-1:k==='ArrowRight'?1:0,e.shiftKey); }
+        else if(k==='Tab'){ e.preventDefault(); move(0,e.shiftKey?-1:1); } else if(k==='Enter'||k==='F2'){ e.preventDefault(); edit(null); }
+        else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); selVals(api.keys(),function(){ return 0; }); }
+        else if(mod&&(k==='c'||k==='C')){ e.preventDefault(); api.copy(); } else if(mod&&(k==='z'||k==='Z')){ e.preventDefault(); if(o.undo)o.undo(); }
+        else if(mod&&(k==='a'||k==='A')){ e.preventDefault(); api.select({r:0,c:0},{r:o.nR()-1,c:o.nC()-1}); }
+        else if(!mod&&k.length===1&&/[0-9]/.test(k)){ e.preventDefault(); edit(k); } };
+      t.onpaste=function(e){ e.preventDefault(); paste((e.clipboardData&&e.clipboardData.getData('text'))||_CMV_CLIP); };
+      if(G.ed){ G.mount=true; mountEd(); G.mount=false; } else paint(); };
+    if(!window._cmvMouseUp){ window._cmvMouseUp=1; document.addEventListener('mouseup',function(){ try{ (window._cmvGrids||[]).forEach(function(g){ g._up(); }); }catch(e){} }); }
+    api._up=function(){ G.drag=false; }; (window._cmvGrids=window._cmvGrids||[]).push(api);
+    return api; }
+
+  // ---- main grid: rows = active SKUs, then sub-category rows; cols = visible channel columns ----
+  // undo entries: {t:'s'|'u', k, prev} (s = SKU draft key, u = sub-category draft key)
+  function setDr(map,k,v,b){ if(v==null||v===b)delete map[k]; else map[k]=v; }
+  var MG=XG({table:function(){ return $('cmv-t'); }, nR:function(){ return V.act.length+V.subs.length; }, nC:function(){ return V.cols.length; },
+    get:function(r,c){ return r<V.act.length?tyv(V.act[r],V.cols[c]):subv(V.subs[r-V.act.length],V.cols[c]); },
+    commit:function(list,prev){ var u=[]; list.forEach(function(x){ var c=V.cols[x.c];
+        if(x.r<V.act.length){ var row=V.act[x.r], k=key(row,c); u.push({t:'s',k:k,prev:CMV.dr[k]}); setDr(CMV.dr,k,x.v,base(row,c)); }
+        else { var o=V.subs[x.r-V.act.length], sk=o.sub+'|'+ck(c); u.push({t:'u',k:sk,prev:CMV.sdr[sk]}); setDr(CMV.sdr,sk,x.v,sbase(o,c)); } });
+      if(u.length)CMV.undo.push(u); draw(); },
+    live:function(r,c,v){ var col=V.cols[c]; if(r<V.act.length){ var row=V.act[r]; setDr(CMV.dr,key(row,col),v,base(row,col)); } else { var o=V.subs[r-V.act.length]; setDr(CMV.sdr,o.sub+'|'+ck(col),v,sbase(o,col)); } draw(); },
+    undo:undo, onSel:function(api){ sb(api); } });
+  function undo(){ var u=CMV.undo.pop(); if(!u)return; u.forEach(function(x){ var m=x.t==='s'?CMV.dr:CMV.sdr; if(x.prev==null)delete m[x.k]; else m[x.k]=x.prev; }); draw(); }
+  function sb(api){ var el=$('cmv-sb'); if(!el)return; el.hidden=!CMV.ws; if(!CMV.ws)return; var ks=api.keys(), sum=0, n=0; ks.forEach(function(p){ sum+=MG_get(p); n++; });
+    el.innerHTML=(n?'Selected <b>'+n+'</b> cells &nbsp; Sum <b>'+nf(sum)+'</b> &nbsp; Avg <b>'+nf(sum/n)+'</b>':'Click a cell to select. Drag, Shift or Ctrl/Cmd+click to select more.')
+      +'<span class="cmv-sp"></span><label for="cmv-sbp">Adjust selection</label><input id="cmv-sbp" type="text" placeholder="±%" inputmode="decimal"><button class="cmv-btn" id="cmv-sbpa"'+(n?'':' disabled')+'>Apply %</button>'
+      +'<label for="cmv-sbv">Set to</label><input id="cmv-sbv" type="text" placeholder="units" inputmode="numeric"><button class="cmv-btn" id="cmv-sbva"'+(n?'':' disabled')+'>Set</button>'
+      +'<button class="cmv-btn" id="cmv-sbc"'+(n?'':' disabled')+'>Copy</button><button class="cmv-btn" id="cmv-sbu"'+(CMV.undo.length?'':' disabled')+'>Undo ('+CMV.undo.length+')</button>';
+    $('cmv-sbpa').onclick=function(){ var p=parseFloat($('cmv-sbp').value); if(isNaN(p))return; MG.apply(function(v){ return Math.max(0,Math.round(v*(1+p/100))); }); };
+    $('cmv-sbva').onclick=function(){ if($('cmv-sbv').value==='')return; var v=num($('cmv-sbv').value); MG.apply(function(){ return v; }); };
+    $('cmv-sbc').onclick=function(){ MG.copy(); }; $('cmv-sbu').onclick=undo; }
+  function MG_get(p){ var c=V.cols[p.c]; if(!c)return 0; return p.r<V.act.length?tyv(V.act[p.r],c):(V.subs[p.r-V.act.length]?subv(V.subs[p.r-V.act.length],c):0); }
+
+  function draw(){
+    var t=$('cmv-t'); if(!t||!document.body.contains(t))return;
+    $('cmv-ws').classList.toggle('on',CMV.ws); $('cmv-ws').setAttribute('aria-pressed',CMV.ws);
+    var qs=CMV.chips.slice(); if(CMV.q.trim())qs.push(CMV.q.trim());
+    if(CMV.cat==='ALL'&&!qs.length){ $('cmv-sum').innerHTML=''; $('cmv-wsbar').hidden=true; $('cmv-sb').hidden=true; t.innerHTML='<tbody><tr><td style="padding:18px">Pick a category or search for SKUs to build the view.</td></tr></tbody>'; $('cmv-chn').textContent='-'; chipsDraw(); return; }
+    D=_cmvCompute();
+    var months=D.months;
+    V.act=D.rows.filter(function(r){return !r.disc;}).sort(function(a,b){ return rowT(b,base)-rowT(a,base); });
+    V.dis=D.rows.filter(function(r){return r.disc;}).sort(function(a,b){ return rowT(b,lyv)-rowT(a,lyv); });
+    V.subs=D.subRows; var cols=V.cols=visCols(), list=D.rows;
+    var tot=function(set,f){ return cols.map(function(c){ return set.reduce(function(s,r){ return s+f(r,c); },0); }); };
+    var tyT=tot(list,tyv), lyT=tot(list,lyv), baT=tot(list,base), TY=_cmvSum(tyT), LY=_cmvSum(lyT), BA=_cmvSum(baT), ch=changes(), sig=CMV.ws?signals():{};
+    var lyLbl=mlbl(lyMonth(months[0]))+' to '+mlbl(lyMonth(months[months.length-1]));
+    var mxT=sizeMix(V.act,tyv), mxL=sizeMix(list,lyv);
+    $('cmv-sum').innerHTML='<div class="cmv-k"><span>TY units ('+mlbl(months[0])+' to '+mlbl(months[months.length-1])+')'+(CMV.ws&&ch.length?' draft':'')+'</span><b>'+nf(TY)+(CMV.ws&&TY!==BA?' <small>'+sgn(TY-BA)+'</small>':'')+'</b></div>'
+      +'<div class="cmv-k"><span>LY units ('+lyLbl+')</span><b>'+nf(LY)+'</b></div><div class="cmv-k"><span>Var vs LY</span><b>'+pct(TY,LY)+'</b></div>'
+      +'<div class="cmv-k"><span>SKUs</span><b>'+V.act.length+' active · '+V.dis.length+' disc</b></div>'+(mxT?'<div class="cmv-k"><span>Size mix TY</span><b style="font-size:13px">'+mxT+'</b></div>':'')+(mxL?'<div class="cmv-k"><span>Size mix LY</span><b style="font-size:13px">'+mxL+'</b></div>':'');
+    var nsk={}; ch.forEach(function(x){ if(x.kind==='sku')nsk[x.r.sku]=1; });
+    var wb=$('cmv-wsbar'); wb.hidden=!CMV.ws;
+    if(CMV.ws)wb.innerHTML='<span><b>Worksheet'+(CMV.wsName?': '+esc(CMV.wsName):'')+'</b> Edits are a draft until you apply them.</span><span>Changed <b>'+ch.length+'</b> cells on <b>'+Object.keys(nsk).length+'</b> SKUs · <b>'+sgn(TY-BA)+'</b> units</span>'
+      +'<label><input type="checkbox" id="cmv-follow"'+(CMV.follow?' checked':'')+'> Move sub-category forecast with SKU changes</label><span class="cmv-sp"></span>'
+      +'<label for="cmv-wsn">Name</label><input id="cmv-wsn" type="text" placeholder="e.g. SS27 picnic review" value="'+esc(CMV.wsName)+'" style="width:190px"><button class="cmv-btn" id="cmv-wss">Save worksheet</button>'
+      +'<button class="cmv-btn" id="cmv-wsr"'+(ch.length?'':' disabled')+'>Reset all</button><button class="cmv-btn pri" id="cmv-wsa"'+(ch.length?'':' disabled')+'>Review &amp; apply all ('+ch.length+')</button>';
+    var groups=[]; cols.forEach(function(c){ var g=groups[groups.length-1]; if(g&&g.co===c[0])g.n++; else groups.push({co:c[0],n:1}); });
+    var cg=function(i){ return (i===0||cols[i-1][0]!==cols[i][0])?'cg0':''; };
+    var W=CMV.ws, xs=W?2:0;
+    var h='<thead><tr><th class="cmv-st" rowspan="2">SKU</th><th rowspan="2">ABC</th><th rowspan="2">Season</th><th rowspan="2">Release</th>'+(W?'<th rowspan="2">Apply</th><th rowspan="2">Signal</th>':'')
+      +'<th class="cg0" colspan="'+(W?4:3)+'">Total</th>'+groups.map(function(g){ return '<th class="cg0 mk" colspan="'+g.n+'" style="background:'+MKC(g.co)+'">'+g.co+'</th>'; }).join('')+'</tr>'
+      +'<tr><th class="cg0">TY</th>'+(W?'<th>vs current</th>':'')+'<th>LY</th><th>Var</th>'+cols.map(function(c,i){ return '<th class="'+cg(i)+'"'+(W?' data-col="'+i+'" style="cursor:pointer" title="Select column"':'')+'>'+CMV_CHL[c[1]]+'</th>'; }).join('')+'</tr></thead><tbody>';
+    var pad=W?'<td></td><td></td>':'';
+    var line=function(r,ri){ var t2=rowT(r,tyv), l=rowT(r,lyv), b=rowT(r,base), live=W&&ri>=0, has=live&&ch.some(function(x){ return x.kind==='sku'&&x.r===r; });
+      var cells=cols.map(function(c,i){ var k=key(r,c), chg=W&&CMV.dr[k]!=null&&CMV.dr[k]!==base(r,c);
+        if(live)return '<td class="xc '+cg(i)+(chg?' chg':'')+'" data-r="'+ri+'" data-c="'+i+'" data-e="'+(editable(r,c)?1:0)+'">'+fmt(tyv(r,c))+(chg?'<span class="cmv-was x">'+nf(base(r,c))+'</span>':'')+'</td>';
+        return '<td class="'+cg(i)+'">'+fmt(tyv(r,c))+'</td>'; }).join('');
+      return '<tr><td class="cmv-st sku"'+(live?' data-row="'+ri+'" style="cursor:pointer" title="Select row"':'')+'>'+esc(r.sku)+(r.disc?'<span class="disc">DISC</span>':'')+(r.set?'<span class="tag" title="Set: shown in boxes, edit sets in the Plan">SET</span>':'')+'</td>'
+        +'<td><span class="tag">'+esc(r.p.ti||'-')+'</span></td><td>'+esc(r.p.csf||r.p.cs||'-')+'</td><td>'+esc(r.p.rw||'-')+'</td>'
+        +(W?'<td>'+(has?'<button class="cmv-btn pri cmv-ap" data-ap="'+esc(r.sku)+'" style="min-height:24px;padding:2px 9px">Apply</button>':'')+'</td><td>'+(sig[r.sku]||'')+'</td>':'')
+        +'<td class="cg0"><b>'+fmt(t2)+'</b></td>'+(W?'<td>'+sgn(t2-b)+'</td>':'')+'<td>'+fmt(l)+'</td><td>'+pct(t2,l)+'</td>'+cells+'</tr>'; };
+    var gtot=function(set,label){ var a=tot(set,tyv), bb=_cmvSum(tot(set,base)), b=tot(set,lyv), t2=_cmvSum(a), l=_cmvSum(b);
+      return '<tr class="gt"><td class="cmv-st">'+label+'</td><td></td><td></td><td></td>'+pad+'<td class="cg0">'+fmt(t2)+'</td>'+(W?'<td>'+sgn(t2-bb)+'</td>':'')+'<td>'+fmt(l)+'</td><td>'+pct(t2,l)+'</td>'+a.map(function(x,i){ return '<td class="'+cg(i)+'">'+fmt(x)+'</td>'; }).join('')+'</tr>'; };
+    var span=7+(W?3:0)+cols.length;
+    h+='<tr class="grp"><td class="cmv-st" colspan="4">&#9660; Active ('+V.act.length+')</td><td colspan="'+(span-4)+'"></td></tr>'+V.act.map(line).join('')+gtot(V.act,'Active total');
+    // sub-category forecast rows + gap vs the active SKUs of that sub-category
+    V.subs.forEach(function(o,si){ var ri=V.act.length+si, cv=cols.map(function(c){ return subv(o,c); }), cb=cols.map(function(c){ return sbase(o,c); }), T=_cmvSum(cv), B=_cmvSum(cb);
+      var hasCh=W&&ch.some(function(x){ return x.kind==='sub'&&x.o===o; });
+      var sk=cols.map(function(c){ return V.act.reduce(function(s,r){ return s+(r.sub===o.sub?tyv(r,c):0); },0); });
+      h+='<tr class="sub"><td class="cmv-st">Sub-category forecast: '+esc(o.sub)+'</td><td></td><td></td><td></td>'+(W?'<td>'+(hasCh?'<button class="cmv-btn pri cmv-ap" data-ap="@sub:'+esc(o.sub)+'" style="min-height:24px;padding:2px 9px">Apply</button>':'')+'</td><td></td>':'')
+        +'<td class="cg0"><b>'+fmt(T)+'</b></td>'+(W?'<td>'+sgn(T-B)+'</td>':'')+'<td></td><td></td>'
+        +cols.map(function(c,i){ var chg=W&&cv[i]!==cb[i], k=o.sub+'|'+ck(c); if(W)return '<td class="xc '+cg(i)+(chg?' chg':'')+'" data-r="'+ri+'" data-c="'+i+'" data-e="'+(o.has[ck(c)]?1:0)+'" title="'+(CMV.sdr[k]!=null?'Edited directly':CMV.follow?'Moves with SKU changes':'')+'">'+fmt(cv[i])+(chg?'<span class="cmv-was x">'+nf(cb[i])+'</span>':'')+'</td>'; return '<td class="'+cg(i)+'">'+fmt(cv[i])+'</td>'; }).join('')+'</tr>';
+      h+='<tr><td class="cmv-st cmv-hint">Gap: sub-category minus active SKUs</td><td></td><td></td><td></td>'+pad+'<td class="cg0">'+sgn(T-_cmvSum(sk))+'</td>'+(W?'<td></td>':'')+'<td></td><td></td>'+cols.map(function(c,i){ return '<td class="'+cg(i)+'">'+sgn(cv[i]-sk[i])+'</td>'; }).join('')+'</tr>'; });
+    h+='<tr class="grp" id="cmv-dt" tabindex="0" aria-expanded="'+CMV.openDisc+'"><td class="cmv-st" colspan="4">'+(CMV.openDisc?'&#9660;':'&#9654;')+' Discontinued ('+V.dis.length+')</td><td colspan="'+(span-4)+'" style="text-transform:none;letter-spacing:0;font-weight:500">'+(CMV.openDisc?'':'click to expand')+'</td></tr>'
+      +(CMV.openDisc?V.dis.map(function(r){ return line(r,-1); }).join(''):'')+gtot(V.dis,'Discontinued total')+'</tbody>';
+    var fr=function(label,vals,tv,extra){ return '<tr><td class="cmv-st">'+label+'</td><td></td><td></td><td></td>'+pad+'<td class="cg0">'+tv+'</td>'+(W?'<td>'+(extra||'')+'</td>':'')+'<td></td><td></td>'+vals.map(function(x,i){ return '<td class="'+cg(i)+'">'+x+'</td>'; }).join('')+'</tr>'; };
+    h+='<tfoot>'+fr('TY total'+(W&&ch.length?' (draft)':''),tyT.map(fmt),fmt(TY),sgn(TY-BA))+(W&&TY!==BA?fr('TY current',baT.map(fmt),fmt(BA)):'')+fr('LY total ('+lyLbl+')',lyT.map(fmt),fmt(LY))
+      +fr('Var units',tyT.map(function(x,i){ return sgn(x-lyT[i]); }),sgn(TY-LY))+fr('Var %',tyT.map(function(x,i){ return pct(x,lyT[i]); }),pct(TY,LY))
+      +fr('TY mix %',tyT.map(function(x){ return TY?(x/TY*100).toFixed(1)+'%':'-'; }),'100%')+fr('LY mix %',lyT.map(function(x){ return LY?(x/LY*100).toFixed(1)+'%':'-'; }),'100%')+'</tfoot>';
+    t.innerHTML=h;
+    if(W){ MG.bind(); t.querySelectorAll('[data-row]').forEach(function(x){ x.onmousedown=function(e){ e.preventDefault(); var r=+x.dataset.row; MG.select({r:r,c:0},{r:r,c:cols.length-1}); }; });
+      t.querySelectorAll('th[data-col]').forEach(function(x){ x.onmousedown=function(e){ e.preventDefault(); var c=+x.dataset.col; MG.select({r:0,c:c},{r:V.act.length-1,c:c}); }; });
+      t.querySelectorAll('.cmv-ap').forEach(function(b){ b.onmousedown=function(e){ e.stopPropagation(); }; b.onclick=function(e){ e.stopPropagation(); openApply(b.dataset.ap); }; }); }
+    else { t.onmousedown=t.onkeydown=t.onpaste=null; t.removeAttribute('tabindex'); sb(MG); }
+    var dt=$('cmv-dt'), tg=function(){ CMV.openDisc=!CMV.openDisc; draw(); }; dt.onclick=tg; dt.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); tg(); } };
+    $('cmv-chn').textContent=cols.length+' of '+CMV_COLS.length; chipsDraw();
+    if(W){ $('cmv-follow').onchange=function(){ CMV.follow=this.checked; draw(); }; $('cmv-wsn').oninput=function(){ CMV.wsName=this.value; }; $('cmv-wss').onclick=saveWs;
+      var rs=$('cmv-wsr'); if(rs)rs.onclick=function(){ var u=[]; Object.keys(CMV.dr).forEach(function(k){ u.push({t:'s',k:k,prev:CMV.dr[k]}); }); Object.keys(CMV.sdr).forEach(function(k){ u.push({t:'u',k:k,prev:CMV.sdr[k]}); }); CMV.dr={}; CMV.sdr={}; if(u.length)CMV.undo.push(u); draw(); };
+      var ap=$('cmv-wsa'); if(ap)ap.onclick=function(){ openApply(null); }; }
+  }
+  function chipsDraw(){ var el=$('cmv-chips'); el.innerHTML=CMV.chips.map(function(c,i){ return '<span class="cmv-chip">'+esc(c)+'<button aria-label="Remove '+esc(c)+'" data-i="'+i+'">&times;</button></span>'; }).join('')+(CMV.chips.length?'<button class="cmv-btn" id="cmv-clr">Clear SKUs</button>':'');
+    el.querySelectorAll('[data-i]').forEach(function(b){ b.onclick=function(){ CMV.chips.splice(+b.dataset.i,1); MG.clear(); draw(); }; }); var c=$('cmv-clr'); if(c)c.onclick=function(){ CMV.chips=[]; MG.clear(); draw(); }; }
+
+  // ---- apply popup: month by month ----
+  var MD=null;
+  function lineOf(x){ var months=D.months, act=months.map(function(m){ return isActualMonth(m); }), cur=x.kind==='sku'?x.r.cur[ck(x.c)].slice():x.o.cur[ck(x.c)].slice();
+    var actSum=cur.reduce(function(s,v,i){ return s+(act[i]?v:0); },0), fc=cur.map(function(v,i){ return act[i]?0:v; }), fcT=_cmvSum(fc), F=Math.max(0,x.to-actSum);
+    var shape=fcT?fc:(function(){ var sub=x.kind==='sku'?x.r.sub:x.o.sub, fu={}; try{ fu=(calc(sub,x.c[0],x.c[1])||{}).fu||{}; }catch(e){} var w=months.map(function(m,i){ return act[i]?0:(fu[m]||0); }); return _cmvSum(w)?w:months.map(function(m,i){ return act[i]?0:1; }); })();
+    return {x:x,months:months,act:act,cur:cur,nw:_cmvSpread(F,shape,act,cur),on:true,actSum:actSum}; }
+  function openApply(filter){ var all=changes(), L;
+    if(!filter)L=all; else if(filter.indexOf('@sub:')===0){ var s=filter.slice(5); L=all.filter(function(x){ return x.kind==='sub'&&x.o.sub===s; }); } else L=all.filter(function(x){ return x.kind==='sku'&&x.r.sku===filter; });
+    if(!L.length)return; MD={lines:L.map(lineOf),undo:[],title:!filter?null:filter.indexOf('@sub:')===0?'Sub-category '+filter.slice(5):filter,note:''}; drawModal(true); }
+  var MXG=XG({table:function(){ return document.getElementById('cmv-mt'); }, nR:function(){ return MD?MD.lines.length:0; }, nC:function(){ return MD?MD.lines[0].months.length:0; },
+    get:function(r,c){ return MD.lines[r].nw[c]; },
+    commit:function(list){ var u=[]; list.forEach(function(x){ u.push({r:x.r,c:x.c,prev:MD.lines[x.r].nw[x.c]}); MD.lines[x.r].nw[x.c]=x.v; }); MD.undo.push(u); drawModal(); },
+    live:function(r,c,v){ MD.lines[r].nw[c]=v; drawModal(); },
+    undo:function(){ var u=MD&&MD.undo.pop(); if(!u)return; u.forEach(function(x){ MD.lines[x.r].nw[x.c]=x.prev; }); drawModal(); },
+    onSel:function(api){ var s=document.getElementById('cmv-msel'); if(!s)return; var ks=api.keys(), sum=0; ks.forEach(function(p){ sum+=MD.lines[p.r].nw[p.c]; }); s.textContent=ks.length+' cells · sum '+nf(sum); } });
+  function closeModal(){ var m=document.getElementById('cmv-modal'); if(m)m.remove(); MD=null; MXG.clear(); }
+  function drawModal(first){ if(!MD)return; var L=MD.lines, on=L.filter(function(l){ return l.on; }), months=L[0].months;
+    var colT=function(f){ return months.map(function(_,i){ return on.reduce(function(s,l){ return s+f(l,i); },0); }); }, cT=colT(function(l,i){ return l.cur[i]; }), nT=colT(function(l,i){ return l.nw[i]; });
+    var bad=on.filter(function(l){ return _cmvSum(l.nw)!==l.x.to; }).length;
+    var h='<div class="m" role="dialog" aria-modal="true" aria-labelledby="cmv-mh"><header><h3 id="cmv-mh">Apply forecast changes by month'+(MD.title?': '+esc(MD.title):'')+'</h3><span class="cmv-sp" style="flex:1"></span><span>'+on.length+' of '+L.length+' lines · net '+sgn(_cmvSum(nT)-_cmvSum(cT))+' units</span></header><div class="b">'
+      +'<div class="how">Each line starts from a suggestion: the change spread over the forecast months in the shape of the current forecast (or the sub-category curve when the current forecast is 0). Every forecast month is editable, Excel-style. Actual months are locked. <b>To allocate</b> should reach 0 to match the worksheet total; if not, the monthly figures are applied. SKU lines save as SKU forecast overrides and sub-category lines as the sub-category forecast, exactly as editing in the Plan, so Plan, Buy, Undo and the change record all follow.</div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="cmv-btn" id="cmv-mfill">Spread remaining</button><button class="cmv-btn" id="cmv-mreset">Reset to suggestion</button><button class="cmv-btn" id="cmv-meven">Spread evenly</button><span style="flex:1"></span><span>Selected: <b id="cmv-msel">0</b></span><input class="cmv-in" id="cmv-mset" placeholder="units" inputmode="numeric"><button class="cmv-btn" id="cmv-mseta">Set</button></div>'
+      +'<div style="overflow-x:auto"><table id="cmv-mt"><thead><tr><th><input type="checkbox" id="cmv-mall"'+(on.length===L.length?' checked':'')+' aria-label="Select all lines"></th><th>Line</th><th>Mkt</th><th>Channel</th><th>Current</th><th>Worksheet</th>'+months.map(function(m){ return '<th>'+mlbl(m)+'</th>'; }).join('')+'<th>Allocated</th><th>To allocate</th></tr></thead><tbody>'
+      +L.map(function(l,i){ var al=_cmvSum(l.nw), d=l.x.to-al, x=l.x;
+        return '<tr'+(l.on?'':' style="opacity:.45"')+'><td><input type="checkbox" class="cmv-mchk" data-i="'+i+'"'+(l.on?' checked':'')+' aria-label="Apply line"></td><td>'+(x.kind==='sku'?'<span style="font-family:ui-monospace,Menlo,monospace">'+esc(x.r.sku)+'</span>':'<b>Sub-category: '+esc(x.o.sub)+'</b>')+'</td>'
+          +'<td><span class="tag" style="background:'+MKC(x.c[0])+';color:#101828;font-weight:700;border-radius:6px;padding:1px 6px">'+x.c[0]+'</span></td><td>'+CMV_CHL[x.c[1]]+'</td><td>'+nf(x.from)+'</td><td><b>'+nf(x.to)+'</b> '+sgn(x.to-x.from)+'</td>'
+          +months.map(function(m,j){ var dd=l.nw[j]-l.cur[j]; if(l.act[j])return '<td class="lock" title="Actual month: locked">'+nf(l.cur[j])+'</td>';
+            return '<td class="xc'+(dd?' chg':'')+'" data-r="'+i+'" data-c="'+j+'" data-e="'+(l.on?1:0)+'"><b>'+nf(l.nw[j])+'</b><span class="cmv-was">'+nf(l.cur[j])+' · '+(dd?(dd>0?'+':'')+nf(dd):'0')+'</span></td>'; }).join('')
+          +'<td>'+nf(al)+'</td><td class="'+(d?'bad':'ok')+'">'+(d?(d>0?'+':'')+nf(d):'0')+'</td></tr>'; }).join('')
+      +'</tbody><tfoot><tr><td></td><td colspan="5">Current</td>'+cT.map(function(v){ return '<td>'+nf(v)+'</td>'; }).join('')+'<td>'+nf(_cmvSum(cT))+'</td><td></td></tr><tr><td></td><td colspan="5"><b>New</b></td>'+nT.map(function(v){ return '<td><b>'+nf(v)+'</b></td>'; }).join('')+'<td><b>'+nf(_cmvSum(nT))+'</b></td><td></td></tr>'
+      +'<tr><td></td><td colspan="5">Change</td>'+nT.map(function(v,i){ return '<td>'+sgn(v-cT[i])+'</td>'; }).join('')+'<td>'+sgn(_cmvSum(nT)-_cmvSum(cT))+'</td><td></td></tr></tfoot></table></div>'
+      +'<div><label for="cmv-mnote" style="font-size:11px;font-weight:700;color:var(--muted)">Reason (saved to the change record)</label><textarea id="cmv-mnote" placeholder="e.g. SS27 picnic review: rebalance C players">'+esc(MD.note||'')+'</textarea></div></div>'
+      +'<footer><button class="cmv-btn" id="cmv-mcancel">Back to worksheet</button><span style="flex:1"></span>'+(bad?'<span class="bad">'+bad+' line'+(bad>1?'s':'')+' not fully allocated: the monthly figures will be applied</span>':'')+'<button class="cmv-btn pri" id="cmv-mok"'+(on.length?'':' disabled')+'>Apply '+on.length+' line'+(on.length===1?'':'s')+'</button></footer></div>';
+    var host=document.getElementById('cmv-modal'), sc=0; if(!host){ host=document.createElement('div'); host.id='cmv-modal'; document.body.appendChild(host); } else { var ob=host.querySelector('.b'); sc=ob?ob.scrollTop:0; }
+    host.innerHTML=h; var nb=host.querySelector('.b'); if(nb)nb.scrollTop=sc; MXG.bind();
+    host.querySelectorAll('.cmv-mchk').forEach(function(b){ b.onchange=function(){ L[+b.dataset.i].on=b.checked; MXG.clear(); drawModal(); }; });
+    document.getElementById('cmv-mall').onchange=function(){ var v=this.checked; L.forEach(function(l){ l.on=v; }); drawModal(); };
+    document.getElementById('cmv-mnote').oninput=function(){ MD.note=this.value; };
+    document.getElementById('cmv-mcancel').onclick=closeModal;
+    host.onmousedown=function(e){ if(e.target===host)closeModal(); };
+    document.getElementById('cmv-mreset').onclick=function(){ MD.lines=MD.lines.map(function(l){ var n=lineOf(l.x); n.on=l.on; return n; }); drawModal(); };
+    document.getElementById('cmv-meven').onclick=function(){ L.forEach(function(l){ if(!l.on)return; var F=Math.max(0,l.x.to-l.actSum); l.nw=_cmvSpread(F,l.act.map(function(a){ return a?0:1; }),l.act,l.cur); }); drawModal(); };
+    document.getElementById('cmv-mfill').onclick=function(){ L.forEach(function(l){ if(!l.on)return; var d=l.x.to-_cmvSum(l.nw); if(!d)return; var w=l.nw.map(function(v,i){ return l.act[i]?0:(v||0); }); if(!_cmvSum(w))w=l.act.map(function(a){ return a?0:1; });
+      var add=_cmvSpread(Math.abs(d),w,l.act,l.cur.map(function(){ return 0; })); l.nw=l.nw.map(function(v,i){ return l.act[i]?v:Math.max(0,v+(d>0?add[i]:-add[i])); }); }); drawModal(); };
+    document.getElementById('cmv-mseta').onclick=function(){ var el=document.getElementById('cmv-mset'); if(el.value==='')return; var v=num(el.value); MXG.apply(function(){ return v; }); };
+    document.getElementById('cmv-mok').onclick=function(){ applyLines(on, MD.note); closeModal(); };
+    if(first)setTimeout(function(){ var t=document.getElementById('cmv-mt'); if(t)try{ t.focus({preventScroll:true}); }catch(e){} },0);
+  }
+  if(!window._cmvEsc){ window._cmvEsc=1; document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&document.getElementById('cmv-modal')&&!document.querySelector('#cmv-mt .ed')){ document.getElementById('cmv-modal').remove(); } }); }
+  function applyLines(lines,note){ if(!lines.length)return;
+    var act='cross market worksheet'+(note&&note.trim()?': '+note.trim().slice(0,200):''), rows=[], touched={}, nSku=0, nSub=0;
+    // a SKU applied on its own leaves its sub-category change pending: freeze the follow amount as an explicit sub-category draft first
+    if(CMV.follow)lines.forEach(function(l){ if(l.x.kind!=='sku')return; var o=D.subRows.filter(function(s){ return s.sub===l.x.r.sub; })[0]; if(!o)return; var sk=o.sub+'|'+ck(l.x.c); if(CMV.sdr[sk]==null){ var v=subv(o,l.x.c); if(v!==sbase(o,l.x.c))CMV.sdr[sk]=v; } });
+    try{ if(typeof undoMark==='function')undoMark(); }catch(e){}
+    lines.forEach(function(l){ var x=l.x, co=x.c[0], ch=x.c[1];
+      if(x.kind==='sku'){ var ss=x.r.set?Math.max(1,_setSize(x.r.sku)):1; nSku++;
+        l.months.forEach(function(m,i){ if(l.act[i]||l.nw[i]===l.cur[i])return; skuOvSet(x.r.sku,co,ch,m,String(l.nw[i]*ss)); rows.push({level:'sku',item:x.r.sku,country:co,channel:ch,month:m,action:act,from:l.cur[i],to:l.nw[i]}); });
+        delete CMV.dr[x.k]; touched[x.r.sub+'|'+co+'|'+ch]=1; }
+      else { nSub++; l.months.forEach(function(m,i){ if(l.act[i]||l.nw[i]===l.cur[i])return; IV[x.o.sub+'|'+co+'|'+ch+'|'+m]="'"+l.nw[i]; rows.push({level:'subcat',item:x.o.sub,country:co,channel:ch,month:m,action:act,from:l.cur[i],to:l.nw[i]}); });
+        delete CMV.sdr[x.k]; touched[x.o.sub+'|'+co+'|'+ch]=1; } });
+    try{ if(rows.length&&typeof logChangesBulk==='function')logChangesBulk(rows); }catch(e){}
+    Object.keys(touched).forEach(function(k){ var p=k.split('|'); try{ refreshRow(p[0],p[1],p[2]); }catch(e){} });
+    try{ if(typeof markDirty==='function')markDirty(); }catch(e){}
+    try{ if(typeof saveForecasts==='function')Promise.resolve(saveForecasts()).catch(function(){}); }catch(e){}
+    CMV.cache=null; CMV.undo=[]; MG.clear(); draw();
+    try{ st('Applied '+nSku+' SKU and '+nSub+' sub-category line'+((nSku+nSub)===1?'':'s')+' ('+rows.length+' monthly changes). Saving…'); }catch(e){} }
+
+  // ---- saved worksheets (shared, planner.demand_worksheets) ----
+  function saveWs(){ var name=(CMV.wsName||'').trim(); if(!name){ var el=$('cmv-wsn'); if(el){ el.focus(); el.placeholder='Name it first'; } return; }
+    var ch=changes(); var payload={from:CMV.from,to:CMV.to,cat:CMV.cat,chips:CMV.chips,follow:CMV.follow,sku:CMV.dr,sub:CMV.sdr};
+    fetch('/api/demand/worksheets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:CMV.wsId,name:name,view:'crossmarket',payload:payload,n_changes:ch.length})})
+      .then(function(r){ return r.json(); }).then(function(j){ if(j.error){ try{ st('Save failed: '+j.error); }catch(e){} return; } CMV.wsId=j.id; try{ st('Saved worksheet "'+name+'" ('+ch.length+' changes)'); }catch(e){} })
+      .catch(function(){ try{ st('Save failed: network'); }catch(e){} }); }
+  function wsList(){ var p=$('cmv-wsl'); p.innerHTML='<div class="cmv-hint" style="padding:8px">Loading…</div>';
+    fetch('/api/demand/worksheets?view=crossmarket').then(function(r){ return r.json(); }).then(function(j){ if(j.error){ p.innerHTML='<div class="cmv-hint" style="padding:8px">'+esc(j.error)+'</div>'; return; } var a=j.worksheets||[];
+      p.innerHTML=(a.length?a.map(function(w){ var d=String(w.updated_at||''), dd=d?(d.slice(8,10)+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+d.slice(5,7)-1]+'-'+d.slice(2,4)+' '+d.slice(11,16)):'';
+          return '<div class="cmv-wsi"><div><b>'+esc(w.name)+'</b><small>'+esc(String(w.updated_by||w.created_by||'').split('@')[0]+'@')+' · '+dd+' · '+(w.n_changes||0)+' changes</small></div><button class="cmv-btn" data-open="'+w.id+'">Open</button><button class="cmv-btn" data-del="'+w.id+'" aria-label="Delete">&times;</button></div>'; }).join('')
+        :'<div class="cmv-hint" style="padding:8px">No saved worksheets yet.</div>')+'<div class="cmv-hint" style="padding:4px 8px">Shared: everyone can open, update or delete these.</div>';
+      p.querySelectorAll('[data-open]').forEach(function(b){ b.onclick=function(){ var w=a.filter(function(x){ return String(x.id)===b.dataset.open; })[0]; if(!w)return; var pl=w.payload||{};
+        CMV.from=pl.from||CMV.from; CMV.to=pl.to||CMV.to; CMV.cat=pl.cat||CMV.cat; CMV.chips=pl.chips||[]; CMV.q=''; CMV.follow=pl.follow!==false; CMV.dr=pl.sku||{}; CMV.sdr=pl.sub||{}; CMV.undo=[]; CMV.ws=true; CMV.wsId=w.id; CMV.wsName=w.name; CMV.cache=null; p.hidden=true; renderCrossMarketView(body); }; });
+      p.querySelectorAll('[data-del]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); if(!b.dataset.armed){ b.dataset.armed=1; b.textContent='Delete?'; return; }
+        fetch('/api/demand/worksheets/'+b.dataset.del,{method:'DELETE'}).then(function(){ if(String(CMV.wsId)===b.dataset.del)CMV.wsId=null; wsList(); }); }; }); })
+      .catch(function(){ p.innerHTML='<div class="cmv-hint" style="padding:8px">Could not load worksheets.</div>'; }); }
+
+  // ---- channels panel, export, wiring ----
+  function chPanel(){ var p=$('cmv-chp'); p.innerHTML='<div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Show channels</div><div class="cmv-chgrid">'+['UK','US','EU','AU'].map(function(co){ return '<div><b>'+co+'</b>'+CMV_COLS.filter(function(c){ return c[0]===co; }).map(function(c){ var k=ck(c); return '<label><input type="checkbox" data-k="'+k+'"'+(CMV.off[k]?'':' checked')+'> '+CMV_CHL[c[1]]+'</label>'; }).join('')+'</div>'; }).join('')+'</div>'
+    +'<div style="display:flex;gap:10px;align-items:center;border-top:1px solid var(--line2);margin-top:8px;padding-top:8px"><label><input type="checkbox" id="cmv-he"'+(CMV.hideEmpty?' checked':'')+'> Hide channels with no TY or LY</label><span style="flex:1"></span><button class="cmv-btn" id="cmv-chall">Show all</button></div>';
+    p.querySelectorAll('[data-k]').forEach(function(b){ b.onchange=function(){ if(b.checked)delete CMV.off[b.dataset.k]; else CMV.off[b.dataset.k]=1; MG.clear(); draw(); }; });
+    $('cmv-he').onchange=function(){ CMV.hideEmpty=this.checked; MG.clear(); draw(); }; $('cmv-chall').onclick=function(){ CMV.off={}; CMV.hideEmpty=false; chPanel(); MG.clear(); draw(); }; }
+  function exportXlsx(){ if(!D)return; var cols=V.cols, W=CMV.ws, head=['SKU','Group','Sub-category','ABC','Season','Release','TY total','LY total','Var %'].concat(W?['TY current']:[]).concat(cols.map(function(c){ return c[0]+' '+CMV_CHL[c[1]]; })), g=[['Cross Market view: '+(CMV.cat==='ALL'?'All categories':CMV.cat)+', '+mlbl(D.months[0])+' to '+mlbl(D.months[D.months.length-1])+(W&&CMV.wsName?' (worksheet: '+CMV.wsName+')':'')],head];
+    var vp=function(a,b){ return b?Math.round((a-b)/b*1000)/10:''; };
+    var add=function(r,grp){ var t=rowT(r,tyv), l=rowT(r,lyv); g.push([r.sku,grp,r.sub,r.p.ti||'',r.p.csf||r.p.cs||'',r.p.rw||'',t,l,vp(t,l)].concat(W?[rowT(r,base)]:[]).concat(cols.map(function(c){ return tyv(r,c); }))); };
+    V.act.forEach(function(r){ add(r,'Active'); }); V.subs.forEach(function(o){ var cv=cols.map(function(c){ return subv(o,c); }); g.push(['Sub-category forecast','Sub-category',o.sub,'','','',_cmvSum(cv),'',''].concat(W?[_cmvSum(cols.map(function(c){ return sbase(o,c); }))]:[]).concat(cv)); });
+    V.dis.forEach(function(r){ add(r,'Discontinued'); });
+    var tyT=cols.map(function(c){ return D.rows.reduce(function(s,r){ return s+tyv(r,c); },0); }), lyT=cols.map(function(c){ return D.rows.reduce(function(s,r){ return s+lyv(r,c); },0); });
+    g.push(['TY total','','','','','',_cmvSum(tyT),'',''].concat(W?['']:[]).concat(tyT)); g.push(['LY total','','','','','','',_cmvSum(lyT),''].concat(W?['']:[]).concat(lyT));
+    var bytes=buildXlsx('Cross market',g), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download='cross_market_'+String(CMV.cat).replace(/[^A-Za-z0-9]+/g,'_')+'_'+mlbl(D.months[0])+'_to_'+mlbl(D.months[D.months.length-1])+'.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); }
+  $('cmv-from').onchange=function(){ CMV.from=this.value; CMV.cache=null; MG.clear(); draw(); };
+  $('cmv-to').onchange=function(){ CMV.to=this.value; CMV.cache=null; MG.clear(); draw(); };
+  $('cmv-cat').onchange=function(){ CMV.cat=this.value; CMV.cache=null; MG.clear(); draw(); };
+  var _qt; $('cmv-q').oninput=function(){ var v=this.value; clearTimeout(_qt); _qt=setTimeout(function(){ CMV.q=v; MG.clear(); draw(); },250); };
+  $('cmv-q').onkeydown=function(e){ if(e.key==='Enter'&&this.value.trim()){ CMV.chips.push(this.value.trim().toUpperCase()); this.value=''; CMV.q=''; MG.clear(); draw(); } };
+  $('cmv-ws').onclick=function(){ CMV.ws=!CMV.ws; MG.clear(); draw(); };
+  $('cmv-chb').onclick=function(e){ e.stopPropagation(); var p=$('cmv-chp'); p.hidden=!p.hidden; this.setAttribute('aria-expanded',!p.hidden); if(!p.hidden)chPanel(); };
+  $('cmv-wslb').onclick=function(e){ e.stopPropagation(); var p=$('cmv-wsl'); p.hidden=!p.hidden; this.setAttribute('aria-expanded',!p.hidden); if(!p.hidden)wsList(); };
+  $('cmv-xl').onclick=exportXlsx;
+  if(!window._cmvDocClick){ window._cmvDocClick=1; document.addEventListener('click',function(e){ ['cmv-chp','cmv-wsl'].forEach(function(id){ var p=document.getElementById(id); if(p&&!p.hidden&&!p.contains(e.target)&&!(e.target.closest&&e.target.closest('#cmv-chb,#cmv-wslb')))p.hidden=true; }); }); }
+  draw();
+}
+var _CMV_CLIP='';
+// Largest-remainder spread of `total` over the weight vector w (actual months keep their current value).
+function _cmvSpread(total,w,act,cur){ var sw=0, i; for(i=0;i<w.length;i++)if(!act[i])sw+=(w[i]||0); var out=cur.map(function(v,j){ return act[j]?v:0; }); if(!sw||!total)return out;
+  var raw=w.map(function(x,j){ return act[j]?0:total*(x||0)/sw; }), fl=raw.map(Math.floor), rem=total-fl.reduce(function(a,b){ return a+b; },0);
+  raw.map(function(x,j){ return [x-fl[j],j]; }).filter(function(p){ return !act[p[1]]; }).sort(function(a,b){ return b[0]-a[0]; }).slice(0,rem).forEach(function(p){ fl[p[1]]++; });
+  return out.map(function(v,j){ return act[j]?v:fl[j]; }); }
 function renderExceptionsView(body){
   // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
   try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
@@ -13126,7 +13510,7 @@ function renderShipBagView(body){
   var mp={ratio:'SB_RATIO',mmed:'SB_MMED',mlar:'SB_MLAR',mxlg:'SB_MXLG'};
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });
 }
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
+var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -13143,7 +13527,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','crossmarket','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)

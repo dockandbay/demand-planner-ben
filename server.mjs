@@ -1353,6 +1353,7 @@ function requiredCap(method, p) {
       || p.startsWith('/api/buy-complex-rules')
       || p.startsWith('/api/filter-rules')
       || p.startsWith('/api/auto-forecast/')
+      || p.startsWith('/api/demand/worksheets')   // v28.216 Cross Market saved worksheets
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
@@ -1660,6 +1661,38 @@ function _trendsWin(req, cutoffNum) {
   const lblExpr = grain === 'subcategory' ? `coalesce(nullif(btrim(p.subcategory),''),'Unmapped')` : catExpr;
   return { from, to, grain, catExpr, lblExpr };
 }
+// v28.216 (Ben): DEMAND ▸ Cross Market view — SHARED saved worksheets (migration 338). A worksheet is a named draft of
+// forecast edits; saving never touches the forecast. Any planner can list / open; saving or deleting needs demand_edit.
+const _wsMissing = e => /demand_worksheets/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
+app.get('/api/demand/worksheets', async (req, res) => {
+  try {
+    const view = String(req.query.view || 'crossmarket').slice(0, 40);
+    const rows = (await pool.query(`SELECT id, name, payload, n_changes, coalesce(created_by,'') created_by, coalesce(updated_by,'') updated_by,
+      to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.demand_worksheets WHERE view=$1 ORDER BY updated_at DESC LIMIT 200`, [view])).rows;
+    res.json({ worksheets: rows });
+  } catch (e) { if (_wsMissing(e)) return res.status(503).json({ error: 'Saved worksheets need migration 338' }); log500(e); res.status(500).json({ error: 'Could not load worksheets' }); }
+});
+app.post('/api/demand/worksheets', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to save a worksheet' });
+    const b = req.body || {}, name = String(b.name || '').trim().slice(0, 120), view = String(b.view || 'crossmarket').slice(0, 40);
+    if (!name) return res.status(400).json({ error: 'Give the worksheet a name' });
+    const payload = b.payload && typeof b.payload === 'object' ? b.payload : {};
+    const js = JSON.stringify(payload); if (js.length > 2000000) return res.status(413).json({ error: 'Worksheet too large' });
+    const n = Math.max(0, parseInt(b.n_changes, 10) || 0), who = me.email || null;
+    let row;
+    if (b.id) row = (await pool.query(`UPDATE planner.demand_worksheets SET name=$2, payload=$3::jsonb, n_changes=$4, updated_by=$5, updated_at=now() WHERE id=$1 AND view=$6 RETURNING id`, [b.id, name, js, n, who, view])).rows[0];
+    if (!row) row = (await pool.query(`INSERT INTO planner.demand_worksheets (view, name, payload, n_changes, created_by, updated_by) VALUES ($1,$2,$3::jsonb,$4,$5,$5) RETURNING id`, [view, name, js, n, who])).rows[0];
+    res.json({ ok: true, id: row.id });
+  } catch (e) { if (_wsMissing(e)) return res.status(503).json({ error: 'Saved worksheets need migration 338' }); log500(e); res.status(500).json({ error: 'Could not save the worksheet' }); }
+});
+app.delete('/api/demand/worksheets/:id', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to delete a worksheet' });
+    const r = await pool.query(`DELETE FROM planner.demand_worksheets WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, deleted: r.rowCount });
+  } catch (e) { if (_wsMissing(e)) return res.status(503).json({ error: 'Saved worksheets need migration 338' }); log500(e); res.status(500).json({ error: 'Could not delete the worksheet' }); }
+});
 app.get('/api/demand/trends/plan-sanity', async (req, res) => {
   try {
     const { cutoffNum, planYear } = await _trendsMeta();
