@@ -1,3 +1,12 @@
+## v28.201 (Ben, branch review-fixes-2026-10-05): client portal New Order screen, quantities can be entered + carton notification
+
+**Files:** `supply/client-view.js` (+ package.json, CHANGES.md). No migration, no env vars. (v28.199 / v28.200 are reserved for the Fulfil push guard and per-order messages, merging separately.)
+
+- **Bug (all client accounts, e.g. Ideco, Dillard's):** the Qty and Cartons columns were the last two of 11, beyond the right edge of the grid card (table ~1,500px in a ~1,060px card), so users saw no quantity box. Same for sample requests. Columns now: image, SKU, Product (colour · size underneath), Ctn qty, Qty, Cartons, Price, Stock, Season, Disc.; Qty is on screen without scrolling.
+- Qty edits update the row and the cart in place. Previously every change redrew all ~500 rows, which jumped the list to the top and lost focus. Enter commits and moves to the next row.
+- Carton quantity: "Ctn qty" column (units per carton), Qty placeholder "×20", spinner steps in whole cartons. A quantity that is not a whole number of cartons shows an amber cell hint while typing, a toast on commit ("25 is not a whole number of cartons (20 per carton). Whole cartons preferred: 20 or 40."), and a cart line warning. Preferred, not blocked (review step still asks to round or tick "submit anyway"). Sample requests show cartons without warnings.
+- Top nav "Order" renamed "New Order".
+
 ## v28.198 (Ben, branch review-fixes-2026-10-05): CLIENT ▸ Clients & agents ▸ Edit is a tabbed view
 
 **Files:** `supply/inject.html`, `server.mjs`, `supply/hz-health.js` (+ package.json, CHANGES.md). No migration, no env vars.
