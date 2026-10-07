@@ -117,8 +117,29 @@ function checkSupplierPayload(tag, d, names) {
     if (p === '/api/cp/prices' && a1.json) ok(a1.json.currency === clA.currency || (a1.json.code && a1.json.code === clA.price_list), p + ': A gets its own price list / currency');
     if (p === '/api/cp/line-sheet' && a1.json && a1.status === 200) ok(a1.json.market === clA.market && a1.json.currency === clA.currency, p + ': A gets its own market / currency');
   }
+  // v28.200 (Ben): messages + documents per order. The counts and the thread list are live per identity: every counted order is one of
+  // the caller's own orders (okey from its own /api/cp/orders), thread lists never cross clients, and A is served A's own answer after B.
+  {
+    const oA = await get('/api/cp/orders', { cookie: 'csid=' + CA }), oB = await get('/api/cp/orders', { cookie: 'csid=' + CB });
+    const keysA = new Set(((oA.json && oA.json.orders) || []).map((o) => o.okey)), keysB = new Set(((oB.json && oB.json.orders) || []).map((o) => o.okey));
+    ok(((oA.json && oA.json.orders) || []).every((o) => /^[FP]\d+$/.test(o.okey || '')), '/api/cp/orders: every order carries its order key (okey)');
+    const tA = await get('/api/cp/order-threads', { cookie: 'csid=' + CA }), tB = await get('/api/cp/order-threads', { cookie: 'csid=' + CB }), tA2 = await get('/api/cp/order-threads', { cookie: 'csid=' + CA });
+    if (tA.status === 200) { ok(sub(new Set(Object.keys(tA.json.counts || {})), keysA), '/api/cp/order-threads: A counts keyed only by A\'s own orders'); ok(tA.text === tA2.text, '/api/cp/order-threads: A served A\'s own answer again after B'); }
+    if (tB.status === 200) ok(sub(new Set(Object.keys(tB.json.counts || {})), keysB), '/api/cp/order-threads: B counts keyed only by B\'s own orders');
+    const hA = await get('/api/cp/threads', { cookie: 'csid=' + CA }), hB = await get('/api/cp/threads', { cookie: 'csid=' + CB });
+    if (hA.status === 200 && hB.status === 200) {
+      ok(hA.json.threads.every((t) => t.client_id === clA.id) && hB.json.threads.every((t) => t.client_id === clB.id), '/api/cp/threads: each list holds only its own client\'s threads');
+      ok(disjoint(new Set(hA.json.threads.map((t) => t.id)), new Set(hB.json.threads.map((t) => t.id))), '/api/cp/threads: thread ids disjoint between the two clients');
+      ok(hA.json.threads.filter((t) => t.order_key).every((t) => keysA.has(t.okey) || keysA.has(t.order_key)), '/api/cp/threads: A\'s order threads are all on A\'s own orders');
+      for (const t of hB.json.threads.slice(0, 3)) ok((await get('/api/cp/threads/' + t.id, { cookie: 'csid=' + CA })).status === 403, 'A opening B\'s thread ' + t.id + ' -> 403');
+      for (const t of hB.json.threads.filter((x) => x.order_key).slice(0, 3)) ok((await get('/api/cp/order-thread/' + encodeURIComponent(t.okey || t.order_key), { cookie: 'csid=' + CA })).status === 403, 'A opening B\'s order thread ' + (t.okey || t.order_key) + ' -> 403');
+    }
+    const meA = await get('/api/cp/me', { cookie: 'csid=' + CA });
+    if (hA.status === 200 && meA.status === 200) ok(meA.json.unread === hA.json.threads.reduce((s, t) => s + (t.unread_client || 0), 0), '/api/cp/me unread = the sum over A\'s Messages list');
+  }
   for (const [h, why] of [[{}, 'no cookie'], [{ cookie: 'csid=forged-token-1234567890' }, 'forged csid'], [{ 'x-client-email': 'x@y.z', 'x-user-email': 'x@y.z' }, 'proxy email headers']]) {
     const r = await get('/api/cp/orders', h); ok(r.status === 401, 'client orders rejects ' + why + ' (got ' + r.status + ')');
+    for (const p of ['/api/cp/order-threads', '/api/cp/order-thread/F1']) { const x = await get(p, h); ok(x.status === 401, p + ' rejects ' + why + ' (got ' + x.status + ')'); }   // v28.200
   }
   console.log((fails ? 'FAILED' : 'OK') + ': ' + passes + ' checks passed, ' + fails + ' failed');
   process.exit(fails ? 1 : 0);

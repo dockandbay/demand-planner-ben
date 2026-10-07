@@ -28,6 +28,8 @@ sources:
   - server.mjs :: portalOwnsProductSample (product-dev request-level ownership)
   - server.mjs :: cpTierPrice, /api/cp/prices, /api/cp/order, cpCreateFulfilDraft
   - server.mjs :: /api/client/commission/runs/build, /api/client/commission/runs/:id/xero-bill (client commission)
+  - server.mjs :: cpAllowedOrderKeys, cpPortalThreads, cpOrderThreadFind, cpOrderClients, /api/cp/order-thread/:key, /api/client/order-thread/:key/post (order messages + documents)
+  - migrations/336_client_order_threads.sql :: planner.client_threads.order_key, client_messages.internal
   - server.mjs :: /api/supply/charge/:id/accept, /api/supply/po-polybags/:po
   - server.mjs :: afLoadCommon (Auto Forecast cash phasing)
   - server.mjs :: buildUpfxStatement, upfxCsv, upfxConfig, runUpfxStatementCron, upfxEmailed, /api/supply/xero/up-fx-statement.csv, /api/cron/up-fx-statement
@@ -116,6 +118,14 @@ fingerprints:
   server.mjs::cpCreateFulfilDraft: 5117a7608ab4
   server.mjs::/api/client/commission/runs/build: 9f79554f891a
   server.mjs::/api/client/commission/runs/:id/xero-bill: fd75919ebdf4
+  server.mjs::cpAllowedOrderKeys: c286b5dd11d6
+  server.mjs::cpPortalThreads: 84a27797a150
+  server.mjs::cpOrderThreadFind: 00c107366099
+  server.mjs::cpOrderClients: 21bc75ca4d0c
+  server.mjs::/api/cp/order-thread/:key: 3a5d8c8753ba
+  server.mjs::/api/client/order-thread/:key/post: b7a4807dbfb7
+  migrations/336_client_order_threads.sql::planner.client_threads.order_key: 04dc437babc1
+  migrations/336_client_order_threads.sql::client_messages.internal: 04dc437babc1
   server.mjs::/api/supply/charge/:id/accept: 2726245218bd
   server.mjs::/api/supply/po-polybags/:po: abcb96e2dee0
   server.mjs::afLoadCommon: c726c90779ce
@@ -151,7 +161,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.194
+verified_version: v28.200
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -314,6 +324,7 @@ verified_version: v28.194
 - Price tiers by market: rt = products.<mkt>_rt (includes tax). ws = ex-tax retail ÷ 2, where ex-tax = RT ÷ 1.2 (UK, EU), ÷ 1.1 (AU) or ÷ 1.0 (US, CA). dist = ws × (1 − discount %), with the discount taken from distributor_offers by market and method (fob, exw or 3pl). If no discount is set, the price falls back to ws. With no tier set, the legacy client_price_lists is used. (source: server.mjs :: cpTierPrice, /api/cp/prices)
 - Client orders reject unknown and CLOSED SKUs. Non-whole cartons need explicit acceptance (sample orders are exempt). Samples are priced 0. The order is saved, then a Fulfil draft sale is attempted; if that fails it is flagged "needs keying". Stock shows in bands unless exact stock is configured. (source: server.mjs :: /api/cp/order)
 - Commissions are monthly runs per rep group. Rate = the per-order override, else the group default. Commission = commissionable × rate ÷ 100. A credit-note row has commission 0 and carries amount × rate ÷ 100 in credit_adj; net = commission + credit_adj. Fulfil rows come from done/processing sales in the month using the untaxed amount; they are "exception" until the invoice is paid. A run cannot be finalised while exceptions remain (unless forced). The Xero bill is GBP, in the UK org, named COMMISSION-<month>-<GROUP>. (source: server.mjs :: /api/client/commission/*)
+- Order messages and documents (v28.200): one thread per client and order, keyed F<fulfil_id> (Fulfil sales mirror) or P<portal order id>; a portal submission's thread follows it into the mirror once its Fulfil number appears there. Documents are the thread's message attachments. A portal user may open an order's thread only if the order is visible to their client under the My orders rules; a scope 'self' user only for their OWN orders (mirror rows with their email as party email, portal orders they placed), even though their My orders list is not narrowed. Another client, or a non-own order for a 'self' user, gets 403. Staff can post internal messages or documents that the client never sees, counts or downloads. Unread counts (My orders, Messages, nav badge) all come from one thread list, so they agree. An order visible to two clients has two separate conversations. (source: server.mjs :: cpAllowedOrderKeys, cpPortalThreads, cpOrderThreadFind, cpOrderClients)
 
 ## Samples and barcodes (number-producing parts only)
 - An accepted supplier charge (sample or shipment) becomes one Other payment = freight + product cost. The Payments Report Xero download splits a sample charge evenly across the sample's purposes, using sample_purpose_accounts. (source: server.mjs :: charge/:id/accept, payments-report _sampleSplit)

@@ -16,7 +16,9 @@
 const http = require('http'), zlib = require('zlib');
 const E = process.env, BASE = new URL(E.HZ_TEST_BASE || 'http://127.0.0.1:8164');
 const need = ['HZ_TEST_PSID_MASTER', 'HZ_TEST_PSID_RIDER', 'HZ_TEST_PSID_OTHER', 'HZ_TEST_SHIP', 'HZ_TEST_ATT_MASTER_DOC', 'HZ_TEST_ATT_SHIP_TL', 'HZ_TEST_ATT_OTHER', 'HZ_TEST_OTHER_PO'];
-const miss = need.filter((k) => !E[k]); if (miss.length) { console.error('set ' + miss.join(', ') + ' (see header)'); process.exit(2); }
+const miss = need.filter((k) => !E[k]);   // v28.200 (Ben): the supplier checks run when all of these are set; the client order-thread checks need their own (below)
+const SUP = !miss.length, CP = !!(E.HZ_TEST_CSID_CLIENT && E.HZ_TEST_CSID_SELF && E.HZ_TEST_CSID_OTHER && E.HZ_TEST_CP_ORDER);
+if (!SUP && !CP) { console.error('set ' + miss.join(', ') + ' (supplier portal) and / or HZ_TEST_CSID_CLIENT, HZ_TEST_CSID_SELF, HZ_TEST_CSID_OTHER, HZ_TEST_CP_ORDER (client portal); see header'); process.exit(2); }
 const M = 'psid=' + E.HZ_TEST_PSID_MASTER, Rd = 'psid=' + E.HZ_TEST_PSID_RIDER, O = 'psid=' + E.HZ_TEST_PSID_OTHER, SHIP = E.HZ_TEST_SHIP;
 let fails = 0, passes = 0;
 const ok = (cond, msg) => { if (cond) passes++; else { fails++; console.log('FAIL: ' + msg); } };
@@ -37,7 +39,7 @@ function req(method, path, { cookie, body, headers, form } = {}) {
 }
 const get = (p, o) => req('GET', p, o), post = (p, body, o) => req('POST', p, Object.assign({ body }, o || {}));
 const internal = (t) => /relation "|column "|syntax error|violates|duplicate key|invalid input syntax|file:\/\/|\/Users\/|node_modules|\n\s+at /i.test(String(t || ''));
-(async () => {
+async function supplierChecks() {
   // sessions valid and distinct
   const me = {}; for (const [k, c] of [['M', M], ['R', Rd], ['O', O]]) { const r = await get('/api/portal/me', { cookie: c }); ok(r.status === 200, k + ' session valid'); me[k] = (r.json && r.json.suppliers) || []; }
   ok(me.M.join() !== me.R.join() && me.R.join() !== me.O.join(), 'precondition: three different suppliers');
@@ -187,6 +189,98 @@ const internal = (t) => /relation "|column "|syntax error|violates|duplicate key
   ok(le2.status === 202 && le2.json && le2.json.accepted === 1, 'H7: login-page capture without a session -> 202, only the allowed kind accepted (got ' + le2.status + ' ' + JSON.stringify(le2.json) + ')');
   ok(!le || le.status === 400 || le.status === 202, 'H7: login-page capture with an empty body never errors (got ' + (le && le.status) + ')');
 
+}
+// ── v28.200 (Ben): CLIENT PORTAL messages + documents per order (order threads). Needs three client sessions (rows in planner.client_sessions,
+// e.g. minted with POST /api/client/users/:uid/magic then GET /client?token=…): CLIENT = a scope 'client' user of client A, SELF = a
+// scope 'self' user of the SAME client A, OTHER = a user of a different client B; and HZ_TEST_CP_ORDER = an order key ('F<fulfil_id>' or
+// 'P<client_orders.id>') visible to client A that is NOT one of SELF's own orders. Optional: HZ_TEST_CP_ORDER_SELF (one of SELF's own
+// orders), HZ_TEST_CP_ORDER_OTHER (an order of client B that client A can not see). Refusals only, unless HZ_TEST_WRITES=1: then staff
+// (the sandbox has no login gate) and the client post messages / documents; delete the created threads afterwards (the test prints them).
+async function clientOrderThreadChecks() {
+  const CC = 'csid=' + E.HZ_TEST_CSID_CLIENT, CS = 'csid=' + E.HZ_TEST_CSID_SELF, CO = 'csid=' + E.HZ_TEST_CSID_OTHER, K = E.HZ_TEST_CP_ORDER;
+  const me = {}; for (const [k, c] of [['C', CC], ['S', CS], ['O', CO]]) { const r = await get('/api/cp/me', { cookie: c }); ok(r.status === 200, 'cp: ' + k + ' session valid'); me[k] = r.json || {}; }
+  const A = me.C.client && me.C.client.id, B = me.O.client && me.O.client.id;
+  ok(A && A === (me.S.client && me.S.client.id) && B && B !== A, 'cp precondition: CLIENT and SELF share client A, OTHER is client B');
+  ok(me.C.user && me.C.user.scope !== 'self' && me.S.user && me.S.user.scope === 'self', 'cp precondition: CLIENT is scope client, SELF is scope self');
+  const P = (k) => '/api/cp/order-thread/' + encodeURIComponent(k);
+  const pdf = (name) => ({ filename: name, mime: 'application/pdf', data_base64: Buffer.from('%PDF-1.4 v28200 test ' + name).toString('base64') });
+  // refusals (always)
+  ok((await get('/api/cp/order-threads')).status === 401, 'cp: order counts without a session -> 401');
+  ok((await get(P(K))).status === 401, 'cp: order thread without a session -> 401');
+  ok((await post(P(K) + '/post', { body: 'v28200 test (should be refused)' })).status === 401, 'cp: order post without a session -> 401');
+  ok((await get(P(K), { cookie: CO })).status === 403, 'cp: another client opening the order thread -> 403');
+  ok((await post(P(K) + '/post', { body: 'v28200 test (should be refused)' }, { cookie: CO })).status === 403, 'cp: another client posting on the order -> 403');
+  ok((await get(P(K), { cookie: CS })).status === 403, 'cp: scope self user opening an order that is not theirs -> 403');
+  ok((await post(P(K) + '/post', { body: 'v28200 test (should be refused)' }, { cookie: CS })).status === 403, 'cp: scope self user posting on an order that is not theirs -> 403');
+  ok((await get(P('X1'), { cookie: CC })).status === 403 && (await get(P('F1x'), { cookie: CC })).status === 403, 'cp: malformed order key -> 403');
+  ok((await get(P(K), { cookie: CC })).status === 200, 'cp: CLIENT opens the order thread -> 200');
+  for (const [c, who] of [[CC, 'CLIENT'], [CO, 'OTHER']]) { const r = await get('/api/cp/order-threads', { cookie: c }); ok(r.status === 200 && r.json && typeof r.json.counts === 'object', 'cp: ' + who + ' order counts -> 200'); }
+  if (E.HZ_TEST_CP_ORDER_OTHER) ok((await get(P(E.HZ_TEST_CP_ORDER_OTHER), { cookie: CC })).status === 403, 'cp: client A opening client B\'s order thread -> 403');
+  if (E.HZ_TEST_WRITES !== '1') return;
+  // ── write flow (sandbox) ──
+  const created = new Set();
+  const counts = async (c) => ((await get('/api/cp/order-threads', { cookie: c })).json || {}).counts || {};
+  const unreadMe = async (c) => ((await get('/api/cp/me', { cookie: c })).json || {}).unread;
+  const sumThreads = async (c) => (((await get('/api/cp/threads', { cookie: c })).json || {}).threads || []).reduce((s, t) => s + (t.unread_client || 0), 0);
+  const s1 = await post('/api/client/order-thread/' + encodeURIComponent(K) + '/post', { client_id: A, body: 'v28200 test: staff message on the order', attachments: [pdf('v28200 staff doc.pdf')] });
+  ok(s1.status === 200 && s1.json && s1.json.thread_id && s1.json.files === 1, 'staff posts a message + document on the order -> 200, thread created, 1 file');
+  const T = s1.json && s1.json.thread_id; if (T) created.add(T);
+  let ct = (await counts(CC))[K] || {};
+  ok(ct.msgs >= 1 && ct.files >= 1 && ct.unread >= 1 && ct.thread_id === T, 'CLIENT My orders counts show the message, the document and unread (' + JSON.stringify(ct) + ')');
+  const u0 = await unreadMe(CC); ok(u0 >= 1 && u0 === await sumThreads(CC), 'nav badge (/me unread) = sum of the Messages list unread (' + u0 + ')');
+  const th = ((await get('/api/cp/threads', { cookie: CC })).json || {}).threads || [];
+  ok(th.some((t) => t.id === T && t.order_key && t.order_ref), 'the order thread is in CLIENT Messages, tagged with the order ref');
+  ok(!(((await get('/api/cp/threads', { cookie: CS })).json || {}).threads || []).some((t) => t.id === T), 'the order thread is NOT in the scope self user\'s Messages');
+  ok(!(((await get('/api/cp/threads', { cookie: CO })).json || {}).threads || []).some((t) => t.id === T), 'the order thread is NOT in the other client\'s Messages');
+  const v = await get(P(K), { cookie: CC }); const docs = (v.json && v.json.documents) || [];
+  ok(v.status === 200 && (v.json.messages || []).some((m) => /v28200 test: staff message/.test(m.body || '')) && docs.length >= 1, 'CLIENT reads the order thread (message + document listed)');
+  ct = (await counts(CC))[K] || {}; ok(ct.unread === 0, 'unread clears on the order once read (' + ct.unread + ')');
+  ok(await unreadMe(CC) === u0 - 1 || await unreadMe(CC) < u0, 'nav badge drops after reading');
+  const D1 = docs[0] && docs[0].id;
+  ok((await get('/api/cp/attachment/' + D1, { cookie: CC })).status === 200, 'CLIENT downloads the order document -> 200');
+  ok((await get('/api/cp/attachment/' + D1, { cookie: CS })).status === 403, 'scope self user downloading the order document -> 403');
+  ok((await get('/api/cp/attachment/' + D1, { cookie: CO })).status === 403, 'another client downloading the order document -> 403');
+  ok((await get('/api/cp/attachment/' + D1)).status === 401, 'order document without a session -> 401');
+  ok((await get('/api/cp/threads/' + T, { cookie: CS })).status === 403, 'scope self user opening the order thread by id (Messages) -> 403');
+  ok((await post('/api/cp/threads/' + T + '/reply', { body: 'v28200 test (should be refused)' }, { cookie: CS })).status === 403, 'scope self user replying on it in Messages -> 403');
+  ok((await get('/api/cp/threads/' + T, { cookie: CO })).status === 403, 'another client opening the thread by id -> 403');
+  // client replies with a document -> staff sees it unread in Orders + Messages
+  const c1 = await post(P(K) + '/post', { body: 'v28200 test: client reply with a document', attachments: [pdf('v28200 client doc.pdf')] }, { cookie: CC });
+  ok(c1.status === 200 && c1.json && c1.json.thread_id === T && c1.json.files === 1, 'CLIENT replies with a document on the order -> same thread');
+  const sc = (((await get('/api/client/order-threads?client_id=' + A)).json || {}).counts || {})[K] || {};
+  ok(sc.unread >= 1 && sc.files >= 2, 'staff CLIENT > Orders counts: unread from the client + 2 documents (' + JSON.stringify(sc) + ')');
+  const sm = (((await get('/api/client/threads?kind=order&client_id=' + A)).json || {}).threads || []).find((t) => t.id === T);
+  ok(sm && sm.unread_ops >= 1 && sm.order_ref, 'staff CLIENT > Messages lists the order thread unread, tagged');
+  const dr = await get('/api/client/order-thread/' + encodeURIComponent(K) + '?client_id=' + A);
+  ok(dr.status === 200 && dr.json.header && dr.json.thread && dr.json.thread.id === T && (dr.json.documents || []).length >= 2, 'staff order drawer: header, thread, documents');
+  ok(((((await get('/api/client/order-threads?client_id=' + A)).json || {}).counts || {})[K] || {}).unread === 0, 'staff unread clears on view');
+  // internal note + document: staff only
+  const iN = await post('/api/client/order-thread/' + encodeURIComponent(K) + '/post', { client_id: A, body: 'v28200 test: INTERNAL staff note', internal: true, attachments: [pdf('v28200 internal.pdf')] });
+  ok(iN.status === 200, 'staff posts an internal note + document');
+  const cv = await get(P(K), { cookie: CC });
+  ok(!(cv.json.messages || []).some((m) => /INTERNAL/.test(m.body || '')) && !(cv.json.documents || []).some((d) => /internal/.test(d.filename || '')), 'the client never sees the internal note or document');
+  ok(((await counts(CC))[K] || {}).unread === 0, 'an internal note is not unread for the client');
+  const idoc = ((((await get('/api/client/order-thread/' + encodeURIComponent(K) + '?client_id=' + A)).json || {}).documents) || []).find((d) => d.internal);
+  ok(idoc && (await get('/api/cp/attachment/' + idoc.id, { cookie: CC })).status === 403, 'CLIENT downloading the internal document -> 403');
+  ok(idoc && (await get('/api/client/attachment/' + idoc.id)).status === 200, 'staff downloads the internal document -> 200');
+  // replying in Messages = replying on the order
+  const mr = await post('/api/cp/threads/' + T + '/reply', { body: 'v28200 test: reply from Messages' }, { cookie: CC });
+  ok(mr.status === 200 && ((((await get('/api/client/order-thread/' + encodeURIComponent(K) + '?client_id=' + A)).json || {}).messages) || []).some((m) => /reply from Messages/.test(m.body || '')), 'a reply in Messages lands on the order');
+  if (E.HZ_TEST_CP_ORDER_SELF) { const KS = E.HZ_TEST_CP_ORDER_SELF;
+    const p = await post(P(KS) + '/post', { body: 'v28200 test: rep message on own order' }, { cookie: CS }); ok(p.status === 200, 'scope self user posts on their OWN order -> 200'); if (p.json && p.json.thread_id) created.add(p.json.thread_id);
+    ok((await get(P(KS), { cookie: CS })).status === 200, 'scope self user reads their own order thread -> 200');
+    ok((await get(P(KS), { cookie: CC })).status === 200, 'the client-scope colleague sees the rep\'s order thread -> 200');
+    ok((await get(P(KS), { cookie: CO })).status === 403, 'another client opening the rep\'s order thread -> 403'); }
+  if (E.HZ_TEST_CP_ORDER_OTHER) { const KO = E.HZ_TEST_CP_ORDER_OTHER;
+    const p = await post('/api/client/order-thread/' + encodeURIComponent(KO) + '/post', { client_id: B, body: 'v28200 test: staff message to client B' }); ok(p.status === 200, 'staff posts on client B\'s order'); if (p.json && p.json.thread_id) created.add(p.json.thread_id);
+    ok((await get(P(KO), { cookie: CO })).status === 200, 'client B reads its own order thread -> 200');
+    ok((await get(P(KO), { cookie: CC })).status === 403, 'client A (agent) opening client B\'s order thread -> 403');
+    if (p.json && p.json.thread_id) ok((await get('/api/cp/threads/' + p.json.thread_id, { cookie: CC })).status === 403, 'client A opening client B\'s thread by id -> 403'); }
+  console.log('v28200 test threads created (delete after): ' + [...created].join(','));
+}
+(async () => {
+  if (SUP) await supplierChecks(); else console.log('supplier portal checks skipped (set ' + miss.join(', ') + ')');
+  if (CP) await clientOrderThreadChecks(); else console.log('client portal order-thread checks skipped (set HZ_TEST_CSID_CLIENT / _SELF / _OTHER and HZ_TEST_CP_ORDER)');
   console.log((fails ? 'FAILED' : 'OK') + ': ' + passes + ' checks passed, ' + fails + ' failed');
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
