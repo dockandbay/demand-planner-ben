@@ -7,6 +7,21 @@
 - Carton quantity: "Ctn qty" column (units per carton), Qty placeholder "×20", spinner steps in whole cartons. A quantity that is not a whole number of cartons shows an amber cell hint while typing, a toast on commit ("25 is not a whole number of cartons (20 per carton). Whole cartons preferred: 20 or 40."), and a cart line warning. Preferred, not blocked (review step still asks to round or tick "submit anyway"). Sample requests show cartons without warnings.
 - Top nav "Order" renamed "New Order".
 
+## v28.199 (Ben, branch review-fixes-2026-10-05) URGENT, deploy with v28.186: Fulfil push guard
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`. No migration, no env vars (`HZ_FULFIL_WRITE_STUB=1` stubs the PO push, dev only).
+
+HORIZON no longer creates a Fulfil PO when it shouldn't. On 05-Oct PO373 (Direct to Client, SO56447) had no Fulfil mirror row, so "Update lines" created duplicate Fulfil PO385 (XR Textile, 2,000 x TOWLB-CAB-LG-BLUE-R) next to the real SO-generated Fulfil PO373 (Lixin, id 530).
+- Push target: the PO's manual Fulfil link (po_links fulfil, manual) first, then the Fulfil reference.
+- Client POs (DIRECT / Direct to Client / UK B2B JLEW / UK B2B NEXT / key account) are never created; they must be linked.
+- Any PO is refused (409) when Fulfil already has a non-cancelled PO with its number, its SO / client ref as reference, or linked to that sales order.
+- A failed Fulfil lookup stops the push (503), never treated as "not found". POs generated from a sales order never have their lines rewritten.
+- Every refusal logs a health 'sanity' row `fulfil:create_refused:<po>`.
+- New "Link Fulfil PO" picker (live Fulfil read-only search) in the PO grid Fulfil column, the ERP update popup and the drawer Linked records; saves the link in HORIZON only. The link refresh no longer overwrites a manual Fulfil link.
+- New route `GET /api/supply/fulfil/po-search`; `POST /api/supply/po/:po/links` validates Fulfil ids; grid-status adds `client_po`, `fulfil_link_manual`, `fulfil_link_ref`.
+- On live, all 32 active client POs will show "Link Fulfil PO" until linked (0 manual links today).
+- **After deploy:** cancel PO385 (Fulfil id 542) by hand in Fulfil, then link HORIZON PO373 to Fulfil id 530.
+
 ## v28.198 (Ben, branch review-fixes-2026-10-05): CLIENT ▸ Clients & agents ▸ Edit is a tabbed view
 
 **Files:** `supply/inject.html`, `server.mjs`, `supply/hz-health.js` (+ package.json, CHANGES.md). No migration, no env vars.
