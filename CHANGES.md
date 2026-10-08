@@ -1,3 +1,10 @@
+## v28.228 (Ben, branch review-fixes-2026-10-05): Cross Market view, stray blue bar and white box removed
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- DEMAND ▸ Cross Market showed an empty blue bar across the page with a white box over it. They were the worksheet bar and the Saved worksheets list, which should be hidden: their CSS set `display`, which overrides the `hidden` attribute. Added `#cmv [hidden]{display:none!important}`.
+- Verified on sandbox (jsdom): both hidden on load; worksheet bar shows in Worksheet mode; Saved worksheets opens on click and closes on an outside click. 0 JS errors.
+
 ## v28.227 (Ben, branch review-fixes-2026-10-05): Client portal orders held for review before Fulfil
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/341_client_order_review.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 341** (additive, idempotent: `clients.order_review`, review columns on `client_orders`). No new env vars (uses the existing `FULFIL_LIVE_WRITES`).
