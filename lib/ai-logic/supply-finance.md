@@ -167,7 +167,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.210
+verified_version: v28.223
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -353,3 +353,7 @@ verified_version: v28.210
 **Q:** Why does the buy plan count units that haven't shipped yet? **A:** On order counts the same as shipped. An open PO to a UK, US, EU, AU or CA destination that is not yet in the inbound feed lands at production end + 7 + branch sea transit. Once n8n lists it in inbound_shipments, the feed row replaces it.
 **Q:** Why did a PO's Xero bill change by itself? **A:** Its linked bill was voided in Xero and the PO had exactly one live bill of the same supplier, so HORIZON relinked it (Linked records shows "auto-relinked: previous bill voided"; the note keeps the old bill). With no or several candidates it asks you to choose instead.
 **Q:** Why doesn't the Fulfil drift badge flag a price difference? **A:** Drift checks line count and per-SKU quantity only, and only for PRODUCTION, READY TO SHIP and SHIPPING POs. Prices still go to Fulfil when a push runs.
+
+## Flexport booking named by Fulfil IS (v28.223, SUG-0042)
+- A Flexport booking lodged from a PO is named by the Fulfil internal shipment (IS) number(s) of every PO on that shipment (master plus consolidated riders), read live from Fulfil stock.shipment.internal where reference = PO, newest first, cancelled ignored; several are joined "IS288 / IS377". Every PO on the shipment goes in the booking's Purchase Order tags. No IS found or Fulfil unavailable: named by the PO number, with a note in the preview. (source: buildFlexportBookingBody)
+- On lodging, each PO's IS number is saved (purchase_orders.fulfil_is_number, migration 339). The Flexport import then links an IS-named Flexport shipment to every PO carrying that IS (sets flexport_reference) where the PO has no Flexport link yet, so ETAs and costs keep flowing. (source: server.mjs :: booking-submit, runFlexportImport)

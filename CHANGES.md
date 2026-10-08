@@ -1,3 +1,11 @@
+## v28.223 (Ben, branch review-fixes-2026-10-05): Flexport booking named by Fulfil IS number, all POs as tags (SUG-0042)
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/339_po_fulfil_is_number.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 339** (additive, idempotent). No env vars.
+
+- PO ▸ Flexport booking request: the booking **name is now the Fulfil internal shipment (IS) number** (e.g. IS288, or "IS288 / IS377" for a consolidated shipment), read live from Fulfil; **every PO on the shipment** (master plus riders) goes into the booking's Purchase Order tags. Falls back to the PO number, with a note, when there is no IS in Fulfil yet. The preview shows the booking name and the PO tags (with each PO's IS); the confirm names them too. Data was already preloaded from HORIZON (v28.064).
+- Linking kept intact: on lodging, each PO's IS is saved (`purchase_orders.fulfil_is_number`); the Flexport import links an IS-named Flexport shipment back to every PO with that IS (sets `flexport_reference` where empty), so ETAs and costs still land on the PO. Until migration 339 is applied, bookings still lodge and the link stays manual.
+- Verified: sandbox preview groups PO-57UKXR1 with rider PO-56UKLX4-BUNDLE and falls back to the PO name (sandbox Fulfil has no IS); the same IS query against Fulfil live (read only) returns IS288 for PO-57UKXR1 and IS377 for PO-57UKNL1; the import link update linked exactly the intended PO in a rolled-back sandbox transaction; the name matcher rejects IS2880 / IS28; app loads with 0 JS errors. Nothing was lodged with Flexport.
+
 ## v28.222 (Ben, branch review-fixes-2026-10-05): Stock Availability product descriptions (SUG-0043, Sarah)
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.

@@ -7347,11 +7347,18 @@ async function runFlexportImport(opts) {
         } catch (e) { /* one bad container fetch never fails the whole import */ }
       }
     }
+    // v28.223 (SUG-0042): bookings are named by Fulfil IS number(s) (e.g. "IS377" or "IS377 / IS378"), not the PO, so link
+    // an IS-named Flexport shipment to every PO carrying that IS (only where the PO has no Flexport link yet).
+    let is_linked = 0;
+    try { is_linked = (await pool.query(`UPDATE planner.purchase_orders p SET flexport_reference=f.flex_id
+        FROM planner.flexport_api_shipments f
+        WHERE coalesce(p.flexport_reference,'')='' AND coalesce(p.fulfil_is_number,'')<>''
+          AND f.shipment_name ~ ('(^|[^0-9A-Za-z])' || p.fulfil_is_number || '([^0-9]|$)')`)).rowCount; } catch (e) { if (!/fulfil_is_number/.test(String(e.message))) console.error('[flexport] IS link failed:', e.message); }
     const apiCount = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments`)).rows[0].n;
     const matched = (await pool.query(`SELECT count(*) n FROM planner.flexport_api_shipments f WHERE EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR p.shipment_ref=f.shipment_name OR p.po=f.shipment_name)`)).rows[0].n;
     const at = new Date().toISOString();
     await pool.query(`INSERT INTO planner.app_settings (key,value) VALUES ('flexport_last_sync',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [at]);
-    return { ok: true, pages: page, seen, imported, containers_filled, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
+    return { ok: true, pages: page, seen, imported, containers_filled, is_linked, api_table_rows: Number(apiCount), po_matched: Number(matched), last_sync: at, samples };
   }
 }
 app.post('/api/supply/flexport/import', async (req, res) => {
@@ -7474,9 +7481,24 @@ async function buildFlexportBookingBody(po, opts) {
   if (!consignee) missing.push('No Flexport consignee entity for market ' + (row.market || '—') + '.');
   if (!row.cargo_ready) missing.push('No cargo-ready date (production end) on the PO.');
   if (!row.delivery_date) assumed.push('No delivery date on the PO — Flexport will set it.');
+  // v28.223 (Ben, SUG-0042): name the booking by the Fulfil internal shipment (IS) number(s) and tag EVERY PO on the
+  // shipment (master + consolidated riders), instead of name = this PO only. IS numbers are read live from Fulfil
+  // (stock.shipment.internal, reference = PO). No IS found / Fulfil unavailable -> fall back to the PO number, noted.
+  let groupPos = [row.po];
+  try { groupPos = (await pool.query(`WITH me AS (SELECT coalesce(nullif(shipment_ref,''),po) sref, coalesce(nullif(master_po,''),po) mpo FROM planner.purchase_orders WHERE po=$1)
+      SELECT p.po FROM planner.purchase_orders p, me WHERE coalesce(nullif(p.shipment_ref,''),p.po)=me.sref OR coalesce(nullif(p.master_po,''),p.po)=me.mpo
+      ORDER BY (p.po=me.mpo) DESC, p.po`, [row.po])).rows.map(r => r.po); if (!groupPos.length) groupPos = [row.po]; } catch (e) { groupPos = [row.po]; }
+  const isByPo = {};
+  try {
+    const ships = await fulfilFetch('PUT', '/model/stock.shipment.internal/search_read', [[['reference', 'in', groupPos], ['state', '!=', 'cancelled']], 0, 200, [['id', 'DESC']], ['id', 'number', 'reference', 'state']]);
+    (Array.isArray(ships) ? ships : []).forEach(sh => { const ref = String(sh.reference || '').trim(); if (ref && sh.number && !isByPo[ref]) isByPo[ref] = String(sh.number); });
+  } catch (e) { assumed.push('Fulfil IS lookup unavailable (' + String(e.message || e).slice(0, 80) + '), so the booking is named by the PO number.'); }
+  const isNums = []; groupPos.forEach(p => { if (isByPo[p] && isNums.indexOf(isByPo[p]) < 0) isNums.push(isByPo[p]); });
+  if (!isNums.length && !assumed.some(a => /IS lookup/.test(a))) assumed.push('No Fulfil internal shipment (IS) found for ' + groupPos.join(', ') + ', so the booking is named by the PO number. Create the IS in Fulfil first to name it by IS.');
+  const missingIs = groupPos.filter(p => !isByPo[p]); if (isNums.length && missingIs.length) assumed.push('No IS yet for ' + missingIs.join(', ') + ' (still tagged on the booking).');
   const body = {
-    name: row.po,
-    metadata: { 'Purchase Order': [row.po] },
+    name: isNums.length ? isNums.join(' / ') : row.po,
+    metadata: { 'Purchase Order': groupPos },
     transportation_mode: mode || 'ocean',
     cargo_ready_date: row.cargo_ready || null,
     delivery_date: row.delivery_date || null,
@@ -7520,7 +7542,7 @@ async function buildFlexportBookingBody(po, opts) {
   assumed.push('Ports/routing are left for Flexport to quote (this lodges a booking REQUEST; you accept the quote in Flexport).');
   return {
     body,
-    info: { po: row.po, supplier: row.supplier_name, market: row.market, branch: row.branch, mode, cargo_ready: row.cargo_ready, delivery_date: row.delivery_date, pallets,
+    info: { po: row.po, booking_name: isNums.length ? isNums.join(' / ') : row.po, is_numbers: isByPo, pos: groupPos, supplier: row.supplier_name, market: row.market, branch: row.branch, mode, cargo_ready: row.cargo_ready, delivery_date: row.delivery_date, pallets,
       shipper: shipper ? { ref: shipper.ref, name: shipper.name } : null, consignee: consignee ? { ref: consignee.ref, name: consignee.name } : null },
     cargo_options: cargoOpts.map(o => ({ key: o.key, label: o.label })), cargo_choice: choiceKey,
     missing, assumed, can_submit: missing.length === 0,
@@ -7556,6 +7578,8 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
     if (!r.ok) { const msg = (j && j.error && (j.error.message || j.error.code)) || (j && j.message) || String(t).slice(0, 300); return res.status(r.status === 400 ? 400 : 502).json({ error: 'Flexport ' + r.status + ': ' + msg, sent: built.body }); }
     const bk = (j && j.data) || j;
     await logPoChange(po, 'Flexport booking lodged', [bk && bk.flex_id, bk && bk.name, bk && bk.id].filter(Boolean).join(' / ') || 'booking', authUser(req));
+    // v28.223 (SUG-0042): remember each PO's IS number so the Flexport import can link the IS-named shipment back to it
+    try { const m = (built.info && built.info.is_numbers) || {}; for (const p of Object.keys(m)) await pool.query(`UPDATE planner.purchase_orders SET fulfil_is_number=$2 WHERE po=$1 AND coalesce(fulfil_is_number,'')<>$2`, [p, m[p]]); } catch (e) { if (!/fulfil_is_number/.test(String(e.message))) console.error('[flexport] IS save failed:', e.message); }
     res.json({ ok: true, booking: { id: bk && bk.id, flex_id: bk && bk.flex_id, name: bk && bk.name, status: bk && bk.status, quote_status: bk && bk.quote_status }, sent: built.body });
     });
   } catch (e) { log500(e); res.status(e.code === 404 ? 404 : e.code === 'FLEXPORT_BUSY' ? 409 : 500).json({ error: e.message }); }

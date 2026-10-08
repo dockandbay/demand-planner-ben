@@ -3508,7 +3508,8 @@
       var crB=''; if(inf.cargo_ready){ var _cd=Math.round((Date.parse(inf.cargo_ready)-Date.parse(new Date().toISOString().slice(0,10)))/86400000);
         crB=' <span style="background:#fde68a;color:#92400e;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">'+(_cd<=0?'ready now':'ready in '+_cd+' day'+(_cd>1?'s':''))+'</span>'; }
       var cargoSel=(j.cargo_options&&j.cargo_options.length)?('<div style="display:flex;gap:8px;padding:2px 0;align-items:center"><div style="min-width:130px;color:var(--muted)">Cargo size</div><select id="fxb-cargo" style="font-size:12px;padding:3px 6px;border:1px solid #d0d0d0;border-radius:6px">'+j.cargo_options.map(function(o){return '<option value="'+esc(o.key)+'"'+(o.key===curCargo?' selected':'')+'>'+esc(o.label)+'</option>';}).join('')+'</select>'+(inf.pallets?' <span class="mut tiny">('+inf.pallets+' pallet est)</span>':'')+'</div>'):'';
-      var html=kv('Supplier',esc(inf.supplier||''))+kv('Market',esc(inf.market||''))+kv('Mode',esc((inf.mode||'').toUpperCase()))
+      var _isMap=inf.is_numbers||{}, _pos=inf.pos||[po];   // v28.223 (SUG-0042): booking named by Fulfil IS, all shipment POs as tags
+      var html=kv('Booking name','<b>'+esc(inf.booking_name||po)+'</b>'+(Object.keys(_isMap).length?' <span class="mut tiny">Fulfil internal shipment</span>':' <span class="mut tiny">no IS in Fulfil yet, named by PO</span>'))+kv('PO tags',_pos.map(function(p){ return '<span style="display:inline-block;background:var(--blue-soft);color:var(--blue-ink);border-radius:4px;padding:1px 6px;margin:0 4px 2px 0;font-size:11px">'+esc(p)+(_isMap[p]?' · '+esc(_isMap[p]):'')+'</span>'; }).join(''))+kv('Supplier',esc(inf.supplier||''))+kv('Market',esc(inf.market||''))+kv('Mode',esc((inf.mode||'').toUpperCase()))
         +kv('Cargo ready',(inf.cargo_ready?esc(fd(inf.cargo_ready)):'')+crB)+kv('Delivery date',inf.delivery_date?esc(fd(inf.delivery_date)):'')
         +kv('Shipper (Flexport)',inf.shipper?esc(inf.shipper.name)+' <span class="mut tiny">'+esc(inf.shipper.ref)+'</span>':'')
         +kv('Consignee (Flexport)',inf.consignee?esc(inf.consignee.name)+' <span class="mut tiny">'+esc(inf.consignee.ref)+'</span>':'')
@@ -3519,7 +3520,7 @@
       box.innerHTML=html;
       var csel=document.getElementById('fxb-cargo'); if(csel)csel.onchange=function(){ load(csel.value); };
       if(j.can_submit){ goBtn.style.display=''; }
-      goBtn.onclick=function(){ if(!confirm('Lodge a live booking request with Flexport for '+po+'? Flexport will quote it; you accept the quote in Flexport.'))return;
+      goBtn.onclick=function(){ if(!confirm('Lodge a live booking request with Flexport named '+(inf.booking_name||po)+' for '+_pos.join(', ')+'? Flexport will quote it; you accept the quote in Flexport.'))return;
         goBtn.disabled=true; goBtn.textContent='Lodging…';
         var _fxs=function(rebook){ return fetch('/api/supply/flexport/booking-submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,confirm:true,cargo:curCargo,rebook:!!rebook})}).then(function(r){return r.json();}); };
         _fxs(false).then(function(res){ if(res&&res.code==='ALREADY_BOOKED'&&confirm(res.error+'\n\nLodge ANOTHER booking request anyway?'))return _fxs(true); return res; }).then(function(res){   // v28.151 (review D6): server duplicate guard
