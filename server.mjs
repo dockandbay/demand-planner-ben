@@ -1701,13 +1701,13 @@ const _intakeMissing = e => /intake_deadlines|alert_snoozes/.test(String(e && e.
 app.get('/api/demand/intake', async (_req, res) => {
   try {
     const [d, s, a] = await Promise.all([
-      pool.query(`SELECT sku, country, to_char(deadline,'YYYY-MM-DD') deadline, coalesce(note,'') note, coalesce(set_by,'') set_by, to_char(updated_at,'YYYY-MM-DD') updated FROM planner.intake_deadlines`),
+      pool.query(`SELECT sku, location, to_char(deadline,'YYYY-MM-DD') deadline, coalesce(note,'') note, coalesce(set_by,'') set_by, to_char(updated_at,'YYYY-MM-DD') updated FROM planner.intake_deadlines`),
       pool.query(`SELECT alert_key, to_char(until,'YYYY-MM-DD') until, coalesce(reason,'') reason, coalesce(set_by,'') set_by FROM planner.alert_snoozes WHERE kind='intake' AND until >= current_date`),
       pool.query(`SELECT value FROM planner.app_settings WHERE key='intake_lead_days'`).catch(() => ({ rows: [] })),
     ]);
     const days = parseInt(a.rows[0] && a.rows[0].value, 10);
-    res.set('Cache-Control', 'no-store').json({ deadlines: d.rows, snoozes: s.rows, lead_days: Number.isFinite(days) && days >= 0 ? days : 14 });
-  } catch (e) { if (_intakeMissing(e)) return res.json({ deadlines: [], snoozes: [], lead_days: 14, missing_migration: 340 }); log500(e); res.status(500).json({ error: 'Could not load intake deadlines' }); }
+    res.set('Cache-Control', 'no-store').json({ deadlines: d.rows, snoozes: s.rows, lead_days: Number.isFinite(days) && days >= 0 ? days : 0 });
+  } catch (e) { if (_intakeMissing(e)) return res.json({ deadlines: [], snoozes: [], lead_days: 0, missing_migration: 340 }); log500(e); res.status(500).json({ error: 'Could not load intake deadlines' }); }
 });
 app.post('/api/demand/intake/deadline', async (req, res) => {
   try {
@@ -1716,14 +1716,14 @@ app.post('/api/demand/intake/deadline', async (req, res) => {
     if (!items.length || items.length > 2000) return res.status(400).json({ error: 'Send 1 to 2000 items' });
     let set = 0, cleared = 0;
     for (const it of items) {
-      const sku = String(it.sku || '').trim(), co = String(it.country || '').trim().toUpperCase();
-      if (!sku || !/^(UK|US|EU|AU|CA)$/.test(co)) continue;
+      const sku = String(it.sku || '').trim(), loc = String(it.location || '').trim().toLowerCase();   // sku '*' = the location's intake date
+      if (!sku || !/^(uk|us|eu|au|ca)_(3pl|fba)$/.test(loc)) continue;
       const dl = it.deadline ? String(it.deadline).slice(0, 10) : '';
-      if (!dl) { cleared += (await pool.query(`DELETE FROM planner.intake_deadlines WHERE sku=$1 AND country=$2`, [sku, co])).rowCount; continue; }
+      if (!dl) { cleared += (await pool.query(`DELETE FROM planner.intake_deadlines WHERE sku=$1 AND location=$2`, [sku, loc])).rowCount; continue; }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dl)) continue;
-      await pool.query(`INSERT INTO planner.intake_deadlines (sku,country,deadline,note,set_by,updated_at) VALUES ($1,$2,$3::date,$4,$5,now())
-        ON CONFLICT (sku,country) DO UPDATE SET deadline=EXCLUDED.deadline, note=coalesce(EXCLUDED.note, planner.intake_deadlines.note), set_by=EXCLUDED.set_by, updated_at=now()`,
-        [sku, co, dl, it.note != null ? String(it.note).slice(0, 300) : null, me.email || null]);
+      await pool.query(`INSERT INTO planner.intake_deadlines (sku,location,deadline,note,set_by,updated_at) VALUES ($1,$2,$3::date,$4,$5,now())
+        ON CONFLICT (sku,location) DO UPDATE SET deadline=EXCLUDED.deadline, note=coalesce(EXCLUDED.note, planner.intake_deadlines.note), set_by=EXCLUDED.set_by, updated_at=now()`,
+        [sku, loc, dl, it.note != null ? String(it.note).slice(0, 300) : null, me.email || null]);
       set++;
     }
     res.json({ ok: true, set, cleared });

@@ -1,3 +1,13 @@
+## v28.225 (Ben, branch review-fixes-2026-10-05): Intake deadlines by branch location (SUG-0045 follow-up)
+
+**Files:** `artifact_v16.7.html`, `server.mjs`, `migrations/340_intake_deadlines.sql` (reshaped, not yet on live), `lib/ai-logic/reports.md` (+ package.json, CHANGES.md).
+
+- Intake deadlines now work per **branch location** (UK / US / EU / AU, 3PL and FBA separately): stock, inbound and alerts are judged at that location.
+- **Intake date by branch location** panel: set one date per location; it overrides the launch date for every SKU there with no stock. A date on a SKU row overrides the location date. No date = the launch date itself (lead days now default **0**, still editable).
+- Rows show where their deadline came from (SKU / location / launch); location pills replace market pills; snooze keys are per SKU and location.
+- **Migration 340 changed shape** (`intake_deadlines` keyed by `sku, location`; `sku='*'` = location date). It was never applied on live, so Diviyaj runs the new file once. Sandbox reshaped (table was empty).
+- Verified on sandbox (jsdom, real data): 760 SKU x location rows, 65 counted alerts; a UK 3PL location date cleared its 3 alerts and clearing it restored them; a SKU date beat the location date; snooze 65 -> 64 -> 65; sandbox left empty; 0 JS errors.
+
 ## v28.224 (Ben, branch review-fixes-2026-10-05): DEMAND ▸ Analysis ▸ Intake deadlines with alert counters and snooze (SUG-0045)
 
 **Files:** `artifact_v16.7.html`, `server.mjs`, `supply/inject.html`, `migrations/340_intake_deadlines.sql`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). **Migration 340** (additive, idempotent). No env vars (uses `app_settings.intake_lead_days`, default 14).
