@@ -1,3 +1,11 @@
+## v28.226 (Ben, branch review-fixes-2026-10-05): Intake deadlines count Zalando and FBA transfers
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- **Zalando** now counts as a 3PL channel: an EU SKU sold on Zalando gets an EU 3PL intake row.
+- **FBA rows count pending transfers from the 3PL** as inbound (planned or dispatched, from the existing `/api/supply/fba-transfers/list`), so an FBA location fed from ILG is not flagged Missing while a transfer is on its way. A planned transfer without an ETA shows as No ETA; the next-inbound cell labels it "planned transfer" / "transfer".
+- Verified on sandbox (jsdom): transfers load (4 pending, all planned); the 25 EU Zalando-only SKUs on the sandbox are all closed last-year-only SKUs, correctly excluded; counters unchanged at 65; 0 JS errors.
+
 ## v28.225 (Ben, branch review-fixes-2026-10-05): Intake deadlines by branch location (SUG-0045 follow-up)
 
 **Files:** `artifact_v16.7.html`, `server.mjs`, `migrations/340_intake_deadlines.sql` (reshaped, not yet on live), `lib/ai-logic/reports.md` (+ package.json, CHANGES.md).

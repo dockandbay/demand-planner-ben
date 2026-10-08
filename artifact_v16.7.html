@@ -12831,7 +12831,7 @@ function _cmvSpread(total,w,act,cur){ var sw=0, i; for(i=0;i<w.length;i++)if(!ac
 // deadline, there is no stock there and nothing inbound (Missing), the inbound lands after it (Late), or it has no ETA.
 // The open-alert count (deadline overdue or within 60 days, not snoozed) shows on DEMAND ▸ Analysis and on the tab.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-var INTAKE={loaded:false,loading:false,dl:{},snooze:{},lead:0,err:null,mig:false}, INTAKE_UI={co:'ALL',st:'alerts',cat:'ALL',rw:'ALL',q:'',sel:{}};
+var INTAKE={loaded:false,loading:false,dl:{},snooze:{},lead:0,err:null,mig:false,fbaTx:[]}, INTAKE_UI={co:'ALL',st:'alerts',cat:'ALL',rw:'ALL',q:'',sel:{}};
 var INTAKE_LOCS=[['uk_3pl','UK','3PL'],['uk_fba','UK','FBA'],['us_3pl','US','3PL'],['us_fba','US','FBA'],['eu_3pl','EU','3PL'],['eu_fba','EU','FBA'],['au_3pl','AU','3PL'],['au_fba','AU','FBA']];
 function _ikLocLbl(w){ var l=INTAKE_LOCS.filter(function(x){ return x[0]===w; })[0]; return l?l[1]+' '+l[2]:w; }
 var INTAKE_SOON_DAYS=60, INTAKE_PAST_DAYS=90;
@@ -12839,18 +12839,22 @@ function _ikToday(){ return new Date().toISOString().slice(0,10); }
 function _ikAddDays(d,n){ var t=new Date(String(d).slice(0,10)+'T00:00:00Z'); t.setUTCDate(t.getUTCDate()+n); return t.toISOString().slice(0,10); }
 function _ikDiff(a,b){ return Math.round((Date.parse(String(a).slice(0,10)+'T00:00:00Z')-Date.parse(String(b).slice(0,10)+'T00:00:00Z'))/86400000); }
 function loadIntake(force,cb){ if(INTAKE.loading)return; if(INTAKE.loaded&&!force){ if(cb)cb(); return; } INTAKE.loading=true;
-  fetch('/api/demand/intake').then(function(r){ return r.json(); }).then(function(j){ var dl={}, sn={}; (j.deadlines||[]).forEach(function(d){ dl[d.sku+'|'+d.location]=d; }); (j.snoozes||[]).forEach(function(s){ sn[s.alert_key]=s; });
+  // v28.226: pending FBA transfers (dispatched or planned) count as inbound to that FBA location
+  var _tx=fetch('/api/supply/fba-transfers/list').then(function(r){ return r.json(); }).then(function(j){ INTAKE.fbaTx=(j&&Array.isArray(j.rows))?j.rows:[]; }).catch(function(){ INTAKE.fbaTx=[]; });
+  Promise.all([fetch('/api/demand/intake').then(function(r){ return r.json(); }),_tx]).then(function(a){ return a[0]; }).then(function(j){ var dl={}, sn={}; (j.deadlines||[]).forEach(function(d){ dl[d.sku+'|'+d.location]=d; }); (j.snoozes||[]).forEach(function(s){ sn[s.alert_key]=s; });
       INTAKE.dl=dl; INTAKE.snooze=sn; INTAKE.lead=(j.lead_days!=null?j.lead_days:0); INTAKE.mig=!!j.missing_migration; INTAKE.err=j.error||null; INTAKE.loaded=true; })
     .catch(function(e){ INTAKE.err='Could not load intake deadlines'; INTAKE.loaded=true; })
     .then(function(){ INTAKE.loading=false; intakeBadgeSync(); if(cb)cb(); }); }
 function _ikInbound(sku,wh0){ var whs=[wh0], out=[];
   whs.forEach(function(wh){ var k=sku+'|'+wh, inb=(typeof SKUI!=='undefined')?SKUI[k]:null; if(inb)(Array.isArray(inb)?inb:[inb]).forEach(function(x){ if(x&&(Number(x.qty)||x.eta))out.push({qty:Number(x.qty)||0,eta:x.eta?String(x.eta).slice(0,10):null,ref:x.ref||''}); });
     var op=(typeof SKUOI!=='undefined')?SKUOI[k]:null; if(op&&op.length)op.forEach(function(x){ out.push({qty:Number(x.qty)||0,eta:x.eta?String(x.eta).slice(0,10):null,ref:x.ref||''}); }); });
+  if(/_fba$/.test(wh0))(INTAKE.fbaTx||[]).forEach(function(t){ if(String(t.sku)!==sku||String(t.warehouse||'').toLowerCase()!==wh0)return; var q=Number(t.qty)||0; if(!q)return;
+    out.push({qty:q,eta:t.eta?String(t.eta).slice(0,10):null,ref:t.reference||'',tx:true,planned:!t.dispatched}); });   // v28.226: transfer from the 3PL (planned or dispatched)
   out.sort(function(a,b){ var ea=a.eta||'9999-99-99', eb=b.eta||'9999-99-99'; return ea<eb?-1:ea>eb?1:0; }); return out; }
 function intakeRows(){ var today=_ikToday(), lead=Number(INTAKE.lead)||0, rows=[], SK=(typeof SKUM!=='undefined'?SKUM:{});
   Object.keys(SK).forEach(function(sku){ var p=SK[sku]; if(!p||p.vt==='SET'||p.lyo)return;
     INTAKE_LOCS.forEach(function(L){ var wh=L[0], co=L[1], ctry=co.toLowerCase(), av=((p.av||{})[ctry])||''; if(!av)return;
-      if(L[2]==='FBA'?av.indexOf('f')<0:!/[dbt]/.test(av))return;   // 3PL serves DTC / B2B / TikTok; FBA its own channel
+      if(L[2]==='FBA'?av.indexOf('f')<0:!/[dbtz]/.test(av))return;   // 3PL serves DTC / B2B / TikTok / Zalando (v28.226); FBA its own channel
       var disc=((p.disc||{})[ctry])||''; if(disc&&String(disc).slice(0,10)<=today)return;
       var lch=String(((p.lch||{})[ctry])||'').slice(0,10), ex=INTAKE.dl[sku+'|'+wh], lx=INTAKE.dl['*|'+wh], src=ex?'sku':lx?'location':'launch';
       var dl=ex?ex.deadline:lx?lx.deadline:(lch?_ikAddDays(lch,-lead):'');
@@ -12885,7 +12889,7 @@ function renderIntakeView(body){
   var pill=function(r){ var m={missing:['Missing','var(--neg-bg)','var(--neg)'],late:['Late '+r.late+'d','var(--amber-bg)','var(--amber)'],nodate:['No ETA','var(--amber-bg)','var(--amber)'],ontrack:['On track','var(--pos-bg)','var(--pos)'],stock:['In stock','var(--pos-bg)','var(--pos)']}[r.st];
     return '<span style="background:'+m[1]+';color:'+m[2]+';font-size:10px;font-weight:800;border-radius:8px;padding:1px 7px;white-space:nowrap">'+m[0]+'</span>'+(r.snoozed?' <span style="font-size:10px;color:var(--muted);white-space:nowrap" title="'+esc(r.snooze.reason||'')+'">snoozed to '+fd(r.snooze.until)+'</span>':''); };
   var dueTxt=function(r){ return r.due<0?'<span style="color:var(--neg);font-weight:700">'+(-r.due)+'d overdue</span>':r.due===0?'<span style="color:var(--neg);font-weight:700">today</span>':'in '+r.due+'d'; };
-  var inbTxt=function(r){ var x=r.inb[0]; if(!x)return '<span style="color:var(--faint)">nothing inbound</span>'; return '<b>'+saFmt(x.qty)+'</b> '+(x.eta?fd(x.eta):'<span style="color:var(--amber)">no ETA</span>')+(x.ref?' <a class="ik-po" data-po="'+esc(x.ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer">'+esc(x.ref)+'</a>':'')+(r.inb.length>1?' <span style="color:var(--faint)">+'+(r.inb.length-1)+'</span>':''); };
+  var inbTxt=function(r){ var x=r.inb[0]; if(!x)return '<span style="color:var(--faint)">nothing inbound</span>'; return '<b>'+saFmt(x.qty)+'</b> '+(x.eta?fd(x.eta):'<span style="color:var(--amber)">no ETA</span>')+(x.tx?' <span style="font-size:10px;color:var(--muted)">'+(x.planned?'planned transfer':'transfer')+(x.ref?' '+esc(x.ref):'')+'</span>':(x.ref?' <a class="ik-po" data-po="'+esc(x.ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer">'+esc(x.ref)+'</a>':''))+(r.inb.length>1?' <span style="color:var(--faint)">+'+(r.inb.length-1)+'</span>':''); };
   var MAX=600, shown=list.slice(0,MAX);
   var h='<div id="ik" style="display:grid;gap:12px;padding:6px 0 30px">'
     +'<div><h2 style="margin:0;font-size:18px">Intake deadlines</h2><div style="color:var(--muted);font-size:12.5px;max-width:95ch">The date each SKU\'s stock must be in a branch location (3PL or FBA). Set it for a whole location below, or on a SKU row; otherwise it is the launch date (minus <input id="ik-lead" type="number" min="0" max="180" value="'+INTAKE.lead+'" style="width:52px;font-size:12px;padding:1px 4px;border:1px solid var(--line);border-radius:5px"> days). An alert means that by the deadline there is no stock and nothing inbound, the inbound arrives late, or it has no ETA. The menu counters show alerts that are overdue or due within '+INTAKE_SOON_DAYS+' days and not snoozed.</div>'

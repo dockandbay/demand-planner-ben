@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.225
+verified_version: v28.226
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -443,7 +443,7 @@ verified_version: v28.225
 - REPORTS ▸ Stock Availability and the SA drawer show a Description column (the product name) next to the SKU, and on phone cards under the SKU. The filter box accepts SKU codes (any word containing a hyphen keeps the old "any of these SKUs" match) or plain words, which must all appear in the SKU or the description ("whitsunday large"). Display only. (source: saRows, saTableHTML, saRowMatch)
 
 ## Intake deadlines (DEMAND ▸ Analysis ▸ Intake deadlines, v28.224/225, SUG-0045)
-- Rows are SKU x BRANCH LOCATION: UK/US/EU/AU 3PL (if the SKU sells DTC, B2B or TikTok there) and FBA (if it sells on FBA there); masters only, not discontinued. Deadline precedence: a SKU date at that location > the location's intake date (planner.intake_deadlines sku='*') > the market launch date minus app_settings.intake_lead_days (default 0). Deadlines more than 90 days past are ignored. (source: intakeRows)
-- Status by the deadline, at that location only: In stock (stock there; US FBA includes AWD); On track (an inbound ETA to that location on or before the deadline); No ETA; Late (earliest inbound after the deadline, by N days); Missing (no stock there, nothing inbound). Missing, Late and No ETA are alerts. (source: intakeRows, _ikInbound)
+- Rows are SKU x BRANCH LOCATION: UK/US/EU/AU 3PL (if the SKU sells DTC, B2B, TikTok or Zalando there) and FBA (if it sells on FBA there); masters only, not discontinued. Deadline precedence: a SKU date at that location > the location's intake date (planner.intake_deadlines sku='*') > the market launch date minus app_settings.intake_lead_days (default 0). Deadlines more than 90 days past are ignored. (source: intakeRows)
+- Status by the deadline, at that location only: In stock (stock there; US FBA includes AWD); On track (an inbound ETA to that location on or before the deadline; for FBA this includes pending transfers from the 3PL, planned or dispatched, from /api/supply/fba-transfers/list, and a planned transfer with no ETA counts as No ETA); No ETA; Late (earliest inbound after the deadline, by N days); Missing (no stock there, nothing inbound). Missing, Late and No ETA are alerts. (source: intakeRows, _ikInbound)
 - Snooze hides an alert until a date (planner.alert_snoozes, key intake|SKU|location), optional reason; bulk set SKU dates and bulk snooze on selected rows. (source: renderIntakeView; server.mjs :: /api/demand/intake)
 - The red counter on DEMAND ▸ Analysis and on the Intake deadlines tab = alerts not snoozed whose deadline is overdue or within 60 days. (source: intakeAlertCount, intakeBadgeSync)
