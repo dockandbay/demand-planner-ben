@@ -12681,7 +12681,8 @@ function renderCrossMarketView(body){
       return '<tr class="gt"><td class="cmv-st">'+label+'</td><td></td><td></td><td></td>'+pad+'<td class="cg0">'+fmt(t2)+'</td>'+(W?'<td>'+sgn(t2-bb)+'</td>':'')+'<td>'+fmt(l)+'</td><td>'+pct(t2,l)+'</td>'+a.map(function(x,i){ return '<td class="'+cg(i)+'">'+fmt(x)+'</td>'; }).join('')+'</tr>'; };
     var span=7+(W?3:0)+cols.length;
     h+='<tr class="grp"><td class="cmv-st" colspan="4">&#9660; Active ('+V.act.length+')</td><td colspan="'+(span-4)+'"></td></tr>'+V.act.map(line).join('')+gtot(V.act,'Active total');
-    // sub-category forecast rows + gap vs the active SKUs of that sub-category
+    // sub-category forecast rows + gap vs the active SKUs of that sub-category (v28.229 Ben: shown BELOW the discontinued SKUs; built into sh, appended after them)
+    var h0=h; h='';
     V.subs.forEach(function(o,si){ var ri=V.act.length+si, cv=cols.map(function(c){ return subv(o,c); }), cb=cols.map(function(c){ return sbase(o,c); }), T=_cmvSum(cv), B=_cmvSum(cb);
       var hasCh=W&&ch.some(function(x){ return x.kind==='sub'&&x.o===o; });
       var sk=cols.map(function(c){ return V.act.reduce(function(s,r){ return s+(r.sub===o.sub?tyv(r,c):0); },0); });
@@ -12689,8 +12690,9 @@ function renderCrossMarketView(body){
         +'<td class="cg0"><b>'+fmt(T)+'</b></td>'+(W?'<td>'+sgn(T-B)+'</td>':'')+'<td></td><td></td>'
         +cols.map(function(c,i){ var chg=W&&cv[i]!==cb[i], k=o.sub+'|'+ck(c); if(W)return '<td class="xc '+cg(i)+(chg?' chg':'')+'" data-r="'+ri+'" data-c="'+i+'" data-e="'+(o.has[ck(c)]?1:0)+'" title="'+(CMV.sdr[k]!=null?'Edited directly':CMV.follow?'Moves with SKU changes':'')+'">'+fmt(cv[i])+(chg?'<span class="cmv-was x">'+nf(cb[i])+'</span>':'')+'</td>'; return '<td class="'+cg(i)+'">'+fmt(cv[i])+'</td>'; }).join('')+'</tr>';
       h+='<tr><td class="cmv-st cmv-hint">Gap: sub-category minus active SKUs</td><td></td><td></td><td></td>'+pad+'<td class="cg0">'+sgn(T-_cmvSum(sk))+'</td>'+(W?'<td></td>':'')+'<td></td><td></td>'+cols.map(function(c,i){ return '<td class="'+cg(i)+'">'+sgn(cv[i]-sk[i])+'</td>'; }).join('')+'</tr>'; });
+    var sh=h; h=h0;
     h+='<tr class="grp" id="cmv-dt" tabindex="0" aria-expanded="'+CMV.openDisc+'"><td class="cmv-st" colspan="4">'+(CMV.openDisc?'&#9660;':'&#9654;')+' Discontinued ('+V.dis.length+')</td><td colspan="'+(span-4)+'" style="text-transform:none;letter-spacing:0;font-weight:500">'+(CMV.openDisc?'':'click to expand')+'</td></tr>'
-      +(CMV.openDisc?V.dis.map(function(r){ return line(r,-1); }).join(''):'')+gtot(V.dis,'Discontinued total')+'</tbody>';
+      +(CMV.openDisc?V.dis.map(function(r){ return line(r,-1); }).join(''):'')+gtot(V.dis,'Discontinued total')+sh+'</tbody>';
     var fr=function(label,vals,tv,extra){ return '<tr><td class="cmv-st">'+label+'</td><td></td><td></td><td></td>'+pad+'<td class="cg0">'+tv+'</td>'+(W?'<td>'+(extra||'')+'</td>':'')+'<td></td><td></td>'+vals.map(function(x,i){ return '<td class="'+cg(i)+'">'+x+'</td>'; }).join('')+'</tr>'; };
     h+='<tfoot>'+fr('TY total'+(W&&ch.length?' (draft)':''),tyT.map(fmt),fmt(TY),sgn(TY-BA))+(W&&TY!==BA?fr('TY current',baT.map(fmt),fmt(BA)):'')+fr('LY total ('+lyLbl+')',lyT.map(fmt),fmt(LY))
       +fr('Var units',tyT.map(function(x,i){ return sgn(x-lyT[i]); }),sgn(TY-LY))+fr('Var %',tyT.map(function(x,i){ return pct(x,lyT[i]); }),pct(TY,LY))
@@ -12801,8 +12803,7 @@ function renderCrossMarketView(body){
   function exportXlsx(){ if(!D)return; var cols=V.cols, W=CMV.ws, head=['SKU','Group','Sub-category','ABC','Season','Release','TY total','LY total','Var %'].concat(W?['TY current']:[]).concat(cols.map(function(c){ return c[0]+' '+CMV_CHL[c[1]]; })), g=[['Cross Market view: '+(CMV.cat==='ALL'?'All categories':CMV.cat)+', '+mlbl(D.months[0])+' to '+mlbl(D.months[D.months.length-1])+(W&&CMV.wsName?' (worksheet: '+CMV.wsName+')':'')],head];
     var vp=function(a,b){ return b?Math.round((a-b)/b*1000)/10:''; };
     var add=function(r,grp){ var t=rowT(r,tyv), l=rowT(r,lyv); g.push([r.sku,grp,r.sub,r.p.ti||'',r.p.csf||r.p.cs||'',r.p.rw||'',t,l,vp(t,l)].concat(W?[rowT(r,base)]:[]).concat(cols.map(function(c){ return tyv(r,c); }))); };
-    V.act.forEach(function(r){ add(r,'Active'); }); V.subs.forEach(function(o){ var cv=cols.map(function(c){ return subv(o,c); }); g.push(['Sub-category forecast','Sub-category',o.sub,'','','',_cmvSum(cv),'',''].concat(W?[_cmvSum(cols.map(function(c){ return sbase(o,c); }))]:[]).concat(cv)); });
-    V.dis.forEach(function(r){ add(r,'Discontinued'); });
+    V.act.forEach(function(r){ add(r,'Active'); }); V.dis.forEach(function(r){ add(r,'Discontinued'); }); V.subs.forEach(function(o){ var cv=cols.map(function(c){ return subv(o,c); }); g.push(['Sub-category forecast','Sub-category',o.sub,'','','',_cmvSum(cv),'',''].concat(W?[_cmvSum(cols.map(function(c){ return sbase(o,c); }))]:[]).concat(cv)); });
     var tyT=cols.map(function(c){ return D.rows.reduce(function(s,r){ return s+tyv(r,c); },0); }), lyT=cols.map(function(c){ return D.rows.reduce(function(s,r){ return s+lyv(r,c); },0); });
     g.push(['TY total','','','','','',_cmvSum(tyT),'',''].concat(W?['']:[]).concat(tyT)); g.push(['LY total','','','','','','',_cmvSum(lyT),''].concat(W?['']:[]).concat(lyT));
     var bytes=buildXlsx('Cross market',g), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), url=URL.createObjectURL(blob), a=document.createElement('a');

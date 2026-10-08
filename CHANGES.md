@@ -1,3 +1,10 @@
+## v28.229 (Ben, branch review-fixes-2026-10-05): Cross Market, sub-category forecast below discontinued SKUs
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- DEMAND ▸ Cross Market rows now run Active SKUs, Discontinued SKUs, then the Sub-category forecast and its gap row (was between Active and Discontinued). The xlsx export follows the same order.
+- Verified on sandbox (jsdom, Bag - Beach): order correct with Discontinued collapsed, expanded and in Worksheet mode; the sub-category row stays editable in Worksheet mode. 0 JS errors.
+
 ## v28.228 (Ben, branch review-fixes-2026-10-05): Cross Market view, stray blue bar and white box removed
 
 **Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env vars.
