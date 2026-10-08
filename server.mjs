@@ -1355,6 +1355,7 @@ function requiredCap(method, p) {
       || p.startsWith('/api/filter-rules')
       || p.startsWith('/api/auto-forecast/')
       || p.startsWith('/api/demand/worksheets')   // v28.216 Cross Market saved worksheets
+      || p.startsWith('/api/demand/intake/')   // v28.224 intake deadlines + snoozes
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
@@ -1693,6 +1694,52 @@ app.delete('/api/demand/worksheets/:id', async (req, res) => {
     const r = await pool.query(`DELETE FROM planner.demand_worksheets WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, deleted: r.rowCount });
   } catch (e) { if (_wsMissing(e)) return res.status(503).json({ error: 'Saved worksheets need migration 338' }); log500(e); res.status(500).json({ error: 'Could not delete the worksheet' }); }
+});
+// v28.224 (Ben, SUG-0045): DEMAND ▸ Analysis ▸ Intake deadlines (migration 340). Explicit deadlines per SKU x country and
+// per-alert snoozes. Alerts themselves are computed in the client from stock, inbound and launch dates.
+const _intakeMissing = e => /intake_deadlines|alert_snoozes/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
+app.get('/api/demand/intake', async (_req, res) => {
+  try {
+    const [d, s, a] = await Promise.all([
+      pool.query(`SELECT sku, country, to_char(deadline,'YYYY-MM-DD') deadline, coalesce(note,'') note, coalesce(set_by,'') set_by, to_char(updated_at,'YYYY-MM-DD') updated FROM planner.intake_deadlines`),
+      pool.query(`SELECT alert_key, to_char(until,'YYYY-MM-DD') until, coalesce(reason,'') reason, coalesce(set_by,'') set_by FROM planner.alert_snoozes WHERE kind='intake' AND until >= current_date`),
+      pool.query(`SELECT value FROM planner.app_settings WHERE key='intake_lead_days'`).catch(() => ({ rows: [] })),
+    ]);
+    const days = parseInt(a.rows[0] && a.rows[0].value, 10);
+    res.set('Cache-Control', 'no-store').json({ deadlines: d.rows, snoozes: s.rows, lead_days: Number.isFinite(days) && days >= 0 ? days : 14 });
+  } catch (e) { if (_intakeMissing(e)) return res.json({ deadlines: [], snoozes: [], lead_days: 14, missing_migration: 340 }); log500(e); res.status(500).json({ error: 'Could not load intake deadlines' }); }
+});
+app.post('/api/demand/intake/deadline', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed' });
+    const b = req.body || {}, items = Array.isArray(b.items) ? b.items : [b];
+    if (!items.length || items.length > 2000) return res.status(400).json({ error: 'Send 1 to 2000 items' });
+    let set = 0, cleared = 0;
+    for (const it of items) {
+      const sku = String(it.sku || '').trim(), co = String(it.country || '').trim().toUpperCase();
+      if (!sku || !/^(UK|US|EU|AU|CA)$/.test(co)) continue;
+      const dl = it.deadline ? String(it.deadline).slice(0, 10) : '';
+      if (!dl) { cleared += (await pool.query(`DELETE FROM planner.intake_deadlines WHERE sku=$1 AND country=$2`, [sku, co])).rowCount; continue; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dl)) continue;
+      await pool.query(`INSERT INTO planner.intake_deadlines (sku,country,deadline,note,set_by,updated_at) VALUES ($1,$2,$3::date,$4,$5,now())
+        ON CONFLICT (sku,country) DO UPDATE SET deadline=EXCLUDED.deadline, note=coalesce(EXCLUDED.note, planner.intake_deadlines.note), set_by=EXCLUDED.set_by, updated_at=now()`,
+        [sku, co, dl, it.note != null ? String(it.note).slice(0, 300) : null, me.email || null]);
+      set++;
+    }
+    res.json({ ok: true, set, cleared });
+  } catch (e) { if (_intakeMissing(e)) return res.status(503).json({ error: 'Intake deadlines need migration 340' }); log500(e); res.status(500).json({ error: 'Could not save the deadline' }); }
+});
+app.post('/api/demand/intake/snooze', async (req, res) => {
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed' });
+    const b = req.body || {}, keys = (Array.isArray(b.keys) ? b.keys : [b.key]).map(k => String(k || '').trim()).filter(k => /^intake\|/.test(k)).slice(0, 2000);
+    if (!keys.length) return res.status(400).json({ error: 'key required' });
+    if (!b.until) { const r = await pool.query(`DELETE FROM planner.alert_snoozes WHERE alert_key = ANY($1)`, [keys]); return res.json({ ok: true, unsnoozed: r.rowCount }); }
+    const until = String(b.until).slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) return res.status(400).json({ error: 'until must be YYYY-MM-DD' });
+    for (const k of keys) await pool.query(`INSERT INTO planner.alert_snoozes (alert_key,kind,until,reason,set_by,set_at) VALUES ($1,'intake',$2::date,$3,$4,now())
+      ON CONFLICT (alert_key) DO UPDATE SET until=EXCLUDED.until, reason=EXCLUDED.reason, set_by=EXCLUDED.set_by, set_at=now()`, [k, until, b.reason ? String(b.reason).slice(0, 300) : null, me.email || null]);
+    res.json({ ok: true, snoozed: keys.length, until });
+  } catch (e) { if (_intakeMissing(e)) return res.status(503).json({ error: 'Snooze needs migration 340' }); log500(e); res.status(500).json({ error: 'Could not snooze' }); }
 });
 app.get('/api/demand/trends/plan-sanity', async (req, res) => {
   try {

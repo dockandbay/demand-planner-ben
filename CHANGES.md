@@ -1,3 +1,15 @@
+## v28.224 (Ben, branch review-fixes-2026-10-05): DEMAND ▸ Analysis ▸ Intake deadlines with alert counters and snooze (SUG-0045)
+
+**Files:** `artifact_v16.7.html`, `server.mjs`, `supply/inject.html`, `migrations/340_intake_deadlines.sql`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). **Migration 340** (additive, idempotent). No env vars (uses `app_settings.intake_lead_days`, default 14).
+
+- New **DEMAND ▸ Analysis ▸ Intake deadlines** (`#/demand/analysis/intake`): every SKU x market has an intake deadline, set explicitly (inline date, or bulk on selected rows) or defaulting to the launch date minus N days (N editable on the page).
+- **Alerts** when, by the deadline, there is no stock and nothing inbound (Missing), the inbound arrives late (Late, by N days) or has no ETA. Status cards, market pills, category / release window / search filters, next inbound with a PO link.
+- **Snooze** per alert (7 / 14 / 30 days or until a date, optional reason), bulk snooze / unsnooze.
+- **Red counters** on the DEMAND **Analysis** button and the **Intake deadlines** tab = open alerts overdue or due within 60 days, not snoozed.
+- Endpoints: `GET /api/demand/intake`, `POST /api/demand/intake/deadline`, `POST /api/demand/intake/snooze` (demand edit rights). Until migration 340: default deadlines only, edits / snoozes return 503.
+- Also: `#/demand/analysis/stockcover` deep link now resolves under Analysis.
+- Verified on sandbox (jsdom, real data): 652 SKU x market rows (309 Missing, 9 Late, 200 On track, 134 In stock); counters 18 on both menu items; snooze 18 -> 17 and unsnooze back to 18; an explicit deadline clears the alert and reset restores it; 0 JS errors. Sandbox left as found.
+
 ## v28.223 (Ben, branch review-fixes-2026-10-05): Flexport booking named by Fulfil IS number, all POs as tags (SUG-0042)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/339_po_fulfil_is_number.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 339** (additive, idempotent). No env vars.

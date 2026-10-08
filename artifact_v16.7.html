@@ -10617,7 +10617,8 @@ function render(){
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
-    else if(DEMAND_VIEW==='crossmarket') renderCrossMarketView(body);   // v28.216 DEMAND ▸ Cross Market view (#/demand/crossmarket)
+    else if(DEMAND_VIEW==='crossmarket') renderCrossMarketView(body);
+    else if(DEMAND_VIEW==='intake') renderIntakeView(body);   // v28.224 DEMAND ▸ Analysis ▸ Intake deadlines (#/demand/analysis/intake)   // v28.216 DEMAND ▸ Cross Market view (#/demand/crossmarket)
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
     else if(DEMAND_VIEW==='accuracy') renderAccuracyView(body);   // DEMAND ▸ Accuracy — forecast accuracy & bias vs locked snapshots (#/demand/accuracy)
     else if(DEMAND_VIEW==='fcanom') renderForecastAnomaliesView(body);   // DEMAND ▸ Analysis ▸ Forecast anomalies — sustained (2+ mo) actual-vs-forecast divergence per SKU×country×channel
@@ -12823,6 +12824,116 @@ function _cmvSpread(total,w,act,cur){ var sw=0, i; for(i=0;i<w.length;i++)if(!ac
   var raw=w.map(function(x,j){ return act[j]?0:total*(x||0)/sw; }), fl=raw.map(Math.floor), rem=total-fl.reduce(function(a,b){ return a+b; },0);
   raw.map(function(x,j){ return [x-fl[j],j]; }).filter(function(p){ return !act[p[1]]; }).sort(function(a,b){ return b[0]-a[0]; }).slice(0,rem).forEach(function(p){ fl[p[1]]++; });
   return out.map(function(v,j){ return act[j]?v:fl[j]; }); }
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// v28.224 (Ben, SUG-0045): DEMAND ▸ Analysis ▸ Intake deadlines. Each SKU x country has an intake deadline (the date its
+// stock must be in the market's warehouses): explicit if set here, else the country launch date minus N days
+// (app_settings.intake_lead_days, default 14). An ALERT is raised when, by that deadline, there is no stock and nothing
+// inbound (Missing), the inbound lands after it (Late), or the inbound has no ETA (No ETA). Alerts can be snoozed.
+// The open-alert count (deadline overdue or within 60 days, not snoozed) shows on DEMAND ▸ Analysis and on the tab.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+var INTAKE={loaded:false,loading:false,dl:{},snooze:{},lead:14,err:null,mig:false}, INTAKE_UI={co:'ALL',st:'alerts',cat:'ALL',rw:'ALL',q:'',sel:{}};
+var INTAKE_SOON_DAYS=60, INTAKE_PAST_DAYS=90;
+function _ikToday(){ return new Date().toISOString().slice(0,10); }
+function _ikAddDays(d,n){ var t=new Date(String(d).slice(0,10)+'T00:00:00Z'); t.setUTCDate(t.getUTCDate()+n); return t.toISOString().slice(0,10); }
+function _ikDiff(a,b){ return Math.round((Date.parse(String(a).slice(0,10)+'T00:00:00Z')-Date.parse(String(b).slice(0,10)+'T00:00:00Z'))/86400000); }
+function loadIntake(force,cb){ if(INTAKE.loading)return; if(INTAKE.loaded&&!force){ if(cb)cb(); return; } INTAKE.loading=true;
+  fetch('/api/demand/intake').then(function(r){ return r.json(); }).then(function(j){ var dl={}, sn={}; (j.deadlines||[]).forEach(function(d){ dl[d.sku+'|'+d.country]=d; }); (j.snoozes||[]).forEach(function(s){ sn[s.alert_key]=s; });
+      INTAKE.dl=dl; INTAKE.snooze=sn; INTAKE.lead=(j.lead_days!=null?j.lead_days:14); INTAKE.mig=!!j.missing_migration; INTAKE.err=j.error||null; INTAKE.loaded=true; })
+    .catch(function(e){ INTAKE.err='Could not load intake deadlines'; INTAKE.loaded=true; })
+    .then(function(){ INTAKE.loading=false; intakeBadgeSync(); if(cb)cb(); }); }
+function _ikInbound(sku,co){ var whs=[SA_WH3[co],SA_WHF[co]].filter(Boolean), out=[];
+  whs.forEach(function(wh){ var k=sku+'|'+wh, inb=(typeof SKUI!=='undefined')?SKUI[k]:null; if(inb)(Array.isArray(inb)?inb:[inb]).forEach(function(x){ if(x&&(Number(x.qty)||x.eta))out.push({qty:Number(x.qty)||0,eta:x.eta?String(x.eta).slice(0,10):null,ref:x.ref||''}); });
+    var op=(typeof SKUOI!=='undefined')?SKUOI[k]:null; if(op&&op.length)op.forEach(function(x){ out.push({qty:Number(x.qty)||0,eta:x.eta?String(x.eta).slice(0,10):null,ref:x.ref||''}); }); });
+  out.sort(function(a,b){ var ea=a.eta||'9999-99-99', eb=b.eta||'9999-99-99'; return ea<eb?-1:ea>eb?1:0; }); return out; }
+function intakeRows(){ var today=_ikToday(), lead=Number(INTAKE.lead)||0, rows=[], SK=(typeof SKUM!=='undefined'?SKUM:{});
+  Object.keys(SK).forEach(function(sku){ var p=SK[sku]; if(!p||p.vt==='SET'||p.lyo)return;
+    ['UK','US','EU','AU'].forEach(function(co){ var ctry=co.toLowerCase(), av=((p.av||{})[ctry])||''; if(!av)return;
+      var disc=((p.disc||{})[ctry])||''; if(disc&&String(disc).slice(0,10)<=today)return;
+      var lch=String(((p.lch||{})[ctry])||'').slice(0,10), ex=INTAKE.dl[sku+'|'+co], dl=ex?ex.deadline:(lch?_ikAddDays(lch,-lead):'');
+      if(!dl||_ikDiff(dl,today)< -INTAKE_PAST_DAYS)return;
+      var inv=p.inv||{}, stock=(SA_WH3[co]?(inv[SA_WH3[co]]||0):0)+(SA_WHF[co]?(inv[SA_WHF[co]]||0):0)+(co==='US'&&typeof awdOf==='function'?(awdOf(sku,co)||0):0);
+      var inb=_ikInbound(sku,co), st, late=0;
+      if(stock>0)st='stock';
+      else if(inb.some(function(x){ return x.eta&&x.eta<=dl; }))st='ontrack';
+      else if(inb.some(function(x){ return !x.eta; }))st='nodate';
+      else if(inb.length){ st='late'; late=_ikDiff(inb[0].eta,dl); }
+      else st='missing';
+      var key='intake|'+sku+'|'+co, sz=INTAKE.snooze[key], snoozed=!!(sz&&sz.until>=today), alert=(st==='late'||st==='nodate'||st==='missing');
+      rows.push({sku:sku,nm:p.n||'',cat:(typeof _subcatParent==='function'&&_subcatParent(p.s))||p.c||'',sub:p.s||'',rw:p.rw||'',co:co,lch:lch,dl:dl,explicit:!!ex,note:ex?ex.note:'',stock:stock,inb:inb,st:st,late:late,key:key,snoozed:snoozed,snooze:sz||null,alert:alert,
+        due:_ikDiff(dl,today), counted:alert&&!snoozed&&_ikDiff(dl,today)<=INTAKE_SOON_DAYS}); }); });
+  rows.sort(function(a,b){ return (b.counted-a.counted)||(a.dl<b.dl?-1:a.dl>b.dl?1:0)||(a.sku<b.sku?-1:1); }); return rows; }
+function intakeAlertCount(){ if(!INTAKE.loaded||typeof SKUM==='undefined'||!Object.keys(SKUM).length)return null; try{ return intakeRows().filter(function(r){ return r.counted; }).length; }catch(e){ return null; } }
+function _ikBadge(n){ return n?'<span class="ik-badge" style="display:inline-block;min-width:16px;padding:0 5px;margin-left:5px;border-radius:999px;background:var(--neg);color:#fff;font-size:10px;font-weight:800;line-height:16px;text-align:center;vertical-align:1px">'+n+'</span>':''; }
+function intakeBadgeSync(){ var n=intakeAlertCount(); window.__intakeCount=n;
+  var b=document.getElementById('dnav-analysis-btn'); if(b){ var o=b.querySelector('.ik-badge'); if(o)o.remove(); if(n)b.insertAdjacentHTML('beforeend',_ikBadge(n)); b.title=(n?n+' intake deadline alert'+(n===1?'':'s')+' · ':'')+'Summary, Snapshots, Trends, Safety stock, Ship bags, Intake deadlines'; }
+  var t=document.querySelector('#demand-analysis-nav [data-da="intake"]'); if(t){ var o2=t.querySelector('.ik-badge'); if(o2)o2.remove(); if(n)t.insertAdjacentHTML('beforeend',_ikBadge(n)); } }
+function renderIntakeView(body){
+  var esc=hzEscH, fd=function(d){ return d?saDate(d):'—'; };
+  if(typeof SKUM==='undefined'||!Object.keys(SKUM).length){ body.innerHTML='<div style="padding:18px;color:var(--muted)">Loading SKU data…</div>'; try{ if(typeof hzWhenSkuData==='function')hzWhenSkuData('intake',function(){ if(DEMAND_VIEW==='intake')renderIntakeView(body); }); }catch(e){} return; }
+  if(!INTAKE.loaded){ body.innerHTML='<div style="padding:18px;color:var(--muted)">Loading intake deadlines…</div>'; loadIntake(false,function(){ if(DEMAND_VIEW==='intake')renderIntakeView(body); }); return; }
+  var all=intakeRows(), U=INTAKE_UI, today=_ikToday();
+  var cats={}, rws={}; all.forEach(function(r){ if(r.cat)cats[r.cat]=1; if(r.rw)rws[r.rw]=1; });
+  var list=all.filter(function(r){ if(U.co!=='ALL'&&r.co!==U.co)return false; if(U.cat!=='ALL'&&r.cat!==U.cat)return false; if(U.rw!=='ALL'&&r.rw!==U.rw)return false;
+    if(U.st==='alerts'&&!(r.alert&&!r.snoozed))return false; if(U.st==='snoozed'&&!r.snoozed)return false; if(U.st==='ok'&&r.alert)return false;
+    if(U.q){ var h=(r.sku+' '+r.nm).toLowerCase(); if(!String(U.q).toLowerCase().split(/\s+/).filter(Boolean).every(function(t){ return h.indexOf(t)>=0; }))return false; } return true; });
+  var cnt=function(f){ return all.filter(f).length; };
+  var C={miss:cnt(function(r){ return r.st==='missing'&&!r.snoozed; }),late:cnt(function(r){ return r.st==='late'&&!r.snoozed; }),nod:cnt(function(r){ return r.st==='nodate'&&!r.snoozed; }),sn:cnt(function(r){ return r.snoozed; }),ok:cnt(function(r){ return !r.alert; }),due:cnt(function(r){ return r.counted; })};
+  var pill=function(r){ var m={missing:['Missing','var(--neg-bg)','var(--neg)'],late:['Late '+r.late+'d','var(--amber-bg)','var(--amber)'],nodate:['No ETA','var(--amber-bg)','var(--amber)'],ontrack:['On track','var(--pos-bg)','var(--pos)'],stock:['In stock','var(--pos-bg)','var(--pos)']}[r.st];
+    return '<span style="background:'+m[1]+';color:'+m[2]+';font-size:10px;font-weight:800;border-radius:8px;padding:1px 7px;white-space:nowrap">'+m[0]+'</span>'+(r.snoozed?' <span style="font-size:10px;color:var(--muted);white-space:nowrap" title="'+esc(r.snooze.reason||'')+'">snoozed to '+fd(r.snooze.until)+'</span>':''); };
+  var dueTxt=function(r){ return r.due<0?'<span style="color:var(--neg);font-weight:700">'+(-r.due)+'d overdue</span>':r.due===0?'<span style="color:var(--neg);font-weight:700">today</span>':'in '+r.due+'d'; };
+  var inbTxt=function(r){ var x=r.inb[0]; if(!x)return '<span style="color:var(--faint)">nothing inbound</span>'; return '<b>'+saFmt(x.qty)+'</b> '+(x.eta?fd(x.eta):'<span style="color:var(--amber)">no ETA</span>')+(x.ref?' <a class="ik-po" data-po="'+esc(x.ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer">'+esc(x.ref)+'</a>':'')+(r.inb.length>1?' <span style="color:var(--faint)">+'+(r.inb.length-1)+'</span>':''); };
+  var MAX=600, shown=list.slice(0,MAX);
+  var h='<div id="ik" style="display:grid;gap:12px;padding:6px 0 30px">'
+    +'<div><h2 style="margin:0;font-size:18px">Intake deadlines</h2><div style="color:var(--muted);font-size:12.5px;max-width:95ch">The date each SKU\'s stock must be in a market\'s warehouses. Set it per SKU and country, or it defaults to the launch date minus <input id="ik-lead" type="number" min="0" max="180" value="'+INTAKE.lead+'" style="width:52px;font-size:12px;padding:1px 4px;border:1px solid var(--line);border-radius:5px"> days. An alert means that by the deadline there is no stock and nothing inbound, the inbound arrives late, or it has no ETA. The menu counters show alerts that are overdue or due within '+INTAKE_SOON_DAYS+' days and not snoozed.</div>'
+    +(INTAKE.mig?'<div style="margin-top:6px;color:var(--amber);font-size:12px">Deadlines and snoozes need migration 340; showing default deadlines only.</div>':'')+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'+[['alerts','Alerts',C.miss+C.late+C.nod,'var(--neg)'],['due','Counted (due or overdue)',C.due,'var(--neg)'],['snoozed','Snoozed',C.sn,'var(--muted)'],['ok','On track or in stock',C.ok,'var(--pos)'],['all','All',all.length,'var(--ink-soft)']].map(function(c){ var on=U.st===c[0]; return '<button class="ik-st" data-st="'+c[0]+'" style="border:1px solid '+(on?'var(--blue)':'var(--line)')+';background:'+(on?'var(--blue-soft)':'var(--card)')+';border-radius:10px;padding:6px 12px;cursor:pointer;text-align:left;font:inherit"><div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">'+c[1]+'</div><div style="font-size:18px;font-weight:800;color:'+c[3]+'">'+c[2]+'</div></button>'; }).join('')
+      +'<div style="display:grid;gap:2px;font-size:11px;color:var(--muted);align-content:center;padding-left:6px">Missing <b style="color:var(--neg)">'+C.miss+'</b> · Late <b style="color:var(--amber)">'+C.late+'</b> · No ETA <b style="color:var(--amber)">'+C.nod+'</b></div></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+['ALL','UK','US','EU','AU'].map(function(c){ return '<button class="pill ik-co'+(U.co===c?' active':'')+'" data-co="'+c+'">'+(c==='ALL'?'All markets':c)+'</button>'; }).join('')
+      +'<select id="ik-cat" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"><option value="ALL">All categories</option>'+Object.keys(cats).sort().map(function(c){ return '<option'+(U.cat===c?' selected':'')+'>'+esc(c)+'</option>'; }).join('')+'</select>'
+      +'<select id="ik-rw" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"><option value="ALL">All release windows</option>'+Object.keys(rws).sort().map(function(c){ return '<option'+(U.rw===c?' selected':'')+'>'+esc(c)+'</option>'; }).join('')+'</select>'
+      +'<input id="ik-q" type="search" placeholder="SKU or description" value="'+esc(U.q)+'" style="font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;width:200px">'
+      +'<span style="flex:1"></span><span id="ik-msg" style="font-size:12px;color:var(--muted)"></span></div>'
+    +'<div id="ik-bulk" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px"><b id="ik-nsel">0 selected</b><label>Set deadline <input id="ik-bdl" type="date" style="font-size:12px"></label><button class="ik-bset" style="font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">Apply</button><button class="ik-bclr" style="font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">Back to default</button>'
+      +'<span style="width:1px;height:16px;background:var(--line)"></span>Snooze <button class="ik-bsz" data-d="7" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">7d</button><button class="ik-bsz" data-d="14" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">14d</button><button class="ik-bsz" data-d="30" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">30d</button><button class="ik-bun" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">Unsnooze</button><input id="ik-reason" placeholder="Reason (optional)" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;width:180px"></div>'
+    +'<div style="overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)"><table style="border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums"><thead><tr style="background:var(--hover)">'
+      +['<input type="checkbox" id="ik-all" aria-label="Select all shown">','SKU','Description','Mkt','Release','Launch','Intake deadline','Due','Stock','Next inbound','Status','Snooze'].map(function(t){ return '<th style="text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:11px;color:var(--ink-soft);white-space:nowrap">'+t+'</th>'; }).join('')+'</tr></thead><tbody>'
+    +(shown.length?shown.map(function(r){ var mk=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[r.co])||'var(--line2)';
+      return '<tr data-k="'+esc(r.key)+'" style="border-bottom:1px solid var(--line2)'+(r.counted?';background:color-mix(in srgb,var(--neg-bg) 45%,transparent)':'')+'">'
+        +'<td style="padding:5px 8px"><input type="checkbox" class="ik-sel" data-k="'+esc(r.key)+'"'+(U.sel[r.key]?' checked':'')+' aria-label="Select '+esc(r.sku)+' '+r.co+'"></td>'
+        +'<td style="padding:5px 8px;white-space:nowrap"><b>'+esc(r.sku)+'</b></td><td style="padding:5px 8px;min-width:200px;color:var(--ink-soft)">'+esc(r.nm)+'</td>'
+        +'<td style="padding:5px 8px"><span style="background:'+mk+';color:#101828;font-weight:800;font-size:10px;border-radius:5px;padding:1px 6px">'+r.co+'</span></td>'
+        +'<td style="padding:5px 8px">'+esc(r.rw||'—')+'</td><td style="padding:5px 8px;white-space:nowrap">'+fd(r.lch)+'</td>'
+        +'<td style="padding:5px 8px;white-space:nowrap"><input type="date" class="ik-dl" data-sku="'+esc(r.sku)+'" data-co="'+r.co+'" value="'+r.dl+'" style="font-size:12px;padding:1px 4px;border:1px solid '+(r.explicit?'var(--blue)':'var(--line)')+';border-radius:5px" aria-label="Intake deadline '+esc(r.sku)+' '+r.co+'"> <span style="font-size:10px;color:var(--faint)">'+(r.explicit?'set':'default')+'</span>'+(r.explicit?' <a class="ik-def" data-sku="'+esc(r.sku)+'" data-co="'+r.co+'" title="Back to the default (launch minus '+INTAKE.lead+' days)" style="cursor:pointer;color:var(--neg);font-weight:700">×</a>':'')+'</td>'
+        +'<td style="padding:5px 8px;white-space:nowrap">'+dueTxt(r)+'</td><td style="padding:5px 8px">'+saFmt(r.stock)+'</td><td style="padding:5px 8px;white-space:nowrap">'+inbTxt(r)+'</td>'
+        +'<td style="padding:5px 8px">'+pill(r)+'</td>'
+        +'<td style="padding:5px 8px;white-space:nowrap">'+(r.alert?(r.snoozed?'<button class="ik-un" data-k="'+esc(r.key)+'" style="font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer">Unsnooze</button>':['7','14','30'].map(function(d){ return '<button class="ik-sz" data-k="'+esc(r.key)+'" data-d="'+d+'" style="font-size:11px;padding:2px 6px;margin-right:3px;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer" title="Snooze '+d+' days">'+d+'d</button>'; }).join('')+'<input type="date" class="ik-szd" data-k="'+esc(r.key)+'" title="Snooze until a date" aria-label="Snooze until" style="font-size:11px;padding:1px 3px;border:1px solid var(--line);border-radius:5px;width:118px">'):'')+'</td></tr>'; }).join('')
+      :'<tr><td colspan="12" style="padding:16px;color:var(--muted)">'+(U.st==='alerts'?'No open intake alerts for this filter.':'Nothing matches.')+'</td></tr>')
+    +'</tbody></table></div>'+(list.length>MAX?'<div style="font-size:12px;color:var(--muted)">Showing the first '+MAX+' of '+list.length+'. Narrow the filter to see the rest.</div>':'')+'</div>';
+  body.innerHTML=h;
+  var $=function(s){ return body.querySelector(s); }, msg=function(t,bad){ var m=$('#ik-msg'); if(m){ m.textContent=t; m.style.color=bad?'var(--neg)':'var(--pos)'; } };
+  var redraw=function(){ renderIntakeView(body); intakeBadgeSync(); };
+  body.querySelectorAll('.ik-st').forEach(function(b){ b.onclick=function(){ U.st=b.dataset.st==='due'?'alerts':b.dataset.st; if(b.dataset.st==='due')U.st='alerts'; redraw(); }; });
+  body.querySelectorAll('.ik-co').forEach(function(b){ b.onclick=function(){ U.co=b.dataset.co; redraw(); }; });
+  $('#ik-cat').onchange=function(){ U.cat=this.value; redraw(); }; $('#ik-rw').onchange=function(){ U.rw=this.value; redraw(); };
+  var qt; $('#ik-q').oninput=function(){ var v=this.value; clearTimeout(qt); qt=setTimeout(function(){ U.q=v; redraw(); var n=body.querySelector('#ik-q'); if(n){ n.focus(); n.setSelectionRange(v.length,v.length); } },250); };
+  var post=function(url,data,done){ msg('Saving…'); fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)}).then(function(r){ return r.json(); }).then(function(j){ if(j.error){ msg(j.error,true); return; } loadIntake(true,function(){ redraw(); msg(done||'Saved'); }); }).catch(function(){ msg('Save failed',true); }); };
+  body.querySelectorAll('.ik-dl').forEach(function(i){ i.onchange=function(){ post('/api/demand/intake/deadline',{sku:i.dataset.sku,country:i.dataset.co,deadline:i.value||null},'Deadline saved'); }; });
+  body.querySelectorAll('.ik-def').forEach(function(a){ a.onclick=function(){ post('/api/demand/intake/deadline',{sku:a.dataset.sku,country:a.dataset.co,deadline:null},'Back to default'); }; });
+  var reason=function(){ var r=$('#ik-reason'); return r?r.value.trim():''; };
+  body.querySelectorAll('.ik-sz').forEach(function(b){ b.onclick=function(){ post('/api/demand/intake/snooze',{key:b.dataset.k,until:_ikAddDays(today,+b.dataset.d),reason:reason()},'Snoozed '+b.dataset.d+' days'); }; });
+  body.querySelectorAll('.ik-szd').forEach(function(i){ i.onchange=function(){ if(i.value&&i.value>today)post('/api/demand/intake/snooze',{key:i.dataset.k,until:i.value,reason:reason()},'Snoozed to '+saDate(i.value)); }; });
+  body.querySelectorAll('.ik-un').forEach(function(b){ b.onclick=function(){ post('/api/demand/intake/snooze',{key:b.dataset.k,until:null},'Unsnoozed'); }; });
+  var selKeys=function(){ return Object.keys(U.sel).filter(function(k){ return U.sel[k]; }); }, nsel=function(){ var n=$('#ik-nsel'); if(n)n.textContent=selKeys().length+' selected'; };
+  body.querySelectorAll('.ik-sel').forEach(function(c){ c.onchange=function(){ U.sel[c.dataset.k]=c.checked; nsel(); }; });
+  $('#ik-all').onchange=function(){ var on=this.checked; shown.forEach(function(r){ U.sel[r.key]=on; }); body.querySelectorAll('.ik-sel').forEach(function(c){ c.checked=on; }); nsel(); };
+  var selItems=function(){ return selKeys().map(function(k){ var p=k.split('|'); return {sku:p[1],country:p[2]}; }); };
+  body.querySelector('.ik-bset').onclick=function(){ var d=$('#ik-bdl').value, it=selItems(); if(!d||!it.length)return msg('Pick rows and a date first',true); post('/api/demand/intake/deadline',{items:it.map(function(x){ return {sku:x.sku,country:x.country,deadline:d}; })},'Deadline set on '+it.length); };
+  body.querySelector('.ik-bclr').onclick=function(){ var it=selItems(); if(!it.length)return msg('Pick rows first',true); post('/api/demand/intake/deadline',{items:it.map(function(x){ return {sku:x.sku,country:x.country,deadline:null}; })},'Back to default on '+it.length); };
+  body.querySelectorAll('.ik-bsz').forEach(function(b){ b.onclick=function(){ var k=selKeys(); if(!k.length)return msg('Pick rows first',true); post('/api/demand/intake/snooze',{keys:k,until:_ikAddDays(today,+b.dataset.d),reason:reason()},'Snoozed '+k.length); }; });
+  body.querySelector('.ik-bun').onclick=function(){ var k=selKeys(); if(!k.length)return msg('Pick rows first',true); post('/api/demand/intake/snooze',{keys:k,until:null},'Unsnoozed '+k.length); };
+  $('#ik-lead').onchange=function(){ var v=Math.max(0,Math.min(180,parseInt(this.value,10)||0)); fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'intake_lead_days',value:String(v)})}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.error){ msg(j.error,true); return; } INTAKE.lead=v; redraw(); msg('Default lead time saved: '+v+' days'); }).catch(function(){ msg('Save failed',true); }); };
+  body.querySelectorAll('.ik-po').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); location.hash='#/supply/purchase-orders/'+encodeURIComponent(a.dataset.po); }; });
+}
 function renderExceptionsView(body){
   // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
   try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
@@ -13713,7 +13824,7 @@ function renderShipBagView(body){
   var mp={ratio:'SB_RATIO',mmed:'SB_MMED',mlar:'SB_MLAR',mxlg:'SB_MXLG'};
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });
 }
-var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
+var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -13730,7 +13841,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','crossmarket','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -13766,6 +13877,7 @@ function renderDemandTabs(){
     _an3.innerHTML=ANALYSIS.map(function(k){return '<button class="d3tab'+(k===DEMAND_VIEW?' active':'')+'" data-da="'+k+'">'+(_dlbl[k]||k)+'</button>';}).join('');
     _an3.querySelectorAll('[data-da]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.da; if(window.writeHash)window.writeHash(['demand','analysis',DEMAND_VIEW]); render(); }; });
   } else if(_an3){ _an3.style.display='none'; _an3.innerHTML=''; }
+  try{ if(!INTAKE.loaded)loadIntake(); else intakeBadgeSync(); }catch(e){}   // v28.224 intake alert counters on Analysis + its tab
   // "Config" group (Contribution model, Buy plan logic, Discontinued sub-categories) — L2 button + L3 nav, deep-linked #/demand/config/<slug>.
   var _cb2=document.getElementById('dnav-config-btn'); if(_cb2)_cb2.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; if(CONFIGD.indexOf(DEMAND_VIEW)<0)DEMAND_VIEW=CONFIGD[0]; if(window.writeHash)window.writeHash(['demand','config',DEMAND_VIEW]); render(); };
   var _cf3=document.getElementById('demand-config-nav');
