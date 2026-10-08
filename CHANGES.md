@@ -1,3 +1,12 @@
+## v28.232 (Ben, branch review-fixes-2026-10-05): PO grid query speed-up (two indexes)
+
+**Files:** `migrations/343_po_grid_indexes.sql` (+ package.json, CHANGES.md). **Migration 343** (additive, idempotent: two btree indexes + ANALYZE). No code change, no env vars.
+
+- The PO grid query (`PO_ROWS_SQL`: the Purchase Orders grid, every single-PO row refresh, the child-PO list) is the biggest DB cost on live by pg_stat_statements. Its plan scanned `planner.shipments` in full by `master_po` about 865 times per build (consolidated-shipment lookups) and `planner.purchase_orders` in full by `shipment_ref` 318 times (the crossdock 3PL check). Neither column was indexed on live (checked 09-Oct-26).
+- New: `shipments_master_po_idx` on `shipments (master_po)`, `purchase_orders_shipment_ref_idx` on `purchase_orders (shipment_ref)`.
+- Measured on sandbox (copy of live data), EXPLAIN ANALYZE of the full grid build: **963 ms to 672 ms (-30%)**. Results byte-identical before and after (md5 of all 1,378 rows unchanged; also unchanged for the single-PO row, child POs, Order plan 6,786 rows, Order plan exceptions 152 rows).
+- Checked and left alone: Order plan (232 ms), Order plan exceptions (196 ms), child-PO list (245 ms, cached). The 2.7 s / 1.8 s means in pg_stat_statements span 49 days, mostly before the v28.142 indexes (01-Oct); current times are far lower. Going further means rewriting `v_po_finance` (finance figures), not worth the risk for the remaining ~0.4 s on a cached build.
+
 ## v28.231 (Ben, branch review-fixes-2026-10-05): App health review fixes + capture gaps (09-Oct-26 review)
 
 **Files:** `server.mjs`, `supply/hz-health.js`, `migrations/342_app_health_instance_cron.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 342** (additive, idempotent: widens the app_health_events kind CHECK with `instance` and `cron_run`; until applied those rows are stored as kind `metric` with `meta.kind`, nothing is lost). No new env vars, no new dependencies. Optional env `HZ_BUILD_CONC` (default 2 on Vercel, 4 locally).
