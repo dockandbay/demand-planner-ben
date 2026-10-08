@@ -4182,7 +4182,8 @@ app.post('/api/supply/po/:po/cin7-not-required', async (req, res) => {
 //   sale.line.purchase_request → purchase.request {state draft|purchased|done|cancel|exception, party, purchase_line}
 //                               purchase_line.purchase.state/number = the drop-ship PO it already sits on
 //   purchase.product_supplier {product, party, drop_shipment, sequence, company, active} = the product's suppliers
-// Push rules (sovLineBlock): only 'dropship' lines; never when the order is done/cancelled, the line has shipped, or the
+// Push rules (sovLineBlock): only 'dropship' and (v28.230) 'backorder' lines (a backorder line is bought from a supplier
+// into our warehouse: it has a supplier + purchase request exactly like drop ship); never when the order is done/cancelled, the line has shipped, or the
 // line's purchase request is already on a purchase order (any PO state). A request still in draft (no PO line) has its
 // party changed together with the sale line, otherwise Fulfil would still buy from the old supplier.
 // Safety: admin gate, LIVE writes need FULFIL_LIVE_WRITES=true (same gate as every Fulfil write), per-order single-flight.
@@ -4226,12 +4227,13 @@ async function sovFindSales(q) {
   }
   return Array.from(found.values());
 }
-const SOV_MODE_LABEL = { dropship: 'Drop ship', ship: 'Ship from stock', pick_up: 'Pick up', backorder: 'Backorder', make_on_order: 'Make on order', inter_company_dropship: 'Inter-company drop ship' };
+const SOV_MODE_LABEL = { dropship: 'Drop ship', ship: 'Ship from stock', pick_up: 'Pick up', backorder: 'Backorder (buy for warehouse)', make_on_order: 'Make on order', inter_company_dropship: 'Inter-company drop ship' };
 const SOV_SALE_LOCKED = ['done', 'cancel', 'cancelled', 'canceled'];
+const SOV_SUP_MODES = ['dropship', 'backorder'];   // v28.230 (Ben): lines that need a supplier chosen
 // Why a line's supplier cannot be changed (null = it can). Shared by analyse (UI) and push (server re-check).
 function sovLineBlock(sale, l, pr) {
   if (l.service) return 'Service line';
-  if (l.mode !== 'dropship') return l.mode === 'inter_company_dropship' ? 'Inter-company drop ship (supplied by a company, not a supplier)' : (SOV_MODE_LABEL[l.mode] || l.mode || 'Not drop ship') + ': no supplier';
+  if (!SOV_SUP_MODES.includes(l.mode)) return l.mode === 'inter_company_dropship' ? 'Inter-company drop ship (supplied by a company, not a supplier)' : (SOV_MODE_LABEL[l.mode] || l.mode || 'Not drop ship') + ': no supplier';
   if (SOV_SALE_LOCKED.includes(String(sale.state || '').toLowerCase())) return 'Sales order is ' + sale.state;
   if ((Number(l.qty_shipped) || 0) > 0 || l.move_done) return 'Line already shipped';
   if (pr && pr.purchase_line) return 'Already on purchase order ' + (pr.po_number || ('#' + pr.purchase)) + ' (' + (pr.po_state || pr.state) + '): change it on the PO in Fulfil';
@@ -4322,7 +4324,7 @@ async function sovPushOrder(saleId, want, ctx) {
       for (const x of writes) {
         try {
           await sovWrite('sale.line', x.l.line_id, { supplier: x.opt.id }, { 'supplier.name': x.opt.name });
-          if (x.l.pr && x.l.pr.id && !x.l.pr.purchase_line && ['draft', 'exception'].includes(x.l.pr.state) && x.l.pr.party !== x.opt.id) {
+          if (x.l.pr && x.l.pr.id && !x.l.pr.purchase_line && ['draft', 'requested', 'exception'].includes(x.l.pr.state) && x.l.pr.party !== x.opt.id) {
             await sovWrite('purchase.request', x.l.pr.id, { party: x.opt.id }, { 'party.name': x.opt.name }); x.prWritten = true; }
           x.sent = true;
         } catch (e) { results.push({ ...x.base, result: 'failed', message: String(e.message || e).slice(0, 300) }); }

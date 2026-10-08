@@ -1,3 +1,13 @@
+## v28.230 (Ben, branch review-fixes-2026-10-05): Validate sales order, backorder lines need a supplier like drop ship
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Reported on SO58416 (John Lewis, JL-SS27-PO): every line is delivery_mode backorder with a Fulfil supplier and a purchase request, but the drawer lumped them all into "Ship from stock" with no supplier choice.
+- Backorder lines are now supplier lines, exactly like drop ship: one card per supplier, supplier picker, push to Fulfil with read-back. Shown as "Backorder (buy for warehouse)". `sovLineBlock` allows `dropship` and `backorder` (`SOV_SUP_MODES`); all other blocks unchanged (shipped, on a PO, order done or cancelled).
+- The push also moves the purchase request's supplier when the request is in state `requested` (as well as draft / exception) and not yet on a PO, otherwise Fulfil would still buy from the old supplier.
+- "(no drop ship)" option note now only on drop-ship lines.
+- Verified on sandbox (jsdom, SO58416-shaped data): cards Lixin / XR Textile / Jinma + Ship from stock; picker on the multi-supplier line; 0 JS errors. Live Fulfil read of SO58416 confirmed the line shape (read-only).
+
 ## v28.229 (Ben, branch review-fixes-2026-10-05): Cross Market, sub-category forecast below discontinued SKUs
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars.

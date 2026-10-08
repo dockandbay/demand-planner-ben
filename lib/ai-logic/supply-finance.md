@@ -92,9 +92,9 @@ fingerprints:
   server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
   server.mjs::/api/supply/po/:po/links: 0bdb5f8c0dfd
   server.mjs::sovAnalyse: f7dd288a3ddc
-  server.mjs::sovLineBlock: 889239e00674
+  server.mjs::sovLineBlock: bf5806a2f16a
   server.mjs::sovFindSales: 18cf17b8bb06
-  server.mjs::sovPushOrder: b6d5807dc617
+  server.mjs::sovPushOrder: bc6de951373f
   server.mjs::/api/supply/fulfil/sales-order/push-suppliers: ba6d7a4f3b01
   server.mjs::/api/supply/fulfil/sales-order/analyse-batch: 0b121beebc47
   server.mjs::/api/supply/fulfil/sales-order/push-batch: 8d7875782e0b
@@ -170,7 +170,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.227
+verified_version: v28.230
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -313,10 +313,10 @@ verified_version: v28.227
 
 ## Validate sales order (from v28.192)
 - Where: SUPPLY > Purchase Orders > Direct to Client > "Validate sales order" drawer. Input = a Fulfil sales order number (SO59854, so59854 or 59854), a Fulfil link (.../sales_order/284762) or the order reference. A link is an exact id; otherwise id, number and exact reference are searched, then a partial reference match; more than one hit lists them to pick. (source: server.mjs :: sovFindSales)
-- Lines: every sale.line of type "line". Ship method = sale.line.delivery_mode (dropship = Drop ship; ship / pick_up / backorder / make_on_order = from stock or other, shown grey with no supplier). Service products (e.g. SHIPPING) are shown grey and left out of line and unit totals. The Fulfil supplier = sale.line.supplier. (source: server.mjs :: sovAnalyse)
+- Lines: every sale.line of type "line". Ship method = sale.line.delivery_mode. Drop ship (dropship) and, from v28.230, Backorder (backorder, shown as "Backorder (buy for warehouse)") are supplier lines: both carry sale.line.supplier and a purchase request, get a supplier card, the supplier picker and the push. Ship / pick_up / make_on_order = from stock or other, shown grey with no supplier. Service products (e.g. SHIPPING) are shown grey and left out of line and unit totals. The Fulfil supplier = sale.line.supplier. (source: server.mjs :: sovAnalyse)
 - Supplier choices for a drop-ship line = the active purchase.product_supplier rows of that product, limited to the sale's company when any match. Pre-selected: the current Fulfil supplier, else the only option, else none ("Choose..." with a red !). * = more than one supplier possible. The HORIZON SKU supplier (main_supplier_final) shows as a hint when it differs. Fulfil status: ok (same), differs (pick differs from Fulfil), missing (no Fulfil supplier). (source: server.mjs :: sovAnalyse)
 - Summary chips: units and line counts per CURRENTLY picked supplier, plus No supplier and Ship from stock. (source: supply/inject.html :: openSoValDrawer)
-- A line cannot be changed when: it is not drop ship (inter-company drop ship included), the order is done or cancelled, the line has shipped, or its purchase request is already on a purchase order (any PO state). If the request is still draft (no PO line), the request's supplier is changed together with the line. (source: server.mjs :: sovLineBlock, /api/supply/fulfil/sales-order/push-suppliers)
+- A line cannot be changed when: it is not drop ship or backorder (inter-company drop ship included), the order is done or cancelled, the line has shipped, or its purchase request is already on a purchase order (any PO state). If the request is not yet on a PO and is draft, requested (v28.230) or exception, the request's supplier is changed together with the line, so Fulfil buys from the new supplier. (source: server.mjs :: sovLineBlock, /api/supply/fulfil/sales-order/push-suppliers)
 - Push: admin only; needs FULFIL_LIVE_WRITES=true on live Fulfil; one push per order at a time. The server re-reads the order and refuses any line that is blocked, not on the order, or given a supplier not set up on the product. Each change is a write of sale.line.supplier, then every written line is READ BACK; a line only counts as saved when Fulfil shows the new supplier. Every attempt (ok, failed, blocked) is logged in planner.so_supplier_pushes with old and new supplier and the user. (source: server.mjs :: /api/supply/fulfil/sales-order/push-suppliers)
 - Many orders at once (v28.194): paste a list (one per line, or separated by commas, spaces or semicolons); each item is an order number, Fulfil link or reference, resolved exactly as for one order. Repeats are dropped (same text, or two items that resolve to the same order: the later one shows as "duplicate"); at most 50 per batch (the rest are listed as not analysed). Orders are read 3 at a time; a busy or failing Fulfil call is retried with back-off before the order is reported as an error. One item keeps the single-order view. (source: server.mjs :: /api/supply/fulfil/sales-order/analyse-batch; supply/inject.html :: openSoValDrawer)
 - Batch results: items that did not resolve come first with the reason (not found, ambiguous with the matching orders to pick, duplicate, error). The summary adds up every analysed order: orders, lines and units (service lines left out, as for one order), supplier chips by current pick, No supplier, Ship from stock, and blocked drop-ship lines. Each order is a collapsible section with its ok / differs / missing / blocked counts; orders needing attention (missing or differing supplier, no supplier picked, a failed push) sort first. (source: supply/inject.html :: openSoValDrawer)

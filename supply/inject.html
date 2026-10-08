@@ -7619,7 +7619,8 @@
     var qi=bg.querySelector('#sov-q'), body=bg.querySelector('#sov-body');
     function jget(u){ return fetch(u,{cache:'no-store'}).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }); }
     function n0(v){ return Number(v||0).toLocaleString(); }
-    function editable(l){ return l.mode==='dropship' && !l.service && !l.blocked; }
+    function supLine(l){ return l.mode==='dropship'||l.mode==='backorder'; }   // v28.230 (Ben): backorder lines need a supplier too
+    function editable(l){ return supLine(l) && !l.service && !l.blocked; }
     function curId(l){ return l.supplier?l.supplier.id:null; }
     function optName(l,id){ if(id==null)return ''; var o=(l.options||[]).filter(function(x){return x.id===id;})[0]; return o?o.name:(l.supplier&&l.supplier.id===id?l.supplier.name:('Party '+id)); }
     function changed(l){ return editable(l) && S.sel[l.line_id]!=null && S.sel[l.line_id]!==curId(l); }
@@ -7634,7 +7635,7 @@
         .catch(function(e){ body.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
     function chips(L){ var by={}, none={u:0,n:0}, stock={u:0,n:0};   // v28.194 (Ben): takes the lines (one order or every order in a batch)
       (L||S.data.lines||[]).forEach(function(l){ if(l.service)return;
-        if(l.mode!=='dropship'){ stock.u+=l.qty; stock.n++; return; }
+        if(!supLine(l)){ stock.u+=l.qty; stock.n++; return; }
         var id=S.sel[l.line_id]; if(id==null){ none.u+=l.qty; none.n++; return; }
         var k=optName(l,id); (by[k]=by[k]||{u:0,n:0}); by[k].u+=l.qty; by[k].n++; });
       // v28.205 (Ben): clearer, larger summary: one card per supplier (name, units, lines); red card for lines with no supplier,
@@ -7645,12 +7646,12 @@
           +'<span style="font-size:17px;font-weight:700;line-height:1.2">'+n0(o.u)+' <span style="font-size:11px;font-weight:600;color:var(--muted)">units</span></span>'
           +'<span style="font-size:11px;color:var(--muted)">'+o.n+' line'+(o.n===1?'':'s')+'</span></div>'; };
       return '<div style="display:flex;flex-wrap:wrap;align-items:stretch">'+Object.keys(by).sort().map(function(k){ return ch(esc(k),by[k],'sup'); }).join('')+(none.n?ch('No supplier !',none,'red'):'')+ch('Ship from stock',stock,'stock')+'</div>'; }
-    function statusCell(l){ if(l.mode!=='dropship'||l.service)return '<span class="mut">-</span>';
+    function statusCell(l){ if(!supLine(l)||l.service)return '<span class="mut">-</span>';
       var c=curId(l), s=S.sel[l.line_id], nm=l.supplier?esc(l.supplier.name):'<span class="mut">none</span>';
       var inOpts=c==null||(l.options||[]).some(function(o){return o.id===c;});
       var st=c==null?'<span class="tool-badge bg-red">missing</span>':(s!=null&&s!==c?'<span class="tool-badge bg-amber">differs</span>':'<span class="tool-badge bg-green">ok</span>');
       return nm+' '+st+(inOpts?'':' <span class="mut tiny" title="the current Fulfil supplier is not set up as a supplier on this product">(not a product supplier)</span>'); }
-    function supCell(l){ if(l.service)return '<span class="mut">(service)</span>'; if(l.mode!=='dropship')return '<span class="mut">(from stock)</span>';
+    function supCell(l){ if(l.service)return '<span class="mut">(service)</span>'; if(!supLine(l))return '<span class="mut">(from stock)</span>';
       var opts=(l.options||[]).slice(), c=curId(l), s=S.sel[l.line_id];
       // v28.205 (Ben): no dropdown when there is nothing to choose: no supplier set up on the product in Fulfil, or the only
       // option is already the line's supplier. Plain text (current supplier or none) + the existing notes instead.
@@ -7664,7 +7665,7 @@
       // v28.205 (Ben): a line with a choice of suppliers gets the Create Buy Plan "multiple suppliers" colouring (amber, --prod border)
       var multi=(l.options||[]).length>1;
       var h='<select class="flt sov-sel" data-l="'+l.line_id+'"'+(editable(l)?'':' disabled')+(multi?' title="multiple suppliers — pick one"':'')+' style="min-width:130px;max-width:100%'+(multi?';border:1px solid var(--prod);border-radius:4px;background:var(--amber-bg);color:var(--amber);font-weight:600':'')+'">'+(s==null?'<option value="">Choose…</option>':'')
-        +opts.map(function(o){ return '<option value="'+o.id+'"'+(o.id===s?' selected':'')+'>'+esc(o.name)+(o.drop_shipment===false?' (no drop ship)':'')+'</option>'; }).join('')+'</select>';
+        +opts.map(function(o){ return '<option value="'+o.id+'"'+(o.id===s?' selected':'')+'>'+esc(o.name)+(o.drop_shipment===false&&l.mode==='dropship'?' (no drop ship)':'')+'</option>'; }).join('')+'</select>';
       if((l.options||[]).length>1)h+=' <b title="more than one supplier possible" style="color:var(--blue)">*</b>';
       if(s==null&&editable(l))h+=' <b title="no supplier chosen" style="color:var(--neg)">!</b>';
       if(!(l.options||[]).length&&!l.blocked)h+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
@@ -7695,7 +7696,7 @@
     function redraw(){ if(S.mode==='batch')drawBatch(); else draw(); }
     function linesTable(L,withChk){
       return '<div class="tw"><table style="width:100%"><thead><tr>'+(withChk?'<th class="l" style="width:22px"></th>':'')+'<th class="l">SKU</th><th class="r">Qty</th><th class="l">Ship method</th><th class="l">Supplier</th><th class="l">Fulfil</th></tr></thead><tbody>'
-        +L.map(function(l){ var grey=l.mode!=='dropship'||l.service;
+        +L.map(function(l){ var grey=!supLine(l)||l.service;
           return '<tr data-l="'+l.line_id+'"'+(grey?' style="background:var(--hover);color:var(--muted)"':'')+'>'+(withChk?'<td class="l">'+(editable(l)?'<input type="checkbox" class="sov-chk" data-l="'+l.line_id+'"'+(S.chk[l.line_id]?' checked':'')+'>':'')+'</td>':'')
             +'<td class="l"><b>'+esc(l.sku||'?')+'</b><div class="mut tiny">'+esc(l.name||'')+'</div>'+resCell(l)+'</td><td class="r">'+n0(l.qty)+'</td>'
             +'<td class="l">'+esc(l.service?'Service':l.mode_label)+'</td><td class="l">'+supCell(l)+'</td><td class="l">'+statusCell(l)+'</td></tr>'; }).join('')
@@ -7713,7 +7714,7 @@
     function okOrders(){ return B?B.list.filter(function(x){ return x.status==='ok'&&x.sale; }):[]; }
     function ordStats(o){ var st={ok:0,differs:0,missing:0,blocked:0,none:0,changed:0,failed:0};
       (o.lines||[]).forEach(function(l){ var r=S.res[l.line_id]; if(r&&r.result==='failed')st.failed++;
-        if(l.service||l.mode!=='dropship')return; var c=curId(l), sv=S.sel[l.line_id];
+        if(l.service||!supLine(l))return; var c=curId(l), sv=S.sel[l.line_id];
         if(l.blocked)st.blocked++; if(c==null)st.missing++; else if(sv!=null&&sv!==c)st.differs++; else st.ok++;
         if(sv==null&&editable(l))st.none++; if(changed(l))st.changed++; });
       st.attention=st.missing+st.differs+st.none+st.failed+((B&&B.pushRes[o.sale.id]&&B.pushRes[o.sale.id].error)?1:0); return st; }
@@ -7745,7 +7746,7 @@
     function drawBatch(){ if(!B)return; var oks=okOrders(), bad=B.list.filter(function(x){ return x.status!=='ok'; });
       var L=allLines(), goods=L.filter(function(l){ return !l.service; }), nChanged=L.filter(changed).length;
       var nOrdCh=oks.filter(function(o){ return (o.lines||[]).some(changed); }).length;
-      var nBlocked=L.filter(function(l){ return !l.service&&l.mode==='dropship'&&l.blocked; }).length;
+      var nBlocked=L.filter(function(l){ return !l.service&&supLine(l)&&l.blocked; }).length;
       var g=B.gate||{}, gateNote=g.stub?'<div class="tool-badge bg-amber" style="display:block;margin:8px 0">TEST STUB: pushes are simulated on this server, nothing is sent to Fulfil.</div>'
         :(B.gate&&!g.live_writes?'<div class="tool-badge bg-amber" style="display:block;margin:8px 0">LIVE Fulfil writes are disabled (FULFIL_LIVE_WRITES). Analyse works; push will be refused.</div>':'');
       var h='';
@@ -10080,7 +10081,7 @@
       +'<span class="pill-lbl" style="margin-left:10px">Type</span>'+[['','All'],['key','Key account'],['custom','Custom']].map(function(o){return '<span class="pill dc-tag'+(o[0]===''?' active':'')+'" data-tag="'+o[0]+'">'+o[1]+'</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:12px">Group by</span><select class="flt" id="dc-group" style="min-width:130px"><option value="client">Client</option><option value="completion">Completion date</option></select>'
       +'<button class="save-btn" id="dc-edi" style="margin-left:12px;background:var(--nav);color:#fff;border-color:var(--nav)" title="Split Dillards / EZY COM SSCC label PDFs into SUPPLIER / PO / SKU folders">🏷 EDI LABELS</button>'
-      +'<button class="save-btn" id="dc-sov" style="margin-left:8px" title="Check a Fulfil sales order: ship method + drop-ship supplier per line, fix and push suppliers to Fulfil">Validate sales order</button>'   // v28.192 (Ben)
+      +'<button class="save-btn" id="dc-sov" style="margin-left:8px" title="Check a Fulfil sales order: ship method + supplier per drop-ship or backorder line, fix and push suppliers to Fulfil">Validate sales order</button>'   // v28.192 (Ben)
       +'<span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
     var _edb=document.getElementById('dc-edi'); if(_edb)_edb.onclick=function(){ showPoSub('edi-labels'); }; var _sovb=document.getElementById('dc-sov'); if(_sovb)_sovb.onclick=function(){ openSoValDrawer(); };
     function view(){ var f=filt(base.filter(function(r){ return st.tag==='key'?r.dtc_key_account:st.tag==='custom'?r.dtc_custom:true; }), st.q);
