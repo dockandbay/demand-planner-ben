@@ -69,11 +69,15 @@
   // to a supplier these are failures too. The sign-in probe (GET /api/portal/me answering 401 on the login page) is expected, not a failure.
   // v28.195 (Ben): the client portal too (its sign-in probe is GET /api/cp/me answering 401).
   function PORTAL4xx(m,p,s){ return (SRC==='portal'&&!(s===401&&m==='GET'&&p==='/api/portal/me'))||(SRC==='client_portal'&&!(s===401&&m==='GET'&&p==='/api/cp/me')); }
-  function apiNote(m,p,st,ms,err){ var k=m+' '+p+' '+st, a=API[k]; if(!a){ if(Object.keys(API).length>=40)return; a=API[k]={m:m,p:p,s:st,n:0,max:0,err:null}; } a.n++; if(ms>a.max)a.max=ms; if(err)a.err=err; }
+  // v28.231 (Ben, health review gap G7): a "> 10s" call that spanned the tab being hidden ('slow_hidden') or the device sleeping
+  // ('slow_sleep': the wall clock and the monotonic clock drifted > 2s apart) is not a server wait; recorded separately.
+  var HID=0; document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')HID++; });
+  function slowKind(t0,d0,h0){ try{ if(HID!==h0||document.visibilityState==='hidden')return 'slow_hidden'; if(Math.abs((Date.now()-d0)-(performance.now()-t0))>2000)return 'slow_sleep'; }catch(_){} return 'slow'; }
+  function apiNote(m,p,st,ms,err){ var k=m+' '+p+' '+st+(err&&/^slow_/.test(err)?' '+err:''), a=API[k]; if(!a){ if(Object.keys(API).length>=40)return; a=API[k]={m:m,p:p,s:st,n:0,max:0,err:null}; } a.n++; if(ms>a.max)a.max=ms; if(err)a.err=err; }
   if(typeof _fetch==='function'){ window.fetch=function(input,init){
-    var t0=0, u='', m='GET'; try{ t0=performance.now(); u=(typeof input==='string')?input:((input&&input.url)||String(input||'')); m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase(); }catch(e){}
+    var t0=0, d0=0, h0=0, u='', m='GET'; try{ t0=performance.now(); d0=Date.now(); h0=HID; u=(typeof input==='string')?input:((input&&input.url)||String(input||'')); m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase(); }catch(e){}
     var p=_fetch.apply(window,arguments);
-    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000||(s>=400&&PORTAL4xx(m,path,s)))apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?'slow':null); }catch(_){} },
+    try{ var path=apiPath(u); if(path&&p&&typeof p.then==='function')p.then(function(r){ try{ var ms=performance.now()-t0, s=r.status; if(s>=500||s===408||s===429||ms>10000||(s>=400&&PORTAL4xx(m,path,s)))apiNote(m,path,s,Math.round(ms),(ms>10000&&s<500)?slowKind(t0,d0,h0):null); }catch(_){} },
       function(e){ try{ var n=e&&e.name; if(n==='AbortError')return; apiNote(m,path,0,Math.round(performance.now()-t0),n==='TimeoutError'?'timeout':'network'); }catch(_){} }); }catch(e){}
     return p; }; }
   // v28.179 (Ben): dead_click: a press on a NAV item (left rail L1 / L2 / L3, top view toggles, L2 / L3 tab bars) that is not
@@ -113,7 +117,7 @@
     for(k in PV){ a=PV[k]; if(a.n||a.s>=1)rows.push({kind:'page_view',message:'page view',path:k,count:Math.max(1,a.n),v:VER,meta:{visits:a.n,active_s:Math.round(a.s)}}); } PV={};
     for(k in LT){ a=LT[k]; rows.push({kind:'long_task',message:'Main thread blocked >= 1s',path:k,ms:Math.round(a.max),count:a.n,v:VER,meta:{sum_ms:Math.round(a.sum)}}); } LT={};
     for(k in DC){ a=DC[k]; rows.push({kind:'dead_click',message:'Dead click: '+a.label,path:a.path,count:a.n,v:VER,meta:{label:a.label}}); } DC={};   // v28.179
-    for(k in API){ a=API[k]; rows.push({kind:'api_failure',message:(a.s?'HTTP '+a.s:a.err)+' '+a.m+' '+a.p+(a.err==='slow'?' (> 10s)':''),path:a.p,method:a.m,status:a.s||null,ms:a.max,count:a.n,v:VER,meta:{err:a.err}}); } API={};
+    for(k in API){ a=API[k]; rows.push({kind:'api_failure',message:(a.s?'HTTP '+a.s:a.err)+' '+a.m+' '+a.p+(a.err==='slow'?' (> 10s)':a.err==='slow_hidden'?' (> 10s, tab hidden meanwhile)':a.err==='slow_sleep'?' (> 10s, device slept)':''),path:a.p,method:a.m,status:a.s||null,ms:a.max,count:a.n,v:VER,meta:{err:a.err}}); } API={};
     for(var i=0;i<rows.length&&i<60;i++)q.push(rows[i]); return rows.length; }catch(e){ return 0; } }
   window.addEventListener('hashchange',pvEnter); pvEnter();
   document.addEventListener('visibilitychange',function(){ pvAccrue(); vis=document.visibilityState!=='hidden'; });

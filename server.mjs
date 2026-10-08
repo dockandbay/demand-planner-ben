@@ -146,8 +146,9 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
     let op = u.pathname.split('/').map(hzIdSeg).join('/').slice(0, 160) || '/';
     if (svc === 'kv') { try { const c = JSON.parse(String(o.body || '')); if (Array.isArray(c) && typeof c[0] === 'string') op = c[0].slice(0, 20); } catch (_) {} }
     const message = msg ? String(msg).replace(/\?[^\s]*/g, '').slice(0, 300) : (svc + ' HTTP ' + status);
-    hzHealthEvt('integration_error', svc + '|' + method + '|' + op + '|' + status + '|' + (timeout ? 1 : 0), { path: svc + ' ' + method + ' ' + op, method, status: status || null, ms, message,
-      meta: { service: svc, op, status: status || 0, timeout: !!timeout } });
+    const tg = hzThawGap();   // v28.231 (gap G1): a "timeout" that spanned an instance freeze
+    hzHealthEvt('integration_error', svc + '|' + method + '|' + op + '|' + status + '|' + (timeout ? 1 : 0) + (tg ? '|thaw' : ''), { path: svc + ' ' + method + ' ' + op, method, status: status || null, ms, message,
+      meta: Object.assign({ service: svc, op, status: status || 0, timeout: !!timeout }, tg ? { thaw_gap_ms: tg } : null) });
   } catch (_) { /* measurement must never throw */ }
 }
 // v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
@@ -167,28 +168,53 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
 // wrapped (pool.query uses it internally) and any client query error is checked: the v28.152 fail-fast errors (connect
 // "timeout exceeded when trying to connect", query_timeout "Query read timeout", server statement_timeout) are noted as db_pool.
 // Cost per query: one Date.now() + one closure; the note itself only fires on a slow / failed statement. All via the buffer.
+// v28.231 (Ben, health review 09-Oct-26): FREEZE / THAW DETECTOR (capture gap G1). On Vercel the instance is frozen once a response
+// is sent; work still in flight resumes on the next request and reports durations that span the freeze (551s "slow" SELECTs, 10-min
+// KV "30s timeouts"). A 1s unref'd tick sees the gap: when it (or an event) finds > HZ_THAW_MS since the last tick, the instance was
+// frozen; events recorded within 60s after that carry meta.thaw_gap_ms so they can be told apart from real DB / API slowness.
+// Also INSTANCE ID (gap G4): every server row carries meta.instance; the first request of an instance notes a cold start.
+const HZ_THAW_MS = 3000, HZ_INSTANCE = Math.random().toString(36).slice(2, 10), HZ_BOOT_UPTIME_MS = Math.round(process.uptime() * 1000);
+let _hzTickAt = Date.now(), _hzThaw = null, _hzColdDone = false;   // _hzThaw = { at, gap }
+function hzThawCheck() { const now = Date.now(), gap = now - _hzTickAt - 1000; _hzTickAt = now;
+  if (gap > HZ_THAW_MS) { _hzThaw = { at: now, gap }; try { hzHealthEvt('instance', 'thaw', { path: 'instance thaw', ms: gap, message: 'Instance resumed after a ' + Math.round(gap / 1000) + 's freeze', meta: { max_gap_ms: gap } }); } catch (_) {} } }
+{ const _t = setInterval(hzThawCheck, 1000); _t.unref?.(); }
+function hzThawGap() { if (Date.now() - _hzTickAt - 1000 > HZ_THAW_MS) hzThawCheck(); return (_hzThaw && Date.now() - _hzThaw.at < 60000) ? _hzThaw.gap : 0; }
+// v28.231 (Ben, health review fix 1): keep a Vercel instance alive until post-response work finishes, instead of freezing it mid-query.
+// Same request-context hook @vercel/functions' waitUntil uses (no new dependency); a no-op off Vercel or outside a request.
+const _hzWU = { ok: 0, miss: 0 };
+function hzWaitUntil(p) { try { if (!p || typeof p.then !== 'function' || !process.env.VERCEL) return p;
+  const rc = globalThis[Symbol.for('@vercel/request-context')], c = rc && typeof rc.get === 'function' ? rc.get() : null;
+  if (c && typeof c.waitUntil === 'function') { c.waitUntil(Promise.resolve(p).catch(() => {})); _hzWU.ok++; } else _hzWU.miss++; } catch (_) {} return p; }
+// v28.231 (Ben, gap G3): DB checkout timing per instance (time to get a pooled client, and separately when that meant opening a new
+// physical connection). Sent as one 'metric' row per flush, so a slow pooler handshake shows up without a timeout.
+const _hzCk = { n: 0, ms: 0, max: 0, slow: 0, newN: 0, newMs: 0, newMax: 0 };
+function hzCkNote(ms, isNew) { _hzCk.n++; _hzCk.ms += ms; if (ms > _hzCk.max) _hzCk.max = ms; if (ms >= 1000) _hzCk.slow++; if (isNew) { _hzCk.newN++; _hzCk.newMs += ms; if (ms > _hzCk.newMax) _hzCk.newMax = ms; } }
 const HZ_SLOW_Q_MS = Math.max(200, Number(process.env.HZ_SLOW_QUERY_MS || 2000));
 function hzSqlNorm(sql) { return String(sql || '').replace(/'(?:[^']|'')*'/g, '?').replace(/(?<![$\w])\d+(?:\.\d+)?/g, '?').replace(/\s+/g, ' ').trim().slice(0, 160); }
 function hzDbErr(e, op) { try { const m = String((e && e.message) || e || '');
   if (!/timeout exceeded when trying to connect|Query read timeout|statement timeout|Connection terminated due to connection timeout|ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients reached/i.test(m)) return;
   const kind = /ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients/i.test(m) ? 'pooler_saturated' : /connect/i.test(m) ? 'connect_timeout' : /statement timeout/i.test(m) ? 'statement_timeout' : 'query_timeout';   // pooler_saturated = Supabase pooler out of sessions / checkouts
-  hzHealthEvt('db_pool', kind, { path: 'db ' + kind.replace('_', ' '), message: m.slice(0, 300), meta: { op, error: kind, max_waiting: pool.waitingCount, total: pool.totalCount, idle: pool.idleCount } });
+  let ex = 'background'; try { const st = _reqStore.getStore(), r = st && st.req; if (r) ex = (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200); } catch (_) {}   // v28.231 (gap G2): which route / background job hit it
+  const tg = hzThawGap();   // v28.231 (gap G1): a timeout that straddled an instance freeze is not a real DB timeout
+  hzHealthEvt('db_pool', kind + '|' + ex + (tg ? '|thaw' : ''), { path: 'db ' + kind.replace('_', ' '), message: m.slice(0, 300), meta: Object.assign({ op, error: kind, example: ex, max_waiting: pool.waitingCount, total: pool.totalCount, idle: pool.idleCount }, tg ? { thaw_gap_ms: tg } : null) });
 } catch (_) {} }
-pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 1; const oq = client.query;
+pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 1; client.__hzNew = 1; const oq = client.query;   // __hzNew: v28.231 (gap G3) this checkout opened a physical connection
   client.query = function (cfg) {
     if (cfg && typeof cfg.submit === 'function') return oq.apply(this, arguments);   // Cursor / Submittable: untouched
     const t0 = Date.now(), n = arguments.length, cb = n && typeof arguments[n - 1] === 'function' ? arguments[n - 1] : null;
     let st = this.__hzSt || null; if (!st) { try { st = _reqStore.getStore(); } catch (_) {} }
     const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query'); _hzDbTot.n++; _hzDbTot.ms += ms; if (st) st.dbms = (st.dbms || 0) + ms;   // v28.167 (Ben): process-wide DB execution totals (GET /api/perf/recent). v28.175 (Ben): + DB ms per request (ring row `db`)
       if (ms >= HZ_SLOW_Q_MS) { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;
-        hzHealthEvt('slow_query', sql, { path: sql, ms, message: 'Slow SQL ' + ms + 'ms', meta: { example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' } }); } } catch (_) {} };
+        const tg = hzThawGap();   // v28.231 (gap G1): duration spans an instance freeze, not real execution time
+        hzHealthEvt('slow_query', sql + (tg ? '|thaw' : ''), { path: sql, ms, message: 'Slow SQL ' + ms + 'ms' + (tg ? ' (spans a ' + Math.round(tg / 1000) + 's instance freeze)' : ''), meta: Object.assign({ example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' }, tg ? { thaw_gap_ms: tg } : null) }); } } catch (_) {} };
     if (cb) { const a = Array.prototype.slice.call(arguments); a[n - 1] = function (err) { done(err); return cb.apply(this, arguments); }; return oq.apply(this, a); }
     const p = oq.apply(this, arguments); if (p && typeof p.then === 'function') p.then(() => done(null), done); return p; };
 } catch (_) {} });
 { const _oc = pool.connect.bind(pool);   // also tags the checked-out client with the caller's request (pg-pool may hand it over from another request's async context)
-  pool.connect = function (cb) { let st = null; try { st = _reqStore.getStore() || null; } catch (_) {}
-    if (typeof cb === 'function') return _oc(function (err, client) { if (err) hzDbErr(err, 'connect'); else if (client) client.__hzSt = st; return cb.apply(this, arguments); });
-    const p = _oc(); p.then(c => { if (c) c.__hzSt = st; }, e => hzDbErr(e, 'connect')); return p; }; }
+  pool.connect = function (cb) { let st = null; try { st = _reqStore.getStore() || null; } catch (_) {} const t0 = Date.now();
+    const got = (c) => { try { hzCkNote(Date.now() - t0, !!c.__hzNew); c.__hzNew = 0; } catch (_) {} };   // v28.231 (gap G3)
+    if (typeof cb === 'function') return _oc(function (err, client) { if (err) hzDbErr(err, 'connect'); else if (client) { client.__hzSt = st; got(client); } return cb.apply(this, arguments); });
+    const p = _oc(); p.then(c => { if (c) { c.__hzSt = st; got(c); } }, e => hzDbErr(e, 'connect')); return p; }; }
 // Keep one pooled connection WARM. idleTimeoutMillis (8s) closes idle clients, so a request after any short idle gap
 // otherwise pays the remote Supabase pooler's ~8s cold-connect stall — which is what made SUPPLY (Actions etc.) feel
 // slow on the sandbox even with the response caches (every request still runs one small query). A 5s SELECT 1 keeps a
@@ -904,13 +930,16 @@ const _hzHB = new Map(); let _hzHBn = 0, _hzHBlast = Date.now(), _hzHBbusy = nul
 // in meta.supplier_ids and part of the grouping key, so a slow or failing portal request can be tied to a supplier.
 // v28.195 (Ben): `ctag` = the client-portal tag of a /api/cp/* request ({ client_id, rep_group_id }, from the csid session; never the
 // email): merged into meta and part of the grouping key. Messages on client-portal rows are scrubbed (hzCpScrub).
-function hzHealthNote(kind, method, path, status, ms, msg, example, sids, ctag) {
+const HZ_CRON_RE = /^\/api\/(cron\/|data-cache\/invalidate|tracking\/poll)/;   // v28.231 (gap G6): scheduler-driven routes
+function hzReqUser(req) { try { if (String(req.originalUrl || '').startsWith('/api/portal/') || String(req.originalUrl || '').startsWith('/api/cp/')) return null; const e = authUser(req); return e ? String(e).split('@')[0].slice(0, 40) + '@' : null; } catch (_) { return null; } }
+function hzHealthNote(kind, method, path, status, ms, msg, example, sids, ctag, who) {
   const ck = ctag ? JSON.stringify(ctag) : '';
   const k = kind + '|' + method + '|' + path + '|' + status + (sids ? '|' + sids : '') + (ck ? '|c' + ck : ''); let e = _hzHB.get(k);
   if (!e) { if (_hzHB.size >= 1000) return; e = { kind, source: 'server', method, path: String(path).slice(0, 300), status, ms: 0, count: 0, message: null, meta: (sids || ctag) ? Object.assign({}, sids ? { supplier_ids: sids } : null, ctag || null) : null }; _hzHB.set(k, e); }
   if (msg && ctag) msg = hzCpScrub(msg);
   e.count++; _hzHBn++; if (ms > e.ms) e.ms = ms; if (msg) e.message = String(msg).slice(0, 1000); e.ts = new Date().toISOString();
   if (example && example !== e.path) e.meta = Object.assign(e.meta || {}, { example: String(example).slice(0, 300) });
+  if (who) { const m = e.meta || (e.meta = {}), u = m.users || (m.users = []); if (u.indexOf(who) < 0 && u.length < 8) u.push(who); }
   if (kind === 'server_error') _hzAlertDirty = true;
 }
 // v28.163 (Ben): generic buffered event for the new server kinds (integration_error, db_pool, slow_query). Same buffer, same
@@ -932,13 +961,21 @@ function hzRouteCount(route, is5xx) { const now = Date.now(); if (now - _hzRoute
 const HZ_HEALTH_INSERT = `INSERT INTO planner.app_health_events (ts, kind, source, path, method, status, ms, message, stack, user_email, app_version, user_agent, count, meta)
   SELECT coalesce(x.ts, now()), x.kind, x.source, x.path, x.method, x.status, x.ms, x.message, x.stack, x.user_email, x.app_version, x.user_agent, coalesce(x.count, 1), x.meta
   FROM jsonb_to_recordset($1::jsonb) AS x(ts timestamptz, kind text, source text, path text, method text, status int, ms int, message text, stack text, user_email text, app_version text, user_agent text, count int, meta jsonb)`;
+const HZ_NEW_KINDS = new Set(['instance', 'cron_run']); let _hzKindsLegacy = false;   // v28.231: see migration 342
 function hzHealthFlush(force) {
   try {
     if (_hzHBbusy) return _hzHBbusy; if (!_hzHB.size) return null; const now = Date.now();
     if (!force && _hzHBn < 25 && now - _hzHBlast < 60000) return null;
     if (now < _hzHBoffUntil) return null;
-    const rows = Array.from(_hzHB.values(), e => Object.assign({ app_version: APP_VERSION }, e)); _hzHB.clear(); _hzHBn = 0; _hzHBlast = now;
-    _hzHBbusy = _reqStore.exit(() => pool.query(HZ_HEALTH_INSERT, [JSON.stringify(rows)]))   // exit(): not counted against the triggering request
+    if (_hzCk.n) { hzHealthEvt('metric', 'db_checkout|' + HZ_INSTANCE + '|' + now, { path: 'db checkout', ms: _hzCk.max, message: 'DB checkouts ' + _hzCk.n + ', avg ' + Math.round(_hzCk.ms / _hzCk.n) + 'ms, max ' + _hzCk.max + 'ms; new connections ' + _hzCk.newN + (_hzCk.newN ? ', avg ' + Math.round(_hzCk.newMs / _hzCk.newN) + 'ms, max ' + _hzCk.newMax + 'ms' : ''),
+      meta: { value: Math.round(_hzCk.ms / _hzCk.n), n: _hzCk.n, avg_ms: Math.round(_hzCk.ms / _hzCk.n), max_ms: _hzCk.max, over_1s: _hzCk.slow, new_n: _hzCk.newN, new_avg_ms: _hzCk.newN ? Math.round(_hzCk.newMs / _hzCk.newN) : 0, new_max_ms: _hzCk.newMax, wait_until: _hzWU.ok, wait_until_miss: _hzWU.miss } });   // v28.231 (gap G3)
+      for (const k in _hzCk) _hzCk[k] = 0; }
+    const rows = Array.from(_hzHB.values(), e => Object.assign({ app_version: APP_VERSION }, e, { meta: Object.assign({ instance: HZ_INSTANCE }, e.meta || null) })); _hzHB.clear(); _hzHBn = 0; _hzHBlast = now;   // v28.231 (gap G4): instance id on every server row
+    // v28.231 (Ben): kinds 'instance' and 'cron_run' need migration 342. Before it, a CHECK violation (23514) retries the batch with those
+    // rows stored as kind 'metric' (meta.kind = the real kind) and remembers it, so the rest of the batch is never lost.
+    const legacy = (rs) => rs.map(r => HZ_NEW_KINDS.has(r.kind) ? Object.assign({}, r, { kind: 'metric', meta: Object.assign({}, r.meta, { kind: r.kind }) }) : r);
+    const ins = (rs) => _reqStore.exit(() => pool.query(HZ_HEALTH_INSERT, [JSON.stringify(_hzKindsLegacy ? legacy(rs) : rs)]));   // exit(): not counted against the triggering request
+    _hzHBbusy = ins(rows).catch(e => { if (e && e.code === '23514' && !_hzKindsLegacy && rows.some(r => HZ_NEW_KINDS.has(r.kind))) { _hzKindsLegacy = true; return ins(rows); } throw e; })
       .then(() => { hzAlertMaybeEval(); return null; }, e => { console.warn('[health] flush of ' + rows.length + ' row(s) failed: ' + (e && e.message)); if (e && e.code === '42P01') _hzHBoffUntil = Date.now() + 600000; })
       .finally(() => { _hzHBbusy = null; });
     return _hzHBbusy;
@@ -947,13 +984,18 @@ function hzHealthFlush(force) {
 if (!process.env.VERCEL) setInterval(() => hzHealthFlush(false), 30000).unref?.();
 if (!process.env.VERCEL) setInterval(() => tokPurgeMaybe(false), 3600000).unref?.();   // v28.210 (Ben): hourly token purge on the long-lived server
 app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
-  if (_hzHB.size) hzHealthFlush(false);   // v28.159: due flush rides an active request (Vercel has no background time)
-  tokPurgeMaybe(false);   // v28.210 (Ben): expired login-token purge, at most once an hour per instance (a no-op Date check otherwise)
+  if (_hzHB.size) hzWaitUntil(hzHealthFlush(false));   // v28.159: due flush rides an active request (Vercel has no background time). v28.231: kept alive past the response
+  hzWaitUntil(tokPurgeMaybe(false));   // v28.210 (Ben): expired login-token purge, at most once an hour per instance (a no-op Date check otherwise)
   // v28.163 (Ben): DB pool sample at most once per 10s (three integer reads); noted only when requests are queued for a connection.
   try { const now = Date.now(); if (now - _hzPoolT >= 10000) { _hzPoolT = now; const w = pool.waitingCount;
     if (w > 0) hzHealthEvt('db_pool', 'waiting', { path: 'db pool waiting', message: 'Requests queued for a DB connection (pool max ' + ((pool.options && pool.options.max) || '?') + ')', meta: { max_waiting: w, total: pool.totalCount, idle: pool.idleCount } }); } } catch (_) {}
   res.on('finish', () => { try { const s = _reqStore.getStore(); const ms = Date.now() - ((s && s.t0) || Date.now()); const q = (s && s.q) || 0;
     const path = String(req.originalUrl || req.url || '').split('?')[0];
+    // v28.231 (Ben, gap G4): the first request this instance serves = a cold start: module init time and that request's time
+    if (!_hzColdDone) { _hzColdDone = true; hzHealthEvt('instance', 'cold_start', { path: 'instance cold start', ms, message: 'Cold start: module init ' + HZ_BOOT_UPTIME_MS + 'ms, first request ' + req.method + ' ' + path.slice(0, 120) + ' ' + ms + 'ms', meta: { init_ms: HZ_BOOT_UPTIME_MS, first_path: path.slice(0, 200), max_first_ms: ms } }); }
+    // v28.231 (Ben, gap G6): every cron / scheduler hit is recorded (count, max ms, last status per route per hour), not only slow or failing ones
+    if (HZ_CRON_RE.test(path)) { const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
+      hzHealthEvt('cron_run', route + '|' + res.statusCode + '|' + new Date().toISOString().slice(0, 13), { method: req.method, path: route, status: res.statusCode, ms, message: req.method + ' ' + route + ' ' + res.statusCode }); }
     if (!path.startsWith('/api/')) return;   // page/static loads aren't what we're measuring
     _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q, db: (s && s.dbms) || 0 }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
     if (ms >= HZ_SLOW_MS) console.log('[slow ' + ms + 'ms ' + q + 'q] ' + req.method + ' ' + path + ' ' + res.statusCode);
@@ -963,10 +1005,13 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
       const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
       const sids = (path.startsWith('/api/portal/') && req.portal && Array.isArray(req.portal.supplierIds)) ? req.portal.supplierIds.slice(0, 5).join(',') : '';   // v28.188
       const ctag = path.startsWith('/api/cp/') ? hzCpTag(req) : null;   // v28.195
-      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path, sids, ctag);
-      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path, sids, ctag);
-      hzHealthFlush(false);
+      const who = hzReqUser(req);   // v28.231 (Ben, gap G5): staff user (local part only) on server rows
+      if (res.statusCode >= 500) hzHealthNote('server_error', req.method, route, res.statusCode, ms, (s && s.err) || null, path, sids, ctag, who);
+      if (ms >= HZ_SLOW_MS) hzHealthNote('slow_request', req.method, route, res.statusCode, ms, null, path, sids, ctag, who);
     }
+    // v28.231 (Ben, gap G8): flush when due, or when the buffer is > 15s old, and keep the instance alive for it, so a recycled instance
+    // no longer drops buffered events.
+    if (_hzHB.size) hzWaitUntil(hzHealthFlush(Date.now() - _hzHBlast > 15000));
     // v28.195 (Ben): client portal 4xx answers (refused feature 403, not found 404, validation 400 / 409, rate limit 429) as server
     // api_failure rows tagged with the client id. 401 (signed out / session expired) is the normal sign-in path and is not recorded.
     // The message is the status + route only: never the response body (it can name SKUs or order details).
@@ -1590,11 +1635,15 @@ async function buildLockedFc() {
   } catch (e) { /* forecast_runs/forecasts may be absent in some envs → leave empty */ }
   return out;
 }
+// v28.231 (Ben, health review fix 3): the 16 builders run at most HZ_BUILD_CONC at a time (was all at once, ~25 statements queued on a
+// 4-connection pool: waiting 21 to 34, starving user requests on the same instance). Same results, same order.
+const HZ_BUILD_CONC = Math.max(1, Number(process.env.HZ_BUILD_CONC || (process.env.VERCEL ? 2 : 4)));
 async function _buildDataVals() {
-  return Promise.all([
-    buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-    buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(), buildCatAspGBP(), buildLockedFc(),
-  ]);
+  const fns = [buildDATA, buildFC_CURRENT, buildFC_OUTPUTS, buildSKURAW,
+    buildCATS_META, buildSUBS_META, buildBI_RULES, buildPROD_CONST, freshness, buildFBADIMS, buildSAEXTRA, gbpRate, buildBRANCH_FREIGHT, buildTRANSFER_LEADS, buildCatAspGBP, buildLockedFc];
+  const out = new Array(fns.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(HZ_BUILD_CONC, fns.length) }, async () => { while (next < fns.length) { const i = next++; out[i] = await fns[i](); } }));
+  return out;
 }
 // v28.151 (review E3): generation counter. invalidateDataCache() bumps it; a build that STARTED before the bump read
 // pre-save data, so on completion it is discarded (not cached, not written to KV, where other instances would serve it for
@@ -1616,10 +1665,10 @@ function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-f
 // blob another instance rebuilt on invalidate. Without KV: rebuild from Supabase (identical to the old behaviour).
 function bgRefresh() {
   if (_bgRefreshing || _dataRefresh) return;
-  if (!KV_ON) { refreshDataCache().catch(() => {}); return; }
-  if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { refreshDataCache().catch(() => {}); return; }   // blob past max age → authoritative rebuild from Supabase (surfaces ETL'd product-field changes), else just re-read
+  if (!KV_ON) { hzWaitUntil(refreshDataCache().catch(() => {})); return; }   // v28.231: hzWaitUntil = finish before Vercel freezes the instance
+  if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { hzWaitUntil(refreshDataCache().catch(() => {})); return; }   // blob past max age → authoritative rebuild from Supabase (surfaces ETL'd product-field changes), else just re-read
   _bgRefreshing = true; const _gen = _dataGen;
-  kvReadBlob().then((v) => { if (v && _gen === _dataGen) _dataCache = { at: Date.now(), vals: v }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
+  hzWaitUntil(kvReadBlob()).then((v) => { if (v && _gen === _dataGen) _dataCache = { at: Date.now(), vals: v }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
 }
 // The accessor every serve path uses. In-process first; on a cold start, prefer KV (no Supabase); else build once.
 async function getDataVals() {
@@ -1629,7 +1678,9 @@ async function getDataVals() {
 }
 // Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
 // background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
-function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoDrop(); } catch (_) {} refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
+// v28.231 (Ben, health review fix 1): the rebuild is kept alive with hzWaitUntil (was frozen mid-build on Vercel: 570 pool events + 2 false
+// red alerts in one forecast-editing session on 07-Oct-26).
+function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoDrop(); } catch (_) {} hzWaitUntil(refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message))); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
 (async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
@@ -3392,12 +3443,22 @@ const FULFIL_COMPANY_UK = 1, FULFIL_COMPANY_AU = 3;
 function fulfilCompanyForCountry(cc) { return (String(cc || '').trim().toUpperCase() === 'AU') ? FULFIL_COMPANY_AU : FULFIL_COMPANY_UK; }
 function fulfilCompanyName(id) { return (Number(id) === FULFIL_COMPANY_AU) ? 'Dock & Bay Pty Ltd (AU)' : 'Dock & Bay Ltd (UK)'; }
 function fulfilCountryForCompany(id) { return (Number(id) === FULFIL_COMPANY_AU) ? 'AU' : 'UK'; }
+// v28.231 (Ben, health review fix 7): Fulfil answered 429 (rate limited) 18 times in one minute on 08-Oct-26. READS (GET, search_read,
+// read, search_count) are retried after Retry-After (or 1s, 2s, 4s), up to 3 times; writes are never retried (a 429 write may have run).
+const _fulfilIsRead = (method, path) => method === 'GET' || /\/(search_read|read|search_count|search)$/.test(String(path || '').split('?')[0]);
 async function fulfilFetch(method, path, body) {
+  for (let i = 0; ; i++) {
+    try { return await _fulfilFetch1(method, path, body); }
+    catch (e) { if (e.status !== 429 || i >= 3 || !_fulfilIsRead(method, path)) throw e;
+      await new Promise(r => setTimeout(r, Math.min(10000, (Number(e.retryAfter) > 0 ? Number(e.retryAfter) * 1000 : 1000 * Math.pow(2, i))))); }
+  }
+}
+async function _fulfilFetch1(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
   const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
-  if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; if (r.status === 429) e.retryAfter = r.headers.get('retry-after'); throw e; }
   return j;
 }
 // v27.751: fetch against an EXPLICIT Fulfil env config (not the app's Active-ERP env) — used by the id-seeder so a
@@ -24154,14 +24215,14 @@ async function runHealthChecks(opt) {
 }
 // Request-driven trigger evaluation (flush path + client-event posts): at most once per 60s, only after an alert-relevant event.
 function hzAlertMaybeEval() { try { const now = Date.now(); if (!_hzAlertDirty || now - _hzAlertEvalAt < HZ_RA.eval_every_ms) return; _hzAlertEvalAt = now; _hzAlertDirty = false;
-  _reqStore.exit(() => hzAlertCollect().then(f => f.length ? hzRedAlert(f) : null)).catch(e => console.warn('[health] alert eval failed: ' + (e && e.message))); } catch (_) {} }
+  hzWaitUntil(_reqStore.exit(() => hzAlertCollect().then(f => f.length ? hzRedAlert(f) : null)).catch(e => console.warn('[health] alert eval failed: ' + (e && e.message)))); } catch (_) {} }
 // Triggers (a) (b) (d) (e) from the last 10 minutes of events (ONE query) + the in-memory route ratio.
 async function hzAlertCollect() {
   const out = [], d = (await pool.query(`WITH ev AS (SELECT kind, path, method, status, message, count, ts, user_email, meta FROM planner.app_health_events
       WHERE ts >= now() - make_interval(mins => $1::int) AND kind IN ('server_error','db_pool','integration_error','client_error','console_error'))
     SELECT json_build_object(
       's5', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT coalesce(method || ' ', '') || path p, split_part(coalesce(message, ''), E'\\n', 1) m, sum(count)::int n FROM ev WHERE kind = 'server_error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 3) x)) FROM ev WHERE kind = 'server_error'),
-      'db', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT left(coalesce(message, ''), 160))) FROM ev WHERE kind = 'db_pool' AND meta ? 'error' AND ts >= now() - make_interval(mins => $2::int)),
+      'db', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT left(coalesce(message, ''), 160))) FROM ev WHERE kind = 'db_pool' AND meta ? 'error' AND NOT meta ? 'thaw_gap_ms' AND coalesce(meta->>'example', '') <> 'background' AND ts >= now() - make_interval(mins => $2::int)),   -- v28.231 (fix 5): only user-request timeouts that did not span an instance freeze page
       'fa', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT path)) FROM ev WHERE kind = 'integration_error' AND meta->>'service' = 'fulfil' AND status IN (401, 403)),
       'cu', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT message, count(DISTINCT user_email)::int users, sum(count)::int n, min(ts) first, max(ts) last, (array_agg(DISTINCT path))[1:3] views
         FROM ev WHERE kind IN ('client_error', 'console_error') AND user_email IS NOT NULL GROUP BY message HAVING count(DISTINCT user_email) >= $3 ORDER BY 2 DESC LIMIT 5) x)) d`, [HZ_RA.win_min, HZ_RA.db_win_min, HZ_RA.client_users])).rows[0].d;
@@ -24479,8 +24540,13 @@ function cpAgentCodes(v) { v = v || {}; const m = Array.isArray(v.modes) ? v.mod
 function cpSelfNarrows(client, user) { return !!(user && user.scope === 'self' && String(user.email || '').trim() && !cpAgentCodes((client || {}).visibility).length); }
 // migration 337 present? (checked at boot and every 10 min; cpVisibilitySql is synchronous)
 let _cpAgentCol = false;
-async function cpCheckAgentCol() { try { _cpAgentCol = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='fulfil_sales' AND column_name='agent_code'`)).rowCount > 0; } catch (e) {} return _cpAgentCol; }
-cpCheckAgentCol(); setInterval(cpCheckAgentCol, 10 * 60000).unref();
+// v28.231 (Ben, health review fix 2): no more 10-min timer (on Vercel it ran on frozen / thawing instances as background slow queries).
+// One check at load (cpVisibilitySql reads the flag synchronously); once the column exists it is never queried again, until then at
+// most every 10 min when a caller asks.
+let _cpAgentColAt = 0;
+async function cpCheckAgentCol() { if (_cpAgentCol || (_cpAgentColAt && Date.now() - _cpAgentColAt < 10 * 60000)) return _cpAgentCol;
+  try { _cpAgentCol = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='fulfil_sales' AND column_name='agent_code'`)).rowCount > 0; _cpAgentColAt = Date.now(); } catch (e) {} return _cpAgentCol; }
+cpCheckAgentCol();
 async function cpOrders(opts) {
   const { client, user, q, from, to, status } = opts || {};
   const rule = await cpOriginRule(!!(opts && opts.cachedRule)); const params = []; const where = [];

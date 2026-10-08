@@ -1,3 +1,31 @@
+## v28.231 (Ben, branch review-fixes-2026-10-05): App health review fixes + capture gaps (09-Oct-26 review)
+
+**Files:** `server.mjs`, `supply/hz-health.js`, `migrations/342_app_health_instance_cron.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 342** (additive, idempotent: widens the app_health_events kind CHECK with `instance` and `cron_run`; until applied those rows are stored as kind `metric` with `meta.kind`, nothing is lost). No new env vars, no new dependencies. Optional env `HZ_BUILD_CONC` (default 2 on Vercel, 4 locally).
+
+Review (live health log, 06 to 08-Oct-26): most "slow queries", KV / Fulfil "30s timeouts" and the db_pool bursts were Vercel freeze artifacts: work that runs after the response (data-cache rebuild after a forecast save, KV re-read, health flush, token purge) was frozen with the instance and resumed minutes later (551s "slow" SELECTs on a 30s statement_timeout). One forecast-editing session (07-Oct 14:40 to 16:50) made 570 pool events and 2 false red alerts. No user route was slow server-side (worst p95 1.8s).
+
+Fixes
+- **Post-response work kept alive on Vercel** (`hzWaitUntil`, the same request-context hook `@vercel/functions` uses, no dependency): data-cache rebuild (`invalidateDataCache`, `bgRefresh`), health flush, red-alert evaluation, token purge. No-op off Vercel; counts `wait_until` / `wait_until_miss` in the db checkout metric so we can confirm it engages on prod.
+- **Data-cache rebuild throttled:** the 16 builders run 2 at a time on Vercel (was all at once, ~25 statements queued on a 4-connection pool). Same results, same order.
+- **cpCheckAgentCol timer removed** (ran every 10 min on Vercel): one check at load, then never again once the column exists.
+- **Red alert "DB timeouts"** now counts only user-request timeouts that did not span an instance freeze (background and freeze-spanning events are still logged, they just don't page).
+- **Fulfil 429:** reads retried after Retry-After or 1s / 2s / 4s, up to 3 times; writes never retried.
+
+Capture gaps closed
+- G1 **freeze / thaw detector:** a 1s unref'd tick; an `instance thaw` row when the instance resumed after > 3s; slow_query, db_pool and integration_error recorded within 60s of a thaw carry `meta.thaw_gap_ms` and say "(spans a Ns instance freeze)".
+- G2 **db_pool rows name the route** (`meta.example`, or `background`), grouped per route.
+- G3 **DB checkout timing:** one `metric` row per flush ("db checkout"): checkouts, avg / max ms, over 1s, and new physical connections with their avg / max connect time.
+- G4 **instance id on every server row** (`meta.instance`) and an `instance cold start` row (module init ms, first request and its ms).
+- G5 **staff user on server rows** (slow_request / server_error `meta.users`, local part only, e.g. ben@; never on portal rows).
+- G6 **every scheduler hit recorded** (`cron_run`: /api/cron/*, /api/data-cache/invalidate, /api/tracking/poll; count, max ms, status per route per hour).
+- G7 **browser "> 10s" calls** that spanned a hidden tab (`slow_hidden`) or a device sleep (`slow_sleep`, wall clock vs monotonic drift > 2s) are recorded separately from real waits.
+- G8 **buffer loss:** the buffer is flushed (and kept alive) at the end of a request once it is > 15s old, so a recycled instance no longer drops events.
+- G9 retention: not a bug. The table was created by migration 328 in the 06-Oct deploy; the purge keeps 60 days.
+
+Verified on sandbox: process paused 6s (SIGSTOP / SIGCONT) produced an `instance thaw` row (5,295 ms) and 8 slow_query rows tagged with the freeze, matching the live pattern; cold start, cron_run (401 health-checks), db checkout metric (151 checkouts, 8 new connections avg 2,257 ms to the remote sandbox pooler) all stored; before migration 342 the two new kinds fell back to `metric` with the rest of the batch intact; migration 342 applied twice (idempotent); red-alert query runs; app boots in jsdom with data (DATA 396, SKUM 2,092), 0 JS errors.
+
+Not in this version (needs Diviyaj or a separate, finance-checked change): `PAYMENT_EMAIL_CRON=1` + n8n schedule; transaction-pooler check and `attachDatabasePool`; purchase-orders / PO-lines query optimisation.
+
 ## v28.230 (Ben, branch review-fixes-2026-10-05): Validate sales order, backorder lines need a supplier like drop ship
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
