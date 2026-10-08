@@ -27,7 +27,7 @@ sources:
   - server.mjs :: portalPoIsSlim, portalPaymentsTrim, /api/portal/po-detail, /api/portal/shipment-notes-read, shipNoteUnreadSql (portal payload + per-supplier shipment reads)
   - server.mjs :: /api/portal/doc-remove, /api/portal/upload (supplier PO documents)
   - server.mjs :: portalOwnsProductSample (product-dev request-level ownership)
-  - server.mjs :: cpTierPrice, /api/cp/prices, /api/cp/order, cpCreateFulfilDraft
+  - server.mjs :: cpTierPrice, /api/cp/prices, /api/cp/order, cpCreateFulfilDraft, cpAutoPush, cpSalesTeam, /api/client/portal-orders/:id (+ /fulfil-options, /push, /cancel)
   - server.mjs :: /api/client/commission/runs/build, /api/client/commission/runs/:id/xero-bill (client commission)
   - server.mjs :: cpAllowedOrderKeys, cpPortalThreads, cpOrderThreadFind, cpOrderClients, /api/cp/order-thread/:key, /api/client/order-thread/:key/post (order messages + documents)
   - migrations/336_client_order_threads.sql :: planner.client_threads.order_key, client_messages.internal
@@ -121,8 +121,11 @@ fingerprints:
   server.mjs::portalOwnsProductSample: 29dda2af6dd1
   server.mjs::cpTierPrice: a2b9b629bb4a
   server.mjs::/api/cp/prices: 1445d08c02f9
-  server.mjs::/api/cp/order: d604b61b8633
-  server.mjs::cpCreateFulfilDraft: 5117a7608ab4
+  server.mjs::/api/cp/order: 398611112b12
+  server.mjs::cpCreateFulfilDraft: 81e3ebb94ea9
+  server.mjs::cpAutoPush: c9e609cf631c
+  server.mjs::cpSalesTeam: fc161fffe290
+  server.mjs::/api/client/portal-orders/:id: f994a90fd00a
   server.mjs::/api/client/commission/runs/build: 9f79554f891a
   server.mjs::/api/client/commission/runs/:id/xero-bill: fd75919ebdf4
   server.mjs::cpAllowedOrderKeys: b6d23180e894
@@ -167,7 +170,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.223
+verified_version: v28.227
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -335,7 +338,11 @@ verified_version: v28.223
 
 ## Client portal pricing, orders, commissions
 - Price tiers by market: rt = products.<mkt>_rt (includes tax). ws = ex-tax retail ÷ 2, where ex-tax = RT ÷ 1.2 (UK, EU), ÷ 1.1 (AU) or ÷ 1.0 (US, CA). dist = ws × (1 − discount %), with the discount taken from distributor_offers by market and method (fob, exw or 3pl). If no discount is set, the price falls back to ws. With no tier set, the legacy client_price_lists is used. (source: server.mjs :: cpTierPrice, /api/cp/prices)
-- Client orders reject unknown and CLOSED SKUs. Non-whole cartons need explicit acceptance (sample orders are exempt). Samples are priced 0. The order is saved, then a Fulfil draft sale is attempted; if that fails it is flagged "needs keying". Stock shows in bands unless exact stock is configured. (source: server.mjs :: /api/cp/order)
+- Client orders reject unknown and CLOSED SKUs. Non-whole cartons need explicit acceptance (sample orders are exempt). Samples are priced 0. Stock shows in bands unless exact stock is configured. (source: server.mjs :: /api/cp/order)
+- Order review before Fulfil (v28.227): a submitted portal order goes straight to Fulfil as a draft sale only when auto-post applies: the client's "Portal orders" setting (clients.order_review) is Auto post, or it is Inherit and CLIENT ▸ Config "Post portal orders to Fulfil automatically" (cp_auto_push_fulfil) is on. The default is OFF, so orders are held with status 'review' (Awaiting review). Always review beats the global switch. The override is read fresh at submit time. If an auto-post fails, the order shows "Needs push" with the reason. (source: server.mjs :: cpAutoPush, /api/cp/order)
+- Order emails (v28.227): one email on submit, to the client user, cc the sales team (cp_sales_team_emails, else cp_ops_emails) plus the client's owner. With cp_client_confirm_email off it goes to the sales team only. A failed auto-post also alerts the sales team. (source: server.mjs :: cpSalesTeam, /api/cp/order)
+- Reviewing an order (CLIENT ▸ Orders, v28.227): anyone with CLIENT access can edit an order that is Awaiting review / Needs push: PO, requested date, ship-from, Fulfil carrier and service, internal note (appended to the Fulfil comment), lines (qty, price, add, remove). Flags, cartons, units and totals are recomputed on the server; every edit is written to the order history. Fulfilment per line is From stock (delivery_mode ship), Back order (backorder) or Drop ship (dropship). Back order and drop ship need a supplier from the product's Fulfil suppliers (purchase.product_supplier, the client market's company first): one option is set automatically, several show a dropdown. (source: server.mjs :: /api/client/portal-orders/:id, /fulfil-options)
+- Pushing (v28.227): creates a Fulfil DRAFT sale (Confirmed is not wired yet). Blocked while a back order / drop ship line has no supplier, or the order already has a Fulfil draft; partial cartons need explicit acceptance. One push at a time per order. Each line carries delivery_mode and, when not From stock, supplier; the header carries carrier and carrier_service when set. Live writes need FULFIL_LIVE_WRITES=true; dry run returns the payload without writing; HZ_FULFIL_WRITE_STUB=1 fakes the write on the sandbox. A pushed or cancelled order is read-only. (source: server.mjs :: /api/client/portal-orders/:id/push, cpCreateFulfilDraft)
 - Commissions are monthly runs per rep group. Rate = the per-order override, else the group default. Commission = commissionable × rate ÷ 100. A credit-note row has commission 0 and carries amount × rate ÷ 100 in credit_adj; net = commission + credit_adj. Fulfil rows come from done/processing sales in the month using the untaxed amount; they are "exception" until the invoice is paid. A run cannot be finalised while exceptions remain (unless forced). The Xero bill is GBP, in the UK org, named COMMISSION-<month>-<GROUP>. (source: server.mjs :: /api/client/commission/*)
 - Link Fulfil PO (v28.207): the PO grid payload carries fulfil_link_needed (client PO with no manual Fulfil link, FULFIL_LINK_NEEDED_SQL), which raises the "Link Fulfil PO" PO action; see the actions topic. (source: server.mjs :: PO_ROWS_SQL)
 - Order visibility and rep groups (v28.204): a client's orders are the Fulfil sales mirror rows matching ANY of its ticked modes: Agent Code (the Fulfil sales order metafield "Agent Code", code agent_code, copied by the sales import into fulfil_sales.agent_code; the client lists one or more codes, e.g. appelman), tag (sale metadata, legacy), channel + region, company / email. A user with scope 'self' ("own customers only") is NARROWED to orders where they are the customer email and the portal orders they placed, except when the client has an Agent Code: then every user of that rep group sees all the group's orders (Ben 07-Oct-26). Commission runs pick a rep group's orders through the same rule, so they follow the Agent Code too. (source: server.mjs :: cpVisibilitySql, cpAgentCodes, cpSelfNarrows, cpOrders, fulfilImportSales)

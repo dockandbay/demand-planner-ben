@@ -23361,14 +23361,14 @@ app.get('/api/client/clients/:id', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ client: c, users: users.rows, audit: audit.rows, portal_orders: orders.rows, key_account: ka.rows[0] || null, last_login: (last.rows[0] && last.rows[0].last_login) || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', price_tier: 'text', price_method: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool' };
+const CP_CLIENT_FIELDS = { name: 'text', type: 'text', owner_email: 'text', market: 'text', currency: 'text', price_list: 'text', price_tier: 'text', price_method: 'text', warehouse_code: 'text', visibility: 'json', stock_scope: 'json', features: 'json', rep_group_id: 'int', key_account_id: 'int', fulfil_party_id: 'int', fulfil_channel: 'text', notes: 'text', active: 'bool', order_review: 'text' };
 app.post('/api/client/clients/:id', async (req, res) => {
   const b = req.body || {}; const sets = [], vals = [], changed = [];
   const before = await cpClientById(req.params.id); if (!before) return res.status(404).json({ error: 'not found' });
   for (const [k, t] of Object.entries(CP_CLIENT_FIELDS)) {
     if (!(k in b)) continue; let v = b[k];
     if (t === 'json') v = JSON.stringify(v == null ? {} : v); else if (t === 'int') v = (v === '' || v == null) ? null : parseInt(v, 10); else if (t === 'bool') v = !!v; else v = (v == null) ? null : String(v);
-    if (k === 'type' && !CP_TYPES.includes(v)) continue; if (k === 'market' && !CP_MARKETS[v]) continue;
+    if (k === 'type' && !CP_TYPES.includes(v)) continue; if (k === 'market' && !CP_MARKETS[v]) continue; if (k === 'order_review' && !CP_REVIEW_MODES.includes(v)) continue;
     vals.push(v); sets.push(k + '=$' + vals.length + (t === 'json' ? '::jsonb' : '')); changed.push(k);
   }
   if (!sets.length) return res.json({ ok: true, unchanged: true });
@@ -24271,7 +24271,8 @@ if (process.env.HZ_HEALTH_TEST === '1' && !process.env.VERCEL) {
 }
 
 // ── config (portal-wide settings live in app_settings under cp_*) ──
-const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to'];
+const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to', 'cp_auto_push_fulfil', 'cp_sales_team_emails'];
+const CP_REVIEW_MODES = ['inherit', 'review', 'auto'];   // v28.227 clients.order_review
 app.get('/api/client/config', async (req, res) => {
   try {
     const rows = (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key = ANY($1)`, [CP_SETTINGS])).rows; const s = {}; rows.forEach(r => { s[r.key] = r.value; });
@@ -24280,7 +24281,7 @@ app.get('/api/client/config', async (req, res) => {
       pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus, to_char(max(updated_at),'YYYY-MM-DD') updated FROM planner.client_price_lists GROUP BY code ORDER BY code`),
       pool.query(`SELECT count(*)::int n, to_char(max(last_synced_at),'YYYY-MM-DD HH24:MI') synced, min(sale_date) mn, max(sale_date) mx FROM planner.fulfil_sales`),
     ]);
-    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
+    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL', cp_auto_push_fulfil: 'false' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/config', async (req, res) => {
@@ -24508,8 +24509,8 @@ async function cpOrders(opts) {
   if (client) { const subs = (await pool.query(`SELECT id, order_type, status, customer_po, units, total, currency, fulfil_number, requested_date, to_char(created_at,'YYYY-MM-DD') created, ship_to, lines FROM planner.client_orders WHERE client_id=$1 AND created_at > now() - interval '120 days'${cpSelfNarrows(client, user) ? ' AND user_id=$2' : ''} ORDER BY created_at DESC`, cpSelfNarrows(client, user) ? [client.id, user.id] : [client.id])).rows;   // v28.204: an own-customers-only user sees only the portal orders they placed
     const known = new Set(out.map(o => o.number).filter(Boolean));
     subs.forEach(o => { if (o.fulfil_number && known.has(o.fulfil_number)) return; const st = cpJson(o.ship_to, {});
-      out.unshift({ id: 'cp-' + o.id, okey: 'P' + o.id, ref: o.fulfil_number || ('CP-' + o.id), number: o.fulfil_number, origin: 'fulfil', state: o.status === 'fulfil_draft' ? 'draft' : 'submitted', bucket: 'draft', unpaid: false, company: st.company || client.name, customer: st.contact || st.company || client.name, channel: client.fulfil_channel, country: null, currency: o.currency, amount: Number(o.total) || 0, net: Number(o.total) || 0,
-        created: o.created, days: Math.round((Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(o.created)) / 86400000), requested: o.requested_date ? String(o.requested_date).slice(0, 10) : null, sample: o.order_type === 'sample', customer_po: o.customer_po, portal_order_id: o.id, document: { kind: 'fulfil', label: o.status === 'fulfil_draft' ? 'Draft in Fulfil' : 'Submitted · awaiting Ops', url: null }, lines: cpJson(o.lines, []) }); }); }
+      out.unshift({ id: 'cp-' + o.id, okey: 'P' + o.id, ref: o.fulfil_number || ('CP-' + o.id), number: o.fulfil_number, origin: 'fulfil', state: o.status === 'fulfil_draft' ? 'draft' : o.status === 'cancelled' ? 'cancelled' : 'submitted', bucket: 'draft', unpaid: false, company: st.company || client.name, customer: st.contact || st.company || client.name, channel: client.fulfil_channel, country: null, currency: o.currency, amount: Number(o.total) || 0, net: Number(o.total) || 0,
+        created: o.created, days: Math.round((Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(o.created)) / 86400000), requested: o.requested_date ? String(o.requested_date).slice(0, 10) : null, sample: o.order_type === 'sample', customer_po: o.customer_po, portal_order_id: o.id, document: { kind: 'fulfil', label: o.status === 'fulfil_draft' ? 'Draft in Fulfil' : o.status === 'cancelled' ? 'Cancelled' : 'Submitted · awaiting Ops', url: null }, lines: cpJson(o.lines, []) }); }); }
   return status ? out.filter(o => status === 'unpaid' ? o.unpaid : o.bucket === status) : out;
 }
 app.get('/api/client/orders', async (req, res) => {
@@ -24519,8 +24520,101 @@ app.get('/api/client/orders', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/client/portal-orders', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json({ orders: (await pool.query(`SELECT o.id, o.client_id, c.name client, o.order_type, o.status, o.customer_po, o.units, o.total, o.currency, o.fulfil_number, o.error, to_char(o.requested_date,'YYYY-MM-DD') requested_date, to_char(o.created_at,'YYYY-MM-DD HH24:MI') created_at, o.submitted_by, o.ship_to, o.lines FROM planner.client_orders o JOIN planner.clients c ON c.id=o.client_id ORDER BY o.created_at DESC LIMIT 300`)).rows }); }
+  try { res.set('Cache-Control', 'no-store').json({ auto: String(await cpSetting('cp_auto_push_fulfil', 'false')).toLowerCase() === 'true', orders: (await pool.query(`SELECT o.id, o.client_id, c.name client, c.order_review, o.order_type, o.status, o.customer_po, o.units, o.total, o.currency, o.fulfil_number, o.error, o.carrier_name, o.carrier_service_name, o.pushed_by, to_char(o.pushed_at,'YYYY-MM-DD HH24:MI') pushed_at, to_char(o.requested_date,'YYYY-MM-DD') requested_date, to_char(o.created_at,'YYYY-MM-DD HH24:MI') created_at, o.submitted_by, o.ship_to, o.lines FROM planner.client_orders o JOIN planner.clients c ON c.id=o.client_id ORDER BY o.created_at DESC LIMIT 300`)).rows }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── v28.227 (Ben): portal order REVIEW. A held order (status review; also submitted = auto-post failed, error) is edited here and
+// pushed to Fulfil as a DRAFT sale by anyone with CLIENT access (cpAdminGate). Edits recompute flags / cartons / totals server-side.
+const CP_EDITABLE = ['review', 'submitted', 'error'];
+async function cpOrderRow(id) { return (await pool.query(`SELECT o.*, to_char(o.requested_date,'YYYY-MM-DD') requested_date, to_char(o.created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(o.pushed_at,'YYYY-MM-DD HH24:MI') pushed_at FROM planner.client_orders o WHERE o.id=$1`, [id])).rows[0] || null; }
+async function cpOrderProducts(skus) { const m = {}; if (!skus.length) return m;
+  (await pool.query(`SELECT sku, coalesce(nullif(product_name_final,''), product_name) name, upper(coalesce(status,'')) status, carton_qty FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { m[r.sku] = { name: r.name || '', status: r.status, carton_qty: Number(r.carton_qty) || 0 }; }); return m; }
+app.get('/api/client/portal-orders/:id', async (req, res) => {
+  try { const o = await cpOrderRow(req.params.id); if (!o) return res.status(404).json({ error: 'order not found' });
+    const c = await cpClientById(o.client_id); const lines = Array.isArray(o.lines) ? o.lines : [];
+    const prods = await cpOrderProducts(lines.map(l => l.sku)); const stockBy = await cpStockBase(); const avail = {};
+    Object.keys(CP_WAREHOUSES).forEach(w => (stockBy[w] || []).forEach(([sku, q]) => { if (prods[sku]) (avail[sku] = avail[sku] || {})[w] = Number(q) || 0; }));
+    res.set('Cache-Control', 'no-store').json({ order: o, editable: CP_EDITABLE.includes(o.status), client: c ? { id: c.id, name: c.name, market: c.market, currency: c.currency, owner_email: c.owner_email, order_review: c.order_review || 'inherit', fulfil_party_id: c.fulfil_party_id, fulfil_channel: c.fulfil_channel } : null,
+      auto: c ? await cpAutoPush(c) : false, products: prods, avail, warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Fulfil lookups for the review form (reads only): carriers + their services, and each line's suppliers (purchase.product_supplier,
+// the same source as Validate SO). Company filter mirrors Validate SO: the client market's company first, all if none match.
+const CP_MARKET_COMPANY = { UK: 1, AU: 3 };
+app.get('/api/client/portal-orders/:id/fulfil-options', async (req, res) => {
+  try { const o = await cpOrderRow(req.params.id); if (!o) return res.status(404).json({ error: 'order not found' }); const c = await cpClientById(o.client_id);
+    const env = await activeFulfilEnv(); if (!fulfilConfigFor(env).configured) return res.json({ env, carriers: [], suppliers: {}, error: 'Fulfil not configured' });
+    const [carriers, services] = await Promise.all([fulfilFetch('PUT', '/model/carrier/search_read', [[['active', '=', true]], 0, 200, null, ['id', 'rec_name', 'services']]), fulfilFetch('PUT', '/model/carrier.service/search_read', [[], 0, 500, null, ['id', 'name', 'code']])]);
+    const svc = {}; (services || []).forEach(x => { svc[x.id] = { id: x.id, name: x.name || x.code || ('Service ' + x.id) }; });
+    const skus = Array.from(new Set((o.lines || []).map(l => l.sku))); const prods = skus.length ? await fulfilResolveProducts(skus) : {}; const bySku = {};
+    const pids = Object.values(prods).map(p => p.id); const opts = {};
+    if (pids.length) (await fulfilFetch('PUT', '/model/purchase.product_supplier/search_read', [[['product', 'in', pids], ['active', '=', true]], 0, 500, null, ['product', 'party', 'party.name', 'sequence', 'company']]) || [])
+      .forEach(r => { (opts[r.product] = opts[r.product] || []).push({ id: r.party, name: r['party.name'] || ('Party ' + r.party), sequence: r.sequence == null ? 99 : r.sequence, company: r.company }); });
+    const co = CP_MARKET_COMPANY[c && c.market];
+    skus.forEach(sku => { const p = prods[sku]; let l = p ? (opts[p.id] || []).slice() : []; if (co && l.some(x => x.company === co)) l = l.filter(x => x.company === co);
+      const seen = new Set(); bySku[sku] = { in_fulfil: !!p, options: l.sort((a, z) => a.sequence - z.sequence).filter(x => !seen.has(x.id) && seen.add(x.id)).map(x => ({ id: x.id, name: x.name })) }; });
+    res.set('Cache-Control', 'no-store').json({ env, carriers: (carriers || []).map(x => ({ id: x.id, name: x.rec_name, services: (x.services || []).map(id => svc[id]).filter(Boolean) })).sort((a, z) => String(a.name).localeCompare(z.name)), suppliers: bySku }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/portal-orders/:id', async (req, res) => {
+  const b = req.body || {}; const by = (req.me && req.me.email) || 'sandbox';
+  try { const o = await cpOrderRow(req.params.id); if (!o) return res.status(404).json({ error: 'order not found' }); if (!CP_EDITABLE.includes(o.status)) return res.status(409).json({ error: 'order is ' + o.status + ' — only orders awaiting review can be edited' });
+    const c = await cpClientById(o.client_id); const changes = [];
+    const hdr = { customer_po: 'PO', requested_date: 'Requested date', ship_from: 'Ship from', carrier_id: null, carrier_name: 'Carrier', carrier_service_id: null, carrier_service_name: 'Service', internal_note: 'Internal note' }; const set = {};
+    Object.keys(hdr).forEach(k => { if (!(k in b)) return; let v = b[k]; if (v === '') v = null; if (/_id$/.test(k)) v = v == null ? null : Number(v); else if (v != null) v = String(v).trim();
+      if (k === 'ship_from' && v && !CP_WAREHOUSES[v]) return; if (k === 'requested_date' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+      if (String(o[k] == null ? '' : o[k]) !== String(v == null ? '' : v)) { set[k] = v; if (hdr[k]) changes.push(hdr[k] + ': ' + (o[k] || '—') + ' → ' + (v || '—')); } });
+    if ('ship_to' in b) { set.ship_to = JSON.stringify(b.ship_to || {}); if (JSON.stringify(o.ship_to || {}) !== set.ship_to) changes.push('Ship-to edited'); else delete set.ship_to; }
+    let lines = Array.isArray(o.lines) ? o.lines : [];
+    if (Array.isArray(b.lines)) {
+      const inL = b.lines.map(l => ({ sku: String(l.sku || '').trim().toUpperCase(), qty: Math.round(Number(l.qty) || 0), price: l.price === '' || l.price == null ? null : Math.round(Number(l.price) * 10000) / 10000, mode: CP_LINE_MODES.includes(l.mode) ? l.mode : 'ship', supplier_id: l.supplier_id ? Number(l.supplier_id) : null, supplier_name: l.supplier_name ? String(l.supplier_name) : null })).filter(l => l.sku && l.qty > 0);
+      if (!inL.length) return res.status(400).json({ error: 'an order needs at least one line (cancel it instead)' });
+      const pm = await cpOrderProducts(inL.map(l => l.sku)); const unknown = inL.filter(l => !pm[l.sku]).map(l => l.sku); if (unknown.length) return res.status(422).json({ error: 'unknown SKU: ' + unknown.join(', ') });
+      const prev = {}; lines.forEach(l => { prev[l.sku] = l; });
+      lines = inL.map(l => { const p = pm[l.sku]; const flags = []; if (p.status === 'CLOSED') flags.push('closed'); if (p.status === 'PHASE OUT' || p.status === 'LAST SEASON') flags.push('discontinuing');
+        if (p.carton_qty > 0 && l.qty % p.carton_qty !== 0 && o.order_type === 'standard') flags.push('partial carton (' + p.carton_qty + '/ctn)');
+        const price = o.order_type === 'sample' ? 0 : l.price; const x = { sku: l.sku, qty: l.qty, cartons: p.carton_qty ? Math.round(l.qty / p.carton_qty * 100) / 100 : null, price, amount: price != null ? Math.round(price * l.qty * 100) / 100 : null, flags, mode: l.mode,
+          supplier_id: l.mode === 'ship' ? null : l.supplier_id, supplier_name: l.mode === 'ship' ? null : l.supplier_name };
+        const w = prev[l.sku]; if (!w) changes.push('Added ' + l.sku + ' × ' + l.qty); else { if (w.qty !== x.qty) changes.push(l.sku + ' qty ' + w.qty + ' → ' + x.qty); if ((w.price == null ? null : Number(w.price)) !== x.price) changes.push(l.sku + ' price ' + (w.price == null ? '—' : w.price) + ' → ' + (x.price == null ? '—' : x.price));
+          if ((w.mode || 'ship') !== x.mode) changes.push(l.sku + ' ' + (w.mode || 'ship') + ' → ' + x.mode); if ((w.supplier_id || null) !== x.supplier_id) changes.push(l.sku + ' supplier → ' + (x.supplier_name || '—')); }
+        return x; });
+      Object.keys(prev).forEach(k => { if (!lines.some(l => l.sku === k)) changes.push('Removed ' + k); });
+      set.lines = JSON.stringify(lines); set.units = lines.reduce((s2, l) => s2 + l.qty, 0); set.total = o.order_type === 'sample' ? 0 : Math.round(lines.reduce((s2, l) => s2 + (l.amount || 0), 0) * 100) / 100;
+    }
+    if (!changes.length && !('carrier_id' in set) && !('carrier_service_id' in set)) return res.json({ ok: true, unchanged: true, order: o });
+    const keys = Object.keys(set); const vals = keys.map(k => set[k]); const hist = JSON.stringify([{ at: new Date().toISOString(), by, what: changes.join(' · ') || 'Edited' }]);
+    await pool.query(`UPDATE planner.client_orders SET ${keys.map((k, n) => k + '=$' + (n + 2) + (k === 'lines' || k === 'ship_to' ? '::jsonb' : '')).join(', ')}${keys.length ? ', ' : ''}history = history || $${keys.length + 2}::jsonb, updated_by=$${keys.length + 3}, updated_at=now() WHERE id=$1`, [o.id, ...vals, hist, by]);
+    await cpAudit(o.client_id, 'Portal order edited', '#' + o.id + ' · ' + (changes.join(' · ') || 'carrier').slice(0, 300), by);
+    res.json({ ok: true, changes, order: await cpOrderRow(o.id) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+const _cpPushing = new Set();   // per-order single flight: a double click cannot create two Fulfil drafts
+app.post('/api/client/portal-orders/:id/push', async (req, res) => {
+  const b = req.body || {}; const by = (req.me && req.me.email) || 'sandbox'; const id = Number(req.params.id);
+  if (b.state && b.state !== 'draft') return res.status(400).json({ error: 'only Draft is supported for now (confirming in Fulfil is not wired)' });
+  if (_cpPushing.has(id)) return res.status(409).json({ error: 'already pushing this order' }); _cpPushing.add(id);
+  try { const o = await cpOrderRow(id); if (!o) return res.status(404).json({ error: 'order not found' }); if (!CP_EDITABLE.includes(o.status)) return res.status(409).json({ error: 'order is ' + o.status + (o.fulfil_number ? ' (' + o.fulfil_number + ')' : '') });
+    if (o.fulfil_id) return res.status(409).json({ error: 'order already has Fulfil draft ' + o.fulfil_number });
+    const lines = Array.isArray(o.lines) ? o.lines : []; const c = await cpClientById(o.client_id);
+    const noSup = lines.filter(l => (l.mode === 'backorder' || l.mode === 'dropship') && !l.supplier_id).map(l => l.sku); if (noSup.length) return res.status(422).json({ error: 'choose a supplier for: ' + noSup.join(', '), lines: noSup });
+    const partial = lines.filter(l => (l.flags || []).some(f => /partial/.test(f))).map(l => l.sku); if (partial.length && !b.accept_partial) return res.status(422).json({ error: partial.length + ' line(s) are not whole cartons', partial });
+    let fulfil; try { fulfil = await cpCreateFulfilDraft(c, { id: o.id, customer_po: o.customer_po, order_type: o.order_type, notes: o.notes, ship_from: o.ship_from, carrier_id: o.carrier_id, carrier_service_id: o.carrier_service_id, internal_note: o.internal_note, dry: !!b.dry }, lines); } catch (e) { fulfil = { ok: false, reason: e.message }; }
+    if (b.dry) return res.json({ ok: fulfil.ok, dry: true, fulfil });
+    const hist = JSON.stringify([{ at: new Date().toISOString(), by, what: fulfil.ok ? 'Pushed to Fulfil as draft ' + fulfil.number + (fulfil.stub ? ' (stub)' : '') : 'Push failed: ' + fulfil.reason }]);
+    if (fulfil.ok) await pool.query(`UPDATE planner.client_orders SET status='fulfil_draft', fulfil_id=$2, fulfil_number=$3, error=null, pushed_by=$4, pushed_at=now(), history = history || $5::jsonb, updated_by=$4, updated_at=now() WHERE id=$1`, [o.id, fulfil.fulfil_id, fulfil.number, by, hist]);
+    else await pool.query(`UPDATE planner.client_orders SET error=$2, history = history || $3::jsonb WHERE id=$1`, [o.id, fulfil.reason, hist]);
+    await cpAudit(o.client_id, fulfil.ok ? 'Portal order pushed to Fulfil' : 'Portal order push failed', '#' + o.id + ' · ' + (fulfil.ok ? fulfil.number : fulfil.reason), by);
+    res.status(fulfil.ok ? 200 : 502).json({ ok: fulfil.ok, fulfil: { ok: fulfil.ok, number: fulfil.number || null, reason: fulfil.reason || null, stub: !!fulfil.stub, env: fulfil.env }, order: await cpOrderRow(o.id) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  finally { _cpPushing.delete(id); }
+});
+app.post('/api/client/portal-orders/:id/cancel', async (req, res) => {
+  const by = (req.me && req.me.email) || 'sandbox'; const reason = String((req.body || {}).reason || '').trim();
+  try { const o = await cpOrderRow(req.params.id); if (!o) return res.status(404).json({ error: 'order not found' }); if (!CP_EDITABLE.includes(o.status)) return res.status(409).json({ error: 'order is ' + o.status });
+    await pool.query(`UPDATE planner.client_orders SET status='cancelled', history = history || $2::jsonb, updated_by=$3, updated_at=now() WHERE id=$1`, [o.id, JSON.stringify([{ at: new Date().toISOString(), by, what: 'Cancelled' + (reason ? ': ' + reason : '') }]), by]);
+    await cpAudit(o.client_id, 'Portal order cancelled', '#' + o.id + (reason ? ' · ' + reason : ''), by); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── commission engine ──
@@ -24876,7 +24970,7 @@ async function cpOrderHeader(key) {
     return { key: k.key, kind: 'fulfil', ref: r.reference || r.number, number: r.number, company: r.party_name, customer: r.ship_name || r.party_name, state: r.state, invoice_state: r.invoice_state, shipment_state: r.shipment_state, channel: r.channel, country: r.country_code, currency: r.currency, amount: Number(r.total) || 0, net: Number(r.untaxed) || 0, created: r.sale_date || r.created, shipped: last ? last.date : null, tracking: last ? last.tracking : null, carrier: last ? last.carrier : null }; }
   const r = (await pool.query(`SELECT o.id, o.client_id, c.name client, o.order_type, o.status, o.customer_po, o.units, o.total, o.currency, o.fulfil_number, to_char(o.requested_date,'YYYY-MM-DD') requested, to_char(o.created_at,'YYYY-MM-DD') created, o.ship_to FROM planner.client_orders o JOIN planner.clients c ON c.id=o.client_id WHERE o.id=$1::bigint`, [k.id])).rows[0]; if (!r) return null;
   const st = cpJson(r.ship_to, {});
-  return { key: k.key, kind: 'portal', ref: r.fulfil_number || ('CP-' + r.id), number: r.fulfil_number, company: st.company || r.client, customer: st.contact || st.company || r.client, state: r.status === 'fulfil_draft' ? 'draft' : 'submitted', currency: r.currency, amount: Number(r.total) || 0, created: r.created, requested: r.requested, customer_po: r.customer_po, sample: r.order_type === 'sample', units: r.units, client_id: r.client_id };
+  return { key: k.key, kind: 'portal', ref: r.fulfil_number || ('CP-' + r.id), number: r.fulfil_number, company: st.company || r.client, customer: st.contact || st.company || r.client, state: r.status === 'fulfil_draft' ? 'draft' : r.status === 'cancelled' ? 'cancelled' : 'submitted', currency: r.currency, amount: Number(r.total) || 0, created: r.created, requested: r.requested, customer_po: r.customer_po, sample: r.order_type === 'sample', units: r.units, client_id: r.client_id };
 }
 // staff: which clients this order belongs to = clients whose visibility includes it (portal submission: its client), plus any client
 // that already has a thread on it. One query for every active client (a few dozen at most).
@@ -25141,17 +25235,32 @@ app.get('/api/cp/orders', cpAuth, async (req, res) => { try {
   const v = _cpMemo('orders|' + key, [orders], () => ({ orders }));
   sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Order submission: validate (unknown / closed SKUs, partial cartons) → record → Fulfil draft (gated) → two emails.
+// v28.227 (Ben): the draft also carries what staff set in CLIENT ▸ Orders review: order.carrier_id / carrier_service_id
+// (Fulfil carrier + carrier.service ids) and per line mode 'ship' | 'backorder' | 'dropship' (= sale.line.delivery_mode) with
+// supplier_id (party id, required for backorder / drop ship). order.dry = build + resolve everything, return the payload, write
+// nothing. HZ_FULFIL_WRITE_STUB=1 (sandbox only, same switch as Validate SO) fakes the create so the push can be tested.
+const CP_LINE_MODES = ['ship', 'backorder', 'dropship'];
+// v28.227: does this client's portal order go straight to Fulfil? clients.order_review auto | review | inherit (→ cp_auto_push_fulfil)
+async function cpAutoPush(c) {   // order_review read fresh: the portal session memo (cpAuth) holds a client copy for minutes
+  let m = c && c.order_review; try { const r = c && c.id ? (await pool.query(`SELECT order_review FROM planner.clients WHERE id=$1`, [c.id])).rows[0] : null; if (r) m = r.order_review; } catch (e) {} if (m === 'auto') return true; if (m === 'review') return false; return String(await cpSetting('cp_auto_push_fulfil', 'false')).toLowerCase() === 'true'; }
+async function cpSalesTeam(c) { const raw = String(await cpSetting('cp_sales_team_emails', '')) || String(await cpSetting('cp_ops_emails', ''));
+  const t = raw.split(/[,;\s]+/).filter(Boolean); if (c && c.owner_email && !t.some(x => x.toLowerCase() === c.owner_email.toLowerCase())) t.push(c.owner_email); return t; }
 async function cpCreateFulfilDraft(client, order, lines) {
   const env = await activeFulfilEnv(); const cfg = fulfilConfigFor(env); if (!cfg.configured) return { ok: false, reason: 'Fulfil not configured' };
-  if (env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return { ok: false, reason: 'live Fulfil writes are disabled (FULFIL_LIVE_WRITES)' };
+  if (!order.dry && !sovStubOn() && env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return { ok: false, reason: 'live Fulfil writes are disabled (FULFIL_LIVE_WRITES)' };
   if (!client.fulfil_party_id) return { ok: false, reason: 'client has no Fulfil party id (set it on the client record)' };
   const chName = client.fulfil_channel || CP_CHANNEL_ALIAS[client.market + 'WS']; const ch = (await fulfilFetch('PUT', '/model/sale.channel/search_read', [[['name', '=', chName]], 0, 1, null, ['id']]))[0]; if (!ch) return { ok: false, reason: 'Fulfil channel "' + chName + '" not found' };
   const whCode = CP_FULFIL_WH[order.ship_from] || CP_FULFIL_WH[client.warehouse_code] || FULFIL_MAP.defaultWarehouseCode; const wh = (await fulfilFetch('PUT', '/model/' + FULFIL_MAP.whModel + '/search_read', [[['code', '=', whCode]], 0, 1, null, ['id']]))[0]; if (!wh) return { ok: false, reason: 'Fulfil warehouse "' + whCode + '" not found' };
   const cur = (await fulfilFetch('PUT', '/model/' + FULFIL_MAP.currencyModel + '/search_read', [[['code', '=', client.currency]], 0, 1, null, ['id']]))[0]; if (!cur) return { ok: false, reason: 'currency ' + client.currency + ' not in Fulfil' };
   const addr = await fulfilFindPartyAddress(client.fulfil_party_id); if (!addr) return { ok: false, reason: 'Fulfil party has no address' };
   const prods = await fulfilResolveProducts(lines.map(l => l.sku)); const missing = lines.filter(l => !prods[l.sku]).map(l => l.sku); if (missing.length) return { ok: false, reason: 'not in Fulfil: ' + missing.join(', ') };
-  const payload = { party: client.fulfil_party_id, invoice_address: addr, shipment_address: addr, currency: cur.id, channel: ch.id, warehouse: wh.id, reference: order.customer_po || ('CP-' + order.id), comment: 'Client portal ' + (order.order_type === 'sample' ? 'SAMPLE REQUEST' : 'order') + ' #' + order.id + (order.notes ? ' — ' + order.notes : ''),
-    lines: [['create', lines.map(l => ({ product: prods[l.sku].id, quantity: l.qty, unit: prods[l.sku].uom, unit_price: order.order_type === 'sample' ? 0 : (l.price || 0), description: l.sku }))]] };
+  const payload = { party: Number(client.fulfil_party_id), invoice_address: addr, shipment_address: addr, currency: cur.id, channel: ch.id, warehouse: wh.id, reference: order.customer_po || ('CP-' + order.id), comment: 'Client portal ' + (order.order_type === 'sample' ? 'SAMPLE REQUEST' : 'order') + ' #' + order.id + (order.notes ? ' — ' + order.notes : ''),
+    lines: [['create', lines.map(l => { const m = CP_LINE_MODES.includes(l.mode) ? l.mode : 'ship'; const x = { product: prods[l.sku].id, quantity: l.qty, unit: prods[l.sku].uom, unit_price: order.order_type === 'sample' ? 0 : (l.price || 0), description: l.sku, delivery_mode: m };
+      if (m !== 'ship' && l.supplier_id) x.supplier = Number(l.supplier_id); return x; })]] };
+  if (order.carrier_id) payload.carrier = Number(order.carrier_id); if (order.carrier_service_id) payload.carrier_service = Number(order.carrier_service_id);
+  if (order.internal_note) payload.comment = String(payload.comment || '') + '\n' + order.internal_note;
+  if (order.dry) return { ok: true, dry: true, env, payload };
+  if (sovStubOn()) return { ok: true, stub: true, env, fulfil_id: 990000000 + Number(order.id || 0), number: 'SO-STUB-' + order.id, payload };
   const created = await fulfilFetch('POST', '/model/sale.sale', [payload]); const id = Array.isArray(created) ? created[0] : (created && created.id);
   if (!id) return { ok: false, reason: 'Fulfil did not return an id' };
   const row = (await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['id', '=', id]], 0, 1, null, ['id', 'number']]))[0];
@@ -25184,16 +25293,26 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
     const units = lines.reduce((s, l) => s + l.qty, 0); const total = type === 'sample' ? 0 : lines.reduce((s, l) => s + (l.amount || 0), 0);
     const o = (await pool.query(`INSERT INTO planner.client_orders (client_id, user_id, order_type, customer_po, ship_to, requested_date, ship_from, method, notes, lines, units, total, currency, submitted_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14) RETURNING id, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`,
       [c.id, req.cp.user.id, type, (b.customer_po || '').trim() || null, JSON.stringify(b.ship_to || {}), b.requested_date || null, b.ship_from || c.warehouse_code || CP_MARKETS[c.market].wh, b.method || null, (b.notes || '').trim() || null, JSON.stringify(lines), units, total, c.currency, req.cp.user.email])).rows[0];
-    let fulfil = { ok: false, reason: 'not attempted' }; try { fulfil = await cpCreateFulfilDraft(c, { id: o.id, customer_po: b.customer_po, order_type: type, notes: b.notes, ship_from: b.ship_from }, lines); } catch (e) { fulfil = { ok: false, reason: e.message }; }
-    await pool.query(`UPDATE planner.client_orders SET status=$2, fulfil_id=$3, fulfil_number=$4, error=$5 WHERE id=$1`, [o.id, fulfil.ok ? 'fulfil_draft' : 'submitted', fulfil.ok ? fulfil.fulfil_id : null, fulfil.ok ? fulfil.number : null, fulfil.ok ? null : fulfil.reason]);
+    // v28.227 (Ben): auto-post to Fulfil only when the client's override says so, or it inherits and cp_auto_push_fulfil = 'true'.
+    // Otherwise the order waits in CLIENT ▸ Orders (status 'review') for staff to set carrier / fulfilment / suppliers and push.
+    const auto = await cpAutoPush(c); lines.forEach(l => { l.mode = 'ship'; });
+    let fulfil = { ok: false, reason: auto ? 'not attempted' : 'held for review' };
+    if (auto) { try { fulfil = await cpCreateFulfilDraft(c, { id: o.id, customer_po: b.customer_po, order_type: type, notes: b.notes, ship_from: b.ship_from }, lines); } catch (e) { fulfil = { ok: false, reason: e.message }; } }
+    const status = fulfil.ok ? 'fulfil_draft' : auto ? 'submitted' : 'review';
+    await pool.query(`UPDATE planner.client_orders SET status=$2, fulfil_id=$3, fulfil_number=$4, error=$5, lines=$6::jsonb, history=$7::jsonb WHERE id=$1`, [o.id, status, fulfil.ok ? fulfil.fulfil_id : null, fulfil.ok ? fulfil.number : null, fulfil.ok || !auto ? null : fulfil.reason, JSON.stringify(lines),
+      JSON.stringify([{ at: new Date().toISOString(), by: req.cp.user.email, what: 'Submitted in portal' + (fulfil.ok ? ' · auto-posted Fulfil draft ' + fulfil.number : auto ? ' · auto-post failed: ' + fulfil.reason : ' · held for review') }])]);
     await cpAudit(c.id, (type === 'sample' ? 'Sample request' : 'Order') + ' submitted', '#' + o.id + ' · ' + units + ' units' + (fulfil.ok ? ' · Fulfil ' + fulfil.number : ' · ' + fulfil.reason), req.cp.user.email);
-    // notifications: Ops (draft waiting) + the client (their record)
-    const base = cpBase(req); const ops = String(await cpSetting('cp_ops_emails', '')).split(/[,;\s]+/).filter(Boolean); if (c.owner_email && !ops.includes(c.owner_email)) ops.push(c.owner_email);
+    // notifications (v28.227 Ben): ONE email, to the client user, cc the sales team (cp_sales_team_emails, else cp_ops_emails, + the
+    // client's owner). cp_client_confirm_email = 'false' sends it to the sales team only. An auto-post that failed also alerts the team.
+    const base = cpBase(req); const team = await cpSalesTeam(c);
     const E = escHtml;   // v28.151 (review C7): every interpolated value in both order emails is HTML-escaped (client-typed PO / notes / names, SKUs, Fulfil reasons)
     const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${E(l.sku)}</td><td align="right">${E(l.qty)}</td><td align="right">${l.cartons == null ? '' : E(l.cartons)}</td><td align="right">${l.price == null ? '' : E(l.price.toFixed(2))}</td><td>${E(l.flags.join(', '))}</td></tr>`).join('') + '</table>';
-    if (ops.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: ops, subject: (type === 'sample' ? 'Sample request' : 'Client order') + ' from ' + c.name + (fulfil.ok ? ' — draft ' + fulfil.number + ' waiting in Fulfil' : ' — needs keying (no Fulfil draft)'), html: `<p><b>${E(c.name)}</b> (${E(req.cp.user.email)}) submitted a ${type === 'sample' ? 'sample request' : 'order'} in the client portal.</p><p>${units} units · ${E(c.currency)} ${total.toFixed(2)} · PO ${E(b.customer_po || '—')} · requested ${E(b.requested_date || '—')} · ship from ${E(b.ship_from || c.warehouse_code || '')}</p>${lineHtml}<p>${fulfil.ok ? 'Draft <b>' + E(fulfil.number) + '</b> is waiting in Fulfil (' + E(fulfil.env) + ') for confirmation.' : '<b>No Fulfil draft was created:</b> ' + E(fulfil.reason) + '. Key it in Fulfil from this email.'}</p><p><a href="${E(adminBase(req))}/#/client/orders">Open in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
-    if (String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false') await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to: req.cp.user.email, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id, html: `<p>Hi ${E(req.cp.user.name || '')},</p><p>Thanks — we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + E(b.customer_po) + ')' : ''}. Our team will confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + E(c.currency) + ' ' + total.toFixed(2) + ' ex shipping'}</p>${lineHtml}<p><a href="${E(base)}/client#/orders">View your orders</a></p>` });
-    res.json({ ok: true, id: o.id, status: fulfil.ok ? 'fulfil_draft' : 'submitted', fulfil, units, total, lines });
+    const toClient = String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false';
+    const to = toClient ? req.cp.user.email : team; const cc = toClient ? team.filter(x => x.toLowerCase() !== String(req.cp.user.email).toLowerCase()) : [];
+    if ((Array.isArray(to) ? to.length : to)) await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to, cc, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id + (b.customer_po ? ' (PO ' + String(b.customer_po).trim() + ')' : '') + ' · ' + c.name,
+      html: `<p>Hi ${E(req.cp.user.name || '')},</p><p>Thanks, we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + E(b.customer_po) + ')' : ''} for <b>${E(c.name)}</b>. Our team will review and confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + E(c.currency) + ' ' + total.toFixed(2) + ' ex shipping'}${b.requested_date ? ' · requested ' + E(b.requested_date) : ''}</p>${lineHtml}${b.notes ? '<p>Notes: ' + E(b.notes) + '</p>' : ''}<p><a href="${E(base)}/client#/orders">View your orders</a></p>` });
+    if (auto && !fulfil.ok && team.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: team, subject: 'Client order #' + o.id + ' from ' + c.name + ' — auto-post to Fulfil failed', html: `<p>The Fulfil draft for portal order <b>#${o.id}</b> (${E(c.name)}) was not created: ${E(fulfil.reason)}.</p><p><a href="${E(adminBase(req))}/#/client/orders">Review and push it in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
+    res.json({ ok: true, id: o.id, status, fulfil, units, total, lines });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/cp/commission', cpAuth, async (req, res) => {

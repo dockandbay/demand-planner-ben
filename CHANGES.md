@@ -1,3 +1,18 @@
+## v28.227 (Ben, branch review-fixes-2026-10-05): Client portal orders held for review before Fulfil
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/341_client_order_review.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 341** (additive, idempotent: `clients.order_review`, review columns on `client_orders`). No new env vars (uses the existing `FULFIL_LIVE_WRITES`).
+
+- New CLIENT ▸ Config setting **Post portal orders to Fulfil automatically** (`cp_auto_push_fulfil`), **default off**. Off: a portal order is saved as **Awaiting review** with no Fulfil draft. On: the old behaviour (draft on submit).
+- **Per-client override** (Clients & agents ▸ Account ▸ Portal orders): Inherit / Always review / Auto post. Read fresh at submit (the portal session cache no longer delays it).
+- **One email on submit**, to the client, **cc the sales team** (new setting `cp_sales_team_emails`, falls back to Notify Ops) and the client's owner. The separate "needs keying" Ops email is now sent only when an auto-post fails.
+- **CLIENT ▸ Orders:** red badge on the ORDERS tab and a banner with the awaiting-review count; the Portal submissions table has Review / Open buttons. Deep link `#/client/orders/R<id>`.
+- **Review view** (approved mockup): PO, requested date, ship-from, Fulfil carrier + service, internal note (appended to the Fulfil comment); editable lines (qty, price, add, remove) with availability at the ship-from; **coloured fulfilment dropdown** (From stock green, Back order violet, Drop ship blue); **supplier** from Fulfil product suppliers: text when one option, yellow Validate-SO dropdown when several; **Partial carton** flag next to the qty; history of every edit.
+- **Push to Fulfil**: anyone with CLIENT access; creates a **Draft** sale (Confirmed shown but disabled, not wired). Blocked until every back order / drop ship line has a supplier; warns on partial cartons and missing prices; dry run shows the payload. Each line sends `delivery_mode` + `supplier`; the header sends `carrier` + `carrier_service`. Cancel order is available while awaiting review.
+- Portal: a cancelled order shows as Cancelled to the client.
+- Fix: the Fulfil draft sent the party id as text (Postgres bigint); now a number.
+- Endpoints (CLIENT access): `GET /api/client/portal-orders/:id`, `GET /api/client/portal-orders/:id/fulfil-options` (Fulfil reads), `POST /api/client/portal-orders/:id` (edit), `POST /api/client/portal-orders/:id/push`, `POST /api/client/portal-orders/:id/cancel`.
+- Verified on sandbox (stub writes, Fulfil sandbox reads): all four override/global combinations route correctly; email to client cc sales + owner; edit recomputes flags/totals/history; guards for missing supplier, partial cartons, Confirmed, unknown SKU, double push, edit after push; dry-run payload carries delivery_mode, supplier, carrier; jsdom render of badge (6), banner, review view, partial-carton flag, single and multi supplier cells, push modal, push to Draft. 0 JS errors.
+
 ## v28.226 (Ben, branch review-fixes-2026-10-05): Intake deadlines count Zalando and FBA transfers
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
