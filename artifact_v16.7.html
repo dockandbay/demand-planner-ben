@@ -16241,6 +16241,11 @@ function saFmt(n){ var r=Math.round(Number(n)||0); return r?r.toLocaleString():'
 function saDate(d){ if(!d)return ''; var m=String(d).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m)return String(d).slice(0,10); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[3]+'-'+mn[+m[2]-1]+'-'+m[1].slice(2); }
 function saStatus(lch,disc,pst){ var t=new Date().toISOString().slice(0,10); if(disc&&String(disc).slice(0,10)<=t)return 'DISC'; if((pst||'')==='CLOSED')return 'CLOSED'; if(lch&&String(lch).slice(0,10)>t)return 'FUTURE'; return 'ACTIVE'; }
 function saSkuMatch(sku,q){ if(!q)return true; var toks=q.split(/[\s,]+/).filter(Boolean); if(!toks.length)return true; var s=sku.toLowerCase(); return toks.some(function(t){return s.indexOf(t)>=0;}); }
+// v28.222 (SUG-0043): SKU codes (any word with a hyphen) keep the old "any of these SKUs" match; otherwise it is a
+// description search: every word must appear in the SKU or the product description ("navy large", "cherry bomb").
+function saRowMatch(r,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,]+/).filter(Boolean); if(!toks.length)return true;
+  if(toks.some(function(t){ return t.indexOf('-')>=0; }))return saSkuMatch(r.sku,q);
+  var hay=(r.sku+' '+(r.nm||'')).toLowerCase(); return toks.every(function(t){ return hay.indexOf(t)>=0; }); }
 function saInbound(sku,mkt){ var whs=[SA_WH3[mkt],SA_WHF[mkt]].filter(Boolean),out=[];
   whs.forEach(function(wh){ var k=sku+'|'+wh;
     var inb=(typeof SKUI!=='undefined')?SKUI[k]:null; if(inb){ (Array.isArray(inb)?inb:[inb]).forEach(function(x){ if(x&&(Number(x.qty)||x.eta))out.push({qty:Number(x.qty)||0,eta:x.eta||null,ref:x.ref||''}); }); }
@@ -16258,7 +16263,7 @@ function saRows(mkt){ var co=mkt.toLowerCase(),wh3=SA_WH3[mkt],whF=SA_WHF[mkt],r
     var inb=saInbound(sku,mkt);
     if(!av && !(s3||sf||aw) && !inb.length)return;   // not present in this market
     var lch=(p.lch||{})[co]||'',disc=(p.disc||{})[co]||'';
-    rows.push({sku:sku,cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc,p.st),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb}); });
+    rows.push({sku:sku,nm:p.n||'',cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc,p.st),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb}); });
   rows.sort(function(a,b){ return a.cat<b.cat?-1:a.cat>b.cat?1:(a.sku<b.sku?-1:1); });
   return rows; }
 function saStatusBadge(st){ var c=st==='DISC'?['var(--hover)','var(--muted)']:st==='CLOSED'?['var(--neg-bg)','var(--neg)']:st==='FUTURE'?['var(--amber-bg)','var(--amber)']:['var(--pos-bg)','var(--pos)']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">'+st+'</span>'; }
@@ -16267,15 +16272,15 @@ function saInbCell(x){ if(!x)return '<td class="sa-inb" style="text-align:right;
     +'<div style="font-weight:700">'+saFmt(x.qty)+'</div>'
     +'<div style="font-size:9.5px;color:var(--muted)">'+(x.eta?saDate(x.eta):'no date')+'</div>'
     +'<div style="font-size:9.5px">'+(x.ref?'<a class="sa-poref" data-po="'+saEsc(x.ref)+'" title="Open '+saEsc(x.ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer">'+saEsc(x.ref)+'</a>':'<span style="color:var(--faint)">—</span>')+'</div></td>'; }
-function saTableHTML(rows,awCol){ var ncols=awCol?10:9;
+function saTableHTML(rows,awCol){ var ncols=awCol?11:10;   // v28.222 (SUG-0043): + Description
   if(!rows.length)return '<div class="count" style="padding:10px;color:var(--faint)">No SKUs match.</div>';
   var h='<table><thead><tr>'
-    +'<th class="l sku">SKU</th><th class="l">Status</th><th class="l">Type</th><th class="l">Launch</th><th class="l">Disc</th>'
+    +'<th class="l sku">SKU</th><th class="l sa-desc">Description</th><th class="l">Status</th><th class="l">Type</th><th class="l">Launch</th><th class="l">Disc</th>'
     +'<th class="soh">SOH 3PL</th><th class="soh">SOH FBA</th>'+(awCol?'<th class="soh">SOH AWD</th>':'')
     +'<th>Next inbound</th><th>2nd inbound</th></tr></thead><tbody>';
   var cur=null;
   rows.forEach(function(r){ if(r.cat!==cur){ cur=r.cat; h+='<tr class="sa-cat"><td colspan="'+ncols+'">'+saEsc(r.cat)+'</td></tr>'; }
-    h+='<tr><td class="l sku"><b>'+saEsc(r.sku)+'</b></td>'
+    h+='<tr><td class="l sku"><b>'+saEsc(r.sku)+'</b></td><td class="l sa-desc">'+(r.nm?saEsc(r.nm):'<span style="color:var(--faint)">—</span>')+'</td>'
       +'<td class="l">'+saStatusBadge(r.st)+'</td>'
       +'<td class="l">'+saEsc(r.cs||'—')+(r.ti?' <span style="color:var(--faint);font-size:9px">'+saEsc(r.ti)+'</span>':'')+'</td>'
       +'<td class="l">'+(r.lch?saDate(r.lch):'—')+'</td><td class="l">'+(r.disc?saDate(r.disc):'—')+'</td>'
@@ -16294,7 +16299,7 @@ function saCardsHTML(rows,awCol){
       h+='<div style="font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);background:var(--band);padding:4px 8px;margin:8px 0 4px;border-radius:4px">'+saEsc(r.cat)+'</div>'
         +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'; open=true; }
     h+='<div style="border:1px solid #e5e5e5;border-radius:8px;padding:8px 10px;background:var(--card)">'
-      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div style="font-weight:700;font-size:11.5px;overflow-wrap:anywhere">'+saEsc(r.sku)+'</div>'+saStatusBadge(r.st)+'</div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div style="font-weight:700;font-size:11.5px;overflow-wrap:anywhere">'+saEsc(r.sku)+(r.nm?'<div style="font-weight:500;font-size:10.5px;color:var(--ink-soft)">'+saEsc(r.nm)+'</div>':'')+'</div>'+saStatusBadge(r.st)+'</div>'
       +'<div style="font-size:9.5px;color:var(--muted);margin-bottom:6px">'+saEsc(r.cs||'—')+(r.ti?' · '+saEsc(r.ti):'')+' · L '+(r.lch?saDate(r.lch):'—')+' · D '+(r.disc?saDate(r.disc):'—')+'</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:7px 4px;border-top:1px solid var(--line2);padding-top:5px">'
         +cell('SOH 3PL',saFmt(r.s3))+cell('SOH FBA',saFmt(r.sf))+(awCol?cell('SOH AWD',r.aw?saFmt(r.aw):'—'):'')
@@ -16308,7 +16313,7 @@ function renderStockAvailability(container){ if(!container)return;
   all.forEach(function(r){ if(!seen[r.cat]){seen[r.cat]=1;cats.push(r.cat);} }); cats.sort();
   if(SA_CAT!=='__ALL__'&&cats.indexOf(SA_CAT)<0)SA_CAT='__ALL__';
   var q=(SA_Q||'').trim().toLowerCase();
-  var rows=all.filter(function(r){ if(SA_CAT!=='__ALL__'&&r.cat!==SA_CAT)return false; return saSkuMatch(r.sku,q); });
+  var rows=all.filter(function(r){ if(SA_CAT!=='__ALL__'&&r.cat!==SA_CAT)return false; return saRowMatch(r,q); });
   var FLAGS={UK:'\u{1F1EC}\u{1F1E7}',US:'\u{1F1FA}\u{1F1F8}',EU:'\u{1F1EA}\u{1F1FA}',AU:'\u{1F1E6}\u{1F1FA}',CA:'\u{1F1E8}\u{1F1E6}'};
   var pills=SA_MKTS.map(function(m){ return '<button class="sa-mkt" data-m="'+m+'" style="cursor:pointer;font-size:11px;font-weight:600;padding:3px 10px;border-radius:14px;border:1px solid '+(m===SA_CUR?'var(--blue)':'var(--line)')+';background:'+(m===SA_CUR?'var(--blue)':'#fff')+';color:'+(m===SA_CUR?'#fff':'var(--ink-soft)')+'">'+(FLAGS[m]||'')+' '+m+'</button>'; }).join('');
   var catOpts='<option value="__ALL__">All categories</option>'+cats.map(function(c){return '<option value="'+saEsc(c)+'"'+(c===SA_CAT?' selected':'')+'>'+saEsc(c)+'</option>';}).join('');
@@ -16318,14 +16323,15 @@ function renderStockAvailability(container){ if(!container)return;
     +'.sa-report th.l{text-align:left}.sa-report td{padding:3px 8px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap;vertical-align:top}.sa-report td.l{text-align:left}'
     +'.sa-report th.sku,.sa-report td.sku{position:sticky;left:0;text-align:left;white-space:normal;overflow-wrap:anywhere;width:25ch;max-width:25ch;min-width:14ch}'   /* SKU pinned; ~25ch then wraps (never truncated) */
     +'.sa-report th.sku{z-index:4;background:var(--band)}.sa-report td.sku{z-index:2;background:var(--card);font-weight:600;border-right:1px solid #e5e5e5}'
-    +'.sa-report th.soh,.sa-report td.soh{width:58px;min-width:58px;max-width:58px}'   /* SOH cols: just fit the heading */
+    +'.sa-report th.soh,.sa-report td.soh{width:58px;min-width:58px;max-width:58px}'
+    +'.sa-report th.sa-desc,.sa-report td.sa-desc{text-align:left;white-space:normal;min-width:22ch;max-width:40ch;font-size:11px}'   /* v28.222 description column wraps */   /* SOH cols: just fit the heading */
     +'.sa-report tr.sa-cat td{background:var(--band);font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);text-align:left;border-top:2px solid var(--faint)}'
     +'.sa-report .sa-filter{position:sticky;top:0;z-index:6;background:var(--card);padding:8px 0;margin:0;border-bottom:1px solid var(--line2)}'   /* keep pills + filters in view while scrolling */
     +'</style>'
     +'<div class="sa-report"><div class="sa-filter" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
       +'<span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--faint);margin-right:2px">MARKET</span>'+pills
       +'<span style="width:1px;height:16px;background:var(--line);margin:0 4px"></span>'
-      +'<input class="sa-q" placeholder="Filter by SKU(s) — space/comma separated…" value="'+saEsc(SA_Q||'')+'" style="font-size:11px;padding:3px 8px;border:1px solid var(--line);border-radius:4px;width:280px">'
+      +'<input class="sa-q" placeholder="Filter by SKU(s) or description, e.g. navy large" value="'+saEsc(SA_Q||'')+'" style="font-size:11px;padding:3px 8px;border:1px solid var(--line);border-radius:4px;width:280px">'
       +'<select class="sa-cat" style="font-size:11px;padding:3px 8px;border:1px solid var(--line);border-radius:4px;max-width:220px">'+catOpts+'</select>'
     +'</div>'+((window.matchMedia&&window.matchMedia('(max-width:640px)').matches)?saCardsHTML(rows,SA_CUR==='US'):saTableHTML(rows,SA_CUR==='US'))+'</div>';
   container.querySelectorAll('.sa-mkt').forEach(function(b){ b.onclick=function(){ SA_CUR=b.dataset.m; renderStockAvailability(container); }; });

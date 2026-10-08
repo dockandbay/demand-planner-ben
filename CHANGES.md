@@ -1,3 +1,11 @@
+## v28.222 (Ben, branch review-fixes-2026-10-05): Stock Availability product descriptions (SUG-0043, Sarah)
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Stock Availability (REPORTS tab and the SA drawer) has a **Description** column (product name) next to SKU, wrapping; phone cards show it under the SKU.
+- The filter box now also searches descriptions: type plain words ("whitsunday large", "cherry bomb") and every word must appear in the SKU or description. SKU codes (anything with a hyphen) keep the old "any of these SKUs" behaviour.
+- Verified on sandbox (jsdom, real data): 1,002 rows, all rows aligned with the new header; "whitsunday large" = 8 rows; "TOWLB-CAB-LG" = 55 (unchanged); 0 JS errors.
+
 ## v28.221 (Ben, branch review-fixes-2026-10-05): Contribution model size split
 
 **Files:** `artifact_v16.7.html`, `supply/inject.html`, `server.mjs`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migration, no env vars (uses the existing `app_settings.contrib_model` JSON).
