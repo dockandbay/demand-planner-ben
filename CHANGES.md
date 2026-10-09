@@ -1,3 +1,9 @@
+## v28.239 (Ben, branch review-fixes-2026-10-05): COGS table: wider SKU column
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- COGS main table: the SKU column is about twice as wide (min 360px, no wrapping) so the longest SKUs (43 characters, e.g. BUNDLE-BEACH-KIT-TOWLB-CAB-X2-LTPNK-LG-SETA, plus the SET tag) sit on one line; value cells are tighter (4px 6px padding, no wrap) so the 10 cost columns take less room.
+
 ## v28.238 (Ben, branch review-fixes-2026-10-05): COGS: last analysis persists, main table left-aligned
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `migrations/345_cogs_values.sql` (amended, not yet deployed: + `planner.cogs_analysis`), `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No env vars.
