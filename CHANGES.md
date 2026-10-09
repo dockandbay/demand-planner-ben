@@ -1,3 +1,9 @@
+## v28.237 (Ben, branch review-fixes-2026-10-05): COGS history modal left-aligned
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- COGS ▸ History modal: headers and data are now left-aligned (Rows and Changed were right-aligned; the shared table styles also centred some cells). Verified in jsdom: every header and cell computes text-align left.
+
 ## v28.236 (Ben, branch review-fixes-2026-10-05): COGS: sets / bundles costed from components, category + status filters, history modal
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
