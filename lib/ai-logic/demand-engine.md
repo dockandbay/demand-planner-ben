@@ -87,7 +87,7 @@ fingerprints:
   artifact_v16.7.html::zalInit: ac5eab8f1024
   artifact_v16.7.html::tikInit: e030a71e53dc
   artifact_v16.7.html::buildLiveBpOverlay: 01bf2c87eb2c
-  artifact_v16.7.html::_pkaIngest: 2aee2f643995
+  artifact_v16.7.html::_pkaIngest: 5bca96e3246b
   artifact_v16.7.html::parseStored: e11224289247
   artifact_v16.7.html::parseInput: 0cf591df7502
   artifact_v16.7.html::calc: 39918cbe26ac
@@ -115,7 +115,7 @@ fingerprints:
   artifact_v16.7.html::discCutoffMo: 5e942f8dd917
   artifact_v16.7.html::buildLiveDemand: fcbc97070915
   artifact_v16.7.html::_hzBuildDemandCore: de531209af79
-  artifact_v16.7.html::_hzDemandGen: 625a066042de
+  artifact_v16.7.html::_hzDemandGen: e2a62173559a
   artifact_v16.7.html::hzDemandBuildAsync: ae8d121bb869
   artifact_v16.7.html::_hzDbRun: 757b1925b060
   artifact_v16.7.html::hzDemandScope: 910b3f7073b6
@@ -140,7 +140,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.233
+verified_version: v28.243
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -219,6 +219,7 @@ verified_version: v28.233
 
 ## Preorder, Key Account, TikTok, Zalando
 - Preorder and Key-Account quantities are folded into B2B demand only for months inside the 18-month window. Past-dated months are past forecasts: ignored, never rolled forward. A record with no date lands in the window's first month. (source: buildLiveDemand, _pkaIngest)
+- v28.243 (Ben): Key-Account quantities always add to B2B. A PREORDER adds only when that SKU x market x month's preorder is at least 50% of the B2B forecast (B2B before any preorder or key account; 0 forecast = any preorder adds); a smaller one is taken to be inside the forecast. The result per month is kept as md.pre_used {u, base} for the buy popup. Preorder order + client detail (from planner.preorder_lines) rides along as PKA_MAP.det, display only. (source: buildLiveDemand step 3, _pkaIngest)
 - DEMAND ▸ Key Accounts Forecast grid (v28.182): one cell = client x SKU x warehouse (UK / US / EU 3PL pill) x month. Saving a cell deletes every row for that client / SKU / warehouse inside the month and inserts one row dated the 1st with the new quantity; blank or 0 clears the month. Quantities must be whole numbers of 0 or more (thousands separators are stripped); anything else is rejected and not saved. (source: renderKeyAccountsView, /api/supply/ka-forecast-cell, /api/supply/ka-forecast-cells, kaCellQty)
 - The grid works like a spreadsheet: click, drag, Shift+click and Ctrl/Cmd+click select cells (client header rows are skipped, so a block can span clients); the status bar shows Selected, Sum, Count (non-blank) and Avg of the selection. Arrows / Tab move, Enter / F2 / a digit edits, Delete clears the selection, Ctrl/Cmd+C copies it as tab-separated rows, Ctrl/Cmd+V pastes a block from Excel / Sheets starting at the active cell (one value pasted into a multi-cell selection fills it), Ctrl/Cmd+Z undoes the last change (up to 50 steps). Pasted cells that are not numbers, or fall outside the shown rows / months, are skipped and counted in a message. Past (tinted) months stay editable as before. (source: renderKeyAccountsView)
 - A typed single cell saves through /api/supply/ka-forecast-cell; a paste, fill, clear or undo saves in ONE request to /api/supply/ka-forecast-cells, which applies the same per-cell rule in batches of 200 cells (one database statement per batch). Each cell is checked on its own: a rejected or failed cell is reported and put back on screen, the others still save. The import panel and the column / SKU clear buttons use the same bulk endpoint. (source: /api/supply/ka-forecast-cells, renderKeyAccountsView)
