@@ -1,3 +1,10 @@
+## v28.245 (Ben, branch review-fixes-2026-10-05): Preorders sync needs DEMAND edit rights; vercel.json matches prod
+
+**Files:** `server.mjs`, `vercel.json`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. Buy plan unchanged.
+
+- `POST /api/demand/preorders/sync` now maps to the `demand` capability in requiredCap() (was falling through to fail-open, so a read-only user could run the Fulfil sync and write preorders / preorder_lines). Same change Diviyaj made on prod. The n8n cron path `/api/cron/preorders-sync` is unchanged (webhook-secret gated).
+- vercel.json now matches prod: `regions: ["lhr1"]`, and includeFiles adds `horizon-login.html`, `templates/**`, `zalando_data.json`.
+
 ## v28.244 (Ben, branch review-fixes-2026-10-05): Preorders > Demand impact report
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. Buy plan unchanged.

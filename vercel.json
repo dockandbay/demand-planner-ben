@@ -1,11 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "regions": ["lhr1"],
   "buildCommand": "echo no-build",
   "outputDirectory": ".",
   "installCommand": "npm install",
   "functions": {
-    "api/index.mjs": { "includeFiles": "{artifact_v16.7.html,favicon.png,package.json,supply/**,lib/**,node_modules/pdfjs-dist/legacy/build/pdf.worker*.mjs,node_modules/pdfjs-dist/build/pdf*.min.mjs}", "maxDuration": 300 }
+    "api/index.mjs": { "includeFiles": "{artifact_v16.7.html,horizon-login.html,zalando_data.json,favicon.png,package.json,templates/**,supply/**,lib/**,node_modules/pdfjs-dist/legacy/build/pdf.worker*.mjs,node_modules/pdfjs-dist/build/pdf*.min.mjs}", "maxDuration": 300 }
   },
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }

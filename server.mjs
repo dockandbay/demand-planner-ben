@@ -1401,6 +1401,7 @@ function requiredCap(method, p) {
       || p.startsWith('/api/auto-forecast/')
       || p.startsWith('/api/demand/worksheets')   // v28.216 Cross Market saved worksheets
       || p.startsWith('/api/demand/intake/')   // v28.224 intake deadlines + snoozes
+      || p.startsWith('/api/demand/preorders')   // v28.245 Sync from Fulfil writes preorders + preorder_lines (Diviyaj review)
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
