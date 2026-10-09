@@ -17,7 +17,7 @@ sources:
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.221
+verified_version: v28.241
 fingerprints:
   artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
@@ -50,6 +50,7 @@ fingerprints:
 - Per SKU month: a saved SKU forecast (planner.forecast_outputs) wins; otherwise a continuing SKU uses last year's same-month actual (chained); otherwise a new SKU gets subcategory forecast x SKU share. [buildLiveDemand]
 - Pre-launch months are zero (month start before the market launch date). [buildLiveDemand]
 - Preorders and Key-Account forecasts (planner.preorders, planner.key_account_forecasts) are ADDED to B2B, for months inside the live forecast window only (past months are ignored). [buildLiveDemand]
+- Preorders come from Fulfil (v28.241): open sales order lines (order confirmed or processing) with a FUTURE shipping date, fulfilment Ship from stock, not yet assigned (stock move draft/waiting, or no move yet), with quantity left to ship (quantity less shipped less cancelled). The Fulfil warehouse maps to the 3PL: UKILG = uk_3pl, USGENEVA_STD = us_3pl, EUIFUL = eu_3pl, AUCOGHLANS = au_3pl. Left out: drop ship and backorder lines (not fetched), China Port (China stock), any other warehouse, assigned lines, and every KEY ACCOUNT customer (any client in planner.key_account_forecasts, e.g. John Lewis, NEXT, whatever the month or 3PL: their key account forecast carries them). Included lines are summed per SKU x 3PL x ship date into planner.preorders (source 'fulfil'); the line detail is planner.preorder_lines, shown in DEMAND > Inputs > Preorders. Once a Fulfil sync has run (app_settings preorders_source = 'fulfil') the buy plan reads only the Fulfil rows; older Airtable rows stay in the table but are ignored. Sync: the page's Sync from Fulfil button, daily cron (POST /api/cron/preorders-sync, n8n 06:00 London; the local server also runs it daily), logged to planner.etl_runs job preorders_fulfil. Reads LIVE Fulfil (read only) when configured. A preorder SKU that is not in the buy plan (e.g. discontinued) adds nothing. [preordersBuild, preordersSync, preordersFilter, /api/preorders-ka, renderPreordersView]
 - Sets never buy. A set's DTC + FBA forecast explodes onto its components' 3PL DTC demand (set forecast x component qty). [buildLiveDemand, buildLiveBpOverlay]
 
 ## Discontinue cutoff (end of life)

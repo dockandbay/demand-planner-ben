@@ -10646,6 +10646,7 @@ function render(){
     else if(DEMAND_VIEW==='snapshots') renderSnapshotsView(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
     else if(DEMAND_VIEW==='replacements') renderReplacementsView(body);
+    else if(DEMAND_VIEW==='preorders') renderPreordersView(body);   // v28.241 DEMAND ▸ Inputs ▸ Preorders (Fulfil)
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis'){ try{ location.hash='#/reports/performance/demand-metrics'; }catch(e){} return; }   // KPIs moved to REPORTS ▸ Performance ▸ Demand Metrics — bounce any stale DEMAND_VIEW='kpis' there
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
@@ -11579,6 +11580,77 @@ var _KAF_PKA_T=null, KAF_PKA_P=null;
 function kafPkaRefresh(){ clearTimeout(_KAF_PKA_T); _KAF_PKA_T=setTimeout(function(){ _KAF_PKA_T=null;
   var w=(typeof _PKA_INFLIGHT!=='undefined'&&_PKA_INFLIGHT)||Promise.resolve();   // a load already in flight may predate this write: re-pull after it
   KAF_PKA_P=w.then(function(){ return loadPreorderKA(); }).then(function(){ try{ hzMarkDemandStale(); }catch(e){} }); },300); }
+// v28.241 (Ben): DEMAND ▸ Inputs ▸ Preorders. Open Fulfil sales order lines with a future shipping date, ship from stock at a
+// 3PL, not yet assigned. Included lines are summed per SKU x 3PL x ship date into planner.preorders, which the buy plan adds to B2B.
+var PREO={d:null,co:'all',q:'',ex:false,open:{},busy:false,msg:''};
+function renderPreordersView(body){
+  function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function dmy(s){ if(!s)return '—'; var p=String(s).slice(0,10).split('-'); return p.length<3?e(s):(p[2]+'-'+MN[+p[1]-1]+'-'+p[0].slice(2)); }
+  function when(s){ return s?dmy(s)+' '+String(s).slice(11,16):'never'; }
+  function n0(v){ return Math.round(Number(v)||0).toLocaleString('en-GB'); }
+  var CO=[['all','All'],['uk_3pl','UK'],['us_3pl','US'],['eu_3pl','EU'],['au_3pl','AU']], CL={uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU',au_3pl:'AU'};
+  body.innerHTML='<div style="padding:6px 2px 12px" id="preo">'
+    +'<style>#preo table{border-collapse:collapse;width:100%;font-size:12px}#preo th,#preo td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}#preo th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--bg,#fff);z-index:1}'
+    +'#preo tr.po-o{cursor:pointer}#preo tr.po-o:hover td{background:var(--blue-soft)}#preo tr.po-l td{background:var(--soft,rgba(0,0,0,.02))}#preo .pill{border:1px solid var(--line);background:none;padding:4px 11px;border-radius:999px;font-size:12px;cursor:pointer;color:inherit}#preo .pill.on{background:var(--blue-soft);border-color:#93c5fd;color:var(--blue-ink);font-weight:600}'
+    +'#preo .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:130px}#preo .card b{font-size:16px;display:block}#preo .xb{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--amber-soft,#fef3c7);color:var(--amber-ink,#92400e)}#preo .ib{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--pos-soft,#dcfce7);color:var(--pos-ink,#166534)}</style>'
+    +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:15px">Preorders</div>'
+    +'<button id="preo-sync" style="border:1px solid #93c5fd;background:var(--blue-soft);color:var(--blue-ink);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">Sync from Fulfil</button>'
+    +'<button id="preo-csv" style="border:1px solid var(--line);background:none;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;color:inherit">Download CSV</button>'
+    +'<span id="preo-last" style="font-size:12px;color:var(--muted)"></span></div>'
+    +'<div style="font-size:12px;color:var(--muted);margin:0 0 10px;max-width:980px">Open Fulfil sales orders (confirmed or processing) with a future shipping date: lines that ship from stock at a 3PL and are not yet assigned. Included lines are summed per SKU, 3PL and ship date and added to B2B demand in the buy plan. Drop ship, backorder and China stock lines are left out, and so is every key account customer such as John Lewis or NEXT (their key account forecast carries them). Synced daily and on the button.</div>'
+    +'<div id="preo-msg"></div><div id="preo-cards" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="preo-pills" style="display:flex;gap:4px"></span>'
+    +'<input id="preo-q" placeholder="order, customer or SKU" value="'+e(PREO.q)+'" style="padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:220px">'
+    +'<label style="font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" id="preo-ex"'+(PREO.ex?' checked':'')+'> show left-out lines</label>'
+    +'<button id="preo-all" class="pill">Expand all</button></div>'
+    +'<div id="preo-t" style="overflow:auto;max-height:calc(100dvh - 300px)"><div style="color:var(--faint);font-size:12px">Loading…</div></div></div>';
+  var $=function(id){ return body.querySelector('#'+id); };
+  function msg(h){ $('preo-msg').innerHTML=h?'<div style="font-size:12px;margin:0 0 8px;padding:6px 10px;border-radius:6px;background:var(--blue-soft);color:var(--blue-ink)">'+h+'</div>':''; }
+  function load(){ return fetch('/api/demand/preorders').then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(d.error); PREO.d=d; draw(); })
+    .catch(function(err){ $('preo-t').innerHTML='<div style="color:var(--neg);font-size:12px">Could not load preorders: '+e(err&&err.message||err)+'</div>'; }); }
+  function visible(){ var L=(PREO.d&&PREO.d.lines)||[], q=PREO.q.trim().toLowerCase();
+    return L.filter(function(l){ if(!PREO.ex&&!l.included)return false; if(PREO.co!=='all'&&l.warehouse!==PREO.co)return false;
+      if(q&&[l.sale_number,l.sale_reference,l.customer,l.sku,l.product_name].join(' ').toLowerCase().indexOf(q)<0)return false; return true; }); }
+  function draw(){ var d=PREO.d||{lines:[]}, L=d.lines||[];
+    $('preo-last').textContent=d.needs_migration?'Needs migration 346':('Last sync '+when(d.last&&d.last.at)+(d.last&&d.last.created_by?' by '+String(d.last.created_by).replace(/@.*$/,'@'):''));
+    var inc=L.filter(function(l){return l.included;}), ex=L.filter(function(l){return !l.included;});
+    $('preo-cards').innerHTML=['uk_3pl','us_3pl','eu_3pl','au_3pl'].map(function(w){ var x=inc.filter(function(l){return l.warehouse===w;});
+      var o={}, s={}; x.forEach(function(l){o[l.sale_number]=1;s[l.sku]=1;});
+      return '<div class="card"><span style="font-size:11px;color:var(--muted)">'+CL[w]+' 3PL</span><b>'+n0(x.reduce(function(a,l){return a+l.quantity;},0))+'u</b><span style="font-size:11px;color:var(--muted)">'+Object.keys(o).length+' orders · '+Object.keys(s).length+' SKUs</span></div>'; }).join('')
+      +(ex.length?'<div class="card"><span style="font-size:11px;color:var(--muted)">Left out</span><b>'+n0(ex.reduce(function(a,l){return a+l.quantity;},0))+'u</b><span style="font-size:11px;color:var(--muted)">'+ex.length+' lines</span></div>':'');
+    $('preo-pills').innerHTML=CO.map(function(c){ return '<button class="pill'+(c[0]===PREO.co?' on':'')+'" data-co="'+c[0]+'">'+c[1]+'</button>'; }).join('');
+    $('preo-pills').querySelectorAll('[data-co]').forEach(function(b){ b.onclick=function(){ PREO.co=b.dataset.co; draw(); }; });
+    var V=visible(), ord={}, order=[];
+    V.forEach(function(l){ var k=l.sale_number; if(!ord[k]){ ord[k]={n:k,ref:l.sale_reference,cust:l.customer,ch:l.channel,st:l.sale_state,wh:{},d:l.ship_date,lines:[],u:0,inc:0}; order.push(k); }
+      var o=ord[k]; o.lines.push(l); o.u+=l.quantity; o.wh[CL[l.warehouse]||l.fulfil_warehouse||'?']=1; if(l.included)o.inc++; if(l.ship_date&&l.ship_date<o.d)o.d=l.ship_date; });
+    order.sort(function(a,b){ return String(ord[a].d).localeCompare(String(ord[b].d))||String(a).localeCompare(String(b)); });
+    if(!order.length){ $('preo-t').innerHTML='<div style="color:var(--faint);font-size:12px;padding:8px 0">'+(L.length?'No lines match.':(d.needs_migration?'Run migration 346, then Sync from Fulfil.':'No preorders yet: click Sync from Fulfil.'))+'</div>'; return; }
+    var h='<table><thead><tr><th style="width:18px"></th><th>Order</th><th>Reference</th><th>Customer</th><th>Channel</th><th>3PL</th><th>Ship date</th><th>Lines</th><th>Units</th><th>Buy plan</th></tr></thead><tbody>';
+    order.forEach(function(k){ var o=ord[k], op=!!PREO.open[k];
+      h+='<tr class="po-o" data-o="'+e(k)+'"><td>'+(op?'▾':'▸')+'</td><td><b>'+e(k)+'</b></td><td>'+e(o.ref||'')+'</td><td>'+e(o.cust||'')+'</td><td>'+e(o.ch||'')+'</td><td>'+e(Object.keys(o.wh).join(', '))+'</td><td>'+dmy(o.d)+'</td><td>'+o.lines.length+'</td><td>'+n0(o.u)+'</td><td>'
+        +(o.inc===o.lines.length?'<span class="ib">Included</span>':(o.inc?'<span class="xb">Part</span>':'<span class="xb" title="'+e(o.lines[0].exclude_reason||'')+'">Left out</span>'))+'</td></tr>';
+      if(op)o.lines.forEach(function(l){ h+='<tr class="po-l"><td></td><td colspan="2" style="padding-left:18px">'+e(l.sku)+'</td><td colspan="2" style="color:var(--muted)">'+e(l.product_name||'')+'</td><td>'+e(CL[l.warehouse]||l.fulfil_warehouse||'')+'</td><td>'+dmy(l.ship_date)+'</td><td style="color:var(--muted)">'+e(l.move_state==='none'?'no move yet':l.move_state)+'</td><td>'+n0(l.quantity)+'</td><td>'
+        +(l.included?'<span class="ib">Included</span>':'<span class="xb">'+e(l.exclude_reason||'Left out')+'</span>')+'</td></tr>'; }); });
+    var tu=V.reduce(function(a,l){return a+(l.included?l.quantity:0);},0);
+    h+='</tbody><tfoot><tr><td></td><td colspan="6"><b>'+order.length+' orders, '+V.length+' lines shown</b></td><td></td><td><b>'+n0(tu)+'</b></td><td style="color:var(--muted)">into buy plan</td></tr></tfoot></table>';
+    $('preo-t').innerHTML=h;
+    $('preo-t').querySelectorAll('tr.po-o').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.o; PREO.open[k]=!PREO.open[k]; draw(); }; });
+    var allOpen=order.length&&order.every(function(k){return PREO.open[k];}); $('preo-all').textContent=allOpen?'Collapse all':'Expand all';
+    $('preo-all').onclick=function(){ order.forEach(function(k){ PREO.open[k]=!allOpen; }); draw(); }; }
+  $('preo-q').oninput=function(){ PREO.q=this.value; draw(); };
+  $('preo-ex').onchange=function(){ PREO.ex=this.checked; draw(); };
+  $('preo-csv').onclick=function(){ var V=visible(), rows=[['Order','Reference','Customer','Channel','Order state','SKU','Product','Fulfil warehouse','3PL','Ship date','Quantity','Move state','In buy plan','Left out because']];
+    V.forEach(function(l){ rows.push([l.sale_number,l.sale_reference,l.customer,l.channel,l.sale_state,l.sku,l.product_name,l.fulfil_warehouse,CL[l.warehouse]||'',dmy(l.ship_date),l.quantity,l.move_state,l.included?'yes':'no',l.exclude_reason||'']); });
+    var c=rows.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+    var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+c],{type:'text/csv'})); a.download='preorders.csv'; document.body.appendChild(a); a.click(); a.remove(); };
+  $('preo-sync').onclick=function(){ if(PREO.busy)return; PREO.busy=true; var b=$('preo-sync'); b.disabled=true; b.textContent='Syncing…'; msg('');
+    fetch('/api/demand/preorders/sync',{method:'POST'}).then(function(r){return r.json();}).then(function(r){ if(!r||!r.ok)throw new Error((r&&r.error)||'Sync failed');
+      msg('Synced: '+r.orders+' orders, '+r.lines+' lines, '+n0(r.units)+' units into the buy plan.'); return load().then(function(){ try{ if(typeof _PKA_INFLIGHT!=='undefined')_PKA_INFLIGHT=null; if(typeof loadPreorderKA==='function')loadPreorderKA(); }catch(_){} }); })
+      .catch(function(err){ msg('<span style="color:var(--neg)">'+e(err&&err.message||err)+'</span>'); })
+      .then(function(){ PREO.busy=false; var b2=$('preo-sync'); if(b2){ b2.disabled=false; b2.textContent='Sync from Fulfil'; } }); };
+  if(PREO.d)draw(); load();
+}
 function renderReplacementsView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function nm(sku){ var p=SKUM[sku]; return p&&p.n?p.n:''; }
@@ -13890,8 +13962,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
+  var PRIMARY=['plan','crossmarket','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -13904,7 +13976,7 @@ function renderDemandTabs(){
   bar.innerHTML=PRIMARY.map(function(k){ if(!_dlbl[k])return ''; return '<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>'; }).join('')
     +'<button class="dnav'+(_anlActive?' active':'')+'" id="dnav-analysis-btn" title="Summary, Snapshots, Trends, Safety stock, Ship bags">Analysis</button>'
     +'<button class="dnav'+(_cfgActive?' active':'')+'" id="dnav-config-btn" title="Contribution model, Buy plan logic, Discontinued sub-categories">Config</button>'
-    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Key accounts, Calendar, Price changes">Inputs</button>';
+    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Key accounts, Preorders, Calendar, Price changes">Inputs</button>';
   if(_isPlanV){ try{ fillPlanRwSel(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
   bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(DEMAND_VIEW==='scenario'&&window.scenCur?['demand','scenario',window.scenCur()]:['demand',DEMAND_VIEW]); render(); }; });   // v28.179: Scenario planner keeps its tool in the URL   // a demand sub-tab is a planning view — force planning mode
   // "Inputs" → enter the inputs group (keep the current input view, else default to the first)

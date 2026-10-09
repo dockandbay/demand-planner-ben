@@ -1272,7 +1272,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/api/cron/up-fx-statement'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -3173,16 +3173,131 @@ app.get('/api/weather', async (_req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Preorders + key-account order forecasts (moved off Airtable → Supabase). The BUY plan reads this instead
-// of calling Airtable via the MCP. Tables are kept current by n8n (see Diviyaj note).
+// of calling Airtable via the MCP. key_account_forecasts is edited in DEMAND > Inputs > Key accounts; preorders come from the Fulfil sync (v28.241).
 app.get('/api/preorders-ka', async (_req, res) => {
   try {
     const [pre, ka] = await Promise.all([
-      pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.preorders WHERE coalesce(sku,'')<>''`),
+      pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.preorders WHERE coalesce(sku,'')<>''` + await preordersFilter()),   // v28.241: Fulfil rows only once the Fulfil sync owns the table
       pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.key_account_forecasts WHERE coalesce(sku,'')<>''`),
     ]);
     res.set('Cache-Control', 'no-store').json({ preorder: pre.rows, ka: ka.rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.241 (Ben 09-Oct-26): PREORDERS FROM FULFIL. The planner.preorders table was last loaded 10-Jun-26 by the old
+// Airtable/n8n sync. Now: open sales order lines (sale confirmed or processing) with a future shipping date, fulfilment
+// "ship from stock", not yet assigned (move draft/waiting, or no move yet), at a 3PL warehouse (never China Port) are
+// summed per SKU x 3PL x ship date into planner.preorders (source 'fulfil'), with the line detail in
+// planner.preorder_lines (DEMAND > Inputs > Preorders). Once a Fulfil sync has run (app_settings preorders_source =
+// 'fulfil') the buy plan reads ONLY the Fulfil rows; the old rows are kept, not deleted. A line whose customer is a
+// key account (any client in key_account_forecasts) is shown but always left out (the key account forecast carries it).
+// Reads LIVE Fulfil (read only) when configured, like COGS. Writes only HORIZON's own tables.
+const PRE_WH = { UKILG: 'uk_3pl', USGENEVA_STD: 'us_3pl', EUIFUL: 'eu_3pl', AUCOGHLANS: 'au_3pl' };
+const PRE_CHINA = ['CHP'];
+let _preFilt = { v: null, t: 0 };
+async function preordersFilter() {   // ' AND source = 'fulfil'' once the Fulfil sync owns the table; '' before (or before migration 346)
+  const now = Date.now(); if (_preFilt.v != null && now - _preFilt.t < 60000) return _preFilt.v;
+  let v = '';
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key = 'preorders_source'`)).rows[0];
+    if (r && r.value === 'fulfil') { const c = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='preorders' AND column_name='source'`)).rows.length; if (c) v = ` AND source = 'fulfil'`; } }
+  catch (_) {}
+  _preFilt = { v, t: now }; return v;
+}
+async function preFulfilAll(cfg, model, domain, fields) {
+  const out = []; for (let off = 0; off < 50000; off += 500) { const b = await cogsFulfil(cfg, 'PUT', '/model/' + model + '/search_read', [domain, off, 500, null, fields]); const a = Array.isArray(b) ? b : []; out.push(...a); if (a.length < 500) break; }
+  return out;
+}
+async function preordersBuild() {
+  const cfg = cogsFulfilCfg();
+  const today = new Date().toISOString().slice(0, 10);
+  const dom = [['sale.state', 'in', ['confirmed', 'processing']], ['type', '=', 'line'], ['delivery_mode', '=', 'ship'], ['shipping_date', '>', { __class__: 'date', iso_string: today }]];
+  const raw = await preFulfilAll(cfg, 'sale.line', dom, ['id', 'sale', 'sale.number', 'sale.reference', 'sale.party.name', 'sale.state', 'sale.channel.name', 'shipping_date',
+    'warehouse.code', 'product.code', 'product.name', 'product_type', 'quantity', 'quantity_shipped', 'quantity_canceled', 'moves']);
+  const mids = [...new Set(raw.flatMap(r => r.moves || []))], mst = new Map();
+  for (let i = 0; i < mids.length; i += 500) (await cogsFulfil(cfg, 'PUT', '/model/stock.move/search_read', [[['id', 'in', mids.slice(i, i + 500)]], 0, 500, null, ['id', 'state']]) || []).forEach(m => mst.set(m.id, m.state));
+  // Key account customers (John Lewis, NEXT, ...) are ALWAYS left out, whatever the month or 3PL (Ben 09-Oct-26): the key account forecast carries them.
+  const ka = (await pool.query(`SELECT DISTINCT trim(client) client FROM planner.key_account_forecasts WHERE coalesce(trim(client),'') <> ''`)).rows.map(r => r.client);
+  const kaHit = cust => { const c = String(cust || '').trim().toLowerCase(); if (!c) return null;
+    return ka.find(k => { const x = k.toLowerCase(); return c === x || c.startsWith(x + ' ') || x.startsWith(c + ' '); }) || null; };
+  const lines = [];
+  raw.forEach(r => {
+    if (!r['product.code'] || r.product_type === 'service') return;   // shipping / fee lines
+    const fwh = r['warehouse.code'] || null, wh = fwh ? (PRE_WH[fwh] || null) : null, d = fulfilUnwrap(r.shipping_date) || null;
+    const qty = Math.max(0, (Number(fulfilUnwrap(r.quantity)) || 0) - (Number(fulfilUnwrap(r.quantity_shipped)) || 0) - (Number(fulfilUnwrap(r.quantity_canceled)) || 0));
+    const st = [...new Set((r.moves || []).map(id => mst.get(id) || 'unknown').filter(s => s !== 'cancel' && s !== 'cancelled'))];
+    let reason = null;
+    if (!qty) reason = 'Nothing left to ship';
+    else if (st.includes('assigned') || st.includes('done')) reason = 'Assigned in Fulfil';
+    else if (fwh && PRE_CHINA.includes(fwh)) reason = 'China stock';
+    else if (!wh) reason = 'Not a 3PL warehouse (' + (fwh || 'none') + ')';
+    else { const k = kaHit(r['sale.party.name']); if (k) reason = 'Key account (' + k + ')'; }
+    lines.push({ line_id: r.id, sale_id: r.sale, sale_number: r['sale.number'] || null, sale_reference: r['sale.reference'] || null, customer: r['sale.party.name'] || null,
+      channel: r['sale.channel.name'] || null, sale_state: r['sale.state'] || null, sku: r['product.code'], product_name: r['product.name'] || null, fulfil_warehouse: fwh, warehouse: wh,
+      ship_date: d, quantity: qty, move_state: st.length ? st.join(',') : 'none', included: !reason, exclude_reason: reason });
+  });
+  return { lines, source: cfg ? 'live' : 'active' };
+}
+async function preordersSync(by) {
+  const { lines, source } = await preordersBuild();
+  const sums = new Map();
+  lines.filter(l => l.included).forEach(l => { const k = l.sku + '|' + l.warehouse + '|' + l.ship_date; const s = sums.get(k) || { sku: l.sku, warehouse: l.warehouse, ship_date: l.ship_date, quantity: 0, refs: new Set(), cust: new Set() };
+    s.quantity += l.quantity; s.refs.add(l.sale_number); if (l.customer) s.cust.add(l.customer); sums.set(k, s); });
+  const rows = [...sums.values()];
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`DELETE FROM planner.preorder_lines`);   // HORIZON-owned snapshot of the last sync
+    const L = lines, col = f => L.map(l => l[f]);
+    if (L.length) await c.query(`INSERT INTO planner.preorder_lines (line_id, sale_id, sale_number, sale_reference, customer, channel, sale_state, sku, product_name, fulfil_warehouse, warehouse, ship_date, quantity, move_state, included, exclude_reason)
+      SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::date[], $13::numeric[], $14::text[], $15::bool[], $16::text[])`,
+      ['line_id', 'sale_id', 'sale_number', 'sale_reference', 'customer', 'channel', 'sale_state', 'sku', 'product_name', 'fulfil_warehouse', 'warehouse', 'ship_date', 'quantity', 'move_state', 'included', 'exclude_reason'].map(col));
+    await c.query(`DELETE FROM planner.preorders WHERE source = 'fulfil'`);   // only the rows this sync owns; old Airtable rows are kept
+    if (rows.length) await c.query(`INSERT INTO planner.preorders (reference, sku, warehouse, ship_date, quantity, source, customers)
+      SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::date[], $5::int[], $6::text[], $7::text[])`,
+      [rows.map(r => [...r.refs].join(', ').slice(0, 300)), rows.map(r => r.sku), rows.map(r => r.warehouse), rows.map(r => r.ship_date), rows.map(r => Math.round(r.quantity)), rows.map(() => 'fulfil'), rows.map(r => [...r.cust].join(', ').slice(0, 300))]);
+    await c.query(`INSERT INTO planner.app_settings (key, value) VALUES ('preorders_source','fulfil') ON CONFLICT (key) DO UPDATE SET value = 'fulfil'`);
+    const inc = lines.filter(l => l.included), ex = {};
+    lines.filter(l => !l.included).forEach(l => { const k = l.exclude_reason.replace(/ \(.*\)$/, ''); ex[k] = ex[k] || { lines: 0, units: 0 }; ex[k].lines++; ex[k].units += l.quantity; });
+    const byWh = {}; inc.forEach(l => { byWh[l.warehouse] = (byWh[l.warehouse] || 0) + l.quantity; });
+    const stats = { by_warehouse: byWh, excluded: ex, rows: rows.length, source };
+    await c.query(`INSERT INTO planner.preorder_syncs (created_by, orders, lines, units, skus, stats) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [by, new Set(inc.map(l => l.sale_number)).size, inc.length, inc.reduce((a, l) => a + l.quantity, 0), new Set(inc.map(l => l.sku)).size, JSON.stringify(stats)]);
+    await c.query('COMMIT');
+    _preFilt = { v: null, t: 0 };
+    return { ok: true, orders: new Set(inc.map(l => l.sale_number)).size, lines: inc.length, units: inc.reduce((a, l) => a + l.quantity, 0), skus: new Set(inc.map(l => l.sku)).size, rows: rows.length, stats };
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { c.release(); }
+}
+let _preSyncBusy = null;
+function preordersSyncOnce(by) { if (_preSyncBusy) return _preSyncBusy; _preSyncBusy = preordersSync(by).finally(() => { _preSyncBusy = null; }); return _preSyncBusy; }
+app.get('/api/demand/preorders', async (_req, res) => {
+  try {
+    const [l, s] = await Promise.all([
+      pool.query(`SELECT line_id, sale_number, sale_reference, customer, channel, sale_state, sku, product_name, fulfil_warehouse, warehouse, to_char(ship_date,'YYYY-MM-DD') ship_date, quantity::float8 quantity, move_state, included, exclude_reason FROM planner.preorder_lines ORDER BY ship_date, sale_number, sku`),
+      pool.query(`SELECT created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, orders, lines, units::float8 units, skus, stats FROM planner.preorder_syncs ORDER BY id DESC LIMIT 1`)]);
+    res.set('Cache-Control', 'no-store').json({ lines: l.rows, last: s.rows[0] || null });
+  } catch (e) { if (e.code === '42P01') return res.json({ lines: [], last: null, needs_migration: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/preorders/sync', async (req, res) => {
+  try { const r = await preordersSyncOnce(authUser(req) || 'user');
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('preorders_fulfil','success',$1,$2)`, [r.rows, r.orders + ' order(s), ' + r.lines + ' line(s), ' + r.units + 'u (manual)']); } catch (_) {}
+    res.json(r); }
+  catch (e) { if (e.code === '42P01' || e.code === '42703') return res.status(503).json({ error: 'Run migration 346 first' }); log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+// Daily refresh. PROD SCHEDULE: n8n daily 06:00 Europe/London, POST /api/cron/preorders-sync, x-webhook-secret = N8N_WEBHOOK_SECRET.
+// Logs planner.etl_runs job 'preorders_fulfil'. The local server also runs it daily (HZ_PREORDERS_CRON=0 turns that off).
+async function runPreordersCron() {
+  let r; try { r = await preordersSyncOnce('cron'); } catch (e) { r = { ok: false, error: e.message }; }
+  try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('preorders_fulfil',$1,$2,$3)`, [r.ok ? 'success' : 'error', r.ok ? r.rows : 0, r.ok ? (r.orders + ' order(s), ' + r.lines + ' line(s), ' + r.units + 'u') : String(r.error || 'failed').slice(0, 500)]); } catch (_) {}
+  return r;
+}
+app.post('/api/cron/preorders-sync', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const r = await runPreordersCron(); res.status(r.ok ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+if (!process.env.VERCEL && process.env.HZ_PREORDERS_CRON !== '0') {
+  const _pc = () => runPreordersCron().then(r => console.log('[preorders] ' + (r.ok ? ('synced ' + r.lines + ' line(s)') : ('not synced: ' + r.error))), e => console.warn('[preorders] failed: ' + (e && e.message)));
+  setTimeout(_pc, 900000).unref?.(); setInterval(_pc, 86400000).unref?.();
+}
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
@@ -21541,7 +21656,7 @@ async function aiExplainBuy(sku, market) {
     qs(`SELECT computed_at, app_version, buy_3pl, buy_3pl_urgent, buy_fba, transfer, future_qty, soh_3pl, soh_fba, on_order, inbound FROM planner.buy_plan_latest WHERE sku = $1 AND market = $2`, [p.sku, M]).catch(e => ({ rows: [], err: e.message })),
     qs(`SELECT to_char(month,'YYYY-MM') ym, channel ch, warehouse wh, sum(units)::int u FROM planner.forecast_outputs
       WHERE sku = $1 AND warehouse IN ($2, $3) AND month >= date_trunc('month', now()) AND month < date_trunc('month', now()) + interval '18 months' GROUP BY 1,2,3`, [p.sku, m + '_3pl', m + '_fba']),
-    qs(`SELECT 'preorder' src, to_char(ship_date,'YYYY-MM') ym, sum(quantity)::int u FROM planner.preorders WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2
+    qs(`SELECT 'preorder' src, to_char(ship_date,'YYYY-MM') ym, sum(quantity)::int u FROM planner.preorders WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2` + await preordersFilter() + ` GROUP BY 2
       UNION ALL SELECT 'key_account', to_char(ship_date,'YYYY-MM'), sum(quantity)::int FROM planner.key_account_forecasts WHERE sku = $1 AND lower(split_part(warehouse,'_',1)) = $2 GROUP BY 2`, [p.sku, m]).catch(() => ({ rows: [] })),
     qs(`SELECT warehouse wh, available::int qty FROM planner.v_product_inventory WHERE sku = $1 AND warehouse IN ($2, $3, $4)`, [p.sku, m + '_3pl', m + '_fba', m + '_awd']),
     qs(`SELECT i.reference ref, i.destination_warehouse wh, (i.quantity - coalesce(i.received_quantity,0))::int open_qty, to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.status

@@ -1,3 +1,13 @@
+## v28.241 (Ben, branch review-fixes-2026-10-05): Preorders from Fulfil + DEMAND > Inputs > Preorders
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `supply/inject.html`, `lib/ai-logic/buy-plan.md`, `migrations/346_preorders_fulfil.sql` (+ package.json, CHANGES.md). **Migration 346.** No new env vars (cron uses N8N_WEBHOOK_SECRET).
+
+- planner.preorders was last loaded 10-Jun-26 (old Airtable/n8n sync, 119 rows). It now comes from Fulfil: open sales order lines (confirmed / processing) with a future shipping date, Ship from stock, not yet assigned, at a 3PL (UKILG, USGENEVA_STD, EUIFUL, AUCOGHLANS). China Port, drop ship, backorder and all key account customers (John Lewis, NEXT, ...) are left out.
+- Summed per SKU x 3PL x ship date into planner.preorders (source 'fulfil'); line detail in planner.preorder_lines; runs in planner.preorder_syncs. Once synced, /api/preorders-ka (buy plan) and the assistant read only the Fulfil rows; old rows are kept, not deleted. Before migration 346 nothing changes.
+- New page DEMAND > Inputs > Preorders: per-3PL cards, orders with expandable line items, country pills, search, show left-out lines, CSV, Sync from Fulfil.
+- Routes: GET /api/demand/preorders, POST /api/demand/preorders/sync, POST /api/cron/preorders-sync (x-webhook-secret; added to the login-gate exemptions; Diviyaj: mirror in prod and schedule n8n daily 06:00 London; switch OFF the old n8n_sync_preorders workflow).
+- Verified vs LIVE Fulfil (read only), synced into the sandbox: 42 orders, 642 lines, 6,707 units (UK 428, US 2,253, EU 1,546, AU 2,480); left out NEXT SO56633 5,804u (key account) and 405u China stock. 6,638u attach in the buy plan; 69u are SKUs not in the buy plan.
+
 ## v28.240 (Ben, branch review-fixes-2026-10-05): COGS: UK / US / EU FBA columns from Fulfil
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
