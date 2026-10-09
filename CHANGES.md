@@ -1,3 +1,12 @@
+## v28.246 (Ben, branch review-fixes-2026-10-05): Preorders leave out stock already assigned on the customer shipment
+
+**Files:** `server.mjs`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. **Buy plan changes (intended, downward).**
+
+- Bug (Ben, SO59482 / PO1940, Until Distribution, AU): the customer shipment CS52716 is assigned, but the sync counted it as a preorder. It only checked the sale line's own move, which is the OUTGOING move and stays draft until shipped. Stock is reserved on the pick (inventory) moves, whose origin is that outgoing move.
+- Fix: the sync reads the pick moves for every candidate line and takes their assigned / done quantity off the line. Fully assigned lines are left out as "Assigned in Fulfil"; part-assigned lines count only the unassigned remainder (move state "assigned n of m").
+- Sandbox, same Fulfil data before/after: preorders 50 orders / 665 lines / 6,989u -> 33 orders / 394 lines / 2,212u (271 lines / 4,676u now "Assigned in Fulfil", plus 101u off part-assigned lines). AU 2,503u -> 0 (SO59482 2,480u). Buy plan: 17 SKU x market cells change, all down (AU 2, EU 14, UK 1), e.g. AU TOWLB-CAB-LG-NAVY-R Buy 3PL 160 -> 120, AU TOWLB-CAB-LG-GREEN-R 40 -> 0, UK PICNIC-CAB-XL-NAVY urgent 8,700 -> 8,688.
+- **After deploy:** run Sync from Fulfil once (or wait for the cron) so live drops the assigned units.
+
 ## v28.245 (Ben, branch review-fixes-2026-10-05): Preorders sync needs DEMAND edit rights; vercel.json matches prod
 
 **Files:** `server.mjs`, `vercel.json`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. Buy plan unchanged.

@@ -3217,6 +3217,13 @@ async function preordersBuild() {
     'warehouse.code', 'product.code', 'product.name', 'product_type', 'quantity', 'quantity_shipped', 'quantity_canceled', 'moves']);
   const mids = [...new Set(raw.flatMap(r => r.moves || []))], mst = new Map();
   for (let i = 0; i < mids.length; i += 500) (await cogsFulfil(cfg, 'PUT', '/model/stock.move/search_read', [[['id', 'in', mids.slice(i, i + 500)]], 0, 500, null, ['id', 'state']]) || []).forEach(m => mst.set(m.id, m.state));
+  // v28.246 (Ben 10-Oct-26, SO59482): the line's own move is the OUTGOING move and stays draft; stock is reserved on the
+  // pick (inventory) moves, whose origin is that outgoing move. Their assigned/done quantity is stock already allocated, not a preorder.
+  const asg = new Map(), org = mids.map(id => 'stock.move,' + id);
+  for (let i = 0; i < org.length; i += 300) for (let off = 0; off < 50000; off += 500) {
+    const a = await cogsFulfil(cfg, 'PUT', '/model/stock.move/search_read', [[['origin', 'in', org.slice(i, i + 300)], ['state', 'in', ['assigned', 'done']]], off, 500, [['id', 'ASC']], ['id', 'origin', 'quantity']]);
+    const arr = Array.isArray(a) ? a : []; arr.forEach(m => { const k = Number(String(fulfilUnwrap(m.origin) || '').split(',')[1]); if (k) asg.set(k, (asg.get(k) || 0) + (Number(fulfilUnwrap(m.quantity)) || 0)); });
+    if (arr.length < 500) break; }
   // Key account customers (John Lewis, NEXT, ...) are ALWAYS left out, whatever the month or 3PL (Ben 09-Oct-26): the key account forecast carries them.
   const ka = (await pool.query(`SELECT DISTINCT trim(client) client FROM planner.key_account_forecasts WHERE coalesce(trim(client),'') <> ''`)).rows.map(r => r.client);
   const kaHit = cust => { const c = String(cust || '').trim().toLowerCase(); if (!c) return null;
@@ -3225,17 +3232,20 @@ async function preordersBuild() {
   raw.forEach(r => {
     if (!r['product.code'] || r.product_type === 'service') return;   // shipping / fee lines
     const fwh = r['warehouse.code'] || null, wh = fwh ? (PRE_WH[fwh] || null) : null, d = fulfilUnwrap(r.shipping_date) || null;
-    const qty = Math.max(0, (Number(fulfilUnwrap(r.quantity)) || 0) - (Number(fulfilUnwrap(r.quantity_shipped)) || 0) - (Number(fulfilUnwrap(r.quantity_canceled)) || 0));
+    const left = Math.max(0, (Number(fulfilUnwrap(r.quantity)) || 0) - (Number(fulfilUnwrap(r.quantity_shipped)) || 0) - (Number(fulfilUnwrap(r.quantity_canceled)) || 0));
     const st = [...new Set((r.moves || []).map(id => mst.get(id) || 'unknown').filter(s => s !== 'cancel' && s !== 'cancelled'))];
+    const aq = Math.min(left, (r.moves || []).reduce((t, id) => t + (asg.get(id) || 0), 0));
+    const qty = left - aq;   // only the part not yet assigned on the pick is a preorder
+    if (aq > 0) st.unshift('assigned ' + aq + ' of ' + left);
     let reason = null;
-    if (!qty) reason = 'Nothing left to ship';
-    else if (st.includes('assigned') || st.includes('done')) reason = 'Assigned in Fulfil';
+    if (!left) reason = 'Nothing left to ship';
+    else if (!qty || st.includes('assigned') || st.includes('done')) { reason = 'Assigned in Fulfil'; }
     else if (fwh && PRE_CHINA.includes(fwh)) reason = 'China stock';
     else if (!wh) reason = 'Not a 3PL warehouse (' + (fwh || 'none') + ')';
     else { const k = kaHit(r['sale.party.name']); if (k) reason = 'Key account (' + k + ')'; }
     lines.push({ line_id: r.id, sale_id: r.sale, sale_number: r['sale.number'] || null, sale_reference: r['sale.reference'] || null, customer: r['sale.party.name'] || null,
       channel: r['sale.channel.name'] || null, sale_state: r['sale.state'] || null, sku: r['product.code'], product_name: r['product.name'] || null, fulfil_warehouse: fwh, warehouse: wh,
-      ship_date: d, quantity: qty, move_state: st.length ? st.join(',') : 'none', included: !reason, exclude_reason: reason });
+      ship_date: d, quantity: reason ? left : qty, move_state: st.length ? st.join(',') : 'none', included: !reason, exclude_reason: reason });
   });
   return { lines, source: cfg ? 'live' : 'active' };
 }
