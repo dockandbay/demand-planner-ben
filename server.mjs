@@ -3272,9 +3272,10 @@ function preordersSyncOnce(by) { if (_preSyncBusy) return _preSyncBusy; _preSync
 app.get('/api/demand/preorders', async (_req, res) => {
   try {
     const [l, s] = await Promise.all([
-      pool.query(`SELECT line_id, sale_number, sale_reference, customer, channel, sale_state, sku, product_name, fulfil_warehouse, warehouse, to_char(ship_date,'YYYY-MM-DD') ship_date, quantity::float8 quantity, move_state, included, exclude_reason FROM planner.preorder_lines ORDER BY ship_date, sale_number, sku`),
+      pool.query(`SELECT line_id, sale_id, sale_number, sale_reference, customer, channel, sale_state, sku, product_name, fulfil_warehouse, warehouse, to_char(ship_date,'YYYY-MM-DD') ship_date, quantity::float8 quantity, move_state, included, exclude_reason FROM planner.preorder_lines ORDER BY ship_date, sale_number, sku`),
       pool.query(`SELECT created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, orders, lines, units::float8 units, skus, stats FROM planner.preorder_syncs ORDER BY id DESC LIMIT 1`)]);
-    res.set('Cache-Control', 'no-store').json({ lines: l.rows, last: s.rows[0] || null });
+    const fc = cogsFulfilCfg() || fulfilConfigFor(await activeFulfilEnv());   // v28.242: order click-through to Fulfil (same instance the sync reads)
+    res.set('Cache-Control', 'no-store').json({ lines: l.rows, last: s.rows[0] || null, fulfil_order_url: fc && fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io/v2/erp/model/sales_order/' : null });
   } catch (e) { if (e.code === '42P01') return res.json({ lines: [], last: null, needs_migration: true }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/preorders/sync', async (req, res) => {
@@ -3283,16 +3284,20 @@ app.post('/api/demand/preorders/sync', async (req, res) => {
     res.json(r); }
   catch (e) { if (e.code === '42P01' || e.code === '42703') return res.status(503).json({ error: 'Run migration 346 first' }); log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
 });
-// Daily refresh. PROD SCHEDULE: n8n daily 06:00 Europe/London, POST /api/cron/preorders-sync, x-webhook-secret = N8N_WEBHOOK_SECRET.
+// Daily refresh. PROD SCHEDULE: n8n daily 06:00 Europe/London, POST /api/cron/preorders-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET,
+// body {} (or { "dry_run": true } to preview without writing). 200 = synced, 401 = bad secret, 500 = failed (n8n error workflow).
 // Logs planner.etl_runs job 'preorders_fulfil'. The local server also runs it daily (HZ_PREORDERS_CRON=0 turns that off).
-async function runPreordersCron() {
+async function runPreordersCron({ dry = false } = {}) {
+  if (dry) { try { const { lines, source } = await preordersBuild(); const inc = lines.filter(l => l.included);   // v28.242: { dry_run: true } previews, writes nothing
+      return { ok: true, dry_run: true, source, orders: new Set(inc.map(l => l.sale_number)).size, lines: inc.length, units: inc.reduce((a, l) => a + l.quantity, 0), left_out: lines.length - inc.length }; }
+    catch (e) { return { ok: false, dry_run: true, error: e.message }; } }
   let r; try { r = await preordersSyncOnce('cron'); } catch (e) { r = { ok: false, error: e.message }; }
   try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('preorders_fulfil',$1,$2,$3)`, [r.ok ? 'success' : 'error', r.ok ? r.rows : 0, r.ok ? (r.orders + ' order(s), ' + r.lines + ' line(s), ' + r.units + 'u') : String(r.error || 'failed').slice(0, 500)]); } catch (_) {}
   return r;
 }
 app.post('/api/cron/preorders-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const r = await runPreordersCron(); res.status(r.ok ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const b = req.body || {}; const r = await runPreordersCron({ dry: b.dry_run === true || b.dry_run === 'true' || req.query.dry === '1' }); res.status(r.ok ? 200 : 500).json(r); }   /* 500 on failure so the n8n error workflow fires */ catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 if (!process.env.VERCEL && process.env.HZ_PREORDERS_CRON !== '0') {
   const _pc = () => runPreordersCron().then(r => console.log('[preorders] ' + (r.ok ? ('synced ' + r.lines + ' line(s)') : ('not synced: ' + r.error))), e => console.warn('[preorders] failed: ' + (e && e.message)));

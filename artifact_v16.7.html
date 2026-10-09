@@ -11591,7 +11591,7 @@ function renderPreordersView(body){
   function n0(v){ return Math.round(Number(v)||0).toLocaleString('en-GB'); }
   var CO=[['all','All'],['uk_3pl','UK'],['us_3pl','US'],['eu_3pl','EU'],['au_3pl','AU']], CL={uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU',au_3pl:'AU'};
   body.innerHTML='<div style="padding:6px 2px 12px" id="preo">'
-    +'<style>#preo table{border-collapse:collapse;width:100%;font-size:12px}#preo th,#preo td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}#preo th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--bg,#fff);z-index:1}'
+    +'<style>#preo table{border-collapse:collapse;width:100%;font-size:12px}#preo th,#preo td{text-align:left!important;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}#preo th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--bg,#fff);z-index:1}'
     +'#preo tr.po-o{cursor:pointer}#preo tr.po-o:hover td{background:var(--blue-soft)}#preo tr.po-l td{background:var(--soft,rgba(0,0,0,.02))}#preo .pill{border:1px solid var(--line);background:none;padding:4px 11px;border-radius:999px;font-size:12px;cursor:pointer;color:inherit}#preo .pill.on{background:var(--blue-soft);border-color:#93c5fd;color:var(--blue-ink);font-weight:600}'
     +'#preo .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:130px}#preo .card b{font-size:16px;display:block}#preo .xb{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--amber-soft,#fef3c7);color:var(--amber-ink,#92400e)}#preo .ib{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--pos-soft,#dcfce7);color:var(--pos-ink,#166534)}</style>'
     +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:15px">Preorders</div>'
@@ -11628,14 +11628,15 @@ function renderPreordersView(body){
     if(!order.length){ $('preo-t').innerHTML='<div style="color:var(--faint);font-size:12px;padding:8px 0">'+(L.length?'No lines match.':(d.needs_migration?'Run migration 346, then Sync from Fulfil.':'No preorders yet: click Sync from Fulfil.'))+'</div>'; return; }
     var h='<table><thead><tr><th style="width:18px"></th><th>Order</th><th>Reference</th><th>Customer</th><th>Channel</th><th>3PL</th><th>Ship date</th><th>Lines</th><th>Units</th><th>Buy plan</th></tr></thead><tbody>';
     order.forEach(function(k){ var o=ord[k], op=!!PREO.open[k];
-      h+='<tr class="po-o" data-o="'+e(k)+'"><td>'+(op?'▾':'▸')+'</td><td><b>'+e(k)+'</b></td><td>'+e(o.ref||'')+'</td><td>'+e(o.cust||'')+'</td><td>'+e(o.ch||'')+'</td><td>'+e(Object.keys(o.wh).join(', '))+'</td><td>'+dmy(o.d)+'</td><td>'+o.lines.length+'</td><td>'+n0(o.u)+'</td><td>'
+      var fu=(PREO.d&&PREO.d.fulfil_order_url&&o.lines[0].sale_id)?PREO.d.fulfil_order_url+o.lines[0].sale_id:'';
+      h+='<tr class="po-o" data-o="'+e(k)+'"><td>'+(op?'▾':'▸')+'</td><td><b>'+e(k)+'</b>'+(fu?' <a class="preo-fl" href="'+e(fu)+'" target="_blank" rel="noopener" title="Open this order in Fulfil" style="font-size:11px;color:var(--blue-ink);text-decoration:none;margin-left:4px">Fulfil ↗</a>':'')+'</td><td>'+e(o.ref||'')+'</td><td>'+e(o.cust||'')+'</td><td>'+e(o.ch||'')+'</td><td>'+e(Object.keys(o.wh).join(', '))+'</td><td>'+dmy(o.d)+'</td><td>'+o.lines.length+'</td><td>'+n0(o.u)+'</td><td>'
         +(o.inc===o.lines.length?'<span class="ib">Included</span>':(o.inc?'<span class="xb">Part</span>':'<span class="xb" title="'+e(o.lines[0].exclude_reason||'')+'">Left out</span>'))+'</td></tr>';
       if(op)o.lines.forEach(function(l){ h+='<tr class="po-l"><td></td><td colspan="2" style="padding-left:18px">'+e(l.sku)+'</td><td colspan="2" style="color:var(--muted)">'+e(l.product_name||'')+'</td><td>'+e(CL[l.warehouse]||l.fulfil_warehouse||'')+'</td><td>'+dmy(l.ship_date)+'</td><td style="color:var(--muted)">'+e(l.move_state==='none'?'no move yet':l.move_state)+'</td><td>'+n0(l.quantity)+'</td><td>'
         +(l.included?'<span class="ib">Included</span>':'<span class="xb">'+e(l.exclude_reason||'Left out')+'</span>')+'</td></tr>'; }); });
     var tu=V.reduce(function(a,l){return a+(l.included?l.quantity:0);},0);
     h+='</tbody><tfoot><tr><td></td><td colspan="6"><b>'+order.length+' orders, '+V.length+' lines shown</b></td><td></td><td><b>'+n0(tu)+'</b></td><td style="color:var(--muted)">into buy plan</td></tr></tfoot></table>';
     $('preo-t').innerHTML=h;
-    $('preo-t').querySelectorAll('tr.po-o').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.o; PREO.open[k]=!PREO.open[k]; draw(); }; });
+    $('preo-t').querySelectorAll('tr.po-o').forEach(function(tr){ tr.onclick=function(ev){ if(ev&&ev.target&&ev.target.closest&&ev.target.closest('a'))return; var k=tr.dataset.o; PREO.open[k]=!PREO.open[k]; draw(); }; });
     var allOpen=order.length&&order.every(function(k){return PREO.open[k];}); $('preo-all').textContent=allOpen?'Collapse all':'Expand all';
     $('preo-all').onclick=function(){ order.forEach(function(k){ PREO.open[k]=!allOpen; }); draw(); }; }
   $('preo-q').oninput=function(){ PREO.q=this.value; draw(); };

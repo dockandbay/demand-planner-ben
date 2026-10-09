@@ -1,3 +1,11 @@
+## v28.242 (Ben, branch review-fixes-2026-10-05): Preorders page: Fulfil links, left-aligned, n8n cron dry run
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- DEMAND > Inputs > Preorders: each order has a "Fulfil ↗" link that opens the sales order in Fulfil in a new tab (https://<subdomain>.fulfil.io/v2/erp/model/sales_order/<id>); every table cell is left-aligned.
+- **n8n cron for Diviyaj:** POST https://horizon.dockandbay.com/api/cron/preorders-sync, header `x-webhook-secret: <N8N_WEBHOOK_SECRET>`, header `content-type: application/json`, body `{}`. Schedule daily 06:00 Europe/London. `{"dry_run": true}` previews (counts only, writes nothing). Responses: 200 synced (orders, lines, units, rows), 401 wrong or missing secret, 500 failed (wire to the n8n error workflow). Each real run logs planner.etl_runs job `preorders_fulfil`. Needs migration 346 and the login-gate exemption for this path (already in this repo's gate; mirror in prod). Then switch off the old n8n_sync_preorders (Airtable) workflow.
+- Tested on the sandbox: no secret 401, wrong secret 401, dry run 200 (42 orders, 642 lines, 6,707u), real run 200 and logged.
+
 ## v28.241 (Ben, branch review-fixes-2026-10-05): Preorders from Fulfil + DEMAND > Inputs > Preorders
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `supply/inject.html`, `lib/ai-logic/buy-plan.md`, `migrations/346_preorders_fulfil.sql` (+ package.json, CHANGES.md). **Migration 346.** No new env vars (cron uses N8N_WEBHOOK_SECRET).
