@@ -1,3 +1,12 @@
+## v28.236 (Ben, branch review-fixes-2026-10-05): COGS: sets / bundles costed from components, category + status filters, history modal
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- **Sets / bundles:** the 311 build-on-the-fly sets in `planner.set_bom` are costed per column as Σ component value × qty, using each component's resolved value (Fulfil / kept / supplier cost). Incomplete component costs fall back to the set's kept value, else supplier cost, and the cell names the missing components. Shown green with a SET tag; hovering a cell gives the breakdown (e.g. GIFT-BOX-HOME-BOHMDRM-SET UK ILG = 3.69 + 1.37 + 1.34 = 6.40, sheet had 5.83). Stored as `set_bom` when sent.
+- **Filters:** category and status dropdowns (from products, with counts), search on SKU or product name, new "Sets / bundles" quick filter.
+- **History** moved to its own button + modal.
+- Verified on sandbox vs LIVE Fulfil (read only): 2,382 SKUs, all 311 sets fully costed, none incomplete; jsdom: filters (Hair Wrap 194, + ACTIVE 24), name search, Sets filter 311, set tooltip, history modal; no JS errors. Nothing emailed.
+
 ## v28.235 (Ben, branch review-fixes-2026-10-05): BUY & MOVE ▸ Inventory ▸ COGS (per-unit cost to Airtable) + rail badge fix
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `supply/inject.html`, `migrations/345_cogs_values.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 345** (additive, idempotent: `planner.cogs_values`, `planner.cogs_uploads`). **New env var `COGS_AIRTABLE_EMAIL`** (the Airtable cogs-up email-sync address; Ben has it; without it the Email button is disabled and the endpoint returns 503). Uses the existing `RESEND_API_KEY` and LIVE Fulfil read credentials.

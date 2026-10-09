@@ -4607,27 +4607,41 @@ async function cogsBuild() {
   const stored = {}; let storedN = 0;
   try { (await pool.query(`SELECT sku, col, value::float8 v, source, to_char(updated_at,'YYYY-MM-DD') d FROM planner.cogs_values`)).rows.forEach(r => { (stored[r.sku] = stored[r.sku] || {})[r.col] = r; storedN++; }); }
   catch (e) { if (e.code !== '42P01') throw e; warnings.push('Migration 345 not applied: nothing stored yet, so out-of-stock SKUs fall back to supplier cost'); }
-  const prod = {}; (await pool.query(`SELECT trim(sku) sku, cost::float8 cost FROM planner.products WHERE sku IS NOT NULL`)).rows.forEach(r => { prod[r.sku] = r; });
+  const prod = {}; (await pool.query(`SELECT trim(sku) sku, cost::float8 cost, coalesce(category_name_final, category) cat, status, coalesce(product_name_final, product_name) nm FROM planner.products WHERE sku IS NOT NULL`)).rows.forEach(r => { prod[r.sku] = r; });
+  // v28.236 (Ben): build-on-the-fly sets / bundles (planner.set_bom, one level) are costed from their components
+  const bom = {}; (await pool.query(`SELECT trim(output_sku) o, trim(input_sku) i, input_quantity::float8 q FROM planner.set_bom`)).rows.forEach(r => { (bom[r.o] = bom[r.o] || []).push({ sku: r.i, q: Number(r.q) || 0 }); });
   const fz = {}; [1, 3].forEach(co => rep[co].rows.forEach(x => { (fz[x.code] = fz[x.code] || {})[co] = x; }));
   const skus = new Set(Object.keys(stored)); Object.keys(fz).forEach(s => { if (prod[s]) skus.add(s); });   // Fulfil-only codes not in HORIZON products (test items, polybags) are left out
-  const stats = {}; COGS_COLS.forEach(c => { stats[c.col] = { fulfil: 0, changed: 0, kept: 0, supplier: 0, blank: 0 }; });
-  const rows = Array.from(skus).sort().map(sku => {
+  Object.keys(bom).forEach(s => { if (prod[s]) skus.add(s); bom[s].forEach(x => { if (prod[x.sku]) skus.add(x.sku); }); });
+  const stats = {}; COGS_COLS.forEach(c => { stats[c.col] = { fulfil: 0, set: 0, changed: 0, kept: 0, supplier: 0, blank: 0 }; });
+  const one = (sku, setPass, cellsBySku) => {
     const cells = {};
     COGS_COLS.forEach(c => {
       const prev = stored[sku] && stored[sku][c.col], st = stats[c.col]; let cell = null;
-      if (c.co) { const x = fz[sku] && fz[sku][c.co];
+      if (setPass) {   // set = Σ component value × qty in this column; every component must have a value, else the normal rules
+        const parts = bom[sku].map(x => { const cc = cellsBySku[x.sku] && cellsBySku[x.sku][c.col]; return { sku: x.sku, q: x.q, v: cc ? cc.v : null, src: cc ? cc.src : null }; });
+        if (parts.length && parts.every(p => p.v != null)) cell = { v: Math.round(parts.reduce((a, p) => a + p.v * p.q, 0) * 100) / 100, src: 'set', parts };
+        else var setMiss = parts.filter(p => p.v == null).map(p => p.sku);   // falls through to kept / supplier cost below
+      }
+      if (!cell && c.co && !setPass) { const x = fz[sku] && fz[sku][c.co];
         if (x) { let q = 0, val = 0; c.wh.forEach(w => { const id = rep[c.co].whId[w]; if (!id) return; const qq = Number(fulfilUnwrap(x['quantity_on_hand_' + id])) || 0, uc = Number(fulfilUnwrap(x['unit_cost_' + id])) || 0; /* REST wraps Decimals */ if (qq > 0 && uc > 0) { q += qq; val += qq * uc; } });
           if (q > 0) { const uc = val / q, v = cogsConv(uc, COGS_CO_CCY[c.co], c.ccy, R); cell = { v: Math.round(v * 100) / 100, src: 'fulfil', qty: q, uc: Math.round(uc * 100000) / 100000, fx: COGS_CO_CCY[c.co] === c.ccy ? 1 : R[c.ccy] / R[COGS_CO_CCY[c.co]] }; } } }
       if (!cell && prev && prev.v != null) cell = { v: Math.round(prev.v * 100) / 100, src: 'kept', since: prev.d, from: prev.source };
       if (!cell && !c.keepOnly && prod[sku] && prod[sku].cost > 0) { const v = cogsConv(prod[sku].cost, 'USD', c.ccy, R); if (v != null) cell = { v: Math.round(v * 100) / 100, src: 'supplier', usd: prod[sku].cost, fx: R[c.ccy] / R.USD }; }
       if (!cell) { st.blank++; cells[c.col] = null; return; }
+      if (setPass && cell.src !== 'set' && typeof setMiss !== 'undefined' && setMiss) cell.miss = setMiss;
       if (prev && prev.v != null && cell.src !== 'kept') cell.prev = Math.round(prev.v * 100) / 100;
       cell.changed = cell.src !== 'kept' && (cell.prev == null || Math.abs(cell.v - cell.prev) >= 0.005);
-      st[cell.src === 'kept' ? 'kept' : cell.src]++; if (cell.changed) st.changed++;
+      st[cell.src === 'kept' ? 'kept' : cell.src] = (st[cell.src === 'kept' ? 'kept' : cell.src] || 0) + 1; if (cell.changed) st.changed++;
       cells[c.col] = cell;
     });
-    return { sku, cells };
-  });
+    const p = prod[sku] || {};
+    return { sku, cells, set: setPass ? bom[sku].length : 0, cat: p.cat || '', status: p.status || '', name: p.nm || '' };
+  };
+  const all = Array.from(skus).sort(), byS = {}, rowsBy = {};
+  all.filter(s => !bom[s]).forEach(s => { const r = one(s, false); rowsBy[s] = r; byS[s] = r.cells; });   // components first
+  all.filter(s => bom[s]).forEach(s => { rowsBy[s] = one(s, true, byS); });
+  const rows = all.map(s => rowsBy[s]);
   return { ok: true, date, env: cfg ? 'live' : 'active', rates: R, columns: COGS_COLS.map(c => ({ col: c.col, ccy: c.ccy, source: c.co ? (c.co === 1 ? 'Fulfil UK ' : 'Fulfil AU ') + c.wh.join(' + ') : (c.keepOnly ? 'kept (decommissioned)' : 'kept / supplier cost') })),
     rows, stats, stored: storedN, warnings, recipient_set: !!process.env.COGS_AIRTABLE_EMAIL };
 }
@@ -4649,7 +4663,7 @@ app.get('/api/supply/cogs/csv', async (req, res) => {
 async function cogsStore(b, by) {   // upsert every Fulfil / supplier-cost cell; kept cells are already stored
   const s = [], c = [], v = [], k = [], src = [], q = [], uc = [], fx = [];
   b.rows.forEach(r => COGS_COLS.forEach(col => { const x = r.cells[col.col]; if (!x || x.src === 'kept') return;
-    s.push(r.sku); c.push(col.col); v.push(x.v); k.push(col.ccy); src.push(x.src === 'fulfil' ? 'fulfil' : 'supplier_cost'); q.push(x.qty == null ? null : x.qty); uc.push(x.uc == null ? null : x.uc); fx.push(x.fx == null ? null : x.fx); }));
+    s.push(r.sku); c.push(col.col); v.push(x.v); k.push(col.ccy); src.push(x.src === 'fulfil' ? 'fulfil' : x.src === 'set' ? 'set_bom' : 'supplier_cost'); q.push(x.qty == null ? null : x.qty); uc.push(x.uc == null ? null : x.uc); fx.push(x.fx == null ? null : x.fx); }));
   for (let i = 0; i < s.length; i += 2000) {
     await pool.query(`INSERT INTO planner.cogs_values (sku, col, value, ccy, source, qty, unit_cost_company, fx, updated_at, updated_by)
       SELECT * , now(), $9 FROM unnest($1::text[], $2::text[], $3::numeric[], $4::text[], $5::text[], $6::numeric[], $7::numeric[], $8::numeric[])

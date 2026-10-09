@@ -44,12 +44,12 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
-  server.mjs::cogsBuild: 8d0665efa6e7
+  server.mjs::cogsBuild: 68c9ded1d569
   server.mjs::cogsValuation: bc96a6558dea
   server.mjs::cogsRates: 1824cafed9b3
-  server.mjs::cogsStore: b6ed0f03f350
+  server.mjs::cogsStore: bcd45226f5b0
   server.mjs::COGS_COLS: 03fda4554d05
-  artifact_v16.7.html::renderCogs: 1c14469a695a
+  artifact_v16.7.html::renderCogs: 87a91fc21033
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -180,7 +180,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.235
+verified_version: v28.236
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -393,3 +393,5 @@ verified_version: v28.235
 - SKUs = everything stored plus Fulfil products that exist in planner.products (Fulfil test items and packaging codes are left out). Airtable's email sync replaces the table, so every SKU is sent every time.
 - Analyse writes nothing. Email rebuilds on the server, sends (Resend, attachment cogs-up-IMPORT.csv, to COGS_AIRTABLE_EMAIL) and only then stores values (planner.cogs_values) and logs the run (planner.cogs_uploads, migration 345). A missing warehouse in the Fulfil report blocks the send. Load baseline CSV seeds the stored values from an Airtable export (fills only empty cells). (source: cogsStore, /api/supply/cogs/email, /api/supply/cogs/import-baseline)
 - Review flags: moves over 25% vs the stored value are shown red (often a Fulfil costing oddity worth checking before sending).
+- Sets / bundles (v28.236): every build-on-the-fly set in planner.set_bom (one level, 311 sets) is costed per column as the sum of its components' values in that column × quantity, using each component's own resolved value (Fulfil, kept or supplier cost). Components are worked out first. If any component has no value in that column, the set falls back to the normal rules (kept, else supplier cost) and the cell lists the missing components. Set values are stored with source set_bom when sent. Set component SKUs are included even if nothing was stored for them. (source: cogsBuild)
+- Filters (v28.236): category (products.category_name_final, else category), status (products.status), search on SKU or product name, and quick filters All / Changed / Big moves / Sets / Supplier cost / Has blanks. History opens in its own modal.
