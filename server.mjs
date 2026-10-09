@@ -4651,9 +4651,21 @@ function cogsCsv(b) {
 }
 async function cogsAdminOk(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return null; } return me; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
 app.get('/api/supply/cogs/analyse', async (req, res) => {
-  if (!(await cogsAdminOk(req, res))) return;
-  try { const b = await cogsBuild(); res.set('Cache-Control', 'no-store').json(b); }
+  const me = await cogsAdminOk(req, res); if (!me) return;
+  try { const b = await cogsBuild(), by = (me && me.email) || authUser(req) || 'admin';
+    // v28.238 (Ben): keep the last result so the tab shows it until the next Analyse (only the newest row is kept)
+    try { const r = await pool.query(`INSERT INTO planner.cogs_analysis (created_by, payload) VALUES ($1, $2) RETURNING id, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at`, [by, JSON.stringify(b)]);
+      await pool.query(`DELETE FROM planner.cogs_analysis WHERE id < $1`, [r.rows[0].id]); b.analysed_at = r.rows[0].at; b.analysed_by = by; }
+    catch (e) { if (e.code !== '42P01') console.warn('[cogs] analysis not saved: ' + (e && e.message)); }
+    res.set('Cache-Control', 'no-store').json(b); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+app.get('/api/supply/cogs/last', async (req, res) => {   // v28.238: the saved last Analyse (null if none)
+  if (!(await cogsAdminOk(req, res))) return;
+  try { const r = (await pool.query(`SELECT payload, created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at FROM planner.cogs_analysis ORDER BY id DESC LIMIT 1`)).rows[0];
+    if (!r) return res.json({ ok: true, last: null });
+    res.set('Cache-Control', 'no-store').json({ ok: true, last: Object.assign(r.payload, { analysed_at: r.at, analysed_by: r.created_by }) }); }
+  catch (e) { if (e.code === '42P01') return res.json({ ok: true, last: null }); log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
 app.get('/api/supply/cogs/csv', async (req, res) => {
   if (!(await cogsAdminOk(req, res))) return;
@@ -4709,7 +4721,7 @@ app.post('/api/supply/cogs/import-baseline', express.text({ type: '*/*', limit: 
   } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 345 (cogs_values) not applied.' }); log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
 app.get('/api/supply/cogs/history', async (req, res) => {
-  try { res.json({ ok: true, rows: (await pool.query(`SELECT kind, to_char(created_at,'YYYY-MM-DD"T"HH24:MI') at, created_by, rows, changed, sent, note FROM planner.cogs_uploads ORDER BY id DESC LIMIT 20`)).rows }); }
+  try { res.json({ ok: true, rows: (await pool.query(`SELECT kind, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at, created_by, rows, changed, sent, note FROM planner.cogs_uploads ORDER BY id DESC LIMIT 20`)).rows }); }
   catch (e) { res.json({ ok: true, rows: [] }); }
 });
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.

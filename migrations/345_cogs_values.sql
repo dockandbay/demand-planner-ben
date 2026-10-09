@@ -29,3 +29,10 @@ CREATE TABLE IF NOT EXISTS planner.cogs_uploads (
   note        text
 );
 CREATE INDEX IF NOT EXISTS cogs_uploads_created_idx ON planner.cogs_uploads (created_at DESC);
+-- v28.238 (Ben): the last Analyse result, so the COGS tab shows it until the next Analyse (one row kept).
+CREATE TABLE IF NOT EXISTS planner.cogs_analysis (
+  id          bigserial PRIMARY KEY,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  created_by  text,
+  payload     jsonb NOT NULL
+);

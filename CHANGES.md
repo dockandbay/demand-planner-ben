@@ -1,3 +1,12 @@
+## v28.238 (Ben, branch review-fixes-2026-10-05): COGS: last analysis persists, main table left-aligned
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `migrations/345_cogs_values.sql` (amended, not yet deployed: + `planner.cogs_analysis`), `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No env vars.
+
+- **Persists until the next Analyse:** each Analyse saves its result (`planner.cogs_analysis`, newest row only). Opening the tab shows it with "Analysed 09-Oct-26 03:37 by ben@ (shown until the next Analyse)". New route `GET /api/supply/cogs/last` (admin).
+- **Main table left-aligned** (headers and values).
+- COGS times (analysed, history) now in London time (were UTC).
+- Verified on sandbox: Analyse via API, then a fresh page load shows the saved 2,382-row table without clicking; every header and cell computes text-align left; history times in BST; no JS errors.
+
 ## v28.237 (Ben, branch review-fixes-2026-10-05): COGS history modal left-aligned
 
 **Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migrations, no env vars.
