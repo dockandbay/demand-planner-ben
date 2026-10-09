@@ -6,6 +6,8 @@ sources:
   - migrations/322_v_po_finance_setbased.sql :: planner.v_po_finance (canonical PO date + payment calc)
   - migrations/213_vpol_carton_from_products.sql :: planner.v_purchase_order_lines (full/partial carton check)
   - server.mjs :: PO_ROWS_SQL (admin PO grid, shipment mastering, due dates, action flags, landed cost)
+  - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
+  - artifact_v16.7.html :: renderCogs
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
   - server.mjs :: buildDATA (on-order and inbound feeds for DEMAND)
   - server.mjs :: /api/supply/po/:po/set-shipping, propagateShippingToPOs, shipmentShippingFromMasterPO
@@ -42,6 +44,12 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
+  server.mjs::cogsBuild: 8d0665efa6e7
+  server.mjs::cogsValuation: bc96a6558dea
+  server.mjs::cogsRates: 1824cafed9b3
+  server.mjs::cogsStore: b6ed0f03f350
+  server.mjs::COGS_COLS: 03fda4554d05
+  artifact_v16.7.html::renderCogs: 1c14469a695a
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -172,7 +180,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.234
+verified_version: v28.235
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -372,3 +380,16 @@ verified_version: v28.234
 ## Flexport booking named by Fulfil IS (v28.223, SUG-0042)
 - A Flexport booking lodged from a PO is named by the Fulfil internal shipment (IS) number(s) of every PO on that shipment (master plus consolidated riders), read live from Fulfil stock.shipment.internal where reference = PO, newest first, cancelled ignored; several are joined "IS288 / IS377". Every PO on the shipment goes in the booking's Purchase Order tags. No IS found or Fulfil unavailable: named by the PO number, with a note in the preview. (source: buildFlexportBookingBody)
 - On lodging, each PO's IS number is saved (purchase_orders.fulfil_is_number, migration 339). The Flexport import then links an IS-named Flexport shipment to every PO carrying that IS (sets flexport_reference) where the PO has no Flexport link yet, so ETAs and costs keep flowing. (source: server.mjs :: booking-submit, runFlexportImport)
+
+## COGS per unit for Airtable (v28.235)
+- Where: BUY & MOVE > Inventory > COGS. Analyse previews, Download CSV gives the exact file, Email to Airtable sends it (admin). Columns and order match the Airtable cogs-up import: UK ILG, AU Coghlans, CA Propack, US Geneva, EU iFulfillment, AU FBA, CA FBA, UK FBA, US FBA, EU FBA. (source: server.mjs :: COGS_COLS)
+- Source: LIVE Fulfil "Inventory Valuation" (inventory.valuation.report, generate, by product, per warehouse) for the UK company (GBP: UKILG, USGENEVA_STD, EUIFUL) and the AU company (AUD: AUCOGHLANS, AMZ_FBA_AU). Unit cost per warehouse = Fulfil's own costing (it differs by warehouse). (source: cogsValuation)
+- Currency: converted from the company currency to the column currency at Fulfil's current rates (GBP base: 1 GBP = rate). US Geneva = USD, EU iFulfillment = EUR, AU columns stay AUD, UK ILG stays GBP. (source: cogsRates)
+- Rule per SKU per column (Ben 09-Oct-26):
+  1. Stock on hand in Fulfil with a unit cost > 0: the Fulfil value, which replaces the stored one.
+  2. Otherwise (sold out: Fulfil values it at 0): the LAST STORED value is kept, never overwritten.
+  3. Never valued (nothing stored): supplier cost (planner.products.cost, USD) converted to the column currency. Stored once sent, so it becomes the last known value until Fulfil values the SKU.
+- UK FBA, US FBA and EU FBA are not read from Fulfil (outside Ben's list); they are kept, else supplier cost. CA Propack and CA FBA (decommissioned) are kept only.
+- SKUs = everything stored plus Fulfil products that exist in planner.products (Fulfil test items and packaging codes are left out). Airtable's email sync replaces the table, so every SKU is sent every time.
+- Analyse writes nothing. Email rebuilds on the server, sends (Resend, attachment cogs-up-IMPORT.csv, to COGS_AIRTABLE_EMAIL) and only then stores values (planner.cogs_values) and logs the run (planner.cogs_uploads, migration 345). A missing warehouse in the Fulfil report blocks the send. Load baseline CSV seeds the stored values from an Airtable export (fills only empty cells). (source: cogsStore, /api/supply/cogs/email, /api/supply/cogs/import-baseline)
+- Review flags: moves over 25% vs the stored value are shown red (often a Fulfil costing oddity worth checking before sending).

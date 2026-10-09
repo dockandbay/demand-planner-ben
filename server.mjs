@@ -4559,6 +4559,145 @@ app.get('/api/supply/fulfil/sales-order/pushes', async (req, res) => {   // audi
     res.json({ ok: true, rows: r.rows }); }
   catch (e) { res.json({ ok: true, rows: [] }); }   // pre-migration 334
 });
+// ── v28.235 (Ben): COGS per unit for Airtable (BUY & MOVE ▸ Inventory ▸ COGS) ─────────────────────────────────────────
+// Source = Fulfil "Inventory Valuation" report (model inventory.valuation.report, PUT /model/<m>/generate, per warehouse,
+// by product) for the UK company (1, GBP) and the AU company (3, AUD). Always LIVE Fulfil when configured (read only).
+// Per SKU per column:
+//   1. stock on hand in that warehouse AND a unit cost > 0 → Fulfil unit cost, converted to the column currency (Fulfil's
+//      own daily rates, GBP base) and STORED as the new value;
+//   2. otherwise (sold out: Fulfil values it at 0) → the last stored value is KEPT, never overwritten;
+//   3. never valued (nothing stored) → supplier cost (planner.products.cost, USD) converted to the column currency.
+// Analyse = preview, writes nothing. Email = rebuild server side, email the CSV (exact Airtable column order) to
+// COGS_AIRTABLE_EMAIL via Resend, then store the values (migration 345). Airtable's email sync replaces the table, so
+// every SKU is sent every time.
+const COGS_COLS = [
+  { col: 'UK ILG',          ccy: 'GBP', co: 1, wh: ['UKILG'] },
+  { col: 'AU Coghlans',     ccy: 'AUD', co: 3, wh: ['AUCOGHLANS'] },
+  { col: 'CA Propack',      ccy: 'CAD', co: null, keepOnly: true },   // CA decommissioned: kept as last sent
+  { col: 'US Geneva',       ccy: 'USD', co: 1, wh: ['USGENEVA_STD'] },
+  { col: 'EU iFulfillment', ccy: 'EUR', co: 1, wh: ['EUIFUL'] },
+  { col: 'AU FBA',          ccy: 'AUD', co: 3, wh: ['AMZ_FBA_AU'] },
+  { col: 'CA FBA',          ccy: 'CAD', co: null, keepOnly: true },
+  { col: 'UK FBA',          ccy: 'GBP', co: null },   // not on the Fulfil list (Ben 09-Oct-26): kept, else supplier cost
+  { col: 'US FBA',          ccy: 'USD', co: null },
+  { col: 'EU FBA',          ccy: 'EUR', co: null },
+];
+const COGS_CO_CCY = { 1: 'GBP', 3: 'AUD' };
+function cogsFulfilCfg() { const l = fulfilConfigFor('live'); return l.configured ? l : null; }
+async function cogsFulfil(cfg, method, path, body) { return cfg ? fulfilFetchCfg(cfg, method, path, body) : fulfilFetch(method, path, body); }
+async function cogsValuation(cfg, company, date) {
+  const r = await cogsFulfil(cfg, 'PUT', '/model/inventory.valuation.report/generate', [{ company, date: { __class__: 'date', iso_string: date }, summarization: 'product', warehouse_detail: 'per_warehouse', warehouses: [], show_product_details: false, category: null }]);
+  const whId = {}; (r && r.column_groups || []).forEach(g => { const m = /^warehouse_(\d+)$/.exec(g.name || ''); if (m) whId[String(g.display_name || '').trim().toUpperCase()] = m[1]; });
+  const rows = (r && r.data || []).filter(x => x.level === 'consolidated' && x.code);
+  const pg = r && r.pagination; if (pg && (pg.has_more || (pg.total_pages || pg.pages || 1) > 1)) { const e = new Error('Fulfil valuation report came back paged (' + JSON.stringify(pg).slice(0, 120) + '): not all products read'); e.code = 502; throw e; }
+  return { whId, rows, title: r && r.subtitle };
+}
+async function cogsRates(cfg) {   // GBP-based: 1 GBP = rate units of that currency
+  const rows = await cogsFulfil(cfg, 'PUT', '/model/currency.currency/search_read', [[['code', 'in', ['GBP', 'USD', 'EUR', 'AUD', 'CAD']]], 0, 10, null, ['code', 'rate']]);
+  const r = { GBP: 1 }; (rows || []).forEach(x => { const v = Number(fulfilUnwrap(x.rate)); if (v > 0) r[x.code] = v; });
+  for (const c of ['USD', 'EUR', 'AUD']) if (!r[c]) { const e = new Error('Fulfil has no ' + c + ' exchange rate'); e.code = 502; throw e; }
+  return r;
+}
+const cogsConv = (v, from, to, R) => (from === to ? v : (R[from] && R[to] ? v / R[from] * R[to] : null));
+async function cogsBuild() {
+  const cfg = cogsFulfilCfg(), date = upfxLondonToday();
+  const [uk, au, R] = await Promise.all([cogsValuation(cfg, 1, date), cogsValuation(cfg, 3, date), cogsRates(cfg)]);
+  const rep = { 1: uk, 3: au }, warnings = [];
+  COGS_COLS.forEach(c => { if (c.co) c.wh.forEach(w => { if (!rep[c.co].whId[w]) warnings.push('Fulfil warehouse ' + w + ' not in the ' + (c.co === 1 ? 'UK' : 'AU') + ' report'); }); });
+  const stored = {}; let storedN = 0;
+  try { (await pool.query(`SELECT sku, col, value::float8 v, source, to_char(updated_at,'YYYY-MM-DD') d FROM planner.cogs_values`)).rows.forEach(r => { (stored[r.sku] = stored[r.sku] || {})[r.col] = r; storedN++; }); }
+  catch (e) { if (e.code !== '42P01') throw e; warnings.push('Migration 345 not applied: nothing stored yet, so out-of-stock SKUs fall back to supplier cost'); }
+  const prod = {}; (await pool.query(`SELECT trim(sku) sku, cost::float8 cost FROM planner.products WHERE sku IS NOT NULL`)).rows.forEach(r => { prod[r.sku] = r; });
+  const fz = {}; [1, 3].forEach(co => rep[co].rows.forEach(x => { (fz[x.code] = fz[x.code] || {})[co] = x; }));
+  const skus = new Set(Object.keys(stored)); Object.keys(fz).forEach(s => { if (prod[s]) skus.add(s); });   // Fulfil-only codes not in HORIZON products (test items, polybags) are left out
+  const stats = {}; COGS_COLS.forEach(c => { stats[c.col] = { fulfil: 0, changed: 0, kept: 0, supplier: 0, blank: 0 }; });
+  const rows = Array.from(skus).sort().map(sku => {
+    const cells = {};
+    COGS_COLS.forEach(c => {
+      const prev = stored[sku] && stored[sku][c.col], st = stats[c.col]; let cell = null;
+      if (c.co) { const x = fz[sku] && fz[sku][c.co];
+        if (x) { let q = 0, val = 0; c.wh.forEach(w => { const id = rep[c.co].whId[w]; if (!id) return; const qq = Number(fulfilUnwrap(x['quantity_on_hand_' + id])) || 0, uc = Number(fulfilUnwrap(x['unit_cost_' + id])) || 0; /* REST wraps Decimals */ if (qq > 0 && uc > 0) { q += qq; val += qq * uc; } });
+          if (q > 0) { const uc = val / q, v = cogsConv(uc, COGS_CO_CCY[c.co], c.ccy, R); cell = { v: Math.round(v * 100) / 100, src: 'fulfil', qty: q, uc: Math.round(uc * 100000) / 100000, fx: COGS_CO_CCY[c.co] === c.ccy ? 1 : R[c.ccy] / R[COGS_CO_CCY[c.co]] }; } } }
+      if (!cell && prev && prev.v != null) cell = { v: Math.round(prev.v * 100) / 100, src: 'kept', since: prev.d, from: prev.source };
+      if (!cell && !c.keepOnly && prod[sku] && prod[sku].cost > 0) { const v = cogsConv(prod[sku].cost, 'USD', c.ccy, R); if (v != null) cell = { v: Math.round(v * 100) / 100, src: 'supplier', usd: prod[sku].cost, fx: R[c.ccy] / R.USD }; }
+      if (!cell) { st.blank++; cells[c.col] = null; return; }
+      if (prev && prev.v != null && cell.src !== 'kept') cell.prev = Math.round(prev.v * 100) / 100;
+      cell.changed = cell.src !== 'kept' && (cell.prev == null || Math.abs(cell.v - cell.prev) >= 0.005);
+      st[cell.src === 'kept' ? 'kept' : cell.src]++; if (cell.changed) st.changed++;
+      cells[c.col] = cell;
+    });
+    return { sku, cells };
+  });
+  return { ok: true, date, env: cfg ? 'live' : 'active', rates: R, columns: COGS_COLS.map(c => ({ col: c.col, ccy: c.ccy, source: c.co ? (c.co === 1 ? 'Fulfil UK ' : 'Fulfil AU ') + c.wh.join(' + ') : (c.keepOnly ? 'kept (decommissioned)' : 'kept / supplier cost') })),
+    rows, stats, stored: storedN, warnings, recipient_set: !!process.env.COGS_AIRTABLE_EMAIL };
+}
+function cogsCsv(b) {
+  const q = s => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+  return '﻿' + ['SKU'].concat(COGS_COLS.map(c => c.col)).join(',') + '\n' + b.rows.map(r => [q(r.sku)].concat(COGS_COLS.map(c => { const x = r.cells[c.col]; return x ? x.v.toFixed(2) : ''; })).join(',')).join('\n') + '\n';
+}
+async function cogsAdminOk(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return null; } return me; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; } }
+app.get('/api/supply/cogs/analyse', async (req, res) => {
+  if (!(await cogsAdminOk(req, res))) return;
+  try { const b = await cogsBuild(); res.set('Cache-Control', 'no-store').json(b); }
+  catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
+});
+app.get('/api/supply/cogs/csv', async (req, res) => {
+  if (!(await cogsAdminOk(req, res))) return;
+  try { const b = await cogsBuild(); res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="cogs-up-IMPORT.csv"', 'Cache-Control': 'no-store' }).send(cogsCsv(b)); }
+  catch (e) { log500(e); res.status(502).json({ error: String(e.message || e) }); }
+});
+async function cogsStore(b, by) {   // upsert every Fulfil / supplier-cost cell; kept cells are already stored
+  const s = [], c = [], v = [], k = [], src = [], q = [], uc = [], fx = [];
+  b.rows.forEach(r => COGS_COLS.forEach(col => { const x = r.cells[col.col]; if (!x || x.src === 'kept') return;
+    s.push(r.sku); c.push(col.col); v.push(x.v); k.push(col.ccy); src.push(x.src === 'fulfil' ? 'fulfil' : 'supplier_cost'); q.push(x.qty == null ? null : x.qty); uc.push(x.uc == null ? null : x.uc); fx.push(x.fx == null ? null : x.fx); }));
+  for (let i = 0; i < s.length; i += 2000) {
+    await pool.query(`INSERT INTO planner.cogs_values (sku, col, value, ccy, source, qty, unit_cost_company, fx, updated_at, updated_by)
+      SELECT * , now(), $9 FROM unnest($1::text[], $2::text[], $3::numeric[], $4::text[], $5::text[], $6::numeric[], $7::numeric[], $8::numeric[])
+      ON CONFLICT (sku, col) DO UPDATE SET value=EXCLUDED.value, ccy=EXCLUDED.ccy, source=EXCLUDED.source, qty=EXCLUDED.qty, unit_cost_company=EXCLUDED.unit_cost_company, fx=EXCLUDED.fx, updated_at=now(), updated_by=EXCLUDED.updated_by`,
+      [s.slice(i, i + 2000), c.slice(i, i + 2000), v.slice(i, i + 2000), k.slice(i, i + 2000), src.slice(i, i + 2000), q.slice(i, i + 2000), uc.slice(i, i + 2000), fx.slice(i, i + 2000), by]);
+  }
+  return s.length;
+}
+app.post('/api/supply/cogs/email', async (req, res) => {
+  const me = await cogsAdminOk(req, res); if (!me) return;
+  const to = String(process.env.COGS_AIRTABLE_EMAIL || '').trim();
+  if (!to) return res.status(503).json({ error: 'COGS_AIRTABLE_EMAIL is not set on this server. Nothing sent.' });
+  try {
+    const b = await cogsBuild(), by = (me && me.email) || authUser(req) || 'admin';
+    if (b.warnings.some(w => /not in the/.test(w))) return res.status(409).json({ error: 'Fulfil report is missing a warehouse: ' + b.warnings.join('; ') + '. Nothing sent.' });
+    const csv = cogsCsv(b), changed = Object.values(b.stats).reduce((a, s) => a + s.changed, 0);
+    const html = '<p>COGS per unit for Airtable, ' + ddMonYy(b.date) + '. ' + b.rows.length + ' SKUs, ' + changed + ' values changed. Rates (1 GBP): USD ' + b.rates.USD + ', EUR ' + b.rates.EUR + ', AUD ' + b.rates.AUD + '.</p><p>Sent by HORIZON (' + by + ').</p>';
+    const r = await sendResendEmail({ to, subject: 'COGS per unit ' + ddMonYy(b.date), html, kind: 'cogs-airtable', ref: b.date, by, attachments: [{ filename: 'cogs-up-IMPORT.csv', content: Buffer.from(csv, 'utf8').toString('base64') }] });
+    const sent = !!(r && r.sent), sandbox = !!(r && r.sandbox);
+    if (!sent && !sandbox) return res.status(502).json({ error: 'Email failed: ' + ((r && r.error) || 'not sent') + '. Nothing stored.' });
+    const n = await cogsStore(b, by);
+    try { await pool.query(`INSERT INTO planner.cogs_uploads (kind, created_by, recipient, rows, changed, fx, stats, sent, note) VALUES ('email',$1,$2,$3,$4,$5,$6,$7,$8)`, [by, sandbox ? null : to, b.rows.length, changed, JSON.stringify(b.rates), JSON.stringify(b.stats), sent, sandbox ? 'sandbox: no RESEND_API_KEY, not emailed; values stored' : null]); } catch (e) { /* pre-345 */ }
+    res.json({ ok: true, sent, sandbox, rows: b.rows.length, changed, stored: n });
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 345 (cogs_values) not applied. Nothing stored.' }); log500(e); res.status(502).json({ error: String(e.message || e) }); }
+});
+// One-off seed of the stored values from the current Airtable export (only cells with nothing stored, unless replace).
+app.post('/api/supply/cogs/import-baseline', express.text({ type: '*/*', limit: '5mb' }), async (req, res) => {
+  const me = await cogsAdminOk(req, res); if (!me) return;
+  try {
+    const txt = String(req.body || '').replace(/^﻿/, ''), lines = txt.split(/\r?\n/).filter(l => l.trim());
+    const head = (lines.shift() || '').split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+    if (head[0] !== 'SKU') return res.status(400).json({ error: 'First column must be SKU (the Airtable cogs-up export).' });
+    const idx = {}; COGS_COLS.forEach(c => { idx[c.col] = head.indexOf(c.col); });
+    const s = [], c = [], v = [], k = [];
+    lines.forEach(l => { const p = l.split(','), sku = (p[0] || '').trim(); if (!sku) return;
+      COGS_COLS.forEach(col => { const i = idx[col.col]; if (i < 0) return; const n = parseFloat(p[i]); if (!(n > 0)) return; s.push(sku); c.push(col.col); v.push(n); k.push(col.ccy); }); });
+    const replace = String(req.query.replace || '') === '1', by = (me && me.email) || authUser(req) || 'admin';
+    const r = await pool.query(`INSERT INTO planner.cogs_values (sku, col, value, ccy, source, updated_by)
+      SELECT a, b, c, d, 'airtable_csv', $5 FROM unnest($1::text[], $2::text[], $3::numeric[], $4::text[]) AS t(a,b,c,d)
+      ON CONFLICT (sku, col) DO ` + (replace ? `UPDATE SET value=EXCLUDED.value, ccy=EXCLUDED.ccy, source='airtable_csv', qty=NULL, unit_cost_company=NULL, fx=NULL, updated_at=now(), updated_by=EXCLUDED.updated_by` : 'NOTHING'), [s, c, v, k, by]);
+    try { await pool.query(`INSERT INTO planner.cogs_uploads (kind, created_by, rows, note) VALUES ('baseline',$1,$2,$3)`, [by, r.rowCount, 'imported ' + s.length + ' values, ' + r.rowCount + ' written' + (replace ? ' (replace)' : ' (missing only)')]); } catch (e) {}
+    res.json({ ok: true, values: s.length, written: r.rowCount, skus: new Set(s).size, missing_cols: COGS_COLS.filter(x => idx[x.col] < 0).map(x => x.col) });
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 345 (cogs_values) not applied.' }); log500(e); res.status(500).json({ error: String(e.message || e) }); }
+});
+app.get('/api/supply/cogs/history', async (req, res) => {
+  try { res.json({ ok: true, rows: (await pool.query(`SELECT kind, to_char(created_at,'YYYY-MM-DD"T"HH24:MI') at, created_by, rows, changed, sent, note FROM planner.cogs_uploads ORDER BY id DESC LIMIT 20`)).rows }); }
+  catch (e) { res.json({ ok: true, rows: [] }); }
+});
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
