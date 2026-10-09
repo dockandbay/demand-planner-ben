@@ -1,3 +1,10 @@
+## v28.240 (Ben, branch review-fixes-2026-10-05): COGS: UK / US / EU FBA columns from Fulfil
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migrations, no env vars.
+
+- UK FBA = Fulfil AMZ_FBA_UK (GBP), US FBA = AMZ_FBA_US (USD), EU FBA = quantity-weighted across AMZ_FBA_DE/FR/IT/ES/PL/NL/SE/BE/IE (EUR), all UK company, same rules as the other Fulfil columns (in stock → Fulfil, sold out → kept, never valued → supplier cost). AWD and Geneva FBA prep are not included in US FBA.
+- Verified vs LIVE Fulfil (read only): UK FBA 234, US FBA 283, EU FBA 68 values from Fulfil; median move 3%, 37 over 25% flagged (e.g. PONCHK-SUM-SM-CSTCANDY UK FBA 28.00 vs 3.49, TOWLB-SUM-LG-CSTCANDY 0.07 vs 4.69: Fulfil costing to check). Nothing emailed.
+
 ## v28.239 (Ben, branch review-fixes-2026-10-05): COGS table: wider SKU column
 
 **Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migrations, no env vars.

@@ -49,7 +49,7 @@ fingerprints:
   server.mjs::cogsRates: 1824cafed9b3
   server.mjs::cogsStore: bcd45226f5b0
   server.mjs::COGS_COLS: 03fda4554d05
-  artifact_v16.7.html::renderCogs: d9540cd4b2ff
+  artifact_v16.7.html::renderCogs: 0ba77ea1149c
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -180,7 +180,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.238
+verified_version: v28.240
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -389,7 +389,7 @@ verified_version: v28.238
   1. Stock on hand in Fulfil with a unit cost > 0: the Fulfil value, which replaces the stored one.
   2. Otherwise (sold out: Fulfil values it at 0): the LAST STORED value is kept, never overwritten.
   3. Never valued (nothing stored): supplier cost (planner.products.cost, USD) converted to the column currency. Stored once sent, so it becomes the last known value until Fulfil values the SKU.
-- UK FBA, US FBA and EU FBA are not read from Fulfil (outside Ben's list); they are kept, else supplier cost. CA Propack and CA FBA (decommissioned) are kept only.
+- FBA columns (v28.240, Ben): UK FBA = AMZ_FBA_UK (GBP), US FBA = AMZ_FBA_US (USD; AWD and Geneva FBA prep are separate pools, not included), EU FBA = quantity-weighted across AMZ_FBA_DE, FR, IT, ES, PL, NL, SE, BE and IE (EUR), all from the UK company. CA Propack and CA FBA (decommissioned) are kept only (sets still recomputed from kept components).
 - SKUs = everything stored plus Fulfil products that exist in planner.products (Fulfil test items and packaging codes are left out). Airtable's email sync replaces the table, so every SKU is sent every time.
 - Analyse writes nothing. Email rebuilds on the server, sends (Resend, attachment cogs-up-IMPORT.csv, to COGS_AIRTABLE_EMAIL) and only then stores values (planner.cogs_values) and logs the run (planner.cogs_uploads, migration 345). A missing warehouse in the Fulfil report blocks the send. Load baseline CSV seeds the stored values from an Airtable export (fills only empty cells). (source: cogsStore, /api/supply/cogs/email, /api/supply/cogs/import-baseline)
 - Review flags: moves over 25% vs the stored value are shown red (often a Fulfil costing oddity worth checking before sending).

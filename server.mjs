@@ -4578,9 +4578,9 @@ const COGS_COLS = [
   { col: 'EU iFulfillment', ccy: 'EUR', co: 1, wh: ['EUIFUL'] },
   { col: 'AU FBA',          ccy: 'AUD', co: 3, wh: ['AMZ_FBA_AU'] },
   { col: 'CA FBA',          ccy: 'CAD', co: null, keepOnly: true },
-  { col: 'UK FBA',          ccy: 'GBP', co: null },   // not on the Fulfil list (Ben 09-Oct-26): kept, else supplier cost
-  { col: 'US FBA',          ccy: 'USD', co: null },
-  { col: 'EU FBA',          ccy: 'EUR', co: null },
+  { col: 'UK FBA',          ccy: 'GBP', co: 1, wh: ['AMZ_FBA_UK'] },   // v28.240 (Ben): FBA columns from Fulfil too
+  { col: 'US FBA',          ccy: 'USD', co: 1, wh: ['AMZ_FBA_US'] },   // AWD and Geneva FBA prep are separate pools, not FBA
+  { col: 'EU FBA',          ccy: 'EUR', co: 1, wh: ['AMZ_FBA_DE', 'AMZ_FBA_FR', 'AMZ_FBA_IT', 'AMZ_FBA_ES', 'AMZ_FBA_PL', 'AMZ_FBA_NL', 'AMZ_FBA_SE', 'AMZ_FBA_BE', 'AMZ_FBA_IE'] },   // qty-weighted across EU FBA
 ];
 const COGS_CO_CCY = { 1: 'GBP', 3: 'AUD' };
 function cogsFulfilCfg() { const l = fulfilConfigFor('live'); return l.configured ? l : null; }
