@@ -4301,6 +4301,43 @@ function sovLineBlock(sale, l, pr) {
   if (pr && ['done', 'purchased'].includes(pr.state)) return 'Purchase request is ' + pr.state;
   return null;
 }
+// v28.234 (Ben): FULFILMENT METHOD change per line (From stock / Back order / Drop ship). On a processing order a plain
+// write of delivery_mode is NOT enough: verified on the Fulfil sandbox 09-Oct-26 it saves the field but leaves the old
+// customer-shipment move and raises no purchase request. So confirmed/processing orders go through Fulfil's own Modify
+// wizard (sale.wizard_order_modification, action change_fulfil_strategy), exactly what Modify ▸ "Change Fulfil Strategy on
+// Line Item" does in the UI. Sandbox-verified: same line id kept; ship → drop ship replaces the move and raises a purchase
+// request; drop ship → ship cancels the request (and its auto PO line) and puts the line on a NEW customer shipment (merge
+// in Fulfil if needed). Draft / quotation orders have no moves yet, so a plain write is correct there.
+const SOV_MODE_TARGETS = ['ship', 'backorder', 'dropship'];
+const SOV_WIZ_STATES = ['confirmed', 'processing'], SOV_WRITE_STATES = ['draft', 'quotation'];
+function sovModeBlock(sale, l, pr) {
+  if (l.service) return 'Service line';
+  if (!SOV_MODE_TARGETS.includes(l.mode)) return (SOV_MODE_LABEL[l.mode] || l.mode || 'This method') + ': change it in Fulfil';
+  const st = String(sale.state || '').toLowerCase();
+  if (!SOV_WIZ_STATES.includes(st) && !SOV_WRITE_STATES.includes(st)) return 'Sales order is ' + (sale.state || 'unknown');
+  if ((Number(l.qty_shipped) || 0) > 0 || l.move_done) return 'Line already shipped';
+  if (pr && pr.purchase_line && String(pr.po_state || '').toLowerCase() !== 'cancel') return 'On purchase order ' + (pr.po_number || ('#' + pr.purchase)) + ' (' + (pr.po_state || pr.state) + '): change it on the PO in Fulfil first';
+  return null;
+}
+async function sovChangeMode(sale, lineId, mode) {   // throws on failure; caller reads the line back
+  if (!SOV_MODE_TARGETS.includes(mode)) throw new Error('Unsupported fulfilment method ' + mode);
+  const st = String(sale.state || '').toLowerCase();
+  if (sovStubOn()) return sovWrite('sale.line', lineId, { delivery_mode: mode });
+  if (SOV_WRITE_STATES.includes(st)) return sovWrite('sale.line', lineId, { delivery_mode: mode });
+  if (!SOV_WIZ_STATES.includes(st)) throw new Error('Sales order is ' + sale.state);
+  const W = '/wizard/sale.wizard_order_modification', ctx = { active_id: sale.id, active_ids: [sale.id], active_model: 'sale.sale' };
+  const sess = await fulfilFetch('PUT', W + '/create', [{}]); const sid = Array.isArray(sess) ? sess[0] : null;
+  if (!sid) throw new Error('Fulfil Modify wizard did not start');
+  try {
+    const v = await fulfilFetch('PUT', W + '/execute', [sid, {}, 'action', ctx]);
+    const defs = (v && v.view && v.view.defaults) || {};
+    if (Number(defs.sale) !== Number(sale.id)) throw new Error('Fulfil Modify wizard opened on the wrong order (' + defs.sale + ')');
+    const form = { ...Object.fromEntries(Object.entries(defs).filter(([k]) => !k.includes('.'))), action: 'change_fulfil_strategy', line: Number(lineId), fulfil_strategy: mode };
+    if (form.action !== 'change_fulfil_strategy') throw new Error('wizard action guard');   // the wizard defaults to "Cancel the Order": never send anything else
+    const r = await fulfilFetch('PUT', W + '/execute', [sid, { action: form }, 'check_shipment', ctx]);
+    if (r && r.view) { const w = (r.view.defaults && (r.view.defaults.warning || r.view.defaults.message)) || r.view.title || 'a further step'; throw new Error('Fulfil asked for confirmation (' + String(w).slice(0, 200) + '): change it in Fulfil'); }
+  } finally { try { await fulfilFetch('PUT', W + '/delete', [sid]); } catch (_) { /* sessions expire on their own */ } }
+}
 // One sales order → lines + supplier options + blocks. Pure reads.
 async function sovAnalyse(saleId) {
   const sale = (await sovSearch('sale.sale', [['id', '=', saleId]], SOV_SALE_FIELDS, 1))[0];
@@ -4325,11 +4362,12 @@ async function sovAnalyse(saleId) {
       mode: l.delivery_mode || 'ship', mode_label: SOV_MODE_LABEL[l.delivery_mode] || l.delivery_mode || '', service: String(l.product_type || '') === 'service',
       supplier: l.supplier ? { id: l.supplier, name: l['supplier.name'] || ('Party ' + l.supplier) } : null, options: o, pr, horizon: hz[sku] || null };
     row.blocked = sovLineBlock(sale, row, pr);
+    row.mode_block = sovModeBlock(sale, row, pr);   // v28.234 null = the fulfilment method can be changed here
     return row;
   });
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   return { sale: { id: sale.id, number: sale.number || '', reference: sale.reference || '', customer: sale['party.name'] || '', state: sale.state || '', shipment_state: sale.shipment_state || '', sale_date: fulfilUnwrap(sale.sale_date) || null, company: sale.company, channel: sale['channel.name'] || '',
-    url: cfg.subdomain ? ('https://' + cfg.subdomain + '.fulfil.io/v2/erp/model/sales_order/' + sale.id) : '' }, lines };
+    url: cfg.subdomain ? ('https://' + cfg.subdomain + '.fulfil.io/v2/erp/model/sales_order/' + sale.id) : '' }, lines, mode_targets: SOV_MODE_TARGETS };
 }
 function sovGate(cfg) { return { env: cfg.env, stub: sovStubOn(), live_writes: cfg.env !== 'live' || String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() === 'true' }; }
 app.get('/api/supply/fulfil/sales-order/analyse', async (req, res) => {
@@ -4346,8 +4384,11 @@ app.get('/api/supply/fulfil/sales-order/analyse', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, gate: sovGate(cfg), ...out });
   } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
 });
-async function sovAudit(rows) {   // migration 334; non-fatal (the Fulfil result is what the user sees)
-  for (const r of rows) { try { await pool.query(`INSERT INTO planner.so_supplier_pushes (sale_id, sale_number, line_id, sku, old_supplier_id, old_supplier, new_supplier_id, new_supplier, result, message, fulfil_env, stub, pushed_by)
+async function sovAudit(rows) {   // migration 334 (+344 modes); non-fatal (the Fulfil result is what the user sees)
+  for (const r of rows) { try {
+      if (r.old_mode != null || r.new_mode != null) { try { await pool.query(`INSERT INTO planner.so_supplier_pushes (sale_id, sale_number, line_id, sku, old_supplier_id, old_supplier, new_supplier_id, new_supplier, result, message, fulfil_env, stub, pushed_by, old_mode, new_mode)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [r.sale_id, r.sale_number, r.line_id, r.sku, r.old_id, r.old_name, r.new_id, r.new_name, r.result, r.message || null, r.env, r.stub, r.by, r.old_mode || null, r.new_mode || null]); continue; }
+        catch (e) { if (e.code !== '42703') throw e; /* pre-344: no mode columns, store without them */ } } await pool.query(`INSERT INTO planner.so_supplier_pushes (sale_id, sale_number, line_id, sku, old_supplier_id, old_supplier, new_supplier_id, new_supplier, result, message, fulfil_env, stub, pushed_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [r.sale_id, r.sale_number, r.line_id, r.sku, r.old_id, r.old_name, r.new_id, r.new_name, r.result, r.message || null, r.env, r.stub, r.by]); } catch (e) { /* table absent pre-migration 334 */ } }
 }
 app.post('/api/supply/fulfil/sales-order/push-suppliers', async (req, res) => {
@@ -4367,11 +4408,40 @@ app.post('/api/supply/fulfil/sales-order/push-suppliers', async (req, res) => {
 async function sovPushOrder(saleId, want, ctx) {
   const { cfg, gate, by } = ctx;
   return _withXactLock('fulfil_so_push:' + saleId, { code: 'FULFIL_PUSH_BUSY', message: 'A supplier push for this sales order is already in progress. Wait for it to finish, then analyse again.' }, async () => {
-      const cur = await sovAnalyse(saleId);   // never trust the client's view: re-read the order, lines, options and blocks now
+      let cur = await sovAnalyse(saleId);   // never trust the client's view: re-read the order, lines, options and blocks now
       if (!cur) { const e = new Error('Fulfil sales order ' + saleId + ' not found.'); e.status = 404; throw e; }
-      const byId = {}; cur.lines.forEach(l => { byId[l.line_id] = l; });
+      let byId = {}; cur.lines.forEach(l => { byId[l.line_id] = l; });
+      // v28.234 (Ben): phase 1 = fulfilment method changes (one line at a time, each read back); then the order is re-read
+      // so the supplier phase below sees the new method, the new purchase request and the new blocks.
+      // Switching TO back order / drop ship with a supplier chosen: the supplier goes on the line FIRST, so the purchase request
+      // Fulfil raises during the change is for that supplier (sandbox-verified 09-Oct-26; requests can be bought into a PO
+      // straight away, after which the supplier could no longer be changed here).
+      const modeRes = {}, modeFailed = new Set(), supDone = new Set(); let modeSent = 0;
+      for (const w of want) {
+        const l = byId[Number(w.line_id)], to = w.mode ? String(w.mode) : null;
+        if (!l || !to || to === l.mode) continue;
+        const base = { line_id: l.line_id, sku: l.sku, old_id: l.supplier ? l.supplier.id : null, old_name: l.supplier ? l.supplier.name : null, new_id: l.supplier ? l.supplier.id : null, new_name: l.supplier ? l.supplier.name : null, old_mode: l.mode, new_mode: to };
+        if (!SOV_MODE_TARGETS.includes(to)) { modeRes[l.line_id] = { ...base, result: 'blocked', message: 'Unsupported fulfilment method ' + to }; modeFailed.add(l.line_id); continue; }
+        if (l.mode_block) { modeRes[l.line_id] = { ...base, result: 'blocked', message: l.mode_block }; modeFailed.add(l.line_id); continue; }
+        const pid = SOV_SUP_MODES.includes(to) && w.supplier_party_id != null ? Number(w.supplier_party_id) : null, opt = pid != null ? l.options.find(o => o.id === pid) : null;
+        if (pid != null && !opt) { modeRes[l.line_id] = { ...base, result: 'blocked', message: 'Supplier is not set up on this product in Fulfil' }; modeFailed.add(l.line_id); continue; }
+        try {
+          if (opt && base.old_id !== opt.id) await sovWrite('sale.line', l.line_id, { supplier: opt.id }, { 'supplier.name': opt.name });
+          if (opt) { supDone.add(l.line_id); Object.assign(base, { new_id: opt.id, new_name: opt.name }); }
+          await sovChangeMode(cur.sale, l.line_id, to); modeSent++; modeRes[l.line_id] = { ...base, result: 'pending' }; }
+        catch (e) { modeRes[l.line_id] = { ...base, result: 'failed', message: String(e.message || e).slice(0, 300) }; modeFailed.add(l.line_id); }
+      }
+      if (modeSent) {
+        cur = await sovAnalyse(saleId); byId = {}; cur.lines.forEach(l => { byId[l.line_id] = l; });
+        Object.values(modeRes).filter(r => r.result === 'pending').forEach(r => { const l = byId[r.line_id];
+          if (!l || l.mode !== r.new_mode) { r.result = 'failed'; r.message = 'Read-back mismatch: Fulfil line shows ' + (l ? (SOV_MODE_LABEL[l.mode] || l.mode) : 'no line') + ', expected ' + SOV_MODE_LABEL[r.new_mode]; modeFailed.add(r.line_id); return; }
+          if (supDone.has(r.line_id) && (l.supplier ? l.supplier.id : null) !== r.new_id) { r.result = 'failed'; r.message = 'Method changed, but the line shows supplier ' + (l.supplier ? l.supplier.name : 'none') + ', expected ' + r.new_name; return; }
+          if (supDone.has(r.line_id) && l.pr && l.pr.party && l.pr.party !== r.new_id) { r.result = 'failed'; r.message = 'Method changed, but Fulfil raised the purchase request for ' + (l.pr.party_name || ('party ' + l.pr.party)) + ', expected ' + r.new_name + (l.pr.purchase_line ? ' (already on ' + (l.pr.po_number || 'a PO') + ': change it there)' : ''); return; }
+          r.result = 'ok'; r.message = 'Method changed to ' + SOV_MODE_LABEL[r.new_mode] + (supDone.has(r.line_id) ? ', supplier ' + r.new_name : '') + ', read back' + (r.new_mode === 'ship' ? ' (Fulfil puts it on a new customer shipment)' : (l.pr ? ' (purchase request ' + (l.pr.party_name ? 'for ' + l.pr.party_name : 'raised') + ')' : '')); });
+      }
       const results = [], writes = [];
       for (const w of want) {
+        if (w.supplier_party_id == null || modeFailed.has(Number(w.line_id)) || supDone.has(Number(w.line_id))) continue;   // method-only change, method change failed, or supplier already set with it
         const l = byId[Number(w.line_id)], pid = Number(w.supplier_party_id) || null;
         const base = { line_id: Number(w.line_id), sku: l ? l.sku : '', old_id: l && l.supplier ? l.supplier.id : null, old_name: l && l.supplier ? l.supplier.name : null, new_id: pid, new_name: null };
         if (!l) { results.push({ ...base, result: 'blocked', message: 'Line is not on this sales order' }); continue; }
@@ -4400,6 +4470,11 @@ async function sovPushOrder(saleId, want, ctx) {
           if (x.prWritten && (prBack[x.l.pr.id] || {}).party !== x.opt.id) { results.push({ ...x.base, result: 'failed', message: 'Line saved, but purchase request ' + x.l.pr.id + ' still shows the old supplier' }); return; }
           results.push({ ...x.base, result: 'ok', message: 'Saved and read back' + (x.prWritten ? ' (purchase request updated too)' : '') }); });
       }
+      // v28.234: one result per line. A method change and a supplier change on the same line merge (worst result wins).
+      const rank = { failed: 3, blocked: 2, ok: 1, unchanged: 0 };
+      Object.values(modeRes).forEach(m => { const i = results.findIndex(r => r.line_id === m.line_id);
+        if (i < 0) { results.push(m); return; } const s = results[i];
+        results[i] = { ...s, old_mode: m.old_mode, new_mode: m.new_mode, old_id: m.old_id, old_name: m.old_name, result: rank[m.result] >= rank[s.result] ? m.result : s.result, message: [m.message, s.message].filter(Boolean).join(' · ') }; });
       await sovAudit(results.filter(r => r.result !== 'unchanged').map(r => ({ ...r, sale_id: saleId, sale_number: cur.sale.number, env: cfg.env, stub: gate.stub, by })));
       return { ok: true, stub: gate.stub, env: cfg.env, sale: cur.sale, results, saved: results.filter(r => r.result === 'ok').length, failed: results.filter(r => r.result === 'failed').length, blocked: results.filter(r => r.result === 'blocked').length };
   });
@@ -4478,8 +4553,10 @@ app.post('/api/supply/fulfil/sales-order/push-batch', async (req, res) => {
   } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: String(e.message || e) }); }
 });
 app.get('/api/supply/fulfil/sales-order/pushes', async (req, res) => {   // audit trail for one order (drawer footer)
-  try { const r = await pool.query(`SELECT line_id, sku, old_supplier, new_supplier, result, message, fulfil_env, stub, pushed_by, to_char(pushed_at,'YYYY-MM-DD"T"HH24:MI') pushed_at
-      FROM planner.so_supplier_pushes WHERE sale_id=$1 ORDER BY pushed_at DESC, id DESC LIMIT 100`, [Number(req.query.sale_id) || 0]); res.json({ ok: true, rows: r.rows }); }
+  try { const q = (m) => pool.query(`SELECT line_id, sku, old_supplier, new_supplier, result, message, fulfil_env, stub, pushed_by, to_char(pushed_at,'YYYY-MM-DD"T"HH24:MI') pushed_at` + (m ? ', old_mode, new_mode' : '') + `
+      FROM planner.so_supplier_pushes WHERE sale_id=$1 ORDER BY pushed_at DESC, id DESC LIMIT 100`, [Number(req.query.sale_id) || 0]);
+    let r; try { r = await q(true); } catch (e) { if (e.code !== '42703') throw e; r = await q(false); }   // v28.234 modes from migration 344
+    res.json({ ok: true, rows: r.rows }); }
   catch (e) { res.json({ ok: true, rows: [] }); }   // pre-migration 334
 });
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.

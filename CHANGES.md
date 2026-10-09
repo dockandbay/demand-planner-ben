@@ -1,3 +1,14 @@
+## v28.234 (Ben, branch review-fixes-2026-10-05): Validate sales order: change the fulfilment method per line
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/344_so_push_modes.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 344** (additive, idempotent: `old_mode`, `new_mode` on `so_supplier_pushes`; the push works before it is applied, the history just has no methods). No env vars. Same gates as the supplier push (admin, `FULFIL_LIVE_WRITES`, per-order lock).
+
+- Each line in the Validate sales order drawer (single and batch) now has a **fulfilment method dropdown**: From stock / Back order / Drop ship, coloured like the client order review. Switching to Back order or Drop ship opens the supplier picker; the line can only be pushed once a supplier is chosen (when the product has suppliers in Fulfil).
+- **How it writes to Fulfil:** confirmed / processing orders go through Fulfil's own Modify wizard (`sale.wizard_order_modification`, "Change Fulfil Strategy on Line Item"). A plain field write is not enough there: on the Fulfil sandbox it saved the field but left the old shipment move and raised no purchase request. Draft / quotation orders get a plain write (no moves yet). The wizard defaults to "Cancel the Order", so the code always sets the action and checks the order id.
+- When switching to Back order / Drop ship with a supplier, the supplier is written on the line **first**, so Fulfil raises the purchase request for that supplier. Read back checks method, line supplier and the request's supplier.
+- **Locked** (🔒 with reason): service lines, pick up / make on order / inter-company drop ship, orders not draft / quotation / confirmed / processing, shipped lines, and lines whose purchase request is already on a live PO (change the PO first, so a supplier PO is never cancelled from here).
+- Confirm dialog shows Now and New per line and what Fulfil will do. Moving a line to From stock cancels its purchase request and puts it on a **new customer shipment** (Fulfil's behaviour; merge shipments in Fulfil if needed).
+- Verified end to end on the **Fulfil sandbox** (not live): ship to drop ship and back via the wizard (same line id, move replaced, request raised then cancelled); through HORIZON, SO54894 two lines changed to Drop ship with XR Textile and Back order with Lixin, both read back with requests for those suppliers; an invalid supplier blocked; a line whose request was already on a PO blocked; audit rows carry the methods. Drawer render (jsdom): dropdowns, lock on the shipping line, supplier "!" until chosen, push count, confirm text and payload checked, no JS errors.
+
 ## v28.233 (Ben, branch review-fixes-2026-10-05): Plan grid column filters: Top 10, Value range, Status
 
 **Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migrations, no env vars, no server change. Display only.

@@ -7612,24 +7612,41 @@
       +'<textarea class="flt" id="sov-q" rows="1" placeholder="SO number, Fulfil link or reference (paste a list to validate many)" title="One order, or a list: one per line or separated by commas / spaces / semicolons (max 50). Enter = Analyse, Shift+Enter = new line" style="flex:1 1 260px;min-width:0;background:var(--blue-soft);border-color:#93c5fd;resize:vertical;max-height:140px;font-family:inherit;line-height:1.35"></textarea>'   // v28.194 (Ben): textarea so a pasted list keeps its line breaks
       +'<button class="save-btn" id="sov-go" style="background:var(--nav);color:#fff;border-color:var(--nav)">Analyse</button></div><div id="sov-body"></div></div></div>';
     root.appendChild(bg); requestAnimationFrame(function(){ bg.classList.add('open'); });
-    var S={data:null, sel:{}, chk:{}, res:{}, busy:false, mode:'single'}, B=null;   // v28.194 (Ben): B = batch state (pasted list)
+    var S={data:null, sel:{}, msel:{}, chk:{}, res:{}, busy:false, mode:'single'}, B=null;   // v28.234 msel = chosen fulfilment method per line   // v28.194 (Ben): B = batch state (pasted list)
     var onKey=function(e){ if(e.key!=='Escape')return; var cf=document.getElementById('sov-confirm'); if(cf){ cf.remove(); return; } close(); };
     var close=function(){ bg.classList.remove('open'); document.removeEventListener('keydown',onKey); setTimeout(function(){ if(bg.parentNode)bg.parentNode.removeChild(bg); maybeResetDrawerZ(); },220); };
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)close(); }); bg.querySelector('.shipdrawer-x').onclick=close; document.addEventListener('keydown',onKey);
     var qi=bg.querySelector('#sov-q'), body=bg.querySelector('#sov-body');
     function jget(u){ return fetch(u,{cache:'no-store'}).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }); }
     function n0(v){ return Number(v||0).toLocaleString(); }
-    function supLine(l){ return l.mode==='dropship'||l.mode==='backorder'; }   // v28.230 (Ben): backorder lines need a supplier too
-    function editable(l){ return supLine(l) && !l.service && !l.blocked; }
+    // v28.234 (Ben): the fulfilment method can be changed too (From stock / Back order / Drop ship). S.msel holds the chosen
+    // method; every supplier rule below follows the CHOSEN method, so switching a line to Drop ship opens its supplier picker.
+    var SOV_MODES=[['ship','From stock'],['backorder','Back order'],['dropship','Drop ship']];
+    function modeLbl(m){ var x=SOV_MODES.filter(function(z){ return z[0]===m; })[0]; return x?x[1]:(m||''); }
+    function fmSt(m){ return 'font-weight:700;font-size:12px;border-radius:6px;padding:2px 6px;'+(m==='ship'?'background:var(--pos-bg,#e8f6ee);color:var(--pos,#118a4e);border:1px solid var(--pos,#118a4e)':m==='backorder'?'background:var(--violet-bg,#f1ebfc);color:var(--violet,#7048c9);border:1px solid var(--violet,#7048c9)':m==='dropship'?'background:var(--blue-soft,#eaf1fd);color:var(--blue-ink,#1a4fb5);border:1px solid var(--blue,#2361d8)':'border:1px solid var(--line)'); }   // same colours as the client order review
+    function effMode(l){ return S.msel[l.line_id]||l.mode; }
+    function modeChanged(l){ return !l.service && !l.mode_block && S.msel[l.line_id]!=null && S.msel[l.line_id]!==l.mode; }
+    function supLine(l){ var m=effMode(l); return m==='dropship'||m==='backorder'; }   // v28.230 (Ben): backorder lines need a supplier too
+    function blk(l){ return modeChanged(l)?null:l.blocked; }   // the supplier block was worked out for the CURRENT method
+    function editable(l){ return supLine(l) && !l.service && !blk(l); }
+    function canEdit(l){ return editable(l) || (!l.service && !l.mode_block); }
     function curId(l){ return l.supplier?l.supplier.id:null; }
     function optName(l,id){ if(id==null)return ''; var o=(l.options||[]).filter(function(x){return x.id===id;})[0]; return o?o.name:(l.supplier&&l.supplier.id===id?l.supplier.name:('Party '+id)); }
-    function changed(l){ return editable(l) && S.sel[l.line_id]!=null && S.sel[l.line_id]!==curId(l); }
+    function needsSup(l){ return modeChanged(l) && supLine(l) && S.sel[l.line_id]==null && (l.options||[]).length>0; }   // switched to a supplier method: pick the supplier first
+    function changed(l){ var sup=editable(l) && S.sel[l.line_id]!=null && (modeChanged(l)||S.sel[l.line_id]!==curId(l)); return (modeChanged(l)||sup) && !needsSup(l); }
+    function wantOf(l){ var w={line_id:l.line_id}; if(modeChanged(l))w.mode=effMode(l); if(supLine(l)&&S.sel[l.line_id]!=null)w.supplier_party_id=S.sel[l.line_id]; return w; }
+    function chgDesc(l,now){ var m=now?l.mode:effMode(l), sup=now?(l.supplier?l.supplier.name:''):(supLine(l)?optName(l,S.sel[l.line_id]):'');
+      return '<span style="'+fmSt(m)+'">'+esc(modeLbl(m))+'</span>'+((m==='dropship'||m==='backorder')?' '+(sup?esc(sup):'<span class="mut">no supplier</span>'):''); }
+    function modeCell(l){ if(l.service)return 'Service'; var m=effMode(l);
+      if(l.mode_block)return '<span style="'+fmSt(l.mode)+'">'+esc(modeLbl(l.mode)||l.mode_label)+'</span> <span class="mut tiny" title="Method can\'t be changed here: '+esc(l.mode_block)+'">🔒</span>';
+      return '<select class="flt sov-mode" data-l="'+l.line_id+'" title="Fulfilment method" style="'+fmSt(m)+'">'+SOV_MODES.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===m?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'
+        +(modeChanged(l)?' <b title="changed from '+esc(modeLbl(l.mode))+', not pushed yet" style="color:var(--amber)">●</b>':''); }
     function analyse(q,id){ if(S.busy)return; body.innerHTML='<div class="count">Reading Fulfil…</div>';
       jget('/api/supply/fulfil/sales-order/analyse?'+(id?('id='+encodeURIComponent(id)):('q='+encodeURIComponent(q)))).then(function(d){
         if(d.candidates){ body.innerHTML='<div class="mut tiny" style="margin-bottom:6px">'+d.candidates.length+' sales orders match. Pick one:</div>'+d.candidates.map(function(c){
             return '<div><button class="lnk-btn sov-pick" data-id="'+c.id+'" style="padding:3px 0"><b>'+esc(c.number||('#'+c.id))+'</b> '+esc(c.customer||'')+' <span class="mut tiny">'+esc(c.reference||'')+' · '+esc(c.state||'')+(c.sale_date?' · '+fd(c.sale_date):'')+'</span></button></div>'; }).join('');
           body.querySelectorAll('.sov-pick').forEach(function(b){ b.onclick=function(){ analyse('',b.dataset.id); }; }); return; }
-        S.data=d; S.sel={}; S.chk={};
+        S.data=d; S.sel={}; S.msel={}; S.chk={};
         (d.lines||[]).forEach(function(l){ var c=curId(l); S.sel[l.line_id]=c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null); });
         draw(); })
         .catch(function(e){ body.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
@@ -7646,7 +7663,8 @@
           +'<span style="font-size:17px;font-weight:700;line-height:1.2">'+n0(o.u)+' <span style="font-size:11px;font-weight:600;color:var(--muted)">units</span></span>'
           +'<span style="font-size:11px;color:var(--muted)">'+o.n+' line'+(o.n===1?'':'s')+'</span></div>'; };
       return '<div style="display:flex;flex-wrap:wrap;align-items:stretch">'+Object.keys(by).sort().map(function(k){ return ch(esc(k),by[k],'sup'); }).join('')+(none.n?ch('No supplier !',none,'red'):'')+ch('Ship from stock',stock,'stock')+'</div>'; }
-    function statusCell(l){ if(!supLine(l)||l.service)return '<span class="mut">-</span>';
+    function statusCell(l){ if(modeChanged(l))return '<span class="mut tiny">now</span> '+chgDesc(l,true)+' <span class="tool-badge bg-amber">method change</span>';
+      if(!supLine(l)||l.service)return '<span class="mut">-</span>';
       var c=curId(l), s=S.sel[l.line_id], nm=l.supplier?esc(l.supplier.name):'<span class="mut">none</span>';
       var inOpts=c==null||(l.options||[]).some(function(o){return o.id===c;});
       var st=c==null?'<span class="tool-badge bg-red">missing</span>':(s!=null&&s!==c?'<span class="tool-badge bg-amber">differs</span>':'<span class="tool-badge bg-green">ok</span>');
@@ -7657,20 +7675,20 @@
       // option is already the line's supplier. Plain text (current supplier or none) + the existing notes instead.
       var noChoice=!opts.length||(opts.length===1&&c!=null&&opts[0].id===c&&(s==null||s===c));
       if(noChoice){ var t=c!=null?esc(l.supplier.name):(opts.length?esc(opts[0].name):'<span class="mut">none</span>');
-        if(!opts.length&&!l.blocked)t+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
+        if(!opts.length&&!blk(l))t+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
         var hz0=l.horizon&&l.horizon.main; if(hz0&&String(hz0).toLowerCase()!==String(c!=null?l.supplier.name:'').toLowerCase())t+='<div class="mut tiny" title="HORIZON SKU supplier'+(l.horizon.multi?' (all: '+esc(l.horizon.multi)+')':'')+'">HORIZON: '+esc(hz0)+'</div>';
-        if(l.blocked)t+='<div class="mut tiny" style="color:var(--amber)">🔒 '+esc(l.blocked)+'</div>';
+        if(blk(l))t+='<div class="mut tiny" style="color:var(--amber)">🔒 '+esc(blk(l))+'</div>';
         return t; }
       if(c!=null&&!opts.some(function(o){return o.id===c;}))opts.unshift({id:c,name:l.supplier.name+' (current)'});
       // v28.205 (Ben): a line with a choice of suppliers gets the Create Buy Plan "multiple suppliers" colouring (amber, --prod border)
       var multi=(l.options||[]).length>1;
       var h='<select class="flt sov-sel" data-l="'+l.line_id+'"'+(editable(l)?'':' disabled')+(multi?' title="multiple suppliers — pick one"':'')+' style="min-width:130px;max-width:100%'+(multi?';border:1px solid var(--prod);border-radius:4px;background:var(--amber-bg);color:var(--amber);font-weight:600':'')+'">'+(s==null?'<option value="">Choose…</option>':'')
-        +opts.map(function(o){ return '<option value="'+o.id+'"'+(o.id===s?' selected':'')+'>'+esc(o.name)+(o.drop_shipment===false&&l.mode==='dropship'?' (no drop ship)':'')+'</option>'; }).join('')+'</select>';
+        +opts.map(function(o){ return '<option value="'+o.id+'"'+(o.id===s?' selected':'')+'>'+esc(o.name)+(o.drop_shipment===false&&effMode(l)==='dropship'?' (no drop ship)':'')+'</option>'; }).join('')+'</select>';
       if((l.options||[]).length>1)h+=' <b title="more than one supplier possible" style="color:var(--blue)">*</b>';
       if(s==null&&editable(l))h+=' <b title="no supplier chosen" style="color:var(--neg)">!</b>';
-      if(!(l.options||[]).length&&!l.blocked)h+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
+      if(!(l.options||[]).length&&!blk(l))h+='<div class="mut tiny" style="color:var(--neg)">No suppliers set up on this product in Fulfil</div>';
       var hz=l.horizon&&l.horizon.main; if(hz&&String(hz).toLowerCase()!==String(optName(l,s)).toLowerCase())h+='<div class="mut tiny" title="HORIZON SKU supplier'+(l.horizon.multi?' (all: '+esc(l.horizon.multi)+')':'')+'">HORIZON: '+esc(hz)+'</div>';
-      if(l.blocked)h+='<div class="mut tiny" style="color:var(--amber)">🔒 '+esc(l.blocked)+'</div>';
+      if(blk(l))h+='<div class="mut tiny" style="color:var(--amber)">🔒 '+esc(blk(l))+'</div>';
       return h; }
     function resCell(l){ var r=S.res[l.line_id]; if(!r)return ''; var cls=r.result==='ok'?'bg-green':r.result==='unchanged'?'bg-neutral':r.result==='blocked'?'bg-amber':'bg-red';
       return '<div style="margin-top:3px"><span class="tool-badge '+cls+'">'+esc(r.result)+'</span> <span class="mut tiny">'+esc(r.message||'')+'</span></div>'; }
@@ -7682,7 +7700,7 @@
         +' · '+goods.length+' line'+(goods.length===1?'':'s')+' · '+n0(goods.reduce(function(a,l){return a+l.qty;},0))+' units'
         +' <span class="mut tiny">'+esc(s.reference||'')+' · '+esc(s.state||'')+(s.sale_date?' · '+fd(s.sale_date):'')+'</span></div>'
         +'<div style="margin-bottom:6px"><div class="pill-lbl" style="margin-bottom:6px">Suppliers</div>'+chips(L)+'</div>'+gateNote
-        +linesTable(L,true)+'<div class="mut tiny" style="margin:6px 0">* = more than one supplier possible · ! = no supplier chosen</div>'
+        +linesTable(L,true)+'<div class="mut tiny" style="margin:6px 0">* = more than one supplier possible · ! = no supplier chosen · ● = method changed, not pushed</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="save-btn" id="sov-push-sel"'+(nSel&&!S.busy?'':' disabled')+'>Push selected to Fulfil'+(nSel?' ('+nSel+')':'')+'</button>'
         +'<button class="save-btn" id="sov-push-all" style="background:var(--nav);color:#fff;border-color:var(--nav)"'+(nChanged&&!S.busy?'':' disabled')+'>Push all changed ('+nChanged+')</button></div><div id="sov-log" style="margin-top:14px"></div>';
       body.innerHTML=h; bindLines();
@@ -7695,13 +7713,17 @@
     function allLines(){ return S.mode==='batch'?okOrders().reduce(function(a,o){ return a.concat(o.lines||[]); },[]):((S.data&&S.data.lines)||[]); }
     function redraw(){ if(S.mode==='batch')drawBatch(); else draw(); }
     function linesTable(L,withChk){
-      return '<div class="tw"><table style="width:100%"><thead><tr>'+(withChk?'<th class="l" style="width:22px"></th>':'')+'<th class="l">SKU</th><th class="r">Qty</th><th class="l">Ship method</th><th class="l">Supplier</th><th class="l">Fulfil</th></tr></thead><tbody>'
+      return '<div class="tw"><table style="width:100%"><thead><tr>'+(withChk?'<th class="l" style="width:22px"></th>':'')+'<th class="l">SKU</th><th class="r">Qty</th><th class="l">Fulfilment method</th><th class="l">Supplier</th><th class="l">Fulfil</th></tr></thead><tbody>'
         +L.map(function(l){ var grey=!supLine(l)||l.service;
-          return '<tr data-l="'+l.line_id+'"'+(grey?' style="background:var(--hover);color:var(--muted)"':'')+'>'+(withChk?'<td class="l">'+(editable(l)?'<input type="checkbox" class="sov-chk" data-l="'+l.line_id+'"'+(S.chk[l.line_id]?' checked':'')+'>':'')+'</td>':'')
+          return '<tr data-l="'+l.line_id+'"'+(grey?' style="background:var(--hover);color:var(--muted)"':'')+'>'+(withChk?'<td class="l">'+(canEdit(l)?'<input type="checkbox" class="sov-chk" data-l="'+l.line_id+'"'+(S.chk[l.line_id]?' checked':'')+'>':'')+'</td>':'')
             +'<td class="l"><b>'+esc(l.sku||'?')+'</b><div class="mut tiny">'+esc(l.name||'')+'</div>'+resCell(l)+'</td><td class="r">'+n0(l.qty)+'</td>'
-            +'<td class="l">'+esc(l.service?'Service':l.mode_label)+'</td><td class="l">'+supCell(l)+'</td><td class="l">'+statusCell(l)+'</td></tr>'; }).join('')
+            +'<td class="l">'+modeCell(l)+'</td><td class="l">'+supCell(l)+'</td><td class="l">'+statusCell(l)+'</td></tr>'; }).join('')
         +'</tbody></table></div>'; }
     function bindLines(){
+      body.querySelectorAll('.sov-mode').forEach(function(el){ el.onchange=function(){ var id=el.dataset.l, l=lineById(id); if(!l)return;   // v28.234
+          if(el.value===l.mode)delete S.msel[id]; else S.msel[id]=el.value;
+          if(supLine(l)&&S.sel[id]==null&&(l.options||[]).length===1)S.sel[id]=l.options[0].id;   // one supplier on the product: pick it
+          if(changed(l)||needsSup(l))S.chk[id]=true; delete S.res[id]; redraw(); }; });
       body.querySelectorAll('.sov-sel').forEach(function(el){ el.onchange=function(){ var id=Number(el.value)||null; S.sel[el.dataset.l]=id; if(id!=null&&changed(lineById(el.dataset.l)))S.chk[el.dataset.l]=true; delete S.res[el.dataset.l]; redraw(); }; });
       body.querySelectorAll('.sov-chk').forEach(function(el){ el.onchange=function(){ S.chk[el.dataset.l]=el.checked; redraw(); }; }); }
     function initSel(L,keep,res){ (L||[]).forEach(function(l){ var c=curId(l), r=res&&res[l.line_id]; S.sel[l.line_id]=(r&&r.result==='failed'&&keep&&keep[l.line_id]!=null)?keep[l.line_id]:(c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null)); }); }
@@ -7714,13 +7736,14 @@
     function okOrders(){ return B?B.list.filter(function(x){ return x.status==='ok'&&x.sale; }):[]; }
     function ordStats(o){ var st={ok:0,differs:0,missing:0,blocked:0,none:0,changed:0,failed:0};
       (o.lines||[]).forEach(function(l){ var r=S.res[l.line_id]; if(r&&r.result==='failed')st.failed++;
+        if(modeChanged(l)){ if(needsSup(l))st.none++; if(changed(l))st.changed++; return; }   // v28.234 pending method change
         if(l.service||!supLine(l))return; var c=curId(l), sv=S.sel[l.line_id];
         if(l.blocked)st.blocked++; if(c==null)st.missing++; else if(sv!=null&&sv!==c)st.differs++; else st.ok++;
         if(sv==null&&editable(l))st.none++; if(changed(l))st.changed++; });
       st.attention=st.missing+st.differs+st.none+st.failed+((B&&B.pushRes[o.sale.id]&&B.pushRes[o.sale.id].error)?1:0); return st; }
     function batchAnalyse(items){ if(S.busy)return; var skipped=[];
       if(items.length>SOV_MAX){ skipped=items.slice(SOV_MAX); items=items.slice(0,SOV_MAX); }
-      S.mode='batch'; S.data=null; S.sel={}; S.chk={}; S.res={}; S.busy=true;
+      S.mode='batch'; S.data=null; S.sel={}; S.msel={}; S.chk={}; S.res={}; S.busy=true;
       B={list:[], gate:null, open:{}, pushRes:{}, note:'', total:items.length, done:0, skipped:skipped};
       var i=0;
       function step(){ if(!bg.parentNode){ S.busy=false; return; }   // drawer closed: stop
@@ -7772,7 +7795,7 @@
             +'<div style="margin-top:8px"><button class="save-btn sov-bpush-one" data-s="'+s.id+'"'+(st.changed&&!S.busy?'':' disabled')+'>Push changed ('+st.changed+')</button></div></div>':'')
           +'</div>'; }).join('');
       if(!oks.length&&!bad.length)h+='<div class="mut">Nothing to show.</div>';
-      h+='<div class="mut tiny" style="margin:6px 0">* = more than one supplier possible · ! = no supplier chosen</div>';
+      h+='<div class="mut tiny" style="margin:6px 0">* = more than one supplier possible · ! = no supplier chosen · ● = method changed, not pushed</div>';
       body.innerHTML=h; bindLines();
       body.querySelectorAll('.sov-bpick').forEach(function(b){ b.onclick=function(){ pickCandidate(Number(b.dataset.i),b.dataset.id); }; });
       body.querySelectorAll('.sov-ord-h').forEach(function(el){ el.onclick=function(e){ if(e.target.closest&&e.target.closest('a'))return; var id=el.dataset.s; B.open[id]=!B.open[id]; drawBatch(); }; });
@@ -7783,11 +7806,12 @@
     function confirmBatch(groups){ groups=groups.filter(function(x){ return x.lines.length; }); if(!groups.length||S.busy)return; var ex=document.getElementById('sov-confirm'); if(ex)ex.remove();
       var n=groups.reduce(function(a,x){ return a+x.lines.length; },0), g=B.gate||{}, ov=document.createElement('div'); ov.id='sov-confirm'; ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:'+(nextDrawerZ()+200000)+';display:flex;align-items:center;justify-content:center;padding:20px';
       ov.innerHTML='<div style="background:var(--card);border-radius:10px;max-width:560px;width:100%;max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
-        +'<div style="font-size:14px;font-weight:700;color:var(--nav);margin-bottom:6px">Push '+n+' supplier change'+(n===1?'':'s')+' across '+groups.length+' order'+(groups.length===1?'':'s')+' to Fulfil'+(g.stub?' (TEST STUB)':'')+'</div>'
+        +'<div style="font-size:14px;font-weight:700;color:var(--nav);margin-bottom:6px">Push '+n+' change'+(n===1?'':'s')+' across '+groups.length+' order'+(groups.length===1?'':'s')+' to Fulfil'+(g.stub?' (TEST STUB)':'')+'</div>'
         +'<div class="mut tiny" style="margin-bottom:8px">Orders are pushed one at a time. Each line is written to Fulfil, then read back to confirm it saved; a failure on one order does not stop the others.</div>'
-        +'<table style="width:100%;font-size:12px"><thead><tr><th class="l" style="text-align:left">SKU</th><th class="l" style="text-align:left">Old supplier</th><th class="l" style="text-align:left">New supplier</th></tr></thead><tbody>'
+        +modeNote(groups.reduce(function(a,x){ return a.concat(x.lines); },[]))
+        +'<table style="width:100%;font-size:12px"><thead><tr><th class="l" style="text-align:left">SKU</th><th class="l" style="text-align:left">Now</th><th class="l" style="text-align:left">New</th></tr></thead><tbody>'
         +groups.map(function(x){ return '<tr class="sov-cf-ord"><td class="l" colspan="3" style="padding-top:8px;text-align:left"><b>'+esc(x.o.sale.number||('#'+x.o.sale.id))+'</b> '+esc(x.o.sale.customer||'')+' <span class="mut tiny">('+x.lines.length+')</span></td></tr>'
-          +x.lines.map(function(l){ return '<tr class="sov-cf-row"><td class="l" style="text-align:left">'+esc(l.sku)+'</td><td class="l" style="text-align:left">'+(l.supplier?esc(l.supplier.name):'<span class="mut">none</span>')+'</td><td class="l" style="text-align:left"><b>'+esc(optName(l,S.sel[l.line_id]))+'</b></td></tr>'; }).join(''); }).join('')
+          +x.lines.map(cfRow).join(''); }).join('')
         +'</tbody></table><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
         +'<button id="sov-cf-cancel" style="font-size:12px;padding:6px 14px;border:1px solid var(--line);border-radius:5px;background:var(--card);cursor:pointer">Cancel</button>'
         +'<button id="sov-cf-yes" style="font-size:12px;padding:6px 14px;border:1px solid var(--nav);border-radius:5px;background:var(--nav);color:#fff;cursor:pointer;font-weight:600">Push to Fulfil</button></div></div>';
@@ -7797,8 +7821,8 @@
     // Orders go to the server in chunks of SOV_PUSH_CHUNK (server pushes them one by one); a failed chunk marks only its
     // orders. 403 / 423 (not admin / live writes off) stop the remaining chunks with the same reason.
     function pushBatch(groups){ S.busy=true; B.note=''; drawBatch();
-      var orders=groups.map(function(x){ return {sale_id:x.o.sale.id,lines:x.lines.map(function(l){ return {line_id:l.line_id,supplier_party_id:S.sel[l.line_id]}; })}; });
-      var keep={}; Object.keys(S.sel).forEach(function(k){ keep[k]=S.sel[k]; });
+      var orders=groups.map(function(x){ return {sale_id:x.o.sale.id,lines:x.lines.map(wantOf)}; });
+      var keep={}, keepM={}; Object.keys(S.sel).forEach(function(k){ keep[k]=S.sel[k]; }); Object.keys(S.msel).forEach(function(k){ keepM[k]=S.msel[k]; });
       var out=[], i=0, stop=null, stub=false;
       function prog(t){ var el=document.getElementById('sov-bprog'); if(el)el.textContent=t; }
       function step(){ if(i>=orders.length)return finish();
@@ -7817,18 +7841,23 @@
         var j=0; (function rb(){ if(j>=ids.length||!bg.parentNode){ S.busy=false; drawBatch(); return; }
           var ch=ids.slice(j,j+SOV_CHUNK); j+=ch.length;
           jpost('/api/supply/fulfil/sales-order/analyse-batch',{items:ch.map(function(id){ return {id:id}; })}).then(function(r){ (r.results||[]).forEach(function(x){ if(x.status!=='ok')return;
-              var idx=B.list.findIndex(function(z){ return z.status==='ok'&&z.sale&&z.sale.id===x.sale.id; }); if(idx<0)return; x.item=B.list[idx].item; B.list[idx]=x; initSel(x.lines,keep,S.res); }); })
+              var idx=B.list.findIndex(function(z){ return z.status==='ok'&&z.sale&&z.sale.id===x.sale.id; }); if(idx<0)return; x.item=B.list[idx].item; B.list[idx]=x; initSel(x.lines,keep,S.res);
+              (x.lines||[]).forEach(function(l){ var r=S.res[l.line_id]; if(r&&r.result==='failed'&&keepM[l.line_id])S.msel[l.line_id]=keepM[l.line_id]; else delete S.msel[l.line_id]; }); }); })
             .catch(function(){}).then(rb); })(); }
       step(); }
     function loadLog(saleId){ jget('/api/supply/fulfil/sales-order/pushes?sale_id='+encodeURIComponent(saleId)).then(function(j){ var el=document.getElementById('sov-log'); if(!el||!(j.rows||[]).length)return;
-      el.innerHTML='<div class="pill-lbl" style="margin-bottom:4px">Push history</div>'+j.rows.slice(0,20).map(function(r){ return '<div class="mut tiny">'+fd(r.pushed_at)+' '+esc(String(r.pushed_at||'').slice(11,16))+' · '+esc(r.pushed_by||'')+' · '+esc(r.sku||'')+': '+esc(r.old_supplier||'none')+' to '+esc(r.new_supplier||'none')+' · '+esc(r.result)+(r.stub?' (stub)':'')+'</div>'; }).join(''); }).catch(function(){}); }
+      el.innerHTML='<div class="pill-lbl" style="margin-bottom:4px">Push history</div>'+j.rows.slice(0,20).map(function(r){ return '<div class="mut tiny">'+fd(r.pushed_at)+' '+esc(String(r.pushed_at||'').slice(11,16))+' · '+esc(r.pushed_by||'')+' · '+esc(r.sku||'')+': '+(r.old_mode&&r.new_mode&&r.old_mode!==r.new_mode?esc(modeLbl(r.old_mode))+' to '+esc(modeLbl(r.new_mode))+(r.old_supplier!==r.new_supplier?', ':''):'')+(r.old_mode&&r.new_mode&&r.old_mode!==r.new_mode&&r.old_supplier===r.new_supplier?'':esc(r.old_supplier||'none')+' to '+esc(r.new_supplier||'none'))+' · '+esc(r.result)+(r.stub?' (stub)':'')+'</div>'; }).join(''); }).catch(function(){}); }
+    function cfRow(l){ return '<tr class="sov-cf-row"><td class="l" style="text-align:left">'+esc(l.sku)+'</td><td class="l" style="text-align:left">'+chgDesc(l,true)+'</td><td class="l" style="text-align:left"><b>'+chgDesc(l,false)+'</b></td></tr>'; }
+    function modeNote(list){ var toShip=list.filter(function(l){ return modeChanged(l)&&effMode(l)==='ship'; }).length, toSup=list.filter(function(l){ return modeChanged(l)&&supLine(l); }).length; if(!toShip&&!toSup)return '';
+      return '<div class="tool-badge bg-amber" style="display:block;margin-bottom:8px;white-space:normal;text-align:left">Method changes run Fulfil\'s own Modify ▸ Change Fulfil Strategy.'+(toShip?' Lines moved to From stock go on a new customer shipment (merge shipments in Fulfil if needed) and their purchase request is cancelled.':'')+(toSup?' Lines moved to Back order or Drop ship get a purchase request for the supplier shown.':'')+'</div>'; }
     function confirmPush(list){ if(!list.length)return; var ex=document.getElementById('sov-confirm'); if(ex)ex.remove();
       var g=S.data.gate||{}, ov=document.createElement('div'); ov.id='sov-confirm'; ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:'+(nextDrawerZ()+200000)+';display:flex;align-items:center;justify-content:center;padding:20px';
       ov.innerHTML='<div style="background:var(--card);border-radius:10px;max-width:560px;width:100%;max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
-        +'<div style="font-size:14px;font-weight:700;color:var(--nav);margin-bottom:6px">Push '+list.length+' supplier change'+(list.length===1?'':'s')+' to Fulfil'+(g.stub?' (TEST STUB)':'')+'</div>'
+        +'<div style="font-size:14px;font-weight:700;color:var(--nav);margin-bottom:6px">Push '+list.length+' change'+(list.length===1?'':'s')+' to Fulfil'+(g.stub?' (TEST STUB)':'')+'</div>'
         +'<div class="mut tiny" style="margin-bottom:8px">'+esc(S.data.sale.number)+' '+esc(S.data.sale.customer)+'. Each line is written to Fulfil, then read back to confirm it saved.</div>'
-        +'<table style="width:100%;font-size:12px"><thead><tr><th class="l" style="text-align:left">SKU</th><th class="l" style="text-align:left">Old supplier</th><th class="l" style="text-align:left">New supplier</th></tr></thead><tbody>'
-        +list.map(function(l){ return '<tr class="sov-cf-row"><td class="l" style="text-align:left">'+esc(l.sku)+'</td><td class="l" style="text-align:left">'+(l.supplier?esc(l.supplier.name):'<span class="mut">none</span>')+'</td><td class="l" style="text-align:left"><b>'+esc(optName(l,S.sel[l.line_id]))+'</b></td></tr>'; }).join('')
+        +modeNote(list)
+        +'<table style="width:100%;font-size:12px"><thead><tr><th class="l" style="text-align:left">SKU</th><th class="l" style="text-align:left">Now</th><th class="l" style="text-align:left">New</th></tr></thead><tbody>'
+        +list.map(cfRow).join('')
         +'</tbody></table><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
         +'<button id="sov-cf-cancel" style="font-size:12px;padding:6px 14px;border:1px solid var(--line);border-radius:5px;background:var(--card);cursor:pointer">Cancel</button>'
         +'<button id="sov-cf-yes" style="font-size:12px;padding:6px 14px;border:1px solid var(--nav);border-radius:5px;background:var(--nav);color:#fff;cursor:pointer;font-weight:600">Push to Fulfil</button></div></div>';
@@ -7836,10 +7865,11 @@
       ov.addEventListener('click',function(e){ if(e.target===ov)cl(); }); ov.querySelector('#sov-cf-cancel').onclick=cl;
       ov.querySelector('#sov-cf-yes').onclick=function(){ cl(); push(list); }; }
     function push(list){ S.busy=true; var saleId=S.data.sale.id; draw();
-      fetch('/api/supply/fulfil/sales-order/push-suppliers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sale_id:saleId,lines:list.map(function(l){return {line_id:l.line_id,supplier_party_id:S.sel[l.line_id]};})})})
+      fetch('/api/supply/fulfil/sales-order/push-suppliers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sale_id:saleId,lines:list.map(wantOf)})})
         .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
         .then(function(j){ var res={}; (j.results||[]).forEach(function(x){ res[x.line_id]=x; }); S.busy=false;
-          return jget('/api/supply/fulfil/sales-order/analyse?id='+encodeURIComponent(saleId)).then(function(d){ var keep=S.sel; S.data=d; S.sel={}; S.chk={};
+          return jget('/api/supply/fulfil/sales-order/analyse?id='+encodeURIComponent(saleId)).then(function(d){ var keep=S.sel, keepM=S.msel; S.data=d; S.sel={}; S.msel={}; S.chk={};
+            Object.keys(res).forEach(function(id){ if(res[id].result==='failed'&&keepM[id])S.msel[id]=keepM[id]; });   // v28.234 keep a failed method change on screen
             (d.lines||[]).forEach(function(l){ var c=curId(l), r=res[l.line_id]; S.sel[l.line_id]=(r&&r.result==='failed'&&keep[l.line_id]!=null)?keep[l.line_id]:(c!=null?c:((l.options||[]).length===1&&editable(l)?l.options[0].id:null)); });
             S.res=res; draw(); var lg=document.getElementById('sov-log');
             if(lg)lg.insertAdjacentHTML('beforebegin','<div class="tool-badge '+(j.failed?'bg-red':'bg-green')+'" style="display:block;margin-top:10px">'+(j.stub?'TEST STUB: ':'')+j.saved+' saved · '+j.failed+' failed · '+j.blocked+' blocked</div>'); }); })
@@ -10081,7 +10111,7 @@
       +'<span class="pill-lbl" style="margin-left:10px">Type</span>'+[['','All'],['key','Key account'],['custom','Custom']].map(function(o){return '<span class="pill dc-tag'+(o[0]===''?' active':'')+'" data-tag="'+o[0]+'">'+o[1]+'</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:12px">Group by</span><select class="flt" id="dc-group" style="min-width:130px"><option value="client">Client</option><option value="completion">Completion date</option></select>'
       +'<button class="save-btn" id="dc-edi" style="margin-left:12px;background:var(--nav);color:#fff;border-color:var(--nav)" title="Split Dillards / EZY COM SSCC label PDFs into SUPPLIER / PO / SKU folders">🏷 EDI LABELS</button>'
-      +'<button class="save-btn" id="dc-sov" style="margin-left:8px" title="Check a Fulfil sales order: ship method + supplier per drop-ship or backorder line, fix and push suppliers to Fulfil">Validate sales order</button>'   // v28.192 (Ben)
+      +'<button class="save-btn" id="dc-sov" style="margin-left:8px" title="Check a Fulfil sales order: fulfilment method + supplier per line, change either and push to Fulfil">Validate sales order</button>'   // v28.192 (Ben)
       +'<span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
     var _edb=document.getElementById('dc-edi'); if(_edb)_edb.onclick=function(){ showPoSub('edi-labels'); }; var _sovb=document.getElementById('dc-sov'); if(_sovb)_sovb.onclick=function(){ openSoValDrawer(); };
     function view(){ var f=filt(base.filter(function(r){ return st.tag==='key'?r.dtc_key_account:st.tag==='custom'?r.dtc_custom:true; }), st.q);
