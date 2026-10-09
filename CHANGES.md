@@ -1,3 +1,14 @@
+## v28.243 (Ben, branch review-fixes-2026-10-05): Preorders count in the buy only at 50% of B2B; preorder tooltip; buy popup below the top bar; stale-sync badge
+
+**Files:** `artifact_v16.7.html`, `server.mjs`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. **Buy plan changes (intended).**
+
+- Buy plan: a preorder is added to B2B demand (SKU x market x month) only when it is at least 50% of that month's B2B forecast; smaller preorders are taken to be inside the forecast. Key account forecasts still always add. Before this every preorder was added on top.
+- Buy plan before/after (sandbox, all SKUs, UK/US/EU/AU): one change, EYEMASK-DES-BOHMDRM US Buy 3PL 60 -> 0. Totals otherwise identical. Preorder units no longer added: UK 264, US 457, EU 96, AU 0 (stock already covers them).
+- Buy popup Preorder row: click or hover the amount for the orders and clients behind it (SO, customer, qty, ship date) and whether it is included in demand, with the B2B forecast it was compared to; not-added amounts are grey and struck through. /api/preorders-ka now also returns preorder_lines (included order detail; empty before migration 346).
+- Buy popup opens below the fixed top menu bar (was 24px from the top, hiding its title row and close button under the bar).
+- DEMAND > Inputs > Preorders: red "more than 5 days ago" badge when the last sync is over 5 days old ("never synced" when there is none).
+- Assistant tool applies the same 50% rule (B2B_preorder_not_added).
+
 ## v28.242 (Ben, branch review-fixes-2026-10-05): Preorders page: Fulfil links, left-aligned, n8n cron dry run
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars.

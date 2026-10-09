@@ -608,9 +608,9 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
 #buy-wrap .dl-item:hover{background:var(--blue-soft);color:var(--blue)}
 /* Panel */
 #buy-wrap .ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.15);z-index:100}
-#buy-wrap .ov.open{display:flex;align-items:flex-start;justify-content:center;padding-top:24px}
+#buy-wrap .ov.open{display:flex;align-items:flex-start;justify-content:center;padding-top:84px}   /* v28.243 (Ben): open below the fixed top menu bar (72px), not under it */
 #buy-wrap[data-scaffold] .ov.open{visibility:visible;pointer-events:auto}   /* popup opened from DEMAND/SUPPLY: grid stays hidden, only the modal shows */
-#buy-wrap .pn{background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.12);width:min(1120px,96vw);max-height:92vh;display:flex;flex-direction:column}
+#buy-wrap .pn{background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.12);width:min(1120px,96vw);max-height:calc(100vh - 100px);display:flex;flex-direction:column}
 #buy-wrap .ph{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}
 #buy-wrap .ph-t{font-size:13px;font-weight:600}
 #buy-wrap .ph-c{margin-left:auto;font-size:14px;cursor:pointer;color:var(--faint);padding:2px 6px;border-radius:3px;line-height:1}
@@ -1822,7 +1822,10 @@ function _pkaIngest(pk){
   function ingest(recs,tgt){ (recs||[]).forEach(function(r){ var sku=r.sku, q=Number(r.qty||0), wh=r.wh,
     co=wh?String(wh).split('_')[0].toUpperCase():null, ymk=r.date?String(r.date).slice(0,7).replace('-','_'):null; all.add(sku,co,ymk,q); tgt.add(sku,co,ymk,q); }); }
   ingest(pk&&pk.preorder, pre); ingest(pk&&pk.ka, ka);
-  return { all:all.map, pre:pre.map, ka:ka.map };
+  // v28.243: orders + customers behind each preorder SKU x market x month (buy popup tooltip; display only)
+  var det={}; ((pk&&pk.preorder_lines)||[]).forEach(function(r){ var co=r.wh?String(r.wh).split('_')[0].toUpperCase():null, ymk=r.date?String(r.date).slice(0,7).replace('-','_'):null; if(!r.sku||!co||!ymk)return;
+    var a=((det[r.sku]=det[r.sku]||{})[co]=det[r.sku][co]||{}); (a[ymk]=a[ymk]||[]).push({so:r.so,cust:r.cust,q:Number(r.qty)||0,d:r.date}); });
+  return { all:all.map, pre:pre.map, ka:ka.map, det:det };
 }
 function attachPKA(){ try{ if(!PKA_MAP||!BP_DATA||!BP_DATA.products)return;
   Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
@@ -4455,7 +4458,14 @@ function buildTable(proj,md,pd,is3,hasFBA){
     if(hasB2B)rows.push(dr('B2B demand',proj,p=>p.isActual?`<td style="color:var(--muted);font-style:italic">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:p.isForecast?`<td style="color:var(--faint)">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:c(p.b2b?fmt(p.b2b):'\u2014',p.b2b?'cv':'cv0')));
     // Preorder + Key accounts (committed B2B demand from the Preorder + Key account FC tables; both folded into B2B above).
     // v28.016 (Ben): shown as two separate lines for visibility; the buy logic still uses the combined pka (unchanged).
-    if(proj.some(p=>(p.pre||0)>0))rows.push(dr('Preorder',proj,p=>(p.pre||0)>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.pre)}</td>`:c('\u2014','cv0')));
+    // v28.243 (Ben): click (or hover) a preorder amount: the orders + clients behind it and whether it counts in demand (>= 50% of the B2B forecast)
+    if(proj.some(p=>(p.pre||0)>0))rows.push(dr('Preorder',proj,p=>{ if(!((p.pre||0)>0))return c('\u2014','cv0');
+      const pu=md.pre_used&&md.pre_used[p.key], det=(PKA_MAP&&PKA_MAP.det&&PSKU&&PKA_MAP.det[PSKU]&&PKA_MAP.det[PSKU][PMKT]&&PKA_MAP.det[PSKU][PMKT][p.key])||[];
+      const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], dm=d=>{const x=String(d||'').split('-');return x.length<3?'':x[2]+'-'+MN[+x[1]-1]+'-'+x[0].slice(2);}, h=v=>String(v==null?'':v).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+      const lines=pu?(pu.u?['<b>Included in demand</b> (added to B2B)',`${fmt(p.pre)} is at least 50% of B2B forecast ${fmt(Math.round(pu.base))}`]:['<b>Not added to demand</b>',`${fmt(p.pre)} is under 50% of B2B forecast ${fmt(Math.round(pu.base))}:`,'taken to be inside the forecast']):['Outside the forecast window: not in demand'];
+      det.slice().sort((a,b)=>String(a.d).localeCompare(String(b.d))).forEach(o=>lines.push(`${h(o.so)} \u00b7 ${h(o.cust||'')}: ${fmt(o.q)}${o.d?' (ships '+dm(o.d)+')':''}`));
+      if(!det.length)lines.push('Order detail appears after a Fulfil sync (DEMAND \u25b8 Inputs \u25b8 Preorders)');
+      return tipCell(fmt(p.pre),'',lines,pu&&!pu.u?'color:var(--muted);text-decoration:line-through':'color:var(--amber);font-weight:600','Preorder'); }));
     if(proj.some(p=>(p.ka||0)>0))rows.push(dr('Key accounts',proj,p=>(p.ka||0)>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.ka)}</td>`:c('\u2014','cv0')));
     if(proj.some(p=>(p.pka||0)>0 && !((p.pre||0)>0||(p.ka||0)>0)))rows.push(dr('Preorder & KA',proj,p=>(p.pka||0)>0?`<td style="color:var(--amber);font-weight:600">${fmt(p.pka)}</td>`:c('\u2014','cv0')));
     // FBA Transfer (out from 3PL)
@@ -11613,7 +11623,10 @@ function renderPreordersView(body){
     return L.filter(function(l){ if(!PREO.ex&&!l.included)return false; if(PREO.co!=='all'&&l.warehouse!==PREO.co)return false;
       if(q&&[l.sale_number,l.sale_reference,l.customer,l.sku,l.product_name].join(' ').toLowerCase().indexOf(q)<0)return false; return true; }); }
   function draw(){ var d=PREO.d||{lines:[]}, L=d.lines||[];
-    $('preo-last').textContent=d.needs_migration?'Needs migration 346':('Last sync '+when(d.last&&d.last.at)+(d.last&&d.last.created_by?' by '+String(d.last.created_by).replace(/@.*$/,'@'):''));
+    // v28.243 (Ben): red badge when the last sync is more than 5 days old (or there has never been one)
+    var _la=d.last&&d.last.at, _age=_la?(Date.now()-new Date(String(_la).slice(0,16)+':00').getTime())/86400000:Infinity, _stale=!d.needs_migration&&_age>5;
+    $('preo-last').innerHTML=d.needs_migration?'Needs migration 346':(e('Last sync '+when(_la)+(d.last&&d.last.created_by?' by '+String(d.last.created_by).replace(/@.*$/,'@'):''))
+      +(_stale?' <span id="preo-stale" style="display:inline-block;margin-left:6px;padding:1px 9px;border-radius:999px;background:var(--neg,#dc2626);color:#fff;font-weight:700;font-size:11px">'+(_la?'more than 5 days ago':'never synced')+'</span>':''));
     var inc=L.filter(function(l){return l.included;}), ex=L.filter(function(l){return !l.included;});
     $('preo-cards').innerHTML=['uk_3pl','us_3pl','eu_3pl','au_3pl'].map(function(w){ var x=inc.filter(function(l){return l.warehouse===w;});
       var o={}, s={}; x.forEach(function(l){o[l.sale_number]=1;s[l.sku]=1;});
@@ -18144,11 +18157,11 @@ function _hzCloneJ(v){ if(v===null||typeof v!=='object')return v; if(Array.isArr
 // Shadow products: same SKU / market keys and order, md.demand deep-copied (a full build clears + rewrites it), pka by reference (read only).
 function _hzShadowTarget(){ var P={}, SP=BP_DATA.products;
   for(var s in SP){ var mk=SP[s]&&SP[s].mkts; if(!mk){ P[s]={mkts:mk}; continue; } var m2={};
-    for(var co in mk){ var md=mk[co]; if(!md){ m2[co]=md; continue; } m2[co]={demand:(md.demand&&typeof md.demand==='object')?_hzCloneJ(md.demand):md.demand, pka:md.pka}; }
+    for(var co in mk){ var md=mk[co]; if(!md){ m2[co]=md; continue; } m2[co]={demand:(md.demand&&typeof md.demand==='object')?_hzCloneJ(md.demand):md.demand, pka:md.pka, pre:md.pre, ka:md.ka}; }
     P[s]={mkts:m2}; }
   return {P:P, PPC:{}, B:{set_explosion_skips:null, demand_source:null}}; }
 // Publish a complete shadow onto the live objects in one step (in place: same objects, same key order as a sync build leaves).
-function _hzDemandApply(T,fromWorker){ var SP=BP_DATA.products, F=['demand_tik','demand_sets','demand_sets_src'], k, j;
+function _hzDemandApply(T,fromWorker){ var SP=BP_DATA.products, F=['demand_tik','demand_sets','demand_sets_src','pre_used'], k, j;
   for(var s in T.P){ var sm=T.P[s]&&T.P[s].mkts, mk=SP[s]&&SP[s].mkts; if(!sm||!mk)continue;
     for(var co in sm){ var x=sm[co], md=mk[co]; if(!x||!md)continue;
       if(x.demand!==undefined){ var D=md.demand;
@@ -18236,7 +18249,7 @@ function _hzWorkerMain(){ var _D={};   // runs INSIDE the worker
         RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={}; HZ_SHARE_MEMO={}; SET_BY_COMP=null; _SKUSALES_CACHE={}; BP=null; if(!CALC_MEMO)CALC_MEMO={};
         var T={P:_D.P, PPC:{}, B:{set_explosion_skips:null, demand_source:null}}, g=_hzDemandGen(null,T); _D={};
         while(!g.next().done){}
-        for(var s in T.P){ var mk=T.P[s]&&T.P[s].mkts; if(mk)for(var co in mk){ if(mk[co])delete mk[co].pka; } }
+        for(var s in T.P){ var mk=T.P[s]&&T.P[s].mkts; if(mk)for(var co in mk){ if(mk[co]){ delete mk[co].pka; delete mk[co].pre; delete mk[co].ka; } } }
         IV=DATA=SKUM=SKUS=SKUI=FC_OUTPUTS=CALC_MEMO=null; RUNOFF_MEMO=SETDEM_MEMO=HZ_SHARE_MEMO={};   // free the copies between builds
         self.postMessage({t:'done', id:m.id, T:T, ms:performance.now()-t0}); } }
     catch(err){ _D={}; self.postMessage({t:'err', id:m.id, msg:String(err&&err.message||err), stack:String(err&&err.stack||'').slice(0,800)}); } }; }
@@ -18439,9 +18452,16 @@ function* _hzDemandGen(_S,T){
     var mk=T.P[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
       if(_S&&!_inA(sku,co))return;   // v28.171 (Ben)
-      var md=mk[co];if(!md.pka)return;
+      var md=mk[co]; delete md.pre_used; if(!md.pka)return;
       if(!md.demand)md.demand={};if(!md.demand.B2B)md.demand.B2B={};
-      Object.keys(md.pka).forEach(function(fym){ if(!_pkaWin[fym])return; md.demand.B2B[fym]=(md.demand.B2B[fym]||0)+(md.pka[fym]||0);});
+      // v28.243 (Ben): key account forecasts always add. A PREORDER adds only when it is at least half that month's B2B forecast;
+      // a smaller preorder is taken to be inside the B2B forecast already. md.pre_used[month] = {u: added?, base: B2B forecast} (popup tooltip).
+      if(!md.pre&&!md.ka){ Object.keys(md.pka).forEach(function(fym){ if(!_pkaWin[fym])return; md.demand.B2B[fym]=(md.demand.B2B[fym]||0)+(md.pka[fym]||0);}); return; }
+      var pu={};
+      Object.keys(md.pka).forEach(function(fym){ if(!_pkaWin[fym])return; var base=md.demand.B2B[fym]||0, ka=(md.ka&&md.ka[fym])||0, pre=(md.pre&&md.pre[fym])||0;
+        var use=pre>0&&pre>=0.5*base; if(pre>0)pu[fym]={u:use,base:base};
+        var add=ka+(use?pre:0); if(add)md.demand.B2B[fym]=base+add; });
+      if(Object.keys(pu).length)md.pre_used=pu;
     });
   });
   // TIK fold: TikTok behaves like DTC on the 3PL pool. Built above as its own channel (gated to TIK_COUNTRIES); here we

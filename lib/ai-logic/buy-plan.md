@@ -17,7 +17,7 @@ sources:
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.242
+verified_version: v28.243
 fingerprints:
   artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
@@ -29,7 +29,7 @@ fingerprints:
   artifact_v16.7.html::buildLiveBpOverlay: 01bf2c87eb2c
   artifact_v16.7.html::buildLiveDemand: fcbc97070915
   artifact_v16.7.html::_hzBuildDemandCore: de531209af79
-  artifact_v16.7.html::_hzDemandGen: 625a066042de
+  artifact_v16.7.html::_hzDemandGen: e2a62173559a
   artifact_v16.7.html::bpBuildFeedAsync: 92861a0bf15d
   server.mjs::buildPROD_CONST: b8b131b6ad8b
   server.mjs::buildSKURAW: 3fa61dca6e8a
@@ -49,7 +49,8 @@ fingerprints:
 - Channels: DTC (TikTok folded into DTC), B2B, FBA; EU also Zalando when a Zalando stock file is uploaded. 3PL demand = DTC + B2B (+ Zalando); FBA demand is supplied from the 3PL by transfers, so the 3PL buy also funds the FBA top-up. [buildLiveDemand, project]
 - Per SKU month: a saved SKU forecast (planner.forecast_outputs) wins; otherwise a continuing SKU uses last year's same-month actual (chained); otherwise a new SKU gets subcategory forecast x SKU share. [buildLiveDemand]
 - Pre-launch months are zero (month start before the market launch date). [buildLiveDemand]
-- Preorders and Key-Account forecasts (planner.preorders, planner.key_account_forecasts) are ADDED to B2B, for months inside the live forecast window only (past months are ignored). [buildLiveDemand]
+- Key-Account forecasts (planner.key_account_forecasts) are ADDED to B2B, for months inside the live forecast window only (past months are ignored). [buildLiveDemand]
+- Preorders (planner.preorders) are added to B2B per SKU x market x month ONLY when the month's preorder quantity is at least 50% of that month's B2B forecast (the B2B demand before any preorder or key account is added; a B2B forecast of 0 means any preorder adds). A smaller preorder is taken to be inside the B2B forecast already and adds nothing. Window months only. The buy popup Preorder row shows every preorder amount (struck through and grey when not added); click or hover it for the orders and clients behind it and whether it is included in demand, with the B2B forecast it was compared to. (Ben 09-Oct-26, v28.243) [buildLiveDemand md.pre_used, buildTable Preorder row, _pkaIngest det]
 - Preorders come from Fulfil (v28.241): open sales order lines (order confirmed or processing) with a FUTURE shipping date, fulfilment Ship from stock, not yet assigned (stock move draft/waiting, or no move yet), with quantity left to ship (quantity less shipped less cancelled). The Fulfil warehouse maps to the 3PL: UKILG = uk_3pl, USGENEVA_STD = us_3pl, EUIFUL = eu_3pl, AUCOGHLANS = au_3pl. Left out: drop ship and backorder lines (not fetched), China Port (China stock), any other warehouse, assigned lines, and every KEY ACCOUNT customer (any client in planner.key_account_forecasts, e.g. John Lewis, NEXT, whatever the month or 3PL: their key account forecast carries them). Included lines are summed per SKU x 3PL x ship date into planner.preorders (source 'fulfil'); the line detail is planner.preorder_lines, shown in DEMAND > Inputs > Preorders. Once a Fulfil sync has run (app_settings preorders_source = 'fulfil') the buy plan reads only the Fulfil rows; older Airtable rows stay in the table but are ignored. Sync: the page's Sync from Fulfil button, or the n8n cron: POST /api/cron/preorders-sync with header x-webhook-secret = N8N_WEBHOOK_SECRET, body {} (or {"dry_run": true} to preview without writing); 200 synced, 401 bad secret, 500 failed. Schedule daily 06:00 London; the local server also runs it daily. Every real run is logged to planner.etl_runs job preorders_fulfil. Each order on the page links to the order in Fulfil (same instance the sync reads); all table cells are left-aligned. Reads LIVE Fulfil (read only) when configured. A preorder SKU that is not in the buy plan (e.g. discontinued) adds nothing. [preordersBuild, preordersSync, preordersFilter, /api/preorders-ka, renderPreordersView]
 - Sets never buy. A set's DTC + FBA forecast explodes onto its components' 3PL DTC demand (set forecast x component qty). [buildLiveDemand, buildLiveBpOverlay]
 

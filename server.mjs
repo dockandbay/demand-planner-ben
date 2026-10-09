@@ -3180,7 +3180,9 @@ app.get('/api/preorders-ka', async (_req, res) => {
       pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.preorders WHERE coalesce(sku,'')<>''` + await preordersFilter()),   // v28.241: Fulfil rows only once the Fulfil sync owns the table
       pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.key_account_forecasts WHERE coalesce(sku,'')<>''`),
     ]);
-    res.set('Cache-Control', 'no-store').json({ preorder: pre.rows, ka: ka.rows });
+    // v28.243: order + customer detail behind each preorder SKU x 3PL x ship date (buy popup tooltip); empty before migration 346
+    let det = []; try { if (await preordersFilter()) det = (await pool.query(`SELECT sku, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date, sale_number so, customer cust, sum(quantity)::float8 qty FROM planner.preorder_lines WHERE included GROUP BY 1,2,3,4,5`)).rows; } catch (_) {}
+    res.set('Cache-Control', 'no-store').json({ preorder: pre.rows, ka: ka.rows, preorder_lines: det });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.241 (Ben 09-Oct-26): PREORDERS FROM FULFIL. The planner.preorders table was last loaded 10-Jun-26 by the old
@@ -21687,7 +21689,10 @@ async function aiExplainBuy(sku, market) {
   ['DTC', 'B2B', 'FBA'].forEach(ch => { const sh = salesBy[ch]; if (!sh || !Object.values(sh).some(v => v > 0)) return; const sv = saved[ch] || {}, run = {};
     months.forEach(ym => { if (sv[ym]) { run[ym] = byM[ym][ch] || 0; return; } const ly = aiYmAdd(ym, -12); const v = ly < curYm ? (sh[ly] || 0) : (run[ly] || 0); run[ym] = v;
       if (v > 0 && !(launch && (ym + '-01') < launch.slice(0, 10))) { byM[ym][ch] = (byM[ym][ch] || 0) + v; (lyFill[ym] || (lyFill[ym] = [])).push(ch); } }); });
-  const pkaBy = {}; pka.rows.forEach(r => { if (r.ym && byM[r.ym] && r.u) { pkaBy[r.ym] = (pkaBy[r.ym] || 0) + r.u; byM[r.ym].B2B_preorder_ka = (byM[r.ym].B2B_preorder_ka || 0) + r.u; } });
+  const pkaBy = {}; pka.rows.forEach(r => { if (!(r.ym && byM[r.ym] && r.u)) return;
+    // v28.243 (Ben): a preorder counts only when it is at least half the month's B2B forecast (smaller ones are taken to be inside the forecast); key accounts always count
+    if (r.src === 'preorder' && r.u < 0.5 * (byM[r.ym].B2B || 0)) { byM[r.ym].B2B_preorder_not_added = (byM[r.ym].B2B_preorder_not_added || 0) + r.u; return; }
+    pkaBy[r.ym] = (pkaBy[r.ym] || 0) + r.u; byM[r.ym].B2B_preorder_ka = (byM[r.ym].B2B_preorder_ka || 0) + r.u; });
   const cutoff = aiDiscCutoff(disc), launchYm = launch && /^\d{4}-\d{2}/.test(launch) ? launch.slice(0, 7) : null;
   const firstArr = leadM != null ? aiYmAdd(curYm, leadM) : null;
   const sum = f => months.reduce((a, ym) => a + (f(ym) ? Object.values(byM[ym]).reduce((x, y) => x + y, 0) : 0), 0);
@@ -21720,7 +21725,7 @@ async function aiExplainBuy(sku, market) {
       launch_date: launch, discontinue_date: disc, dates_raw: { launch_date_uk: p.launch_date_uk, launch_date_uk_final: p.launch_date_uk_final, launch_date_au_final: p.launch_date_au_final, discontinue_date_final: p.discontinue_date_final, discontinue_date_au_final: p.discontinue_date_au_final, discontinue_date_ca: p.discontinue_date_ca } },
     stock_on_hand: { '3pl': invBy[m + '_3pl'] || 0, fba: invBy[m + '_fba'] || 0, ...(invBy[m + '_awd'] ? { awd: invBy[m + '_awd'] } : {}) },
     open_inbound_and_on_order: { total: inbound.reduce((a, x) => a + (x.qty || 0), 0), lines: inbound },
-    forecast_by_month: forecast, forecast_note: 'planner.forecast_outputs (saved SKU plan) for ' + m + '_3pl (DTC incl TikTok, B2B, ZAL) and ' + m + '_fba (FBA); B2B_preorder_ka = preorders + key-account forecasts the engine adds to B2B. A channel-month with no saved forecast is filled the way the engine does it for a continuing SKU (last year same month, chained), flagged filled_from_last_year: an ESTIMATE of the engine input. A new SKU with no saved forecast and no history gets subcategory x share, not shown here.',
+    forecast_by_month: forecast, forecast_note: 'planner.forecast_outputs (saved SKU plan) for ' + m + '_3pl (DTC incl TikTok, B2B, ZAL) and ' + m + '_fba (FBA); B2B_preorder_ka = preorders + key-account forecasts the engine adds to B2B (a preorder is added only when it is at least 50% of that month B2B forecast; B2B_preorder_not_added = smaller preorders taken to be inside the forecast). A channel-month with no saved forecast is filled the way the engine does it for a continuing SKU (last year same month, chained), flagged filled_from_last_year: an ESTIMATE of the engine input. A new SKU with no saved forecast and no history gets subcategory x share, not shown here.',
     complex_rules_matching: matched,
     derived: {
       current_month: curYm, today_day: cur.dd, order_now_window: cur.dd >= 20 ? curYm + ' and ' + aiYmAdd(curYm, 1) : curYm,
