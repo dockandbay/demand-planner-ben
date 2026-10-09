@@ -1,3 +1,14 @@
+## v28.233 (Ben, branch review-fixes-2026-10-05): Plan grid column filters: Top 10, Value range, Status
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/demand-engine.md` (+ package.json, CHANGES.md). No migrations, no env vars, no server change. Display only.
+
+- The Plan grid column menu (click a month, quarter, half, FY, YTD or To go header) gains three filters beside the two sorts and Hide rows with 0. Still one at a time: picking another replaces it (Ben 09-Oct-26).
+  - **Top 10 rows:** top 10 sub-categories across the whole grid and top 10 SKUs in each sub-category, high to low; zero rows excluded.
+  - **Value range:** min and/or max; each row tested on its own value.
+  - **Status:** Active / Discontinuing / New launches / Sets, per SKU for the selected country; a sub-category stays if any SKU matches. Discontinuing = discontinue date passed or within 6 months (many SKUs carry seasonal end dates a year+ out, which still count as Active). New launches = launched in the last 6 months or later.
+- Chip and header tooltip describe the active filter (e.g. "Column Oct-26: between 100 and 300"); header marks ▼10, ⇔, ●.
+- Verified on sandbox (jsdom render, UK, Oct-26): 27 sub-category rows → Top 10: 10; ≥500: 1; 100-300: 6; Active 17, Discontinuing 15, New 23, Sets 8; cleared back to 27; menu Apply path sets the range; no JS errors.
+
 ## v28.232 (Ben, branch review-fixes-2026-10-05): PO grid query speed-up (two indexes)
 
 **Files:** `migrations/343_po_grid_indexes.sql` (+ package.json, CHANGES.md). **Migration 343** (additive, idempotent: two btree indexes + ANALYZE). No code change, no env vars.

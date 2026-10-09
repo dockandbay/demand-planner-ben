@@ -8111,25 +8111,60 @@ function _pcsSkuVal(sku,s,co,ch){ var k='K|'+sku+'|'+co+'|'+ch; if(k in _PCS_MEM
     try{ fc=skuMonthlyMap(sku,co,ch,fm,(calc(s,co,ch)||{}).fu||{},sh,(SKUM[sku]&&SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0)||{}; }catch(e){}
     fm.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fc[m]=parseInt(ov,10)||0; }); }
   var t=0; ms.forEach(function(m){ t+=m>=CUR_MONTH?(Number(fc[m])||0):(Number(sales[m])||0); }); return (_PCS_MEMO[k]=t); }
+// v28.233 (Ben): three more column filters, still one at a time: Top 10 (sub-categories ranked across the whole grid, SKUs
+// within each sub-category; zero rows never count), Value range (min and/or max, each row tested on its own value) and
+// Status (per SKU for this country; a sub-category stays if any SKU matches): Active = launched, not discontinuing;
+// Discontinuing = discontinue date passed or within 6 months; New launches = launched in the last 6 months or later; Sets = has a BOM.
+var _PCS_ST={act:'Active',disc:'Discontinuing',new:'New launches',set:'Sets'};
+function _pcsInRng(x){ var a=PLAN_COLSORT.arg||{}; return (a.lo==null||x>=a.lo)&&(a.hi==null||x<=a.hi); }
+function _pcsSkuSt(sku,co){ var p=SKUM[sku]||{}, c=String(co).toLowerCase(), st=PLAN_COLSORT.arg, td=new Date().toISOString().slice(0,10);
+  var lch=(p.lch&&p.lch[c])||null, dsc=(p.disc&&p.disc[c])||null;
+  if(st==='set')return !!(typeof SET_BOM!=='undefined'&&SET_BOM[String(sku).toUpperCase()]&&SET_BOM[String(sku).toUpperCase()].length);
+  var m6=new Date(); m6.setMonth(m6.getMonth()+6); var soon=!!dsc&&dsc<=m6.toISOString().slice(0,10);   // many SKUs carry a seasonal end date a year+ out, so only past or next-6-month dates count
+  if(st==='disc')return soon;   // discontinued (run-off) or discontinuing within 6 months
+  if(st==='new'){ var d=new Date(); d.setMonth(d.getMonth()-6); return !!lch&&lch>=d.toISOString().slice(0,10); }   // launched in the last 6 months, or launching later
+  return !soon&&(!lch||lch<=td); }   // act: launched and not discontinuing
+function _pcsTopSubs(cm,co){ if(!PLAN_COLSORT||PLAN_COLSORT.mode!=='top')return; var all=[];
+  Object.keys(cm).forEach(function(cat){ cm[cat].forEach(function(r){ if(typeof SHOW_RUNOFF_CATS!=='undefined'&&!SHOW_RUNOFF_CATS&&RUNOFF_CATS.has(r.c))return; var x=_pcsSubVal(r.s,co,r.ch); if(x>0)all.push({k:r.s+'|'+r.ch,x:x}); }); });
+  all.sort(function(a,b){ return b.x-a.x; }); _PCS_MEMO.__top=new Set(all.slice(0,PLAN_COLSORT.arg||10).map(function(o){ return o.k; })); }
 function _pcsApplySkus(skus,s,co,ch){ if(!PLAN_COLSORT)return skus; var v=function(x){ return _pcsSkuVal(x,s,co,ch); };
   if(PLAN_COLSORT.mode==='nz')return skus.filter(function(x){ return v(x)!==0; });
+  if(PLAN_COLSORT.mode==='rng')return skus.filter(function(x){ return _pcsInRng(v(x)); });
+  if(PLAN_COLSORT.mode==='st')return skus.filter(function(x){ return _pcsSkuSt(x,co); });
+  if(PLAN_COLSORT.mode==='top')return skus.filter(function(x){ return v(x)>0; }).sort(function(a,b){ return v(b)-v(a)||a.localeCompare(b); }).slice(0,PLAN_COLSORT.arg||10);
   var d=PLAN_COLSORT.mode==='asc'?1:-1; return skus.slice().sort(function(a,b){ return d*(v(a)-v(b))||a.localeCompare(b); }); }
 function _pcsApplySubs(rows,co){ if(!PLAN_COLSORT)return rows; var v=function(r){ return _pcsSubVal(r.s,co,r.ch); };
   if(PLAN_COLSORT.mode==='nz')return rows.filter(function(r){ return v(r)!==0; });
+  if(PLAN_COLSORT.mode==='rng')return rows.filter(function(r){ return _pcsInRng(v(r)); });
+  if(PLAN_COLSORT.mode==='st')return rows.filter(function(r){ return filteredSkus(r.s,co,r.ch,false,true).some(function(x){ return _pcsSkuSt(x,co); }); });
+  if(PLAN_COLSORT.mode==='top'){ var ts=_PCS_MEMO.__top; if(ts)rows=rows.filter(function(r){ return ts.has(r.s+'|'+r.ch); }); }
   var d=PLAN_COLSORT.mode==='asc'?1:-1; return rows.slice().sort(function(a,b){ return d*(v(a)-v(b))||a.s.localeCompare(b.s)||a.ch.localeCompare(b.ch); }); }
-var _PCS_LBL={desc:'high to low',asc:'low to high',nz:'hide 0'};
-function setPlanColSort(key,lbl,mode){ PLAN_COLSORT=mode?{key:key,ms:String(key).split(','),lbl:lbl,mode:mode}:null; _PCS_MEMO={};
+var _PCS_LBL={desc:'high to low',asc:'low to high',nz:'hide 0',top:'top 10',rng:'range',st:'status'};
+function _pcsDesc(c){ if(!c)return ''; var f=function(x){ return Number(x).toLocaleString('en-GB'); }, a=c.arg||{};
+  if(c.mode==='rng')return a.lo!=null&&a.hi!=null?'between '+f(a.lo)+' and '+f(a.hi):a.lo!=null?'at least '+f(a.lo):'at most '+f(a.hi);
+  if(c.mode==='st')return 'status '+(_PCS_ST[c.arg]||c.arg); if(c.mode==='top')return 'top '+(c.arg||10); return _PCS_LBL[c.mode]||c.mode; }
+function setPlanColSort(key,lbl,mode,arg){ PLAN_COLSORT=mode?{key:key,ms:String(key).split(','),lbl:lbl,mode:mode,arg:arg}:null; _PCS_MEMO={};
   try{ renderPlanChips(); }catch(e){} try{ _VIEW_ONLY_RENDER=true; render(); }catch(e){ try{ renderMain(true); }catch(_){} } }
 function openPlanColSortMenu(th,key,lbl){ var old=document.getElementById('pcs-pop'); if(old){ old.remove(); if(old.dataset.k===key)return; }
-  var cur=PLAN_COLSORT&&PLAN_COLSORT.key===key?PLAN_COLSORT.mode:null, p=document.createElement('div'); p.id='pcs-pop'; p.dataset.k=key;
+  var cur=PLAN_COLSORT&&PLAN_COLSORT.key===key?PLAN_COLSORT.mode:null, ca=cur?PLAN_COLSORT.arg:null, p=document.createElement('div'); p.id='pcs-pop'; p.dataset.k=key;
   p.style.cssText='position:fixed;z-index:200001;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:6px;font-size:12px;display:grid;gap:2px;min-width:190px;text-align:left';
   var it=function(mode,txt){ return '<button data-m="'+mode+'" style="text-align:left;border:0;background:'+(cur===mode?'var(--blue-soft)':'none')+';color:var(--ink);font:inherit;font-weight:'+(cur===mode?700:500)+';padding:6px 10px;border-radius:6px;cursor:pointer">'+txt+'</button>'; };
-  p.innerHTML='<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 10px">'+esc(lbl)+'</div>'+it('desc','Sort high to low')+it('asc','Sort low to high')+it('nz','Hide rows with 0')+(PLAN_COLSORT?it('','Clear column sort / filter'):'');
+  p.innerHTML='<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 10px">'+esc(lbl)+'</div>'+it('desc','Sort high to low')+it('asc','Sort low to high')+it('nz','Hide rows with 0')+it('top','Top 10 rows')
+    +'<div style="border-top:1px solid var(--line);margin:4px 0 2px;padding:6px 10px 2px;font-weight:600'+(cur==='rng'?';color:var(--blue)':'')+'">Value range</div>'
+    +'<div style="display:flex;gap:4px;align-items:center;padding:0 10px 4px"><input id="pcs-lo" type="number" placeholder="Min" value="'+(cur==='rng'&&ca&&ca.lo!=null?ca.lo:'')+'" style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;background:var(--card);color:var(--ink)"><span style="color:var(--muted)">to</span><input id="pcs-hi" type="number" placeholder="Max" value="'+(cur==='rng'&&ca&&ca.hi!=null?ca.hi:'')+'" style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;background:var(--card);color:var(--ink)"><button id="pcs-rng-go" style="border:1px solid var(--line);background:var(--hover);color:var(--ink);font:inherit;font-weight:600;padding:4px 8px;border-radius:6px;cursor:pointer">Apply</button></div>'
+    +'<div style="border-top:1px solid var(--line);margin:4px 0 2px;padding:6px 10px 2px;font-weight:600">Status</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:4px;padding:0 10px 4px">'+Object.keys(_PCS_ST).map(function(k){ var on=cur==='st'&&ca===k; return '<button data-st="'+k+'" title="'+({act:'Launched and not discontinuing',disc:'Discontinue date passed or within the next 6 months',new:'Launched in the last 6 months or launching later',set:'Set SKUs (have a bill of materials)'})[k]+'" style="border:1px solid '+(on?'var(--blue)':'var(--line)')+';background:'+(on?'var(--blue-soft)':'none')+';color:var(--ink);font:inherit;font-size:11px;font-weight:'+(on?700:500)+';padding:3px 8px;border-radius:999px;cursor:pointer">'+_PCS_ST[k]+'</button>'; }).join('')+'</div>'
+    +(PLAN_COLSORT?it('','Clear column sort / filter'):'');
   document.body.appendChild(p); var r=th.getBoundingClientRect(); p.style.left=Math.max(8,Math.min(window.innerWidth-210,r.left))+'px'; p.style.top=(r.bottom+4)+'px';
-  p.querySelectorAll('[data-m]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); p.remove(); setPlanColSort(key,lbl,b.dataset.m); }; });
+  p.querySelectorAll('[data-m]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); p.remove(); setPlanColSort(key,lbl,b.dataset.m,b.dataset.m==='top'?10:undefined); }; });
+  p.querySelectorAll('[data-st]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); p.remove(); setPlanColSort(key,lbl,'st',b.dataset.st); }; });
+  var rgo=function(){ var num=function(id){ var v=String(p.querySelector(id).value).trim(); return v===''||isNaN(Number(v))?null:Number(v); }, lo=num('#pcs-lo'), hi=num('#pcs-hi');
+    if(lo==null&&hi==null){ p.querySelector('#pcs-lo').focus(); return; } if(lo!=null&&hi!=null&&lo>hi){ var t=lo; lo=hi; hi=t; } p.remove(); setPlanColSort(key,lbl,'rng',{lo:lo,hi:hi}); };
+  p.querySelector('#pcs-rng-go').onclick=function(e){ e.stopPropagation(); rgo(); };
+  p.querySelectorAll('input').forEach(function(i){ i.onclick=function(e){ e.stopPropagation(); }; i.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); rgo(); } else if(e.key==='Escape')p.remove(); }; });
   setTimeout(function(){ document.addEventListener('click',function off(e){ if(!p.contains(e.target)){ p.remove(); document.removeEventListener('click',off); } }); },0); }
 function _pcsMark(th,key,lbl){ th.dataset.pcs=key; th.style.cursor='pointer'; th.title=(th.title?th.title+' · ':'')+'Click to sort or filter by this column';
-  if(PLAN_COLSORT&&PLAN_COLSORT.key===key){ var sp=document.createElement('span'); sp.textContent=PLAN_COLSORT.mode==='asc'?' ▲':PLAN_COLSORT.mode==='desc'?' ▼':' ≠0'; sp.style.cssText='color:var(--blue);font-weight:800'; th.appendChild(sp); th.style.boxShadow='inset 0 -2px 0 var(--blue)'; }
+  if(PLAN_COLSORT&&PLAN_COLSORT.key===key){ var sp=document.createElement('span'); sp.textContent=PLAN_COLSORT.mode==='asc'?' ▲':PLAN_COLSORT.mode==='desc'?' ▼':PLAN_COLSORT.mode==='top'?' ▼10':PLAN_COLSORT.mode==='rng'?' ⇔':PLAN_COLSORT.mode==='st'?' ●':' ≠0'; th.title=(th.title?th.title+' · ':'')+'Filter: '+_pcsDesc(PLAN_COLSORT); sp.style.cssText='color:var(--blue);font-weight:800'; th.appendChild(sp); th.style.boxShadow='inset 0 -2px 0 var(--blue)'; }
   th.addEventListener('click',function(e){ if(e.target.closest&&e.target.closest('.fy-toggle'))return; e.stopPropagation(); openPlanColSortMenu(th,key,lbl); }); }
 function filteredSkus(s,co,ch,all,inclLyo){
   var wh=skuWh(co,ch);
@@ -10059,6 +10094,7 @@ function buildBody(){
   var _gtr0=_makeGrandTotRow(); if(_gtr0&&!_frTop)frag.appendChild(_gtr0);
   const fu_cache={};
   var _shownOn=hzPlanRowFilterOn(), _anyCat=false;   // v28.165 (Ben): "Shown SKUs" lines on/off for this build; _anyCat feeds the search empty-state hint
+  try{ _pcsTopSubs(cm,CUR); }catch(e){}   // v28.233 Top 10 ranks sub-categories across the whole grid, not per category
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));}); try{ rows=_pcsApplySubs(rows,CUR); if(!rows.length)return; }catch(e){}   // v28.218 column sort/filter
     var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()));   // Filter Rules: explode to matching SKUs; the subcat summary-totals row is removed below (see the rows loop). Drift rule = highlight-only → render the plan NORMALLY (subcat cells stay so they can be painted yellow).
@@ -10438,7 +10474,7 @@ function renderPlanChips(){ var c=document.getElementById('plan-chips'); if(!c)r
   var fr=document.getElementById('plan-fromrep-btn'); if(fr&&fr.classList.contains('active'))chips.push(chip('From replacement','fromrep'));
   // (no "Category totals" chip — the More-Filters Show toggle is the single control; the external chip was redundant per Ben)
   var ss=document.getElementById('plan-sort-sel'); if(ss&&ss.value&&ss.value!=='alpha')chips.push(chip('Sort: '+((ss.options[ss.selectedIndex]||{}).text||ss.value),'sort'));
-  if(typeof PLAN_COLSORT!=='undefined'&&PLAN_COLSORT)chips.push(chip('Column '+PLAN_COLSORT.lbl+': '+_PCS_LBL[PLAN_COLSORT.mode],'colsort'));
+  if(typeof PLAN_COLSORT!=='undefined'&&PLAN_COLSORT)chips.push(chip('Column '+PLAN_COLSORT.lbl+': '+_pcsDesc(PLAN_COLSORT),'colsort'));
   c.innerHTML=chips.join('');
   c.querySelectorAll('[data-clr]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); _planClearFilter(x.getAttribute('data-clr')); }; });
   var fb=document.getElementById('plan-filters-btn'); if(fb){ var on=chips.length>0; fb.style.background=on?'var(--blue-soft)':'var(--hover)'; fb.style.borderColor=on?'#93c5fd':'var(--line)'; } }
