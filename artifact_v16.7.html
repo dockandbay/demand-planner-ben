@@ -11592,8 +11592,9 @@ function kafPkaRefresh(){ clearTimeout(_KAF_PKA_T); _KAF_PKA_T=setTimeout(functi
   KAF_PKA_P=w.then(function(){ return loadPreorderKA(); }).then(function(){ try{ hzMarkDemandStale(); }catch(e){} }); },300); }
 // v28.241 (Ben): DEMAND ▸ Inputs ▸ Preorders. Open Fulfil sales order lines with a future shipping date, ship from stock at a
 // 3PL, not yet assigned. Included lines are summed per SKU x 3PL x ship date into planner.preorders, which the buy plan adds to B2B.
-var PREO={d:null,co:'all',q:'',ex:false,open:{},busy:false,msg:''};
+var PREO={d:null,co:'all',q:'',ex:false,open:{},busy:false,msg:'',tab:'orders',st:'all',imp:null};   // v28.244: tab orders|impact, st = impact status filter
 function renderPreordersView(body){
+  PREO.imp=null;   // v28.244: the impact table is recomputed from the current demand on every visit
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function dmy(s){ if(!s)return '—'; var p=String(s).slice(0,10).split('-'); return p.length<3?e(s):(p[2]+'-'+MN[+p[1]-1]+'-'+p[0].slice(2)); }
@@ -11605,6 +11606,7 @@ function renderPreordersView(body){
     +'#preo tr.po-o{cursor:pointer}#preo tr.po-o:hover td{background:var(--blue-soft)}#preo tr.po-l td{background:var(--soft,rgba(0,0,0,.02))}#preo .pill{border:1px solid var(--line);background:none;padding:4px 11px;border-radius:999px;font-size:12px;cursor:pointer;color:inherit}#preo .pill.on{background:var(--blue-soft);border-color:#93c5fd;color:var(--blue-ink);font-weight:600}'
     +'#preo .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:130px}#preo .card b{font-size:16px;display:block}#preo .xb{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--amber-soft,#fef3c7);color:var(--amber-ink,#92400e)}#preo .ib{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--pos-soft,#dcfce7);color:var(--pos-ink,#166534)}</style>'
     +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:15px">Preorders</div>'
+    +'<span style="display:flex;gap:4px"><button class="pill preo-tab'+(PREO.tab==='orders'?' on':'')+'" data-tab="orders">Orders</button><button class="pill preo-tab'+(PREO.tab==='impact'?' on':'')+'" data-tab="impact" title="Which preorders count in buy plan demand (at least 50% of the B2B forecast)">Demand impact</button></span>'
     +'<button id="preo-sync" style="border:1px solid #93c5fd;background:var(--blue-soft);color:var(--blue-ink);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">Sync from Fulfil</button>'
     +'<button id="preo-csv" style="border:1px solid var(--line);background:none;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;color:inherit">Download CSV</button>'
     +'<span id="preo-last" style="font-size:12px;color:var(--muted)"></span></div>'
@@ -11613,7 +11615,8 @@ function renderPreordersView(body){
     +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="preo-pills" style="display:flex;gap:4px"></span>'
     +'<input id="preo-q" placeholder="order, customer or SKU" value="'+e(PREO.q)+'" style="padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;width:220px">'
     +'<label style="font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" id="preo-ex"'+(PREO.ex?' checked':'')+'> show left-out lines</label>'
-    +'<button id="preo-all" class="pill">Expand all</button></div>'
+    +'<button id="preo-all" class="pill">Expand all</button>'
+    +'<select id="preo-st" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;background:var(--card);color:inherit"><option value="all">All preorders</option><option value="add">Added to demand</option><option value="not">Not added</option><option value="other">Outside window / not in buy plan</option></select></div>'
     +'<div id="preo-t" style="overflow:auto;max-height:calc(100dvh - 300px)"><div style="color:var(--faint);font-size:12px">Loading…</div></div></div>';
   var $=function(id){ return body.querySelector('#'+id); };
   function msg(h){ $('preo-msg').innerHTML=h?'<div style="font-size:12px;margin:0 0 8px;padding:6px 10px;border-radius:6px;background:var(--blue-soft);color:var(--blue-ink)">'+h+'</div>':''; }
@@ -11634,6 +11637,8 @@ function renderPreordersView(body){
       +(ex.length?'<div class="card"><span style="font-size:11px;color:var(--muted)">Left out</span><b>'+n0(ex.reduce(function(a,l){return a+l.quantity;},0))+'u</b><span style="font-size:11px;color:var(--muted)">'+ex.length+' lines</span></div>':'');
     $('preo-pills').innerHTML=CO.map(function(c){ return '<button class="pill'+(c[0]===PREO.co?' on':'')+'" data-co="'+c[0]+'">'+c[1]+'</button>'; }).join('');
     $('preo-pills').querySelectorAll('[data-co]').forEach(function(b){ b.onclick=function(){ PREO.co=b.dataset.co; draw(); }; });
+    var _imp=PREO.tab==='impact'; $('preo-ex').parentNode.style.display=_imp?'none':''; $('preo-all').style.display=_imp?'none':''; $('preo-st').style.display=_imp?'':'none'; $('preo-q').placeholder=_imp?'SKU or order':'order, customer or SKU';
+    if(_imp){ drawImpact(); return; }
     var V=visible(), ord={}, order=[];
     V.forEach(function(l){ var k=l.sale_number; if(!ord[k]){ ord[k]={n:k,ref:l.sale_reference,cust:l.customer,ch:l.channel,st:l.sale_state,wh:{},d:l.ship_date,lines:[],u:0,inc:0}; order.push(k); }
       var o=ord[k]; o.lines.push(l); o.u+=l.quantity; o.wh[CL[l.warehouse]||l.fulfil_warehouse||'?']=1; if(l.included)o.inc++; if(l.ship_date&&l.ship_date<o.d)o.d=l.ship_date; });
@@ -11654,13 +11659,57 @@ function renderPreordersView(body){
     $('preo-all').onclick=function(){ order.forEach(function(k){ PREO.open[k]=!allOpen; }); draw(); }; }
   $('preo-q').oninput=function(){ PREO.q=this.value; draw(); };
   $('preo-ex').onchange=function(){ PREO.ex=this.checked; draw(); };
-  $('preo-csv').onclick=function(){ var V=visible(), rows=[['Order','Reference','Customer','Channel','Order state','SKU','Product','Fulfil warehouse','3PL','Ship date','Quantity','Move state','In buy plan','Left out because']];
+  // v28.244 (Ben): DEMAND IMPACT. One row per preorder SKU x market x month: preorder, B2B forecast, % of forecast, and whether the buy
+  // plan adds it (>= 50% of the B2B forecast; v28.243 rule). Read from the built demand overlay (md.pre_used), so it is exactly what the buy uses.
+  var MKC={UK:'uk_3pl',US:'us_3pl',EU:'eu_3pl',AU:'au_3pl'};
+  function ymLbl(k){ var p=String(k).split('_'); return p.length<2?e(k):(MN[+p[1]-1]+'-'+p[0].slice(2)); }
+  function impRows(){ var pre=(typeof PKA_MAP!=='undefined'&&PKA_MAP&&PKA_MAP.pre)||{}, det=(PKA_MAP&&PKA_MAP.det)||{}, P=(typeof BP_DATA!=='undefined'&&BP_DATA&&BP_DATA.products)||{}, out=[];
+    Object.keys(pre).forEach(function(sku){ Object.keys(pre[sku]).forEach(function(co){ Object.keys(pre[sku][co]).forEach(function(ym){ var q=pre[sku][co][ym]||0; if(!q)return;
+      var md=P[sku]&&P[sku].mkts&&P[sku].mkts[co], pu=md&&md.pre_used&&md.pre_used[ym], st, base=null;
+      if(!md)st='nobp'; else if(pu){ st=pu.u?'add':'not'; base=pu.base; } else st='win';
+      var ords=((det[sku]||{})[co]||{})[ym]||[];
+      out.push({sku:sku,co:co,ym:ym,q:q,base:base,st:st,ords:ords,name:(typeof SKUM!=='undefined'&&SKUM[sku]&&SKUM[sku].n)||''}); }); }); });
+    return out.sort(function(a,b){ return a.ym.localeCompare(b.ym)||a.co.localeCompare(b.co)||a.sku.localeCompare(b.sku); }); }
+  var STL={add:'Added',not:'Not added',win:'Outside window',nobp:'Not in buy plan'};
+  function impVisible(){ var q=PREO.q.trim().toLowerCase();
+    return (PREO.imp||[]).filter(function(r){ if(PREO.co!=='all'&&MKC[r.co]!==PREO.co)return false;
+      if(PREO.st==='add'&&r.st!=='add')return false; if(PREO.st==='not'&&r.st!=='not')return false; if(PREO.st==='other'&&(r.st==='add'||r.st==='not'))return false;
+      if(q&&(r.sku+' '+r.name+' '+r.ords.map(function(o){return o.so+' '+(o.cust||'');}).join(' ')).toLowerCase().indexOf(q)<0)return false; return true; }); }
+  function drawImpact(){
+    if(!PREO.imp){ $('preo-cards').innerHTML=''; $('preo-t').innerHTML='<div style="color:var(--faint);font-size:12px">Calculating demand for the buy plan (a few seconds, first open only)…</div>'; impLoad(); return; }
+    var A=PREO.imp; $('preo-cards').innerHTML=['UK','US','EU','AU'].map(function(co){ var x=A.filter(function(r){return r.co===co;}), su=function(f){ return x.filter(f).reduce(function(a,r){return a+r.q;},0); };
+      var ot=su(function(r){return r.st==='win'||r.st==='nobp';});
+      return '<div class="card"><span style="font-size:11px;color:var(--muted)">'+co+' 3PL</span><b>'+n0(su(function(r){return r.st==='add';}))+'u added</b><span style="font-size:11px;color:var(--muted)">'+n0(su(function(r){return r.st==='not';}))+'u not added'+(ot?' · '+n0(ot)+'u other':'')+'</span></div>'; }).join('');
+    $('preo-st').value=PREO.st;
+    var V=impVisible(); if(!V.length){ $('preo-t').innerHTML='<div style="color:var(--faint);font-size:12px;padding:8px 0">'+(A.length?'No rows match.':'No preorders in the buy plan feed.')+'</div>'; return; }
+    var h='<table style="width:auto;min-width:100%"><thead><tr><th>SKU</th><th>Product</th><th>Market</th><th>Month</th><th>Preorder</th><th>B2B forecast</th><th>% of forecast</th><th>In demand</th><th>Orders</th></tr></thead><tbody>';
+    V.forEach(function(r){ var pct=(r.base!=null&&r.base>0)?Math.round(r.q/r.base*100)+'%':(r.base===0?'no forecast':'\u2014');
+      var b=r.st==='add'?'<span class="ib">Added +'+n0(r.q)+'</span>':'<span class="xb"'+(r.st==='not'?' title="Under 50% of the B2B forecast: taken to be inside it"':'')+'>'+STL[r.st]+'</span>';
+      h+='<tr><td><b>'+e(r.sku)+'</b></td><td style="color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis" title="'+e(r.name)+'">'+e(r.name)+'</td><td>'+r.co+'</td><td>'+ymLbl(r.ym)+'</td><td>'+n0(r.q)+'</td><td>'+(r.base==null?'\u2014':n0(r.base))+'</td><td>'+pct+'</td><td>'+b+'</td><td>'
+        +r.ords.map(function(o){ return e(o.so)+' '+e(o.cust||'')+' ('+n0(o.q)+')'; }).join(', ')+'</td></tr>'; });
+    var add=V.filter(function(r){return r.st==='add';}).reduce(function(a,r){return a+r.q;},0), all=V.reduce(function(a,r){return a+r.q;},0);
+    h+='</tbody><tfoot><tr><td colspan="4"><b>'+V.length+' SKU months</b></td><td><b>'+n0(all)+'</b></td><td></td><td></td><td><b>'+n0(add)+' added</b></td><td></td></tr></tfoot></table>';
+    $('preo-t').innerHTML=h; }
+  var _impBusy=false;
+  function impLoad(){ if(_impBusy)return; _impBusy=true;
+    var go=function(){ Promise.resolve((typeof PKA_MAP!=='undefined'&&PKA_MAP&&PKA_MAP.det)?null:(typeof loadPreorderKA==='function'?loadPreorderKA():null))
+      .then(function(){ return typeof hzDemandBuildAsync==='function'?hzDemandBuildAsync('preorders'):null; })   /* incremental (fast) when only the preorder feed moved */
+      .then(function(){ PREO.imp=impRows(); }, function(err){ PREO.imp=[]; msg('<span style="color:var(--neg)">Could not calculate demand: '+e(err&&err.message||err)+'</span>'); })
+      .then(function(){ _impBusy=false; if(document.body.contains(body)&&PREO.tab==='impact')draw(); }); };
+    if(typeof hzWhenSkuData==='function')hzWhenSkuData('preorders',go); else go(); }
+  body.querySelectorAll('.preo-tab').forEach(function(b){ b.onclick=function(){ PREO.tab=b.dataset.tab; body.querySelectorAll('.preo-tab').forEach(function(x){ x.classList.toggle('on',x.dataset.tab===PREO.tab); }); draw(); }; });
+  $('preo-st').onchange=function(){ PREO.st=this.value; draw(); };
+  $('preo-csv').onclick=function(){ if(PREO.tab==='impact'){ var R=[['SKU','Product','Market','Month','Preorder','B2B forecast','% of forecast','In demand','Units added','Orders']];
+      impVisible().forEach(function(r){ R.push([r.sku,r.name,r.co,ymLbl(r.ym),r.q,r.base==null?'':Math.round(r.base),(r.base>0)?Math.round(r.q/r.base*100)+'%':'',STL[r.st],r.st==='add'?r.q:0,r.ords.map(function(o){return o.so+' '+(o.cust||'')+' ('+o.q+')';}).join('; ')]); });
+      var c2=R.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+      var a2=document.createElement('a'); a2.href=URL.createObjectURL(new Blob(['\ufeff'+c2],{type:'text/csv'})); a2.download='preorder-demand-impact.csv'; document.body.appendChild(a2); a2.click(); a2.remove(); return; }
+    var V=visible(), rows=[['Order','Reference','Customer','Channel','Order state','SKU','Product','Fulfil warehouse','3PL','Ship date','Quantity','Move state','In buy plan','Left out because']];
     V.forEach(function(l){ rows.push([l.sale_number,l.sale_reference,l.customer,l.channel,l.sale_state,l.sku,l.product_name,l.fulfil_warehouse,CL[l.warehouse]||'',dmy(l.ship_date),l.quantity,l.move_state,l.included?'yes':'no',l.exclude_reason||'']); });
     var c=rows.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
     var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+c],{type:'text/csv'})); a.download='preorders.csv'; document.body.appendChild(a); a.click(); a.remove(); };
   $('preo-sync').onclick=function(){ if(PREO.busy)return; PREO.busy=true; var b=$('preo-sync'); b.disabled=true; b.textContent='Syncing…'; msg('');
     fetch('/api/demand/preorders/sync',{method:'POST'}).then(function(r){return r.json();}).then(function(r){ if(!r||!r.ok)throw new Error((r&&r.error)||'Sync failed');
-      msg('Synced: '+r.orders+' orders, '+r.lines+' lines, '+n0(r.units)+' units into the buy plan.'); return load().then(function(){ try{ if(typeof _PKA_INFLIGHT!=='undefined')_PKA_INFLIGHT=null; if(typeof loadPreorderKA==='function')loadPreorderKA(); }catch(_){} }); })
+      msg('Synced: '+r.orders+' orders, '+r.lines+' lines, '+n0(r.units)+' units into the buy plan.'); return load().then(function(){ try{ PREO.imp=null; if(typeof _PKA_INFLIGHT!=='undefined')_PKA_INFLIGHT=null; if(typeof loadPreorderKA==='function')return loadPreorderKA(); }catch(_){} }).then(function(){ if(PREO.tab==='impact')draw(); }); })
       .catch(function(err){ msg('<span style="color:var(--neg)">'+e(err&&err.message||err)+'</span>'); })
       .then(function(){ PREO.busy=false; var b2=$('preo-sync'); if(b2){ b2.disabled=false; b2.textContent='Sync from Fulfil'; } }); };
   if(PREO.d)draw(); load();

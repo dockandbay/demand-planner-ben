@@ -1,3 +1,11 @@
+## v28.244 (Ben, branch review-fixes-2026-10-05): Preorders > Demand impact report
+
+**Files:** `artifact_v16.7.html`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. Buy plan unchanged.
+
+- DEMAND > Inputs > Preorders has two tabs: Orders (as before) and Demand impact. Demand impact lists each preorder SKU x market x month: preorder, B2B forecast, % of forecast, In demand (Added +n / Not added / Outside window / Not in buy plan) and the orders + clients behind it. Per-market cards (added / not added / other units), market pills, search, status filter, CSV (preorder-demand-impact.csv). Left-aligned.
+- Read from the built demand overlay (the same md.pre_used the buy uses), so it matches the buy exactly. Cold load about 4s in the background worker, no page freeze; recomputed on every visit and after a sync.
+- Sandbox check: 446 SKU months, 6,707u = 5,529u added + 1,109u not added + 69u outside window or not in the buy plan.
+
 ## v28.243 (Ben, branch review-fixes-2026-10-05): Preorders count in the buy only at 50% of B2B; preorder tooltip; buy popup below the top bar; stale-sync badge
 
 **Files:** `artifact_v16.7.html`, `server.mjs`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. **Buy plan changes (intended).**
