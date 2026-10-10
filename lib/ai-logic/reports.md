@@ -46,7 +46,7 @@ sources:
   - server.mjs :: /api/demand/stock-cover
   - server.mjs :: /api/product/reports/sampling, /api/product/reports/catalogue, /api/product/pim-waiting-room
 fingerprints:
-  artifact_v16.7.html::renderReportView: 806be94bdf32
+  artifact_v16.7.html::renderReportView: d295c42ef5f0
   artifact_v16.7.html::renderExecView: 255e38a51f5e
   artifact_v16.7.html::buildExecData: 279a59ce1aeb
   artifact_v16.7.html::getASP: c70881d04bde
@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.226
+verified_version: v28.247
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -248,12 +248,12 @@ verified_version: v28.226
 - Defaults: within 4 weeks, all markets, critical only.
 (source: server.mjs :: /api/scenario/key-arrivals)
 
-## Stock Availability and 3PL & Invoicing
+## Stock Availability (3PL & Invoicing moved to ACCOUNTS)
 - Stock Availability is built client-side from SKUM, plus out-of-scope SKUs that still hold stock.
   - Columns: SOH 3PL, FBA, AWD (US only), and the next 2 inbounds.
   - Status: DISC if the discontinue date is on or before today, else CLOSED, else FUTURE if launch is after today, else ACTIVE.
   (source: artifact_v16.7.html :: renderStockAvailability, saRows)
-- 3PL & Invoicing: 3PL invoice mapping with missing-file and cross-month duplicate-charge warnings. Unverified: detailed rules not studied.
+- 3PL & Invoicing moved to ACCOUNTS > 3PL invoicing in v28.247 (old REPORTS links redirect); see the supply-finance topic. It is no longer a REPORTS tab.
 
 ## Inventory Status Report (BUY & MOVE > INVENTORY > Status Report)
 - Market pills US/UK/EU/AU/CA (default US). Data comes from BP.statusMetrics(mkt), a read-only view of the buy-plan data.

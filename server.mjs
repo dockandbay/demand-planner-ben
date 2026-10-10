@@ -1393,6 +1393,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
   if (p.startsWith('/api/config/channel') || p.startsWith('/api/config/countr')) return null;  // channel registry — reads open; writes self-check admin
   if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
+  if (p.startsWith('/api/accounts/')) return null;           // v28.247 ACCOUNTS: accountsGate checks every method (reads too)
   if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts'
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
       || p.startsWith('/api/price-changes') || p.startsWith('/api/demand-revenue-targets')
@@ -3316,6 +3317,34 @@ if (!process.env.VERCEL && process.env.HZ_PREORDERS_CRON !== '0') {
   const _pc = () => runPreordersCron().then(r => console.log('[preorders] ' + (r.ok ? ('synced ' + r.lines + ' line(s)') : ('not synced: ' + r.error))), e => console.warn('[preorders] failed: ' + (e && e.message)));
   setTimeout(_pc, 900000).unref?.(); setInterval(_pc, 86400000).unref?.();
 }
+// ═══ v28.247 (Ben 10-Oct-26): ACCOUNTS top menu. Every /api/accounts/* call, READS included, needs the ACCOUNTS grant or admin. ═══
+async function accountsGate(req, res, next) {
+  try { const me = await permsFor(req);
+    if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
+    req.me = me; next();
+  } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
+}
+app.use('/api/accounts', accountsGate);
+// Aged payables: open Xero bills (approved or awaiting approval, amount due > 0) from the planner.xero_bills cache that the
+// hourly Xero bills sync keeps fresh (UK + AU). Supplier = linked to a HORIZON PO, or a Xero contact named "<name> - <supplier code>".
+app.get('/api/accounts/payables', async (req, res) => {
+  try {
+    const org = String(req.query.org || 'all').toLowerCase();
+    const bills = (await pool.query(
+      `SELECT b.invoice_id, lower(b.region) region, b.invoice_number, b.reference, b.contact_name, b.total, b.amount_paid, b.amount_due, b.currency_code, upper(b.status) status,
+              to_char(b.invoice_date,'YYYY-MM-DD') invoice_date, to_char(b.due_date,'YYYY-MM-DD') due_date,
+              coalesce((SELECT array_agg(DISTINCT l.po) FROM planner.po_links l WHERE l.system='xero' AND l.status='linked' AND l.external_id=b.invoice_id), '{}') pos
+         FROM planner.xero_bills b
+        WHERE upper(coalesce(b.status,'')) IN ('AUTHORISED','SUBMITTED') AND coalesce(b.amount_due,0) > 0.004
+          AND ($1 = 'all' OR lower(b.region) = $1)
+        ORDER BY b.due_date NULLS LAST`, [org])).rows;
+    const sup = new Map(); try { (await pool.query(`SELECT name, code FROM planner.suppliers WHERE coalesce(trim(code),'') <> ''`)).rows.forEach(r => sup.set(String(r.code).trim().toUpperCase(), r.name)); } catch (_) {}
+    bills.forEach(b => { const m = / - ([A-Za-z0-9]{1,8})$/.exec(String(b.contact_name || '').trim()); const s = m ? sup.get(m[1].toUpperCase()) : null;
+      b.supplier = s || (b.pos.length ? b.contact_name : null); b.url = xbUrl(b.invoice_id); b.total = Number(b.total) || 0; b.amount_due = Number(b.amount_due) || 0; b.amount_paid = Number(b.amount_paid) || 0; });
+    const synced = {}; (await pool.query(`SELECT lower(region) region, to_char(max(synced_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.xero_bills GROUP BY 1`)).rows.forEach(r => { synced[r.region] = r.at; });
+    res.set('Cache-Control', 'no-store').json({ bills, synced, today: new Date().toISOString().slice(0, 10) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
@@ -13357,25 +13386,32 @@ function permsMemoDrop(email) { if (email) _permsMemo.delete(String(email).toLow
 // Inbox item types a user can be granted (top-bar Inbox filter, v28.070). Order = display order.
 const INBOX_TYPES_ALL = ['samples', 'purchase_order', 'product', 'client'];
 const INBOX_TYPE_LABEL = { samples: 'Sample', purchase_order: 'Purchase order', product: 'Product', client: 'Client' };
+// v28.247 (Ben 10-Oct-26): ACCOUNTS grant. Column added by migration 347; until it exists everyone reads as false (admins still see ACCOUNTS).
+let _accCol = { ok: false, at: 0 };
+async function accColExpr() {
+  if (!_accCol.ok && Date.now() - _accCol.at > 60000) { _accCol.at = Date.now();
+    try { _accCol.ok = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='app_permissions' AND column_name='accounts_access'`)).rowCount > 0; } catch (_) {} }
+  return _accCol.ok ? 'coalesce(accounts_access,false)' : 'false';
+}
 async function permsFor(req) {
   const email = authUser(req);
   // v28.151 (review B3): no identity under a GATE (prod: planner key but no signed login cookie) = READ-ONLY, not admin.
   // Local dev / sandbox (no GATE) keeps full access exactly as before.
-  if (!email && GATE) return { email: null, live: true, supply_edit: false, demand_edit: false, product_edit: false, is_admin: false, client_access: false, commissions: false, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: [] };
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
+  if (!email && GATE) return { email: null, live: true, supply_edit: false, demand_edit: false, product_edit: false, is_admin: false, client_access: false, commissions: false, accounts_access: false, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: [] };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, accounts_access: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
   let row = null;
   const m = _permsMemo.get(e);
   if (m && Date.now() - m.at < PERMS_MEMO_MS) row = m.row;
   else {
-    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
+    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
   }
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
   // inbox_types: which top-bar Inbox item types this user sees. NULL/unset = all (back-compat); a saved array (incl. empty) is explicit.
   let inboxTypes = INBOX_TYPES_ALL;
   if (row && row.inbox_types != null) { try { const a = typeof row.inbox_types === 'string' ? JSON.parse(row.inbox_types) : row.inbox_types; if (Array.isArray(a)) inboxTypes = a.filter(t => INBOX_TYPES_ALL.includes(t)); } catch (_) {} }
-  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes };
+  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), accounts_access: sa || !!(row && (row.accounts_access || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes };
 }
 // Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
 // No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
@@ -13398,7 +13434,7 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
     r.rows.forEach(row => { if (row.inbox_types != null && typeof row.inbox_types === 'string') { try { row.inbox_types = JSON.parse(row.inbox_types); } catch (_) { row.inbox_types = null; } } });   // jsonb → array for the client
     res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -13821,6 +13857,8 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
       VALUES ($1,$2,$3,$4,$5,$6,$8,$9,$10::jsonb,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, client_access=excluded.client_access, commissions=excluded.commissions,`
       + (inboxJson === undefined ? '' : ' inbox_types=excluded.inbox_types,') + ` updated_at=now(), updated_by=excluded.updated_by`,
       [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox', !!b.client_access, !!b.commissions, inboxJson === undefined ? null : inboxJson]);
+    // v28.247: ACCOUNTS grant (migration 347); skipped until the column exists, so saving permissions never breaks before it is applied
+    if (b.accounts_access !== undefined && (await accColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET accounts_access=$2 WHERE email=$1`, [email, !!b.accounts_access]);
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });

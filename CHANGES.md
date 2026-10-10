@@ -1,3 +1,13 @@
+## v28.247 (Ben, branch review-fixes-2026-10-05): ACCOUNTS menu (own grant), Payables, 3PL invoicing moved in
+
+**Files:** `server.mjs`, `supply/inject.html`, `artifact_v16.7.html`, `migrations/347_accounts_access.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 347** (additive, idempotent: `app_permissions.accounts_access`; until applied everyone reads as false and only admins see ACCOUNTS; saving permissions keeps working). No env vars. Buy plan unchanged.
+
+- New top menu ACCOUNTS after CLIENT, in the side menu with L2 deep links (`#/accounts/payables`, `#/accounts/3pl-invoicing[/<3pl>]`). Shown only to users with the new ACCOUNTS grant (CONFIG > Admin > Permissions, new column) or admins.
+- Server: every `/api/accounts/*` call, reads included, needs the grant or admin (403 `no_accounts_access`). requiredCap leaves `/api/accounts/` to that gate.
+- ACCOUNTS > Payables: open Xero bills UK + AU (approved or awaiting approval, amount due > 0) from the hourly `planner.xero_bills` cache. Grouped by contact x org x currency, aged Not due / 1-30 / 31-60 / 61-90 / 90+; per-currency cards (due, overdue, over 30 d). Pills Both/UK/AU, Suppliers/All contacts, All/Overdue/Over 30 d, search (contact, bill, PO). Click a contact for its bills with PO links and Xero links. Supplier = bill linked to a PO, or Xero contact "<name> - <supplier code>".
+- REPORTS > 3PL & Invoicing moved to ACCOUNTS > 3PL invoicing (unchanged screen, per-3PL tabs in the side menu). Old `#/reports/3pl-invoicing[/<3pl>]` links redirect. Its API is unchanged (supply gate for writes).
+- Next (mockup `mockups/accounts_mockup.html`): Bank ageing (needs Xero reports + attachments scopes, reconnect UK + AU), Inbox matcher (Gmail connect, Diviyaj sign-off), Auto rules.
+
 ## v28.246 (Ben, branch review-fixes-2026-10-05): Preorders leave out stock already assigned on the customer shipment
 
 **Files:** `server.mjs`, `lib/ai-logic/buy-plan.md` (+ package.json, CHANGES.md). No migrations, no env vars. **Buy plan changes (intended, downward).**

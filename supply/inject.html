@@ -46,6 +46,35 @@
 #client-root .bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0}
 #client-root .pill{display:inline-block;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:11px;cursor:pointer;color:var(--muted);background:var(--card)}
 #client-root .pill.active{background:var(--nav);color:#fff;border-color:var(--nav)}
+/* v28.247 ACCOUNTS: same look as CLIENT */
+#accounts-root{display:none;font-size:12px;color:var(--ink);padding-top:4px}
+#accounts-root,#accounts-root th,#accounts-root td,#accounts-root input,#accounts-root select,#accounts-root textarea{text-align:left}
+#app.accounts-active > *:not(#dab-navwrap):not(#accounts-root):not(.hz-drawer-overlay){display:none!important}
+#app.accounts-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
+#app.accounts-active #view-tabs-row .tool-bar{display:none!important}
+#accounts-root #accounts-subnav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 4px;align-items:center;flex-wrap:wrap}
+#accounts-root #accounts-subnav .ver{margin-left:auto}
+#accounts-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;text-decoration:none;display:inline-block}
+#accounts-root .stab:hover{color:var(--ink)}
+#accounts-root .stab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+#accounts-root .fci{padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit;box-sizing:border-box;background:var(--card);color:var(--ink)}
+#accounts-root .save-btn{border:1px solid var(--line);background:var(--hover);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--ink);text-decoration:none;display:inline-block}
+#accounts-root .save-btn.light{background:var(--card)}
+#accounts-root .save-btn:hover{background:var(--hover)}
+#accounts-root .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+#accounts-root table{border-collapse:separate;border-spacing:0;font-size:12px;width:100%}
+#accounts-root table th{text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:var(--band);white-space:nowrap}
+#accounts-root table td{padding:6px 10px;border-bottom:1px solid var(--line2);vertical-align:top}
+#accounts-root select.fci{width:auto;max-width:100%}
+#accounts-root .bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0}
+#accounts-root .pill{display:inline-block;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:11px;cursor:pointer;color:var(--muted);background:var(--card)}
+#accounts-root .pill.active{background:var(--nav);color:#fff;border-color:var(--nav)}
+#accounts-root .num{text-align:left}
+#accounts-root tr.ac-sub td{background:var(--band)}
+#accounts-root .ac-cards{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
+#accounts-root .ac-card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:150px;background:var(--card)}
+#accounts-root .ac-card .k{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.04em}
+#accounts-root .ac-card .v{font-size:17px;font-weight:700}
 #client-root .annot{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5}
 /* product top sub-nav (Plan / Reports) — matches the PO-detail subnav (.po-subnav / .rtab) */
 #product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:2px 0 10px}   /* level-2 underline tabs — match SUPPLY/SCENARIO (was a pill container) */
@@ -313,6 +342,7 @@
  body.hz-rail #report-tabs,
  body.hz-rail #product-subnav,
  body.hz-rail #client-subnav,
+ body.hz-rail #accounts-subnav,
  body.hz-rail #config-subs{display:none!important}
  body.hz-rail .hz-l3-mirrored{display:none!important}   /* the one content L3 nav currently mirrored into the rail (set per-render) */
  /* v28.140 (Ben: "the level 3 menu tries to load, flashes, then hides"): the per-render class above is only added AFTER the
@@ -348,6 +378,7 @@
  body.hz-navtree #tpl-subnav,
  body.hz-navtree #client-root #client-l3,
  body.hz-navtree #client-root #client-subnav,
+ body.hz-navtree #accounts-root #accounts-subnav,
  body.hz-navtree .hz-l3-mirrored{display:none!important}
 }
 #tl-drop .tl-po:hover{text-decoration:underline}
@@ -7947,7 +7978,7 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
-  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{ ensureProductButton(); ensureClientButton(); }catch(e){} try{startSessionGuard();}catch(e){} try{window.hzSetAvatar&&window.hzSetAvatar();}catch(e){}   /* v27.616 P1b: fill header avatar initials once the signed-in user is known */
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{ ensureProductButton(); ensureClientButton(); ensureAccountsButton(); }catch(e){} try{startSessionGuard();}catch(e){} try{window.hzSetAvatar&&window.hzSetAvatar();}catch(e){}   /* v27.616 P1b: fill header avatar initials once the signed-in user is known */
     try{ if(ME&&ME.email&&Array.isArray(ME.favourites)){ HZ_FAVES=ME.favourites.slice(); try{localStorage.setItem('hzFaves',JSON.stringify(HZ_FAVES));}catch(e){} } }catch(e){}   // server is source of truth once ME loads
     try{ if(typeof renderFaves==='function')renderFaves(); }catch(e){}
     if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
@@ -9267,6 +9298,7 @@
               +'<td class="l" style="text-align:center">'+chk(r.email,'product_edit',r.product_edit)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'client_access',r.client_access)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'commissions',r.commissions)+'</td>'
+              +'<td class="l" style="text-align:center">'+chk(r.email,'accounts_access',r.accounts_access)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'is_admin',r.is_admin)+'</td>'
               +'<td class="l">'+inboxCell(r.email,r.inbox_types)+'</td>'
               +'<td class="l">'+landSel(r.landing_page)+'</td>'
@@ -9279,16 +9311,16 @@
               +'<label style="font-size:12px"><input type="checkbox" id="pm-ndemand" checked> DEMAND</label>'
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nproduct"> PRODUCT</label>'
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nclient"> CLIENT</label>'
-              +'<label style="font-size:12px"><input type="checkbox" id="pm-ncomm"> COMMISSIONS</label>'
+              +'<label style="font-size:12px"><input type="checkbox" id="pm-ncomm"> COMMISSIONS</label>'+'<label style="font-size:12px"><input type="checkbox" id="pm-nacc"> ACCOUNTS</label>'
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nadmin"> Admin</label>'
               +'<button class="tool-badge bg-blue" id="pm-add" style="cursor:pointer;border:none">+ Grant access</button>'
               +'<span class="pm-err" style="color:var(--neg);font-size:12px"></span></div>'
-            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">CLIENT</th><th class="l" style="white-space:nowrap;text-align:center">COMMISSIONS</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap;text-align:center" title="Which top-bar Inbox item types this user sees">Inbox</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="11" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
+            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">CLIENT</th><th class="l" style="white-space:nowrap;text-align:center">COMMISSIONS</th><th class="l" style="white-space:nowrap;text-align:center" title="See the ACCOUNTS menu (admins always can)">ACCOUNTS</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap;text-align:center" title="Which top-bar Inbox item types this user sees">Inbox</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="12" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
           function save(payload,cb){ fetch('/api/config/permissions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(cb)cb(j); }).catch(function(e){ if(cb)cb({error:(e&&e.message)||'failed'}); }); }
           function rowPayload(tr){ return { email:tr.dataset.em,
             supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked,
             product_edit:tr.querySelector('.pm-chk[data-f="product_edit"]').checked, is_admin:tr.querySelector('.pm-chk[data-f="is_admin"]').checked,
-            client_access:tr.querySelector('.pm-chk[data-f="client_access"]').checked, commissions:tr.querySelector('.pm-chk[data-f="commissions"]').checked,
+            client_access:tr.querySelector('.pm-chk[data-f="client_access"]').checked, commissions:tr.querySelector('.pm-chk[data-f="commissions"]').checked, accounts_access:tr.querySelector('.pm-chk[data-f="accounts_access"]').checked,
             inbox_types:Array.prototype.map.call(tr.querySelectorAll('.pm-inbox:checked'),function(c){return c.dataset.t;}),
             landing_page:(tr.querySelector('.pm-land')||{}).value||'' }; }
           b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
@@ -9297,7 +9329,7 @@
           b.querySelectorAll('.pm-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove '+btn.dataset.em+'? They revert to read-only everywhere.'))return; fetch('/api/config/permissions/'+encodeURIComponent(btn.dataset.em),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); showSub(); }); }; });
           document.getElementById('pm-add').onclick=function(){ var em=(document.getElementById('pm-nemail').value||'').trim(); var err=b.querySelector('.pm-err'); err.textContent='';
             if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email.'; return; }
-            save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,product_edit:document.getElementById('pm-nproduct').checked,is_admin:document.getElementById('pm-nadmin').checked,client_access:document.getElementById('pm-nclient').checked,commissions:document.getElementById('pm-ncomm').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
+            save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,product_edit:document.getElementById('pm-nproduct').checked,is_admin:document.getElementById('pm-nadmin').checked,client_access:document.getElementById('pm-nclient').checked,commissions:document.getElementById('pm-ncomm').checked,accounts_access:document.getElementById('pm-nacc').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       // v28.091 (Ben): CONFIG ▸ Admin ▸ App health — run the server-side endpoint sweep, rank slow/errored endpoints,
       // and copy a report to paste into Claude Code. Admin only.
@@ -13124,6 +13156,10 @@
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]!=='client'&&typeof hideClient==='function')hideClient();   // v28.008: leaving CLIENT
+    if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
+    if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
+    if(seg[0]==='accounts'){ if(!ME&&(window._acWait=(window._acWait||0)+1)<=40){ setTimeout(applyRoute,250); return; }   /* permissions not loaded yet: wait up to 10s */
+      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<payables|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if({clients:1,orders:1,commission:1,messages:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
@@ -14515,7 +14551,7 @@
     get items(){ var it=[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(typeof ME!=='undefined'&&ME&&ME.is_admin)it.unshift(['admin','Admin']); return it; },
     select:function(k){ if(k==='admin')k='admin-general'; if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },
     current:function(){return CONFIG_SUB;}};}catch(e){}
-  function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
+  function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); if(typeof hideAccounts==='function')hideAccounts(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     hzLate(function(){ try{ refreshDtcBadge(); }catch(e){} });   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions) — off the first-paint path (v28.081)
     try{ refreshErpcBadge(); }catch(e){}
     hzLate(function(){ try{ refreshReallocBadge(); }catch(e){} });
@@ -15801,7 +15837,7 @@
     el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PRODUCTS</button><button class="stab" data-k="sampling">SAMPLING</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
-  function showProduct(){ ensureProductRoot(); pgetWarm(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient();
+  function showProduct(){ ensureProductRoot(); pgetWarm(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); if(typeof hideAccounts==='function')hideAccounts();
     var app=document.getElementById('app'); if(app){ app.classList.add('product-active'); app.classList.remove('supply-active'); app.classList.remove('config-mode'); }
     document.body.classList.add('supply-on');   // reveal the mobile top-bar search (used for product search on phone)
     var r=document.getElementById('product-root'); if(r)r.style.display='block';
@@ -18699,7 +18735,7 @@
     var el=document.createElement('div'); el.id='client-root';
     el.innerHTML='<div id="client-subnav"><button class="stab" data-k="clients">CLIENTS &amp; AGENTS</button><button class="stab" data-k="orders">ORDERS <span id="cp-ordrev" class="ex-badge" style="display:none" title="Portal orders awaiting review"></span></button><button class="stab" data-k="commission">COMMISSIONS</button><button class="stab" data-k="messages">MESSAGES <span id="cp-unread" class="ex-badge" style="display:none"></span></button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="client-body"></div>';
     app.appendChild(el); el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectClientSub(b.dataset.k); }; }); cpoBadgeRefresh(); }
-  function showClient(){ ensureClientRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideProduct==='function')hideProduct();
+  function showClient(){ ensureClientRoot(); if(typeof hideAccounts==='function')hideAccounts(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideProduct==='function')hideProduct();
     var app=document.getElementById('app'); if(app){ app.classList.add('client-active'); app.classList.remove('supply-active'); app.classList.remove('config-mode'); app.classList.remove('product-active'); }
     document.body.classList.add('supply-on'); var r=document.getElementById('client-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); var pb=document.getElementById('client-btn'); if(pb)pb.classList.add('active'); try{ hzSyncDemandPills(); }catch(e){} }
@@ -18715,6 +18751,76 @@
     row.querySelectorAll('.view-toggle:not(.client-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideClient(); }); });
     cpPollUnread(); if(!window.__cpUnreadPoll)window.__cpUnreadPoll=setInterval(function(){ if(document.hidden)return; cpPollUnread(); },240000); }
   function cpPollUnread(){ if(!clientCan())return; cpGet('/api/client/threads').then(function(j){ var n=(j.threads||[]).reduce(function(s,t){return s+(t.unread_ops||0);},0); var b=document.getElementById('cp-unread'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } var tb=document.getElementById('client-btn'); if(tb)tb.innerHTML='CLIENT'+(n?' <span class="ex-badge" style="display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg,#e11d48);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px">'+n+'</span>':''); }).catch(function(){}); }
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ── v28.247 (Ben 10-Oct-26): ACCOUNTS top menu (after CLIENT). Own grant (app_permissions.accounts_access) or admin;
+  // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
+  // Bank ageing, Inbox matcher and Auto rules follow (mockups/accounts_mockup.html).
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  var ACCOUNTS_TABS=[['payables','Payables'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
+  var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
+  function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
+  function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
+    var el=document.createElement('div'); el.id='accounts-root';
+    el.innerHTML='<div id="accounts-subnav">'+ACCOUNTS_TABS.map(function(t){ return '<button class="stab" data-k="'+t[0]+'">'+esc(t[1].toUpperCase())+'</button>'; }).join('')+'</div><div id="accounts-body"></div>';
+    app.appendChild(el); el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectAccountsSub(b.dataset.k); }; }); }
+  function showAccounts(){ ensureAccountsRoot(); if(typeof hideClient==='function')hideClient(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideProduct==='function')hideProduct();
+    var app=document.getElementById('app'); if(app){ app.classList.add('accounts-active'); ['supply-active','config-mode','product-active','client-active'].forEach(function(c){ app.classList.remove(c); }); }
+    document.body.classList.add('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='block';
+    document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.add('active'); try{ hzSyncDemandPills(); }catch(e){} }
+  function hideAccounts(){ var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
+    app.classList.remove('accounts-active'); document.body.classList.remove('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='none'; var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.remove('active'); }
+  function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
+    if(!fromRoute){ try{ writeHash(['accounts',k]); }catch(e){} }
+    var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
+    if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
+    acRenderPayables(b); }
+  function ensureAccountsButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('accounts-btn'); if(existing){ existing.style.display=accountsCan()?'':'none'; return; } if(!accountsCan())return;
+    var btn=document.createElement('button'); btn.id='accounts-btn'; btn.className='view-toggle accounts-toggle'; btn.innerHTML='ACCOUNTS';
+    var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
+    btn.onclick=function(){ showAccounts(); selectAccountsSub(ACCOUNTS_SUB||'payables'); };
+    row.querySelectorAll('.view-toggle:not(.accounts-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideAccounts(); }); }); }
+  // ── ACCOUNTS > Payables: aged open Xero bills (UK + AU) from the hourly-synced bill cache; suppliers first ──
+  function acAge(due,today){ if(!due)return 0; var d=(new Date(today+'T00:00:00Z')-new Date(due+'T00:00:00Z'))/86400000; return Math.round(d); }
+  function acBucket(days){ return days<=0?0:days<=30?1:days<=60?2:days<=90?3:4; }
+  function acMoney(n,ccy){ n=Number(n)||0; var sym={GBP:'£',USD:'$',AUD:'A$',EUR:'€'}[ccy]; return (sym||((ccy||'')+' '))+n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function acSynced(s){ if(!s)return 'never'; var p=String(s).split(' '); return hzTrkDate(p[0])+(p[1]?' '+p[1]:''); }
+  function acRenderPayables(b){
+    if(!AC_PAY.d){ if(AC_PAY.busy)return; AC_PAY.busy=true;
+      fetch('/api/accounts/payables').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ AC_PAY.d=j; AC_PAY.busy=false; if(ACCOUNTS_SUB==='payables')acRenderPayables(document.getElementById('accounts-body')); })
+        .catch(function(e){ AC_PAY.busy=false; b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; });
+      return; }
+    var d=AC_PAY.d, today=d.today, q=AC_PAY.q.toLowerCase();
+    var bills=d.bills.filter(function(x){ if(AC_PAY.org!=='all'&&x.region!==AC_PAY.org)return false; if(AC_PAY.scope==='sup'&&!x.supplier)return false;
+      var age=acAge(x.due_date,today); if(AC_PAY.due==='over'&&age<=0)return false; if(AC_PAY.due==='30'&&age<=30)return false;
+      if(q&&(x.contact_name+' '+(x.supplier||'')+' '+(x.invoice_number||'')+' '+(x.reference||'')+' '+x.pos.join(' ')).toLowerCase().indexOf(q)<0)return false; return true; });
+    var groups={}, tot={};
+    bills.forEach(function(x){ var k=x.region+'|'+x.contact_name+'|'+x.currency_code; var g=groups[k]||(groups[k]={k:k,region:x.region,contact:x.contact_name,supplier:x.supplier,ccy:x.currency_code,bills:[],b:[0,0,0,0,0],due:0,pos:{},next:null,maxAge:-1e9});
+      var age=acAge(x.due_date,today); g.bills.push(x); g.b[acBucket(age)]+=x.amount_due; g.due+=x.amount_due; x.pos.forEach(function(p){g.pos[p]=1;}); if(age>g.maxAge)g.maxAge=age; if(x.due_date&&age<=0&&(!g.next||x.due_date<g.next))g.next=x.due_date;
+      var t=tot[x.currency_code]||(tot[x.currency_code]={due:0,over:0,over30:0,n:0}); t.due+=x.amount_due; t.n++; if(age>0)t.over+=x.amount_due; if(age>30)t.over30+=x.amount_due; });
+    var G=Object.keys(groups).map(function(k){return groups[k];}).sort(function(a,c){ return (c.b[4]+c.b[3]+c.b[2]+c.b[1])-(a.b[4]+a.b[3]+a.b[2]+a.b[1]) || c.due-a.due; });
+    function pill(grp,val,lab){ return '<span class="pill'+(AC_PAY[grp]===val?' active':'')+'" data-g="'+grp+'" data-v="'+val+'">'+lab+'</span>'; }
+    var cards=Object.keys(tot).sort().map(function(c){ var t=tot[c]; return '<div class="ac-card"><div class="k">Due · '+esc(c)+'</div><div class="v">'+acMoney(t.due,c)+'</div><div class="tiny mut">'+t.n+' bills · <span style="color:'+(t.over?'var(--neg)':'inherit')+'">'+acMoney(t.over,c)+' overdue</span> · '+acMoney(t.over30,c)+' over 30 d</div></div>'; }).join('');
+    var cell=function(v,ccy,red){ return '<td class="l"'+(v&&red?' style="color:var(--neg);font-weight:600"':'')+'>'+(v?acMoney(v,ccy):'<span class="mut">·</span>')+'</td>'; };
+    var rows=G.map(function(g){ var op=!!AC_PAY.open[g.k], np=Object.keys(g.pos).length;
+      var h='<tr class="ac-g" data-k="'+esc(g.k)+'" style="cursor:pointer"><td class="l"><b>'+(op?'▾ ':'▸ ')+esc(g.contact||'(no contact)')+'</b></td><td class="l">'+(g.supplier?'<span class="pill" style="cursor:default">Supplier'+(np?' · '+np+' PO'+(np>1?'s':''):'')+'</span>':'<span class="mut">Other</span>')+'</td><td class="l">'+g.region.toUpperCase()+'</td><td class="l">'+g.bills.length+'</td>'
+        +cell(g.b[0],g.ccy)+cell(g.b[1],g.ccy,1)+cell(g.b[2],g.ccy,1)+cell(g.b[3],g.ccy,1)+cell(g.b[4],g.ccy,1)+'<td class="l"><b>'+acMoney(g.due,g.ccy)+'</b></td><td class="l">'+(g.maxAge>0?'<span style="color:var(--neg)">'+g.maxAge+' d overdue</span>':(g.next?hzTrkDate(g.next):''))+'</td></tr>';
+      if(op)g.bills.forEach(function(x){ var age=acAge(x.due_date,today);
+        h+='<tr class="ac-sub"><td class="l" style="padding-left:24px">'+esc(x.invoice_number||'(no number)')+(x.reference?' <span class="mut">· '+esc(x.reference)+'</span>':'')+'</td><td class="l">'+(x.pos.length?x.pos.map(function(p){ return '<a href="#/supply/purchase-orders/'+encodeURIComponent(p)+'">'+esc(p)+'</a>'; }).join(', '):'')+'</td><td class="l">'+(x.status==='SUBMITTED'?'<span class="mut">Awaiting approval</span>':'Approved')+'</td><td class="l">'+hzTrkDate(x.invoice_date)+'</td>'
+          +'<td class="l" colspan="4">due '+hzTrkDate(x.due_date)+' · '+(age>0?'<span style="color:var(--neg);font-weight:600">'+age+' d overdue</span>':(age===0?'due today':'in '+(-age)+' d'))+' · total '+acMoney(x.total,x.currency_code)+'</td><td class="l"></td><td class="l"><b>'+acMoney(x.amount_due,x.currency_code)+'</b></td><td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'; });
+      return h; }).join('');
+    var sy=d.synced||{};
+    b.innerHTML='<div class="bar">'+pill('org','all','Both')+pill('org','uk','UK')+pill('org','au','AU')+'<span style="width:10px"></span>'+pill('scope','sup','Suppliers')+pill('scope','all','All contacts')+'<span style="width:10px"></span>'+pill('due','all','All')+pill('due','over','Overdue')+pill('due','30','Over 30 d')
+      +'<input class="fci" id="ac-pq" placeholder="Search contact, bill, PO" style="width:220px" value="'+esc(AC_PAY.q)+'"><span class="save-btn light" id="ac-prf">Refresh</span><span class="tiny mut" style="margin-left:auto">Xero bills synced: UK '+esc(acSynced(sy.uk))+' · AU '+esc(acSynced(sy.au))+'</span></div>'
+      +'<div class="ac-cards">'+(cards||'<div class="mut">Nothing due.</div>')+'</div>'
+      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Contact</th><th>Type</th><th>Org</th><th>Bills</th><th>Not due</th><th>1-30 d</th><th>31-60 d</th><th>61-90 d</th><th>90+ d</th><th>Total due</th><th>Oldest / next due</th></tr></thead><tbody>'
+      +(rows||'<tr><td colspan="11" class="l mut">No open bills match.</td></tr>')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:8px">Open Xero bills (approved or awaiting approval) with an amount due, aged by due date, in bill currency. Supplier = linked to a HORIZON PO, or a Xero contact named "&lt;name&gt; - &lt;supplier code&gt;". Click a contact for its bills.</div>';
+    b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_PAY[p.dataset.g]=p.dataset.v; acRenderPayables(b); }; });
+    b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_PAY.open[k]=!AC_PAY.open[k]; acRenderPayables(b); }; });
+    var qi=document.getElementById('ac-pq'); qi.oninput=function(){ AC_PAY.q=qi.value; clearTimeout(AC_PAY._t); AC_PAY._t=setTimeout(function(){ acRenderPayables(b); var n=document.getElementById('ac-pq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+    document.getElementById('ac-prf').onclick=function(){ AC_PAY.d=null; acRenderPayables(b); };
+  }
   // ── CLIENTS & AGENTS ──
   function cpRenderClients(b){ var q='', typeF='';
     var _cj=cpGet('/api/client/clients');   // v28.086: fire the clients fetch immediately, in parallel with lookups (was serial → ~1.7s cold on click)
@@ -19160,7 +19266,7 @@
     }).catch(function(e){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
 
   function hzSyncDemandPills(){ try{ var app=document.getElementById('app'); if(!app)return;
-    var nonDemand=app.classList.contains('supply-active')||app.classList.contains('product-active')||app.classList.contains('client-active')||app.classList.contains('scenario-active')||app.classList.contains('config-mode');
+    var nonDemand=app.classList.contains('supply-active')||app.classList.contains('product-active')||app.classList.contains('client-active')||app.classList.contains('accounts-active')||app.classList.contains('scenario-active')||app.classList.contains('config-mode');
     var pb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]');
     var onDemand=!nonDemand && pb && pb.classList.contains('active');
     document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
@@ -19261,6 +19367,7 @@
     doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>',
     grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/>',
+    ledger:'<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="12" y2="16"/>',
     gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4 15a2 2 0 0 1 0-4a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 4a2 2 0 0 1 4 0a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 20 11a2 2 0 0 1 0 4z"/>'
   };
   function _railSvg(n){ return '<svg viewBox="0 0 24 24">'+(RAIL_IC[n]||'')+'</svg>'; }
@@ -19271,6 +19378,7 @@
     {k:'reports',label:'Reports',icon:'doc',go:function(){ _railView('exec'); }},
     {k:'product',label:'Product',icon:'grid',go:function(){ _railId('product-btn'); }},
     {k:'client',label:'Client',icon:'users',go:function(){ _railId('client-btn'); }},
+    {k:'accounts',label:'Accounts',icon:'ledger',go:function(){ _railId('accounts-btn'); }},
     {k:'config',label:'Config',icon:'gear',go:function(){ _railId('config-btn'); }}
   ];
   function _railView(v){ var b=document.querySelector('#view-tabs-row .view-toggle[data-view="'+v+'"]'); if(b)b.click(); }
@@ -19278,19 +19386,20 @@
   function _railInitials(){ try{ var e=(typeof ME!=='undefined'&&ME&&ME.email)||''; var p=e.split('@')[0].split(/[._-]/); return ((p[0]||'')[0]||'')+((p[1]||'')[0]||''); }catch(e){} return 'DB'; }
   function railActiveKey(){ var h=(location.hash||'').toLowerCase().replace(/^#\/?/,'');
     if(/^supply/.test(h))return 'supply'; if(/^config/.test(h))return 'config'; if(/^product/.test(h))return 'product';
-    if(/^client/.test(h))return 'client'; if(/^(buy|buy-move)/.test(h))return 'buy'; if(/^(exec|reports)/.test(h))return 'reports';
+    if(/^client/.test(h))return 'client'; if(/^accounts/.test(h))return 'accounts'; if(/^(buy|buy-move)/.test(h))return 'buy'; if(/^(exec|reports)/.test(h))return 'reports';
     if(/^(demand|planning|scenario|fba)/.test(h))return 'demand';
     if(document.body.classList.contains('supply-active'))return 'supply'; return 'demand'; }
   // L2 sections mirrored into the rail from each module's live sub-nav (stage 2). Clicking a rail L2 item clicks the
   // original (hidden) tab, so all selection logic is reused. Modules whose sub-nav is base-app-rendered (demand/buy/
   // reports) keep their sub-nav in content for now.
-  var RAIL_L2={ supply:{sel:'#supply-subnav',item:'.stab'}, demand:{sel:'#demand-tabs',item:'.dnav'}, buy:{sel:'#buymove-tabs',item:'.dnav'}, reports:{sel:'#report-tabs',item:'.dnav'}, product:{sel:'#product-subnav',item:'.stab'}, client:{sel:'#client-subnav',item:'.stab'}, config:{sel:'#config-subs',item:'.rtab'} };
+  var RAIL_L2={ supply:{sel:'#supply-subnav',item:'.stab'}, demand:{sel:'#demand-tabs',item:'.dnav'}, buy:{sel:'#buymove-tabs',item:'.dnav'}, reports:{sel:'#report-tabs',item:'.dnav'}, product:{sel:'#product-subnav',item:'.stab'}, client:{sel:'#client-subnav',item:'.stab'}, accounts:{sel:'#accounts-subnav',item:'.stab'}, config:{sel:'#config-subs',item:'.rtab'} };
   // L3 tabs mirrored under the active L2 — per-module list of the L3 nav containers a module renders in the DOM.
   // (Supply for now; demand/buy/reports keep their L3 in content until their L3 mirror is verified.)
   var RAIL_L3MAP={
     supply:['#supply-root #prod-subtabs','#supply-root #rep-subnav','#supply-root #config-subs-l3','#supply-root #config-subs.cfg-flat'],   // v28.135: SUPPLY ▸ CONFIG draws its items flat in #config-subs (cfg-flat), not #config-subs-l3 → rail showed no L3
     demand:['#demand-exceptions-nav','#demand-scenario-nav','#demand-inputs-nav','#demand-analysis-nav','#demand-config-nav'],
     reports:['#perf-subnav'],
+    accounts:['#accounts-root #tpl-subnav'],   // v28.247: ACCOUNTS > 3PL invoicing per-3PL tabs
     product:['#product-root #pcfg-subs-l3'],   // v28.157 (Ben): PRODUCT ▸ Reports (Sampling / Approved products / Catalogue) and PRODUCT ▸ Config L3 in the left menu, not on top
     config:['#supply-root #config-subs-l3']   // v28.141: ⚙ CONFIG ▸ Admin/Demand L3 (Email notifications … Ask Claude feedback) — v28.140 hides the in-content L3, so the rail must show it
   };
@@ -19308,7 +19417,7 @@
       Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el,count:_railCount(el)}); }); if(out.length)return {items:out,el:cont}; } return null; }
   window._railL2c=[]; window._railL3c=[];
   function renderRailList(){ var list=document.getElementById('hz-rl-list'); if(!list)return; var ak=railActiveKey(); var html=''; var l3hide=null;
-    RAIL_L1.forEach(function(m){
+    RAIL_L1.forEach(function(m){ if(m.k==='accounts'&&!accountsCan())return;   // v28.247: ACCOUNTS only for its grant / admins
       html+='<button class="rl1'+(m.k===ak?' on':'')+'" data-k="'+m.k+'">'+_railSvg(m.icon)+'<span class="lab">'+m.label+'</span></button>';
       if(m.k===ak){ var l2=_railL2items(m.k); if(l2){ window._railL2c=l2;
         html+='<div class="rl2wrap">'+l2.map(function(it,i){ var subres=(it.active?_railL3items(m.k):null); var sub=subres?subres.items:null; if(subres){ window._railL3c=sub; l3hide=subres.el; }
@@ -19334,7 +19443,7 @@
   var DRAWER_L3_EXTRA={
     demand:[{sel:'#demand-body > .d3nav',hash:/^#\/demand\/actions(\/|$)/}],             // DEMAND > Actions: Actions / Insights / Trend Gaps / Weather
     buy:[{sel:'#inventory-wrap > .d3nav',hash:/^#\/buy-move\/inventory(\/|$)/}],         // BUY & MOVE > Inventory: Status Report / Manage 3PL / Manage FBA / FBA Aged
-    reports:[{sel:'#tpl-subnav',hash:/^#\/reports\/3pl-invoicing(\/|$)/}],               // REPORTS > 3PL & Invoicing: per-3PL tabs
+    accounts:[{sel:'#accounts-root #tpl-subnav',hash:/^#\/accounts\/3pl-invoicing(\/|$)/}],   // ACCOUNTS > 3PL invoicing: per-3PL tabs (v28.247, was REPORTS)
     client:[{sel:'#client-root #client-l3',hash:/^#\/client\/(commission|config)(\/|$)/}] // CLIENT > Commissions / Config
   };
   function _drawerL3items(mod){ var r=_railL3items(mod); if(r)return r; var ex=DRAWER_L3_EXTRA[mod]; if(!ex)return null; var h=location.hash||'';
@@ -19342,7 +19451,7 @@
       var els=cont.querySelectorAll('.rtab,.stab,.d3tab,.dnav3'); var out=[];
       Array.prototype.forEach.call(els,function(el){ var lab=_railText(el); if(lab)out.push({label:lab,active:el.classList.contains('active'),el:el,count:_railCount(el)}); }); if(out.length)return {items:out,el:cont}; } return null; }
   try{ window.__hzNavModel={
-    l1:function(){ return RAIL_L1.filter(function(m){ if(m.k!=='client')return true; var cb=document.getElementById('client-btn'); return !!(cb&&cb.style.display!=='none'); }); },   // CLIENT only for users who can see it
+    l1:function(){ return RAIL_L1.filter(function(m){ if(m.k==='accounts')return accountsCan(); if(m.k!=='client')return true; var cb=document.getElementById('client-btn'); return !!(cb&&cb.style.display!=='none'); }); },   // CLIENT only for users who can see it
     active:function(){ return railActiveKey(); },
     l2:function(mod){ return _railL2items(mod); },
     l3:function(mod){ return _drawerL3items(mod); },
@@ -19374,7 +19483,7 @@
       // v28.084 (perf Sprint D): the observer still watches the body (module roots are re-created wholesale, so the nav
       // containers can't be observed directly) but only re-renders when a mutation touches a nav container: its target
       // sits inside one, or a node added/removed is/contains one. Grid repaints (hundreds of row mutations) no longer count.
-      if(!window._railMO){ var RAIL_NAV_SEL='#supply-subnav,#prod-subtabs,#rep-subnav,#config-subs-l3,#demand-tabs,#buymove-tabs,#report-tabs,#product-subnav,#client-subnav,#config-subs,#demand-exceptions-nav,#demand-scenario-nav,#demand-inputs-nav,#demand-analysis-nav,#demand-config-nav,#perf-subnav,#hz-leftrail';
+      if(!window._railMO){ var RAIL_NAV_SEL='#accounts-subnav,#accounts-root #tpl-subnav,#supply-subnav,#prod-subtabs,#rep-subnav,#config-subs-l3,#demand-tabs,#buymove-tabs,#report-tabs,#product-subnav,#client-subnav,#config-subs,#demand-exceptions-nav,#demand-scenario-nav,#demand-inputs-nav,#demand-analysis-nav,#demand-config-nav,#perf-subnav,#hz-leftrail';
         var _railRel=function(muts){ try{ for(var i=0;i<muts.length;i++){ var m=muts[i], t=m.target; if(t&&t.nodeType===1&&t.closest&&t.closest(RAIL_NAV_SEL)&&!t.closest('#hz-leftrail'))return true;   // v28.179 (Ben): the rail's OWN re-render is not a nav change (it looped every ~270 ms)
             var lists=[m.addedNodes,m.removedNodes]; for(var a=0;a<2;a++){ var L=lists[a]; if(!L)continue; for(var j=0;j<L.length;j++){ var n=L[j]; if(n.nodeType!==1)continue; if((n.matches&&n.matches(RAIL_NAV_SEL))||(n.querySelector&&n.querySelector(RAIL_NAV_SEL)))return true; } } }
           return false; }catch(e){ return true; } };
@@ -19382,7 +19491,7 @@
     }
     railSync(); _railSoon(); }
 
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureAccountsButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product|client)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
