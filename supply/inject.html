@@ -13159,7 +13159,7 @@
     if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
     if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
     if(seg[0]==='accounts'){ if(!ME&&(window._acWait=(window._acWait||0)+1)<=40){ setTimeout(applyRoute,250); return; }   /* permissions not loaded yet: wait up to 10s */
-      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<payables|3pl-invoicing>[/<3pl>]
+      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<payables|inbox|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if({clients:1,orders:1,commission:1,messages:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
@@ -18756,7 +18756,7 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Inbox matcher and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-  var ACCOUNTS_TABS=[['payables','Payables'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
+  var ACCOUNTS_TABS=[['payables','Payables'],['inbox','Inbox matcher'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
   function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -18773,12 +18773,53 @@
     if(!fromRoute){ try{ writeHash(['accounts',k]); }catch(e){} }
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
+    if(k==='inbox'){ acInRender(); return; }
     acRenderPayables(b); }
   function ensureAccountsButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('accounts-btn'); if(existing){ existing.style.display=accountsCan()?'':'none'; return; } if(!accountsCan())return;
     var btn=document.createElement('button'); btn.id='accounts-btn'; btn.className='view-toggle accounts-toggle'; btn.innerHTML='ACCOUNTS';
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showAccounts(); selectAccountsSub(ACCOUNTS_SUB||'payables'); };
     row.querySelectorAll('.view-toggle:not(.accounts-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideAccounts(); }); }); }
+  // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
+  // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.
+  var AC_IN={st:null,msgs:null,q:'newer_than:30d',busy:false,err:'',flash:'',disc:false};
+  function acInFlash(){ try{ var m=/[?&]gmail=([^&#]*)/.exec(location.search); if(!m)return; AC_IN.flash=decodeURIComponent(m[1].replace(/\+/g,' ')); AC_IN.st=null; AC_IN.msgs=null;
+    history.replaceState(null,'',location.pathname+location.hash); }catch(e){} }
+  function acInLoad(){ if(AC_IN.busy)return; AC_IN.busy=true; AC_IN.err='';
+    fetch('/api/accounts/gmail/status').then(function(r){ return r.json(); }).then(function(st){ AC_IN.st=st;
+      if(!st.connected){ AC_IN.busy=false; acInRender(); return; }
+      return fetch('/api/accounts/gmail/messages?q='+encodeURIComponent(AC_IN.q)).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ AC_IN.msgs=j.messages; AC_IN.busy=false; acInRender(); }); })
+      .catch(function(e){ AC_IN.busy=false; AC_IN.err=e.message; acInRender(); }); }
+  function acInRender(){ var b=document.getElementById('accounts-body'); if(!b||ACCOUNTS_SUB!=='inbox')return; acInFlash();
+    if(!AC_IN.st){ b.innerHTML='<div class="count">Loading…</div>'; acInLoad(); return; }
+    var st=AC_IN.st, h='<div style="text-align:left;max-width:1100px">';
+    if(AC_IN.flash){ var ok=/^connected /.test(AC_IN.flash); h+='<div class="count" style="padding:8px 10px;border-radius:6px;margin-bottom:10px;background:'+(ok?'var(--pos-bg,#e7f6ec)':'var(--neg-bg,#fdecec)')+';color:'+(ok?'var(--pos)':'var(--neg)')+'">'+esc(ok?('Gmail '+AC_IN.flash):AC_IN.flash)+'</div>'; }
+    h+='<div class="ac-cards"><div class="ac-card" style="min-width:340px"><div style="font-weight:600;margin-bottom:6px">Gmail mailbox</div>';
+    if(!st.configured) h+='<div class="count">Google client not set on this server (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS).</div>';
+    else if(!st.migrated) h+='<div class="count">Run migration 348 (planner.accounts_gmail) first.</div>';
+    else if(!st.connected) h+='<div class="count" style="margin-bottom:8px">Not connected. Sign in to Google as <b>'+esc(st.mailbox_hint)+'</b> in this browser, then connect. HORIZON only gets read access: it never sends, labels or deletes mail.</div><button class="save-btn" id="ac-gm-connect" style="background:var(--blue);color:#fff">Connect Gmail</button>';
+    else { var c=String(st.connected_at||'').split(' ');
+      h+='<div>Connected: <b>'+esc(st.email)+'</b></div><div class="count">since '+esc(hzTrkDate(c[0])+(c[1]?' '+c[1]:''))+(st.connected_by?' by '+esc(String(st.connected_by).split('@')[0]+'@'):'')+' · read only</div>';
+      if(st.last_error) h+='<div class="count" style="color:var(--neg)">'+esc(st.last_error)+'</div>';
+      h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
+    h+='</div></div>';
+    if(st.connected){
+      h+='<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input id="ac-gm-q" value="'+esc(AC_IN.q)+'" style="min-width:320px" placeholder="Gmail search, e.g. has:attachment newer_than:7d"><button class="save-btn light" id="ac-gm-go">Search</button><span class="count">Gmail search syntax · newest 25</span></div>';
+      if(AC_IN.err) h+='<div class="count" style="color:var(--neg)">'+esc(AC_IN.err)+'</div>';
+      else if(!AC_IN.msgs) h+='<div class="count">Loading mail…</div>';
+      else if(!AC_IN.msgs.length) h+='<div class="count">No mail matches.</div>';
+      else { h+='<table class="ac-tbl" style="width:100%;border-collapse:collapse;text-align:left"><thead><tr><th style="text-align:left">Date</th><th style="text-align:left">From</th><th style="text-align:left">Subject</th><th style="text-align:left">Attachments</th></tr></thead><tbody>';
+        AC_IN.msgs.forEach(function(m){ var f=String(m.from||'').replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from;
+          var at=m.attachments.length?m.attachments.map(function(a){ return esc(a.name)+' <span class="count">('+Math.max(1,Math.round(a.size/1024))+' KB)</span>'; }).join('<br>'):(m.stripe?'<span class="count">none · Stripe mail (receipt link)</span>':'<span class="count">none</span>');
+          h+='<tr style="border-top:1px solid var(--line,#e5e5e5)"><td style="white-space:nowrap;padding:4px 8px 4px 0">'+esc(hzTrkDate(m.date.slice(0,10)))+'</td><td style="padding:4px 8px 4px 0" title="'+esc(m.from)+'">'+esc(f)+'</td><td style="padding:4px 8px 4px 0"><div>'+esc(m.subject||'(no subject)')+'</div><div class="count">'+esc(String(m.snippet||'').slice(0,120))+'</div></td><td style="padding:4px 0">'+at+'</td></tr>'; });
+        h+='</tbody></table>'; } }
+    b.innerHTML=h+'</div>';
+    var cb=document.getElementById('ac-gm-connect'); if(cb)cb.onclick=function(){ location.href='/api/accounts/gmail/connect'; };
+    var db=document.getElementById('ac-gm-disc'); if(db)db.onclick=function(){ if(!AC_IN.disc){ AC_IN.disc=true; acInRender(); setTimeout(function(){ if(AC_IN.disc){ AC_IN.disc=false; acInRender(); } },5000); return; }
+      AC_IN.disc=false; fetch('/api/accounts/gmail/disconnect',{method:'POST'}).then(function(){ AC_IN.st=null; AC_IN.msgs=null; AC_IN.flash='Gmail disconnected'; acInRender(); }); };
+    var go=function(){ var i=document.getElementById('ac-gm-q'); AC_IN.q=(i&&i.value.trim())||'newer_than:30d'; AC_IN.flash=''; AC_IN.msgs=null; AC_IN.st=null; acInRender(); };
+    var gb=document.getElementById('ac-gm-go'); if(gb)gb.onclick=go; var qi=document.getElementById('ac-gm-q'); if(qi)qi.onkeydown=function(e){ if(e.key==='Enter')go(); }; }
   // ── ACCOUNTS > Payables: aged open Xero bills (UK + AU) from the hourly-synced bill cache; suppliers first ──
   function acAge(due,today){ if(!due)return 0; var d=(new Date(today+'T00:00:00Z')-new Date(due+'T00:00:00Z'))/86400000; return Math.round(d); }
   function acBucket(days){ return days<=0?0:days<=30?1:days<=60?2:days<=90?3:4; }

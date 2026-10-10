@@ -1,3 +1,13 @@
+## v28.248 (Ben, branch review-fixes-2026-10-05): ACCOUNTS > Inbox matcher step 1, connect the accounts@ Gmail (read-only)
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/348_accounts_gmail.sql`, `lib/ai-logic/supply-finance.md`, `.env.example` (+ package.json, CHANGES.md). **Migration 348** (additive: `planner.accounts_gmail`, one row). **New env (new external service, Diviyaj to OK):** `GMAIL_CLIENT_ID_ACCOUNTS`, `GMAIL_CLIENT_SECRET_ACCOUNTS` (Google OAuth web client, Internal consent screen, scope gmail.readonly). Optional `GMAIL_MAILBOX_ACCOUNTS` (default accounts@dockandbay.com), `GMAIL_REDIRECT_URI_ACCOUNTS`. Registered redirect URIs: `http://localhost:8124/api/accounts/gmail/callback` and `https://horizon.dockandbay.com/api/accounts/gmail/callback`. Buy plan unchanged.
+
+- New L2 tab ACCOUNTS > Inbox matcher (`#/accounts/inbox`). Connect Gmail: sign in to Google as accounts@, approve read access once; the refresh token is stored sealed (AES-256-GCM, key from the client secret) server side. Reconnect / Disconnect (two-click; also revokes the token at Google).
+- Connect is CSRF-safe: HMAC-signed state (10 min) bound to a short-lived cookie in the same browser.
+- Shows the newest 25 emails for a Gmail search (default `newer_than:30d`): date, sender, subject, snippet, attachments with size; Stripe emails without attachments are flagged (receipt link).
+- Endpoints (all behind the ACCOUNTS gate): `GET /api/accounts/gmail/status|connect|callback|messages`, `POST /api/accounts/gmail/disconnect`. Nothing is written to Gmail or Xero.
+- Next: scan + match to unreconciled bank lines, bill preview with line items, attachments / Stripe receipt PDF.
+
 ## v28.247 (Ben, branch review-fixes-2026-10-05): ACCOUNTS menu (own grant), Payables, 3PL invoicing moved in
 
 **Files:** `server.mjs`, `supply/inject.html`, `artifact_v16.7.html`, `migrations/347_accounts_access.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 347** (additive, idempotent: `app_permissions.accounts_access`; until applied everyone reads as false and only admins see ACCOUNTS; saving permissions keeps working). No env vars. Buy plan unchanged.

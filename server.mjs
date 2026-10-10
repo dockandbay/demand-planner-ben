@@ -3345,6 +3345,104 @@ app.get('/api/accounts/payables', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ bills, synced, today: new Date().toISOString().slice(0, 10) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ═══ v28.248 (Ben 10-Oct-26): ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only). ═══
+// Google OAuth web client (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS, Internal consent screen). One mailbox is
+// connected once by a user with ACCOUNTS access signed in to Google as accounts@; the refresh token is sealed (AES-256-GCM, key
+// derived from the client secret) in planner.accounts_gmail (mig 348). HORIZON never sends, labels or deletes mail: scope is gmail.readonly.
+// Redirect URI = <origin>/api/accounts/gmail/callback (must be registered on the Google client for both sandbox and live).
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_MAILBOX_HINT = process.env.GMAIL_MAILBOX_ACCOUNTS || 'accounts@dockandbay.com';
+function gmailCfg() { const id = process.env.GMAIL_CLIENT_ID_ACCOUNTS, secret = process.env.GMAIL_CLIENT_SECRET_ACCOUNTS; return id && secret ? { id, secret } : null; }
+function gmailKey(tag) { return crypto.createHash('sha256').update('hz-gmail|' + tag + '|' + (process.env.GMAIL_CLIENT_SECRET_ACCOUNTS || '')).digest(); }
+function gmailSeal(txt) { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', gmailKey('seal'), iv);
+  const ct = Buffer.concat([c.update(String(txt), 'utf8'), c.final()]); return 'g1:' + Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64'); }
+function gmailUnseal(s) { const b = Buffer.from(String(s || '').replace(/^g1:/, ''), 'base64'); const d = crypto.createDecipheriv('aes-256-gcm', gmailKey('seal'), b.subarray(0, 12));
+  d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8'); }
+function gmailRedirectUri(req) { if (process.env.GMAIL_REDIRECT_URI_ACCOUNTS) return process.env.GMAIL_REDIRECT_URI_ACCOUNTS;
+  return (_reqHttps(req) ? 'https' : 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers.host) + '/api/accounts/gmail/callback'; }
+async function gmailRow() { try { return (await pool.query(`SELECT email, refresh_token_enc, scope, connected_by, to_char(connected_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') connected_at,
+  to_char(last_ok_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') last_ok_at, last_error FROM planner.accounts_gmail WHERE id = 1`)).rows[0] || null; }
+  catch (e) { if (/does not exist/.test(e.message)) return { missing: true }; throw e; } }
+let _gmailTok = null;   // { at, exp } access token cache (1 hour from Google)
+async function gmailAccessToken() {
+  if (_gmailTok && _gmailTok.exp > Date.now() + 60000) return _gmailTok.at;
+  const cfg = gmailCfg(), row = await gmailRow(); if (!cfg) throw new Error('Gmail client not set'); if (!row || row.missing) throw new Error('Gmail not connected');
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: cfg.id, client_secret: cfg.secret, refresh_token: gmailUnseal(row.refresh_token_enc), grant_type: 'refresh_token' }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) { const msg = 'Gmail token refresh failed: ' + (j.error_description || j.error || ('HTTP ' + r.status));
+    try { await pool.query('UPDATE planner.accounts_gmail SET last_error = $1 WHERE id = 1', [msg]); } catch (_) {} _gmailTok = null; throw new Error(msg); }
+  _gmailTok = { at: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 }; return j.access_token;
+}
+async function gmailGet(path) {   // GET https://gmail.googleapis.com/gmail/v1/users/me/<path>
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken() } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { if (r.status === 401) _gmailTok = null; throw new Error('Gmail ' + r.status + ': ' + ((j.error && j.error.message) || 'request failed')); }
+  return j;
+}
+app.get('/api/accounts/gmail/status', async (req, res) => {
+  try { const row = await gmailRow();
+    res.set('Cache-Control', 'no-store').json({ configured: !!gmailCfg(), migrated: !(row && row.missing), connected: !!(row && !row.missing), mailbox_hint: GMAIL_MAILBOX_HINT, redirect_uri: gmailRedirectUri(req),
+      email: row && row.email || null, connected_by: row && row.connected_by || null, connected_at: row && row.connected_at || null, last_ok_at: row && row.last_ok_at || null, last_error: row && row.last_error || null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Connect: signed state (HMAC, 10 minutes) bound to a short-lived cookie in this browser, so a forged callback cannot plant a mailbox.
+app.get('/api/accounts/gmail/connect', (req, res) => {
+  const cfg = gmailCfg(); if (!cfg) return res.redirect('/?gmail=' + encodeURIComponent('Gmail client not set on this server') + '#/accounts/inbox');
+  const nonce = crypto.randomBytes(16).toString('base64url'), ts = Date.now().toString(36);
+  const state = ts + '.' + nonce + '.' + crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + nonce).digest('base64url');
+  res.append('Set-Cookie', 'hz_gstate=' + nonce + '; Path=/api/accounts/gmail; Max-Age=600; HttpOnly; SameSite=Lax' + (_reqHttps(req) ? '; Secure' : ''));
+  res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({ client_id: cfg.id, redirect_uri: gmailRedirectUri(req), response_type: 'code', scope: GMAIL_SCOPE,
+    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false', login_hint: GMAIL_MAILBOX_HINT, state }).toString());
+});
+app.get('/api/accounts/gmail/callback', async (req, res) => {
+  const back = (msg) => res.redirect('/?gmail=' + encodeURIComponent(msg) + '#/accounts/inbox');
+  try {
+    const cfg = gmailCfg(); if (!cfg) return back('Gmail client not set on this server');
+    if (req.query.error) return back('Google: ' + String(req.query.error).slice(0, 80));
+    const [ts, nonce, sig] = String(req.query.state || '').split('.');
+    const ck = (/(?:^|;\s*)hz_gstate=([^;]+)/.exec(String(req.headers.cookie || '')) || [])[1];
+    const good = ts && nonce && sig && ck === nonce && Date.now() - parseInt(ts, 36) < 600000 &&
+      sig === crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + nonce).digest('base64url');   // plus the cookie match: an attacker has neither
+    res.append('Set-Cookie', 'hz_gstate=; Path=/api/accounts/gmail; Max-Age=0; HttpOnly; SameSite=Lax');
+    if (!good) return back('Connect link expired or opened in another browser, click Connect again');
+    const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ code: String(req.query.code || ''), client_id: cfg.id, client_secret: cfg.secret, redirect_uri: gmailRedirectUri(req), grant_type: 'authorization_code' }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.access_token) return back('Google token exchange failed: ' + (j.error_description || j.error || ('HTTP ' + r.status)));
+    if (!j.refresh_token) return back('Google did not return a refresh token, remove HORIZON at myaccount.google.com/permissions and connect again');
+    if (!String(j.scope || '').split(' ').includes(GMAIL_SCOPE)) return back('Read access to Gmail was not ticked, connect again and allow it');
+    const p = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { authorization: 'Bearer ' + j.access_token } }).then(x => x.json()).catch(() => ({}));
+    if (!p.emailAddress) return back('Could not read the mailbox address from Gmail');
+    await pool.query(`INSERT INTO planner.accounts_gmail (id, email, refresh_token_enc, scope, connected_by, connected_at, last_ok_at, last_error) VALUES (1,$1,$2,$3,$4,now(),now(),null)
+      ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, refresh_token_enc=EXCLUDED.refresh_token_enc, scope=EXCLUDED.scope, connected_by=EXCLUDED.connected_by, connected_at=now(), last_ok_at=now(), last_error=null`,
+      [p.emailAddress.toLowerCase(), gmailSeal(j.refresh_token), j.scope || GMAIL_SCOPE, (req.me && req.me.email) || authUser(req) || null]);
+    _gmailTok = { at: j.access_token, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+    back('connected ' + p.emailAddress.toLowerCase());
+  } catch (e) { log500(e); back(/does not exist/.test(e.message) ? 'Run migration 348 first' : ('Connect failed: ' + e.message)); }
+});
+app.post('/api/accounts/gmail/disconnect', async (req, res) => {
+  try { const row = await gmailRow(); if (!row || row.missing) return res.json({ ok: true });
+    try { await fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: gmailUnseal(row.refresh_token_enc) }) }); } catch (_) {}
+    await pool.query('DELETE FROM planner.accounts_gmail WHERE id = 1'); _gmailTok = null; res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Recent mail (read-only): subject, from, date, attachments, Stripe receipt link present. ?q= is a Gmail search (default last 30 days).
+function gmailParts(p, out) { if (!p) return out; if (p.filename) out.push({ name: p.filename, type: p.mimeType, size: (p.body && p.body.size) || 0 }); (p.parts || []).forEach(x => gmailParts(x, out)); return out; }
+app.get('/api/accounts/gmail/messages', async (req, res) => {
+  try {
+    const q = String(req.query.q || 'newer_than:30d').slice(0, 300), n = Math.min(50, Math.max(1, parseInt(req.query.n, 10) || 25));
+    const list = await gmailGet('messages?' + new URLSearchParams({ q, maxResults: String(n) }).toString());
+    const ids = (list.messages || []).map(m => m.id), out = [];
+    for (let i = 0; i < ids.length; i += 10) out.push(...await Promise.all(ids.slice(i, i + 10).map(id => gmailGet('messages/' + id + '?format=full&fields=' +
+      encodeURIComponent('id,threadId,snippet,internalDate,payload(headers,filename,mimeType,body/size,parts(filename,mimeType,body/size,parts(filename,mimeType,body/size,parts(filename,mimeType,body/size))))')))));
+    const H = (m, k) => ((m.payload && m.payload.headers) || []).find(h => h.name.toLowerCase() === k);
+    const messages = out.map(m => ({ id: m.id, thread: m.threadId, date: new Date(Number(m.internalDate) || 0).toISOString(), from: (H(m, 'from') || {}).value || '', subject: (H(m, 'subject') || {}).value || '',
+      snippet: m.snippet || '', attachments: gmailParts(m.payload, []).filter(a => a.size > 0), stripe: /stripe/i.test(((H(m, 'from') || {}).value || '') + ' ' + (m.snippet || '')) }));
+    try { await pool.query('UPDATE planner.accounts_gmail SET last_ok_at = now(), last_error = null WHERE id = 1'); } catch (_) {}
+    res.set('Cache-Control', 'no-store').json({ q, messages, more: !!list.nextPageToken });
+  } catch (e) { if (!/not connected|client not set/.test(e.message)) log500(e); res.status(/not connected|client not set/.test(e.message) ? 409 : 502).json({ error: e.message }); }
+});
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
