@@ -1,3 +1,14 @@
+## v28.249 (Ben, branch review-fixes-2026-10-05): ACCOUNTS > Bank ageing (interim: entered in Xero, not reconciled)
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/349_accounts_bank_items.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 349** (additive: `planner.accounts_bank_items`, `planner.accounts_bank_accounts`). No new env. Xero reads only (GET). Buy plan unchanged.
+
+- New L2 tab ACCOUNTS > Bank ageing (`#/accounts/bank`), first in the menu. Xero UK + AU items entered on a bank account but not reconciled: spend / receive money, bill and invoice payments on a bank account (payments on loan / prepayment accounts left out), transfers with an unreconciled side.
+- Grouped by bank account (org, currency, item count per age bucket 0-30 / 31-60 / 61-90 / 90+ d, money out, money in, oldest); click for the items with Xero links. Pills Both/UK/AU and type, search, per-currency cards.
+- Background job: `POST /api/cron/accounts-bank-sync` (x-webhook-secret = N8N_WEBHOOK_SECRET, body {}), logs etl_runs `accounts_bank_ageing`; local server hourly (HZ_ACCOUNTS_CRON=0 off). Refresh now button, last-run stamp, stale badge (> 2 h or failed). A full run takes about 2 minutes (UK org needs narrow date windows).
+- Sandbox first run 10-Oct-26: 33 items (UK 32, AU 1), oldest 10-Nov-18 (CAD clearing account).
+- Not included: bank statement lines not yet matched in Xero. Needs Xero bank statement access on both custom connections (Reports/BankStatement and Finance BankStatementsPlus return 401; the scopes are not offered to our connections).
+- **Diviyaj:** n8n hourly cron for `/api/cron/accounts-bank-sync`; mirror its login-gate exemption (added beside preorders-sync); check the function timeout allows ~2 min for Refresh now on Vercel.
+
 ## v28.248 (Ben, branch review-fixes-2026-10-05): ACCOUNTS > Inbox matcher step 1, connect the accounts@ Gmail (read-only)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/348_accounts_gmail.sql`, `lib/ai-logic/supply-finance.md`, `.env.example` (+ package.json, CHANGES.md). **Migration 348** (additive: `planner.accounts_gmail`, one row). **New env (new external service, Diviyaj to OK):** `GMAIL_CLIENT_ID_ACCOUNTS`, `GMAIL_CLIENT_SECRET_ACCOUNTS` (Google OAuth web client, Internal consent screen, scope gmail.readonly). Optional `GMAIL_MAILBOX_ACCOUNTS` (default accounts@dockandbay.com), `GMAIL_REDIRECT_URI_ACCOUNTS`. Registered redirect URIs: `http://localhost:8124/api/accounts/gmail/callback` and `https://horizon.dockandbay.com/api/accounts/gmail/callback`. Buy plan unchanged.

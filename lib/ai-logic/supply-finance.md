@@ -186,7 +186,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.248
+verified_version: v28.249
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -309,6 +309,8 @@ verified_version: v28.248
 - Payables: open Xero bills in UK and AU (status approved or awaiting approval, amount due above zero) from the hourly Xero bill cache, grouped by contact, org and currency, aged by due date into Not due, 1-30, 31-60, 61-90 and 90+ days overdue. Amounts stay in the bill currency (no GBP conversion). (source: server.mjs :: /api/accounts/payables)
 - A contact counts as a Supplier when any of its bills is linked to a HORIZON PO, or its Xero name ends " - <supplier code>" matching a HORIZON supplier code. The Suppliers pill shows only those; All contacts shows every open bill. (source: server.mjs :: /api/accounts/payables)
 - 3PL invoicing moved from REPORTS to ACCOUNTS > 3PL invoicing in v28.247; old #/reports/3pl-invoicing links redirect. (source: supply/inject.html :: acRenderPayables)
+- Bank ageing (v28.249, interim): Xero items entered on a bank account but not reconciled, UK and AU: spend and receive money, bill and invoice payments whose account is a bank account (payments booked to loan or prepayment accounts are left out, they can never reconcile), and transfers with an unreconciled side (each side shows on its own account; transfer-type bank transactions are not counted twice). Grouped by bank account, aged by transaction date into 0-30, 31-60, 61-90 and 90+ days, amounts in the bank account currency. Bank statement lines not yet matched in Xero are not included (needs Xero bank statement access). (source: server.mjs :: accountsBankSyncOrg; supply/inject.html :: acRenderBank)
+- Bank ageing data comes from a background job (hourly n8n cron /api/cron/accounts-bank-sync, the local server hourly, or Refresh now), logged in etl_runs as accounts_bank_ageing; the screen reads the stored result and shows a stale badge when the last good run is over 2 hours old or failed. Xero refuses broad bank transaction reads on the UK org, so the job reads year by year and halves any window Xero refuses. (source: server.mjs :: accountsBankSync)
 - Inbox matcher (v28.248, step 1): one Gmail mailbox (accounts@) is connected by a user with ACCOUNTS access, read-only scope (gmail.readonly); HORIZON never sends, labels or deletes mail. The refresh token is stored sealed (AES-256-GCM) in planner.accounts_gmail. The tab shows the newest 25 emails for a Gmail search (default last 30 days) with their attachments, and flags Stripe emails without attachments (receipt link). Matching to unreconciled bank lines and bill creation are not built yet. (source: server.mjs :: /api/accounts/gmail/*; supply/inject.html :: acInRender)
 
 ## 3PL invoices

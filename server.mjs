@@ -1272,7 +1272,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -3345,6 +3345,92 @@ app.get('/api/accounts/payables', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ bills, synced, today: new Date().toISOString().slice(0, 10) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ═══ v28.249 (Ben 10-Oct-26): ACCOUNTS > Bank ageing (interim). Background job reads Xero UK + AU (GET only) for items ENTERED on a bank
+// account but not reconciled: spend / receive money (BankTransactions, yearly date windows: Xero refuses unfiltered reads on the UK org),
+// bill / invoice payments whose account is a bank account (payments to loan / prepayment accounts can never reconcile, left out), and
+// transfers with an unreconciled side. *-TRANSFER bank transactions are skipped (the BankTransfer row covers them). Stored in
+// planner.accounts_bank_items (mig 349); the screen reads that. Unmatched bank STATEMENT lines need Xero bank statement access (not granted).
+const ACC_BANK_FROM_YEAR = 2018;
+const _xDate = s => { if (!s) return null; const m = /\/Date\((-?\d+)/.exec(String(s)); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(s).slice(0, 10); };
+let _accBankRun = null;
+async function accountsBankSyncOrg(org) {
+  const accs = ((await xeroFetch(org, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'))) || {}).Accounts || [];
+  const bank = new Map(accs.map(a => [a.AccountID, a])), items = [];
+  const add = (kind, id, accId, date, amount, contact, ref, desc, linkId, linkType) => { const a = bank.get(accId); if (!a) return;
+    items.push([org, kind, id, accId, a.Name || '', a.CurrencyCode || '', date, Math.round(amount * 100) / 100, contact || '', ref || '', desc || '', linkId || null, linkType || null]); };
+  // Date windows: a year at a time; when Xero refuses one as too broad (HighVolumeException, 400) it is split in half, down to one day.
+  const dt = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
+  const btWindow = async (a, b) => { const bt = [];
+    for (let p = 1; p < 50; p++) { let j;
+      try { j = await xeroFetch(org, '/api.xro/2.0/BankTransactions?where=' + encodeURIComponent(`Date>=${dt(a)} AND Date<${dt(b)} AND IsReconciled==false`) + '&pageSize=1000&page=' + p); }
+      catch (e) { const days = (b - a) / 86400000; if (e.code === 400 && /efficient|HighVolume/i.test(e.message + JSON.stringify(e.body || '')) && days > 1) { const m = new Date(a.getTime() + Math.floor(days / 2) * 86400000); return (await btWindow(a, m)).concat(await btWindow(m, b)); } throw e; }
+      const x = (j && j.BankTransactions) || []; bt.push(...x); if (x.length < 1000) break; }
+    return bt; };
+  const nextYear = new Date().getUTCFullYear() + 1;
+  for (let y = ACC_BANK_FROM_YEAR; y <= nextYear; y++) {
+    const bt = await btWindow(new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y + 1, 0, 1)));
+    bt.filter(t => t.Status === 'AUTHORISED' && !/TRANSFER$/.test(t.Type || '')).forEach(t => add(/^RECEIVE/.test(t.Type) ? 'receive' : 'spend', t.BankTransactionID, t.BankAccount && t.BankAccount.AccountID,
+      _xDate(t.DateString || t.Date), (/^RECEIVE/.test(t.Type) ? 1 : -1) * (Number(t.Total) || 0), t.Contact && t.Contact.Name, t.Reference, ((t.LineItems || [])[0] || {}).Description));
+  }
+  for (let p = 1; p < 100; p++) {
+    const j = await xeroFetch(org, '/api.xro/2.0/Payments?where=' + encodeURIComponent('IsReconciled==false AND Status=="AUTHORISED"') + '&pageSize=1000&page=' + p);
+    const ps = (j && j.Payments) || [];
+    ps.forEach(x => { const inv = x.Invoice || x.CreditNote || {}, t = String(x.PaymentType || ''), out = t === 'ACCPAYPAYMENT' || t === 'ACCRECCREDITPAYMENT' || t === 'APOVERPAYMENTPAYMENT' || t === 'APPREPAYMENTPAYMENT';
+      add('payment', x.PaymentID, x.Account && x.Account.AccountID, _xDate(x.Date), (out ? -1 : 1) * (Number(x.BankAmount != null ? x.BankAmount : x.Amount) || 0),
+        inv.Contact && inv.Contact.Name, x.Reference || inv.InvoiceNumber || inv.CreditNoteNumber, (t.startsWith('ACCPAY') || t.startsWith('AP') ? 'Bill ' : 'Invoice ') + (inv.InvoiceNumber || inv.CreditNoteNumber || ''),
+        x.Invoice ? x.Invoice.InvoiceID : null, x.Invoice ? (t.startsWith('ACCPAY') ? 'ACCPAY' : 'ACCREC') : null); });
+    if (ps.length < 1000) break;
+  }
+  const tr = ((await xeroFetch(org, '/api.xro/2.0/BankTransfers?where=' + encodeURIComponent(`Date>=DateTime(${ACC_BANK_FROM_YEAR},01,01)`))) || {}).BankTransfers || [];
+  tr.forEach(x => { const d = _xDate(x.DateString || x.Date), fa = x.FromBankAccount || {}, ta = x.ToBankAccount || {}, amt = Number(x.Amount) || 0;
+    if (!x.FromIsReconciled) add('transfer', x.BankTransferID, fa.AccountID, d, -amt, '', x.Reference, 'Transfer to ' + (ta.Name || ''));
+    if (!x.ToIsReconciled) add('transfer', x.BankTransferID, ta.AccountID, d, amt, '', x.Reference, 'Transfer from ' + (fa.Name || '')); });
+  const c = await pool.connect();
+  try { await c.query('BEGIN');
+    await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1', [org]); await c.query('DELETE FROM planner.accounts_bank_accounts WHERE org = $1', [org]);
+    for (let i = 0; i < items.length; i += 300) { const ch = items.slice(i, i + 300), v = [];
+      await c.query(`INSERT INTO planner.accounts_bank_items (org, kind, xero_id, bank_account_id, bank_account, currency, txn_date, amount, contact, reference, description, link_id, link_type) VALUES `
+        + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 13 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
+    const al = accs.map(a => [org, a.AccountID, a.Name || '', a.Code || '', a.CurrencyCode || '', a.Status || '']);
+    for (let i = 0; i < al.length; i += 300) { const ch = al.slice(i, i + 300);
+      await c.query('INSERT INTO planner.accounts_bank_accounts (org, account_id, name, code, currency, status) VALUES ' + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 6 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
+    await c.query('COMMIT');
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+  return { org, items: items.length, accounts: accs.length };
+}
+async function accountsBankSync(by) {
+  if (_accBankRun) return _accBankRun;   // single flight: a second click shares the running job
+  _accBankRun = (async () => { const out = [], errs = [];
+    for (const org of XERO_REGIONS) { try { out.push(await accountsBankSyncOrg(org)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
+    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)').join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_bank_ageing',$1,$2,$3)`, [errs.length ? 'error' : 'success', n, msg.slice(0, 500)]); } catch (_) {}
+    return { ok: !errs.length, items: n, orgs: out, errors: errs }; })().finally(() => { _accBankRun = null; });
+  return _accBankRun;
+}
+app.get('/api/accounts/bank-ageing', async (req, res) => {
+  try {
+    const items = (await pool.query(`SELECT org, kind, xero_id, bank_account_id, bank_account, currency, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, contact, reference, description, link_id, link_type
+      FROM planner.accounts_bank_items ORDER BY txn_date NULLS LAST`)).rows;
+    items.forEach(x => { x.url = x.kind === 'payment' && x.link_id ? (x.link_type === 'ACCPAY' ? xbUrl(x.link_id) : 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + x.link_id)
+      : x.kind === 'transfer' ? 'https://go.xero.com/Bank/BankTransactions.aspx?accountID=' + x.bank_account_id : 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + x.xero_id; });
+    const last = (await pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
+      FROM planner.etl_runs WHERE job='accounts_bank_ageing' ORDER BY ran_at DESC LIMIT 1`)).rows[0] || null;
+    res.set('Cache-Control', 'no-store').json({ items, last, running: !!_accBankRun, today: new Date().toISOString().slice(0, 10) });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true, today: new Date().toISOString().slice(0, 10) }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/bank-ageing/refresh', async (req, res) => {
+  try { const r = await accountsBankSync((req.me && req.me.email) || 'refresh'); res.status(r.ok ? 200 : 502).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// PROD SCHEDULE: n8n hourly, POST /api/cron/accounts-bank-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {}. 200 ok / 401 secret / 500 failed.
+// Logs planner.etl_runs job 'accounts_bank_ageing'. The local server runs it hourly too (HZ_ACCOUNTS_CRON=0 turns that off).
+app.post('/api/cron/accounts-bank-sync', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const r = await accountsBankSync('cron'); res.status(r.ok ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON !== '0') {
+  const _ab = () => accountsBankSync('timer').then(r => console.log('[accounts-bank] ' + r.items + ' item(s)' + (r.errors.length ? ' errors: ' + r.errors.join('; ') : '')), e => console.warn('[accounts-bank] failed: ' + (e && e.message)));
+  setTimeout(_ab, 600000).unref?.(); setInterval(_ab, 3600000).unref?.();
+}
 // ═══ v28.248 (Ben 10-Oct-26): ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only). ═══
 // Google OAuth web client (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS, Internal consent screen). One mailbox is
 // connected once by a user with ACCOUNTS access signed in to Google as accounts@; the refresh token is sealed (AES-256-GCM, key

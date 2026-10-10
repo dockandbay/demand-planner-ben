@@ -13159,7 +13159,7 @@
     if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
     if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
     if(seg[0]==='accounts'){ if(!ME&&(window._acWait=(window._acWait||0)+1)<=40){ setTimeout(applyRoute,250); return; }   /* permissions not loaded yet: wait up to 10s */
-      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<payables|inbox|3pl-invoicing>[/<3pl>]
+      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if({clients:1,orders:1,commission:1,messages:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
@@ -18756,7 +18756,7 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Inbox matcher and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-  var ACCOUNTS_TABS=[['payables','Payables'],['inbox','Inbox matcher'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
+  var ACCOUNTS_TABS=[['bank','Bank ageing'],['payables','Payables'],['inbox','Inbox matcher'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
   function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -18774,12 +18774,61 @@
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
     if(k==='inbox'){ acInRender(); return; }
+    if(k==='bank'){ acRenderBank(b); return; }
     acRenderPayables(b); }
   function ensureAccountsButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('accounts-btn'); if(existing){ existing.style.display=accountsCan()?'':'none'; return; } if(!accountsCan())return;
     var btn=document.createElement('button'); btn.id='accounts-btn'; btn.className='view-toggle accounts-toggle'; btn.innerHTML='ACCOUNTS';
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]'); if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showAccounts(); selectAccountsSub(ACCOUNTS_SUB||'payables'); };
     row.querySelectorAll('.view-toggle:not(.accounts-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideAccounts(); }); }); }
+  // ── v28.249 ACCOUNTS > Bank ageing (interim): Xero items entered on a bank account but not reconciled, UK + AU, from the background job
+  // (hourly; Refresh now runs it). Grouped by bank account, aged by transaction date. Statement lines need Xero bank statement access (pending).
+  var AC_BK={org:'all',kind:'all',q:'',open:{},d:null,busy:false,run:false,err:''};
+  var AC_BK_KIND={spend:'Spend money',receive:'Receive money',payment:'Payment',transfer:'Transfer'};
+  function acBkBucket(days){ return days<=30?0:days<=60?1:days<=90?2:3; }
+  function acRenderBank(b){
+    if(!AC_BK.d){ if(AC_BK.busy)return; AC_BK.busy=true;
+      fetch('/api/accounts/bank-ageing').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ AC_BK.d=j; AC_BK.busy=false; if(ACCOUNTS_SUB==='bank')acRenderBank(document.getElementById('accounts-body')); })
+        .catch(function(e){ AC_BK.busy=false; b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; });
+      return; }
+    var d=AC_BK.d, today=d.today, q=AC_BK.q.toLowerCase();
+    var its=d.items.filter(function(x){ if(AC_BK.org!=='all'&&x.org!==AC_BK.org)return false; if(AC_BK.kind!=='all'&&x.kind!==AC_BK.kind)return false;
+      if(q&&(x.bank_account+' '+x.contact+' '+x.reference+' '+x.description).toLowerCase().indexOf(q)<0)return false; return true; });
+    var groups={}, tot={};
+    its.forEach(function(x){ var k=x.org+'|'+x.bank_account_id; var g=groups[k]||(groups[k]={k:k,org:x.org,name:x.bank_account,ccy:x.currency,items:[],n:[0,0,0,0],out:0,inn:0,oldest:0});
+      var age=acAge(x.txn_date,today); g.items.push(x); g.n[acBkBucket(age)]++; if(x.amount<0)g.out+=x.amount; else g.inn+=x.amount; if(age>g.oldest)g.oldest=age;
+      var t=tot[x.currency]||(tot[x.currency]={n:0,out:0,inn:0,o30:0}); t.n++; if(x.amount<0)t.out+=x.amount; else t.inn+=x.amount; if(age>30)t.o30++; });
+    var G=Object.keys(groups).map(function(k){return groups[k];}).sort(function(a,c){ return c.oldest-a.oldest; });
+    function pill(grp,val,lab){ return '<span class="pill'+(AC_BK[grp]===val?' active':'')+'" data-g="'+grp+'" data-v="'+val+'">'+lab+'</span>'; }
+    var cards=Object.keys(tot).sort().map(function(c){ var t=tot[c]; return '<div class="ac-card"><div class="k">Unreconciled · '+esc(c)+'</div><div class="v">'+t.n+' item'+(t.n===1?'':'s')+'</div><div class="tiny mut">out '+acMoney(-t.out,c)+' · in '+acMoney(t.inn,c)+' · <span style="color:'+(t.o30?'var(--neg)':'inherit')+'">'+t.o30+' over 30 d</span></div></div>'; }).join('');
+    var nc=function(v,red){ return '<td class="l"'+(v&&red?' style="color:var(--neg);font-weight:600"':'')+'>'+(v||'<span class="mut">·</span>')+'</td>'; };
+    var rows=G.map(function(g){ var op=!!AC_BK.open[g.k];
+      var h='<tr class="ac-g" data-k="'+esc(g.k)+'" style="cursor:pointer"><td class="l"><b>'+(op?'▾ ':'▸ ')+esc(g.name||'(bank account)')+'</b></td><td class="l">'+g.org.toUpperCase()+'</td><td class="l">'+esc(g.ccy)+'</td><td class="l">'+g.items.length+'</td>'
+        +nc(g.n[0])+nc(g.n[1],1)+nc(g.n[2],1)+nc(g.n[3],1)+'<td class="l">'+(g.out?acMoney(-g.out,g.ccy):'<span class="mut">·</span>')+'</td><td class="l">'+(g.inn?acMoney(g.inn,g.ccy):'<span class="mut">·</span>')+'</td><td class="l">'+(g.oldest>30?'<span style="color:var(--neg)">'+g.oldest+' d</span>':g.oldest+' d')+'</td></tr>';
+      if(op)g.items.slice().sort(function(a,c){ return a.txn_date<c.txn_date?-1:1; }).forEach(function(x){ var age=acAge(x.txn_date,today);
+        h+='<tr class="ac-sub"><td class="l" style="padding-left:24px">'+esc(hzTrkDate(x.txn_date))+' · <span'+(age>30?' style="color:var(--neg);font-weight:600"':'')+'>'+age+' d</span></td><td class="l" colspan="3">'+esc(AC_BK_KIND[x.kind]||x.kind)+'</td>'
+          +'<td class="l" colspan="4">'+esc(x.contact||'')+(x.reference?' <span class="mut">· '+esc(x.reference)+'</span>':'')+(x.description?' <span class="mut">· '+esc(String(x.description).slice(0,80))+'</span>':'')+'</td>'
+          +'<td class="l">'+(x.amount<0?acMoney(-x.amount,x.currency):'')+'</td><td class="l">'+(x.amount>=0?acMoney(x.amount,x.currency):'')+'</td><td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'; });
+      return h; }).join('');
+    var L=d.last, stale=!L||L.age_s>7200||L.status!=='success';
+    var stamp=AC_BK.run?'Refreshing from Xero…':(L?('Last run '+acSynced(L.at)+(L.status!=='success'?' · <span style="color:var(--neg)">'+esc(L.message||'failed')+'</span>':'')):'Never run');
+    b.innerHTML='<div class="bar">'+pill('org','all','Both')+pill('org','uk','UK')+pill('org','au','AU')+'<span style="width:10px"></span>'+pill('kind','all','All')+pill('kind','spend','Spend')+pill('kind','receive','Receive')+pill('kind','payment','Payments')+pill('kind','transfer','Transfers')
+      +'<input class="fci" id="ac-bq" placeholder="Search account, contact, reference" style="width:240px" value="'+esc(AC_BK.q)+'"><span class="save-btn light" id="ac-brf">'+(AC_BK.run?'Refreshing…':'Refresh now')+'</span>'
+      +'<span class="tiny mut" style="margin-left:auto">'+stamp+(stale&&!AC_BK.run?' <span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">stale</span>':'')+'</span></div>'
+      +(AC_BK.err?'<div class="count" style="color:var(--neg)">'+esc(AC_BK.err)+'</div>':'')
+      +(d.missing?'<div class="count">Run migration 349 first.</div>':'')
+      +'<div class="ac-cards">'+(cards||'<div class="mut">'+(L?'Nothing unreconciled.':'Not loaded yet: click Refresh now.')+'</div>')+'</div>'
+      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Bank account</th><th>Org</th><th>Ccy</th><th>Items</th><th>0-30 d</th><th>31-60 d</th><th>61-90 d</th><th>90+ d</th><th>Money out</th><th>Money in</th><th>Oldest</th></tr></thead><tbody>'
+      +(rows||'<tr><td colspan="11" class="l mut">No unreconciled items match.</td></tr>')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:8px">Items entered in Xero on a bank account but not yet reconciled: spend and receive money, bill and invoice payments, transfers. Aged by transaction date, in the bank account currency. Payments made from non-bank accounts (loan, prepayments) are left out. Bank statement lines not yet matched in Xero are not shown: that needs Xero bank statement access on the UK and AU connections. Refreshed hourly in the background.</div>';
+    b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_BK[p.dataset.g]=p.dataset.v; acRenderBank(b); }; });
+    b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_BK.open[k]=!AC_BK.open[k]; acRenderBank(b); }; });
+    var qi=document.getElementById('ac-bq'); qi.oninput=function(){ AC_BK.q=qi.value; clearTimeout(AC_BK._t); AC_BK._t=setTimeout(function(){ acRenderBank(b); var n=document.getElementById('ac-bq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+    document.getElementById('ac-brf').onclick=function(){ if(AC_BK.run)return; AC_BK.run=true; AC_BK.err=''; acRenderBank(b);
+      fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json(); }).then(function(j){ AC_BK.run=false; if(j.errors&&j.errors.length)AC_BK.err=j.errors.join('; '); else if(j.error)AC_BK.err=j.error; AC_BK.d=null; acRenderBank(document.getElementById('accounts-body')); })
+        .catch(function(e){ AC_BK.run=false; AC_BK.err=e.message; acRenderBank(b); }); };
+  }
   // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.
   var AC_IN={st:null,msgs:null,q:'newer_than:30d',busy:false,err:'',flash:'',disc:false};
