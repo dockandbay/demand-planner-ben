@@ -13159,7 +13159,7 @@
     if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
     if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
     if(seg[0]==='accounts'){ if(!ME&&(window._acWait=(window._acWait||0)+1)<=40){ setTimeout(applyRoute,250); return; }   /* permissions not loaded yet: wait up to 10s */
-      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|3pl-invoicing>[/<3pl>]
+      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if({clients:1,orders:1,commission:1,messages:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
@@ -18756,7 +18756,7 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Inbox matcher and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-  var ACCOUNTS_TABS=[['bank','Bank ageing'],['payables','Payables'],['inbox','Inbox matcher'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
+  var ACCOUNTS_TABS=[['bank','Bank ageing'],['payables','Payables'],['inbox','Inbox matcher'],['backdate','Back-date'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
   function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -18775,6 +18775,7 @@
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
     if(k==='inbox'){ acInRender(); return; }
     if(k==='bank'){ acRenderBank(b); return; }
+    if(k==='backdate'){ acRenderBackdate(b); return; }
     acRenderPayables(b); }
   function ensureAccountsButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('accounts-btn'); if(existing){ existing.style.display=accountsCan()?'':'none'; return; } if(!accountsCan())return;
     var btn=document.createElement('button'); btn.id='accounts-btn'; btn.className='view-toggle accounts-toggle'; btn.innerHTML='ACCOUNTS';
@@ -18828,6 +18829,46 @@
     document.getElementById('ac-brf').onclick=function(){ if(AC_BK.run)return; AC_BK.run=true; AC_BK.err=''; acRenderBank(b);
       fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json(); }).then(function(j){ AC_BK.run=false; if(j.errors&&j.errors.length)AC_BK.err=j.errors.join('; '); else if(j.error)AC_BK.err=j.error; AC_BK.d=null; acRenderBank(document.getElementById('accounts-body')); })
         .catch(function(e){ AC_BK.run=false; AC_BK.err=e.message; acRenderBank(b); }); };
+  }
+  // ── v28.250 ACCOUNTS > Back-date: past opportunities from the weekly learn job (read only, nothing is written to Xero from here).
+  // Receipts = reconciled Xero items whose receipt email is in accounts@ but Xero has no file; Tax = UK spend coded Reverse Charge.
+  var AC_BD={issue:'receipt',org:'all',q:'',d:null,busy:false,poll:null};
+  var AC_BD_TAX={REVERSECHARGES:'Reverse Charge',ZERORATEDINPUT:'Zero Rated Expenses',INPUT2:'20% VAT on Expenses',NONE:'No VAT',EXEMPTINPUT:'Exempt',INPUT:'GST on Expenses',EXEMPTEXPENSES:'GST Free',BASEXCLUDED:'BAS Excluded'};
+  function acBdTax(t){ return String(t||'').split(' ').filter(Boolean).map(function(x){ return AC_BD_TAX[x]||x; }).join(', '); }
+  function acRenderBackdate(b){
+    if(!AC_BD.d){ if(AC_BD.busy)return; AC_BD.busy=true;
+      fetch('/api/accounts/backdate').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ AC_BD.d=j; AC_BD.busy=false; clearTimeout(AC_BD.poll); if(j.running)AC_BD.poll=setTimeout(function(){ AC_BD.d=null; if(ACCOUNTS_SUB==='backdate')acRenderBackdate(document.getElementById('accounts-body')); },10000);
+          if(ACCOUNTS_SUB==='backdate')acRenderBackdate(document.getElementById('accounts-body')); })
+        .catch(function(e){ AC_BD.busy=false; b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; });
+      return; }
+    var d=AC_BD.d, q=AC_BD.q.toLowerCase();
+    var all=d.items.filter(function(x){ return AC_BD.org==='all'||x.org===AC_BD.org; });
+    var nR=all.filter(function(x){return x.issue==='receipt';}).length, nT=all.filter(function(x){return x.issue==='tax';}).length;
+    var its=all.filter(function(x){ if(x.issue!==AC_BD.issue)return false; if(q&&(x.contact+' '+x.bank+' '+(x.email_from||'')+' '+(x.email_subject||'')).toLowerCase().indexOf(q)<0)return false; return true; });
+    function pill(grp,val,lab){ return '<span class="pill'+(AC_BD[grp]===val?' active':'')+'" data-g="'+grp+'" data-v="'+val+'">'+lab+'</span>'; }
+    var rows=its.map(function(x){ var amt=acMoney(Math.abs(x.amount),x.currency);
+      if(x.issue==='receipt'){ var fr=String(x.email_from||'').replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||x.email_from;
+        return '<tr><td class="l">'+esc(hzTrkDate(x.txn_date))+'</td><td class="l">'+x.org.toUpperCase()+'</td><td class="l"><b>'+esc(x.contact)+'</b><div class="tiny mut">'+(x.kind==='billpay'?'Bill payment':'Spend money')+(x.bank&&x.kind!=='billpay'?' · '+esc(x.bank):'')+'</div></td><td class="l">'+amt+'</td>'
+          +'<td class="l">'+esc(hzTrkDate(x.email_date))+' · <span title="'+esc(x.email_from)+'">'+esc(fr)+'</span><div class="tiny mut">'+esc(String(x.email_subject||'').slice(0,90))+'</div></td>'
+          +'<td class="l">'+esc(x.file_source)+((x.files||[]).length?'<div class="tiny mut">'+esc(x.files.join(', ').slice(0,80))+'</div>':'')+'</td><td class="l">'+(x.lag_days>0?x.lag_days+' d before':x.lag_days<0?(-x.lag_days)+' d after':'same day')+(x.ambiguous?' <span class="pill" style="cursor:default" title="Another email with the same amount scored almost as high">check</span>':'')+'</td>'
+          +'<td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a> · <a href="'+esc(x.mail_url)+'" target="_blank" rel="noopener">Email ↗</a></td></tr>'; }
+      return '<tr><td class="l">'+esc(hzTrkDate(x.txn_date))+'</td><td class="l">'+x.org.toUpperCase()+'</td><td class="l"><b>'+esc(x.contact)+'</b><div class="tiny mut">'+esc(x.bank||'')+'</div></td><td class="l">'+amt+'</td>'
+        +'<td class="l">'+esc(x.account||'')+'</td><td class="l" style="color:var(--neg)">'+esc(acBdTax(x.tax))+'</td><td class="l">'+esc(x.suggested_tax||'')+'</td><td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'; }).join('');
+    var head=AC_BD.issue==='receipt'?'<th>Bank date</th><th>Org</th><th>Payee</th><th>Amount</th><th>Receipt email</th><th>File</th><th>Email sent</th><th></th>':'<th>Bank date</th><th>Org</th><th>Payee</th><th>Amount</th><th>Account</th><th>Coded as</th><th>Should be</th><th></th>';
+    var L=d.last, stale=!L||L.age_s>8*86400||L.status!=='success';
+    var stamp=d.running?('Running: '+esc(d.stage||'starting')+'…'):(L?('Last run '+acSynced(L.at)+(L.status!=='success'?' · <span style="color:var(--neg)">'+esc(L.message||'failed')+'</span>':'')):'Never run');
+    b.innerHTML='<div class="bar">'+pill('issue','receipt','Receipts to attach ('+nR+')')+pill('issue','tax','Tax to review ('+nT+')')+'<span style="width:10px"></span>'+pill('org','all','Both')+pill('org','uk','UK')+pill('org','au','AU')
+      +'<input class="fci" id="ac-dq" placeholder="Search payee, sender, subject" style="width:220px" value="'+esc(AC_BD.q)+'"><span class="save-btn light" id="ac-drf">'+(d.running?'Running…':'Refresh now')+'</span>'
+      +'<span class="tiny mut" style="margin-left:auto">'+stamp+(stale&&!d.running?' <span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">stale</span>':'')+'</span></div>'
+      +(d.missing?'<div class="count">Run migration 350 first.</div>':'')
+      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr>'+head+'</tr></thead><tbody>'+(rows||'<tr><td colspan="8" class="l mut">'+(L?'Nothing to back-date.':'Not run yet: click Refresh now (first run about 10 minutes).')+'</td></tr>')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:8px">'+(AC_BD.issue==='receipt'
+        ?'Reconciled Xero spend and bill payments (last '+(d.days||120)+' days) whose receipt email is in accounts@ but Xero has no file attached. Paired by exact amount, with the payee name in the sender or subject (or a short email in the same currency within 3 days). Feeds, 3PLs and product suppliers are left out. Nothing is attached from here yet.'
+        :'UK spend coded Reverse Charge. Rule: non-GBP expenses are Zero Rated Expenses; GBP expenses are 20% VAT on Expenses or No VAT; bank fees No VAT. Review with the accountant before recoding; nothing is changed from here.')+' Refreshed weekly.</div>';
+    b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_BD[p.dataset.g]=p.dataset.v; acRenderBackdate(b); }; });
+    var qi=document.getElementById('ac-dq'); qi.oninput=function(){ AC_BD.q=qi.value; clearTimeout(AC_BD._t); AC_BD._t=setTimeout(function(){ acRenderBackdate(b); var n=document.getElementById('ac-dq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+    document.getElementById('ac-drf').onclick=function(){ if(d.running)return; fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(){ AC_BD.d=null; acRenderBackdate(b); }); };
   }
   // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.

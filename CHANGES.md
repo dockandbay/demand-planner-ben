@@ -1,3 +1,14 @@
+## v28.250 (Ben, branch review-fixes-2026-10-05): ACCOUNTS > Back-date (past receipts to attach, Reverse Charge to review), weekly learn job
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/350_accounts_backdate.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 350** (additive: `planner.accounts_backdate`, `planner.accounts_gmail_msgs` = parsed accounts@ mail cache, amounts only, no bodies). No new env. Read only on Xero and Gmail. Buy plan unchanged.
+
+- New L2 tab ACCOUNTS > Back-date (`#/accounts/backdate`). Ben: no bills unless a matching statement line is known; learn from reconciled items instead, and list back-date opportunities without acting on them.
+- Receipts to attach: reconciled Xero spend and bill payments (UK + AU, 120 days) whose receipt email is in accounts@ but Xero has no file. Exact amount + payee name in sender/subject (or short same-currency email within 3 days). Feeds, 3PLs (Coghlans, ILG, I-Fulfilment, Geneva) and product suppliers left out. Links to the Xero item and the email.
+- Tax to review: all reconciled UK spend coded Reverse Charge, with the rule (non-GBP = Zero Rated Expenses, GBP = 20% VAT or No VAT; bank fees No VAT).
+- Weekly job: `POST /api/cron/accounts-learn` (x-webhook-secret = N8N_WEBHOOK_SECRET), etl_runs `accounts_learn`; local server weekly (HZ_ACCOUNTS_CRON=0 off); Refresh now starts it in the background and the page polls. First run reads every email (~10 min, Gmail quota); later runs only read new mail.
+- Sandbox run 10-Oct-26: 1,324 of 15,434 reconciled items considered, 150 with an email, 56 receipts to attach (UK 51, AU 5), 386 Reverse Charge items (Stripe 328, Google 30, LinkedIn 8, ...).
+- **Diviyaj:** n8n weekly cron for `/api/cron/accounts-learn` + login-gate exemption (added beside the others). The first run is long: run it from n8n with a long timeout or locally, not via a 300 s Vercel function.
+
 ## v28.249 (Ben, branch review-fixes-2026-10-05): ACCOUNTS > Bank ageing (interim: entered in Xero, not reconciled)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/349_accounts_bank_items.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 349** (additive: `planner.accounts_bank_items`, `planner.accounts_bank_accounts`). No new env. Xero reads only (GET). Buy plan unchanged.

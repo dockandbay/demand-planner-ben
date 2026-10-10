@@ -1272,7 +1272,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -3529,6 +3529,139 @@ app.get('/api/accounts/gmail/messages', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ q, messages, more: !!list.nextPageToken });
   } catch (e) { if (!/not connected|client not set/.test(e.message)) log500(e); res.status(/not connected|client not set/.test(e.message) ? 409 : 502).json({ error: e.message }); }
 });
+// ═══ v28.250 (Ben 10-Oct-26): ACCOUNTS > Back-date. Weekly learn job (READ ONLY on Xero + Gmail): reconciled Xero spend and bill payments
+// (UK + AU, last ACC_LEARN_DAYS) are paired with accounts@ emails by exact amount; pairs whose Xero item has no file are listed as
+// "receipt" opportunities, and UK spend coded Reverse Charge as "tax" (Ben: foreign = Zero Rated Expenses, GBP = 20% VAT or No VAT).
+// Left out of receipt matching: feeds (payees with >= ACC_FEED_MIN items in the window), 3PLs (billed through 3PL invoicing) and HORIZON
+// product suppliers. The tax review covers all reconciled UK spend except 3PLs and product suppliers.
+// Pairing: amount equal, email 60 days before to 7 after the bank date, and the payee name in the sender / subject; without the name only a
+// short email (<= 8 amounts) with the same explicit currency and a gap of -2..+3 days counts. Nothing is written to Xero.
+const ACC_LEARN_DAYS = 120, ACC_FEED_MIN = 60, ACC_TPL_RE = /coghlan|\bilg\b|i-?fulfil|geneva/i;
+const _accAMT = /(?:(£|€|\$|A\$|AU\$|US\$|GBP|USD|EUR|AUD)\s?)?(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})(?!\d)/g;
+function accAmounts(txt) { const s = new Map(); let m; _accAMT.lastIndex = 0; while ((m = _accAMT.exec(String(txt || '')))) { const v = Number(m[2].replace(/,/g, '') + '.' + m[3]); if (v > 0) s.set(v.toFixed(2), m[1] || s.get(v.toFixed(2)) || ''); } return [...s]; }
+async function gmailGetPaced(path) {   // Gmail per-user quota: back off on 429 / quota 403 / 5xx
+  for (let a = 0; a < 12; a++) {
+    const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken() } });
+    if (r.status === 401) { _gmailTok = null; continue; }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 429 || r.status >= 500 || (r.status === 403 && /quota|rate/i.test(JSON.stringify(j)))) { await new Promise(s => setTimeout(s, r.status === 403 ? 20000 : 2000 * (a + 1))); continue; }
+    if (!r.ok) throw new Error('Gmail ' + r.status + ': ' + ((j.error && j.error.message) || 'request failed'));
+    return j;
+  }
+  throw new Error('Gmail busy (quota), try again later');
+}
+async function accGmailCache(days) {   // parse new accounts@ mail into planner.accounts_gmail_msgs; returns how many were new
+  const ids = []; let tok = '';
+  do { const j = await gmailGetPaced('messages?' + new URLSearchParams(Object.assign({ q: 'newer_than:' + days + 'd', maxResults: '500' }, tok ? { pageToken: tok } : {})).toString()); ids.push(...(j.messages || []).map(m => m.id)); tok = j.nextPageToken; } while (tok);
+  const have = new Set((await pool.query('SELECT id FROM planner.accounts_gmail_msgs WHERE id = ANY($1)', [ids])).rows.map(r => r.id)), todo = ids.filter(id => !have.has(id));
+  const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); let PDFParse = null;
+  try { ({ PDFParse } = await import('pdf-parse')); } catch (_) {}
+  const one = async id => { const m = await gmailGetPaced('messages/' + id + '?format=full'); if (!m || !m.payload) return;
+    const H = k => ((m.payload.headers || []).find(h => h.name.toLowerCase() === k) || {}).value || '';
+    let text = '', html = ''; const atts = [];
+    const walk = p => { if (!p) return; if (p.filename && p.body && (p.body.attachmentId || p.body.data)) atts.push({ name: p.filename, type: p.mimeType, size: p.body.size, aid: p.body.attachmentId });
+      else if (p.mimeType === 'text/plain' && p.body && p.body.data) text += b64(p.body.data).toString('utf8'); else if (p.mimeType === 'text/html' && p.body && p.body.data) html += b64(p.body.data).toString('utf8'); (p.parts || []).forEach(walk); };
+    walk(m.payload);
+    const stripe = /https:\/\/(?:pay|invoice)\.stripe\.com\//.test(html + ' ' + text);
+    const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€')).replace(/\s+/g, ' ');
+    const pdfAm = new Map();
+    if (PDFParse) for (const a of atts.filter(a => /pdf/i.test(a.type) || /\.pdf$/i.test(a.name)).slice(0, 2)) { if (!a.aid || a.size > 3e6) continue;
+      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v)); } catch (_) {} }
+    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...pdfAm])]); };
+  for (let i = 0; i < todo.length; i += 4) { await Promise.all(todo.slice(i, i + 4).map(id => one(id).catch(e => console.warn('[accounts-learn] mail ' + id + ': ' + e.message)))); await new Promise(s => setTimeout(s, 350)); }
+  return todo.length;
+}
+async function accXeroBtRange(org, from, to, where) {   // BankTransactions in [from, to), halving any window Xero refuses as too broad
+  const dt = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
+  const win = async (a, b) => { const out = [];
+    for (let p = 1; p < 100; p++) { let j;
+      try { j = await xeroFetch(org, '/api.xro/2.0/BankTransactions?where=' + encodeURIComponent(`Date>=${dt(a)} AND Date<${dt(b)} AND ${where}`) + '&pageSize=1000&page=' + p); }
+      catch (e) { const days = (b - a) / 864e5; if (e.code === 400 && /efficient|HighVolume/i.test(e.message + JSON.stringify(e.body || '')) && days > 1) { const m = new Date(a.getTime() + Math.floor(days / 2) * 864e5); return (await win(a, m)).concat(await win(m, b)); } throw e; }
+      const x = (j && j.BankTransactions) || []; out.push(...x); if (x.length < 1000) break; }
+    return out; };
+  const all = []; for (let a = new Date(from); a < to;) { const b = new Date(Math.min(to, a.getTime() + 31 * 864e5)); all.push(...await win(a, b)); a = b; }
+  return all;
+}
+let _accLearnRun = null, _accLearnStage = '';
+async function accountsLearn(by) {
+  if (_accLearnRun) return _accLearnRun;
+  _accLearnRun = (async () => { try {
+    const since = new Date(Date.now() - ACC_LEARN_DAYS * 864e5), until = new Date(Date.now() + 864e5), sinceS = since.toISOString().slice(0, 10);
+    const xd = s => { const m = /\/Date\((-?\d+)/.exec(String(s || '')); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(s || '').slice(0, 10); };
+    const sup = (await pool.query(`SELECT name, code FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'`)).rows;
+    const supCodes = new Set(sup.map(r => String(r.code || '').trim().toUpperCase()).filter(Boolean)), supNames = new Set(sup.map(r => String(r.name || '').trim().toLowerCase()).filter(Boolean));
+    const isSup = c => { const m = / - ([A-Za-z0-9]{1,8})$/.exec(String(c || '').trim()); return !!(m && supCodes.has(m[1].toUpperCase())) || supNames.has(String(c || '').trim().toLowerCase()); };
+    const txns = [];
+    for (const org of XERO_REGIONS) { _accLearnStage = 'Reading Xero ' + org.toUpperCase();
+      (await accXeroBtRange(org, since, until, 'IsReconciled==true AND Type=="SPEND"')).filter(x => x.Status === 'AUTHORISED').forEach(x => { const li = x.LineItems || [];
+        txns.push({ org, kind: 'spend', id: x.BankTransactionID, date: xd(x.DateString || x.Date), amount: Number(x.Total) || 0, ccy: x.CurrencyCode || '', contact: (x.Contact || {}).Name || '', bank: (x.BankAccount || {}).Name || '',
+          account: [...new Set(li.map(l => l.AccountCode).filter(Boolean))].join(' '), tax: [...new Set(li.map(l => l.TaxType).filter(Boolean))].join(' '), has_att: !!x.HasAttachments, link: null }); });
+      for (let p = 1; p < 100; p++) { const j = await xeroFetch(org, '/api.xro/2.0/Payments?where=' + encodeURIComponent(`IsReconciled==true AND Status=="AUTHORISED" AND PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(${sinceS.replace(/-/g, ',')})`) + '&pageSize=1000&page=' + p);
+        const ps = (j && j.Payments) || []; ps.forEach(x => { const inv = x.Invoice || {};
+          txns.push({ org, kind: 'billpay', id: x.PaymentID, date: xd(x.Date), amount: Number(x.BankAmount != null ? x.BankAmount : x.Amount) || 0, ccy: inv.CurrencyCode || '', contact: (inv.Contact || {}).Name || '', bank: (x.Account || {}).Code || '', account: '', tax: '', has_att: !!inv.HasAttachments, link: inv.InvoiceID || null }); });
+        if (ps.length < 1000) break; } }
+    const cnt = {}; txns.forEach(t => { const k = t.org + '|' + t.contact.toLowerCase(); cnt[k] = (cnt[k] || 0) + 1; });
+    const tx = txns.filter(t => cnt[t.org + '|' + t.contact.toLowerCase()] < ACC_FEED_MIN && !ACC_TPL_RE.test(t.contact) && !isSup(t.contact));
+    _accLearnStage = 'Reading accounts@'; const newMail = await accGmailCache(ACC_LEARN_DAYS + 15);
+    _accLearnStage = 'Matching';
+    const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 70`, [sinceS])).rows
+      .filter(e => !ACC_TPL_RE.test(e.from_addr + ' ' + e.subject) && !/supplier\.dockandbay\.com/i.test(e.from_addr)).map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) }));
+    const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
+    const toks = s => String(s || '').toLowerCase().replace(/ - [a-z0-9]{1,8}$/, '').split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !/^(limited|ltd|inc|pty|the|com|services|payment|payments)$/.test(w));
+    const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$' }, rows = [];
+    let matched = 0;
+    tx.forEach(x => { const k = Math.abs(x.amount).toFixed(2), td = new Date(x.date), nt = toks(x.contact);
+      const c = (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 60) return null;
+        const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = nt.some(w => hay.includes(w)), cs = e.am.get(k) || e.pam.get(k) || '';
+        const ccyOk = !cs || cs === x.ccy || cs === sym[x.ccy] || (cs === '$' && /USD|AUD/.test(x.ccy)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
+        if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 3)) return null;
+        return { e, lag, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; }).filter(Boolean).sort((a, b) => b.score - a.score);
+      const best = c[0] && c[0].score >= 40 ? c[0] : null; if (best) matched++;
+      if (best && !x.has_att) { const e = best.e, files = e.files || [];
+        rows.push([x.org, 'receipt', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, null, x.link, e.id, e.d, e.from_addr, e.subject,
+          files.some(f => /\.pdf$/i.test(f)) ? 'pdf' : files.length ? 'other attachment' : e.stripe_link ? 'stripe link' : 'email body', JSON.stringify(files), best.lag, !!(c[1] && c[1].score >= best.score - 5)]); }
+    });
+    // Tax review covers ALL reconciled UK spend (feeds included: e.g. Stripe fees), only 3PLs and product suppliers left out.
+    txns.filter(x => x.org === 'uk' && x.kind === 'spend' && /REVERSECHARGES/.test(x.tax) && !ACC_TPL_RE.test(x.contact) && !isSup(x.contact)).forEach(x =>
+      rows.push([x.org, 'tax', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, x.ccy === 'GBP' ? '20% VAT on Expenses or No VAT' : 'Zero Rated Expenses', null, null, null, null, null, null, null, null, null]));
+    const cl = await pool.connect();
+    try { await cl.query('BEGIN'); await cl.query('DELETE FROM planner.accounts_backdate');
+      for (let i = 0; i < rows.length; i += 200) { const ch = rows.slice(i, i + 200);
+        await cl.query(`INSERT INTO planner.accounts_backdate (org, issue, xero_id, kind, txn_date, amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id, email_date, email_from, email_subject, file_source, files, lag_days, ambiguous) VALUES `
+          + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 21 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
+      await cl.query('COMMIT'); } catch (e) { try { await cl.query('ROLLBACK'); } catch (_) {} throw e; } finally { cl.release(); }
+    const r = { ok: true, reconciled: txns.length, considered: tx.length, matched, receipts: rows.filter(x => x[1] === 'receipt').length, tax: rows.filter(x => x[1] === 'tax').length, new_mail: newMail };
+    const msg = `${r.considered} of ${r.reconciled} reconciled considered, ${r.matched} with email, ${r.receipts} receipt + ${r.tax} tax opportunities, ${newMail} new mail (${by || 'job'})`;
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','success',$1,$2)`, [rows.length, msg.slice(0, 500)]); } catch (_) {}
+    return r;
+  } catch (e) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} return { ok: false, error: e.message }; } })()
+    .finally(() => { _accLearnRun = null; _accLearnStage = ''; });
+  return _accLearnRun;
+}
+app.get('/api/accounts/backdate', async (req, res) => {
+  try {
+    const items = (await pool.query(`SELECT org, issue, xero_id, kind, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id,
+      to_char(email_date,'YYYY-MM-DD') email_date, email_from, email_subject, file_source, files, lag_days, ambiguous FROM planner.accounts_backdate ORDER BY txn_date DESC`)).rows;
+    items.forEach(x => { x.url = x.kind === 'billpay' && x.link_id ? xbUrl(x.link_id) : 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + x.xero_id;
+      if (x.email_id) x.mail_url = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + x.email_id; });
+    const last = (await pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
+      FROM planner.etl_runs WHERE job='accounts_learn' ORDER BY ran_at DESC LIMIT 1`)).rows[0] || null;
+    res.set('Cache-Control', 'no-store').json({ items, last, running: !!_accLearnRun, stage: _accLearnStage, days: ACC_LEARN_DAYS });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// Refresh now starts the job and returns at once (a first run reads every email: ~10 minutes); the page polls GET for the stage.
+app.post('/api/accounts/backdate/refresh', (req, res) => { const started = !_accLearnRun; accountsLearn((req.me && req.me.email) || 'refresh').catch(() => {}); res.json({ ok: true, started, running: true }); });
+// PROD SCHEDULE: n8n weekly (Mon 05:00 Europe/London), POST /api/cron/accounts-learn, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {}.
+// Logs etl_runs job 'accounts_learn'. The local server runs it weekly too (HZ_ACCOUNTS_CRON=0 turns that off).
+app.post('/api/cron/accounts-learn', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const r = await accountsLearn('cron'); res.status(r.ok ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON !== '0') {
+  const _al = () => gmailRow().then(g => g && !g.missing ? accountsLearn('timer').then(r => console.log('[accounts-learn] ' + (r.ok ? r.receipts + ' receipt / ' + r.tax + ' tax' : 'failed: ' + r.error))) : null).catch(e => console.warn('[accounts-learn] ' + e.message));
+  setTimeout(_al, 1800000).unref?.(); setInterval(_al, 7 * 86400000).unref?.();
+}
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
