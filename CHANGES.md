@@ -1,3 +1,10 @@
+## v28.259 (Ben, branch review-fixes-2026-10-05): PO grid in the section cache; Xero OAuth callback bound to the browser (deep dive P1 #14, P0 #6)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration. Optional env `XERO_UK_TENANT_ID` / `XERO_AU_TENANT_ID` (pin the organisation a Connect may store). Buy plan unchanged.
+
+- **PO grid (`/api/supply/purchase-orders`, no query params)** now rides the v28.167 lazy section cache like cashflow and shipments: served at once, revalidated behind after any PO, line, shipment, deposit, payment or production edit (`sec:purchase-orders` added to the PO dependency set). Sandbox: 6.5 s cold, 20 ms warm; `?supplier=` and `?includeArchived=` still compute live. Live p50 was 2.8 s, p95 26 s.
+- **Xero Connect:** the OAuth state is now `region.ts.nonce.HMAC` (key from the client secret, 10 min) with the nonce in an HttpOnly cookie scoped to `/api/supply/xero`, so a callback URL only works in the browser that started Connect; the callback re-checks SUPPLY edit / admin; when `XERO_<UK|AU>_TENANT_ID` is set, connecting any other organisation is refused. Replaces the per-instance Map (which also broke across Vercel instances). Verified: Connect sets the cookie and a signed state; a forged callback is refused.
+
 ## v28.258 (Ben, branch review-fixes-2026-10-05): KV timeout + circuit breaker, instant /api/version, light /api/health (deep dive P1 #10, #15)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration. Optional env `KV_TIMEOUT_MS` (default 5000). Buy plan unchanged.

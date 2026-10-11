@@ -6507,13 +6507,18 @@ async function supplierByXeroContactIndex() {
     return base[_base(k)] || (m ? base[_base(m[1])] : null) || null;
   };
 }
-const _xeroStates = new Map();   // CSRF state → { region, exp }
+// v28.259 (deep dive P0 #6): the OAuth state used to be a random value in a per-instance Map, so any key holder who got hold of a callback
+// URL could complete it and swap the stored tenant (and the Map was invisible to other Vercel instances). Now the state is
+// region.ts.nonce.HMAC (key from the client secret, 10 min), the nonce is also in an HttpOnly cookie that must match (the callback only
+// works in the browser that started it), the callback re-checks the permission, and XERO_<UK|AU>_TENANT_ID, when set, pins the organisation.
+const _xeroStateKey = region => crypto.createHash('sha256').update('hz-xero-state|' + region + '|' + (xeroConfig(region).secret || '')).digest();
 app.get('/api/supply/xero/connect', async (req, res) => {
   const region = xeroRegion(req.query.region); const cfg = xeroConfig(region);
   if (!cfg.present) return res.status(503).send('Set XERO_CLIENT_ID / XERO_CLIENT_SECRET (or XERO_' + region.toUpperCase() + '_*) first.');
-  try { const me = await permsFor(req); if (me.live && !(me.is_admin || me.supply_edit)) return res.status(403).send('SUPPLY edit or admin required to connect Xero.'); } catch (e) {}
-  const state = crypto.randomBytes(16).toString('hex'); _xeroStates.set(state, { region, exp: Date.now() + 600000 });
-  for (const [k, v] of _xeroStates) if (v.exp < Date.now()) _xeroStates.delete(k);
+  try { const me = await permsFor(req); if (me.live && !(me.is_admin || me.supply_edit)) return res.status(403).send('SUPPLY edit or admin required to connect Xero.'); } catch (e) { if (GATE) return res.status(503).send('permission check failed, try again'); }
+  const ts = Date.now().toString(36), nonce = crypto.randomBytes(16).toString('base64url');
+  const state = region + '.' + ts + '.' + nonce + '.' + crypto.createHmac('sha256', _xeroStateKey(region)).update(region + '.' + ts + '.' + nonce).digest('base64url');
+  res.append('Set-Cookie', 'hz_xstate=' + nonce + '; Path=/api/supply/xero; Max-Age=600; HttpOnly; SameSite=Lax' + (_reqHttps(req) ? '; Secure' : ''));
   res.redirect('https://login.xero.com/identity/connect/authorize?' + new URLSearchParams({ response_type: 'code', client_id: cfg.id, redirect_uri: cfg.redirect, scope: cfg.scopes, state }));
 });
 app.get('/api/supply/xero/callback', async (req, res) => {
@@ -6521,14 +6526,19 @@ app.get('/api/supply/xero/callback', async (req, res) => {
   const done = (msg, ok) => (xeroStatusBust(), res).set('content-type', 'text/html').send('<!doctype html><meta charset=utf8><body style="font-family:system-ui;padding:40px;color:#0f172a"><h2>' + (ok ? '✓ Xero connected' : '⚠ Xero connection failed') + '</h2><p>' + msg + '</p><p><a href="/#/supply/config/payments">Back to HORIZON</a></p><script>try{setTimeout(function(){location.href="/#/supply/config/payments";},1800);}catch(e){}</script></body>');
   try {
     if (req.query.error) return done('Xero said: ' + _xeroHe(String(req.query.error_description || req.query.error)), false);
-    const code = String(req.query.code || ''), state = String(req.query.state || '');
-    const st = _xeroStates.get(state); if (!code) return done('No authorization code returned.', false);
-    if (!st) return done('State mismatch or expired — start again from Connect to Xero.', false);
-    _xeroStates.delete(state); const region = xeroRegion(st.region); const cfg = xeroConfig(region);
+    const code = String(req.query.code || ''), state = String(req.query.state || ''); if (!code) return done('No authorization code returned.', false);
+    const [sreg, ts, nonce, sig] = state.split('.'); const region = xeroRegion(sreg); const cfg = xeroConfig(region);
+    const ck = (/(?:^|;\s*)hz_xstate=([^;]+)/.exec(String(req.headers.cookie || '')) || [])[1];
+    res.append('Set-Cookie', 'hz_xstate=; Path=/api/supply/xero; Max-Age=0; HttpOnly; SameSite=Lax');
+    const good = sreg && ts && nonce && sig && ck === nonce && Date.now() - parseInt(ts, 36) < 600000 && safeEq(sig, crypto.createHmac('sha256', _xeroStateKey(region)).update(sreg + '.' + ts + '.' + nonce).digest('base64url'));
+    if (!good) return done('State mismatch or expired (the callback must be opened in the browser that started Connect): start again from Connect to Xero.', false);
+    try { const me = await permsFor(req); if (me.live && !(me.is_admin || me.supply_edit)) return done('SUPPLY edit or admin required to connect Xero.', false); } catch (e) { if (GATE) return done('permission check failed, try again', false); }
     const j = await xeroExchange(region, { grant_type: 'authorization_code', code, redirect_uri: cfg.redirect });
     const cr = await _fetchT('https://api.xero.com/connections', { headers: { 'Authorization': 'Bearer ' + j.access_token, 'Accept': 'application/json' } });
     const conns = await cr.json().catch(() => []); const c = (Array.isArray(conns) ? conns : []).find(x => x.tenantType === 'ORGANISATION') || conns[0];
     if (!c || !c.tenantId) return done('Connected, but no organisation was authorised. Try again and pick the Dock & Bay ' + region.toUpperCase() + ' organisation.', false);
+    const pin = String(process.env['XERO_' + region.toUpperCase() + '_TENANT_ID'] || '').trim();
+    if (pin && pin !== String(c.tenantId)) return done('That Xero organisation (' + _xeroHe(c.tenantName || c.tenantId) + ') is not the Dock & Bay ' + region.toUpperCase() + ' organisation. Nothing was connected.', false);   // v28.259: pinned tenant
     let by = ''; try { by = (await permsFor(req)).email || ''; } catch (e) {}
     await xeroPutStore(region, { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + (Number(j.expires_in) || 1800) * 1000, tenant_id: c.tenantId, tenant_name: c.tenantName || '', connected_by: by, connected_at: new Date().toISOString() });
     done('Connected the <b>' + region.toUpperCase() + '</b> region to <b>' + _xeroHe(c.tenantName || 'your organisation') + '</b>. You can close this tab.', true);
@@ -9526,7 +9536,8 @@ const actionsCache = makeCache('actions', buildActionsRows, ACTIONS_TTL_MS);   /
 // both a long-lived server and Vercel serverless (no background/self-fetch needed). Dropped by invalidateSupplyCaches
 // on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
 const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS, deposits: SUPPLY_CACHE_TTL_MS, skus: SUPPLY_CACHE_TTL_MS, 'payments-by-supplier': SUPPLY_CACHE_TTL_MS, remittances: SUPPLY_CACHE_TTL_MS, 'payment-emails': SUPPLY_CACHE_TTL_MS,
-  'shipment-plan': SUPPLY_CACHE_TTL_MS, pipeline: SUPPLY_CACHE_TTL_MS, upcoming: SUPPLY_CACHE_TTL_MS, suppliers: SUPPLY_CACHE_TTL_MS, 'products-all': SUPPLY_CACHE_TTL_MS };   // v28.089: more heavy param-free user-independent section reads (shipment-plan 1.3s, pipeline/upcoming ~0.85s, suppliers 0.8s, products-all 2.5s)   // v28.088: the remaining uncached PAYMENTS-tab reads (payments-by-supplier ~1.6s cold; remittances / payment-emails) — param-free, user-independent, epoch-busted on any payment edit   // v28.083: skus (SKU master for ORDER PLAN, 807 KB, 1.9s live on every Order-plan open) joins the cache — param-free, user-independent, product master changes land within the TTL / epoch   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
+  'shipment-plan': SUPPLY_CACHE_TTL_MS, pipeline: SUPPLY_CACHE_TTL_MS, upcoming: SUPPLY_CACHE_TTL_MS, suppliers: SUPPLY_CACHE_TTL_MS, 'products-all': SUPPLY_CACHE_TTL_MS,
+  'purchase-orders': SUPPLY_CACHE_TTL_MS };   // v28.259 (deep dive P1 #14): the PO grid (param-free variant only; ?supplier / ?includeArchived still compute live) rides the same lazy cache; live p50 2.8 s, p95 26 s   // v28.089: more heavy param-free user-independent section reads (shipment-plan 1.3s, pipeline/upcoming ~0.85s, suppliers 0.8s, products-all 2.5s)   // v28.088: the remaining uncached PAYMENTS-tab reads (payments-by-supplier ~1.6s cold; remittances / payment-emails) — param-free, user-independent, epoch-busted on any payment edit   // v28.083: skus (SKU master for ORDER PLAN, 807 KB, 1.9s live on every Order-plan open) joins the cache — param-free, user-independent, product master changes land within the TTL / epoch   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
 // v28.081 (Ben, perf audit): the section cache used to BLOCK the first request after TTL expiry or after any edit.
 // v28.167 (Ben): each whitelisted section is now a lazy cache like makeCache ('sec:<section>' in CACHE_DEPS): an edit only marks
 // it stale (no eager staggered recompute of every section), the next request is served the last JSON and revalidates it in the
@@ -9602,7 +9613,7 @@ function _lcInvalidateLocal(names) { if (!names || !names.size) return 0; const 
 // Every invalidation, whatever its scope, also bumps the shared epoch, drops the shell memo and marks the 'sup:' badge memos stale
 // (all already lazy / request-driven). v28.175: the supplier-portal payloads ('pb:*') are listed in every supply type below (same
 // "every supply edit stales the portal" rule as before, now through the scope); the client-portal types only touch 'cp:' / 'cpu:'.
-const _CD_PO = ['po-rows', 'po-kids', 'order-plan', 'order-plan-exceptions', 'actions', 'sec:cashflow', 'sec:bi', 'sec:manufacturing',
+const _CD_PO = ['po-rows', 'po-kids', 'order-plan', 'order-plan-exceptions', 'actions', 'sec:purchase-orders', 'sec:cashflow', 'sec:bi', 'sec:manufacturing',
   'sec:payments-report', 'sec:shipments', 'sec:deposits', 'sec:payments-by-supplier', 'sec:shipment-plan', 'sec:pipeline', 'sec:upcoming',
   'portal:pos', 'portal:lines', 'pb:*', 'demand-actions'];   // every build that reads purchase_orders / its lines (v28.175: + the supplier-portal PO / line bases and payloads; v28.181: + DEMAND > Actions base, avg PO line cost per category)
 const CACHE_DEPS = {
