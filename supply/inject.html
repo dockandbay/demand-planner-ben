@@ -7978,7 +7978,7 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
-  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{ ensureProductButton(); ensureClientButton(); ensureAccountsButton(); }catch(e){} try{startSessionGuard();}catch(e){} try{window.hzSetAvatar&&window.hzSetAvatar();}catch(e){}   /* v27.616 P1b: fill header avatar initials once the signed-in user is known */
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; window._acWaitAt=0; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{ ensureProductButton(); ensureClientButton(); ensureAccountsButton(); }catch(e){} try{startSessionGuard();}catch(e){} try{window.hzSetAvatar&&window.hzSetAvatar();}catch(e){}   /* v27.616 P1b: fill header avatar initials once the signed-in user is known */
     try{ if(ME&&ME.email&&Array.isArray(ME.favourites)){ HZ_FAVES=ME.favourites.slice(); try{localStorage.setItem('hzFaves',JSON.stringify(HZ_FAVES));}catch(e){} } }catch(e){}   // server is source of truth once ME loads
     try{ if(typeof renderFaves==='function')renderFaves(); }catch(e){}
     if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
@@ -13158,8 +13158,8 @@
     if(seg[0]!=='client'&&typeof hideClient==='function')hideClient();   // v28.008: leaving CLIENT
     if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
     if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
-    if(seg[0]==='accounts'){ if(!ME&&(window._acWait=(window._acWait||0)+1)<=40){ setTimeout(applyRoute,250); return; }   /* permissions not loaded yet: wait up to 10s */
-      if(!accountsCan()){ location.hash='#/supply/purchase-orders'; return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
+    if(seg[0]==='accounts'){ if(!ME){ if(!window._acWaitAt)window._acWaitAt=Date.now(); if(Date.now()-window._acWaitAt<10000){ setTimeout(applyRoute,250); return; } }   /* permissions not loaded yet: wait up to 10s (v28.251: by time, reset in fetchMe, so a slow /api/me never poisons later routes) */
+      if(!accountsCan()){ location.replace('#/supply/purchase-orders'); return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'payables'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='payables'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if({clients:1,orders:1,commission:1,messages:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
@@ -18767,9 +18767,9 @@
     var app=document.getElementById('app'); if(app){ app.classList.add('accounts-active'); ['supply-active','config-mode','product-active','client-active'].forEach(function(c){ app.classList.remove(c); }); }
     document.body.classList.add('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.add('active'); try{ hzSyncDemandPills(); }catch(e){} }
-  function hideAccounts(){ var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
+  function hideAccounts(){ try{ clearTimeout(AC_BD.poll); }catch(e){} var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
     app.classList.remove('accounts-active'); document.body.classList.remove('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='none'; var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.remove('active'); }
-  function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
+  function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; try{ if(k!=='backdate')clearTimeout(AC_BD.poll); }catch(e){} document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
     if(!fromRoute){ try{ writeHash(['accounts',k]); }catch(e){} }
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
@@ -18827,7 +18827,7 @@
     b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_BK.open[k]=!AC_BK.open[k]; acRenderBank(b); }; });
     var qi=document.getElementById('ac-bq'); qi.oninput=function(){ AC_BK.q=qi.value; clearTimeout(AC_BK._t); AC_BK._t=setTimeout(function(){ acRenderBank(b); var n=document.getElementById('ac-bq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     document.getElementById('ac-brf').onclick=function(){ if(AC_BK.run)return; AC_BK.run=true; AC_BK.err=''; acRenderBank(b);
-      fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json(); }).then(function(j){ AC_BK.run=false; if(j.errors&&j.errors.length)AC_BK.err=j.errors.join('; '); else if(j.error)AC_BK.err=j.error; AC_BK.d=null; acRenderBank(document.getElementById('accounts-body')); })
+      fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }); }).then(function(j){ AC_BK.run=false; if(j.errors&&j.errors.length)AC_BK.err=j.errors.join('; '); else if(j.error)AC_BK.err=j.error; AC_BK.d=null; acRenderBank(document.getElementById('accounts-body')); })
         .catch(function(e){ AC_BK.run=false; AC_BK.err=e.message; acRenderBank(b); }); };
   }
   // ── v28.250 ACCOUNTS > Back-date: past opportunities from the weekly learn job (read only, nothing is written to Xero from here).
@@ -18868,7 +18868,7 @@
         :'UK spend coded Reverse Charge. Rule: non-GBP expenses are Zero Rated Expenses; GBP expenses are 20% VAT on Expenses or No VAT; bank fees No VAT. Review with the accountant before recoding; nothing is changed from here.')+' Refreshed weekly.</div>';
     b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_BD[p.dataset.g]=p.dataset.v; acRenderBackdate(b); }; });
     var qi=document.getElementById('ac-dq'); qi.oninput=function(){ AC_BD.q=qi.value; clearTimeout(AC_BD._t); AC_BD._t=setTimeout(function(){ acRenderBackdate(b); var n=document.getElementById('ac-dq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
-    document.getElementById('ac-drf').onclick=function(){ if(d.running)return; fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(){ AC_BD.d=null; acRenderBackdate(b); }); };
+    document.getElementById('ac-drf').onclick=function(){ if(d.running||AC_BD.refreshing)return; AC_BD.refreshing=true; fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); }); }).then(function(){ AC_BD.d=null; acRenderBackdate(b); }).catch(function(e){ AC_BD.err=e.message; AC_BD.d=null; acRenderBackdate(b); }).finally(function(){ AC_BD.refreshing=false; }); };
   }
   // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.
@@ -18876,7 +18876,7 @@
   function acInFlash(){ try{ var m=/[?&]gmail=([^&#]*)/.exec(location.search); if(!m)return; AC_IN.flash=decodeURIComponent(m[1].replace(/\+/g,' ')); AC_IN.st=null; AC_IN.msgs=null;
     history.replaceState(null,'',location.pathname+location.hash); }catch(e){} }
   function acInLoad(){ if(AC_IN.busy)return; AC_IN.busy=true; AC_IN.err='';
-    fetch('/api/accounts/gmail/status').then(function(r){ return r.json(); }).then(function(st){ AC_IN.st=st;
+    fetch('/api/accounts/gmail/status').then(function(r){ return r.json().then(function(st){ if(!r.ok||st.error)throw new Error(st.error||('HTTP '+r.status)); return st; }); }).then(function(st){ AC_IN.st=st;
       if(!st.connected){ AC_IN.busy=false; acInRender(); return; }
       return fetch('/api/accounts/gmail/messages?q='+encodeURIComponent(AC_IN.q)).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
         .then(function(j){ AC_IN.msgs=j.messages; AC_IN.busy=false; acInRender(); }); })
@@ -18907,13 +18907,13 @@
     b.innerHTML=h+'</div>';
     var cb=document.getElementById('ac-gm-connect'); if(cb)cb.onclick=function(){ location.href='/api/accounts/gmail/connect'; };
     var db=document.getElementById('ac-gm-disc'); if(db)db.onclick=function(){ if(!AC_IN.disc){ AC_IN.disc=true; acInRender(); setTimeout(function(){ if(AC_IN.disc){ AC_IN.disc=false; acInRender(); } },5000); return; }
-      AC_IN.disc=false; fetch('/api/accounts/gmail/disconnect',{method:'POST'}).then(function(){ AC_IN.st=null; AC_IN.msgs=null; AC_IN.flash='Gmail disconnected'; acInRender(); }); };
+      AC_IN.disc=false; fetch('/api/accounts/gmail/disconnect',{method:'POST'}).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); AC_IN.st=null; AC_IN.msgs=null; AC_IN.flash='Gmail disconnected'; acInRender(); }).catch(function(e){ AC_IN.st=null; AC_IN.flash=e.message; acInRender(); }); };
     var go=function(){ var i=document.getElementById('ac-gm-q'); AC_IN.q=(i&&i.value.trim())||'newer_than:30d'; AC_IN.flash=''; AC_IN.msgs=null; AC_IN.st=null; acInRender(); };
     var gb=document.getElementById('ac-gm-go'); if(gb)gb.onclick=go; var qi=document.getElementById('ac-gm-q'); if(qi)qi.onkeydown=function(e){ if(e.key==='Enter')go(); }; }
   // ── ACCOUNTS > Payables: aged open Xero bills (UK + AU) from the hourly-synced bill cache; suppliers first ──
   function acAge(due,today){ if(!due)return 0; var d=(new Date(today+'T00:00:00Z')-new Date(due+'T00:00:00Z'))/86400000; return Math.round(d); }
   function acBucket(days){ return days<=0?0:days<=30?1:days<=60?2:days<=90?3:4; }
-  function acMoney(n,ccy){ n=Number(n)||0; var sym={GBP:'£',USD:'$',AUD:'A$',EUR:'€'}[ccy]; return (sym||((ccy||'')+' '))+n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function acMoney(n,ccy){ n=Number(n)||0; var sym={GBP:'£',USD:'$',AUD:'A$',EUR:'€'}[ccy]; return (sym||(esc(ccy||'')+' '))+n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function acSynced(s){ if(!s)return 'never'; var p=String(s).split(' '); return hzTrkDate(p[0])+(p[1]?' '+p[1]:''); }
   function acRenderPayables(b){
     if(!AC_PAY.d){ if(AC_PAY.busy)return; AC_PAY.busy=true;
@@ -19624,7 +19624,7 @@
 
   function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureCmdButton(); ensureRail(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureProductButton(); ensureClientButton(); ensureAccountsButton(); ensureConfigButton(); ensureFaves();   // Scenario is now nested under DEMAND ▸ Scenario planner (no top-level SCENARIO button/root)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
-    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product|client)(\/|$)/.test(location.hash)) applyRoute();
+    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product|client|accounts)(\/|$)/.test(location.hash)) applyRoute();   /* v28.251: + accounts (reload / deep link / Gmail return) */
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
       document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed; keep pills masked unless on DEMAND
     }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }

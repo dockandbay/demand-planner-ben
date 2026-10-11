@@ -1,3 +1,13 @@
+## v28.251 (Ben, branch review-fixes-2026-10-05): ACCOUNTS deep links, no DEMAND work on ACCOUNTS pages, hourly feed timers guarded (deep dive P0 #3, #4, P1 #8)
+
+**Files:** `supply/inject.html`, `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged (no engine change).
+
+- Reload or deep link on any `#/accounts/*` page now routes there (boot regex had no `accounts`; it bounced to the landing page and dropped the "Gmail connected" banner after the OAuth return).
+- `hzDemandOnScreen()` excludes `accounts`: no DEMAND cold build or plan-grid render on ACCOUNTS pages (jsdom: DEMAND_BUILT false, 713 DOM nodes on 3PL invoicing, was 11,634).
+- The hourly Auto Forecast feed and buy-plan snapshot timers only run when demand is already built and on screen (they used to cold-build demand, ~3 s, once an hour on every open SUPPLY or ACCOUNTS tab, then POST two feeds). The server-side hourly snapshot is unaffected.
+- ACCOUNTS client tidy-ups: the "wait for /api/me" uses a 10 s window reset when ME arrives (a slow /api/me no longer poisons later routes), the no-grant fallback uses location.replace (Back works), the Back-date poll stops when leaving the tab, Back-date Refresh is guarded against a double click and shows errors, bank refresh / Gmail status / Gmail disconnect check the HTTP status, and an unknown currency code is escaped in acMoney.
+- Verified in jsdom on the served page: `#/accounts/payables`, `#/accounts/3pl-invoicing`, `#/reports/3pl-invoicing` (redirect) and `#/supply/purchase-orders/plan`; no writes fired at boot.
+
 ## v28.250 (Ben, branch review-fixes-2026-10-05): ACCOUNTS > Back-date (past receipts to attach, Reverse Charge to review), weekly learn job
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/350_accounts_backdate.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 350** (additive: `planner.accounts_backdate`, `planner.accounts_gmail_msgs` = parsed accounts@ mail cache, amounts only, no bodies). No new env. Read only on Xero and Gmail. Buy plan unchanged.
