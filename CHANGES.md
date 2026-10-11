@@ -1,3 +1,10 @@
+## v28.254 (Ben, branch review-fixes-2026-10-05): Bank ageing first run = items updated in the last 90 days, no full Xero scan
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration. Optional env `ACC_BANK_FIRST_DAYS` (default 90). Buy plan unchanged.
+
+- Ben (12-Oct): no full scan of Xero needed, only recently updated items. The first bank-ageing run now makes the same If-Modified-Since read as every later run, with a 90-day watermark (AU: 12 s, 4 calls, 3 items on the sandbox). The 2018-to-now scan is only on explicit request (`?full=1` or cron body `{"full":true}`) and only with 1,500 daily calls of headroom.
+- The hourly live bill sync (`syncXeroBills`) already works this way (per-org `xero_bills_synced_at` watermark), so no change there.
+
 ## v28.253 (Ben, branch review-fixes-2026-10-05): ACCOUNTS jobs safe on Vercel: shared lock, 202 + poll, incremental Xero reads, staged learn job (deep dive P0 #5)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/351_accounts_recon_txns.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 351** (additive: `planner.accounts_recon_txns`, cache of reconciled Xero items for the learn job). Optional env `ACC_LEARN_BUDGET_MS` (default 240000). Xero and Gmail reads only. Buy plan unchanged.

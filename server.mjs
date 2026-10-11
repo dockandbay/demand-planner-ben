@@ -3356,7 +3356,7 @@ app.get('/api/accounts/payables', async (req, res) => {
 // returns 202 and the page polls, the Xero read is INCREMENTAL after the first run (If-Modified-Since watermark per org: modified
 // unreconciled items are upserted, stored items are re-checked by id and dropped once reconciled), the first run uses quarter windows
 // (yearly ones were refused on the UK org) with a 45 s call timeout and one retry. Progress is written to app_settings so any instance can show it.
-const ACC_BANK_FROM_YEAR = 2018, ACC_BANK_LOCK_MS = 15 * 60000;
+const ACC_BANK_FROM_YEAR = 2018, ACC_BANK_LOCK_MS = 15 * 60000, ACC_BANK_FIRST_DAYS = Number(process.env.ACC_BANK_FIRST_DAYS) || 90;
 const _xDate = s => { if (!s) return null; const m = /\/Date\((-?\d+)/.exec(String(s)); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(s).slice(0, 10); };
 const _xDT = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
 // ── small job helpers shared by the ACCOUNTS jobs (lock, watermark, progress) ──
@@ -3421,19 +3421,21 @@ async function accXeroHeadroom(org) { try { await xeroFetch(org, '/api.xro/2.0/O
   const q = xeroQuota(org); if (q && q.day != null && q.day < ACC_XERO_DAY_MIN) throw new Error('Xero ' + org.toUpperCase() + ' daily allowance low (' + q.day + ' calls left): the full scan waits for tomorrow'); }
 async function accountsBankSyncOrg(org, opts) {
   opts = opts || {}; const t0 = new Date(); const wm = opts.full ? null : await accSettingGet('accounts_bank_wm:' + org);
-  if (!wm || opts.full) await accXeroHeadroom(org);
+  if (opts.full) await accXeroHeadroom(org);
   const accs = ((await xeroFetch(org, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'), { timeoutMs: 45000 })) || {}).Accounts || [];
   const bank = new Map(accs.map(a => [a.AccountID, a]));
-  const since = wm && wm.at ? new Date(new Date(wm.at).getTime() - 10 * 60000) : null;   // 10 min overlap
+  // Ben 12-Oct-26: no full scan needed, only recently updated items. First run = items MODIFIED in the last ACC_BANK_FIRST_DAYS (same incremental
+  // read with an older watermark); a 2018-to-now scan only on explicit request (?full=1 / cron { "full": true }) and only with allowance headroom.
+  const since = opts.full ? null : (wm && wm.at ? new Date(new Date(wm.at).getTime() - 10 * 60000) : new Date(Date.now() - ACC_BANK_FIRST_DAYS * 864e5));   // 10 min overlap
   let rows, mode, dropIds = null;
   if (!since) {
-    mode = 'full'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + ' (first run, 2018 to now)');
+    mode = 'full'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + ' (full scan, 2018 to now)');
     const bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), 'IsReconciled==false');
     const pays = await accXeroList(org, 'Payments', 'IsReconciled==false AND Status=="AUTHORISED"');
     const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
     rows = accBankRowsFrom(org, bank, bt, pays, tr);
   } else {
-    mode = 'incremental'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + ' (changes since ' + since.toISOString().slice(0, 16).replace('T', ' ') + ')');
+    mode = wm && wm.at ? 'incremental' : 'first'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + (mode === 'first' ? ' (first run: items updated in the last ' + ACC_BANK_FIRST_DAYS + ' days)' : ' (changes since ' + since.toISOString().slice(0, 16).replace('T', ' ') + ')'));
     let bt, pays;
     try { bt = await accXeroList(org, 'BankTransactions', 'IsReconciled==false', { since }); }
     catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), 'IsReconciled==false', { since }); }   // the UK org refuses the unwindowed read: same If-Modified-Since read, year by year (small answers, a few calls)
@@ -3473,7 +3475,7 @@ async function accountsBankSync(by, opts) {
   const out = [], errs = [];
   try {
     for (const org of XERO_REGIONS) { try { out.push(await accountsBankSyncOrg(org, opts)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
-    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'incremental' ? ' (' + r.changed + ' changed, ' + r.dropped + ' cleared)' : ' (full)')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
+    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'full' ? ' (full)' : ' (' + r.changed + ' changed, ' + r.dropped + ' cleared' + (r.mode === 'first' ? ', first ' + ACC_BANK_FIRST_DAYS + ' days' : '') + ')')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_bank_ageing',$1,$2,$3)`, [errs.length ? 'error' : 'success', n, msg.slice(0, 500)]); } catch (_) {}
     return { ok: !errs.length, items: n, orgs: out, errors: errs };
   } finally { await accProgress('accounts_bank_ageing', ''); await accJobUnlock('accounts_bank_ageing'); }
