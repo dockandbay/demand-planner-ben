@@ -6395,10 +6395,22 @@ const _xeroCallN = { get: 0, write: 0, since: new Date().toISOString() };
 // A 429 with X-Rate-Limit-Problem: day is final until the reset: fail at once with the reset time instead of retrying for minutes.
 const _xeroQuota = { uk: null, au: null };
 function xeroQuotaNote(region, r) { try { const d = r.headers.get('x-daylimit-remaining'), m = r.headers.get('x-minlimit-remaining'), p = r.headers.get('x-rate-limit-problem'), ra = Number(r.headers.get('retry-after')) || 0;
-  _xeroQuota[region] = { day: d == null ? null : Number(d), min: m == null ? null : Number(m), problem: p || null, reset_at: p === 'day' && ra ? new Date(Date.now() + ra * 1000).toISOString() : null, at: new Date().toISOString() }; } catch (_) {} }
+  _xeroQuota[region] = { day: d == null ? null : Number(d), min: m == null ? null : Number(m), problem: p || null, reset_at: p === 'day' && ra ? new Date(Date.now() + ra * 1000).toISOString() : null, at: new Date().toISOString() };
+  // v28.260: the daily allowance is a health metric (one row per org per hour and per 100-call step, so the newest row is the current level) and a RED ALERT below XERO_DAY_ALERT (1,000):
+  // the alert email reaches Ben / Diviyaj / Sarah before the allowance hits 0 and stops live's bill sync and payments.
+  if (d != null) { const day = Number(d), key = 'xero_quota|' + region + '|' + new Date().toISOString().slice(0, 13) + '|' + (Math.floor(day / 100) * 100);
+    hzHealthEvt('metric', key, { path: 'xero quota ' + region, ms: day, message: 'Xero ' + region.toUpperCase() + ' daily API allowance: ' + day + ' calls left', meta: { org: region, day, min: m == null ? null : Number(m), low: day < XERO_DAY_ALERT } }); }
+  } catch (_) {} }
+const XERO_DAY_ALERT = Number(process.env.XERO_DAY_ALERT) || 1000;
 function xeroQuota(region) { return _xeroQuota[xeroRegion(region)]; }
+const _xeroAccMemo = new Map();   // v28.260: region|path -> { at, j } for GET /Accounts (chart of accounts, 66 rows, read on every bill push / payment plan); 10 min, opts.fresh bypasses
 async function xeroFetch(region, path, opts) {
-  region = xeroRegion(region); opts = opts || {}; const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
+  region = xeroRegion(region); opts = opts || {};
+  const _memoK = ((opts.method || 'GET') === 'GET' && /^\/api\.xro\/2\.0\/Accounts(\?|$)/.test(path) && !opts.fresh) ? region + '|' + path : null;
+  if (_memoK) { const m = _xeroAccMemo.get(_memoK); if (m && Date.now() - m.at < 600000) return m.j; }
+  const _j = await _xeroFetch0(region, path, opts); if (_memoK) _xeroAccMemo.set(_memoK, { at: Date.now(), j: _j }); return _j;
+}
+async function _xeroFetch0(region, path, opts) { const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
   const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }
   const headers = Object.assign({ 'Authorization': 'Bearer ' + token, 'Xero-Tenant-Id': tenant.id, 'Accept': 'application/json' }, opts.headers || {});
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
@@ -7010,7 +7022,7 @@ app.get('/api/supply/xero/accounts', async (req, res) => {
   try {
     const region = xeroRegion(req.query.region);
     const kind = String(req.query.kind || 'all').toLowerCase();
-    const j = await xeroFetch(region, '/api.xro/2.0/Accounts');
+    const j = await xeroFetch(region, '/api.xro/2.0/Accounts', { fresh: String(req.query.fresh || '') === '1' });
     let accts = ((j && j.Accounts) || []).map(a => ({ code: a.Code || '', name: a.Name || '', id: a.AccountID, type: a.Type, enable_payments: !!a.EnablePaymentsToAccount, cls: a.Class, currency: a.CurrencyCode || '', status: a.Status, bank_account_number: a.BankAccountNumber || '' }));
     if (kind === 'bank') accts = accts.filter(a => a.type === 'BANK');
     accts.sort((a, b) => String(a.code || 'zzzz').localeCompare(String(b.code || 'zzzz')) || String(a.name).localeCompare(String(b.name)));
@@ -7920,6 +7932,7 @@ const XB_RESYNC_KEY = 'xero_bills_resync_state';
 let _xbResyncP = null;
 async function _xbResyncState() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [XB_RESYNC_KEY])).rows[0]; return r && r.value ? JSON.parse(r.value) : null; } catch (e) { return null; } }
 async function xeroBillsFullResync(by) {
+  for (const reg of XERO_REGIONS) { await accXeroHeadroom(reg); }   // v28.260 (Ben: never a full read when the allowance is low): needs ACC_XERO_DAY_MIN calls left per org
   const st = { status: 'running', by: by || null, started_at: new Date().toISOString(), heartbeat: new Date().toISOString(), orgs: {}, calls: 0 };
   const save = async () => { st.heartbeat = new Date().toISOString(); try { await _xbSetting(XB_RESYNC_KEY, JSON.stringify(st)); } catch (_) {} };
   await save();
@@ -25179,6 +25192,9 @@ async function hzAlertCollect() {
   const s5 = d.s5 || {}; if (Number(s5.n) >= HZ_RA.s5xx_total) out.push({ key: 'srv:5xx', trigger: 'server', title: `${s5.n} server errors (5xx) in ${HZ_RA.win_min} min`, n: Number(s5.n), first: s5.first, last: s5.last, examples: (s5.ex || []).map(x => `${x.p} (${x.n}x): ${x.m}`), file: hzLikelyFile(((s5.ex || [])[0] || {}).p ? String(s5.ex[0].p).replace(/^\S+ /, '') : '') });
   for (const [route, r] of _hzRoute) if (r.n >= HZ_RA.route_min_calls && r.e / r.n >= HZ_RA.route_ratio) out.push({ key: 'srv:route:' + route, trigger: 'server', title: `${route} failing: ${r.e} of ${r.n} calls returned 5xx`, n: r.e, first: new Date(r.first).toISOString(), last: new Date(r.last).toISOString(), examples: [route + ' ' + Math.round(r.e / r.n * 100) + '% 5xx in the current 10-min window (this instance)'], file: hzLikelyFile(route.replace(/^\S+ /, '')) });
   const db = d.db || {}; if (Number(db.n) >= HZ_RA.db_timeouts) out.push({ key: 'db:timeouts', trigger: 'db', title: `${db.n} DB connection / query timeouts in ${HZ_RA.db_win_min} min`, n: Number(db.n), first: db.first, last: db.last, examples: (db.ex || []).slice(0, 3), file: 'server.mjs pool config (max 4, connectionTimeoutMillis, query_timeout) + the slow_query list' });
+  // v28.260: Xero daily allowance low (latest metric per org in the last 2 h, kept by hzHealthEvt as the row's ms)
+  try { const xq = (await pool.query(`SELECT DISTINCT ON (meta->>'org') meta->>'org' org, ms AS day_left, ts FROM planner.app_health_events WHERE kind = 'metric' AND path LIKE 'xero quota %' AND ts >= now() - interval '2 hours' ORDER BY meta->>'org', ts DESC`)).rows;
+    xq.filter(r => r.day_left != null && Number(r.day_left) < XERO_DAY_ALERT).forEach(r => out.push({ key: 'xero:quota:' + r.org, trigger: 'integration', title: `Xero ${String(r.org).toUpperCase()} daily API allowance low: ${r.day_left} calls left (live bill sync and payments stop at 0; resets 23:35 UTC)`, n: Number(r.day_left), first: r.ts, last: r.ts, examples: ['sandbox and live share this allowance; stop any sandbox Xero job'], file: 'server.mjs (xeroQuotaNote)' })); } catch (_) {}
   const c4 = d.c4 || {}; if (Number(c4.n) >= 1) out.push({ key: 'cron:401', trigger: 'cron', title: `${c4.n} scheduled job call(s) rejected (401): n8n is sending the wrong x-webhook-secret, those jobs are not running`, n: Number(c4.n), first: c4.first, last: c4.last, examples: (c4.ex || []).filter(Boolean).slice(0, 5), file: 'server.mjs (N8N_WEBHOOK_SECRET)' });   // v28.256 (deep dive gap): a wrong secret silently stopped preorders / accounts / health crons
   const fa = d.fa || {}; if (Number(fa.n) >= HZ_RA.fulfil_auth) out.push({ key: 'integ:fulfil_auth', trigger: 'integration', title: `Fulfil rejecting our API key: ${fa.n} 401/403 in ${HZ_RA.win_min} min`, n: Number(fa.n), first: fa.first, last: fa.last, examples: (fa.ex || []).slice(0, 3), file: 'server.mjs fulfilFetch / fulfilConfigFor (FULFIL_*_API_KEY)' });
   for (const c of d.cu || []) out.push({ key: 'client:' + crypto.createHash('sha1').update(String(c.message)).digest('hex').slice(0, 16), trigger: 'client', title: `Browser error hitting ${c.users} users: ${String(c.message).slice(0, 80)}`, n: c.n, first: c.first, last: c.last, examples: [String(c.message).slice(0, 200)].concat((c.views || []).filter(Boolean).map(v => 'view ' + v)), file: hzLikelyFile((c.views || [])[0], 'staff') });

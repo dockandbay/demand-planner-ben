@@ -172,7 +172,7 @@ fingerprints:
   server.mjs::_syncXeroBillsRun: 96082099a446
   server.mjs::xbUpsert: 7f5a5479a726
   server.mjs::xbLastSync: 29ebc29cc1f8
-  server.mjs::xeroBillsFullResync: 54b5a2882dd0
+  server.mjs::xeroBillsFullResync: 29e5b96dbbac
   server.mjs::/api/supply/xero/bills-sync-visit: 87f77c346216
   server.mjs::/api/supply/xero/bills-resync-all: 8c04a72e378c
   server.mjs::xeroHealPoLinks: b23530b2ab42
@@ -186,7 +186,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.255
+verified_version: v28.260
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -307,6 +307,10 @@ verified_version: v28.255
 ## Write permissions (from v28.255)
 - Every write (POST, PUT, DELETE, PATCH) under /api is classified by path into a required right: DEMAND, SUPPLY, PRODUCT, CONFIG (supply or demand), any edit right, or admin. Reads are open to every signed-in user. Paths are compared in lower case without a trailing slash, routing is case sensitive, and an unclassified write is admin only (fail closed). Families with their own check (crons with the webhook secret, CLIENT admin, Ask Claude, the client portal, the health beacon, own favourites) are listed explicitly. (source: server.mjs :: requiredCap)
 - A user without the right gets 403 "Read-only access" (or "Admin only"); admins always have every edit right. Off Vercel (sandbox) with no identity the gate is open. (source: server.mjs :: requiredCap)
+
+## Xero API allowance (from v28.253)
+- Xero allows 60 calls a minute and 5,000 a day per organisation for HORIZON's connection, shared by live and the sandbox. Every recurring read is incremental: the hourly bill sync and the PO link resolver use an UpdatedDateUTC watermark (If-Modified-Since), bank ageing reads only items modified since its last run (first run: last 90 days), the back-date learn job keeps a reconciled-items cache. A full bill resync or a full bank scan only runs on explicit request and only with at least 1,500 calls of the day left. (source: server.mjs :: accXeroHeadroom, _syncXeroBillsRun, accountsBankSyncOrg)
+- Every Xero reply records the remaining daily calls as a health metric; below 1,000 a red alert email goes out, and a 429 with the daily problem flag fails at once with the reset time (23:35 UTC) instead of retrying. The chart of accounts is cached for 10 minutes per organisation. (source: server.mjs :: xeroQuotaNote, hzAlertCollect)
 
 ## ACCOUNTS (from v28.247)
 - ACCOUNTS is a top menu after CLIENT, seen only by users with the ACCOUNTS grant (CONFIG > Admin > Permissions) or admins. Unlike other areas, reading is gated too: every /api/accounts/* call returns 403 without the grant. From v28.252 the grant is read access only: connecting or disconnecting Gmail and running the bank or back-date refresh need admin (403 accounts_admin_only otherwise), and only the accounts mailbox (GMAIL_MAILBOX_ACCOUNTS, default accounts@dockandbay.com) can be connected. (source: server.mjs :: accountsGate)

@@ -1,3 +1,11 @@
+## v28.260 (Ben, branch review-fixes-2026-10-05): boot fetch diet, Xero allowance alert + incremental-only guards (deep dive P1 #9; Ben 12-Oct)
+
+**Files:** `supply/inject.html`, `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration. Optional env `XERO_DAY_ALERT` (default 1000). Buy plan unchanged.
+
+- **Boot fetch diet:** the SUPPLY badge and prewarm fetches (shipments 0.9 MB, purchase-orders 3.1 MB, deposits 0.3 MB, order plan 5 MB, actions, samples, exceptions) no longer fire on every landing. They run once, after SUPPLY is shown and its first paint is over. jsdom: DEMAND landing 27 to 15 fetches and 13.9 MB to 3.7 MB; ACCOUNTS landing 24 to 12 fetches, 3.8 MB; SUPPLY landing unchanged in total but only 17 fetches / 6.8 MB before 3 s (the grid's own data), the rest after. The Fulfil grid-status read starts in parallel with the PO rows instead of after the grid paints (promise reused for 60 s).
+- **Xero allowance:** each reply's remaining daily calls is a health metric (`xero quota <org>`); below 1,000 a red alert email goes out (verified on the sandbox: UK 0 left, AU 778 left). The manual Full bill resync now refuses to start without 1,500 calls of headroom, like the accounts full scans. The chart of accounts (GET /Accounts) is cached 10 minutes per org (read on every bill push and payment plan); `/api/supply/xero/accounts?fresh=1` bypasses.
+- Xero read inventory (Ben 12-Oct, "fetch incremental changes, not all data"): hourly bill sync = If-Modified-Since watermark (30 x 1000 max); PO link resolver = local cache; bank ageing = modified-since watermark (first run 90 days); back-date learn = reconciled cache + watermark; payments / deposits / 3PL / commission pushes = writes plus 1 to 3 small reads; status probe = 2 reads per 2 minutes when viewed; Contacts lookup cached 10 min. No recurring full read remains.
+
 ## v28.259 (Ben, branch review-fixes-2026-10-05): PO grid in the section cache; Xero OAuth callback bound to the browser (deep dive P1 #14, P0 #6)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration. Optional env `XERO_UK_TENANT_ID` / `XERO_AU_TENANT_ID` (pin the organisation a Connect may store). Buy plan unchanged.

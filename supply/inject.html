@@ -3719,9 +3719,14 @@
         +det.map(function(d){return '<tr style="color:var(--neg)"><td class="l">'+esc(d.sku)+'</td><td>'+money(d.plan)+'</td><td>'+money(d.cin7)+'</td></tr>';}).join('')
         +'</tbody></table></div>' : '';
     return head+tbl; }
+  // v28.260: grid-status is requested in parallel with the PO rows (see the grid fetch) and the render reuses that promise for 60 s,
+  // instead of a serial round trip after the grid has painted.
+  var _erpGsP=null,_erpGsAt=0;
+  function erpGridStatusFetch(force){ if(!force&&_erpGsP&&Date.now()-_erpGsAt<60000)return _erpGsP; _erpGsAt=Date.now();
+    _erpGsP=fetch('/api/supply/fulfil/grid-status').then(function(r){return r.json();}).catch(function(){ _erpGsP=null; return null; }); return _erpGsP; }
   // v27.741: Fulfil column — fill each row's Fulfil drift status from /api/supply/fulfil/grid-status; grey the Cin7 cell for POs marked not-required-in-Cin7.
   function fillErpFulfil(){ if(!document.querySelector('#sup-grid .po-fulfil[data-po]'))return;
-    fetch('/api/supply/fulfil/grid-status').then(function(r){return r.json();}).then(function(j){ var st=(j&&j.status)||{}; try{ window._erpGridStatus=st; }catch(e){}   // shared with the order-plan "not required in Cin7" tickbox
+    erpGridStatusFetch().then(function(j){ var st=(j&&j.status)||{}; try{ window._erpGridStatus=st; }catch(e){}   // shared with the order-plan "not required in Cin7" tickbox
       // v27.789 (Ben): Fulfil column mirrors the Cin7 column — 3 states (in sync / update lines / update date), plus
       // "update both". Drift detail on hover. Lines drift = qty-level vs the Fulfil mirror; date drift = the Fulfil
       // requested delivery date vs Horizon's effective delivery-to-warehouse date (what the push sends).
@@ -6147,8 +6152,9 @@
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===_umb);});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==_umb)_ns.value=_umb;
     var c=document.getElementById('supply-content');
-    prefetchNavCounts();   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show
+    hzLate(prefetchNavCounts);   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show (v28.260: after the grid's first paint, not alongside its own fetch)
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
+      try{ erpGridStatusFetch(); }catch(e){}   // v28.260: in parallel with the rows
       secFetch('purchase-orders','/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(d){ if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:var(--neg)">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='orderplan'){ var showOP=function(d){ if(_tk!==_navToken)return; renderOrderPlan(d); };   // Order plan folded under PURCHASE ORDERS (was an L2 section). renderOrderPlan/opBuild prepend the PO sub-nav.
       if(cache['order-plan'])return showOP(cache['order-plan']); c.innerHTML='<div class="count">Loading…</div>';
@@ -14551,7 +14557,7 @@
     get items(){ var it=[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(typeof ME!=='undefined'&&ME&&ME.is_admin)it.unshift(['admin','Admin']); return it; },
     select:function(k){ if(k==='admin')k='admin-general'; if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },
     current:function(){return CONFIG_SUB;}};}catch(e){}
-  function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); if(typeof hideAccounts==='function')hideAccounts(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
+  function showSupply(noSelect){ ensureRoot(); hzLate(ensureRootData); if(typeof hideScenario==='function')hideScenario(); if(typeof hideClient==='function')hideClient(); if(typeof hideAccounts==='function')hideAccounts(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     hzLate(function(){ try{ refreshDtcBadge(); }catch(e){} });   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions) — off the first-paint path (v28.081)
     try{ refreshErpcBadge(); }catch(e){}
     hzLate(function(){ try{ refreshReallocBadge(); }catch(e){} });
@@ -14607,8 +14613,14 @@
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(e){ if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return; e.preventDefault(); if(b.dataset.k==='config'){ enterSupplyConfig(); return; } selectSection(b.dataset.k); };});   // Cmd/Ctrl/Shift/Alt-click (or middle-click) opens the section in a new tab via its deep-link href
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){ if(this.value==='config'){ enterSupplyConfig(); return; } selectSection(this.value); };
     // (v27.328) supply "Refresh cache" button removed — the unified top-nav ↻ (hzRefreshCache → hzSupplyRefresh) does this in place.
+  }
+  // v28.260 (deep dive P1 #9): the badge and prewarm fetches used to fire from ensureRoot() on EVERY landing (DEMAND, ACCOUNTS, ...):
+  // shipments 0.9 MB, purchase-orders 3.1 MB, deposits 0.3 MB, actions, samples, exceptions, and the 5 MB order plan, ~14 MB raw at boot,
+  // competing with the landing view's own data. Now they run once, after SUPPLY is shown and its first paint is over (hzLate).
+  var _rootDataDone=false;
+  function ensureRootData(){ if(_rootDataDone)return; _rootDataDone=true;
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
-    refreshOpExc(); try{ prefetchNavCounts(); }catch(e){}   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately
+    refreshOpExc(); try{ prefetchNavCounts(); }catch(e){}   // Payments Due / plan / shipments / manufacturing badges
     // high-priority ACTIONS count for the ACTIONS tab badge (warms the actions cache too, so opening it is instant)
     try{ if(cache['actions']!==undefined){ setActionsBadgeFrom(cache['actions']); }
       else { fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['actions']=d; setActionsBadgeFrom(d); } }).catch(function(){}); } }catch(e){} }
