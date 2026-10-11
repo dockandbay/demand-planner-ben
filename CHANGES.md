@@ -1,3 +1,10 @@
+## v28.263 (Ben, branch review-fixes-2026-10-05): "Copied" is a passing tooltip, not a pop-up
+
+**Files:** `supply/inject.html`, `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration. Buy plan unchanged.
+
+- Every copy-to-clipboard that used `copyText` / `copyRows` (cash flow, the DEMAND report copies and the other TSV copies) showed a browser alert to dismiss. Now a small dark tooltip "<label> copied ✓" appears next to the button that was pressed for 1.4 s and fades. "Nothing to copy" is the same tooltip. One shared helper (`window.hzCopiedTip`) in both bundles; copies that already flipped the button text to "✓ Copied" are unchanged.
+- Verified in jsdom: cash flow Copy puts 8 KB on the clipboard, tooltip shown next to the button, gone after 1.9 s, zero alerts.
+
 ## v28.262 (Ben, branch review-fixes-2026-10-05): supplier portal sample-linking ownership, escaped staff email, client magic link consumed on POST (deep dive P1 #12, #13)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.

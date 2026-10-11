@@ -3438,7 +3438,14 @@ function buildReport(type){
 // Copy text straight to the clipboard (no overlay) + a short confirmation alert. Falls back to a
 // hidden textarea + execCommand where the async clipboard API isn't available.
 function legacyCopy(text){ var ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.focus(); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
-function copyText(text,label){ var done=function(){ alert((label||'Data')+' copied to clipboard ✓'); };
+// v28.263 (Ben): "Copied" is a passing tooltip next to the button that was pressed, never a pop-up to dismiss. Shared by both bundles.
+if(!window.hzCopiedTip){ (function(){ var last=null; document.addEventListener('pointerdown',function(e){ last=e.target; },true);
+  window.hzCopiedTip=function(msg,el){ try{ el=el||last||document.activeElement; var t=document.createElement('div'); t.textContent=msg||'Copied ✓';
+    t.style.cssText='position:fixed;z-index:99999;background:#0f172a;color:#fff;font:600 12px system-ui,sans-serif;padding:6px 10px;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;opacity:0;transition:opacity .15s;white-space:nowrap';
+    document.body.appendChild(t); var r=el&&el.getBoundingClientRect?el.getBoundingClientRect():null; var w=t.offsetWidth,h=t.offsetHeight;
+    var x=r?Math.max(8,Math.min(window.innerWidth-w-8,r.left+r.width/2-w/2)):(window.innerWidth-w)/2, y=r?(r.top-h-8>=8?r.top-h-8:r.bottom+8):window.innerHeight-h-24;
+    t.style.left=x+'px'; t.style.top=y+'px'; requestAnimationFrame(function(){ t.style.opacity='1'; }); setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); },200); },1400); }catch(e){} }; })(); }
+function copyText(text,label){ var done=function(){ window.hzCopiedTip((label||'Data')+' copied ✓'); };
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,function(){ legacyCopy(text); done(); }); }
   else { legacyCopy(text); done(); } }
 // COPY — copy the tab-separated data straight to the clipboard (paste into Sheets/Excel).
