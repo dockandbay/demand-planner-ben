@@ -1586,9 +1586,16 @@ const MAX_BLOB_AGE_MS = 6 * 60 * 60 * 1000;   // 6h — SELF-HEAL: rebuild the K
 const KV_URL = (process.env.KV_REST_API_URL || '').replace(/\/$/, ''), KV_TOKEN = process.env.KV_REST_API_TOKEN || '';
 const KV_ON = !!(KV_URL && KV_TOKEN);
 const KV_KEY = 'horizon:data', KV_CHUNK = 900000;   // ~900KB base64 chunks (safely under the ~1MB REST value limit)
+// v28.258 (deep dive P1 #10): live logged 136 KV timeouts in a week, each a 30 s wait on a cold instance before the Supabase fallback (the
+// likely cause of /api/version taking 10 s+). Now 5 s per call (KV_TIMEOUT_MS) and a circuit breaker: after a timeout or 5xx the instance skips
+// KV for 5 minutes (reads fall back to Supabase at once, writes are skipped) instead of paying the wait on every chunk.
+const KV_TIMEOUT_MS = Number(process.env.KV_TIMEOUT_MS) || 5000, KV_BREAK_MS = 5 * 60000; let _kvDownUntil = 0;
 async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command array → { result }
-  const r = await _fetchT(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }, 30000);   // v28.151 (review D3)
-  if (!r.ok) throw new Error('KV ' + r.status);
+  if (Date.now() < _kvDownUntil) { const e = new Error('KV skipped (unreachable ' + Math.ceil((_kvDownUntil - Date.now()) / 1000) + 's more)'); e.code = 'KV_DOWN'; throw e; }
+  let r;
+  try { r = await _fetchT(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }, KV_TIMEOUT_MS); }
+  catch (e) { _kvDownUntil = Date.now() + KV_BREAK_MS; throw e; }
+  if (!r.ok) { if (r.status >= 500) _kvDownUntil = Date.now() + KV_BREAK_MS; throw new Error('KV ' + r.status); }
   return (await r.json()).result;
 }
 async function kvWriteBlob(vals) {   // store the built 14-tuple as gzip+base64 chunks + a meta record
@@ -3183,7 +3190,10 @@ app.get('/api/perf/recent', (req, res) => {
 });
 // v28.123 (Diviyaj prod v28.122.1): report the SERVED blob's freshness (element 8 of _buildDataVals) so the page's
 // EXTRACT_TS and the poll compare like for like; a live max() moved ahead of the blob and flagged every tab stale.
-app.get('/api/version', async (_req, res) => { const b = _dataCache && _dataCache.vals && _dataCache.vals[8]; res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: b || await freshnessCached() }); });
+// v28.258: answers at once (the browser polls this every 5 min for auto-update; on a cold or pool-starved instance it used to wait for the
+// freshness query, live p50 10 s). The data stamp comes from the cache when there is one; otherwise the query runs after the reply.
+app.get('/api/version', (_req, res) => { const b = (_dataCache && _dataCache.vals && _dataCache.vals[8]) || _freshCache.val || null;
+  res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: b }); if (!b) hzWaitUntil(freshnessCached().catch(() => {})); });
 // Weather cache (moved off Airtable → planner.weather_cache). The DEMAND ▸ Actions ▸ Weather panel reads
 // this instead of calling Airtable via the Anthropic MCP. Rows are refreshed by the weather job (see Diviyaj note).
 app.get('/api/weather', async (_req, res) => {
@@ -3834,13 +3844,17 @@ if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
   const _al = () => gmailRow().then(g => g && !g.missing ? accLearnLoopLocal('timer').then(r => console.log('[accounts-learn] ' + (r.ok ? (r.busy ? 'busy' : r.receipts + ' receipt / ' + r.tax + ' tax') : 'failed: ' + r.error))) : null).catch(e => console.warn('[accounts-learn] ' + e.message));
   setTimeout(_al, 1800000).unref?.(); setInterval(_al, 7 * 86400000).unref?.();
 }
-app.get('/api/health', async (_req, res) => {
+// v28.258 (deep dive P1 #15): the counts come from the data cache (no work); ?deep=1 runs the eight builders as before (3 s, 8 queries into a
+// pool of 4 on Vercel, so never from an uptime monitor). Without a cache and without ?deep=1 it answers with a SELECT 1 round trip only.
+app.get('/api/health', async (req, res) => {
   try {
-    const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
+    const deep = String(req.query.deep || '') === '1', cached = !deep && _dataCache && _dataCache.vals;
+    if (!deep && !cached) { const t0 = Date.now(); await pool.query('SELECT 1'); return res.set('Cache-Control', 'no-store').json({ ok: true, version: APP_VERSION, cache: 'cold', db_ms: Date.now() - t0 }); }
+    const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = cached ? _dataCache.vals : await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
       buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(),
     ]);
-    res.json({
+    res.set('Cache-Control', 'no-store').json({ ok: true, version: APP_VERSION, cache: cached ? 'warm' : 'deep', cache_age_s: _dataCache ? Math.round((Date.now() - _dataCache.at) / 1000) : null,
       data_combos: DATA.length,
       fc_combos: Object.keys(FC).length,
       sku_combos: Object.keys(FO).length,

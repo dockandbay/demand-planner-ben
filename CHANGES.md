@@ -1,3 +1,12 @@
+## v28.258 (Ben, branch review-fixes-2026-10-05): KV timeout + circuit breaker, instant /api/version, light /api/health (deep dive P1 #10, #15)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration. Optional env `KV_TIMEOUT_MS` (default 5000). Buy plan unchanged.
+
+- **KV (Upstash):** live logged 136 KV timeouts in a week, each a 30 s wait on a cold instance before the Supabase fallback. Each KV call now gets 5 s, and after a timeout or 5xx the instance skips KV for 5 minutes (reads fall back to Supabase at once, blob writes are skipped) instead of paying the wait on every chunk.
+- **`/api/version`** answers immediately (the browser polls it every 5 minutes for auto-update; live p50 was 10 s because a cold instance waited for the freshness query). The data stamp comes from the cache; without one the query runs after the reply.
+- **`/api/health`** no longer runs the eight data builders on every hit (3 s, 8 queries into a pool of 4). Counts come from the data cache; `?deep=1` runs the builders as before; with no cache and no `?deep=1` it answers with one `SELECT 1`. Same fields as before plus `ok`, `version`, `cache`, `cache_age_s`.
+- Sandbox: version 1 ms (was up to 1.3 s cold), health 0.57 s warm / 3.2 s deep.
+
 ## v28.257 (Ben, branch review-fixes-2026-10-05): Fulfil 429 on writes is retried (3PL invoicing push failed with "Too Many Requests")
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
