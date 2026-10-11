@@ -1,3 +1,11 @@
+## v28.256 (Ben, branch review-fixes-2026-10-05): health log gaps closed: cron 401 red alert, keepalive noise, portal bootstrap metric (deep dive P1 #17)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
+
+- **Red alert "scheduled job call(s) rejected (401)"**: any cron hit with the wrong `x-webhook-secret` in the last 10 minutes raises an alert (key `cron:401`, re-alerts after 24 h). A wrong `N8N_WEBHOOK_SECRET` used to stop preorders, accounts and health crons silently (3 of 4 sandbox cron hits this week were 401s). Verified: one wrong-secret call, alert row written by the next evaluator pass.
+- The 5 s keepalive `SELECT 1` is no longer captured as a slow query (it only ever looked slow across a sleeping laptop or a frozen instance; 63 rows, p95 947 s, pure noise).
+- `metric` row per hour for the supplier portal bootstrap: raw bytes, build time, cached / fresh / stale, supplier count (the payload size was not measured anywhere).
+
 ## v28.255 (Ben, branch review-fixes-2026-10-05): write-permission gate hardened: case-sensitive routing, path normalisation, fail closed (deep dive P0 #1, #2)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md, lib/ai-logic). No migration, no env. Buy plan unchanged.

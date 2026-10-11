@@ -204,7 +204,7 @@ pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 
     const t0 = Date.now(), n = arguments.length, cb = n && typeof arguments[n - 1] === 'function' ? arguments[n - 1] : null;
     let st = this.__hzSt || null; if (!st) { try { st = _reqStore.getStore(); } catch (_) {} }
     const done = (err) => { try { const ms = Date.now() - t0; if (err) hzDbErr(err, 'query'); _hzDbTot.n++; _hzDbTot.ms += ms; if (st) st.dbms = (st.dbms || 0) + ms;   // v28.167 (Ben): process-wide DB execution totals (GET /api/perf/recent). v28.175 (Ben): + DB ms per request (ring row `db`)
-      if (ms >= HZ_SLOW_Q_MS) { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;
+      if (ms >= HZ_SLOW_Q_MS && hzSqlNorm((cfg && cfg.text) || cfg) !== 'SELECT ?') { const sql = hzSqlNorm((cfg && cfg.text) || cfg); const r = st && st.req;   // v28.256: the 5 s keepalive (SELECT 1) is not a slow query, only a sleeping laptop
         const tg = hzThawGap();   // v28.231 (gap G1): duration spans an instance freeze, not real execution time
         hzHealthEvt('slow_query', sql + (tg ? '|thaw' : ''), { path: sql, ms, message: 'Slow SQL ' + ms + 'ms' + (tg ? ' (spans a ' + Math.round(tg / 1000) + 's instance freeze)' : ''), meta: Object.assign({ example: r ? (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200) : 'background' }, tg ? { thaw_gap_ms: tg } : null) }); } } catch (_) {} };
     if (cb) { const a = Array.prototype.slice.call(arguments); a[n - 1] = function (err) { done(err); return cb.apply(this, arguments); }; return oq.apply(this, a); }
@@ -25137,16 +25137,18 @@ function hzAlertMaybeEval() { try { const now = Date.now(); if (!_hzAlertDirty |
 // Triggers (a) (b) (d) (e) from the last 10 minutes of events (ONE query) + the in-memory route ratio.
 async function hzAlertCollect() {
   const out = [], d = (await pool.query(`WITH ev AS (SELECT kind, path, method, status, message, count, ts, user_email, meta FROM planner.app_health_events
-      WHERE ts >= now() - make_interval(mins => $1::int) AND kind IN ('server_error','db_pool','integration_error','client_error','console_error'))
+      WHERE ts >= now() - make_interval(mins => $1::int) AND kind IN ('server_error','db_pool','integration_error','client_error','console_error','cron_run'))
     SELECT json_build_object(
       's5', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT coalesce(method || ' ', '') || path p, split_part(coalesce(message, ''), E'\\n', 1) m, sum(count)::int n FROM ev WHERE kind = 'server_error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 3) x)) FROM ev WHERE kind = 'server_error'),
       'db', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT left(coalesce(message, ''), 160))) FROM ev WHERE kind = 'db_pool' AND meta ? 'error' AND NOT meta ? 'thaw_gap_ms' AND coalesce(meta->>'example', '') <> 'background' AND ts >= now() - make_interval(mins => $2::int)),   -- v28.231 (fix 5): only user-request timeouts that did not span an instance freeze page
       'fa', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT path)) FROM ev WHERE kind = 'integration_error' AND meta->>'service' = 'fulfil' AND status IN (401, 403)),
+      'c4', (SELECT json_build_object('n', coalesce(sum(count), 0), 'first', min(ts), 'last', max(ts), 'ex', json_agg(DISTINCT path)) FROM ev WHERE kind = 'cron_run' AND status = 401),
       'cu', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT message, count(DISTINCT user_email)::int users, sum(count)::int n, min(ts) first, max(ts) last, (array_agg(DISTINCT path))[1:3] views
         FROM ev WHERE kind IN ('client_error', 'console_error') AND user_email IS NOT NULL GROUP BY message HAVING count(DISTINCT user_email) >= $3 ORDER BY 2 DESC LIMIT 5) x)) d`, [HZ_RA.win_min, HZ_RA.db_win_min, HZ_RA.client_users])).rows[0].d;
   const s5 = d.s5 || {}; if (Number(s5.n) >= HZ_RA.s5xx_total) out.push({ key: 'srv:5xx', trigger: 'server', title: `${s5.n} server errors (5xx) in ${HZ_RA.win_min} min`, n: Number(s5.n), first: s5.first, last: s5.last, examples: (s5.ex || []).map(x => `${x.p} (${x.n}x): ${x.m}`), file: hzLikelyFile(((s5.ex || [])[0] || {}).p ? String(s5.ex[0].p).replace(/^\S+ /, '') : '') });
   for (const [route, r] of _hzRoute) if (r.n >= HZ_RA.route_min_calls && r.e / r.n >= HZ_RA.route_ratio) out.push({ key: 'srv:route:' + route, trigger: 'server', title: `${route} failing: ${r.e} of ${r.n} calls returned 5xx`, n: r.e, first: new Date(r.first).toISOString(), last: new Date(r.last).toISOString(), examples: [route + ' ' + Math.round(r.e / r.n * 100) + '% 5xx in the current 10-min window (this instance)'], file: hzLikelyFile(route.replace(/^\S+ /, '')) });
   const db = d.db || {}; if (Number(db.n) >= HZ_RA.db_timeouts) out.push({ key: 'db:timeouts', trigger: 'db', title: `${db.n} DB connection / query timeouts in ${HZ_RA.db_win_min} min`, n: Number(db.n), first: db.first, last: db.last, examples: (db.ex || []).slice(0, 3), file: 'server.mjs pool config (max 4, connectionTimeoutMillis, query_timeout) + the slow_query list' });
+  const c4 = d.c4 || {}; if (Number(c4.n) >= 1) out.push({ key: 'cron:401', trigger: 'cron', title: `${c4.n} scheduled job call(s) rejected (401): n8n is sending the wrong x-webhook-secret, those jobs are not running`, n: Number(c4.n), first: c4.first, last: c4.last, examples: (c4.ex || []).filter(Boolean).slice(0, 5), file: 'server.mjs (N8N_WEBHOOK_SECRET)' });   // v28.256 (deep dive gap): a wrong secret silently stopped preorders / accounts / health crons
   const fa = d.fa || {}; if (Number(fa.n) >= HZ_RA.fulfil_auth) out.push({ key: 'integ:fulfil_auth', trigger: 'integration', title: `Fulfil rejecting our API key: ${fa.n} 401/403 in ${HZ_RA.win_min} min`, n: Number(fa.n), first: fa.first, last: fa.last, examples: (fa.ex || []).slice(0, 3), file: 'server.mjs fulfilFetch / fulfilConfigFor (FULFIL_*_API_KEY)' });
   for (const c of d.cu || []) out.push({ key: 'client:' + crypto.createHash('sha1').update(String(c.message)).digest('hex').slice(0, 16), trigger: 'client', title: `Browser error hitting ${c.users} users: ${String(c.message).slice(0, 80)}`, n: c.n, first: c.first, last: c.last, examples: [String(c.message).slice(0, 200)].concat((c.views || []).filter(Boolean).map(v => 'view ' + v)), file: hzLikelyFile((c.views || [])[0], 'staff') });
   return out;
@@ -27306,7 +27308,7 @@ async function specSupplierSetCached(spec) {
   const v = await specSupplierSet(spec); _specSupMemo.set(k, { t: Date.now(), v }); return v;
 }
 app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
-  const names = req.portal.suppliers, ids = req.portal.supplierIds;
+  const names = req.portal.suppliers, ids = req.portal.supplierIds, _t0 = Date.now();
   try {
     // Hide archived (completed, pre-cutoff) POs by default — same cutoff as the admin grid — to keep the portal
     // payload small; ?includeArchived=1 reveals them (portal "Show archived" toggle).
@@ -27330,6 +27332,9 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     }
     if (!_fresh && _lcIsStale(st, v)) res.set('X-HZ-Stale', '1');
     sendJsonMemo(req, res, v, () => v);   // serialised + gzipped once per build; strong ETag → 304 on an unchanged payload
+    // v28.256 (deep dive gap): bootstrap size and time per request, aggregated per hour in the health log (metric 'portal bootstrap')
+    try { const m = _jsonMemo.get(v), bytes = m && m.str ? m.str.length : 0, ms = Date.now() - _t0, stale = res.getHeader('X-HZ-Stale') === '1';
+      hzHealthEvt('metric', 'portal_bootstrap|' + (stale ? 'stale' : _fresh ? 'fresh' : 'cached') + '|' + new Date().toISOString().slice(0, 13), { path: 'portal bootstrap', ms, message: 'Portal bootstrap ' + Math.round(bytes / 1024) + ' KB raw, ' + ms + ' ms' + (stale ? ' (stale)' : _fresh ? ' (fresh)' : ''), meta: { bytes, ms, stale, fresh: _fresh, suppliers: names.length } }); } catch (_) {}
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.189 (Ben, deep dive H2): the detail of the caller's own POs, on demand: the full rows (incl. the detail-only fields a completed PO's
