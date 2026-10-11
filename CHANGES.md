@@ -1,3 +1,11 @@
+## v28.266 (Ben, branch review-fixes-2026-10-05): email when a bank statement upload is more than 5 days old (UK or AU)
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration. Optional env `ACC_STMT_MAX_DAYS` (default 5), `ACC_STMT_ALERT_TO` (default rita@, sarah@, ben@dockandbay.com).
+
+- With every health-check run (n8n every 15 min on live, the local timer on the sandbox) HORIZON checks the latest Bank ageing statement upload per org. If it is more than 5 days old, or the org has never been uploaded, it emails rita@, sarah@ and ben@ with the age and the 4 export steps (Xero ▸ Bank accounts ▸ Uncoded statement lines ▸ All bank accounts ▸ CSV ▸ upload) and a link to ACCOUNTS ▸ Bank ageing.
+- At most one email per org per London day, claimed in `app_settings` (`acc_stmt_alert_sent:<org>`) so several instances never double-send. `dry_run` on the health-checks cron reports without sending.
+- Sandbox: AU (never uploaded) produced one email (logged as sandbox, no Resend key), the second run the same day none; UK uploaded today, no email. **Note for go-live:** AU will email on the first run after deploy until an AU export is uploaded.
+
 ## v28.265 (Ben, branch review-fixes-2026-10-05): Bank ageing: statement lines from Xero's Bank Reconciliation export (upload), with instructions
 
 **Files:** `server.mjs`, `lib/xero_recon_xlsx.mjs` (new), `supply/inject.html`, `migrations/352_accounts_stmt_lines.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 352** (additive: `planner.accounts_stmt_lines`, `planner.accounts_stmt_uploads`). No env. Uses the existing `exceljs` dependency. Nothing is sent to Xero.

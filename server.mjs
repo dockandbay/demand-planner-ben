@@ -25333,13 +25333,40 @@ function hzIntegFatal(service, op, message, meta) {
 // PROD SCHEDULE (recommended): n8n every 15 min (on Vercel nothing runs without requests, so this is also what delivers alerts
 // held by the hourly cap and a weekly report that was throttled). Minimum: daily 07:00 Australia/Sydney. The long-lived local
 // server also runs it hourly (unref'd timer; HZ_HEALTH_CHECKS=0 turns that off).
+// v28.266 (Ben 12-Oct-26): email rita@, sarah@ and ben@ when an org's bank statement upload (ACCOUNTS > Bank ageing) is more than 5 days old,
+// or the org has never been uploaded. Runs with the health checks (n8n every 15 min on live, the local timer here); at most ONE email per org
+// per calendar day (London), claimed in app_settings so several instances cannot double-send. Recipients: ACC_STMT_ALERT_TO (comma list).
+const ACC_STMT_MAX_DAYS = Number(process.env.ACC_STMT_MAX_DAYS) || 5;
+const ACC_STMT_ALERT_TO = String(process.env.ACC_STMT_ALERT_TO || 'rita@dockandbay.com,sarah@dockandbay.com,ben@dockandbay.com').split(',').map(x => x.trim()).filter(Boolean);
+async function accStmtStaleCheck(opts) {
+  opts = opts || {}; const out = [];
+  let rows; try { rows = (await pool.query(`SELECT o.org, to_char(max(u.as_at),'YYYY-MM-DD') as_at, ((now() AT TIME ZONE 'Europe/London')::date - max(u.as_at))::int days, (array_agg(u.account_name ORDER BY u.as_at DESC))[1] account
+      FROM (VALUES ('uk'),('au')) o(org) LEFT JOIN planner.accounts_stmt_uploads u ON u.org = o.org GROUP BY o.org ORDER BY o.org`)).rows; }
+  catch (e) { if (/does not exist/.test(e.message)) return out; throw e; }
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  for (const r of rows) {
+    const stale = r.as_at == null || r.days > ACC_STMT_MAX_DAYS; out.push({ org: r.org, as_at: r.as_at, days: r.days, stale });
+    if (!stale || opts.dry) continue;
+    const claim = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ($1,$2,'stmt-alert',now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now() WHERE planner.app_settings.value <> EXCLUDED.value RETURNING key`, ['acc_stmt_alert_sent:' + r.org, today]);
+    if (!claim.rowCount) continue;   // already emailed today for this org
+    const ORG = r.org.toUpperCase(), when = r.as_at || null;
+    const fmt = d => { const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p = d.split('-'); return p[2] + '-' + m[+p[1] - 1] + '-' + p[0].slice(2); };
+    const link = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '') + '/#/accounts/bank';
+    const html = '<p>The <b>' + ORG + '</b> bank statement in HORIZON is ' + (when ? '<b>' + r.days + ' days old</b> (last upload as at ' + fmt(when) + (r.account ? ', ' + escHtml(r.account) : '') + ')' : '<b>not uploaded yet</b>') + '. It should be refreshed at least every ' + ACC_STMT_MAX_DAYS + ' days so Bank ageing and the Inbox matcher see current statement lines.</p>'
+      + '<p><b>To update (about 2 minutes):</b></p><ol><li>In Xero (' + (r.org === 'au' ? 'Dock &amp; Bay Pty Ltd' : 'Dock &amp; Bay Ltd') + ') open <b>Accounting ▸ Bank accounts</b>.</li><li>Open the menu at the top right and choose <b>Uncoded statement lines</b>.</li><li>Choose <b>All bank accounts</b>, set a wide date range, and export as <b>CSV</b>.</li><li>In HORIZON open <a href="' + link + '">ACCOUNTS ▸ Bank ageing</a> and press <b>Upload Xero report</b>.</li></ol>'
+      + '<p style="color:#64748b;font-size:12px">You get this once a day while the statement is more than ' + ACC_STMT_MAX_DAYS + ' days old. Sent by HORIZON.</p>';
+    try { await sendResendEmail({ to: ACC_STMT_ALERT_TO, subject: 'HORIZON: ' + ORG + ' bank statement ' + (when ? r.days + ' days out of date' : 'not uploaded') + ': please upload', html, kind: 'stmt-stale', ref: 'stmt:' + r.org }); out[out.length - 1].emailed = true; }
+    catch (e) { console.warn('[stmt-alert] ' + e.message); out[out.length - 1].error = e.message; }
+  }
+  return out;
+}
 app.post('/api/cron/health-checks', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
+  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 if (!process.env.VERCEL && process.env.HZ_HEALTH_CHECKS !== '0') {
-  const _hc = () => runHealthChecks({}).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
+  const _hc = () => accStmtStaleCheck({}).catch(e => console.warn('[stmt-alert] ' + e.message)).then(() => runHealthChecks({})).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
   setTimeout(_hc, 180000).unref?.(); setInterval(_hc, 3600000).unref?.();
 }
 // Local verification only (HZ_HEALTH_TEST=1, never on Vercel): a slow statement, a synthetic red alert, the claim race.
