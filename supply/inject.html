@@ -18767,9 +18767,9 @@
     var app=document.getElementById('app'); if(app){ app.classList.add('accounts-active'); ['supply-active','config-mode','product-active','client-active'].forEach(function(c){ app.classList.remove(c); }); }
     document.body.classList.add('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.add('active'); try{ hzSyncDemandPills(); }catch(e){} }
-  function hideAccounts(){ try{ clearTimeout(AC_BD.poll); }catch(e){} var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
+  function hideAccounts(){ try{ clearTimeout(AC_BD.poll); clearTimeout(AC_BK.poll); }catch(e){} var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
     app.classList.remove('accounts-active'); document.body.classList.remove('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='none'; var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.remove('active'); }
-  function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; try{ if(k!=='backdate')clearTimeout(AC_BD.poll); }catch(e){} document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
+  function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; try{ if(k!=='backdate')clearTimeout(AC_BD.poll); if(k!=='bank')clearTimeout(AC_BK.poll); }catch(e){} document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
     if(!fromRoute){ try{ writeHash(['accounts',k]); }catch(e){} }
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
@@ -18787,6 +18787,9 @@
   var AC_BK={org:'all',kind:'all',q:'',open:{},d:null,busy:false,run:false,err:''};
   var AC_BK_KIND={spend:'Spend money',receive:'Receive money',payment:'Payment',transfer:'Transfer'};
   function acBkBucket(days){ return days<=30?0:days<=60?1:days<=90?2:3; }
+  function acBankPoll(){ clearTimeout(AC_BK.poll); AC_BK.poll=setTimeout(function(){ fetch('/api/accounts/bank-ageing').then(function(r){ return r.json(); }).then(function(j){
+      if(j.running){ AC_BK.stage=j.stage||''; if(ACCOUNTS_SUB==='bank'){ var s=document.getElementById('ac-bstage'); if(s)s.textContent='Refreshing: '+(AC_BK.stage||'starting')+'…'; } acBankPoll(); return; }
+      AC_BK.run=false; AC_BK.d=j; if(j.last&&j.last.status!=='success')AC_BK.err=j.last.message||'failed'; if(ACCOUNTS_SUB==='bank')acRenderBank(document.getElementById('accounts-body')); }).catch(function(){ acBankPoll(); }); },8000); }
   function acRenderBank(b){
     if(!AC_BK.d){ if(AC_BK.busy)return; AC_BK.busy=true;
       fetch('/api/accounts/bank-ageing').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
@@ -18813,7 +18816,8 @@
           +'<td class="l">'+(x.amount<0?acMoney(-x.amount,x.currency):'')+'</td><td class="l">'+(x.amount>=0?acMoney(x.amount,x.currency):'')+'</td><td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'; });
       return h; }).join('');
     var L=d.last, stale=!L||L.age_s>7200||L.status!=='success';
-    var stamp=AC_BK.run?'Refreshing from Xero…':(L?('Last run '+acSynced(L.at)+(L.status!=='success'?' · <span style="color:var(--neg)">'+esc(L.message||'failed')+'</span>':'')):'Never run');
+    if(d.running&&!AC_BK.run){ AC_BK.run=true; acBankPoll(); }   /* v28.253: a run started elsewhere (cron, another user) */
+    var stamp=AC_BK.run?('<span id="ac-bstage">Refreshing: '+esc(d.stage||AC_BK.stage||'starting')+'…</span>'):(L?('Last run '+acSynced(L.at)+(L.status!=='success'?' · <span style="color:var(--neg)">'+esc(L.message||'failed')+'</span>':'')):'Never run');
     b.innerHTML='<div class="bar">'+pill('org','all','Both')+pill('org','uk','UK')+pill('org','au','AU')+'<span style="width:10px"></span>'+pill('kind','all','All')+pill('kind','spend','Spend')+pill('kind','receive','Receive')+pill('kind','payment','Payments')+pill('kind','transfer','Transfers')
       +'<input class="fci" id="ac-bq" placeholder="Search account, contact, reference" style="width:240px" value="'+esc(AC_BK.q)+'"><span class="save-btn light" id="ac-brf">'+(AC_BK.run?'Refreshing…':'Refresh now')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+stamp+(stale&&!AC_BK.run?' <span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">stale</span>':'')+'</span></div>'
@@ -18827,8 +18831,9 @@
     b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_BK.open[k]=!AC_BK.open[k]; acRenderBank(b); }; });
     var qi=document.getElementById('ac-bq'); qi.oninput=function(){ AC_BK.q=qi.value; clearTimeout(AC_BK._t); AC_BK._t=setTimeout(function(){ acRenderBank(b); var n=document.getElementById('ac-bq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     document.getElementById('ac-brf').onclick=function(){ if(AC_BK.run)return; AC_BK.run=true; AC_BK.err=''; acRenderBank(b);
-      fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }); }).then(function(j){ AC_BK.run=false; if(j.errors&&j.errors.length)AC_BK.err=j.errors.join('; '); else if(j.error)AC_BK.err=j.error; AC_BK.d=null; acRenderBank(document.getElementById('accounts-body')); })
-        .catch(function(e){ AC_BK.run=false; AC_BK.err=e.message; acRenderBank(b); }); };
+      // v28.253: the server answers 202 and runs in the background; poll every 8 s until it reports running=false, then show the last run
+      fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(r.status!==202&&r.status!==409)throw new Error(j.error||('HTTP '+r.status)); }); })
+        .then(function(){ acBankPoll(); }).catch(function(e){ AC_BK.run=false; AC_BK.err=e.message; acRenderBank(b); }); };
   }
   // ── v28.250 ACCOUNTS > Back-date: past opportunities from the weekly learn job (read only, nothing is written to Xero from here).
   // Receipts = reconciled Xero items whose receipt email is in accounts@ but Xero has no file; Tax = UK spend coded Reverse Charge.
@@ -18868,7 +18873,7 @@
         :'UK spend coded Reverse Charge. Rule: non-GBP expenses are Zero Rated Expenses; GBP expenses are 20% VAT on Expenses or No VAT; bank fees No VAT. Review with the accountant before recoding; nothing is changed from here.')+' Refreshed weekly.</div>';
     b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_BD[p.dataset.g]=p.dataset.v; acRenderBackdate(b); }; });
     var qi=document.getElementById('ac-dq'); qi.oninput=function(){ AC_BD.q=qi.value; clearTimeout(AC_BD._t); AC_BD._t=setTimeout(function(){ acRenderBackdate(b); var n=document.getElementById('ac-dq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
-    document.getElementById('ac-drf').onclick=function(){ if(d.running||AC_BD.refreshing)return; AC_BD.refreshing=true; fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); }); }).then(function(){ AC_BD.d=null; acRenderBackdate(b); }).catch(function(e){ AC_BD.err=e.message; AC_BD.d=null; acRenderBackdate(b); }).finally(function(){ AC_BD.refreshing=false; }); };
+    document.getElementById('ac-drf').onclick=function(){ if(d.running||AC_BD.refreshing)return; AC_BD.refreshing=true; fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(r.status!==202&&r.status!==409)throw new Error(j.error||('HTTP '+r.status)); }); }).then(function(){ AC_BD.d=null; acRenderBackdate(b); }).catch(function(e){ AC_BD.err=e.message; AC_BD.d=null; acRenderBackdate(b); }).finally(function(){ AC_BD.refreshing=false; }); };
   }
   // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.

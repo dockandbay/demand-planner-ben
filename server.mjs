@@ -3349,89 +3349,163 @@ app.get('/api/accounts/payables', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ═══ v28.249 (Ben 10-Oct-26): ACCOUNTS > Bank ageing (interim). Background job reads Xero UK + AU (GET only) for items ENTERED on a bank
-// account but not reconciled: spend / receive money (BankTransactions, yearly date windows: Xero refuses unfiltered reads on the UK org),
-// bill / invoice payments whose account is a bank account (payments to loan / prepayment accounts can never reconcile, left out), and
-// transfers with an unreconciled side. *-TRANSFER bank transactions are skipped (the BankTransfer row covers them). Stored in
-// planner.accounts_bank_items (mig 349); the screen reads that. Unmatched bank STATEMENT lines need Xero bank statement access (not granted).
-const ACC_BANK_FROM_YEAR = 2018;
+// account but not reconciled: spend / receive money, bill / invoice payments whose account is a bank account (payments to loan / prepayment
+// accounts can never reconcile, left out), and transfers with an unreconciled side. Stored in planner.accounts_bank_items (mig 349); the
+// screen reads that. Unmatched bank STATEMENT lines need Xero bank statement access (not granted).
+// v28.253 (deep dive P0 #5): safe on Vercel. One runner at a time across instances (a lock row in app_settings, 15 min TTL), Refresh now
+// returns 202 and the page polls, the Xero read is INCREMENTAL after the first run (If-Modified-Since watermark per org: modified
+// unreconciled items are upserted, stored items are re-checked by id and dropped once reconciled), the first run uses quarter windows
+// (yearly ones were refused on the UK org) with a 45 s call timeout and one retry. Progress is written to app_settings so any instance can show it.
+const ACC_BANK_FROM_YEAR = 2018, ACC_BANK_LOCK_MS = 15 * 60000;
 const _xDate = s => { if (!s) return null; const m = /\/Date\((-?\d+)/.exec(String(s)); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(s).slice(0, 10); };
-let _accBankRun = null;
-async function accountsBankSyncOrg(org) {
-  const accs = ((await xeroFetch(org, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'))) || {}).Accounts || [];
-  const bank = new Map(accs.map(a => [a.AccountID, a])), items = [];
+const _xDT = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
+// ── small job helpers shared by the ACCOUNTS jobs (lock, watermark, progress) ──
+async function accSettingGet(key) { try { const r = (await pool.query('SELECT value FROM planner.app_settings WHERE key=$1', [key])).rows[0]; return r ? JSON.parse(r.value) : null; } catch (_) { return null; } }
+async function accSettingSet(key, val, by) { await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_by=EXCLUDED.updated_by, updated_at=now()`, [key, JSON.stringify(val), by || 'job']); }
+async function accJobLock(name, ttlMs, by) {   // true when THIS caller now holds the lock (a live lock held by another instance refuses)
+  const r = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ($1,$2,$3,now())
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_by=EXCLUDED.updated_by, updated_at=now()
+    WHERE coalesce((planner.app_settings.value::jsonb->>'until')::timestamptz, 'epoch'::timestamptz) < now() RETURNING key`,
+    ['job_lock:' + name, JSON.stringify({ until: new Date(Date.now() + ttlMs).toISOString(), by: by || 'job', at: new Date().toISOString() }), by || 'job']);
+  return r.rows.length > 0;
+}
+async function accJobUnlock(name) { try { await pool.query('UPDATE planner.app_settings SET value=$2 WHERE key=$1', ['job_lock:' + name, JSON.stringify({ until: new Date(0).toISOString() })]); } catch (_) {} }
+async function accJobLocked(name) { const v = await accSettingGet('job_lock:' + name); return v && v.until && new Date(v.until) > new Date() ? v : null; }
+async function accProgress(name, text) { try { await accSettingSet('job_progress:' + name, { text: String(text || ''), at: new Date().toISOString() }); } catch (_) {} }
+async function accProgressGet(name) { const v = await accSettingGet('job_progress:' + name); return v && v.text || ''; }
+// Paged Xero list (GET only). opts.since = If-Modified-Since (Date); 45 s per call, one retry on a timeout (xeroFetch).
+async function accXeroList(org, resource, where, opts) {
+  opts = opts || {}; const out = []; const headers = opts.since ? { 'If-Modified-Since': new Date(opts.since).toUTCString() } : {};
+  for (let p = 1; p < 200; p++) {
+    const j = await xeroFetch(org, '/api.xro/2.0/' + resource + '?' + (where ? 'where=' + encodeURIComponent(where) + '&' : '') + 'pageSize=1000&page=' + p, { headers, timeoutMs: 45000 });
+    const x = (j && j[resource]) || []; out.push(...x); if (x.length < 1000) break;
+  }
+  return out;
+}
+const _xHighVol = e => e && e.code === 400 && /efficient|HighVolume/i.test(e.message + JSON.stringify(e.body || ''));
+// BankTransactions in [from, to) with a where clause, yearly windows (or opts.stepMonths), halving any window Xero refuses as too broad (down to one day).
+async function accXeroBtRange(org, from, to, where, opts) {
+  opts = opts || {}; const stepM = opts.stepMonths || 12;   // yearly windows (the UK org halves a few of them); the learn job passes 1
+  const win = async (a, b) => {
+    try { return await accXeroList(org, 'BankTransactions', `Date>=${_xDT(a)} AND Date<${_xDT(b)} AND ${where}`, opts); }
+    catch (e) { const days = (b - a) / 864e5; if (_xHighVol(e) && days > 1) { const m = new Date(a.getTime() + Math.floor(days / 2) * 864e5); return (await win(a, m)).concat(await win(m, b)); } throw e; } };
+  const all = []; for (let a = new Date(from); a < to;) { const b = new Date(Math.min(to, Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + stepM, 1))); all.push(...await win(a, b)); a = b; }
+  return all;
+}
+// Items by id, 15 per call (re-check whether a stored unreconciled item is still open). Returns a Map id -> item (missing = deleted in Xero).
+async function accXeroByIds(org, resource, idField, ids) {
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 15) { const ch = ids.slice(i, i + 15);
+    const rows = await accXeroList(org, resource, ch.map(id => `${idField}==guid("${id}")`).join(' OR '));
+    rows.forEach(x => out.set(x[idField], x)); }
+  return out;
+}
+function accBankRowsFrom(org, bank, bt, pays, transfers) {   // Xero items -> accounts_bank_items rows (only items on a bank account)
+  const rows = [];
   const add = (kind, id, accId, date, amount, contact, ref, desc, linkId, linkType) => { const a = bank.get(accId); if (!a) return;
-    items.push([org, kind, id, accId, a.Name || '', a.CurrencyCode || '', date, Math.round(amount * 100) / 100, contact || '', ref || '', desc || '', linkId || null, linkType || null]); };
-  // Date windows: a year at a time; when Xero refuses one as too broad (HighVolumeException, 400) it is split in half, down to one day.
-  const dt = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
-  const btWindow = async (a, b) => { const bt = [];
-    for (let p = 1; p < 50; p++) { let j;
-      try { j = await xeroFetch(org, '/api.xro/2.0/BankTransactions?where=' + encodeURIComponent(`Date>=${dt(a)} AND Date<${dt(b)} AND IsReconciled==false`) + '&pageSize=1000&page=' + p); }
-      catch (e) { const days = (b - a) / 86400000; if (e.code === 400 && /efficient|HighVolume/i.test(e.message + JSON.stringify(e.body || '')) && days > 1) { const m = new Date(a.getTime() + Math.floor(days / 2) * 86400000); return (await btWindow(a, m)).concat(await btWindow(m, b)); } throw e; }
-      const x = (j && j.BankTransactions) || []; bt.push(...x); if (x.length < 1000) break; }
-    return bt; };
-  const nextYear = new Date().getUTCFullYear() + 1;
-  for (let y = ACC_BANK_FROM_YEAR; y <= nextYear; y++) {
-    const bt = await btWindow(new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y + 1, 0, 1)));
-    bt.filter(t => t.Status === 'AUTHORISED' && !/TRANSFER$/.test(t.Type || '')).forEach(t => add(/^RECEIVE/.test(t.Type) ? 'receive' : 'spend', t.BankTransactionID, t.BankAccount && t.BankAccount.AccountID,
-      _xDate(t.DateString || t.Date), (/^RECEIVE/.test(t.Type) ? 1 : -1) * (Number(t.Total) || 0), t.Contact && t.Contact.Name, t.Reference, ((t.LineItems || [])[0] || {}).Description));
-  }
-  for (let p = 1; p < 100; p++) {
-    const j = await xeroFetch(org, '/api.xro/2.0/Payments?where=' + encodeURIComponent('IsReconciled==false AND Status=="AUTHORISED"') + '&pageSize=1000&page=' + p);
-    const ps = (j && j.Payments) || [];
-    ps.forEach(x => { const inv = x.Invoice || x.CreditNote || {}, t = String(x.PaymentType || ''), out = t === 'ACCPAYPAYMENT' || t === 'ACCRECCREDITPAYMENT' || t === 'APOVERPAYMENTPAYMENT' || t === 'APPREPAYMENTPAYMENT';
-      add('payment', x.PaymentID, x.Account && x.Account.AccountID, _xDate(x.Date), (out ? -1 : 1) * (Number(x.BankAmount != null ? x.BankAmount : x.Amount) || 0),
-        inv.Contact && inv.Contact.Name, x.Reference || inv.InvoiceNumber || inv.CreditNoteNumber, (t.startsWith('ACCPAY') || t.startsWith('AP') ? 'Bill ' : 'Invoice ') + (inv.InvoiceNumber || inv.CreditNoteNumber || ''),
-        x.Invoice ? x.Invoice.InvoiceID : null, x.Invoice ? (t.startsWith('ACCPAY') ? 'ACCPAY' : 'ACCREC') : null); });
-    if (ps.length < 1000) break;
-  }
-  const tr = ((await xeroFetch(org, '/api.xro/2.0/BankTransfers?where=' + encodeURIComponent(`Date>=DateTime(${ACC_BANK_FROM_YEAR},01,01)`))) || {}).BankTransfers || [];
-  tr.forEach(x => { const d = _xDate(x.DateString || x.Date), fa = x.FromBankAccount || {}, ta = x.ToBankAccount || {}, amt = Number(x.Amount) || 0;
+    rows.push([org, kind, id, accId, a.Name || '', a.CurrencyCode || '', date, Math.round(amount * 100) / 100, contact || '', ref || '', desc || '', linkId || null, linkType || null]); };
+  bt.filter(t => t.Status === 'AUTHORISED' && !t.IsReconciled && !/TRANSFER$/.test(t.Type || '')).forEach(t => add(/^RECEIVE/.test(t.Type) ? 'receive' : 'spend', t.BankTransactionID, t.BankAccount && t.BankAccount.AccountID,
+    _xDate(t.DateString || t.Date), (/^RECEIVE/.test(t.Type) ? 1 : -1) * (Number(t.Total) || 0), t.Contact && t.Contact.Name, t.Reference, ((t.LineItems || [])[0] || {}).Description));
+  pays.filter(x => x.Status === 'AUTHORISED' && !x.IsReconciled).forEach(x => { const inv = x.Invoice || x.CreditNote || {}, t = String(x.PaymentType || ''), out = t === 'ACCPAYPAYMENT' || t === 'ACCRECCREDITPAYMENT' || t === 'APOVERPAYMENTPAYMENT' || t === 'APPREPAYMENTPAYMENT';
+    add('payment', x.PaymentID, x.Account && x.Account.AccountID, _xDate(x.Date), (out ? -1 : 1) * (Number(x.BankAmount != null ? x.BankAmount : x.Amount) || 0),
+      inv.Contact && inv.Contact.Name, x.Reference || inv.InvoiceNumber || inv.CreditNoteNumber, (t.startsWith('ACCPAY') || t.startsWith('AP') ? 'Bill ' : 'Invoice ') + (inv.InvoiceNumber || inv.CreditNoteNumber || ''),
+      x.Invoice ? x.Invoice.InvoiceID : null, x.Invoice ? (t.startsWith('ACCPAY') ? 'ACCPAY' : 'ACCREC') : null); });
+  transfers.forEach(x => { const d = _xDate(x.DateString || x.Date), fa = x.FromBankAccount || {}, ta = x.ToBankAccount || {}, amt = Number(x.Amount) || 0;
     if (!x.FromIsReconciled) add('transfer', x.BankTransferID, fa.AccountID, d, -amt, '', x.Reference, 'Transfer to ' + (ta.Name || ''));
     if (!x.ToIsReconciled) add('transfer', x.BankTransferID, ta.AccountID, d, amt, '', x.Reference, 'Transfer from ' + (fa.Name || '')); });
+  const uniq = new Map(); rows.forEach(r => uniq.set(r[1] + '|' + r[2] + '|' + r[3], r));   // Xero paging can repeat an item across pages: one row per key
+  return [...uniq.values()];
+}
+const ACC_XERO_DAY_MIN = Number(process.env.ACC_XERO_DAY_MIN) || 1500;   // a full accounts scan only starts with this much of the day's Xero allowance left
+async function accXeroHeadroom(org) { try { await xeroFetch(org, '/api.xro/2.0/Organisation', { timeoutMs: 20000 }); } catch (e) { if (e && e.xero_daily) throw e; }
+  const q = xeroQuota(org); if (q && q.day != null && q.day < ACC_XERO_DAY_MIN) throw new Error('Xero ' + org.toUpperCase() + ' daily allowance low (' + q.day + ' calls left): the full scan waits for tomorrow'); }
+async function accountsBankSyncOrg(org, opts) {
+  opts = opts || {}; const t0 = new Date(); const wm = opts.full ? null : await accSettingGet('accounts_bank_wm:' + org);
+  if (!wm || opts.full) await accXeroHeadroom(org);
+  const accs = ((await xeroFetch(org, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'), { timeoutMs: 45000 })) || {}).Accounts || [];
+  const bank = new Map(accs.map(a => [a.AccountID, a]));
+  const since = wm && wm.at ? new Date(new Date(wm.at).getTime() - 10 * 60000) : null;   // 10 min overlap
+  let rows, mode, dropIds = null;
+  if (!since) {
+    mode = 'full'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + ' (first run, 2018 to now)');
+    const bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), 'IsReconciled==false');
+    const pays = await accXeroList(org, 'Payments', 'IsReconciled==false AND Status=="AUTHORISED"');
+    const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
+    rows = accBankRowsFrom(org, bank, bt, pays, tr);
+  } else {
+    mode = 'incremental'; await accProgress('accounts_bank_ageing', 'Reading Xero ' + org.toUpperCase() + ' (changes since ' + since.toISOString().slice(0, 16).replace('T', ' ') + ')');
+    let bt, pays;
+    try { bt = await accXeroList(org, 'BankTransactions', 'IsReconciled==false', { since }); }
+    catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)), new Date(Date.now() + 864e5), 'IsReconciled==false', { since }); }   // the UK org refuses the unwindowed read: same If-Modified-Since read, year by year (small answers, a few calls)
+    pays = await accXeroList(org, 'Payments', 'IsReconciled==false AND Status=="AUTHORISED"', { since });
+    const tr = await accXeroList(org, 'BankTransfers', `Date>=${_xDT(new Date(Date.UTC(ACC_BANK_FROM_YEAR, 0, 1)))}`);
+    const modified = accBankRowsFrom(org, bank, bt, pays, tr);   // every transfer is re-read (cheap), so transfer rows are complete
+    // stored spend / receive / payment items not in the modified set: re-check by id and drop the ones now reconciled, voided or deleted
+    const stored = (await pool.query(`SELECT kind, xero_id FROM planner.accounts_bank_items WHERE org=$1 AND kind IN ('spend','receive','payment')`, [org])).rows;
+    const seen = new Set(modified.map(r => r[1] + '|' + r[2])), check = { bt: [], pay: [] };
+    stored.forEach(r => { if (seen.has(r.kind + '|' + r.xero_id)) return; (r.kind === 'payment' ? check.pay : check.bt).push(r.xero_id); });
+    dropIds = [];
+    if (check.bt.length) { const m = await accXeroByIds(org, 'BankTransactions', 'BankTransactionID', check.bt); check.bt.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
+    if (check.pay.length) { const m = await accXeroByIds(org, 'Payments', 'PaymentID', check.pay); check.pay.forEach(id => { const x = m.get(id); if (!x || x.IsReconciled || x.Status !== 'AUTHORISED') dropIds.push(id); }); }
+    rows = modified;
+  }
   const c = await pool.connect();
   try { await c.query('BEGIN');
-    await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1', [org]); await c.query('DELETE FROM planner.accounts_bank_accounts WHERE org = $1', [org]);
-    for (let i = 0; i < items.length; i += 300) { const ch = items.slice(i, i + 300), v = [];
-      await c.query(`INSERT INTO planner.accounts_bank_items (org, kind, xero_id, bank_account_id, bank_account, currency, txn_date, amount, contact, reference, description, link_id, link_type) VALUES `
-        + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 13 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
+    if (mode === 'full') await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1', [org]);
+    else { await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND kind = $2', [org, 'transfer']); if (dropIds.length) await c.query('DELETE FROM planner.accounts_bank_items WHERE org = $1 AND xero_id = ANY($2)', [org, dropIds]); }
+    for (let i = 0; i < rows.length; i += 300) { const ch = rows.slice(i, i + 300);
+      await c.query(`INSERT INTO planner.accounts_bank_items (org, kind, xero_id, bank_account_id, bank_account, currency, txn_date, amount, contact, reference, description, link_id, link_type, synced_at) VALUES `
+        + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 13 + n + 1)).join(',') + ',now())').join(',')
+        + ' ON CONFLICT (org, kind, xero_id, bank_account_id) DO UPDATE SET bank_account=EXCLUDED.bank_account, currency=EXCLUDED.currency, txn_date=EXCLUDED.txn_date, amount=EXCLUDED.amount, contact=EXCLUDED.contact, reference=EXCLUDED.reference, description=EXCLUDED.description, link_id=EXCLUDED.link_id, link_type=EXCLUDED.link_type, synced_at=now()', ch.flat()); }
+    await c.query('DELETE FROM planner.accounts_bank_accounts WHERE org = $1', [org]);
     const al = accs.map(a => [org, a.AccountID, a.Name || '', a.Code || '', a.CurrencyCode || '', a.Status || '']);
     for (let i = 0; i < al.length; i += 300) { const ch = al.slice(i, i + 300);
       await c.query('INSERT INTO planner.accounts_bank_accounts (org, account_id, name, code, currency, status) VALUES ' + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 6 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
     await c.query('COMMIT');
   } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
-  return { org, items: items.length, accounts: accs.length };
+  await accSettingSet('accounts_bank_wm:' + org, { at: t0.toISOString(), mode });
+  const total = (await pool.query('SELECT count(*)::int n FROM planner.accounts_bank_items WHERE org=$1', [org])).rows[0].n;
+  return { org, mode, changed: rows.length, dropped: dropIds ? dropIds.length : 0, items: total, accounts: accs.length };
 }
-async function accountsBankSync(by) {
-  if (_accBankRun) return _accBankRun;   // single flight: a second click shares the running job
-  _accBankRun = (async () => { const out = [], errs = [];
-    for (const org of XERO_REGIONS) { try { out.push(await accountsBankSyncOrg(org)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
-    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)').join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
+async function accountsBankSync(by, opts) {
+  opts = opts || {};
+  if (!(await accJobLock('accounts_bank_ageing', ACC_BANK_LOCK_MS, by))) return { ok: false, busy: true, error: 'A bank ageing run is already in progress' };
+  const out = [], errs = [];
+  try {
+    for (const org of XERO_REGIONS) { try { out.push(await accountsBankSyncOrg(org, opts)); } catch (e) { errs.push(org.toUpperCase() + ': ' + e.message); } }
+    const n = out.reduce((a, r) => a + r.items, 0), msg = out.map(r => r.org.toUpperCase() + ' ' + r.items + ' item(s)' + (r.mode === 'incremental' ? ' (' + r.changed + ' changed, ' + r.dropped + ' cleared)' : ' (full)')).join(', ') + (errs.length ? ' · failed ' + errs.join('; ') : '') + ' (' + (by || 'job') + ')';
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_bank_ageing',$1,$2,$3)`, [errs.length ? 'error' : 'success', n, msg.slice(0, 500)]); } catch (_) {}
-    return { ok: !errs.length, items: n, orgs: out, errors: errs }; })().finally(() => { _accBankRun = null; });
-  return _accBankRun;
+    return { ok: !errs.length, items: n, orgs: out, errors: errs };
+  } finally { await accProgress('accounts_bank_ageing', ''); await accJobUnlock('accounts_bank_ageing'); }
 }
 app.get('/api/accounts/bank-ageing', async (req, res) => {
   try {
-    const items = (await pool.query(`SELECT org, kind, xero_id, bank_account_id, bank_account, currency, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, contact, reference, description, link_id, link_type
-      FROM planner.accounts_bank_items ORDER BY txn_date NULLS LAST`)).rows;
+    const [items, last, lock, stage] = await Promise.all([
+      pool.query(`SELECT org, kind, xero_id, bank_account_id, bank_account, currency, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, contact, reference, description, link_id, link_type
+        FROM planner.accounts_bank_items ORDER BY txn_date NULLS LAST`).then(r => r.rows),
+      pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
+        FROM planner.etl_runs WHERE job='accounts_bank_ageing' ORDER BY ran_at DESC LIMIT 1`).then(r => r.rows[0] || null),
+      accJobLocked('accounts_bank_ageing'), accProgressGet('accounts_bank_ageing')]);
     items.forEach(x => { x.url = x.kind === 'payment' && x.link_id ? (x.link_type === 'ACCPAY' ? xbUrl(x.link_id) : 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + x.link_id)
       : x.kind === 'transfer' ? 'https://go.xero.com/Bank/BankTransactions.aspx?accountID=' + x.bank_account_id : 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + x.xero_id; });
-    const last = (await pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
-      FROM planner.etl_runs WHERE job='accounts_bank_ageing' ORDER BY ran_at DESC LIMIT 1`)).rows[0] || null;
-    res.set('Cache-Control', 'no-store').json({ items, last, running: !!_accBankRun, today: new Date().toISOString().slice(0, 10) });
+    res.set('Cache-Control', 'no-store').json({ items, last, running: !!lock, stage, xero_quota: _xeroQuota, today: new Date().toISOString().slice(0, 10) });
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true, today: new Date().toISOString().slice(0, 10) }); log500(e); res.status(500).json({ error: e.message }); }
 });
+// Refresh now: 202 at once, the run continues on this instance (hzWaitUntil keeps a Vercel function alive) and the page polls GET. ?full=1 rescans.
 app.post('/api/accounts/bank-ageing/refresh', async (req, res) => {
-  try { const r = await accountsBankSync((req.me && req.me.email) || 'refresh'); res.status(r.ok ? 200 : 502).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { if (await accJobLocked('accounts_bank_ageing')) return res.status(409).json({ ok: false, running: true, error: 'A bank ageing run is already in progress' });
+    hzWaitUntil(accountsBankSync((req.me && req.me.email) || 'refresh', { full: req.query.full === '1' }).catch(e => console.warn('[accounts-bank] ' + (e && e.message))));
+    res.status(202).json({ ok: true, started: true, running: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// PROD SCHEDULE: n8n hourly, POST /api/cron/accounts-bank-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {}. 200 ok / 401 secret / 500 failed.
-// Logs planner.etl_runs job 'accounts_bank_ageing'. The local server runs it hourly too (HZ_ACCOUNTS_CRON=0 turns that off).
+// PROD SCHEDULE: n8n hourly, POST /api/cron/accounts-bank-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {} ({ "full": true } rescans).
+// 200 ok (or busy: another instance is running it) / 401 secret / 500 failed. Logs etl_runs 'accounts_bank_ageing'. Local server hourly only with HZ_ACCOUNTS_CRON=1 (the sandbox shares live's Xero allowance).
 app.post('/api/cron/accounts-bank-sync', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const r = await accountsBankSync('cron'); res.status(r.ok ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const r = await accountsBankSync('cron', { full: !!(req.body && (req.body.full === true || req.body.full === 'true')) }); res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON !== '0') {
-  const _ab = () => accountsBankSync('timer').then(r => console.log('[accounts-bank] ' + r.items + ' item(s)' + (r.errors.length ? ' errors: ' + r.errors.join('; ') : '')), e => console.warn('[accounts-bank] failed: ' + (e && e.message)));
+if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
+  const _ab = () => accountsBankSync('timer').then(r => console.log('[accounts-bank] ' + (r.busy ? 'busy' : r.items + ' item(s)' + (r.errors.length ? ' errors: ' + r.errors.join('; ') : ''))), e => console.warn('[accounts-bank] failed: ' + (e && e.message)));
   setTimeout(_ab, 600000).unref?.(); setInterval(_ab, 3600000).unref?.();
 }
 // ═══ v28.248 (Ben 10-Oct-26): ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only). ═══
@@ -3543,27 +3617,39 @@ app.get('/api/accounts/gmail/messages', async (req, res) => {
 // product suppliers. The tax review covers all reconciled UK spend except 3PLs and product suppliers.
 // Pairing: amount equal, email 60 days before to 7 after the bank date, and the payee name in the sender / subject; without the name only a
 // short email (<= 8 amounts) with the same explicit currency and a gap of -2..+3 days counts. Nothing is written to Xero.
-const ACC_LEARN_DAYS = 120, ACC_FEED_MIN = 60, ACC_TPL_RE = /coghlan|\bilg\b|i-?fulfil|geneva/i;
+// v28.253 (deep dive P0 #5): runs in STAGES with a time budget so it fits a Vercel function and resumes where it stopped:
+//   xero  : reconciled items into planner.accounts_recon_txns (mig 351), incremental after the first run (If-Modified-Since watermark per org)
+//   gmail : new accounts@ mail into accounts_gmail_msgs (batched inserts; quota waits capped, the stage resumes next call)
+//   match : in memory, seconds; writes accounts_backdate and the etl_runs row
+// One runner across instances (lock row, 20 min). A call returns { done:false, stage } when the budget ran out: n8n (or the local timer) calls again.
+const ACC_LEARN_DAYS = 120, ACC_FEED_MIN = 60, ACC_TPL_RE = /coghlan|\bilg\b|i-?fulfil|geneva/i, ACC_LEARN_LOCK_MS = 20 * 60000;
+const ACC_LEARN_BUDGET_MS = Math.max(30000, Number(process.env.ACC_LEARN_BUDGET_MS) || 240000);
 const _accAMT = /(?:(£|€|\$|A\$|AU\$|US\$|GBP|USD|EUR|AUD)\s?)?(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})(?!\d)/g;
 function accAmounts(txt) { const s = new Map(); let m; _accAMT.lastIndex = 0; while ((m = _accAMT.exec(String(txt || '')))) { const v = Number(m[2].replace(/,/g, '') + '.' + m[3]); if (v > 0) s.set(v.toFixed(2), m[1] || s.get(v.toFixed(2)) || ''); } return [...s]; }
-async function gmailGetPaced(path) {   // Gmail per-user quota: back off on 429 / quota 403 / 5xx
+class AccBudget { constructor(ms) { this.t0 = Date.now(); this.ms = ms; } left() { return this.ms - (Date.now() - this.t0); } out() { return this.left() <= 0; } }
+async function gmailGetPaced(path, budget) {   // Gmail per-user quota: back off on 429 / quota 403 / 5xx (Retry-After when given); stop when the budget is gone
   for (let a = 0; a < 12; a++) {
     const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { authorization: 'Bearer ' + await gmailAccessToken() } });
     if (r.status === 401) { _gmailTok = null; continue; }
     const j = await r.json().catch(() => ({}));
-    if (r.status === 429 || r.status >= 500 || (r.status === 403 && /quota|rate/i.test(JSON.stringify(j)))) { await new Promise(s => setTimeout(s, r.status === 403 ? 20000 : 2000 * (a + 1))); continue; }
+    if (r.status === 429 || r.status >= 500 || (r.status === 403 && /quota|rate/i.test(JSON.stringify(j)))) {
+      const wait = Math.min(60000, (Number(r.headers.get('retry-after')) || 0) * 1000 || (r.status === 403 ? 20000 : 2000 * (a + 1)));
+      if (budget && budget.left() < wait + 5000) { const e = new Error('Gmail quota: out of time budget'); e.code = 'budget'; throw e; }
+      await new Promise(s => setTimeout(s, wait)); continue; }
     if (!r.ok) throw new Error('Gmail ' + r.status + ': ' + ((j.error && j.error.message) || 'request failed'));
     return j;
   }
   throw new Error('Gmail busy (quota), try again later');
 }
-async function accGmailCache(days) {   // parse new accounts@ mail into planner.accounts_gmail_msgs; returns how many were new
+// Parse new accounts@ mail into planner.accounts_gmail_msgs (amounts only, no bodies). Returns { parsed, pending } (pending > 0 = budget ran out).
+async function accGmailCache(days, budget) {
   const ids = []; let tok = '';
-  do { const j = await gmailGetPaced('messages?' + new URLSearchParams(Object.assign({ q: 'newer_than:' + days + 'd', maxResults: '500' }, tok ? { pageToken: tok } : {})).toString()); ids.push(...(j.messages || []).map(m => m.id)); tok = j.nextPageToken; } while (tok);
-  const have = new Set((await pool.query('SELECT id FROM planner.accounts_gmail_msgs WHERE id = ANY($1)', [ids])).rows.map(r => r.id)), todo = ids.filter(id => !have.has(id));
+  do { const j = await gmailGetPaced('messages?' + new URLSearchParams(Object.assign({ q: 'newer_than:' + days + 'd', maxResults: '500' }, tok ? { pageToken: tok } : {})).toString(), budget); ids.push(...(j.messages || []).map(m => m.id)); tok = j.nextPageToken; } while (tok);
+  const have = new Set(); for (let i = 0; i < ids.length; i += 2000) (await pool.query('SELECT id FROM planner.accounts_gmail_msgs WHERE id = ANY($1)', [ids.slice(i, i + 2000)])).rows.forEach(r => have.add(r.id));
+  const todo = ids.filter(id => !have.has(id));
   const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); let PDFParse = null;
   try { ({ PDFParse } = await import('pdf-parse')); } catch (_) {}
-  const one = async id => { const m = await gmailGetPaced('messages/' + id + '?format=full'); if (!m || !m.payload) return;
+  const one = async id => { const m = await gmailGetPaced('messages/' + id + '?format=full', budget); if (!m || !m.payload) return null;
     const H = k => ((m.payload.headers || []).find(h => h.name.toLowerCase() === k) || {}).value || '';
     let text = '', html = ''; const atts = [];
     const walk = p => { if (!p) return; if (p.filename && p.body && (p.body.attachmentId || p.body.data)) atts.push({ name: p.filename, type: p.mimeType, size: p.body.size, aid: p.body.attachmentId });
@@ -3573,100 +3659,157 @@ async function accGmailCache(days) {   // parse new accounts@ mail into planner.
     const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€')).replace(/\s+/g, ' ');
     const pdfAm = new Map();
     if (PDFParse) for (const a of atts.filter(a => /pdf/i.test(a.type) || /\.pdf$/i.test(a.name)).slice(0, 2)) { if (!a.aid || a.size > 3e6) continue;
-      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v)); } catch (_) {} }
-    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...pdfAm])]); };
-  for (let i = 0; i < todo.length; i += 4) { await Promise.all(todo.slice(i, i + 4).map(id => one(id).catch(e => console.warn('[accounts-learn] mail ' + id + ': ' + e.message)))); await new Promise(s => setTimeout(s, 350)); }
-  return todo.length;
+      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v)); }
+      catch (e) { if (e && e.code === 'budget') throw e; } }
+    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...pdfAm])]; };
+  const flush = async buf => { if (!buf.length) return;
+    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 8 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
+  let parsed = 0, i = 0, buf = [];
+  try {
+    for (; i < todo.length; i += 4) { if (budget && budget.out()) break;
+      const got = await Promise.all(todo.slice(i, i + 4).map(id => one(id).catch(e => { if (e && e.code === 'budget') throw e; console.warn('[accounts-learn] mail ' + id + ': ' + e.message); return null; })));
+      got.filter(Boolean).forEach(r => buf.push(r)); parsed += got.filter(Boolean).length;
+      if (buf.length >= 100) { await flush(buf); buf = []; }
+      await new Promise(s => setTimeout(s, 300)); }
+  } catch (e) { if (!(e && e.code === 'budget')) throw e; }
+  await flush(buf);
+  return { parsed, pending: Math.max(0, todo.length - i) };
 }
-async function accXeroBtRange(org, from, to, where) {   // BankTransactions in [from, to), halving any window Xero refuses as too broad
-  const dt = d => `DateTime(${d.getUTCFullYear()},${String(d.getUTCMonth() + 1).padStart(2, '0')},${String(d.getUTCDate()).padStart(2, '0')})`;
-  const win = async (a, b) => { const out = [];
-    for (let p = 1; p < 100; p++) { let j;
-      try { j = await xeroFetch(org, '/api.xro/2.0/BankTransactions?where=' + encodeURIComponent(`Date>=${dt(a)} AND Date<${dt(b)} AND ${where}`) + '&pageSize=1000&page=' + p); }
-      catch (e) { const days = (b - a) / 864e5; if (e.code === 400 && /efficient|HighVolume/i.test(e.message + JSON.stringify(e.body || '')) && days > 1) { const m = new Date(a.getTime() + Math.floor(days / 2) * 864e5); return (await win(a, m)).concat(await win(m, b)); } throw e; }
-      const x = (j && j.BankTransactions) || []; out.push(...x); if (x.length < 1000) break; }
-    return out; };
-  const all = []; for (let a = new Date(from); a < to;) { const b = new Date(Math.min(to, a.getTime() + 31 * 864e5)); all.push(...await win(a, b)); a = b; }
-  return all;
+// Reconciled Xero items (spend money + bill payments) for one org into planner.accounts_recon_txns. First run = windowed scan of the last
+// ACC_LEARN_DAYS; later runs = items modified since the watermark (If-Modified-Since). Rows older than the window are purged.
+async function accReconSyncOrg(org, budget) {
+  const t0 = new Date(), since = new Date(Date.now() - ACC_LEARN_DAYS * 864e5), until = new Date(Date.now() + 864e5), sinceS = since.toISOString().slice(0, 10);
+  const wm = await accSettingGet('accounts_recon_wm:' + org), mod = wm && wm.at ? new Date(new Date(wm.at).getTime() - 10 * 60000) : null;
+  const rows = [];
+  const addBt = x => { const li = x.LineItems || []; rows.push([org, 'spend', x.BankTransactionID, _xDate(x.DateString || x.Date), Number(x.Total) || 0, x.CurrencyCode || '', (x.Contact || {}).Name || '', (x.BankAccount || {}).Name || '',
+    [...new Set(li.map(l => l.AccountCode).filter(Boolean))].join(' '), [...new Set(li.map(l => l.TaxType).filter(Boolean))].join(' '), !!x.HasAttachments, null, x.Status === 'AUTHORISED' && !!x.IsReconciled]); };
+  const addPay = x => { const inv = x.Invoice || {}; rows.push([org, 'billpay', x.PaymentID, _xDate(x.Date), Number(x.BankAmount != null ? x.BankAmount : x.Amount) || 0, inv.CurrencyCode || '', (inv.Contact || {}).Name || '', (x.Account || {}).Code || '',
+    '', '', !!inv.HasAttachments, inv.InvoiceID || null, x.Status === 'AUTHORISED' && !!x.IsReconciled]); };
+  if (!mod) { await accXeroHeadroom(org);
+    await accProgress('accounts_learn', 'Reading reconciled Xero ' + org.toUpperCase() + ' (first run, ' + ACC_LEARN_DAYS + ' days)');
+    (await accXeroBtRange(org, since, until, 'IsReconciled==true AND Type=="SPEND"', { stepMonths: 1 })).forEach(addBt);
+    (await accXeroList(org, 'Payments', `IsReconciled==true AND Status=="AUTHORISED" AND PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(${sinceS.replace(/-/g, ',')})`)).forEach(addPay);
+  } else {
+    await accProgress('accounts_learn', 'Reading Xero ' + org.toUpperCase() + ' changes since ' + mod.toISOString().slice(0, 16).replace('T', ' '));
+    let bt, pays;
+    try { bt = await accXeroList(org, 'BankTransactions', `Type=="SPEND" AND Date>=DateTime(${sinceS.replace(/-/g, ',')})`, { since: mod }); pays = await accXeroList(org, 'Payments', `PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(${sinceS.replace(/-/g, ',')})`, { since: mod }); }
+    catch (e) { if (!_xHighVol(e)) throw e; bt = await accXeroBtRange(org, since, until, 'Type=="SPEND"', { since: mod, stepMonths: 1 }); pays = await accXeroList(org, 'Payments', `PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(${sinceS.replace(/-/g, ',')})`, { since: mod }); }
+    bt.forEach(addBt); pays.forEach(addPay);   // a modified item that is no longer reconciled / authorised is written with recon=false and skipped by the match
+  }
+  const uniq = new Map(); rows.forEach(r => uniq.set(r[2], r)); rows.length = 0; rows.push(...uniq.values());   // one row per xero_id (paging can repeat)
+  const c = await pool.connect();
+  try { await c.query('BEGIN');
+    await c.query('DELETE FROM planner.accounts_recon_txns WHERE org=$1 AND txn_date < $2::date', [org, sinceS]);
+    if (!mod) await c.query('DELETE FROM planner.accounts_recon_txns WHERE org=$1', [org]);
+    for (let i = 0; i < rows.length; i += 250) { const ch = rows.slice(i, i + 250);
+      await c.query(`INSERT INTO planner.accounts_recon_txns (org, kind, xero_id, txn_date, amount, currency, contact, bank, account, tax, has_att, link_id, recon, synced_at) VALUES `
+        + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 13 + n + 1)).join(',') + ',now())').join(',')
+        + ' ON CONFLICT (org, xero_id) DO UPDATE SET txn_date=EXCLUDED.txn_date, amount=EXCLUDED.amount, currency=EXCLUDED.currency, contact=EXCLUDED.contact, bank=EXCLUDED.bank, account=EXCLUDED.account, tax=EXCLUDED.tax, has_att=EXCLUDED.has_att, link_id=EXCLUDED.link_id, recon=EXCLUDED.recon, synced_at=now()', ch.flat()); }
+    await c.query('COMMIT');
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+  await accSettingSet('accounts_recon_wm:' + org, { at: t0.toISOString(), mode: mod ? 'incremental' : 'full' });
+  return rows.length;
 }
-let _accLearnRun = null, _accLearnStage = '';
-async function accountsLearn(by) {
-  if (_accLearnRun) return _accLearnRun;
-  _accLearnRun = (async () => { try {
-    const since = new Date(Date.now() - ACC_LEARN_DAYS * 864e5), until = new Date(Date.now() + 864e5), sinceS = since.toISOString().slice(0, 10);
-    const xd = s => { const m = /\/Date\((-?\d+)/.exec(String(s || '')); return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(s || '').slice(0, 10); };
-    const sup = (await pool.query(`SELECT name, code FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'`)).rows;
-    const supCodes = new Set(sup.map(r => String(r.code || '').trim().toUpperCase()).filter(Boolean)), supNames = new Set(sup.map(r => String(r.name || '').trim().toLowerCase()).filter(Boolean));
-    const isSup = c => { const m = / - ([A-Za-z0-9]{1,8})$/.exec(String(c || '').trim()); return !!(m && supCodes.has(m[1].toUpperCase())) || supNames.has(String(c || '').trim().toLowerCase()); };
-    const txns = [];
-    for (const org of XERO_REGIONS) { _accLearnStage = 'Reading Xero ' + org.toUpperCase();
-      (await accXeroBtRange(org, since, until, 'IsReconciled==true AND Type=="SPEND"')).filter(x => x.Status === 'AUTHORISED').forEach(x => { const li = x.LineItems || [];
-        txns.push({ org, kind: 'spend', id: x.BankTransactionID, date: xd(x.DateString || x.Date), amount: Number(x.Total) || 0, ccy: x.CurrencyCode || '', contact: (x.Contact || {}).Name || '', bank: (x.BankAccount || {}).Name || '',
-          account: [...new Set(li.map(l => l.AccountCode).filter(Boolean))].join(' '), tax: [...new Set(li.map(l => l.TaxType).filter(Boolean))].join(' '), has_att: !!x.HasAttachments, link: null }); });
-      for (let p = 1; p < 100; p++) { const j = await xeroFetch(org, '/api.xro/2.0/Payments?where=' + encodeURIComponent(`IsReconciled==true AND Status=="AUTHORISED" AND PaymentType=="ACCPAYPAYMENT" AND Date>=DateTime(${sinceS.replace(/-/g, ',')})`) + '&pageSize=1000&page=' + p);
-        const ps = (j && j.Payments) || []; ps.forEach(x => { const inv = x.Invoice || {};
-          txns.push({ org, kind: 'billpay', id: x.PaymentID, date: xd(x.Date), amount: Number(x.BankAmount != null ? x.BankAmount : x.Amount) || 0, ccy: inv.CurrencyCode || '', contact: (inv.Contact || {}).Name || '', bank: (x.Account || {}).Code || '', account: '', tax: '', has_att: !!inv.HasAttachments, link: inv.InvoiceID || null }); });
-        if (ps.length < 1000) break; } }
-    const cnt = {}; txns.forEach(t => { const k = t.org + '|' + t.contact.toLowerCase(); cnt[k] = (cnt[k] || 0) + 1; });
-    const tx = txns.filter(t => cnt[t.org + '|' + t.contact.toLowerCase()] < ACC_FEED_MIN && !ACC_TPL_RE.test(t.contact) && !isSup(t.contact));
-    _accLearnStage = 'Reading accounts@'; const newMail = await accGmailCache(ACC_LEARN_DAYS + 15);
-    _accLearnStage = 'Matching';
-    const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 70`, [sinceS])).rows
-      .filter(e => !ACC_TPL_RE.test(e.from_addr + ' ' + e.subject) && !/supplier\.dockandbay\.com/i.test(e.from_addr)).map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) }));
-    const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
-    const toks = s => String(s || '').toLowerCase().replace(/ - [a-z0-9]{1,8}$/, '').split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !/^(limited|ltd|inc|pty|the|com|services|payment|payments)$/.test(w));
-    const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$' }, rows = [];
-    let matched = 0;
-    tx.forEach(x => { const k = Math.abs(x.amount).toFixed(2), td = new Date(x.date), nt = toks(x.contact);
-      const c = (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 60) return null;
-        const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = nt.some(w => hay.includes(w)), cs = e.am.get(k) || e.pam.get(k) || '';
-        const ccyOk = !cs || cs === x.ccy || cs === sym[x.ccy] || (cs === '$' && /USD|AUD/.test(x.ccy)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
-        if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 3)) return null;
-        return { e, lag, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; }).filter(Boolean).sort((a, b) => b.score - a.score);
-      const best = c[0] && c[0].score >= 40 ? c[0] : null; if (best) matched++;
-      if (best && !x.has_att) { const e = best.e, files = e.files || [];
-        rows.push([x.org, 'receipt', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, null, x.link, e.id, e.d, e.from_addr, e.subject,
-          files.some(f => /\.pdf$/i.test(f)) ? 'pdf' : files.length ? 'other attachment' : e.stripe_link ? 'stripe link' : 'email body', JSON.stringify(files), best.lag, !!(c[1] && c[1].score >= best.score - 5)]); }
-    });
-    // Tax review covers ALL reconciled UK spend (feeds included: e.g. Stripe fees), only 3PLs and product suppliers left out.
-    txns.filter(x => x.org === 'uk' && x.kind === 'spend' && /REVERSECHARGES/.test(x.tax) && !ACC_TPL_RE.test(x.contact) && !isSup(x.contact)).forEach(x =>
-      rows.push([x.org, 'tax', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, x.ccy === 'GBP' ? '20% VAT on Expenses or No VAT' : 'Zero Rated Expenses', null, null, null, null, null, null, null, null, null]));
-    const cl = await pool.connect();
-    try { await cl.query('BEGIN'); await cl.query('DELETE FROM planner.accounts_backdate');
-      for (let i = 0; i < rows.length; i += 200) { const ch = rows.slice(i, i + 200);
-        await cl.query(`INSERT INTO planner.accounts_backdate (org, issue, xero_id, kind, txn_date, amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id, email_date, email_from, email_subject, file_source, files, lag_days, ambiguous) VALUES `
-          + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 21 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
-      await cl.query('COMMIT'); } catch (e) { try { await cl.query('ROLLBACK'); } catch (_) {} throw e; } finally { cl.release(); }
-    const r = { ok: true, reconciled: txns.length, considered: tx.length, matched, receipts: rows.filter(x => x[1] === 'receipt').length, tax: rows.filter(x => x[1] === 'tax').length, new_mail: newMail };
-    const msg = `${r.considered} of ${r.reconciled} reconciled considered, ${r.matched} with email, ${r.receipts} receipt + ${r.tax} tax opportunities, ${newMail} new mail (${by || 'job'})`;
-    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','success',$1,$2)`, [rows.length, msg.slice(0, 500)]); } catch (_) {}
-    return r;
-  } catch (e) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} return { ok: false, error: e.message }; } })()
-    .finally(() => { _accLearnRun = null; _accLearnStage = ''; });
-  return _accLearnRun;
+async function accLearnMatch(by) {
+  await accProgress('accounts_learn', 'Matching');
+  const sinceS = new Date(Date.now() - ACC_LEARN_DAYS * 864e5).toISOString().slice(0, 10);
+  const sup = (await pool.query(`SELECT name, code FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'`)).rows;
+  const supCodes = new Set(sup.map(r => String(r.code || '').trim().toUpperCase()).filter(Boolean)), supNames = new Set(sup.map(r => String(r.name || '').trim().toLowerCase()).filter(Boolean));
+  const isSup = c => { const m = / - ([A-Za-z0-9]{1,8})$/.exec(String(c || '').trim()); return !!(m && supCodes.has(m[1].toUpperCase())) || supNames.has(String(c || '').trim().toLowerCase()); };
+  const txns = (await pool.query(`SELECT org, kind, xero_id id, to_char(txn_date,'YYYY-MM-DD') date, amount::float8 amount, currency ccy, contact, bank, account, tax, has_att, link_id link
+    FROM planner.accounts_recon_txns WHERE recon AND txn_date >= $1::date`, [sinceS])).rows;
+  const cnt = {}; txns.forEach(t => { const k = t.org + '|' + t.contact.toLowerCase(); cnt[k] = (cnt[k] || 0) + 1; });
+  const tx = txns.filter(t => cnt[t.org + '|' + t.contact.toLowerCase()] < ACC_FEED_MIN && !ACC_TPL_RE.test(t.contact) && !isSup(t.contact));
+  const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 70`, [sinceS])).rows
+    .filter(e => !ACC_TPL_RE.test(e.from_addr + ' ' + e.subject) && !/supplier\.dockandbay\.com/i.test(e.from_addr)).map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) }));
+  const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
+  const toks = s => String(s || '').toLowerCase().replace(/ - [a-z0-9]{1,8}$/, '').split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !/^(limited|ltd|inc|pty|the|com|services|payment|payments)$/.test(w));
+  const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$' }, rows = [];
+  let matched = 0;
+  tx.forEach(x => { const k = Math.abs(x.amount).toFixed(2), td = new Date(x.date), nt = toks(x.contact);
+    const c = (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 60) return null;
+      const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = nt.some(w => hay.includes(w)), cs = e.am.get(k) || e.pam.get(k) || '';
+      const ccyOk = !cs || cs === x.ccy || cs === sym[x.ccy] || (cs === '$' && /USD|AUD/.test(x.ccy)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
+      if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 3)) return null;
+      return { e, lag, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; }).filter(Boolean).sort((a, b) => b.score - a.score);
+    const best = c[0] && c[0].score >= 40 ? c[0] : null; if (best) matched++;
+    if (best && !x.has_att) { const e = best.e, files = e.files || [];
+      rows.push([x.org, 'receipt', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, null, x.link, e.id, e.d, e.from_addr, e.subject,
+        files.some(f => /\.pdf$/i.test(f)) ? 'pdf' : files.length ? 'other attachment' : e.stripe_link ? 'stripe link' : 'email body', JSON.stringify(files), best.lag, !!(c[1] && c[1].score >= best.score - 5)]); }
+  });
+  txns.filter(x => x.org === 'uk' && x.kind === 'spend' && /REVERSECHARGES/.test(x.tax) && !ACC_TPL_RE.test(x.contact) && !isSup(x.contact)).forEach(x =>
+    rows.push([x.org, 'tax', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, x.ccy === 'GBP' ? '20% VAT on Expenses or No VAT' : 'Zero Rated Expenses', null, null, null, null, null, null, null, null, null]));
+  const cl = await pool.connect();
+  try { await cl.query('BEGIN'); await cl.query('DELETE FROM planner.accounts_backdate');
+    for (let i = 0; i < rows.length; i += 200) { const ch = rows.slice(i, i + 200);
+      await cl.query(`INSERT INTO planner.accounts_backdate (org, issue, xero_id, kind, txn_date, amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id, email_date, email_from, email_subject, file_source, files, lag_days, ambiguous) VALUES `
+        + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 21 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
+    await cl.query('COMMIT'); } catch (e) { try { await cl.query('ROLLBACK'); } catch (_) {} throw e; } finally { cl.release(); }
+  return { reconciled: txns.length, considered: tx.length, matched, receipts: rows.filter(x => x[1] === 'receipt').length, tax: rows.filter(x => x[1] === 'tax').length, rows: rows.length };
+}
+// One call = as many stages as fit the budget. State (stage, orgs done, mail parsed) lives in app_settings so the next call resumes.
+async function accountsLearn(by, opts) {
+  opts = opts || {}; const budget = new AccBudget(opts.budgetMs || ACC_LEARN_BUDGET_MS);
+  if (!(await accJobLock('accounts_learn', ACC_LEARN_LOCK_MS, by))) return { ok: false, busy: true, done: false, error: 'A learn run is already in progress' };
+  let st = (await accSettingGet('job_state:accounts_learn')) || { stage: 'xero', orgs: [], mail: 0, started: new Date().toISOString(), by: by || 'job' };
+  if (st.stage === 'done' || !st.stage) st = { stage: 'xero', orgs: [], mail: 0, started: new Date().toISOString(), by: by || 'job' };
+  const save = () => accSettingSet('job_state:accounts_learn', st, by);
+  try {
+    if (st.stage === 'xero') {
+      for (const org of XERO_REGIONS) { if (st.orgs.includes(org)) continue; if (budget.out()) { await save(); return { ok: true, done: false, stage: 'xero', state: st }; }
+        const n = await accReconSyncOrg(org, budget); st.orgs.push(org); st.xero = (st.xero || 0) + n; await save(); }
+      st.stage = 'gmail'; await save();
+    }
+    if (st.stage === 'gmail') {
+      await accProgress('accounts_learn', 'Reading accounts@ mail');
+      const g = await accGmailCache(ACC_LEARN_DAYS + 15, budget); st.mail = (st.mail || 0) + g.parsed; await save();
+      if (g.pending > 0) { await accProgress('accounts_learn', 'Reading accounts@ mail (' + g.pending + ' to go)'); return { ok: true, done: false, stage: 'gmail', pending: g.pending, state: st }; }
+      st.stage = 'match'; await save();
+    }
+    const r = await accLearnMatch(by);
+    const msg = `${r.considered} of ${r.reconciled} reconciled considered, ${r.matched} with email, ${r.receipts} receipt + ${r.tax} tax opportunities, ${st.mail || 0} new mail (${st.by || by || 'job'})`;
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','success',$1,$2)`, [r.rows, msg.slice(0, 500)]); } catch (_) {}
+    st.stage = 'done'; await save();
+    return Object.assign({ ok: true, done: true, stage: 'done', new_mail: st.mail || 0 }, r);
+  } catch (e) {
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','error',0,$1)`, [(st.stage + ': ' + e.message).slice(0, 500)]); } catch (_) {}
+    await save();   // keep the stage so the next call retries from here
+    return { ok: false, done: false, stage: st.stage, error: e.message };
+  } finally { await accProgress('accounts_learn', ''); await accJobUnlock('accounts_learn'); }
 }
 app.get('/api/accounts/backdate', async (req, res) => {
   try {
-    const items = (await pool.query(`SELECT org, issue, xero_id, kind, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id,
-      to_char(email_date,'YYYY-MM-DD') email_date, email_from, email_subject, file_source, files, lag_days, ambiguous FROM planner.accounts_backdate ORDER BY txn_date DESC`)).rows;
+    const [items, last, lock, stage] = await Promise.all([
+      pool.query(`SELECT org, issue, xero_id, kind, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id,
+        to_char(email_date,'YYYY-MM-DD') email_date, email_from, email_subject, file_source, files, lag_days, ambiguous FROM planner.accounts_backdate ORDER BY txn_date DESC LIMIT 2000`).then(r => r.rows),
+      pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
+        FROM planner.etl_runs WHERE job='accounts_learn' ORDER BY ran_at DESC LIMIT 1`).then(r => r.rows[0] || null),
+      accJobLocked('accounts_learn'), accProgressGet('accounts_learn')]);
     items.forEach(x => { x.url = x.kind === 'billpay' && x.link_id ? xbUrl(x.link_id) : 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + x.xero_id;
       if (x.email_id) x.mail_url = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + x.email_id; });
-    const last = (await pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
-      FROM planner.etl_runs WHERE job='accounts_learn' ORDER BY ran_at DESC LIMIT 1`)).rows[0] || null;
-    res.set('Cache-Control', 'no-store').json({ items, last, running: !!_accLearnRun, stage: _accLearnStage, days: ACC_LEARN_DAYS });
+    const stt = await accSettingGet('job_state:accounts_learn');
+    res.set('Cache-Control', 'no-store').json({ items, last, running: !!lock, stage, resume: !!(stt && stt.stage && stt.stage !== 'done'), days: ACC_LEARN_DAYS });
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
 });
-// Refresh now starts the job and returns at once (a first run reads every email: ~10 minutes); the page polls GET for the stage.
-app.post('/api/accounts/backdate/refresh', (req, res) => { const started = !_accLearnRun; accountsLearn((req.me && req.me.email) || 'refresh').catch(() => {}); res.json({ ok: true, started, running: true }); });
+// Refresh now: 202 at once; the run continues on this instance for one budget (hzWaitUntil keeps a Vercel function alive) and the page polls GET.
+// A run that did not finish in one budget is continued by the next Refresh or the next cron call (state is kept).
+async function accLearnLoopLocal(by) { for (let i = 0; i < 20; i++) { const r = await accountsLearn(by); if (r.done || r.busy || !r.ok) return r; } return { ok: false, error: 'too many stages' }; }
+app.post('/api/accounts/backdate/refresh', async (req, res) => {
+  try { if (await accJobLocked('accounts_learn')) return res.status(409).json({ ok: false, running: true, error: 'A learn run is already in progress' });
+    const by = (req.me && req.me.email) || 'refresh';
+    hzWaitUntil((process.env.VERCEL ? accountsLearn(by) : accLearnLoopLocal(by)).catch(e => console.warn('[accounts-learn] ' + (e && e.message))));
+    res.status(202).json({ ok: true, started: true, running: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // PROD SCHEDULE: n8n weekly (Mon 05:00 Europe/London), POST /api/cron/accounts-learn, header x-webhook-secret = N8N_WEBHOOK_SECRET, body {}.
-// Logs etl_runs job 'accounts_learn'. The local server runs it weekly too (HZ_ACCOUNTS_CRON=0 turns that off).
+// Each call runs for at most ACC_LEARN_BUDGET_MS (240 s): the reply carries { done }. n8n loops until done:true (a first run is 3 to 5 calls;
+// later runs are 1). 200 ok or busy / 401 secret / 500 failed. Logs etl_runs 'accounts_learn' once per completed run. Local server weekly only with HZ_ACCOUNTS_CRON=1.
 app.post('/api/cron/accounts-learn', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const r = await accountsLearn('cron'); res.status(r.ok ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const r = await accountsLearn('cron'); res.status(r.ok || r.busy ? 200 : 500).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON !== '0') {
-  const _al = () => gmailRow().then(g => g && !g.missing ? accountsLearn('timer').then(r => console.log('[accounts-learn] ' + (r.ok ? r.receipts + ' receipt / ' + r.tax + ' tax' : 'failed: ' + r.error))) : null).catch(e => console.warn('[accounts-learn] ' + e.message));
+if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
+  const _al = () => gmailRow().then(g => g && !g.missing ? accLearnLoopLocal('timer').then(r => console.log('[accounts-learn] ' + (r.ok ? (r.busy ? 'busy' : r.receipts + ' receipt / ' + r.tax + ' tax') : 'failed: ' + r.error))) : null).catch(e => console.warn('[accounts-learn] ' + e.message));
   setTimeout(_al, 1800000).unref?.(); setInterval(_al, 7 * 86400000).unref?.();
 }
 app.get('/api/health', async (_req, res) => {
@@ -6207,6 +6350,12 @@ async function xeroTenant(region) {
   return { id: c.tenantId, name: c.tenantName };
 }
 const _xeroCallN = { get: 0, write: 0, since: new Date().toISOString() };
+// v28.253: Xero quota per org from the response headers (60 calls / min and 5,000 / day per tenant per app, SHARED by live and the sandbox).
+// A 429 with X-Rate-Limit-Problem: day is final until the reset: fail at once with the reset time instead of retrying for minutes.
+const _xeroQuota = { uk: null, au: null };
+function xeroQuotaNote(region, r) { try { const d = r.headers.get('x-daylimit-remaining'), m = r.headers.get('x-minlimit-remaining'), p = r.headers.get('x-rate-limit-problem'), ra = Number(r.headers.get('retry-after')) || 0;
+  _xeroQuota[region] = { day: d == null ? null : Number(d), min: m == null ? null : Number(m), problem: p || null, reset_at: p === 'day' && ra ? new Date(Date.now() + ra * 1000).toISOString() : null, at: new Date().toISOString() }; } catch (_) {} }
+function xeroQuota(region) { return _xeroQuota[xeroRegion(region)]; }
 async function xeroFetch(region, path, opts) {
   region = xeroRegion(region); opts = opts || {}; const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
   const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }
@@ -6215,7 +6364,11 @@ async function xeroFetch(region, path, opts) {
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
     _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;   // v28.183 (Ben): per-instance call counter (bills-sync status)
-    r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined });
+    try { r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined }, opts.timeoutMs || 20000); }
+    catch (e) { if ((opts.method || 'GET') === 'GET' && attempt < 1 && /abort|timeout/i.test(String(e && (e.name + ' ' + e.message)))) continue; throw e; }   // v28.253: a timed-out GET is retried once (opts.timeoutMs sets the per-call limit, default 20 s)
+    xeroQuotaNote(region, r);
+    if (r.status === 429 && r.headers.get('x-rate-limit-problem') === 'day') { try { await r.text(); } catch (_) {} const q = _xeroQuota[region];
+      const e = new Error('Xero ' + region.toUpperCase() + ' daily API allowance used up' + (q && q.reset_at ? ', resets ' + q.reset_at.slice(11, 16) + ' UTC' : '')); e.code = 429; e.xero_daily = true; throw e; }
     const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET');   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
     if (_retryable && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
     break;
