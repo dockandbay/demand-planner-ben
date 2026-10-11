@@ -2943,6 +2943,7 @@ function render(){
   // First demand-plan render: build the prepack cover once so the rail "PP" badge shows without opening the buy plan.
   // v28.164 (Ben): ONE build per render for all three reasons (not built / forecast stale / PP cover pending). The !DEMAND_BUILT
   // branch never cleared BUY_FC_STALE, so a render could run buildLiveDemand() up to 3 times (~1.5 s each) on identical inputs.
+  try{ if(!_PP_COVER_INIT && typeof PREPACK_COVER==='object' && Object.keys(PREPACK_COVER).length) _PP_COVER_INIT=true; }catch(e){}   // v28.264: same as render(): already built = no extra build
   try{ var _ppNeed=(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length);
     if(typeof buildLiveDemand==='function' && ((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) || (typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE) || _ppNeed)){ buildLiveDemand(); BUY_FC_STALE=false; if(_ppNeed)_PP_COVER_INIT=true; } }catch(e){}
   // Load AWD / NonGRS pools once, then re-render (mirrors CAL_EVENTS).
@@ -5128,6 +5129,9 @@ var OTB={market:'all',status:'all',months:6,defcover:8}; var OTB_CACHE={}; // Op
 var KA_CACHE=null; var KA={weeks:4,market:'all',risk:'critical'}; // Key Stock Arrivals state
 var BI_CACHE={}; // subcat|co|ch -> adjusted fu map from Claude
 var CAL_EVENTS=null; // trading-calendar events (for PLAN month-cell "C" markers); null=unloaded
+// v28.264 (deep dive P1 #16): fetched at boot (it used to start inside the first grid render and then force a full re-render when it
+// arrived ~300 ms later). Normally back before the first render, so the markers are in the first paint and nothing re-renders.
+var _CAL_P=null; try{ _CAL_P=fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ var ev=(d&&d.events)||[]; if(CAL_EVENTS===null||!CAL_EVENTS.length){ CAL_EVENTS=ev; _calSkuItems=null; } return ev; }).catch(function(){ return null; }); }catch(e){}
 
 // Apply BI rules for all subcats that have rules, cache results
 async function applyAllBIRules(){
@@ -10532,9 +10536,10 @@ function render(){
   var _dmCold=(VIEW_MODE==='planning' && _cold && !!_NEEDD[DEMAND_VIEW]);
   var _rpCold=(VIEW_MODE==='exec' && _cold);
   var _noPP=(VIEW_MODE==='planning' && !_NEEDD[DEMAND_VIEW]);
+  try{ if(!_PP_COVER_INIT && typeof PREPACK_COVER==='object' && Object.keys(PREPACK_COVER).length) _PP_COVER_INIT=true; }catch(e){}   // v28.264: a completed build (worker / chunked / sync) already filled the cover: no ~3 s synchronous rebuild inside this render
   try{ if(!_PP_COVER_INIT && !_bmV && !_dmCold && !_rpCold && !_noPP && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
-  if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
+  if(CAL_EVENTS===null){ CAL_EVENTS=[]; (_CAL_P||fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ return (d&&d.events)||[]; })).then(function(ev){ if(ev===null)return; CAL_EVENTS=ev||[]; _calSkuItems=null; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }   // v28.264: only when the boot prefetch had not landed before this render
   // Toggle filter rows visibility based on view mode.
   // PLAN shows filters; BUY and REPORT hide the PLAN filter rows (BUY gets its own in a later part).
   var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');

@@ -1,3 +1,11 @@
+## v28.264 (Ben, branch review-fixes-2026-10-05): DEMAND landing: calendar prefetched, no synchronous prepack-cover rebuild inside the render (deep dive P1 #16)
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration. Engine unchanged.
+
+- The trading calendar (plan-cell "C" markers) is fetched at boot instead of from inside the first grid render; it used to arrive ~300 ms after that render and force a full second render of the plan grid. Now it is normally back before the first render, so the markers are in the first paint.
+- `render()` / `renderMain()` no longer run a synchronous `buildLiveDemand()` (~3 s on live) just to fill the prepack cover for the rail "PP" badge when a completed build (worker, chunked or sync) has already filled it.
+- jsdom DEMAND landing: still three grid renders at boot (1.1 s data arrival, 2.1 s after the demand build, 2.4 s), the third is now short; the remaining re-renders are the progressive build landing and are left as they are. Buy plan verified identical on the lazy page and `?lazysku=0` (see the acceptance check below).
+
 ## v28.263 (Ben, branch review-fixes-2026-10-05): "Copied" is a passing tooltip, not a pop-up
 
 **Files:** `supply/inject.html`, `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration. Buy plan unchanged.
