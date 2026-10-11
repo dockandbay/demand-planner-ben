@@ -11406,7 +11406,7 @@ async function emailDocSubmit(po, filename, by) {
   const supName = await poSupplierName(po);   // SUG-0011: name the supplier
   const link = PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(po);
   const html = '<p><b>' + escHtml(supName) + '</b> submitted a <b>document for approval</b> on <b>' + po + '</b>.</p>'
-    + '<p>Document: <b>' + (filename || 'document') + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
+    + '<p>Document: <b>' + escHtml(filename || 'document') + '</b><br>Submitted by: ' + escHtml(by || 'supplier') + '</p>'   // v28.262 (deep dive S2): supplier-chosen filename / email never land as HTML in a staff inbox
     + '<p><a href="' + link + '">Review it on the PO ▸ Documents tab in HORIZON</a></p>';
   return sendResendEmail({ to: emails, subject: supName + ' submitted a document for approval — ' + po, html, kind: 'invoice-notify', ref: po, replyTo: by });   // reply-to = the supplier who submitted
 }
@@ -24441,9 +24441,9 @@ function adminBase(req) {
   if (ADMIN_HOST && !IS_SANDBOX && /(^|\.)dockandbay\.com$/i.test(host.split(':')[0])) return 'https://' + ADMIN_HOST;
   return proto + '://' + host;
 }
-async function cpMintLink(userId, req) {
+async function cpMintLink(userId, req, hours) {   // v28.262: self-service request-link = 48 h; admin "copy magic link" / invite keep 7 days
   const tok = cpToken();
-  await pool.query(`INSERT INTO planner.client_magic_tokens (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tokHash(tok), userId]);   // v28.210 (Ben, H2): stored hashed, raw only in the link
+  await pool.query(`INSERT INTO planner.client_magic_tokens (token,user_id,expires_at) VALUES ($1,$2, now()+ make_interval(hours => $3::int))`, [tokHash(tok), userId, Number(hours) || 168]);   // v28.210 (Ben, H2): stored hashed, raw only in the link
   await pool.query(`UPDATE planner.client_users SET invited_at=now() WHERE id=$1`, [userId]);
   return cpBase(req) + '/client?token=' + tok;
 }
@@ -26146,19 +26146,39 @@ async function cpAuth(req, res, next) {
 }
 function loadClientPage() { try { return readFileSync(new URL('./supply/client.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>client portal page missing'; } }
 const CLIENT_PAGE = DEV ? null : loadClientPage();
+function cpContinuePage(token) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex">
+<title>Dock &amp; Bay client portal</title><style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh;display:flex;align-items:center;justify-content:center}
+form{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 8px 30px rgba(15,23,42,.06);padding:34px 36px;width:380px;max-width:92vw;box-sizing:border-box;text-align:center}
+h1{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#64748b;margin:0 0 2px}h2{font-size:21px;margin:0 0 6px}p{color:#64748b;margin:0 0 18px;font-size:14px}
+button{width:100%;border:0;border-radius:8px;padding:11px 13px;font-weight:600;cursor:pointer;font-size:15px;background:#2563eb;color:#fff}</style></head>
+<body><form method="post" action="/api/cp/redeem"><h1>Dock &amp; Bay</h1><h2>Client Portal</h2><p>Press the button to sign in.</p>
+<input type="hidden" name="token" value="${_eh(token)}"><button type="submit">Continue to portal</button></form></body></html>`;
+}
+// v28.262: redeem a client magic link (the POST from the Continue page). Atomic single use; form-encoded or JSON.
+app.post('/api/cp/redeem', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+  const tok = String((req.body && req.body.token) || ''), wantsJson = /json/i.test(String(req.get('accept') || '')) || /json/i.test(String(req.get('content-type') || ''));
+  const fail = () => wantsJson ? res.status(410).json({ error: 'link expired' }) : res.redirect(303, '/client?e=expired');
+  try {
+    if (!/^[0-9a-f]{32,96}$/i.test(tok)) return fail();
+    const t = (await pool.query(`UPDATE planner.client_magic_tokens SET used_at=now() WHERE ${tokMatchSql('token', 1)} AND expires_at>now() AND used_at IS NULL RETURNING user_id`, tokArgs(tok))).rows[0];
+    if (!t) return fail();
+    const csid = cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tokHash(csid), t.user_id]);
+    await pool.query(`UPDATE planner.client_users SET last_login_at=now() WHERE id=$1`, [t.user_id]);
+    res.setHeader('Set-Cookie', `csid=${csid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${_reqHttps(req) ? '; Secure' : ''}`);
+    return wantsJson ? res.json({ ok: true }) : res.redirect(303, '/client');
+  } catch (e) { log500(e); return fail(); }
+});
 app.get('/client', async (req, res) => {
   try {
     if (req.query.token) {
-      // v28.210 (Ben, H2): hashed + legacy match; consumed in ONE guarded UPDATE (was SELECT then UPDATE: two tabs could both redeem a link)
-      const t = (await pool.query(`UPDATE planner.client_magic_tokens SET used_at=now() WHERE ${tokMatchSql('token', 1)} AND expires_at>now() AND used_at IS NULL RETURNING user_id`, tokArgs(String(req.query.token)))).rows[0];
-      if (t) {
-        const csid = cpToken(); await pool.query(`INSERT INTO planner.client_sessions (token,user_id,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tokHash(csid), t.user_id]);
-        await pool.query(`UPDATE planner.client_users SET last_login_at=now() WHERE id=$1`, [t.user_id]);
-        const secure = req.headers['x-forwarded-proto'] === 'https';
-        res.setHeader('Set-Cookie', `csid=${csid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${secure ? '; Secure' : ''}`);
-        return res.redirect('/client');
-      }
-      return res.redirect('/client?e=expired');
+      // v28.262 (deep dive K1): the GET only checks the link and shows a Continue button; the POST below consumes it (same as the supplier
+      // portal since v28.186). Mail scanners and link previewers prefetch the GET and used to burn the link before the client clicked it.
+      const tok = String(req.query.token);
+      const ok = /^[0-9a-f]{32,96}$/i.test(tok) && (await pool.query(`SELECT 1 FROM planner.client_magic_tokens WHERE ${tokMatchSql('token', 1)} AND expires_at>now() AND used_at IS NULL`, tokArgs(tok))).rowCount > 0;
+      if (!ok) return res.redirect('/client?e=expired');
+      res.set('content-type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex');
+      return res.send(cpContinuePage(tok));
     }
     let pg = (DEV ? loadClientPage() : CLIENT_PAGE).split('__APP_VERSION__').join(APP_VERSION);
     pg = pg.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());
@@ -26185,9 +26205,12 @@ app.post('/api/cp/request-link', async (req, res) => {
   const email = String((req.body && req.body.email) || '').trim().toLowerCase();
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
   if (_cpRateLimited('ip:' + ip, 20, 3600000) || (email && _cpRateLimited('em:' + email, 5, 3600000))) return res.status(429).json({ error: 'too many requests — please wait a few minutes and try again' });
-  try { if (email) { const u = (await pool.query(`SELECT u.id, c.name FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=$1 AND u.active AND c.active`, [email])).rows[0];
-      if (u) { const url = await cpMintLink(u.id, req); await cpSendLink(email, url, u.name); } }
-    res.json({ ok: true }); } catch (e) { res.json({ ok: true }); }   // never reveal whether an email is registered
+  // v28.262 (deep dive K2): same fixed response window as the supplier portal (1.8 s + jitter) so timing never reveals whether an email is registered
+  const deadline = new Promise((ok) => setTimeout(ok, PORTAL_LINK_WINDOW_MS + Math.floor(Math.random() * 300)));
+  const work = (async () => { try { if (email) { const u = (await pool.query(`SELECT u.id, c.name FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=$1 AND u.active AND c.active`, [email])).rows[0];
+      if (u) { const url = await cpMintLink(u.id, req, 48); await cpSendLink(email, url, u.name); } } } catch (e) { log500(e); } })();
+  await Promise.all([deadline, Promise.race([work, deadline])]);
+  res.json({ ok: true });   // never reveal whether an email is registered
 });
 app.post('/api/cp/logout', cpAuth, async (req, res) => { try { const csid = cookieVal(req, 'csid'); if (csid) { _cpAuthMemo.delete(csid); await pool.query(`DELETE FROM planner.client_sessions WHERE ${tokMatchSql('token', 1)}`, tokArgs(csid)); } } catch {} res.setHeader('Set-Cookie', 'csid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); res.json({ ok: true }); });   // v28.210 (Ben, H2): DELETE by hashed + legacy match
 app.get('/api/cp/me', cpAuth, async (req, res) => {
@@ -27850,6 +27873,7 @@ app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) =
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
   const mode = b.mode;
   try {
+    if (b.sample_request_id && !(await portalOwnsSample(req, b.sample_request_id))) return res.status(403).json({ error: 'not your sample request' });   // v28.262 (deep dive S1): the shipment must be this supplier's too
     if (mode === 'link') { if (!b.sample_request_id) return res.status(400).json({ error: 'sample_request_id required' }); await linkSampleToShipment(id, b.sample_request_id, req.portal.email || null); }
     else if (mode === 'unlink') { if (!b.sample_request_id) return res.status(400).json({ error: 'sample_request_id required' }); await unlinkSampleFromShipment(id, b.sample_request_id); }
     else { const srId = (mode === 'shipment') ? b.sample_request_id : null, notShipped = (mode === 'not_shipped');   // legacy single-assign / not-shipped / clear
@@ -27901,6 +27925,7 @@ app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // 
 app.post('/api/portal/sample/:id/dev-samples', portalAuth, async (req, res) => {   // replace-all product-development sample links
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
+    for (const d of (Array.isArray(b.dev_samples || b.dev_sample_ids) ? (b.dev_samples || b.dev_sample_ids) : [])) { const did = (d && typeof d === 'object') ? d.id : d; if (did && !(await portalOwnsProductSample(req, did))) return res.status(403).json({ error: 'not your sample' }); }   // v28.262 (S1)
     await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, req.portal.email || null); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/sample/:id/contents', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
@@ -28041,7 +28066,7 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
       [supId, supName, b.recipient_company||null, b.first_name||null, b.last_name||null, b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, (b.country||'').toUpperCase()||null, b.phone||null, b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, req.portal.email||'supplier', (b.production_status||'not_started'), b.supplier_expected_completion||null]);
     const id = ins.rows[0].id, ref = 'SR-'+id; await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if(!l||!l.sku) continue; await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`, [id, String(l.sku).trim(), qtyOrOne(l.qty)]); }
-    for (const d of (Array.isArray(b.dev_samples)?b.dev_samples:[])) { const did=(d&&typeof d==='object')?d.id:d; if(!did) continue; await client.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [id, did, qtyOrOne(d&&typeof d==='object'?d.qty:1), req.portal.email||null]); }
+    for (const d of (Array.isArray(b.dev_samples)?b.dev_samples:[])) { const did=(d&&typeof d==='object')?d.id:d; if(!did) continue; if(!(await portalOwnsProductSample(req, did))) { await _rollback(client); return res.status(403).json({ error: 'not your sample' }); }   /* v28.262 (S1) */ await client.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [id, did, qtyOrOne(d&&typeof d==='object'?d.qty:1), req.portal.email||null]); }
     // timeline entry: created by the supplier → author_kind 'supplier' = shows as an UNREAD note for Dock & Bay on the admin side
     await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
       [id, req.portal.email||null, (shortUser(req.portal.email||'')||supName||'Supplier')+' created this sample request']);

@@ -1,3 +1,11 @@
+## v28.262 (Ben, branch review-fixes-2026-10-05): supplier portal sample-linking ownership, escaped staff email, client magic link consumed on POST (deep dive P1 #12, #13)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
+
+- **Supplier portal:** linking a sample to a shipment (`product-sample/:id/assign` link / unlink / shipment), attaching dev samples to a sample request (`sample/:id/dev-samples`) and `sample-create` now check that the OTHER side of the link is the caller's as well (`portalOwnsSample` / `portalOwnsProductSample`), so a supplier can no longer attach to another supplier's shipment or read another supplier's dev samples through its own request. The "document for approval" staff email escapes the supplier-chosen filename and sender.
+- **Client portal:** `GET /client?token=` only checks the link and shows a Continue button; `POST /api/cp/redeem` consumes it (atomic, single use). Mail scanners and link previewers prefetch the GET and used to burn the link before the client clicked it (the supplier portal has worked this way since v28.186). Self-service request-link links live 48 h (admin "copy link" and invites keep 7 days). `/api/cp/request-link` answers in a fixed 1.8 s window like the supplier portal, so timing never reveals whether an email is registered.
+- Verified on the sandbox: bad token redirects to expired; real token shows the page and stays unused; POST sets `csid` and redirects; second POST expired; request-link 2.10 s unknown vs 2.02 s known email.
+
 ## v28.261 (Ben, branch review-fixes-2026-10-05): Diviyaj's two prod cron-route fixes taken upstream (so they do not reopen)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
