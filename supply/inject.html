@@ -18803,12 +18803,46 @@
     row.querySelectorAll('.view-toggle:not(.accounts-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideAccounts(); }); }); }
   // ── v28.249 ACCOUNTS > Bank ageing (interim): Xero items entered on a bank account but not reconciled, UK + AU, from the background job
   // (hourly; Refresh now runs it). Grouped by bank account, aged by transaction date. Statement lines need Xero bank statement access (pending).
-  var AC_BK={org:'all',kind:'all',q:'',open:{},d:null,busy:false,run:false,err:''};
+  var AC_BK={org:'all',kind:'all',q:'',open:{},d:null,busy:false,run:false,err:'',up:null,upBusy:false,help:false};
   var AC_BK_KIND={spend:'Spend money',receive:'Receive money',payment:'Payment',transfer:'Transfer'};
   function acBkBucket(days){ return days<=30?0:days<=60?1:days<=90?2:3; }
   function acBankPoll(){ clearTimeout(AC_BK.poll); AC_BK.poll=setTimeout(function(){ fetch('/api/accounts/bank-ageing').then(function(r){ return r.json(); }).then(function(j){
       if(j.running){ AC_BK.stage=j.stage||''; if(ACCOUNTS_SUB==='bank'){ var s=document.getElementById('ac-bstage'); if(s)s.textContent='Refreshing: '+(AC_BK.stage||'starting')+'…'; } acBankPoll(); return; }
       AC_BK.run=false; AC_BK.d=j; if(j.last&&j.last.status!=='success')AC_BK.err=j.last.message||'failed'; if(ACCOUNTS_SUB==='bank')acRenderBank(document.getElementById('accounts-body')); }).catch(function(){ acBankPoll(); }); },8000); }
+  // v28.265: bank STATEMENT lines not yet matched in Xero, from the Bank Reconciliation report export uploaded per account (Xero's API cannot
+  // return them). Grouped by account with the upload stamp; stale after 8 days. Upload = admins and ACCOUNTS users.
+  function acBkStmtHtml(d){ var st=(d.stmt||[]).filter(function(x){ return AC_BK.org==='all'||x.org===AC_BK.org; }), ups=(d.uploads||[]).filter(function(u){ return AC_BK.org==='all'||u.org===AC_BK.org; }), today=d.today, q=AC_BK.q.toLowerCase();
+    if(q)st=st.filter(function(x){ return (x.account_name+' '+x.reference+' '+x.description).toLowerCase().indexOf(q)>=0; });
+    var groups={}; st.forEach(function(x){ var k=x.org+'|'+x.account_name; var g=groups[k]||(groups[k]={k:k,org:x.org,name:x.account_name,ccy:x.currency,items:[],n:[0,0,0,0],out:0,inn:0,oldest:0});
+      var age=acAge(x.line_date,today); g.items.push(x); g.n[acBkBucket(age)]++; if(x.amount<0)g.out+=x.amount; else g.inn+=x.amount; if(age>g.oldest)g.oldest=age; });
+    ups.forEach(function(u){ var k=u.org+'|'+u.account_name; if(!groups[k])groups[k]={k:k,org:u.org,name:u.account_name,ccy:'',items:[],n:[0,0,0,0],out:0,inn:0,oldest:0}; groups[k].up=u; });
+    var G=Object.keys(groups).map(function(k){return groups[k];}).sort(function(a,c){ return c.oldest-a.oldest; });
+    var rows=G.map(function(g){ var op=!!AC_BK.open['s:'+g.k], u=g.up, stale=!u||acAge(u.as_at,today)>8;
+      var h='<tr class="ac-g" data-k="s:'+esc(g.k)+'" style="cursor:pointer"><td class="l"><b>'+(op?'▾ ':'▸ ')+esc(g.name)+'</b><div class="tiny mut">'+(u?('as at '+hzTrkDate(u.as_at)+' · uploaded '+acSynced(u.at)+(u.uploaded_by?' by '+esc(String(u.uploaded_by).split('@')[0]+'@'):'')+(stale?' <span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">upload due</span>':'')):'no upload yet')+'</div></td><td class="l">'+g.org.toUpperCase()+'</td><td class="l">'+esc(g.ccy)+'</td><td class="l">'+g.items.length+'</td>'
+        +[0,1,2,3].map(function(i){ return '<td class="l"'+(g.n[i]&&i?' style="color:var(--neg);font-weight:600"':'')+'>'+(g.n[i]||'<span class="mut">·</span>')+'</td>'; }).join('')+'<td class="l">'+(g.out?acMoney(-g.out,g.ccy):'<span class="mut">·</span>')+'</td><td class="l">'+(g.inn?acMoney(g.inn,g.ccy):'<span class="mut">·</span>')+'</td><td class="l">'+(g.items.length?(g.oldest>30?'<span style="color:var(--neg)">'+g.oldest+' d</span>':g.oldest+' d'):'')+'</td></tr>';
+      if(op)g.items.forEach(function(x){ var age=acAge(x.line_date,today);
+        h+='<tr class="ac-sub"><td class="l" style="padding-left:24px">'+esc(hzTrkDate(x.line_date))+' · <span'+(age>30?' style="color:var(--neg);font-weight:600"':'')+'>'+age+' d</span></td><td class="l" colspan="7">'+esc(x.reference||x.description||'')+(x.reference&&x.description?' <span class="mut">· '+esc(x.description)+'</span>':'')+'</td><td class="l">'+(x.amount<0?acMoney(-x.amount,x.ccy||g.ccy):'')+'</td><td class="l">'+(x.amount>=0?acMoney(x.amount,g.ccy):'')+'</td><td class="l"><span class="tiny mut">seen '+esc(hzTrkDate(x.first_seen))+'</span></td></tr>'; });
+      return h; }).join('');
+    var tot={}; st.forEach(function(x){ var t=tot[x.currency||'?']||(tot[x.currency||'?']={n:0,out:0,inn:0,o30:0}); t.n++; if(x.amount<0)t.out+=x.amount; else t.inn+=x.amount; if(acAge(x.line_date,today)>30)t.o30++; });
+    var cards=Object.keys(tot).sort().map(function(c){ var t=tot[c]; return '<div class="ac-card"><div class="k">Statement lines not matched · '+esc(c)+'</div><div class="v">'+t.n+' line'+(t.n===1?'':'s')+'</div><div class="tiny mut">out '+acMoney(-t.out,c)+' · in '+acMoney(t.inn,c)+' · <span style="color:'+(t.o30?'var(--neg)':'inherit')+'">'+t.o30+' over 30 d</span></div></div>'; }).join('');
+    var up=AC_BK.up, upMsg=up?(up.error?'<span style="color:var(--neg)">'+esc(up.error)+'</span>':('<b>'+esc(up.account)+'</b> ('+esc(String(up.org).toUpperCase())+') as at '+hzTrkDate(up.as_at)+': '+up.unreconciled+' unreconciled line'+(up.unreconciled===1?'':'s')+(up.cleared?', '+up.cleared+' now reconciled':'')+(up.matched_account?'':' · account name not found in Xero bank accounts, lines kept by name'))):'';
+    return '<div class="sect-h" style="margin-top:22px;display:flex;align-items:center;gap:10px">Bank statement lines not matched in Xero'+(d.can_upload?'<label class="save-btn light" style="cursor:pointer">'+(AC_BK.upBusy?'Uploading…':'Upload Xero report')+'<input type="file" id="ac-bupf" accept=".xlsx" style="display:none"'+(AC_BK.upBusy?' disabled':'')+'></label>':'')+'<span class="save-btn light" id="ac-bhelp">'+(AC_BK.help?'Hide instructions':'How to export from Xero')+'</span><span class="tiny mut" style="margin-left:auto">'+upMsg+'</span></div>'
+      +(AC_BK.help?'<div class="annot" style="margin:6px 0 10px"><b>Export the Bank Reconciliation report from Xero (about 2 minutes per account).</b><ol style="margin:6px 0 0 18px;padding:0;display:grid;gap:3px">'
+        +'<li>In Xero open <b>Accounting ▸ Reports</b> and search for <b>Bank Reconciliation</b> (the report, not the Bank Reconciliation Summary tile on the dashboard).</li>'
+        +'<li>Pick the <b>bank account</b> (one report per account) and set the <b>date</b> to today. The period for the Bank Statement tab can be the last month; the Summary tab always lists every unreconciled line whatever the period.</li>'
+        +'<li><b>Update</b>, then <b>Export ▸ Excel</b>. Keep the file as Xero names it (it contains the three tabs the upload reads).</li>'
+        +'<li>Press <b>Upload Xero report</b> here and choose the file. The account and organisation are read from the file. Upload the same account again any time: lines that have since been reconciled in Xero are cleared.</li>'
+        +'<li>Do this weekly for each account that matters (Lloyds, ANZ, Amex, Stripe, PayPal, Shopify payouts). An account whose last upload is over 8 days old shows <b>upload due</b>.</li></ol>'
+        +'<div class="tiny mut" style="margin-top:6px">Why upload: Xero does not provide statement lines through its API (confirmed by Xero support, 12-Oct-26). The export is read on the server and nothing is sent back to Xero.</div></div>':'')
+      +'<div class="ac-cards">'+(cards||'<div class="mut">'+(ups.length?'Every uploaded account is fully reconciled.':'No statement lines yet: upload a Bank Reconciliation report.')+'</div>')+'</div>'
+      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Bank account</th><th>Org</th><th>Ccy</th><th>Lines</th><th>0-30 d</th><th>31-60 d</th><th>61-90 d</th><th>90+ d</th><th>Money out</th><th>Money in</th><th>Oldest</th></tr></thead><tbody>'+(rows||'<tr><td colspan="11" class="l mut">No statement lines match.</td></tr>')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:8px">Statement lines Xero has received from the bank feed that are not yet reconciled, from the latest Bank Reconciliation report upload per account. Aged by statement date. These are the lines the Inbox matcher will match receipts against.</div>'; }
+  function acBkUpload(file){ if(!file||AC_BK.upBusy)return; AC_BK.upBusy=true; AC_BK.up=null; acRenderBank(document.getElementById('accounts-body'));
+    var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^,]*,/,'');
+      fetch('/api/accounts/bank-ageing/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:file.name,content_base64:b64})}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ AC_BK.up=j; AC_BK.upBusy=false; AC_BK.d=null; acRenderBank(document.getElementById('accounts-body')); })
+        .catch(function(e){ AC_BK.up={error:e.message}; AC_BK.upBusy=false; acRenderBank(document.getElementById('accounts-body')); }); };
+    rd.readAsDataURL(file); }
   function acRenderBank(b){
     if(!AC_BK.d){ if(AC_BK.busy)return; AC_BK.busy=true;
       fetch('/api/accounts/bank-ageing').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
@@ -18845,10 +18879,13 @@
       +'<div class="ac-cards">'+(cards||'<div class="mut">'+(L?'Nothing unreconciled.':'Not loaded yet: click Refresh now.')+'</div>')+'</div>'
       +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Bank account</th><th>Org</th><th>Ccy</th><th>Items</th><th>0-30 d</th><th>31-60 d</th><th>61-90 d</th><th>90+ d</th><th>Money out</th><th>Money in</th><th>Oldest</th></tr></thead><tbody>'
       +(rows||'<tr><td colspan="11" class="l mut">No unreconciled items match.</td></tr>')+'</tbody></table></div>'
-      +'<div class="tiny mut" style="margin-top:8px">Items entered in Xero on a bank account but not yet reconciled: spend and receive money, bill and invoice payments, transfers. Aged by transaction date, in the bank account currency. Payments made from non-bank accounts (loan, prepayments) are left out. Bank statement lines not yet matched in Xero are not shown: that needs Xero bank statement access on the UK and AU connections. Refreshed hourly in the background.</div>';
+      +'<div class="tiny mut" style="margin-top:8px">Items entered in Xero on a bank account but not yet reconciled: spend and receive money, bill and invoice payments, transfers. Aged by transaction date, in the bank account currency. Payments made from non-bank accounts (loan, prepayments) are left out. Refreshed hourly in the background.</div>'
+      +acBkStmtHtml(d);
     b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_BK[p.dataset.g]=p.dataset.v; acRenderBank(b); }; });
     b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_BK.open[k]=!AC_BK.open[k]; acRenderBank(b); }; });
     var qi=document.getElementById('ac-bq'); qi.oninput=function(){ AC_BK.q=qi.value; clearTimeout(AC_BK._t); AC_BK._t=setTimeout(function(){ acRenderBank(b); var n=document.getElementById('ac-bq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+    var upf=document.getElementById('ac-bupf'); if(upf)upf.onchange=function(){ acBkUpload(upf.files&&upf.files[0]); };   // v28.265
+    var bh=document.getElementById('ac-bhelp'); if(bh)bh.onclick=function(){ AC_BK.help=!AC_BK.help; acRenderBank(b); };
     document.getElementById('ac-brf').onclick=function(){ if(AC_BK.run)return; AC_BK.run=true; AC_BK.err=''; acRenderBank(b);
       // v28.253: the server answers 202 and runs in the background; poll every 8 s until it reports running=false, then show the last run
       fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(r.status!==202&&r.status!==409)throw new Error(j.error||('HTTP '+r.status)); }); })

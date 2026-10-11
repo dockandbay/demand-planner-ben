@@ -1,3 +1,13 @@
+## v28.265 (Ben, branch review-fixes-2026-10-05): Bank ageing: statement lines from Xero's Bank Reconciliation export (upload), with instructions
+
+**Files:** `server.mjs`, `lib/xero_recon_xlsx.mjs` (new), `supply/inject.html`, `migrations/352_accounts_stmt_lines.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 352** (additive: `planner.accounts_stmt_lines`, `planner.accounts_stmt_uploads`). No env. Uses the existing `exceljs` dependency. Nothing is sent to Xero.
+
+- Xero support (12-Oct): statement lines are only on the finance / bank feeds APIs, restricted to banks. So Bank ageing now takes them from the **Bank Reconciliation report exported as Excel** (Accounting ▸ Reports ▸ Bank Reconciliation ▸ account ▸ Export ▸ Excel), one file per account, uploaded in the app.
+- **Upload Xero report** button on Bank ageing (admins and ACCOUNTS users, Ben 12-Oct; the other ACCOUNTS writes stay admin only) with a **How to export from Xero** panel (5 steps). The account and organisation are read from the file. The Summary tab lists every unreconciled line as at the report date, so re-uploading an account also clears lines that have since been reconciled; the Bank Statement tab's Reconciled flag clears lines in its period. Idempotent (same file twice = no change).
+- New section **Bank statement lines not matched in Xero**: per account with the upload stamp (as at, when, by whom) and an **upload due** badge after 8 days; per-currency cards; aged 0-30 / 31-60 / 61-90 / 90+ days; click an account for its lines. These are the lines the Inbox matcher will match receipts against.
+- Verified on the sandbox with Ben's Lloyds export: 25 unreconciled lines, total -6,997.60 (matches the report), 59 statement lines, account matched to the stored Xero bank account; second upload unchanged; a planted stale line cleared on re-upload; a PDF refused with a clear message; grant-only user can upload, still cannot disconnect Gmail.
+- Scheduled emails from Xero (option C) are not available in Xero's reports, so the stale badge plus a weekly upload per account replaces it.
+
 ## v28.264 (Ben, branch review-fixes-2026-10-05): DEMAND landing: calendar prefetched, no synchronous prepack-cover rebuild inside the render (deep dive P1 #16)
 
 **Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration. Engine unchanged.

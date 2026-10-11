@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/bank-ageing\/upload\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3513,16 +3513,56 @@ async function accountsBankSync(by, opts) {
 }
 app.get('/api/accounts/bank-ageing', async (req, res) => {
   try {
-    const [items, last, lock, stage] = await Promise.all([
+    const [items, last, lock, stage, stmt, uploads] = await Promise.all([
       pool.query(`SELECT org, kind, xero_id, bank_account_id, bank_account, currency, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, contact, reference, description, link_id, link_type
         FROM planner.accounts_bank_items ORDER BY txn_date NULLS LAST`).then(r => r.rows),
       pool.query(`SELECT status, rows_affected, message, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, extract(epoch from now()-ran_at)::int age_s
         FROM planner.etl_runs WHERE job='accounts_bank_ageing' ORDER BY ran_at DESC LIMIT 1`).then(r => r.rows[0] || null),
-      accJobLocked('accounts_bank_ageing'), accProgressGet('accounts_bank_ageing')]);
+      accJobLocked('accounts_bank_ageing'), accProgressGet('accounts_bank_ageing'),
+      pool.query(`SELECT s.org, s.account_name, s.account_id, coalesce(a.currency,'') currency, to_char(s.line_date,'YYYY-MM-DD') line_date, s.amount::float8 amount, s.reference, s.description, to_char(s.first_seen,'YYYY-MM-DD') first_seen, to_char(s.last_seen,'YYYY-MM-DD') last_seen
+        FROM planner.accounts_stmt_lines s LEFT JOIN planner.accounts_bank_accounts a ON a.org=s.org AND a.account_id=s.account_id WHERE NOT s.reconciled ORDER BY s.line_date`).then(r => r.rows).catch(() => []),
+      pool.query(`SELECT DISTINCT ON (org, account_name) org, account_name, to_char(as_at,'YYYY-MM-DD') as_at, to_char(uploaded_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, uploaded_by, unreconciled, cleared, source FROM planner.accounts_stmt_uploads ORDER BY org, account_name, uploaded_at DESC`).then(r => r.rows).catch(() => [])]);
     items.forEach(x => { x.url = x.kind === 'payment' && x.link_id ? (x.link_type === 'ACCPAY' ? xbUrl(x.link_id) : 'https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + x.link_id)
       : x.kind === 'transfer' ? 'https://go.xero.com/Bank/BankTransactions.aspx?accountID=' + x.bank_account_id : 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + x.xero_id; });
-    res.set('Cache-Control', 'no-store').json({ items, last, running: !!lock, stage, xero_quota: _xeroQuota, today: new Date().toISOString().slice(0, 10) });
+    res.set('Cache-Control', 'no-store').json({ items, last, running: !!lock, stage, xero_quota: _xeroQuota, stmt, uploads, can_upload: !!(req.me && (req.me.is_admin || req.me.accounts_access || req.me.live === false)), today: new Date().toISOString().slice(0, 10) });
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ items: [], last: null, running: false, missing: true, today: new Date().toISOString().slice(0, 10) }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.265 (Ben 12-Oct-26): bank STATEMENT lines from Xero's Bank Reconciliation report export (Excel pack), uploaded by admins and ACCOUNTS users
+// (Xero's API cannot return statement lines). Body { name, content_base64 }. The Summary tab lists EVERY unreconciled line as at the report
+// date, so stored lines of that account dated on or before as_at that are not in the upload are marked reconciled. Nothing is sent to Xero.
+app.post('/api/accounts/bank-ageing/upload', async (req, res) => {
+  try {
+    const b = req.body || {}, name = String(b.name || 'upload.xlsx').slice(0, 200), b64 = String(b.content_base64 || b.content || '');
+    if (!b64 || b64.length > 12 * 1024 * 1024) return res.status(400).json({ error: b64 ? 'File too large (8 MB max)' : 'No file' });
+    if (!/\.xlsx$/i.test(name)) return res.status(400).json({ error: 'Export the Bank Reconciliation report from Xero as Excel (.xlsx)' });
+    const { parseXeroReconPack } = await import('./lib/xero_recon_xlsx.mjs');
+    const p = await parseXeroReconPack(Buffer.from(b64.replace(/^data:[^,]*,/, ''), 'base64'));
+    const by = (req.me && req.me.email) || authUser(req) || null, asAt = p.as_at || (p.period && p.period.to) || new Date().toISOString().slice(0, 10);
+    const acct = (await pool.query(`SELECT account_id FROM planner.accounts_bank_accounts WHERE org=$1 AND lower(name)=lower($2) LIMIT 1`, [p.org, p.account])).rows[0];
+    const key = l => l.date + '|' + Number(l.amount).toFixed(2) + '|' + l.reference;
+    const unrec = new Map(); p.unreconciled.forEach(l => unrec.set(key(l), l)); p.lines.filter(l => !l.reconciled).forEach(l => { if (!unrec.has(key(l))) unrec.set(key(l), l); });
+    const recon = p.lines.filter(l => l.reconciled);
+    const c = await pool.connect(); let cleared = 0;
+    try { await c.query('BEGIN');
+      const rows = [...unrec.values()].map(l => [p.org, p.account, acct ? acct.account_id : null, l.date, l.amount, l.reference || '', l.description || '', asAt, by]);
+      for (let i = 0; i < rows.length; i += 200) { const ch = rows.slice(i, i + 200);
+        await c.query(`INSERT INTO planner.accounts_stmt_lines (org, account_name, account_id, line_date, amount, reference, description, reconciled, first_seen, last_seen, uploaded_by, updated_at) VALUES `
+          + ch.map((r, k) => '(' + r.slice(0, 7).map((_, n) => '$' + (k * 9 + n + 1)).join(',') + ',false,$' + (k * 9 + 8) + ',$' + (k * 9 + 8) + ',$' + (k * 9 + 9) + ',now())').join(',')
+          + ` ON CONFLICT (org, account_name, line_date, amount, reference) DO UPDATE SET reconciled=false, reconciled_seen=null, last_seen=GREATEST(planner.accounts_stmt_lines.last_seen, EXCLUDED.last_seen), description=CASE WHEN EXCLUDED.description<>'' THEN EXCLUDED.description ELSE planner.accounts_stmt_lines.description END, account_id=coalesce(EXCLUDED.account_id, planner.accounts_stmt_lines.account_id), updated_at=now()`, ch.flat()); }
+      // lines the Bank Statement tab shows as reconciled, and stored unreconciled lines dated on or before as_at that the Summary no longer lists
+      if (recon.length) for (let i = 0; i < recon.length; i += 200) { const ch = recon.slice(i, i + 200);
+        const r = await c.query(`UPDATE planner.accounts_stmt_lines s SET reconciled=true, reconciled_seen=coalesce(s.reconciled_seen,$3::date), updated_at=now() FROM (SELECT * FROM unnest($4::date[], $5::numeric[], $6::text[]) AS t(d, a, r)) t WHERE s.org=$1 AND s.account_name=$2 AND s.line_date=t.d AND s.amount=t.a AND s.reference=t.r AND NOT s.reconciled`,
+          [p.org, p.account, asAt, ch.map(l => l.date), ch.map(l => l.amount), ch.map(l => l.reference || '')]); cleared += r.rowCount; }
+      if (p.unreconciled.length || p.sheets.some(n => /Reconciliation/i.test(n))) {
+        const r = await c.query(`UPDATE planner.accounts_stmt_lines SET reconciled=true, reconciled_seen=coalesce(reconciled_seen,$3::date), updated_at=now() WHERE org=$1 AND account_name=$2 AND NOT reconciled AND line_date <= $3::date AND NOT (line_date::text || '|' || to_char(amount,'FM9999999990.00') || '|' || reference) = ANY($4::text[])`,
+          [p.org, p.account, asAt, [...unrec.keys()]]); cleared += r.rowCount; }
+      await c.query(`INSERT INTO planner.accounts_stmt_uploads (org, account_name, as_at, period_from, period_to, filename, unreconciled, lines, cleared, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [p.org, p.account, asAt, p.period && p.period.from, p.period && p.period.to, name, unrec.size, p.lines.length, cleared, by]);
+      await c.query('COMMIT');
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+    const open = (await pool.query(`SELECT count(*)::int n FROM planner.accounts_stmt_lines WHERE org=$1 AND account_name=$2 AND NOT reconciled`, [p.org, p.account])).rows[0].n;
+    res.json({ ok: true, org: p.org, account: p.account, matched_account: !!acct, as_at: asAt, period: p.period, unreconciled: unrec.size, lines: p.lines.length, cleared, open });
+  } catch (e) { if (/Not a Xero|No statement lines/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
 // Refresh now: 202 at once, the run continues on this instance (hzWaitUntil keeps a Vercel function alive) and the page polls GET. ?full=1 rescans.
 app.post('/api/accounts/bank-ageing/refresh', async (req, res) => {

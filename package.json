@@ -1,6 +1,6 @@
 {
   "name": "dock-bay-demand-planner",
-  "version": "28.264",
+  "version": "28.265",
   "private": true,
   "type": "module",
   "engines": {
