@@ -4094,14 +4094,16 @@ const FULFIL_COMPANY_UK = 1, FULFIL_COMPANY_AU = 3;
 function fulfilCompanyForCountry(cc) { return (String(cc || '').trim().toUpperCase() === 'AU') ? FULFIL_COMPANY_AU : FULFIL_COMPANY_UK; }
 function fulfilCompanyName(id) { return (Number(id) === FULFIL_COMPANY_AU) ? 'Dock & Bay Pty Ltd (AU)' : 'Dock & Bay Ltd (UK)'; }
 function fulfilCountryForCompany(id) { return (Number(id) === FULFIL_COMPANY_AU) ? 'AU' : 'UK'; }
-// v28.231 (Ben, health review fix 7): Fulfil answered 429 (rate limited) 18 times in one minute on 08-Oct-26. READS (GET, search_read,
-// read, search_count) are retried after Retry-After (or 1s, 2s, 4s), up to 3 times; writes are never retried (a 429 write may have run).
+// v28.231 (Ben, health review fix 7): Fulfil answered 429 (rate limited) 18 times in one minute on 08-Oct-26. Reads were retried; writes were not.
+// v28.257 (Ben, 12-Oct: "Push failed: Fulfil 429" on 3PL invoicing push-actuals, the 429 came on a metafield.value POST): a 429 is Fulfil's
+// request-count gate, answered BEFORE the request is processed, so a 429'd WRITE has not run and is safe to retry. Every method is now
+// retried after Retry-After (or 1s, 2s, 4s, 8s), up to 4 times. Other failures (503, timeouts) keep the old rule: reads only, never writes.
 const _fulfilIsRead = (method, path) => method === 'GET' || /\/(search_read|read|search_count|search)$/.test(String(path || '').split('?')[0]);
+const _fulfilWait = (e, i) => new Promise(r => setTimeout(r, Math.min(30000, (Number(e.retryAfter) > 0 ? Number(e.retryAfter) * 1000 : 1000 * Math.pow(2, i)))));
 async function fulfilFetch(method, path, body) {
   for (let i = 0; ; i++) {
     try { return await _fulfilFetch1(method, path, body); }
-    catch (e) { if (e.status !== 429 || i >= 3 || !_fulfilIsRead(method, path)) throw e;
-      await new Promise(r => setTimeout(r, Math.min(10000, (Number(e.retryAfter) > 0 ? Number(e.retryAfter) * 1000 : 1000 * Math.pow(2, i))))); }
+    catch (e) { if (e.status !== 429 || i >= 4) throw e; await _fulfilWait(e, i); }
   }
 }
 async function _fulfilFetch1(method, path, body) {
@@ -4116,10 +4118,13 @@ async function _fulfilFetch1(method, path, body) {
 // dry-run/seed against 'live' never depends on or changes the CONFIG Active-ERP setting.
 async function fulfilFetchCfg(cfg, method, path, body) {
   if (!cfg || !cfg.configured) { const e = new Error('Fulfil ' + (cfg && cfg.env) + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);
-  const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
-  if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
-  return j;
+  for (let i = 0; ; i++) {   // v28.257: same 429 retry as fulfilFetch (preorders sync, COGS, id seeder)
+    const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);
+    const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
+    if (r.ok) return j;
+    const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; e.retryAfter = r.headers.get('retry-after');
+    if (r.status !== 429 || i >= 4) throw e; await _fulfilWait(e, i);
+  }
 }
 // find a Fulfil purchase order id by its reference (PO number); null if not present
 async function fulfilFindPO(reference) {
@@ -16089,6 +16094,7 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
       if (md.freight && a.freight > 0) await fulfilUpsertShipmentNumeric(a.model, a.id, md.freight, a.freight);
       if (md.process && a.process > 0) await fulfilUpsertShipmentNumeric(a.model, a.id, md.process, a.process);
       await fulfilAddShipmentNote(a.model, a.id, 'Horizon upload - Added fulfilment costs from 3PL invoice reconciliation from ' + tplName + ': Freight $' + a.freight.toFixed(2) + ', Processing $' + a.process.toFixed(2));
+      await new Promise(r => setTimeout(r, 120));   // v28.257: gentle pace (3 to 4 Fulfil calls per shipment) so a chunk stays under Fulfil's request-count gate
       if (a.model === 'stock.shipment.internal') pushedTransfer++; else pushedCust++; }
     res.json({ ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
       customer_shipments_pushed: pushedCust, transfers_pushed: pushedTransfer, unresolved, unresolved_refs: unref });

@@ -1,3 +1,12 @@
+## v28.257 (Ben, branch review-fixes-2026-10-05): Fulfil 429 on writes is retried (3PL invoicing push failed with "Too Many Requests")
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
+
+- Live 11-Oct 20:07 UTC: `POST /api/supply/tpl/push-actuals/:id` failed with "Fulfil 429: Too Many Requests" on a `metafield.value` POST after 8 s. Since v28.231 only Fulfil READS were retried on 429 (a write "may have run"); a 429 is Fulfil's request-count gate and is answered before the request is processed, so the write has not run and is safe to retry.
+- `fulfilFetch` and `fulfilFetchCfg` now retry any method on 429 after `Retry-After` (else 1, 2, 4, 8 s), up to 4 times (30 s cap per wait). 503 and timeouts keep the old rule: reads only, never writes.
+- The 3PL push waits 120 ms between shipments (3 to 4 Fulfil calls each) so a 40-order chunk stays under the gate.
+- Verified with a mocked Fulfil: a POST that gets 429, 429, 200 returns the record after 3 calls; a permanent 429 gives up after 5.
+
 ## v28.256 (Ben, branch review-fixes-2026-10-05): health log gaps closed: cron 401 red alert, keepalive noise, portal bootstrap metric (deep dive P1 #17)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
