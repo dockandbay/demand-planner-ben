@@ -1,3 +1,13 @@
+## v28.255 (Ben, branch review-fixes-2026-10-05): write-permission gate hardened: case-sensitive routing, path normalisation, fail closed (deep dive P0 #1, #2)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md, lib/ai-logic). No migration, no env. Buy plan unchanged.
+
+- **Hole closed:** Express matched `/API/supply/po/X` and `/api/save-forecasts/` to the real handlers while `requiredCap()` compared exact lower-case paths and fell through to fail-open, so any logged-in read-only user could write anywhere. Now: `app.set('case sensitive routing', true)` (an odd-case path is a 404), the gate lower-cases the path and strips a trailing slash before classifying, and the default for an unknown write is **admin only** instead of open.
+- Families with their own check are listed explicitly so nothing legitimate is blocked: `/api/cron/*` (webhook secret in every handler), `/api/client/*` (cpAdminGate), `/api/assistant/*` (aiGate), `/api/cp/*` (client portal session), `/api/health/client-events`, `/api/me/favourites`, `/api/dev/*` (test env only), `/api/health/send-test` (admin inside). Replay of all 490 write routes: none lands on admin-only by accident.
+- Newly gated writes: `POST /api/demand/stock-cover/target`, `/api/demand/inventory-upload`, `/api/demand/snapshots` and `/snapshots/:id/delete` (DEMAND edit), `/api/export/email-csv` (DEMAND edit), `/api/storage/sign-upload` (any edit right; checked inside the handler because the route sits before the gate), `GET|POST /api/cron/action-metrics` (webhook secret or admin; it writes a snapshot).
+- Verified with a second sandbox server as a user with no rights: the five DEMAND writes, email-csv, sign-upload, action-metrics, an unknown write and a supply write all 403 (trailing slash and mixed case included); version, reads, cache invalidate and favourites still 200. jsdom boot on SUPPLY, DEMAND and ACCOUNTS landings: 28 / 27 / 24 GETs, no non-2xx.
+- **Diviyaj:** if anything in n8n calls `/api/cron/action-metrics` it must now send `x-webhook-secret`.
+
 ## v28.254 (Ben, branch review-fixes-2026-10-05): Bank ageing first run = items updated in the last 90 days, no full Xero scan
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration. Optional env `ACC_BANK_FIRST_DAYS` (default 90). Buy plan unchanged.

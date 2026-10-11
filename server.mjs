@@ -857,6 +857,9 @@ async function buildFBADIMS() {
 }
 
 const app = express();
+// v28.255 (deep dive P0 #1): Express matched /API/x to /api/x while the permission gate compared exact lower-case paths, so a mixed-case
+// path reached a handler ungated. Routing is case sensitive now (an odd-case path is a 404) and the gate normalises the path as well.
+app.set('case sensitive routing', true);
 // v28.151 (review B1): nosniff on every response, so a stored/proxied body is never MIME-sniffed into HTML/script.
 app.use((req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); next(); });
 // v28.151 (review B5): constant-time secret compare (planner key, webhook secret). False when either side is empty.
@@ -1146,6 +1149,8 @@ async function serveFile(res, row, { data } = {}) {
 }
 // Client asks for a signed upload URL for a large file, PUTs straight to Storage, then posts {storage_path,storage_sig} back to the real endpoint.
 async function signUploadHandler(req, res) {
+  // v28.255: this route is registered before the permission gate, so it checks itself: any edit right (a read-only user could otherwise fill the bucket)
+  try { const me = await permsFor(req); if (me.live && !(me.supply_edit || me.demand_edit || me.product_edit || me.is_admin)) return res.status(403).json({ error: 'Read-only access: uploads need an edit right', code: 'readonly', cap: 'edit' }); } catch (e) { if (GATE) return res.status(503).json({ error: 'permission check failed, try again' }); }
   if (!STORAGE_ENABLED) return res.status(503).json({ error: 'large-file storage is not configured on this server' });
   const b = req.body || {}, size = Number(b.byte_size || 0);
   if (size && size > STORAGE_MAX) return res.status(413).json({ error: 'file exceeds ' + Math.round(STORAGE_MAX / 1048576) + 'MB' });
@@ -1425,20 +1430,35 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
-  return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
+  // v28.255 (deep dive P0 #1, #2): the default is now FAIL CLOSED (admin only). Families with their own check are listed explicitly.
+  if (p.startsWith('/api/cron/')) return null;                // every cron handler checks x-webhook-secret (safeEq); action-metrics too from v28.255
+  if (p.startsWith('/api/client/')) return null;              // cpAdminGate (app.use) checks the CLIENT grant / admin on every method
+  if (p.startsWith('/api/assistant/')) return null;           // aiGate (app.use)
+  if (p.startsWith('/api/cp/')) return null;                  // client portal: its own magic-link session (cpAuth) or public request-link / logout
+  if (p === '/api/health/client-events') return null;         // staff browser health beacon (rate-limited, no data write beyond the health log)
+  if (p === '/api/me/favourites') return null;                // the signed-in user's own favourites
+  if (p.startsWith('/api/dev/')) return null;                 // registered only with HZ_HEALTH_TEST=1 off Vercel
+  if (p === '/api/health/send-test') return null;             // hzAdminOnly inside the handler
+  if (p === '/api/storage/sign-upload') return 'edit';        // signed Storage upload URL: any edit right (read-only users could fill the bucket)
+  if (p === '/api/export/email-csv') return 'demand';         // emails caller-supplied CSV to the export address
+  if (p.startsWith('/api/demand/')) return 'demand';          // stock-cover target, inventory upload, snapshots, anything new under DEMAND
+  return 'admin';   // unknown write: admin only until classified (was fail-open; the preorders sync and five DEMAND writes slipped through that way)
 }
 app.use(async (req, res, next) => {
   try {
-    const cap = requiredCap(req.method, req.path);
+    const cap = requiredCap(req.method, (String(req.path || '').toLowerCase().replace(/\/+$/, '') || '/'));   // v28.255: lower-case, no trailing slash (Express would still match /api/x/)
     if (!cap) return next();
     const me = await permsFor(req);
     if (!me.live) return next();   // sandbox / no auth proxy → full access
     const ok = cap === 'demand' ? (me.demand_edit || me.is_admin)
              : cap === 'supply' ? (me.supply_edit || me.is_admin)
              : cap === 'product' ? (me.product_edit || me.is_admin)
-             : cap === 'config' ? (me.supply_edit || me.demand_edit || me.is_admin) : true;   // admins always have edit rights (was missing for demand/supply/config → false "Read-only" on auto-smooth etc.)
+             : cap === 'config' ? (me.supply_edit || me.demand_edit || me.is_admin)   // admins always have edit rights (was missing for demand/supply/config → false "Read-only" on auto-smooth etc.)
+             : cap === 'edit' ? (me.supply_edit || me.demand_edit || me.product_edit || me.is_admin)
+             : cap === 'admin' ? !!me.is_admin : true;
     if (ok) return next();
-    const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : 'SUPPLY';
+    if (cap === 'admin') return res.status(403).json({ error: 'Admin only', code: 'admin_only', cap });
+    const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : cap === 'edit' ? 'any' : 'SUPPLY';
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
   } catch (e) { if (GATE) { log500(e); return res.status(503).json({ error: 'permission check failed, try again' }); } return next(); }   // v28.151 (review B3): fail CLOSED under a GATE; local dev stays open
 });
@@ -17599,9 +17619,12 @@ app.get('/api/supply/action-metrics/pos', async (_req, res) => {
 // Weekly snapshot target — now driven by the n8n workflow (Thursday 11:59 GMT, live 2026-08-18); computes + upserts this
 // week's row (idempotent). NOTE: vercel.json still has a legacy cron `59 23 * * 4` pointing here — redundant with n8n
 // (and blocked by the webhook-secret gate); Diviyaj to remove or retime it.
-app.get('/api/cron/action-metrics', async (_req, res) => {
-  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
+// v28.255: writes an open-actions snapshot, so it needs the webhook secret (n8n) or an admin (manual). GET kept for an existing scheduler.
+const _actionMetricsRun = async (req, res) => {
+  try { const secret = process.env.N8N_WEBHOOK_SECRET; if (!(secret && safeEq(req.get('x-webhook-secret'), secret))) { const me = await hzAdminOnly(req, res); if (!me) return; }
+    res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+};
+app.get('/api/cron/action-metrics', _actionMetricsRun); app.post('/api/cron/action-metrics', _actionMetricsRun);
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   try {
     const lim = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200));

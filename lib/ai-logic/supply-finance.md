@@ -186,7 +186,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.254
+verified_version: v28.255
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -303,6 +303,10 @@ verified_version: v28.254
 - Unreconciled: IsReconciled for payments and bank transactions; ToIsReconciled (IN) or FromIsReconciled (OUT) for transfers. Default = unreconciled only; all=1 adds reconciled lines; from / to filter by date. Lines are deduplicated by source id and sorted by date. Description is "FX Transfer In" for money in and "FX Payment Out" for money out. (source: server.mjs :: buildUpfxStatement)
 - File layout (Xero precoded statement import): header *Date,*Amount,Payee,Description,Reference,Check Number; date dd/mm/yyyy; signed amount with 2 decimals, no currency symbol. File name "UP FX Statement dd-mmm-yy.csv". SUPPLY > Payments > Payments Report toolbar button "UP FX Statement" downloads the unreconciled file. (source: server.mjs :: upfxCsv, /api/supply/xero/up-fx-statement.csv; supply/inject.html :: upfxDownload)
 - Weekly email (n8n, Monday 08:00 London, POST /api/cron/up-fx-statement): sends ONLY when there is an unreconciled line that no earlier email carried. Emailed source ids are kept in app_settings up_fx_statement_emailed and pruned after 120 days. Recipients = app_settings up_fx_statement_recipients (default rita@ and accounts@). The email lists the new lines and attaches two files: the new lines only (the one to import) and every unreconciled line. Ids are marked only after the email is accepted; with no email key (sandbox) nothing sends and nothing is marked. Each real run logs etl_runs job up_fx_statement (rows = new lines). ?dry=1 returns what would be sent and writes nothing. (source: server.mjs :: runUpfxStatementCron, upfxEmailed, /api/cron/up-fx-statement)
+
+## Write permissions (from v28.255)
+- Every write (POST, PUT, DELETE, PATCH) under /api is classified by path into a required right: DEMAND, SUPPLY, PRODUCT, CONFIG (supply or demand), any edit right, or admin. Reads are open to every signed-in user. Paths are compared in lower case without a trailing slash, routing is case sensitive, and an unclassified write is admin only (fail closed). Families with their own check (crons with the webhook secret, CLIENT admin, Ask Claude, the client portal, the health beacon, own favourites) are listed explicitly. (source: server.mjs :: requiredCap)
+- A user without the right gets 403 "Read-only access" (or "Admin only"); admins always have every edit right. Off Vercel (sandbox) with no identity the gate is open. (source: server.mjs :: requiredCap)
 
 ## ACCOUNTS (from v28.247)
 - ACCOUNTS is a top menu after CLIENT, seen only by users with the ACCOUNTS grant (CONFIG > Admin > Permissions) or admins. Unlike other areas, reading is gated too: every /api/accounts/* call returns 403 without the grant. From v28.252 the grant is read access only: connecting or disconnecting Gmail and running the bank or back-date refresh need admin (403 accounts_admin_only otherwise), and only the accounts mailbox (GMAIL_MAILBOX_ACCOUNTS, default accounts@dockandbay.com) can be connected. (source: server.mjs :: accountsGate)
