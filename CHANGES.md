@@ -1,3 +1,12 @@
+## v28.261 (Ben, branch review-fixes-2026-10-05): Diviyaj's two prod cron-route fixes taken upstream (so they do not reopen)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged.
+
+- `POST /api/supply/action-metrics/snapshot` and `POST /api/forecast/snapshot` (both called by n8n with `x-webhook-secret`, both also pressed by users in the app) now accept **the scheduler secret or a signed-in SUPPLY / DEMAND editor** inside the handler (`hzSecretOrCap`), and `requiredCap` leaves them to the handler. On prod the session-less cron had been 403'd "readonly" since 8-Oct (Diviyaj patched prod to `null`; this is the upstream version, which keeps the write protected for users without rights rather than opening it to every key holder).
+- `/api/cron/payment-emails` added to the login-gate exemption list (every n8n call was 401'd by the gate before the handler ran) and its secret compare is constant-time like the other crons.
+- Verified with a second sandbox server (read-only user, `N8N_WEBHOOK_SECRET` set): no secret 403, right secret 200, wrong secret 403 on both snapshots; payment-emails right 200, wrong 401.
+- **Diviyaj:** this replaces your prod-only edits for these three routes; the preorders fail-open fix (v28.245) and the v28.255 fail-closed gate both hold.
+
 ## v28.260 (Ben, branch review-fixes-2026-10-05): boot fetch diet, Xero allowance alert + incremental-only guards (deep dive P1 #9; Ben 12-Oct)
 
 **Files:** `supply/inject.html`, `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration. Optional env `XERO_DAY_ALERT` (default 1000). Buy plan unchanged.

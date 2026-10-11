@@ -1277,7 +1277,7 @@ app.use((req, res, next) => {
       || req.path === '/api/supply/fulfil/import-pos' || req.path === '/api/tracking/poll'
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
+      || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
@@ -1393,6 +1393,7 @@ const CONFIG_WRITE = [   // config reference-data writes — editable by anyone 
 ];
 function requiredCap(method, p) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;   // reads open to all
+  if (p === '/api/supply/action-metrics/snapshot' || p === '/api/forecast/snapshot') return null;   // v28.261: hzSecretOrCap inside the handler (n8n secret or an editor); must come before the supply / demand prefix rules
   if (p.startsWith('/api/portal/')) return null;             // supplier portal — separate magic-link auth
   if (p.startsWith('/api/scenario/')) return null;           // SCENARIO open to all
   if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
@@ -14837,7 +14838,7 @@ async function processPaymentEmails() {
 // PAYMENT_EMAIL_CRON=1 once n8n hits /api/cron/payment-emails, which turns the Vercel timer off.
 if (!process.env.VERCEL || process.env.PAYMENT_EMAIL_CRON !== '1') setInterval(processPaymentEmails, 30000).unref?.();
 app.post('/api/cron/payment-emails', async (req, res) => {
-  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });   // v28.261: safeEq like every other cron
   try { res.json(Object.assign({ ok: true }, await processPaymentEmails())); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
@@ -17646,7 +17647,17 @@ app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment
     res.json({ ok: true, current: await getOpenActionsCached(), history });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.post('/api/supply/action-metrics/snapshot', async (_req, res) => {
+// v28.261 (Diviyaj's prod fix taken upstream): routes that n8n calls with x-webhook-secret but users also press from the app. The login gate
+// lets a valid secret through; here the handler accepts the secret OR a signed-in user with the given right (requiredCap leaves these to the handler).
+async function hzSecretOrCap(req, res, cap) {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (secret && safeEq(req.get('x-webhook-secret'), secret)) return true;
+  try { const me = await permsFor(req); if (!me.live) return true;
+    const ok = cap === 'demand' ? (me.demand_edit || me.is_admin) : cap === 'supply' ? (me.supply_edit || me.is_admin) : !!me.is_admin;
+    if (ok) return true; res.status(403).json({ error: 'Read-only access: ' + cap.toUpperCase() + ' edit rights (or the scheduler secret) needed', code: 'readonly', cap }); return false; }
+  catch (e) { res.status(503).json({ error: 'permission check failed, try again' }); return false; }
+}
+app.post('/api/supply/action-metrics/snapshot', async (req, res) => {
+  if (!(await hzSecretOrCap(req, res, 'supply'))) return;
   try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // The individual PO-level open actions (from the same exceptions engine as the ACTIONS tab) — PO + type + explainer,
@@ -23944,6 +23955,7 @@ app.get('/api/kpi/discontinued-stock', async (req, res) => {
 // Run monthly (Diviyaj wires an n8n trigger) and/or manually from the KPIs page so true forecast accuracy
 // accrues: a dated snapshot of what we forecast, later compared to actuals.
 app.post('/api/forecast/snapshot', async (req, res) => {
+  if (!(await hzSecretOrCap(req, res, 'demand'))) return;   // v28.261: n8n (secret) or a DEMAND editor
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
