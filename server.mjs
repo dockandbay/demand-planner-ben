@@ -3321,6 +3321,9 @@ if (!process.env.VERCEL && process.env.HZ_PREORDERS_CRON !== '0') {
 async function accountsGate(req, res, next) {
   try { const me = await permsFor(req);
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
+    // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
+    // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
+    if (me.live && req.method !== 'GET' && !me.is_admin) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3439,11 +3442,14 @@ if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON !== '0') {
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const GMAIL_MAILBOX_HINT = process.env.GMAIL_MAILBOX_ACCOUNTS || 'accounts@dockandbay.com';
 function gmailCfg() { const id = process.env.GMAIL_CLIENT_ID_ACCOUNTS, secret = process.env.GMAIL_CLIENT_SECRET_ACCOUNTS; return id && secret ? { id, secret } : null; }
-function gmailKey(tag) { return crypto.createHash('sha256').update('hz-gmail|' + tag + '|' + (process.env.GMAIL_CLIENT_SECRET_ACCOUNTS || '')).digest(); }
+// v28.252: the seal key is GMAIL_SEAL_KEY (any long random string) when set, so rotating the OAuth client secret no longer bricks the stored
+// refresh token; rows sealed before it was set still open with the old client-secret derivation (gmailUnseal tries both).
+function gmailKey(tag, legacy) { const base = (!legacy && process.env.GMAIL_SEAL_KEY) ? ('seal:' + process.env.GMAIL_SEAL_KEY) : (process.env.GMAIL_CLIENT_SECRET_ACCOUNTS || ''); return crypto.createHash('sha256').update('hz-gmail|' + tag + '|' + base).digest(); }
 function gmailSeal(txt) { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', gmailKey('seal'), iv);
   const ct = Buffer.concat([c.update(String(txt), 'utf8'), c.final()]); return 'g1:' + Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64'); }
-function gmailUnseal(s) { const b = Buffer.from(String(s || '').replace(/^g1:/, ''), 'base64'); const d = crypto.createDecipheriv('aes-256-gcm', gmailKey('seal'), b.subarray(0, 12));
-  d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8'); }
+function gmailUnseal(s) { const b = Buffer.from(String(s || '').replace(/^g1:/, ''), 'base64');
+  const open = legacy => { const d = crypto.createDecipheriv('aes-256-gcm', gmailKey('seal', legacy), b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8'); };
+  try { return open(false); } catch (e) { if (!process.env.GMAIL_SEAL_KEY) throw e; return open(true); } }
 function gmailRedirectUri(req) { if (process.env.GMAIL_REDIRECT_URI_ACCOUNTS) return process.env.GMAIL_REDIRECT_URI_ACCOUNTS;
   return (_reqHttps(req) ? 'https' : 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers.host) + '/api/accounts/gmail/callback'; }
 async function gmailRow() { try { return (await pool.query(`SELECT email, refresh_token_enc, scope, connected_by, to_char(connected_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') connected_at,
@@ -3468,7 +3474,7 @@ async function gmailGet(path) {   // GET https://gmail.googleapis.com/gmail/v1/u
 }
 app.get('/api/accounts/gmail/status', async (req, res) => {
   try { const row = await gmailRow();
-    res.set('Cache-Control', 'no-store').json({ configured: !!gmailCfg(), migrated: !(row && row.missing), connected: !!(row && !row.missing), mailbox_hint: GMAIL_MAILBOX_HINT, redirect_uri: gmailRedirectUri(req),
+    res.set('Cache-Control', 'no-store').json({ can_write: !!(req.me && (req.me.is_admin || req.me.live === false)), configured: !!gmailCfg(), migrated: !(row && row.missing), connected: !!(row && !row.missing), mailbox_hint: GMAIL_MAILBOX_HINT, redirect_uri: gmailRedirectUri(req),
       email: row && row.email || null, connected_by: row && row.connected_by || null, connected_at: row && row.connected_at || null, last_ok_at: row && row.last_ok_at || null, last_error: row && row.last_error || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -3500,6 +3506,7 @@ app.get('/api/accounts/gmail/callback', async (req, res) => {
     if (!String(j.scope || '').split(' ').includes(GMAIL_SCOPE)) return back('Read access to Gmail was not ticked, connect again and allow it');
     const p = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { authorization: 'Bearer ' + j.access_token } }).then(x => x.json()).catch(() => ({}));
     if (!p.emailAddress) return back('Could not read the mailbox address from Gmail');
+    if (String(p.emailAddress).toLowerCase() !== String(GMAIL_MAILBOX_HINT).toLowerCase()) return back('That Google account is ' + String(p.emailAddress).toLowerCase() + '. Sign in to Google as ' + GMAIL_MAILBOX_HINT + ' and connect again');   // v28.252: only the accounts mailbox
     await pool.query(`INSERT INTO planner.accounts_gmail (id, email, refresh_token_enc, scope, connected_by, connected_at, last_ok_at, last_error) VALUES (1,$1,$2,$3,$4,now(),now(),null)
       ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, refresh_token_enc=EXCLUDED.refresh_token_enc, scope=EXCLUDED.scope, connected_by=EXCLUDED.connected_by, connected_at=now(), last_ok_at=now(), last_error=null`,
       [p.emailAddress.toLowerCase(), gmailSeal(j.refresh_token), j.scope || GMAIL_SCOPE, (req.me && req.me.email) || authUser(req) || null]);

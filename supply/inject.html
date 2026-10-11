@@ -18888,11 +18888,11 @@
     h+='<div class="ac-cards"><div class="ac-card" style="min-width:340px"><div style="font-weight:600;margin-bottom:6px">Gmail mailbox</div>';
     if(!st.configured) h+='<div class="count">Google client not set on this server (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS).</div>';
     else if(!st.migrated) h+='<div class="count">Run migration 348 (planner.accounts_gmail) first.</div>';
-    else if(!st.connected) h+='<div class="count" style="margin-bottom:8px">Not connected. Sign in to Google as <b>'+esc(st.mailbox_hint)+'</b> in this browser, then connect. HORIZON only gets read access: it never sends, labels or deletes mail.</div><button class="save-btn" id="ac-gm-connect" style="background:var(--blue);color:#fff">Connect Gmail</button>';
+    else if(!st.connected) h+='<div class="count" style="margin-bottom:8px">Not connected. Sign in to Google as <b>'+esc(st.mailbox_hint)+'</b> in this browser, then connect. HORIZON only gets read access: it never sends, labels or deletes mail.</div>'+(st.can_write?'<button class="save-btn" id="ac-gm-connect" style="background:var(--blue);color:#fff">Connect Gmail</button>':'<div class="count">Only an admin can connect the mailbox.</div>');
     else { var c=String(st.connected_at||'').split(' ');
       h+='<div>Connected: <b>'+esc(st.email)+'</b></div><div class="count">since '+esc(hzTrkDate(c[0])+(c[1]?' '+c[1]:''))+(st.connected_by?' by '+esc(String(st.connected_by).split('@')[0]+'@'):'')+' · read only</div>';
       if(st.last_error) h+='<div class="count" style="color:var(--neg)">'+esc(st.last_error)+'</div>';
-      h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
+      if(st.can_write) h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
     h+='</div></div>';
     if(st.connected){
       h+='<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input id="ac-gm-q" value="'+esc(AC_IN.q)+'" style="min-width:320px" placeholder="Gmail search, e.g. has:attachment newer_than:7d"><button class="save-btn light" id="ac-gm-go">Search</button><span class="count">Gmail search syntax · newest 25</span></div>';

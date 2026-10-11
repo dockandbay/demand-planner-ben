@@ -1,3 +1,12 @@
+## v28.252 (Ben, branch review-fixes-2026-10-05): ACCOUNTS writes admin only, Gmail mailbox check, dedicated seal key (deep dive P1 #11)
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `.env.example` (+ package.json, CHANGES.md). No migration. **Optional new env `GMAIL_SEAL_KEY`** (any long random string): seals the stored Gmail refresh token so rotating the OAuth client secret no longer needs a reconnect; rows sealed before it was set still open (fallback to the old derivation). Buy plan unchanged.
+
+- accountsGate: any non-GET under `/api/accounts/*` (Gmail connect, disconnect, bank-ageing refresh, back-date refresh) now needs admin; the ACCOUNTS grant alone is read access (403 `accounts_admin_only`). requiredCap leaves `/api/accounts/` to this gate, so this was the only write check.
+- Gmail callback refuses any Google account other than `GMAIL_MAILBOX_ACCOUNTS` (default accounts@dockandbay.com) with a clear message.
+- `/api/accounts/gmail/status` returns `can_write`; the Inbox tab hides Connect / Reconnect / Disconnect for non-admins ("Only an admin can connect the mailbox").
+- Verified on the sandbox with a second server as a user who has the grant but is not admin: payables 200; disconnect and bank refresh 403; status `can_write` false. Admin: status and messages still work with the existing token (seal-key fallback).
+
 ## v28.251 (Ben, branch review-fixes-2026-10-05): ACCOUNTS deep links, no DEMAND work on ACCOUNTS pages, hourly feed timers guarded (deep dive P0 #3, #4, P1 #8)
 
 **Files:** `supply/inject.html`, `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env. Buy plan unchanged (no engine change).

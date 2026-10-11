@@ -46,7 +46,7 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
-  server.mjs::accountsGate: eed85da15ec4
+  server.mjs::accountsGate: 66c7e8eea646
   server.mjs::/api/accounts/payables: f95bff782b95
   supply/inject.html::acRenderPayables: dcfac50320fe
   supply/inject.html::accountsCan: c51271303351
@@ -186,7 +186,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.250
+verified_version: v28.252
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -305,7 +305,7 @@ verified_version: v28.250
 - Weekly email (n8n, Monday 08:00 London, POST /api/cron/up-fx-statement): sends ONLY when there is an unreconciled line that no earlier email carried. Emailed source ids are kept in app_settings up_fx_statement_emailed and pruned after 120 days. Recipients = app_settings up_fx_statement_recipients (default rita@ and accounts@). The email lists the new lines and attaches two files: the new lines only (the one to import) and every unreconciled line. Ids are marked only after the email is accepted; with no email key (sandbox) nothing sends and nothing is marked. Each real run logs etl_runs job up_fx_statement (rows = new lines). ?dry=1 returns what would be sent and writes nothing. (source: server.mjs :: runUpfxStatementCron, upfxEmailed, /api/cron/up-fx-statement)
 
 ## ACCOUNTS (from v28.247)
-- ACCOUNTS is a top menu after CLIENT, seen only by users with the ACCOUNTS grant (CONFIG > Admin > Permissions) or admins. Unlike other areas, reading is gated too: every /api/accounts/* call returns 403 without the grant. (source: server.mjs :: accountsGate)
+- ACCOUNTS is a top menu after CLIENT, seen only by users with the ACCOUNTS grant (CONFIG > Admin > Permissions) or admins. Unlike other areas, reading is gated too: every /api/accounts/* call returns 403 without the grant. From v28.252 the grant is read access only: connecting or disconnecting Gmail and running the bank or back-date refresh need admin (403 accounts_admin_only otherwise), and only the accounts mailbox (GMAIL_MAILBOX_ACCOUNTS, default accounts@dockandbay.com) can be connected. (source: server.mjs :: accountsGate)
 - Payables: open Xero bills in UK and AU (status approved or awaiting approval, amount due above zero) from the hourly Xero bill cache, grouped by contact, org and currency, aged by due date into Not due, 1-30, 31-60, 61-90 and 90+ days overdue. Amounts stay in the bill currency (no GBP conversion). (source: server.mjs :: /api/accounts/payables)
 - A contact counts as a Supplier when any of its bills is linked to a HORIZON PO, or its Xero name ends " - <supplier code>" matching a HORIZON supplier code. The Suppliers pill shows only those; All contacts shows every open bill. (source: server.mjs :: /api/accounts/payables)
 - 3PL invoicing moved from REPORTS to ACCOUNTS > 3PL invoicing in v28.247; old #/reports/3pl-invoicing links redirect. (source: supply/inject.html :: acRenderPayables)
