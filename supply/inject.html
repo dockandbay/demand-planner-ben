@@ -18961,7 +18961,7 @@
     h+='<div class="sect-h" style="margin-top:20px">Tax rules</div><ul style="margin:0 0 0 18px;padding:0;display:grid;gap:3px;font-size:13px">'+(d.tax||[]).map(function(r){ return '<li><b>'+esc(r.org)+':</b> '+esc(r.rule)+'</li>'; }).join('')+'</ul>';
     var a=d.alerts||{}; h+='<div class="sect-h" style="margin-top:20px">Alerts and schedules</div><ul style="margin:0 0 0 18px;padding:0;display:grid;gap:3px;font-size:13px">'
       +'<li>Bank statement out of date: email to <b>'+esc((a.recipients||[]).join(', '))+'</b> when an organisation\'s upload is more than <b>'+esc(a.stale_days)+' days</b> old (once a day).</li>'
-      +'<li>Xero API allowance: red alert below <b>'+esc(a.xero_day_alert)+'</b> calls left in the day (5,000 per organisation, shared by live and the sandbox).</li>'
+      +'<li>Xero API allowance: red alert below <b>'+esc(a.xero_day_alert)+'</b> calls left in the day (1,000 per organisation on our Xero plan, shared by live and the sandbox).</li>'
       +'<li>Coghlans invoices: accounts@ checked every <b>'+esc(a.coghlans_scan_hours)+' hours</b> and imported into 3PL invoicing.</li>'
       +'<li>Bank ageing (entered items): hourly. Back-date analysis: weekly.</li></ul><div class="tiny mut" style="margin-top:6px">These settings are changed by Diviyaj in the server settings (ACC_STMT_MAX_DAYS, ACC_STMT_ALERT_TO, XERO_DAY_ALERT).</div>';
     b.innerHTML='<div style="text-align:left">'+h+'</div>';
@@ -19002,7 +19002,39 @@
       +(vis.length?'':'<tr><td colspan="7" class="l mut">Nothing in this filter.</td></tr>')+'</tbody></table></div>'
       +'<div class="tiny mut" style="margin-top:8px">Treatment is remembered per payee: <b>Bill</b> = supplier invoice with terms, <b>Spend money</b> = card or direct-debit spend with a receipt, <b>Xero bank rule</b> = Xero codes it, no receipt needed (Google Ads), <b>Ignore</b> = transfers, loans, tax, money in. A receipt is matched by exact amount, with the payee in the sender or subject (or a short email within a few days). Creating the bill or spend money in Xero is the next step; nothing is sent to Xero from this list.</div>';
     return h; }
+  // v28.272 (Ben 12-Oct-26): regular payees whose receipts do not reach accounts@ (from the weekly back-date analysis), so someone can set up
+  // auto-forwarding at the source; Actioned marks it done (admins and ACCOUNTS users). Changing the treatment to bank rule / ignore removes it.
+  var AC_FW={d:null,busy:false,f:'open'};
+  function acFwLoad(){ if(AC_FW.busy)return; AC_FW.busy=true; fetch('/api/accounts/forwarding').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+    .then(function(j){ AC_FW.d=j; AC_FW.busy=false; acInRender(); }).catch(function(e){ AC_FW.d={rows:[],error:e.message}; AC_FW.busy=false; acInRender(); }); }
+  function acFwHtml(){ var D=AC_FW.d; if(!D){ if(!AC_FW.busy)acFwLoad(); return '<div class="count" style="margin:10px 0">Loading regular payees…</div>'; }
+    if(D.error)return '<div class="count" style="color:var(--neg)">'+esc(D.error)+'</div>';
+    var rows=D.rows||[], yrs=D.years||[], F=AC_FW.f, n={open:0,actioned:0,ignored:0};
+    rows.forEach(function(r){ n[r.status]=(n[r.status]||0)+1; });
+    var vis=rows.filter(function(r){ return F==='all'||r.status===F; });
+    var pill=function(k,l){ return '<span class="pill'+(F===k?' active':'')+'" data-fwf="'+k+'">'+l+' ('+(k==='all'?rows.length:(n[k]||0))+')</span>'; };
+    var h='<div class="sect-h" style="margin-top:20px">Repeating bank payments whose receipts do not reach accounts@</div>'
+      +'<div class="tiny mut" style="margin-bottom:6px">Spend Money on bank and card accounts (bill payments excluded) to payees that repeat: 3 or more in '+(yrs.length?yrs[yrs.length-2]+' and '+yrs[yrs.length-1]:'the last two years')+', where the receipt is not usually found in accounts@. Set up auto-forwarding to accounts@dockandbay.com at the source, then press <b>Actioned</b>; <b>Ignore</b> if no receipt is needed. '+(D.history_at?'Counts updated '+esc(acSynced(D.history_at))+' (weekly).':'')+'</div>'
+      +'<div class="bar">'+pill('open','To action')+pill('actioned','Actioned')+pill('ignored','Ignored')+pill('all','All')
+      +(D.building?'<span class="tiny mut">Building yearly counts from Xero…</span>':(!D.history_at?'<span class="save-btn" id="ac-fwh">Build yearly counts from Xero</span><span class="tiny mut">one-off read of Spend Money since 1-Jan-'+(yrs[0]||2024)+' (about 200 Xero calls)</span>':''))+'</div>';
+    if(!D.history_at&&!rows.length)return h+'<div class="count">No yearly counts yet.</div>';
+    h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Org</th><th>Payee (Xero contact)</th>'+yrs.map(function(y){ return '<th>'+y+'</th>'; }).join('')+'<th>Typical amount</th><th>Last paid</th><th>Receipt in accounts@ (last '+(D.days||120)+' d)</th><th>File in Xero</th><th></th></tr></thead><tbody>'
+      +(vis.length?vis.map(function(r){ var i=rows.indexOf(r);
+        var act=r.status==='open'?'<span class="save-btn" data-fwa="'+i+'">Actioned</span> <span class="save-btn light" data-fwi="'+i+'">Ignore</span>'
+          :'<span class="tiny mut">'+(r.status==='ignored'?'ignored':'actioned')+' by '+esc(String(r.actioned_by||'').split('@')[0]+'@')+' '+esc(acSynced(r.actioned_at))+'</span> <span class="save-btn light" data-fwu="'+i+'">Undo</span>';
+        return '<tr'+(r.status!=='open'?' style="opacity:.6"':'')+'><td class="l">'+esc(r.org.toUpperCase())+'</td><td class="l"><b>'+esc(r.contact)+'</b>'+(r.sender?'<div class="tiny mut">some arrive from '+esc(r.sender)+'</div>':'')+'</td>'
+          +yrs.map(function(y){ var v=r.years[y]||0; return '<td class="l">'+(v||'<span class="mut">·</span>')+'</td>'; }).join('')
+          +'<td class="l">'+acMoney(r.avg_amount,r.currency)+'</td><td class="l">'+esc(hzTrkDate(r.last_date))+'</td><td class="l">'+(r.window_txns?(r.matched?r.matched+' of '+r.window_txns:'<span style="color:var(--neg)">none of '+r.window_txns+'</span>'):'<span class="mut">no recent payment</span>')+'</td><td class="l">'+(r.xero_files?r.xero_files+' of '+r.window_txns:'<span class="mut">·</span>')+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }).join('')
+        :'<tr><td colspan="'+(yrs.length+7)+'" class="l mut">'+(F==='open'?'Nothing left to action.':'None.')+'</td></tr>')+'</tbody></table></div>';
+    return h; }
   function acInWireLines(b){
+    b.querySelectorAll('[data-fwf]').forEach(function(x){ x.onclick=function(){ AC_FW.f=x.dataset.fwf; acInRender(); }; });
+    var fwPost=function(url,body,el){ if(el)el.style.pointerEvents='none'; return fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); }); })
+      .then(function(){ AC_FW.d=null; AC_IN.p=null; acInRender(); }).catch(function(e){ if(el)el.style.pointerEvents=''; window.hzCopiedTip&&window.hzCopiedTip(e.message,el); }); };
+    b.querySelectorAll('[data-fwa]').forEach(function(x){ x.onclick=function(){ var r=AC_FW.d.rows[+x.dataset.fwa]; fwPost('/api/accounts/forwarding/action',{org:r.org,contact:r.contact,status:'actioned'},x); }; });
+    b.querySelectorAll('[data-fwi]').forEach(function(x){ x.onclick=function(){ var r=AC_FW.d.rows[+x.dataset.fwi]; fwPost('/api/accounts/forwarding/action',{org:r.org,contact:r.contact,status:'ignored'},x); }; });
+    b.querySelectorAll('[data-fwu]').forEach(function(x){ x.onclick=function(){ var r=AC_FW.d.rows[+x.dataset.fwu]; fwPost('/api/accounts/forwarding/action',{org:r.org,contact:r.contact,status:'open'},x); }; });
+    var fh=document.getElementById('ac-fwh'); if(fh)fh.onclick=function(){ fh.style.pointerEvents='none'; fh.textContent='Starting…'; fetch('/api/accounts/forwarding/history',{method:'POST'}).then(function(){ AC_FW.d=null; acInRender(); setTimeout(function(){ AC_FW.d=null; acInRender(); },60000); }); };
     b.querySelectorAll('[data-pf]').forEach(function(x){ x.onclick=function(){ AC_IN.pF=x.dataset.pf; acInRender(); }; });
     var q=document.getElementById('ac-pq2'); if(q)q.oninput=function(){ AC_IN.pQ=q.value; clearTimeout(AC_IN._qt); AC_IN._qt=setTimeout(function(){ acInRender(); var n=document.getElementById('ac-pq2'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     b.querySelectorAll('select.ac-tr').forEach(function(s){ s.onchange=function(){ var r=AC_IN.p.rows[+s.dataset.i]; if(!r)return; var t=s.value; s.disabled=true;
@@ -19034,7 +19066,7 @@
       if(st.last_error) h+='<div class="count" style="color:var(--neg)">'+esc(st.last_error)+'</div>';
       if(st.can_write) h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
     h+='</div></div>';
-    if(st.connected){ if(!AC_IN.p&&!AC_IN.pBusy)acInLoadP(); h+=acInLinesHtml()+'<div class="sect-h" style="margin-top:18px">Recent mail in accounts@</div>';
+    if(st.connected){ if(!AC_IN.p&&!AC_IN.pBusy)acInLoadP(); h+=acInLinesHtml()+acFwHtml()+'<div class="sect-h" style="margin-top:18px">Recent mail in accounts@</div>';
       h+='<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input id="ac-gm-q" value="'+esc(AC_IN.q)+'" style="min-width:320px" placeholder="Gmail search, e.g. has:attachment newer_than:7d"><button class="save-btn light" id="ac-gm-go">Search</button><span class="count">Gmail search syntax · newest 25</span></div>';
       if(AC_IN.err) h+='<div class="count" style="color:var(--neg)">'+esc(AC_IN.err)+'</div>';
       else if(!AC_IN.msgs) h+='<div class="count">Loading mail…</div>';

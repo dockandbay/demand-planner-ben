@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|inbox\/read-mail)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|inbox\/read-mail|forwarding\/action)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3447,7 +3447,7 @@ function accBankRowsFrom(org, bank, bt, pays, transfers) {   // Xero items -> ac
   const uniq = new Map(); rows.forEach(r => uniq.set(r[1] + '|' + r[2] + '|' + r[3], r));   // Xero paging can repeat an item across pages: one row per key
   return [...uniq.values()];
 }
-const ACC_XERO_DAY_MIN = Number(process.env.ACC_XERO_DAY_MIN) || 1500;   // a full accounts scan only starts with this much of the day's Xero allowance left
+const ACC_XERO_DAY_MIN = Number(process.env.ACC_XERO_DAY_MIN) || 400;   // v28.272: with a 1,000-a-day allowance a full scan needs 400 left for live's bill sync and pushes   // a full accounts scan only starts with this much of the day's Xero allowance left
 async function accXeroHeadroom(org) { try { await xeroFetch(org, '/api.xro/2.0/Organisation', { timeoutMs: 20000 }); } catch (e) { if (e && e.xero_daily) throw e; }
   const q = xeroQuota(org); if (q && q.day != null && q.day < ACC_XERO_DAY_MIN) throw new Error('Xero ' + org.toUpperCase() + ' daily allowance low (' + q.day + ' calls left): the full scan waits for tomorrow'); }
 async function accountsBankSyncOrg(org, opts) {
@@ -3829,7 +3829,7 @@ async function accLearnMatch(by) {
     .filter(e => !ACC_TPL_RE.test(e.from_addr + ' ' + e.subject) && !/supplier\.dockandbay\.com/i.test(e.from_addr)).map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) }));
   const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
   const toks = s => String(s || '').toLowerCase().replace(/ - [a-z0-9]{1,8}$/, '').split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !/^(limited|ltd|inc|pty|the|com|services|payment|payments)$/.test(w));
-  const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$' }, rows = [];
+  const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$' }, rows = [], cov = new Map();
   let matched = 0;
   tx.forEach(x => { const k = Math.abs(x.amount).toFixed(2), td = new Date(x.date), nt = toks(x.contact);
     const c = (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 60) return null;
@@ -3838,6 +3838,9 @@ async function accLearnMatch(by) {
       if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 3)) return null;
       return { e, lag, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; }).filter(Boolean).sort((a, b) => b.score - a.score);
     const best = c[0] && c[0].score >= 40 ? c[0] : null; if (best) matched++;
+    { const ck = x.org + '|' + x.contact, cv = cov.get(ck) || { org: x.org, contact: x.contact, txns: 0, matched: 0, files: 0, last: null, sum: 0, ccy: {}, acc: {}, snd: {} };   // v28.272: coverage per payee
+      cv.txns++; if (best) { cv.matched++; const sd = String(best.e.from_addr || '').toLowerCase().replace(/^.*<|>.*$/g, '').trim(); if (sd) cv.snd[sd] = (cv.snd[sd] || 0) + 1; } if (x.has_att) cv.files++;
+      if (!cv.last || x.date > cv.last) cv.last = x.date; cv.sum += Math.abs(x.amount); cv.ccy[x.ccy] = (cv.ccy[x.ccy] || 0) + 1; if (x.account) cv.acc[x.account] = (cv.acc[x.account] || 0) + 1; cov.set(ck, cv); }
     if (best && !x.has_att) { const e = best.e, files = e.files || [];
       rows.push([x.org, 'receipt', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, null, x.link, e.id, e.d, e.from_addr, e.subject,
         files.some(f => /\.pdf$/i.test(f)) ? 'pdf' : files.length ? 'other attachment' : e.stripe_link ? 'stripe link' : 'email body', JSON.stringify(files), best.lag, !!(c[1] && c[1].score >= best.score - 5)]); }
@@ -3849,6 +3852,11 @@ async function accLearnMatch(by) {
     for (let i = 0; i < rows.length; i += 200) { const ch = rows.slice(i, i + 200);
       await cl.query(`INSERT INTO planner.accounts_backdate (org, issue, xero_id, kind, txn_date, amount, currency, contact, bank, account, tax, suggested_tax, link_id, email_id, email_date, email_from, email_subject, file_source, files, lag_days, ambiguous) VALUES `
         + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 21 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
+    const top = o => { const e = Object.entries(o).sort((a, b) => b[1] - a[1]); return e.length ? e[0][0] : null; };
+    await cl.query('DELETE FROM planner.accounts_payee_coverage');
+    const cr = [...cov.values()].map(v => [v.org, v.contact, v.txns, v.matched, v.files, v.last, Math.round(v.sum / v.txns * 100) / 100, top(v.ccy), top(v.acc), top(v.snd)]);
+    for (let i = 0; i < cr.length; i += 200) { const ch = cr.slice(i, i + 200);
+      await cl.query(`INSERT INTO planner.accounts_payee_coverage (org, contact, txns, matched, xero_files, last_date, avg_amount, currency, account, sender) VALUES ` + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 10 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT DO NOTHING', ch.flat()); }
     await cl.query('COMMIT'); } catch (e) { try { await cl.query('ROLLBACK'); } catch (_) {} throw e; } finally { cl.release(); }
   return { reconciled: txns.length, considered: tx.length, matched, receipts: rows.filter(x => x[1] === 'receipt').length, tax: rows.filter(x => x[1] === 'tax').length, rows: rows.length };
 }
@@ -3875,6 +3883,7 @@ async function accountsLearn(by, opts) {
     const msg = `${r.considered} of ${r.reconciled} reconciled considered, ${r.matched} with email, ${r.receipts} receipt + ${r.tax} tax opportunities, ${st.mail || 0} new mail (${st.by || by || 'job'})`;
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','success',$1,$2)`, [r.rows, msg.slice(0, 500)]); } catch (_) {}
     st.stage = 'done'; await save();
+    hzWaitUntil(accSpendHistory('learn').catch(() => {}));   // v28.272: current-year repeat counts (plus any missing year)
     return Object.assign({ ok: true, done: true, stage: 'done', new_mail: st.mail || 0 }, r);
   } catch (e) {
     try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_learn','error',0,$1)`, [(st.stage + ': ' + e.message).slice(0, 500)]); } catch (_) {}
@@ -3934,7 +3943,7 @@ function accPayeeKey(ref, desc) {
   return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
 }
 const ACC_RULE_KEYS = /^(GOOGLE|LINKEDIN|FACEBOOK|META|FB|TIKTOK|STRIPE|PAYPAL|PP ZETTLE|SHOPIFY|KLARNA|ADYEN|AMAZON|AMZNMKTPLACE|AMZNBUSINESS|XERO|XRO|DISPUTE|INTEREST|SNAP)$/;
-const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN|FLEXPORT)$/;   // v28.270: + FLEXPORT (Ben: freight is billed through its own flow)
+const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN|FLEXPORT|WAGES|PAYROLL|WEBSITE|US CUSTOMS|CUSTOMS|SUPERANNUATION|ATO|AIRWALLEX|AWX|BANK|TD BANK|LLOYDS|BARCLAYS|HSBC|ANZ|WESTPAC|WORLD|WORLDFIRST|STATEMENT)$/;   // v28.272: + banks, FX and transfer providers (fees and transfers)   // v28.270: + FLEXPORT (Ben: freight is billed through its own flow)
 function accDefaultTreatment(key, amount, match, supKeys) {
   if (amount > 0) return 'ignore';
   if (supKeys && supKeys.has(key)) return 'ignore';   // v28.270 (Ben): product suppliers are paid against POs and supplier bills, never from a receipt                     // money in: customer payments / payouts, reconciled against sales in Xero
@@ -4019,6 +4028,80 @@ app.get('/api/accounts/config', async (req, res) => {
 app.post('/api/accounts/payee-rule/delete', async (req, res) => {   // back to HORIZON's suggestion for this payee
   try { const b = req.body || {}; await pool.query(`DELETE FROM planner.accounts_payee_rules WHERE org=$1 AND payee_key=$2`, [String(b.org || '').toLowerCase(), String(b.payee_key || '').toUpperCase()]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.272 (Ben 12-Oct-26): yearly repeat counts of bank-account spend (Spend Money) per Xero contact from 1-Jan-2024. GET only, monthly windows,
+// a full build needs ACC_XERO_DAY_MIN calls of headroom; later runs (with the weekly learn) rebuild only the current year.
+const ACC_HIST_FROM = 2024;
+let _accHistRun = null;
+async function accSpendHistory(by, opts) {
+  opts = opts || {}; if (_accHistRun) return _accHistRun;
+  _accHistRun = (async () => {
+    const thisYear = new Date().getUTCFullYear(), have = (await pool.query(`SELECT DISTINCT year FROM planner.accounts_spend_history`).catch(() => ({ rows: [] }))).rows.map(r => r.year);
+    const years = []; for (let y = ACC_HIST_FROM; y <= thisYear; y++) if (opts.full || y === thisYear || !have.includes(y)) years.push(y);
+    const out = { years, orgs: [] };
+    for (const org of XERO_REGIONS) {
+      if (years.some(y => y < thisYear)) await accXeroHeadroom(org);
+      const agg = new Map();
+      for (const y of years) {
+        const to = y === thisYear ? new Date(Date.now() + 864e5) : new Date(Date.UTC(y + 1, 0, 1));
+        const bt = await accXeroBtRange(org, new Date(Date.UTC(y, 0, 1)), to, 'Type=="SPEND"', { stepMonths: 1 });
+        bt.filter(t => t.Status === 'AUTHORISED').forEach(t => { const c = ((t.Contact || {}).Name || '').trim(); if (!c) return; const k = c + '|' + y, d = _xDate(t.DateString || t.Date);
+          const a = agg.get(k) || { contact: c, year: y, n: 0, amt: 0, ccy: {}, last: null }; a.n++; a.amt += Math.abs(Number(t.Total) || 0); a.ccy[t.CurrencyCode || ''] = (a.ccy[t.CurrencyCode || ''] || 0) + 1; if (!a.last || d > a.last) a.last = d; agg.set(k, a); });
+      }
+      const rows = [...agg.values()].map(a => [org, a.contact, a.year, a.n, Math.round(a.amt * 100) / 100, Object.entries(a.ccy).sort((x, y) => y[1] - x[1])[0][0], a.last]);
+      const c = await pool.connect();
+      try { await c.query('BEGIN'); await c.query('DELETE FROM planner.accounts_spend_history WHERE org=$1 AND year = ANY($2::int[])', [org, years]);
+        for (let i = 0; i < rows.length; i += 300) { const ch = rows.slice(i, i + 300);
+          await c.query(`INSERT INTO planner.accounts_spend_history (org, contact, year, txns, amount, currency, last_date) VALUES ` + ch.map((r, k) => '(' + r.map((_, n) => '$' + (k * 7 + n + 1)).join(',') + ')').join(','), ch.flat()); }
+        await c.query('COMMIT'); } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+      out.orgs.push({ org, contacts: new Set(rows.map(r => r[1])).size, rows: rows.length });
+    }
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_spend_history','success',$1,$2)`, [out.orgs.reduce((a, o) => a + o.rows, 0), ('years ' + years.join(',') + ' · ' + out.orgs.map(o => o.org.toUpperCase() + ' ' + o.contacts + ' contacts').join(', ') + ' (' + (by || 'job') + ')').slice(0, 500)]); } catch (_) {}
+    return Object.assign({ ok: true }, out);
+  })().catch(e => { try { pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_spend_history','error',0,$1)`, [String(e.message).slice(0, 500)]); } catch (_) {} return { ok: false, error: e.message }; }).finally(() => { _accHistRun = null; });
+  return _accHistRun;
+}
+app.post('/api/accounts/forwarding/history', async (req, res) => {   // admin: build or refresh the yearly history (202 + background)
+  try { if (_accHistRun) return res.status(409).json({ running: true }); hzWaitUntil(accSpendHistory((req.me && req.me.email) || 'button', { full: req.query.full === '1' })); res.status(202).json({ ok: true, started: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.272 (Ben 12-Oct-26): regular payees whose receipts do not reach accounts@ (2+ reconciled items in the learn window, receipt found for under
+// half of them), excluding payees whose treatment is bank rule or ignore and 3PLs / product suppliers, so someone can set up auto-forwarding at
+// the source. Actioned = someone has set it up (admins and ACCOUNTS users); un-action puts it back on the list.
+app.get('/api/accounts/forwarding', async (req, res) => {
+  try {
+    const thisYear = new Date().getUTCFullYear(), yrs = []; for (let y = ACC_HIST_FROM; y <= thisYear; y++) yrs.push(y);
+    const hist = (await pool.query(`SELECT org, contact, year, txns, amount::float8 amount, currency, to_char(last_date,'YYYY-MM-DD') last_date FROM planner.accounts_spend_history`)).rows;
+    const cov = new Map((await pool.query(`SELECT org, contact, txns, matched, xero_files, sender FROM planner.accounts_payee_coverage`)).rows.map(r => [r.org + '|' + r.contact, r]));
+    const act = new Map((await pool.query(`SELECT org, contact, status, actioned_by, to_char(actioned_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') actioned_at FROM planner.accounts_forward_actions`)).rows.map(r => [r.org + '|' + r.contact, r]));
+    const rules = new Map((await pool.query(`SELECT org, payee_key, treatment FROM planner.accounts_payee_rules`)).rows.map(r => [r.org + '|' + r.payee_key, r.treatment]));
+    const sup = new Set(); try { (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'`)).rows.forEach(r => sup.add(accPayeeKey(r.name, ''))); } catch (_) {}
+    const by = new Map(); hist.forEach(h => { const k = h.org + '|' + h.contact; const x = by.get(k) || { org: h.org, contact: h.contact, years: {}, total: 0, amount: 0, currency: h.currency, last_date: null };
+      x.years[h.year] = h.txns; x.total += h.txns; x.amount += h.amount; if (!x.last_date || h.last_date > x.last_date) x.last_date = h.last_date; by.set(k, x); });
+    const rows = [...by.values()].map(x => { const c = cov.get(x.org + '|' + x.contact) || {}, a = act.get(x.org + '|' + x.contact), key = accPayeeKey(x.contact, '');
+      const t = rules.get(x.org + '|' + key) || accDefaultTreatment(key, -1, null, sup);
+      const recent = (x.years[thisYear] || 0) + (x.years[thisYear - 1] || 0);
+      return Object.assign(x, { payee_key: key, treatment: t, recent, matched: c.matched || 0, window_txns: c.txns || 0, xero_files: c.xero_files || 0, sender: c.sender || null,
+        avg_amount: x.total ? Math.round(x.amount / x.total * 100) / 100 : null, status: a ? a.status : 'open', actioned_by: a && a.actioned_by, actioned_at: a && a.actioned_at }); })
+      // repeating bank spend that needs a receipt and is not mostly found in accounts@
+      .filter(x => !ACC_TPL_RE.test(x.contact) && !sup.has(x.payee_key) && x.recent >= 3 && (x.status !== 'open' || ((x.treatment === 'bill' || x.treatment === 'spend') && !(x.window_txns && x.matched * 2 >= x.window_txns))))
+      .sort((a, b) => b.recent - a.recent || a.contact.localeCompare(b.contact));
+    const last = (await pool.query(`SELECT to_char(max(updated_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_spend_history`)).rows[0].at;
+    res.set('Cache-Control', 'no-store').json({ rows, years: yrs, history_at: last, building: !!_accHistRun, days: ACC_LEARN_DAYS });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/forwarding/action', async (req, res) => {
+  try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), contact = String(b.contact || '').slice(0, 200);
+    if (!['uk', 'au'].includes(org) || !contact) return res.status(400).json({ error: 'org and contact required' });
+    const st = b.status || (b.actioned === false ? 'open' : 'actioned');   // v28.272: actioned | ignored | open (undo)
+    const pk = accPayeeKey(contact, ''), who = (req.me && req.me.email) || null;
+    if (st === 'ignored') await pool.query(`INSERT INTO planner.accounts_payee_rules (org, payee_key, treatment, source, updated_by, updated_at) VALUES ($1,$2,'ignore','manual',$3,now()) ON CONFLICT (org, payee_key) DO UPDATE SET treatment='ignore', source='manual', updated_by=EXCLUDED.updated_by, updated_at=now()`, [org, pk, who]);   // Ben 12-Oct: Ignore = on the ACCOUNTS ignore list everywhere
+    if (st === 'open') { const prev = (await pool.query(`SELECT status FROM planner.accounts_forward_actions WHERE org=$1 AND contact=$2`, [org, contact])).rows[0]; if (prev && prev.status === 'ignored') await pool.query(`DELETE FROM planner.accounts_payee_rules WHERE org=$1 AND payee_key=$2 AND treatment='ignore'`, [org, pk]); }
+    if (st === 'open') await pool.query(`DELETE FROM planner.accounts_forward_actions WHERE org=$1 AND contact=$2`, [org, contact]);
+    else if (st === 'actioned' || st === 'ignored') await pool.query(`INSERT INTO planner.accounts_forward_actions (org, contact, status, actioned_by, actioned_at, note) VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (org, contact) DO UPDATE SET status=EXCLUDED.status, actioned_by=EXCLUDED.actioned_by, actioned_at=now(), note=EXCLUDED.note`, [org, contact, st, (req.me && req.me.email) || null, b.note ? String(b.note).slice(0, 300) : null]);
+    else return res.status(400).json({ error: 'status must be actioned, ignored or open' });
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
 app.post('/api/accounts/inbox/read-mail', async (req, res) => {
@@ -6571,7 +6654,7 @@ async function xeroTenant(region) {
   return { id: c.tenantId, name: c.tenantName };
 }
 const _xeroCallN = { get: 0, write: 0, since: new Date().toISOString() };
-// v28.253: Xero quota per org from the response headers (60 calls / min and 5,000 / day per tenant per app, SHARED by live and the sandbox).
+// v28.253: Xero quota per org from the response headers (60 calls / min and, on our plan, 1,000 / day per tenant per app (v28.272), SHARED by live and the sandbox).
 // A 429 with X-Rate-Limit-Problem: day is final until the reset: fail at once with the reset time instead of retrying for minutes.
 const _xeroQuota = { uk: null, au: null };
 function xeroQuotaNote(region, r) { try { const d = r.headers.get('x-daylimit-remaining'), m = r.headers.get('x-minlimit-remaining'), p = r.headers.get('x-rate-limit-problem'), ra = Number(r.headers.get('retry-after')) || 0;
@@ -6581,7 +6664,7 @@ function xeroQuotaNote(region, r) { try { const d = r.headers.get('x-daylimit-re
   if (d != null) { const day = Number(d), key = 'xero_quota|' + region + '|' + new Date().toISOString().slice(0, 13) + '|' + (Math.floor(day / 100) * 100);
     hzHealthEvt('metric', key, { path: 'xero quota ' + region, ms: day, message: 'Xero ' + region.toUpperCase() + ' daily API allowance: ' + day + ' calls left', meta: { org: region, day, min: m == null ? null : Number(m), low: day < XERO_DAY_ALERT } }); }
   } catch (_) {} }
-const XERO_DAY_ALERT = Number(process.env.XERO_DAY_ALERT) || 1000;
+const XERO_DAY_ALERT = Number(process.env.XERO_DAY_ALERT) || 200;   // v28.272: our Xero plan allows 1,000 calls a day per org (measured 12-Oct-26), not 5,000: alert at 200 left
 function xeroQuota(region) { return _xeroQuota[xeroRegion(region)]; }
 const _xeroAccMemo = new Map();   // v28.260: region|path -> { at, j } for GET /Accounts (chart of accounts, 66 rows, read on every bill push / payment plan); 10 min, opts.fresh bypasses
 async function xeroFetch(region, path, opts) {

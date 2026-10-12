@@ -1,3 +1,14 @@
+## v28.272 (Ben, branch review-fixes-2026-10-05): repeating bank payments whose receipts do not reach accounts@ (Actioned / Ignore), Xero 1,000-a-day thresholds
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/355_accounts_forwarding.sql`, `migrations/356_accounts_spend_history.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migrations 355, 356** (additive: `accounts_payee_coverage`, `accounts_forward_actions` with status, `accounts_spend_history`). Env defaults changed: `XERO_DAY_ALERT` 200, `ACC_XERO_DAY_MIN` 400.
+
+- **Xero allowance is 1,000 calls a day per org on our plan** (measured 12-Oct: 997 left 90 minutes after the reset, both orgs), not 5,000. Alert threshold now 200 left; full scans need 400 left. Logic library and Config text updated.
+- New section in ACCOUNTS ▸ Inbox matcher, **Repeating bank payments whose receipts do not reach accounts@**: Spend Money on bank and card accounts only (bill payments excluded), with **repeat counts per year (2024, 2025, 2026)**, typical amount, last paid, receipts found in accounts@ in the last 120 days, files already in Xero. Shown when the payee repeats (3+ in this year and last), needs a receipt, and the receipt is usually not in accounts@. 3PLs, product suppliers, banks, FX and transfer providers left out.
+- **Actioned** (forwarding set up at the source), **Ignore** (no receipt needed; also saves the payee as Ignore on the ACCOUNTS ignore list, so it shows in Config ▸ Payee treatments and is ignored in the matcher) and **Undo**. Admins and ACCOUNTS users. Filters To action / Actioned / Ignored / All.
+- Yearly counts: one-off build (button, headroom-guarded; sandbox used about 170 Xero calls: UK 1,033 and AU 559 contacts), then the current year with the weekly learn job. The learn job also stores per-payee receipt coverage.
+- Sandbox: 265 repeating payees to look at (Snapchat, Uber, OpenAI, Aviva, Upwork, Classpass, Thameslink, Deliveroo, trade-show project contacts, ...); Ignore round trip writes and removes the ACCOUNTS ignore rule.
+- Also in this version: the v28.271 logic-library gap (ACCOUNTS users' write exceptions) closed.
+
 ## v28.271 (Ben, branch review-fixes-2026-10-05): ACCOUNTS ▸ Config: every accounts rule in one place
 
 **Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration.
