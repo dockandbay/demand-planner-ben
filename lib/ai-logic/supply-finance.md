@@ -86,7 +86,7 @@ fingerprints:
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
   server.mjs::computeXeroRunPlan: dff569013199
-  server.mjs::/api/supply/payments/xero-post: 4fc74dfae3d0
+  server.mjs::/api/supply/payments/xero-post: 42f6ffa976db
   server.mjs::/api/supply/xero/deposit-credit-note: b9feb152d0f2
   server.mjs::_poXeroRegion: 844d7ad9c549
   server.mjs::/api/supply/payments/xero-preflight: 0e54d381e8ff
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.304
+verified_version: v28.305
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -365,6 +365,7 @@ verified_version: v28.304
 
 ## 3PL invoices
 - Four 3PLs: uk_ilg, us_geneva, eu_ifulfilment, au_coghlans. Bill number: FULFILLMENT-<region>-<period end>. For Coghlans the bill date is the file's period end and the invoice number is added. (source: server.mjs :: TPL_KEYS, tpl/xero-bill)
+- Payments Report paid and Xero (v28.305, Ben 13-Oct-26: "should only be admin or accounts permissions"): marking a supplier payment run paid (bank amount and currency, which also emails the supplier), Create in Xero (the supplier payment bill) and paying it in Xero need the ACCOUNTS grant or admin. Before, marking paid was open to any SUPPLY editor and the two Xero steps were admin only. The dry run / preview stays open. (source: server.mjs :: /api/supply/payments/pay)
 - Who may create Xero bills (v28.301, Ben 13-Oct-26): the 3PL invoicing bill needs the ACCOUNTS grant or admin (the preview, which writes nothing, also allows SUPPLY edit); the commission bill needs the CLIENT grant or admin. Both still need the confirm step. If the permission lookup fails the answer is 503 try again. (source: server.mjs :: /api/client/commission/runs/:id/xero-bill)
 - Cost-type accounts (storage, returns, inbound, other) are stored per 3PL in tpl_cost_accounts. Per-order freight and fulfilment go to the "region - channel" account map (tpl_account_map). Unmapped amounts appear as UNMAPPED lines. (source: server.mjs :: tpl/xero-bill)
 - iFulfilment consumables: added into the total only when the "Consumables Cost" column sits outside "Total Excl Shipping" (Jul-26 and earlier). From Aug-26 it is inside, so it is not added again. (source: server.mjs :: _tplConsumablesInside)

@@ -1,3 +1,11 @@
+## v28.305 (Ben, branch review-fixes-2026-10-05): Payments Report, paid and Xero submit for ACCOUNTS or admin only
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "payments report, who can update a supplier payment item to PAID and then submit to xero - should only be admin or accounts permissions."
+- Before: marking a run paid (`/api/supply/payment-fx`: bank amount, currency, bank; also sends the supplier's payment email) was open to any SUPPLY editor (all 16 non-admins); Create in Xero (`/api/supply/payments/xero-post`) and Pay in Xero (`/api/supply/payments/pay`) were admin only.
+- Now all three need the ACCOUNTS grant or admin (today: Rita, Alexandria and the 6 admins). Others get 403 "ACCOUNTS access or admin required"; the Paid popup shows it, and an inline paid-amount cell shows it on hover. The Xero dry run / preview stays open. A failed permission lookup answers 503.
+
 ## v28.304 (Ben, branch review-fixes-2026-10-05): cash flow shows the balance left after balance payments 1 and 2
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

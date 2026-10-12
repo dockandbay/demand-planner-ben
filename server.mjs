@@ -1433,6 +1433,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
   if (method === 'POST' && /^\/api\/supply\/tpl\/xero-bill\/\d+$/.test(p)) return null;   // v28.301 (Ben): 3PL Xero bill = ACCOUNTS grant (or SUPPLY edit for the preview), checked in the handler
+  if (method === 'POST' && (p === '/api/supply/payment-fx' || p === '/api/supply/payments/pay' || p === '/api/supply/payments/xero-post')) return null;   // v28.305 (Ben): marking a payment run paid and submitting it to Xero = ACCOUNTS grant or admin, checked in the handler
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   // v28.255 (deep dive P0 #1, #2): the default is now FAIL CLOSED (admin only). Families with their own check are listed explicitly.
   if (p.startsWith('/api/cron/')) return null;                // every cron handler checks x-webhook-secret (safeEq); action-metrics too from v28.255
@@ -8189,8 +8190,8 @@ app.post('/api/supply/payments/xero-bill-sweep', async (req, res) => {
   try { const r = await sweepSupplierPaymentBills(); try { invalidateSupplyCaches('payment'); } catch (_) {} res.json(Object.assign({ ok: true }, r)); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.post('/api/supply/payments/xero-post', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (Ben 13-Oct-26): ACCOUNTS or admin (was admin only)
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access or admin required to create the payment bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
   try {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {}, { contactFresh: true });
@@ -8347,9 +8348,9 @@ app.post('/api/supply/payments/pay-plan', async (req, res) => {   // read only: 
   catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
 });
 // ?dry=1 returns the exact Xero payloads without writing. Otherwise confirm:true + admin.
-app.post('/api/supply/payments/pay', async (req, res) => {
+app.post('/api/supply/payments/pay', async (req, res) => {   // v28.305 (Ben 13-Oct-26): ACCOUNTS or admin (was admin only)
   const b = req.body || {}, dry = String(req.query.dry || '') === '1' || b.dry === true;
-  if (!dry) { try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  if (!dry) { try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access or admin required to pay in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
     if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Xero' }); }
   try {
     const run = b.run || {}; const plan = await payRunPlan(run);
@@ -21172,6 +21173,9 @@ app.post('/api/supply/production-deposit-create', async (req, res) => {
 // Record the actual paid currency + amount for a payment (date × supplier) — alt to the USD legs.
 app.post('/api/supply/payment-fx', async (req, res) => {
   const b = req.body || {};
+  // v28.305 (Ben 13-Oct-26): marking a supplier payment run paid (bank amount / currency, which also emails the supplier) is ACCOUNTS or admin
+  // only; it was any SUPPLY editor through the write gate.
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access or admin required to mark a payment paid' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if (!b.run_date || !b.supplier) return res.status(400).json({ error: 'run_date + supplier required' });
   try {
     const reg = String(b.region || 'UK').toUpperCase() === 'AU' ? 'AU' : 'UK';   // v28.133: UK and AU are separate payments (migration 323)

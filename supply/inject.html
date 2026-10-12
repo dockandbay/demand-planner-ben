@@ -12196,7 +12196,7 @@
       if(el.classList.contains('pfx-amt') && amt!=='') el.value=fmtAmt(amt);
       el.classList.add('saved');
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,region:el.dataset.reg||'UK',paid_currency:ccy,paid_amount:amt})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.emailPreview)showEmailPreview(j.emailPreview); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; });
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.emailPreview)showEmailPreview(j.emailPreview); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(e){el.classList.remove('saved');el.classList.add('err');el.title='Not saved: '+((e&&e.message)||e);}); }; });   // v28.305: say why (e.g. ACCOUNTS access needed)
     // "Paid USD" — fill bank amount = base total, currency = USD, save (which confirms the run → notification fires)
     // v28.288 (Ben): "Paid" opens the bank-account popup (Mark paid in HORIZON only, or + create the Xero payment); "bank ↗" reopens it on a paid run
     b.querySelectorAll('.pay-usd, .pay-bankpay').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); payPaidOpen(payPaidRun(btn)); }; });
