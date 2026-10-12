@@ -70,7 +70,7 @@ fingerprints:
   artifact_v16.7.html::buildInsightsData: 92660fc8f972
   artifact_v16.7.html::getInsights: e9c5f0485a0e
   supply/inject.html::renderBIMetrics: 53246c47c4c2
-  supply/inject.html::buildPaymentsDue: ef7a603f335b
+  supply/inject.html::buildPaymentsDue: e6a4c30f2402
   supply/inject.html::renderProductReports: 4aa694e16e7f
   supply/inject.html::renderProductCatalogue: e590a8dc271a
   supply/inject.html::renderPimWaitingRoom: d6c089a9c8e7
@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.309
+verified_version: v28.311
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -413,7 +413,7 @@ verified_version: v28.309
 - Overdue = unpaid and due before today. "+4wk" = due within 28 days, or no date.
 - Amounts are in supplier currency.
 - Paid this session (v28.303): each PAY click adds to a green box above the table, totalled per currency and per supplier; a failed save is removed, Clear or a page reload resets it.
-- Balance payment 3 onward (v28.307): each is its own row (Balance 3, 4, ...). The remaining row records into balance payment 2 while it is unused or unpaid; once balance 2 is paid, the rest is recorded as the next balance payment: PAY, or the standard Assigned amount and Payment date boxes (the first box filled creates it, amount = typed or the remainder). Paid = fully paid counts every balance payment.
+- Balance payment 3 onward (v28.307): each is its own row (Balance 3, 4, ...). The remaining row records into balance payment 2 while it is unused or unpaid; once balance 2 is paid, the rest is recorded as the next balance payment: PAY, or the standard Assigned amount and Payment date boxes (the first box filled creates it, amount = typed or the remainder). Likely pay dates (v28.311): balance 3 onward rows use their own key (balx:<id>), the remainder once balance 2 is used balrem:<po>. Paid = fully paid counts every balance payment.
 (source: supply/inject.html :: buildPaymentsDue)
 
 ## PRODUCT Reports
