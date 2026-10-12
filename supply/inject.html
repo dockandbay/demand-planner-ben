@@ -4489,7 +4489,7 @@
           // .dep-atrisk-slot below for the async "deposit at risk · assign X" extra-allocation button (bindPay fills it)
           return '<td style="white-space:normal">'+money(capped?drawn:r.start_calc)+(_btn?' '+_btn:'')
             +(_note?'<div class="tiny" style="margin-top:2px">'+_note+'</div>':'')
-            +'<div class="dep-atrisk-slot" data-po="'+esc(r.po)+'"></div></td>'; })()
+            +'<div class="dep-atrisk-slot" data-po="'+esc(r.po)+'"></div><div class="dep-cn-slot" data-po="'+esc(r.po)+'"></div></td>'; })()
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l" style="white-space:normal">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r),!(Number(r.start_pct)>0))+(r.deposit_avail!=null?'<div class="mut tiny" style="margin-top:2px">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</div>':'')+'</td>'
@@ -4880,6 +4880,21 @@
           var fb2=slot.querySelector('.dep-ctx-fill2'); if(fb2)fb2.onclick=function(){ fill(fb2.dataset.amt); };
         } })
         .catch(function(){ el.innerHTML=''; }); });
+    // v28.290 (Ben 12-Oct-26): starting-deposit credit note from the PO (drawer + PLAN > PO > Payments). AU always, UK from P58: an approved
+    // credit note in Xero coded to 602 Stock Deposits, allocated to the PO's bill. In-page confirm; status from a DB-only endpoint.
+    document.querySelectorAll('#podet-'+i+' .dep-cn-slot').forEach(function(slot){ var p=slot.dataset.po; if(!p)return;
+      var paint=function(){ fetch('/api/supply/xero/deposit-credit-note/status?po='+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(s){ if(!s||s.error||!s.route||!(s.amount>0.009)){ slot.innerHTML=''; return; }
+        if(s.credit_note){ slot.innerHTML='<div class="tiny" style="margin-top:4px">Deposit credit note: '+(s.credit_note.url?'<a href="'+esc(s.credit_note.url)+'" target="_blank" rel="noopener">'+esc(s.credit_note.ref||'in Xero')+' ↗</a>':esc(s.credit_note.ref||'created'))+'</div>'; return; }
+        if(!s.can_create){ slot.innerHTML='<div class="tiny mut" style="margin-top:4px">Deposit credit note: '+esc(s.reason||'not available')+'</div>'; return; }
+        slot.innerHTML='<button class="save-btn dep-cn-go" style="margin-top:4px;background:#2563eb;border-color:#2563eb;color:#fff;font-size:10px;white-space:normal;height:auto" title="Create an approved credit note in Xero '+esc(s.region.toUpperCase())+' for the starting deposit, coded to 602 Stock Deposits and allocated to '+esc((s.bill&&s.bill.ref)||'the PO bill')+'">Create deposit credit note '+money(s.amount)+'</button>';
+        var b=slot.querySelector('.dep-cn-go'); b.onclick=function(){
+          if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.style.background='var(--neg)'; b.style.borderColor='var(--neg)'; b.textContent='Confirm: create in Xero '+s.region.toUpperCase()+' ('+money(s.amount)+')'; setTimeout(function(){ if(b.isConnected&&b.dataset.armed==='1'){ b.dataset.armed=''; paint(); } },6000); return; }
+          b.disabled=true; b.textContent='Creating…';
+          fetch('/api/supply/xero/deposit-credit-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:p,confirm:true})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error);
+            slot.innerHTML='<div class="tiny" style="margin-top:4px;color:var(--pos)">Credit note '+esc(x.credit_note_number||'')+' created'+(x.allocated?' and allocated':', <b>not allocated</b>: '+esc(x.allocation_error||''))+(x.url?' · <a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a>':'')+'</div>'; try{ invalidateDerived(); }catch(e){} })
+          .catch(function(e){ slot.innerHTML='<div class="tiny" style="margin-top:4px;color:var(--neg)">'+esc(e.message||String(e))+'</div>'; setTimeout(paint,8000); }); }; })
+        .catch(function(){ slot.innerHTML=''; }); };
+      paint(); });
     function poGone(){ invalidateDerived(); delete cache['purchase-orders']; if(_poRefresh)_poRefresh(); else selectSection('purchase-orders'); }
     bindActMark(document.getElementById('podet-'+i));   // inline Ⓐ action markers (tooltip + snooze) in the detail
     document.querySelectorAll('#podet-'+i+' .pom-del').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Delete PO '+p+' and all its lines? This cannot be undone.'))return;

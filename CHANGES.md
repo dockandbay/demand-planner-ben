@@ -1,3 +1,11 @@
+## v28.290 (Ben, branch review-fixes-2026-10-05): Create deposit credit note from the PO drawer and PLAN > PO > Payments; AU rule from 30-Sep-26
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- The PO payments panel (PO drawer Payments tab, and the Payments sub-tab under PLAN > PO) shows **Create deposit credit note $X** (blue) under the Start deposit when the PO qualifies; second click confirms ("Confirm: create in Xero AU"), then the existing action creates the approved credit note (602 Stock Deposits) allocated to the PO's bill, and the panel links it. Shows the reason when it can't (no deposit, link the bill first, queued, drawn down the old way). New DB-only `GET /api/supply/xero/deposit-credit-note/status?po=`.
+- **AU rule:** AU POs use credit notes only for drawdowns dated on or after **30-Sep-26** (the move of the AU deposits to Xero AU 602). Earlier AU drawdowns were settled in Xero UK, so they are no longer offered (button, Xero payments > Exceptions, and the action itself refuses). UK rule unchanged (P58+).
+- Verified: status for PO-55AULX1 (P55, drawn before the move) says "Drawn down in Xero UK"; jsdom drawer with a qualifying status shows the button, arms, and calls the create action (mocked, nothing written). PO-57AULX1 on live (drawdown 01-Oct-26, bill linked) qualifies.
+
 ## v28.289 (Ben, branch review-fixes-2026-10-05): Deposits drawdown: one AU column (Xero AU 602) with a Sep-26 transfer note; productions newest first
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
