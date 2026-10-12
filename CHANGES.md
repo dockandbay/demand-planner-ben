@@ -1,3 +1,12 @@
+## v28.274 (Ben, branch review-fixes-2026-10-05): AU uncoded statement lines: payee keys skip transaction ids; 3PLs ignored in the matcher
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration.
+
+- Ben's AU export (Dock & Bay Pty Ltd, 12-Oct): 6 accounts, 114 uncoded lines (Amex 52, PayPal AU 42, ANZ 20), all accounts matched by name; the AU upload is in, so the 5-day statement email stays quiet for AU.
+- AU Amex lines start with a transaction id ("AT262470003… | WOOLWORTHS ONLINE … (1008)"): the payee key now skips a leading type code or id and a card suffix, so these read WOOLWORTHS, SUPABASE, OPTUS, QANTAS instead of "AT …".
+- 3PL payees (Coghlans, ILG, I-Fulfilment, Geneva) default to Ignore in the Inbox matcher too: their weekly bills come through 3PL invoicing.
+- AU proposals: 16 receipts found (Optus, DHL, Skillion, Uber Eats via staff forwards, Mini Models, Odda, Microsoft via PayPal), 45 need a receipt, 53 need none.
+
 ## v28.273 (Ben, branch review-fixes-2026-10-05): receipt coverage measured for every payee (Snapchat false positive fixed)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration.

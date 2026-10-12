@@ -3937,8 +3937,10 @@ if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
 const ACC_PK_STOP = new Set(['DEBIT','CREDIT','DEPOSIT','POSDEBIT','POSCREDIT','FPI','FPO','DD','BGC','PAY','TFR','DEB','CR','DR','SO','CHQ','BP','PAYMENT','THANK','YOU','DES','ID','INDN','CO','LTD','LIMITED','PLC','INC','THE','UK','GB','CC','COM','WWW','GO','CARD','TRANSACTION','PENDING','REFERENCE']);
 const ACC_PK_PREFIX = new Set(['SQ','SP','PP','MR','MRS','MS','ZPS','ACH','NEW','WITH','TEAM','ORDER','WIRE','INVOICE']);
 function accPayeeKey(ref, desc) {
-  const s = String((desc && String(desc).length > 2 ? desc : '') || ref || '').toUpperCase(), parts = s.split('|').map(x => x.trim());
-  const body = parts.length > 1 && /^[A-Z]{2,8}$/.test(parts[0]) ? parts.slice(1).join(' ') : s;
+  const s = String((desc && String(desc).length > 2 ? desc : '') || ref || '').toUpperCase();
+  let parts = s.split('|').map(x => x.trim()).filter(Boolean);
+  while (parts.length > 1 && (/^[A-Z]{2,8}$/.test(parts[0]) || /^[A-Z]{0,4}\d{6,}$/.test(parts[0]))) parts = parts.slice(1);   // v28.274: a leading type code (DEBIT, FPO) or transaction id (AU Amex "AT2624...") is not the payee
+  const body = parts.join(' ').replace(/\(\d{3,}\)/g, ' ');   // and drop a card suffix like "(1008)"
   const w = body.split(/[^A-Z]+/).filter(t => t.length >= 2 && !ACC_PK_STOP.has(t));
   if (!w.length) return '(blank)';
   return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
@@ -3947,7 +3949,8 @@ const ACC_RULE_KEYS = /^(GOOGLE|LINKEDIN|FACEBOOK|META|FB|TIKTOK|STRIPE|PAYPAL|P
 const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN|FLEXPORT|WAGES|PAYROLL|WEBSITE|US CUSTOMS|CUSTOMS|SUPERANNUATION|ATO|AIRWALLEX|AWX|BANK|TD BANK|LLOYDS|BARCLAYS|HSBC|ANZ|WESTPAC|WORLD|WORLDFIRST|STATEMENT)$/;   // v28.272: + banks, FX and transfer providers (fees and transfers)   // v28.270: + FLEXPORT (Ben: freight is billed through its own flow)
 function accDefaultTreatment(key, amount, match, supKeys) {
   if (amount > 0) return 'ignore';
-  if (supKeys && supKeys.has(key)) return 'ignore';   // v28.270 (Ben): product suppliers are paid against POs and supplier bills, never from a receipt                     // money in: customer payments / payouts, reconciled against sales in Xero
+  if (supKeys && supKeys.has(key)) return 'ignore';
+  if (ACC_TPL_RE.test(key)) return 'ignore';   // v28.274: 3PLs (Coghlans, ILG, I-Fulfilment, Geneva) are billed through 3PL invoicing   // v28.270 (Ben): product suppliers are paid against POs and supplier bills, never from a receipt                     // money in: customer payments / payouts, reconciled against sales in Xero
   if (ACC_IGNORE_KEYS.test(key)) return 'ignore';
   if (ACC_RULE_KEYS.test(key)) return 'rule';
   if (match && /invoice|inv[-\s]?\d|statement/i.test(match.subject || '') && !/receipt/i.test((match.subject || '') + ' ' + (match.from || ''))) return 'bill';
