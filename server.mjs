@@ -1006,7 +1006,9 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
     if (ms >= HZ_SLOW_MS) console.log('[slow ' + ms + 'ms ' + q + 'q] ' + req.method + ' ' + path + ' ' + res.statusCode);
     if (!HZ_HEALTH_SKIP.test(path)) hzRouteCount(req.method + ' ' + ((req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path), res.statusCode >= 500);   // v28.162: red-alert route ratio
     // v28.159 (Ben): health log. Group by the matched route pattern (/api/supply/po/:po) so ids don't fragment the report.
-    if ((ms >= HZ_SLOW_MS || res.statusCode >= 500) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
+    // v28.314: scheduler routes (HZ_CRON_RE: crons, data-cache/invalidate, tracking/poll) are timed by their cron_run row; no longer also
+    // 'slow_request' (n8n's data upload hook alone was 102 'slow' rows a week, crowding out what users wait for). 5xx still logged.
+    if ((res.statusCode >= 500 || (ms >= HZ_SLOW_MS && !HZ_CRON_RE.test(path))) && !HZ_HEALTH_SKIP.test(path) && !req.get('x-hz-health-sweep')) {
       const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
       const sids = (path.startsWith('/api/portal/') && req.portal && Array.isArray(req.portal.supplierIds)) ? req.portal.supplierIds.slice(0, 5).join(',') : '';   // v28.188
       const ctag = path.startsWith('/api/cp/') ? hzCpTag(req) : null;   // v28.195
@@ -1595,12 +1597,19 @@ const KV_KEY = 'horizon:data', KV_CHUNK = 900000;   // ~900KB base64 chunks (saf
 // v28.258 (deep dive P1 #10): live logged 136 KV timeouts in a week, each a 30 s wait on a cold instance before the Supabase fallback (the
 // likely cause of /api/version taking 10 s+). Now 5 s per call (KV_TIMEOUT_MS) and a circuit breaker: after a timeout or 5xx the instance skips
 // KV for 5 minutes (reads fall back to Supabase at once, writes are skipped) instead of paying the wait on every chunk.
-const KV_TIMEOUT_MS = Number(process.env.KV_TIMEOUT_MS) || 5000, KV_BREAK_MS = 5 * 60000; let _kvDownUntil = 0;
+const KV_TIMEOUT_MS = Number(process.env.KV_TIMEOUT_MS) || 5000, KV_BREAK_MS = 5 * 60000; let _kvDownUntil = 0; const _kvRetry = { n: 0, ok: 0 };
 async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command array → { result }
   if (Date.now() < _kvDownUntil) { const e = new Error('KV skipped (unreachable ' + Math.ceil((_kvDownUntil - Date.now()) / 1000) + 's more)'); e.code = 'KV_DOWN'; throw e; }
+  // v28.314 (Ben, live health 13-Oct-26): every KV failure on live was the FIRST call after the instance thawed from a freeze (thaw_gap_ms
+  // 18 s to 8 min): it rides a keep-alive socket that died while frozen, hangs to the timeout, then the breaker turned KV off for 5 min,
+  // so that page load and every cold load on the instance rebuilt DEMAND data from Supabase (6-8 s). Now: a short first wait right after
+  // a thaw (1.5 s), then ONE retry, which gets a new connection (the timed-out socket is destroyed); the breaker trips only if both fail.
+  const _go = (ms) => _fetchT(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }, ms);
   let r;
-  try { r = await _fetchT(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }, KV_TIMEOUT_MS); }
-  catch (e) { _kvDownUntil = Date.now() + KV_BREAK_MS; throw e; }
+  try { r = await _go(hzThawGap() > 0 ? 1500 : KV_TIMEOUT_MS); }
+  catch (e1) { _kvRetry.n++;
+    try { r = await _go(KV_TIMEOUT_MS); _kvRetry.ok++; }
+    catch (e) { _kvDownUntil = Date.now() + KV_BREAK_MS; throw e; } }
   if (!r.ok) { if (r.status >= 500) _kvDownUntil = Date.now() + KV_BREAK_MS; throw new Error('KV ' + r.status); }
   return (await r.json()).result;
 }
@@ -1706,9 +1715,11 @@ function bgRefresh() {
   hzWaitUntil(kvReadBlob()).then((v) => { if (v && _gen === _dataGen) _dataCache = { at: Date.now(), vals: v }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
 }
 // The accessor every serve path uses. In-process first; on a cold start, prefer KV (no Supabase); else build once.
+let _dataSrc = 'memory';   // v28.314: where the last getDataVals answer came from (memory | kv | supabase), for the slow page-build health row
 async function getDataVals() {
-  if (_dataCache) { if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataCache.vals; }
-  if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; return v; } } catch (e) { console.error('[kv] read failed:', e.message); } }
+  if (_dataCache) { _dataSrc = 'memory'; if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataCache.vals; }
+  if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; _dataSrc = 'kv'; return v; } } catch (e) { console.error('[kv] read failed:', e.message); } }
+  _dataSrc = 'supabase';
   return await refreshDataCache();   // KV miss / not configured → authoritative Supabase build (also writes KV)
 }
 // Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
@@ -2592,6 +2603,10 @@ app.get('/', async (req, res) => {
     // res.json, so the main page was going out uncompressed. Prod/Vercel may also compress at the edge; harmless.
     _mark('inject');
     if (DEV || process.env.HZ_PROFILE) console.log('[perf /] ' + JSON.stringify(_tm) + ' ms cumulative');
+    // v28.314 (health-log gap): the page itself is not an /api route, so a slow build was invisible (users saw it only as a slow first
+    // view). A build over 2 s is logged with its stages and where the DEMAND data came from (memory / kv / supabase) and the KV retries.
+    try { if ((_tm.inject || 0) > 2000) hzHealthEvt('slow_request', 'page|' + _dataSrc, { method: 'GET', path: '/ (page build)', ms: _tm.inject, status: 200,
+      message: 'Page build ' + _tm.inject + 'ms (data ' + (_tm.data || 0) + 'ms from ' + _dataSrc + ')', meta: Object.assign({ data_src: _dataSrc, kv_retries: _kvRetry.n, kv_retry_ok: _kvRetry.ok, thaw_gap_ms: hzThawGap() || undefined }, _tm) }); } catch (_) {}
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').set('Vary', 'Accept-Encoding');
     if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
       zlib.gzip(html, (err, buf) => {
@@ -4854,7 +4869,17 @@ async function fulfilFetch(method, path, body) {
 async function _fulfilFetch1(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, 30000);   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
+  const _req = (ms) => _fetchT(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined }, ms);
+  // v28.314: READ-ONLY calls (GET, search_read / search / search_count / read) get one retry on a new connection when the first dies on a
+  // socket that went stale while the instance was frozen ("fetch failed", or a timeout right after a thaw: first wait 10 s then). Writes are
+  // never retried here (a write that reached Fulfil before the socket died must not be sent twice).
+  const _ro = method === 'GET' || /\/(search_read|search_count|search|read)$/.test(String(path).split('?')[0]);
+  let r;
+  if (!_ro) r = await _req(30000);
+  else { const thawed = hzThawGap() > 0;
+    try { r = await _req(thawed ? 10000 : 30000); }
+    catch (e1) { if (!(thawed || /fetch failed|ECONNRESET|socket|other side closed/i.test(String((e1 && e1.message) || '') + ' ' + String((e1 && e1.cause && e1.cause.code) || '')))) throw e1;
+      r = await _req(30000); } }   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; if (r.status === 429) e.retryAfter = r.headers.get('retry-after'); throw e; }
   return j;
@@ -10406,6 +10431,10 @@ function _lcJob(st, mode, need) {     // one build of st. mode 0 = background (q
         _lcNext(); });
   }; });
   job.p.catch(() => {});              // a background build nobody awaits must not raise an unhandled rejection
+  // v28.314 (Ben, live health 13-Oct-26): a background revalidation (stale value served, rebuild behind) was frozen with the instance once the
+  // response went out; its Fulfil / DB calls died mid-flight and timed out on thaw (purchase.purchase search_read "144 s" = freeze time), and
+  // any request needing fresh data joined that stuck single-flight job and waited out the 30 s timeout. Keep the instance alive until it ends.
+  if (mode === 0) hzWaitUntil(job.p);
   st.job = job;
   if (mode === 2 || _lcRunning < LC_MAX) job.run(); else if (mode === 1) _lcQ.unshift(job); else _lcQ.push(job);
   return job;

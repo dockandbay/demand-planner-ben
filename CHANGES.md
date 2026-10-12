@@ -1,3 +1,15 @@
+## v28.314 (Ben, branch review-fixes-2026-10-05): slow first loads after an instance freeze (KV, Fulfil, background rebuilds)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env vars.
+
+From the live health log (7 days): PO grid first view 10 s typical (worst 106 s), KV failures 168, Fulfil purchase.purchase lookups "144 s". Every KV and almost every Fulfil failure was the first call after the Vercel instance thawed from a freeze (meta.thaw_gap_ms 18 s to 9 min); the long times are freeze time.
+
+- **KV (cold page loads):** the first call after a thaw rides a keep-alive socket that died while frozen. It hung 5 s, then the circuit breaker switched KV off for 5 minutes, so that page load and every cold load on the instance rebuilt DEMAND data from Supabase (sandbox: 6.4 s data + 1.4 s builders = 7.8 s TTFB). Now a short first wait after a thaw (1.5 s), then ONE retry on a new connection; the breaker trips only if both fail. Tested with a fake KV whose first call hangs: the retry answered and KV stayed on (the following reads and the blob write went through).
+- **Background cache rebuilds kept alive:** a stale-while-revalidate rebuild ran after the response with nothing keeping the instance awake, so it froze mid-build with Fulfil / DB calls in flight; they timed out on thaw and a request needing fresh data joined the stuck job and waited out the 30 s Fulfil timeout (Diviyaj's "/api/supply/actions 30 s Fulfil timeouts"). Background builds are now held open with waitUntil.
+- **Fulfil read-only calls** (GET, search_read, search, search_count, read) get one retry on a new connection after "fetch failed" / a reset, or after a timeout right after a thaw (first wait 10 s then). Writes are never retried.
+- **Health log:** a page build over 2 s is now logged (slow_request, path "/ (page build)") with its stages, where DEMAND data came from (memory / kv / supabase) and the KV retries, so a slow first view can be explained. Scheduler routes (crons, data-cache/invalidate, tracking/poll) no longer also count as slow requests (their cron_run row has the time); 5xx still logged.
+- Sandbox smoke: grid-status, actions, purchase-orders and the page answer normally cold and warm.
+
 ## v28.313 (Ben, branch review-fixes-2026-10-05): Permissions, ACCOUNTS 3PL invoicing landing page + Inbox multi-select
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
