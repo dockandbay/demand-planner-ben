@@ -1,3 +1,11 @@
+## v28.271 (Ben, branch review-fixes-2026-10-05): ACCOUNTS ▸ Config: every accounts rule in one place
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration.
+
+- New L2 tab **ACCOUNTS ▸ Config**: **Payee treatments** (every payee on open statement lines plus every saved rule: org, payee, treatment, set by, open lines, money out, receipts found, example bank text), editable by admins and ACCOUNTS users, with **Reset** back to HORIZON's suggestion and **+ Add payee rule** for payees not seen yet; filters by org and treatment, search. **Built-in rules** (the defaults: money in, Flexport and product suppliers, the ignore and bank-rule payee lists, invoice email = bill, else spend money) and the receipt-matching rule. **Tax rules** (UK GBP / non-GBP / bank fees, AU mixed GST split). **Alerts and schedules** (5-day statement email and recipients, Xero allowance alert, Coghlans scan, job cadence).
+- Endpoints `GET /api/accounts/config`, `POST /api/accounts/payee-rule/delete` (admins and ACCOUNTS users).
+- Verified: save OPENAI as bank rule then Reset back to auto spend money; jsdom render: 99 payees, 4 sections, no errors.
+
 ## v28.270 (Ben, branch review-fixes-2026-10-05): Inbox matcher: Flexport and product suppliers default to Ignore
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration.

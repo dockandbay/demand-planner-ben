@@ -18775,7 +18775,7 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Inbox matcher and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-  var ACCOUNTS_TABS=[['bank','Bank ageing'],['payables','Payables'],['inbox','Inbox matcher'],['backdate','Back-date'],['3pl-invoicing','3PL invoicing']], ACCOUNTS_SUB='payables';
+  var ACCOUNTS_TABS=[['bank','Bank ageing'],['payables','Payables'],['inbox','Inbox matcher'],['backdate','Back-date'],['3pl-invoicing','3PL invoicing'],['config','Config']], ACCOUNTS_SUB='payables';
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
   function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -18795,6 +18795,7 @@
     if(k==='inbox'){ acInRender(); return; }
     if(k==='bank'){ acRenderBank(b); return; }
     if(k==='backdate'){ acRenderBackdate(b); return; }
+    if(k==='config'){ acRenderConfig(b); return; }   // v28.271
     acRenderPayables(b); }
   function ensureAccountsButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return; var existing=document.getElementById('accounts-btn'); if(existing){ existing.style.display=accountsCan()?'':'none'; return; } if(!accountsCan())return;
     var btn=document.createElement('button'); btn.id='accounts-btn'; btn.className='view-toggle accounts-toggle'; btn.innerHTML='ACCOUNTS';
@@ -18932,6 +18933,48 @@
     b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_BD[p.dataset.g]=p.dataset.v; acRenderBackdate(b); }; });
     var qi=document.getElementById('ac-dq'); qi.oninput=function(){ AC_BD.q=qi.value; clearTimeout(AC_BD._t); AC_BD._t=setTimeout(function(){ acRenderBackdate(b); var n=document.getElementById('ac-dq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     document.getElementById('ac-drf').onclick=function(){ if(d.running||AC_BD.refreshing)return; AC_BD.refreshing=true; fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(r.status!==202&&r.status!==409)throw new Error(j.error||('HTTP '+r.status)); }); }).then(function(){ AC_BD.d=null; acRenderBackdate(b); }).catch(function(e){ AC_BD.err=e.message; AC_BD.d=null; acRenderBackdate(b); }).finally(function(){ AC_BD.refreshing=false; }); };
+  }
+  // ── v28.271 (Ben 12-Oct-26): ACCOUNTS > Config. Every rule in one place: per-payee treatments (editable by admins and ACCOUNTS users;
+  // "auto" = HORIZON's suggestion, a saved choice wins, Reset goes back to the suggestion), the built-in defaults, the tax rules and alert settings.
+  var AC_CF={d:null,busy:false,org:'all',tr:'all',q:'',add:null};
+  var AC_TRL={bill:'Bill',spend:'Spend money',rule:'Xero bank rule',ignore:'Ignore'};
+  function acRenderConfig(b){
+    if(!AC_CF.d){ if(AC_CF.busy)return; AC_CF.busy=true; b.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/accounts/config').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ AC_CF.d=j; AC_CF.busy=false; if(ACCOUNTS_SUB==='config')acRenderConfig(document.getElementById('accounts-body')); })
+        .catch(function(e){ AC_CF.busy=false; b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); return; }
+    var d=AC_CF.d, q=AC_CF.q.toLowerCase();
+    var P=(d.payees||[]).filter(function(p){ return (AC_CF.org==='all'||p.org===AC_CF.org)&&(AC_CF.tr==='all'||p.treatment===AC_CF.tr)&&(!q||(p.payee_key+' '+(p.example||'')).toLowerCase().indexOf(q)>=0); });
+    var cnt={}; (d.payees||[]).forEach(function(p){ cnt[p.treatment]=(cnt[p.treatment]||0)+1; });
+    var pill=function(g,v,l,n){ return '<span class="pill'+(AC_CF[g]===v?' active':'')+'" data-cg="'+g+'" data-cv="'+v+'">'+l+(n!=null?' ('+n+')':'')+'</span>'; };
+    var sel=function(p,i){ return d.can_edit?'<select class="ac-cft" data-i="'+i+'" style="font-size:12px">'+['bill','spend','rule','ignore'].map(function(t){ return '<option value="'+t+'"'+(t===p.treatment?' selected':'')+'>'+AC_TRL[t]+'</option>'; }).join('')+'</select>':esc(AC_TRL[p.treatment]||p.treatment); };
+    var h='<div class="sect-h">Payee treatments</div><div class="tiny mut" style="margin-bottom:6px">How each bank-statement payee is handled in the Inbox matcher. <b>auto</b> = HORIZON\'s suggestion from the built-in rules below; choosing a treatment saves it for that payee (it wins over the suggestion); <b>Reset</b> goes back to the suggestion.</div>'
+      +'<div class="bar">'+pill('org','all','Both')+pill('org','uk','UK')+pill('org','au','AU')+'<span style="width:10px"></span>'+pill('tr','all','All',(d.payees||[]).length)+pill('tr','bill','Bill',cnt.bill||0)+pill('tr','spend','Spend money',cnt.spend||0)+pill('tr','rule','Bank rule',cnt.rule||0)+pill('tr','ignore','Ignore',cnt.ignore||0)
+      +'<input class="fci" id="ac-cfq" placeholder="Search payee" style="width:180px" value="'+esc(AC_CF.q)+'">'+(d.can_edit?'<span class="save-btn light" id="ac-cfadd">+ Add payee rule</span>':'')+'</div>'
+      +(AC_CF.add?'<div class="bar" style="background:var(--hover);padding:8px;border-radius:8px"><select id="ac-cfa-org"><option value="uk">UK</option><option value="au">AU</option></select><input class="fci" id="ac-cfa-key" placeholder="Payee, e.g. FIGMA" style="width:200px"><select id="ac-cfa-tr">'+['bill','spend','rule','ignore'].map(function(t){ return '<option value="'+t+'">'+AC_TRL[t]+'</option>'; }).join('')+'</select><span class="save-btn" id="ac-cfa-save">Save</span><span class="save-btn light" id="ac-cfa-cancel">Cancel</span><span class="tiny mut">The payee is the first word of the bank text (e.g. GOOGLE, HMRC); see the Payee column in the Inbox matcher.</span></div>':'')
+      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Org</th><th>Payee</th><th>Treatment</th><th>Set by</th><th>Open lines</th><th>Money out</th><th>Receipts found</th><th>Example bank text</th><th></th></tr></thead><tbody>'
+      +(P.length?P.map(function(p){ var i=d.payees.indexOf(p); return '<tr><td class="l">'+esc(p.org.toUpperCase())+'</td><td class="l"><b>'+esc(p.payee_key)+'</b></td><td class="l">'+sel(p,i)+'</td><td class="l">'+(p.source==='manual'?esc(String(p.updated_by||'saved').split('@')[0]+'@')+(p.updated_at?' <span class="tiny mut">'+esc(acSynced(p.updated_at))+'</span>':''):'<span class="tiny mut">auto</span>')+'</td><td class="l">'+(p.lines||'<span class="mut">·</span>')+'</td><td class="l">'+(p.out?Number(p.out).toLocaleString('en-GB',{maximumFractionDigits:0}):'<span class="mut">·</span>')+'</td><td class="l">'+(p.matched||'<span class="mut">·</span>')+'</td><td class="l tiny mut" style="max-width:280px;white-space:normal">'+esc(String(p.example||'').slice(0,70))+'</td><td class="l">'+(d.can_edit&&p.source==='manual'?'<span class="save-btn light" data-cfr="'+i+'">Reset</span>':'')+'</td></tr>'; }).join(''):'<tr><td colspan="9" class="l mut">No payees match.</td></tr>')
+      +'</tbody></table></div><div class="tiny mut" style="margin-top:4px">Money out is the total of the open statement lines, in each line\'s account currency.</div>';
+    h+='<div class="sect-h" style="margin-top:20px">Built-in rules (used when a payee has no saved treatment)</div><div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>When</th><th>Treatment</th><th>Why</th></tr></thead><tbody>'
+      +(d.builtin||[]).map(function(r){ return '<tr><td class="l" style="max-width:520px;white-space:normal">'+esc(r.rule)+'</td><td class="l"><b>'+esc(AC_TRL[r.treatment]||r.treatment)+'</b></td><td class="l tiny mut" style="white-space:normal">'+esc(r.note)+'</td></tr>'; }).join('')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:6px;max-width:900px">'+esc(d.matching||'')+'</div>';
+    h+='<div class="sect-h" style="margin-top:20px">Tax rules</div><ul style="margin:0 0 0 18px;padding:0;display:grid;gap:3px;font-size:13px">'+(d.tax||[]).map(function(r){ return '<li><b>'+esc(r.org)+':</b> '+esc(r.rule)+'</li>'; }).join('')+'</ul>';
+    var a=d.alerts||{}; h+='<div class="sect-h" style="margin-top:20px">Alerts and schedules</div><ul style="margin:0 0 0 18px;padding:0;display:grid;gap:3px;font-size:13px">'
+      +'<li>Bank statement out of date: email to <b>'+esc((a.recipients||[]).join(', '))+'</b> when an organisation\'s upload is more than <b>'+esc(a.stale_days)+' days</b> old (once a day).</li>'
+      +'<li>Xero API allowance: red alert below <b>'+esc(a.xero_day_alert)+'</b> calls left in the day (5,000 per organisation, shared by live and the sandbox).</li>'
+      +'<li>Coghlans invoices: accounts@ checked every <b>'+esc(a.coghlans_scan_hours)+' hours</b> and imported into 3PL invoicing.</li>'
+      +'<li>Bank ageing (entered items): hourly. Back-date analysis: weekly.</li></ul><div class="tiny mut" style="margin-top:6px">These settings are changed by Diviyaj in the server settings (ACC_STMT_MAX_DAYS, ACC_STMT_ALERT_TO, XERO_DAY_ALERT).</div>';
+    b.innerHTML='<div style="text-align:left">'+h+'</div>';
+    b.querySelectorAll('[data-cg]').forEach(function(x){ x.onclick=function(){ AC_CF[x.dataset.cg]=x.dataset.cv; acRenderConfig(b); }; });
+    var qi=document.getElementById('ac-cfq'); if(qi)qi.oninput=function(){ AC_CF.q=qi.value; clearTimeout(AC_CF._t); AC_CF._t=setTimeout(function(){ acRenderConfig(b); var n=document.getElementById('ac-cfq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+    var post=function(url,body,el){ if(el)el.disabled=true; return fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); }); })
+      .then(function(){ AC_CF.d=null; AC_IN.p=null; acRenderConfig(b); }).catch(function(e){ if(el)el.disabled=false; window.hzCopiedTip&&window.hzCopiedTip(e.message,el); }); };
+    b.querySelectorAll('select.ac-cft').forEach(function(s){ s.onchange=function(){ var p=d.payees[+s.dataset.i]; post('/api/accounts/payee-rule',{org:p.org,payee_key:p.payee_key,treatment:s.value},s); }; });
+    b.querySelectorAll('[data-cfr]').forEach(function(x){ x.onclick=function(){ var p=d.payees[+x.dataset.cfr]; post('/api/accounts/payee-rule/delete',{org:p.org,payee_key:p.payee_key},x); }; });
+    var ad=document.getElementById('ac-cfadd'); if(ad)ad.onclick=function(){ AC_CF.add=true; acRenderConfig(b); };
+    var ac=document.getElementById('ac-cfa-cancel'); if(ac)ac.onclick=function(){ AC_CF.add=null; acRenderConfig(b); };
+    var as=document.getElementById('ac-cfa-save'); if(as)as.onclick=function(){ var k=(document.getElementById('ac-cfa-key').value||'').trim().toUpperCase(); if(!k){ document.getElementById('ac-cfa-key').focus(); return; } AC_CF.add=null;
+      post('/api/accounts/payee-rule',{org:document.getElementById('ac-cfa-org').value,payee_key:k,treatment:document.getElementById('ac-cfa-tr').value},as); };
   }
   // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.

@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|inbox\/read-mail)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|inbox\/read-mail)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3985,6 +3985,40 @@ app.post('/api/accounts/payee-rule', async (req, res) => {
       [org, key, t, (req.me && req.me.email) || null]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.271 (Ben 12-Oct-26): ACCOUNTS > Config. Every rule in one place: per-payee treatments (saved overrides + the payees seen on open statement
+// lines with HORIZON's suggestion), the built-in defaults, the UK / AU tax rules and the alert settings.
+app.get('/api/accounts/config', async (req, res) => {
+  try {
+    const saved = (await pool.query(`SELECT org, payee_key, treatment, source, updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.accounts_payee_rules ORDER BY org, payee_key`).catch(() => ({ rows: [] }))).rows;
+    let lines = []; try { lines = await accInboxProposals(); } catch (_) {}
+    const seen = new Map(); lines.forEach(l => { const k = l.org + '|' + l.payee_key; const x = seen.get(k) || { org: l.org, payee_key: l.payee_key, lines: 0, out: 0, inn: 0, matched: 0, treatment: l.treatment, source: l.treatment_source, example: l.reference };
+      x.lines++; if (l.amount < 0) x.out += -l.amount; else x.inn += l.amount; if (l.match) x.matched++; seen.set(k, x); });
+    saved.forEach(r => { const k = r.org + '|' + r.payee_key; const x = seen.get(k) || { org: r.org, payee_key: r.payee_key, lines: 0, out: 0, inn: 0, matched: 0, example: '' };
+      Object.assign(x, { treatment: r.treatment, source: r.source, updated_by: r.updated_by, updated_at: r.updated_at }); seen.set(k, x); });
+    const payees = [...seen.values()].sort((a, b) => b.lines - a.lines || a.payee_key.localeCompare(b.payee_key));
+    res.set('Cache-Control', 'no-store').json({
+      payees,
+      builtin: [
+        { rule: 'Money in (receipts, payouts, refunds)', treatment: 'ignore', note: 'Reconciled against sales in Xero, not from a receipt' },
+        { rule: 'Flexport and HORIZON product suppliers', treatment: 'ignore', note: 'Paid against POs and supplier bills (Ben 12-Oct-26)' },
+        { rule: 'Payee is one of: ' + String(ACC_IGNORE_KEYS.source).replace(/^\^\(|\)\$$/g, '').split('|').join(', '), treatment: 'ignore', note: 'Transfers, loans, tax, card repayments' },
+        { rule: 'Payee is one of: ' + String(ACC_RULE_KEYS.source).replace(/^\^\(|\)\$$/g, '').split('|').join(', '), treatment: 'rule', note: 'Platforms Xero codes with a bank rule (Google Ads: Ben 12-Oct-26)' },
+        { rule: 'The matched email is an invoice or statement (not a receipt)', treatment: 'bill', note: 'Supplier invoice with terms' },
+        { rule: 'Anything else that is money out', treatment: 'spend', note: 'Card or direct-debit spend: Spend Money with the receipt' }],
+      matching: 'Receipt = an accounts@ email with the same amount, from 45 days before to 7 days after the bank line, with the payee in the sender or subject; without the payee only a short email (8 amounts or fewer) in the same currency within 5 days counts. 3PLs (Coghlans, ILG, I-Fulfilment, Geneva) are billed through 3PL invoicing.',
+      tax: [
+        { org: 'UK', rule: 'GBP expenses: 20% VAT on Expenses, or No VAT where no VAT is charged' },
+        { org: 'UK', rule: 'Non-GBP expenses (including foreign software): Zero Rated Expenses, never Reverse Charge (Ben 10-Oct-26)' },
+        { org: 'UK', rule: 'Bank fees: No VAT (Ben 10-Oct-26)' },
+        { org: 'AU', rule: 'Mixed GST invoices: two lines, "<description> (GST component)" = GST x 11 at GST on Expenses, and "<description> (GST free component)" = the rest at GST Free' }],
+      alerts: { stale_days: ACC_STMT_MAX_DAYS, recipients: ACC_STMT_ALERT_TO, xero_day_alert: XERO_DAY_ALERT, coghlans_scan_hours: COG_SCAN_EVERY_MS / 3600000 },
+      can_edit: !!(req.me && (req.me.is_admin || req.me.accounts_access || req.me.live === false)) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/payee-rule/delete', async (req, res) => {   // back to HORIZON's suggestion for this payee
+  try { const b = req.body || {}; await pool.query(`DELETE FROM planner.accounts_payee_rules WHERE org=$1 AND payee_key=$2`, [String(b.org || '').toLowerCase(), String(b.payee_key || '').toUpperCase()]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
 app.post('/api/accounts/inbox/read-mail', async (req, res) => {
