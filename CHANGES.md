@@ -1,3 +1,10 @@
+## v28.273 (Ben, branch review-fixes-2026-10-05): receipt coverage measured for every payee (Snapchat false positive fixed)
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration.
+
+- Ben asked for Snapchat examples missing from accounts@: there were none. All 117 Snapchat payments in the last 120 days (Amex #3009, about £294 a day) have their daily "Your Daily Ads Spend Statement" from snap-ads-receipts-cc@snapchat.com in accounts@. The learn job skipped "feed" payees (60+ payments in 120 days) when matching, so they had no coverage and looked unmatched. Coverage is now measured for every reconciled payee (3PLs and product suppliers aside); receipt opportunities on Back-date stay non-feed only.
+- The repeating-payments list only shows payees paid in the last 120 days (so coverage is known); past events such as Spring Fair 2025 drop off.
+
 ## v28.272 (Ben, branch review-fixes-2026-10-05): repeating bank payments whose receipts do not reach accounts@ (Actioned / Ignore), Xero 1,000-a-day thresholds
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/355_accounts_forwarding.sql`, `migrations/356_accounts_spend_history.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migrations 355, 356** (additive: `accounts_payee_coverage`, `accounts_forward_actions` with status, `accounts_spend_history`). Env defaults changed: `XERO_DAY_ALERT` 200, `ACC_XERO_DAY_MIN` 400.

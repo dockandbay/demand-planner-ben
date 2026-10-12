@@ -3831,17 +3831,18 @@ async function accLearnMatch(by) {
   const toks = s => String(s || '').toLowerCase().replace(/ - [a-z0-9]{1,8}$/, '').split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !/^(limited|ltd|inc|pty|the|com|services|payment|payments)$/.test(w));
   const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$' }, rows = [], cov = new Map();
   let matched = 0;
-  tx.forEach(x => { const k = Math.abs(x.amount).toFixed(2), td = new Date(x.date), nt = toks(x.contact);
+  const txSet = new Set(tx);   // v28.273: coverage is measured for EVERY reconciled payee (feeds included, e.g. Snapchat's daily receipts); receipt opportunities stay non-feed only
+  txns.filter(x => !ACC_TPL_RE.test(x.contact) && !isSup(x.contact)).forEach(x => { const k = Math.abs(x.amount).toFixed(2), td = new Date(x.date), nt = toks(x.contact);
     const c = (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 60) return null;
       const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = nt.some(w => hay.includes(w)), cs = e.am.get(k) || e.pam.get(k) || '';
       const ccyOk = !cs || cs === x.ccy || cs === sym[x.ccy] || (cs === '$' && /USD|AUD/.test(x.ccy)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
       if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 3)) return null;
       return { e, lag, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; }).filter(Boolean).sort((a, b) => b.score - a.score);
-    const best = c[0] && c[0].score >= 40 ? c[0] : null; if (best) matched++;
+    const best = c[0] && c[0].score >= 40 ? c[0] : null; if (best && txSet.has(x)) matched++;
     { const ck = x.org + '|' + x.contact, cv = cov.get(ck) || { org: x.org, contact: x.contact, txns: 0, matched: 0, files: 0, last: null, sum: 0, ccy: {}, acc: {}, snd: {} };   // v28.272: coverage per payee
       cv.txns++; if (best) { cv.matched++; const sd = String(best.e.from_addr || '').toLowerCase().replace(/^.*<|>.*$/g, '').trim(); if (sd) cv.snd[sd] = (cv.snd[sd] || 0) + 1; } if (x.has_att) cv.files++;
       if (!cv.last || x.date > cv.last) cv.last = x.date; cv.sum += Math.abs(x.amount); cv.ccy[x.ccy] = (cv.ccy[x.ccy] || 0) + 1; if (x.account) cv.acc[x.account] = (cv.acc[x.account] || 0) + 1; cov.set(ck, cv); }
-    if (best && !x.has_att) { const e = best.e, files = e.files || [];
+    if (best && !x.has_att && txSet.has(x)) { const e = best.e, files = e.files || [];
       rows.push([x.org, 'receipt', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, null, x.link, e.id, e.d, e.from_addr, e.subject,
         files.some(f => /\.pdf$/i.test(f)) ? 'pdf' : files.length ? 'other attachment' : e.stripe_link ? 'stripe link' : 'email body', JSON.stringify(files), best.lag, !!(c[1] && c[1].score >= best.score - 5)]); }
   });
@@ -4084,7 +4085,7 @@ app.get('/api/accounts/forwarding', async (req, res) => {
       return Object.assign(x, { payee_key: key, treatment: t, recent, matched: c.matched || 0, window_txns: c.txns || 0, xero_files: c.xero_files || 0, sender: c.sender || null,
         avg_amount: x.total ? Math.round(x.amount / x.total * 100) / 100 : null, status: a ? a.status : 'open', actioned_by: a && a.actioned_by, actioned_at: a && a.actioned_at }); })
       // repeating bank spend that needs a receipt and is not mostly found in accounts@
-      .filter(x => !ACC_TPL_RE.test(x.contact) && !sup.has(x.payee_key) && x.recent >= 3 && (x.status !== 'open' || ((x.treatment === 'bill' || x.treatment === 'spend') && !(x.window_txns && x.matched * 2 >= x.window_txns))))
+      .filter(x => !ACC_TPL_RE.test(x.contact) && !sup.has(x.payee_key) && x.recent >= 3 && (x.status !== 'open' || ((x.treatment === 'bill' || x.treatment === 'spend') && x.window_txns > 0 && x.matched * 2 < x.window_txns)))   // v28.273: only payees paid in the last 120 days, so receipt coverage is known
       .sort((a, b) => b.recent - a.recent || a.contact.localeCompare(b.contact));
     const last = (await pool.query(`SELECT to_char(max(updated_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_spend_history`)).rows[0].at;
     res.set('Cache-Control', 'no-store').json({ rows, years: yrs, history_at: last, building: !!_accHistRun, days: ACC_LEARN_DAYS });
