@@ -8020,7 +8020,7 @@ async function computeXeroRunPlan(run, ctx) {
       keyLines = paySplitKeyLines({ number: ref, amount: total, lines: outLines.map(l => ({ type: l.type, reference: l.reference, amount: l.amount })) },
         others.map(o => ({ number: nums.get(String(o.reference || '').trim()) || null, reference: o.reference, description: o.description || '', amount: Number(o.amount) || 0 })),
         { ccy: String(run.base_ccy || 'USD').toUpperCase(), date: run.dt, accountCode: (outLines.find(l => l.account && l.account.code) || {}).account ? outLines.find(l => l.account && l.account.code).account.code : undefined });
-      if (keyLines.length) checks.push({ level: 'ok', msg: 'Split payment: the bill gets ' + keyLines.length + ' $0 key lines explaining the ' + (1 + others.length) + ' bills paid by this bank payment (' + others.map(o => nums.get(String(o.reference || '').trim()) || o.reference).join(', ') + ').' });
+      if (keyLines.length) checks.push({ level: 'ok', msg: 'Split payment: the bill gets a $0 key line explaining the ' + (1 + others.length) + ' bills paid by this bank payment (' + others.map(o => nums.get(String(o.reference || '').trim()) || o.reference).join(', ') + ').' });
     } } catch (e) { console.warn('[xero-plan] split key lines: ' + e.message); }
   const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
@@ -10416,10 +10416,14 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
     // Group columns by PRODUCTION ref — all AU deposits collapse into a single "AU" column; every other
     // deposit is keyed by its production number (multiple deposits sharing a prod # merge into one column).
     const cols = {}, refToCol = {}, refToCcy = {}, refInfo = {};
-    const colKeyFor = (d) => d.country === 'AU' ? 'AU' : (d.prod_no || '—');
+    // v28.286 (Ben 12-Oct-26): columns follow the Xero accounts. AU deposits from P58 sit in Xero AU's single 602 Stock Deposits account
+    // (one column "AU 602"); earlier AU deposits stay in the pooled "AU" column (Xero UK 620.00 AU). UK P58+ deposits keep a column each
+    // AND get a "UK 602" total column (Xero UK's single 602 Stock Deposits account), built after the balances below.
+    const pnum = v => { const x = String(v || '').replace(/[^0-9]/g, ''); return /^[0-9]+$/.test(x) ? parseInt(x, 10) : null; };
+    const colKeyFor = (d) => d.country === 'AU' ? ((pnum(d.prod_no) || 0) >= 58 ? 'AU-602' : 'AU') : (d.prod_no || '—');
     deps.forEach(d => { const isAu = d.country === 'AU'; const key = colKeyFor(d); const ccy = d.ccy || 'USD'; refToCol[d.reference] = key; refToCcy[d.reference] = ccy;
       let c = cols[key];
-      if (!c) c = cols[key] = { key, prod: key, isAu, prodNum: isAu ? -1 : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
+      if (!c) c = cols[key] = { key, prod: key === 'AU-602' ? 'AU 602 Stock Deposits (P58+, Xero AU)' : key === 'AU' ? 'AU (pre-P58, Xero UK 620.00 AU)' : key, isAu, prodNum: isAu ? (key === 'AU-602' ? -2 : -1) : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
       c.nDeps++; const usd = toUsd(Number(d.amount || 0), ccy); const pm = d.paid_month || '';
       c.paid += usd;
       if (pm) c.mov[pm] = (c.mov[pm] || 0) + usd;
@@ -10444,6 +10448,13 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
     columns.forEach(c => { let run = 0; balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round(run * 100) / 100; });
       c.remaining = Math.round(run * 100) / 100; c.drawn = Math.round((c.paid - c.remaining) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
     tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ref < b.ref ? -1 : 1)));
+    // v28.286: "UK 602" = the sum of the UK P58+ production columns (what Xero UK's single 602 Stock Deposits account should hold).
+    const uk58 = columns.filter(c => !c.isAu && c.prodNum >= 58 && c.prodNum < 999999);
+    if (uk58.length) { const t = { key: 'UK-602', prod: 'UK 602 Stock Deposits (P58+ total, Xero UK)', isAu: false, isTotal: true, country: 'UK', nDeps: 0, paid: 0, drawn: 0, remaining: 0, parts: uk58.map(c => c.key) };
+      uk58.forEach(c => { t.nDeps += c.nDeps; t.paid += c.paid; t.drawn += c.drawn; t.remaining += c.remaining; });
+      ['paid', 'drawn', 'remaining'].forEach(k => { t[k] = Math.round(t[k] * 100) / 100; });
+      balances['UK-602'] = {}; months.forEach(m => { balances['UK-602'][m] = Math.round(uk58.reduce((a, c) => a + (balances[c.key][m] || 0), 0) * 100) / 100; });
+      const at = columns.findIndex(c => !c.isAu); columns.splice(at < 0 ? columns.length : at, 0, t); }
     res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx, gbpRate: rUSD });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

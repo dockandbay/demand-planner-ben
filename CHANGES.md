@@ -1,3 +1,11 @@
+## v28.286 (Ben, branch review-fixes-2026-10-05): Deposits drawdown matches the Xero accounts (AU 602, UK 602 total); split-payment key as ONE line
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/pay_split_note.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- **Deposits drawdown** (SUPPLY ▸ Payments ▸ Drawdown): AU deposits from P58 move to a new **AU 602 Stock Deposits (P58+, Xero AU)** column (one account); earlier AU deposits stay in **AU (pre-P58, Xero UK 620.00 AU)**. New **UK 602 Stock Deposits (P58+ total, Xero UK)** column = month-by-month sum of the UK P58+ production columns, i.e. what the single Xero UK 602 account should hold. Production columns unchanged. Order: AU 602, AU, UK 602, then #48 onward.
+- **Split-payment key**: ONE $0 line item with line breaks inside its description (was one line per row). The test draft TEST-SUPPLIER-PAYMENT-XR-2026-09-28 in Xero UK was updated to match (4 lines: the key + 3 PO balances).
+- Verified on the sandbox: UK 602 equals the sum of its parts for every month; AU 602 and AU split by production number.
+
 ## v28.285 (Ben, branch review-fixes-2026-10-05): supplier-payment bills explain a bank payment split across several Xero bills
 
 **Files:** `server.mjs`, `lib/pay_split_note.mjs` (new), `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
