@@ -3530,11 +3530,43 @@ app.get('/api/accounts/bank-ageing', async (req, res) => {
 // v28.265 (Ben 12-Oct-26): bank STATEMENT lines from Xero's Bank Reconciliation report export (Excel pack), uploaded by admins and ACCOUNTS users
 // (Xero's API cannot return statement lines). Body { name, content_base64 }. The Summary tab lists EVERY unreconciled line as at the report
 // date, so stored lines of that account dated on or before as_at that are not in the upload are marked reconciled. Nothing is sent to Xero.
+// v28.268: the Uncoded statement lines CSV (All bank accounts) is authoritative per account as at its date: every account block replaces that
+// account's open lines (lines no longer listed are marked reconciled, an empty block means fully reconciled). Accounts are matched to the
+// stored Xero bank accounts by code, then by name, which also decides the org (a file normally holds one org).
+async function accStmtUploadUncoded(req, res, name, text) {
+  try {
+    const { parseXeroUncodedCsv } = await import('./lib/xero_recon_xlsx.mjs');
+    const p = parseXeroUncodedCsv(text, name), by = (req.me && req.me.email) || authUser(req) || null, asAt = p.as_at;
+    const known = (await pool.query(`SELECT org, account_id, name, coalesce(code,'') code FROM planner.accounts_bank_accounts`)).rows;
+    const pick = a => known.find(k => a.code && k.code === a.code && (k.name === a.name || k.name === a.raw)) || known.find(k => k.name === a.raw) || known.find(k => k.name === a.name) || (a.code ? known.find(k => k.code === a.code) : null) || null;
+    const matched = p.accounts.map(a => ({ a, k: pick(a) })), orgVotes = {}; matched.forEach(x => { if (x.k) orgVotes[x.k.org] = (orgVotes[x.k.org] || 0) + 1; });
+    const fileOrg = Object.keys(orgVotes).sort((x, y) => orgVotes[y] - orgVotes[x])[0] || 'uk';
+    const c = await pool.connect(); let lines = 0, cleared = 0, unmatched = [];
+    try { await c.query('BEGIN');
+      for (const { a, k } of matched) {
+        const org = k ? k.org : fileOrg, acct = k ? k.name : a.name; if (!k) unmatched.push(a.raw);
+        const keys = a.lines.map(l => l.date + '|' + l.amount.toFixed(2) + '|' + l.reference);
+        const r = await c.query(`UPDATE planner.accounts_stmt_lines SET reconciled=true, reconciled_seen=coalesce(reconciled_seen,$3::date), updated_at=now() WHERE org=$1 AND account_name=$2 AND NOT reconciled AND line_date <= $3::date AND NOT (line_date::text || '|' || to_char(amount,'FM9999999990.00') || '|' || reference) = ANY($4::text[])`, [org, acct, asAt, keys]);
+        cleared += r.rowCount;
+        for (let i = 0; i < a.lines.length; i += 200) { const ch = a.lines.slice(i, i + 200);
+          await c.query(`INSERT INTO planner.accounts_stmt_lines (org, account_name, account_id, line_date, amount, reference, description, reconciled, first_seen, last_seen, source, uploaded_by, updated_at) VALUES `
+            + ch.map((l, n) => '($1,$2,$3,$' + (n * 4 + 7) + ',$' + (n * 4 + 8) + ',$' + (n * 4 + 9) + ',$' + (n * 4 + 10) + ',false,$4,$4,$5,$6,now())').join(',')
+            + ` ON CONFLICT (org, account_name, line_date, amount, reference) DO UPDATE SET reconciled=false, reconciled_seen=null, last_seen=GREATEST(planner.accounts_stmt_lines.last_seen, EXCLUDED.last_seen), description=CASE WHEN EXCLUDED.description<>'' THEN EXCLUDED.description ELSE planner.accounts_stmt_lines.description END, account_id=coalesce(EXCLUDED.account_id, planner.accounts_stmt_lines.account_id), source=EXCLUDED.source, updated_at=now()`,
+            [org, acct, k ? k.account_id : null, asAt, 'uncoded', by].concat(ch.flatMap(l => [l.date, l.amount, l.reference, l.payee || '']))); }
+        lines += a.lines.length;
+        await c.query(`INSERT INTO planner.accounts_stmt_uploads (org, account_name, as_at, filename, unreconciled, lines, cleared, source, uploaded_by) VALUES ($1,$2,$3,$4,$5,$5,$6,'uncoded',$7)`, [org, acct, asAt, name, a.lines.length, r.rowCount, by]);
+      }
+      await c.query('COMMIT');
+    } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+    res.json({ ok: true, format: 'uncoded', org: fileOrg, as_at: asAt, accounts: p.accounts.length, accounts_with_lines: p.accounts.filter(a => a.lines.length).length, unreconciled: lines, cleared, unmatched });
+  } catch (e) { if (/Not a Xero/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+}
 app.post('/api/accounts/bank-ageing/upload', async (req, res) => {
   try {
     const b = req.body || {}, name = String(b.name || 'upload.xlsx').slice(0, 200), b64 = String(b.content_base64 || b.content || '');
     if (!b64 || b64.length > 12 * 1024 * 1024) return res.status(400).json({ error: b64 ? 'File too large (8 MB max)' : 'No file' });
-    if (!/\.xlsx$/i.test(name)) return res.status(400).json({ error: 'Export the Bank Reconciliation report from Xero as Excel (.xlsx)' });
+    if (/\.csv$/i.test(name)) return accStmtUploadUncoded(req, res, name, Buffer.from(b64.replace(/^data:[^,]*,/, ''), 'base64').toString('utf8'));   // v28.268: all-accounts export
+    if (!/\.xlsx$/i.test(name)) return res.status(400).json({ error: 'Upload the Xero Uncoded statement lines export (CSV, all bank accounts) or a Bank Reconciliation report (Excel)' });
     const { parseXeroReconPack } = await import('./lib/xero_recon_xlsx.mjs');
     const p = await parseXeroReconPack(Buffer.from(b64.replace(/^data:[^,]*,/, ''), 'base64'));
     const by = (req.me && req.me.email) || authUser(req) || null, asAt = p.as_at || (p.period && p.period.to) || new Date().toISOString().slice(0, 10);

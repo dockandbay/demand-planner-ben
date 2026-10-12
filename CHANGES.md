@@ -1,3 +1,12 @@
+## v28.268 (Ben, branch review-fixes-2026-10-05): Bank ageing reads Xero's Uncoded statement lines export (all bank accounts, one CSV per org)
+
+**Files:** `server.mjs`, `lib/xero_recon_xlsx.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env.
+
+- The upload now accepts Xero's **Uncoded statement lines** report (Accounting ▸ Bank accounts ▸ ⋯ ▸ Uncoded statement lines ▸ All bank accounts ▸ Export CSV): every bank account of the org in one file. Each account block replaces that account's open lines as at the file date; an empty block means fully reconciled. Accounts matched to the stored Xero bank accounts by code, then name.
+- Statement-line references are normalised (`canonRef`) so a line has the same key in this CSV and in the single-account Bank Reconciliation export (Lloyds: 25 of 25 identical), so switching between the two never churns history. The Excel pack is still accepted.
+- Screen: accounts with nothing open are summarised ("41 other accounts are fully reconciled"), the How to export panel now describes the one-file routine, the email alert text matches.
+- Sandbox with Ben's UK file: 59 accounts, 167 uncoded lines in 18 accounts (Capital On Tap 37, Amex #3009 36, Lloyds 25, Bank of America 18, ...), Lloyds lines from the earlier Excel upload kept as the same lines, same file twice changes nothing. 3 names not in the stored Xero bank accounts (CAD Clearing, AWX - CAD Invoices, WorldFirst CHF Swiss), all with no lines.
+
 ## v28.267 (Ben, branch review-fixes-2026-10-05): Coghlans weekly invoices auto-imported from accounts@, and a Weekly bills view
 
 **Files:** `server.mjs`, `artifact_v16.7.html`, `migrations/353_tpl_coghlans_mail.sql`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). **Migration 353** (additive: `tpl_invoice_files.invoice_no / period_end / source_msg_id`, backfills invoice numbers from filenames; new `planner.tpl_coghlans_mail`). No env. Gmail reads only; nothing is written to Xero.
