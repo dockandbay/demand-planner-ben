@@ -2856,6 +2856,13 @@ async function cashflowResponse(pos, q) {
       amount: p.balance_1_amount != null ? p.balance_1_amount : p.balance_owing, due: p.balance_due, paid_date: p.balance_1_date });
     if (p.balance_2_amount != null && (p.balance_2_date || owes)) add({ key: 'bal2:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name,
       country: p.country, amount: p.balance_2_amount, due: p.balance_due, paid_date: p.balance_2_date });
+    // v28.304 (Ben 13-Oct-26): the balance left after balance payments 1 and 2 was missing (same gap as Payments Due before v28.294):
+    // once balance 1 had an amount, only that amount (and balance 2) reached the cash flow, so a part-paid balance understated the outflow.
+    // The remainder is its own unpaid line on the balance due date; it is paid through balance 2, so it takes balance 2's likely date.
+    const _bRem = Math.round((num(p.balance_owing) - num(p.balance_1_amount) - num(p.balance_2_amount)) * 100) / 100;
+    if (owes && (p.balance_1_amount != null || p.balance_2_amount != null) && _bRem > 0.009)
+      add({ key: (p.balance_2_amount != null ? 'balrem:' : 'bal2:') + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
+        amount: _bRem, due: p.balance_due, likely: likely['bal2:' + p.po] || null, paid_date: null });
   }
   // 4. referenced-deposit pools — one line per reference
   for (const d of depPools) {

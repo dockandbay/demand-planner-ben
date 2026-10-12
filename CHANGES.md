@@ -1,3 +1,12 @@
+## v28.304 (Ben, branch review-fixes-2026-10-05): cash flow shows the balance left after balance payments 1 and 2
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "balance payment 2 or 3 was hidden from payment due. was this also hidden from cash flow? it should show obviously". Yes: once balance 1 had an amount, the cash flow showed only that amount (and balance 2 if set); the rest of the balance owing was missing, so the outflow was understated. Same gap fixed in Payments Due in v28.294.
+- The remainder is now its own unpaid Balance line on the balance due date (key bal2:<po>, or balrem:<po> when balance 2 is already used), timed by balance 2's likely date when set.
+- Sandbox before/after: 2,411 to 2,415 lines, 4 added, none removed or changed. On live data (read only) 4 POs get the line: PO-51USXR1 57,609.72 (due 02-Nov-25), PO-55EULX2 18,948.00, PO-56UKLX3-AIR 737.86, PO-57UKNL1 2.64.
+- PO-51USXR1 to check: final invoice 76,011.72 against 18,494.01 recorded paid. Payments Due does not list it (due before 01-Jan-26); the cash flow now does, as overdue.
+
 ## v28.303 (Ben, branch review-fixes-2026-10-05): Payments Due, running total of payments marked paid
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
