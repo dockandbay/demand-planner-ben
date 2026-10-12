@@ -47,12 +47,12 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
-  server.mjs::accountsGate: 3634fd0a0bbf
-  server.mjs::/api/accounts/payables: be607529cdd5
+  server.mjs::accountsGate: 0a0bb22cce37
+  server.mjs::/api/accounts/payables: fdbef5a26279
   server.mjs::accBillCandidates: 2aae1ab67933
   server.mjs::accCreateBill: ba49ef208f97
   server.mjs::accAutoBillRun: bec0282bea6a
-  supply/inject.html::acRenderPayables: 633cc47a236b
+  supply/inject.html::acRenderPayables: 6c5d671cece0
   supply/inject.html::accountsCan: c51271303351
   supply/inject.html::acRenderConfig: 4f0417c6a3ba
   supply/inject.html::acCfReload: 38efe35ae70b
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.282
+verified_version: v28.283
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -328,6 +328,7 @@ verified_version: v28.282
 
 ## ACCOUNTS (from v28.247)
 - ACCOUNTS is a top menu after CLIENT, seen only by users with the ACCOUNTS grant (CONFIG > Admin > Permissions) or admins. Unlike other areas, reading is gated too: every /api/accounts/* call returns 403 without the grant. From v28.252 the grant is read access only for most writes: connecting or disconnecting Gmail and running the bank or back-date refresh need admin (403 accounts_admin_only otherwise); ACCOUNTS users may also upload bank statements, save or reset payee treatments, mark forwarding actioned or ignored, read new mail, switch automatic receipt attachment on or off and run it (v28.265 to v28.275), and only the accounts mailbox (GMAIL_MAILBOX_ACCOUNTS, default accounts@dockandbay.com) can be connected. (source: server.mjs :: accountsGate)
+- Payables (v28.283, Ben 12-Oct-26): contact groups are always expanded (click folds one), one Overdue and one Total due column instead of ageing buckets. Each bill shows a HORIZON check: the PO numbers linked to it or found in its number / reference (PO-xxxx), whether they are in HORIZON (In HORIZON / not linked / Not in HORIZON / No PO), HORIZON's PO value against the bill total (only when the currencies match; within 0.5% or 1) and HORIZON's balance due date against the bill's due date (within a day); when the amount paid equals the HORIZON PO value, the amount still due is flagged as extra on the bill. A recommendation per overdue supplier bill: write off (part-paid, under ACC_WRITEOFF_MAX = 200 in the bill currency still due), part-paid larger balance (check with the supplier), unpaid (pay or query); summary chips filter the list. Create supplier credit note (admins and ACCOUNTS users, drawer + confirm): re-reads the bill in Xero, refuses if it is not part-paid or the amount due is 200 or more, then creates an approved ACCPAYCREDIT for the amount due (account and tax of the bill's main line unless the person picks another, reference WRITE-OFF <bill>, optional reason on the line) and allocates it to the bill; logged once per bill (accounts_credit_log, mig 359), counted in Rules ▸ Metrics. (source: server.mjs :: accCnBill, /api/accounts/payables/credit-note; supply/inject.html :: acRenderPayables, acPayRec, acPayHz, acCnOpen, acCnPaint)
 - Payables: open Xero bills in UK and AU (status approved or awaiting approval, amount due above zero) from the hourly Xero bill cache, grouped by contact, org and currency, aged by due date into Not due, 1-30, 31-60, 61-90 and 90+ days overdue. Amounts stay in the bill currency (no GBP conversion). (source: server.mjs :: /api/accounts/payables)
 - A contact counts as a Supplier when any of its bills is linked to a HORIZON PO, or its Xero name ends " - <supplier code>" matching a HORIZON supplier code. The Suppliers pill shows only those; All contacts shows every open bill. (source: server.mjs :: /api/accounts/payables)
 - 3PL invoicing moved from REPORTS to ACCOUNTS > 3PL invoicing in v28.247; old #/reports/3pl-invoicing links redirect. (source: supply/inject.html :: acRenderPayables)

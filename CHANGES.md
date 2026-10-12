@@ -1,3 +1,13 @@
+## v28.283 (Ben, branch review-fixes-2026-10-05): Payables recommendations, HORIZON match check, "Create supplier credit note" write-off (under 200)
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `migrations/359_accounts_credit_notes.sql` (+ package.json, CHANGES.md). **Migration 359** (new `accounts_credit_log`). Optional env `ACC_WRITEOFF_MAX` (default 200).
+
+- Payables: groups always expanded; the 4 ageing columns replaced by one **Overdue** column next to **Total due**.
+- **HORIZON check per bill**: PO numbers from links or the bill number / reference; In HORIZON / not linked / Not in HORIZON / No PO; HORIZON PO value vs bill total; HORIZON balance due date vs Xero due date; "paid = HORIZON PO value, the amount due is extra on the bill".
+- **Recommendations** (overdue supplier bills, chips filter the list): write off small under-payments (part-paid, under 200 due), part-paid larger balance, unpaid overdue, differs from HORIZON, not in HORIZON or not linked.
+- **Create supplier credit note** (admins and ACCOUNTS users): drawer with bill, paid, due, HORIZON checks; account (default the bill's main line, e.g. 601 Stock) and tax picked from Xero, reference `WRITE-OFF <bill>`, optional reason; confirm; the server re-reads the bill, creates an approved ACCPAYCREDIT for the amount due and allocates it to the bill. Once per bill (log row before the Xero call). Rules ▸ Metrics counts credit notes.
+- Sandbox: 11 write-off candidates ($641.87 USD); Jinma PO-1621143 drawer: total 468, paid 360 = HORIZON PO value, write off 108 to 601 Stock, No VAT. **No credit note created yet** (live Xero: first one on Ben's confirm).
+
 ## v28.282 (Ben, branch review-fixes-2026-10-05): Xero search pickers, PDF drawn in the drawer, deep links = menu names, Rules ▸ Metrics
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

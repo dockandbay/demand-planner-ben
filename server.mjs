@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|payee-rule\/coding|payee-rule\/bank-rule-done)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3375,10 +3375,79 @@ app.get('/api/accounts/payables', async (req, res) => {
         ORDER BY b.due_date NULLS LAST`, [org])).rows;
     const sup = new Map(); try { (await pool.query(`SELECT name, code FROM planner.suppliers WHERE coalesce(trim(code),'') <> ''`)).rows.forEach(r => sup.set(String(r.code).trim().toUpperCase(), r.name)); } catch (_) {}
     bills.forEach(b => { const m = / - ([A-Za-z0-9]{1,8})$/.exec(String(b.contact_name || '').trim()); const s = m ? sup.get(m[1].toUpperCase()) : null;
-      b.supplier = s || (b.pos.length ? b.contact_name : null); b.url = xbUrl(b.invoice_id); b.total = Number(b.total) || 0; b.amount_due = Number(b.amount_due) || 0; b.amount_paid = Number(b.amount_paid) || 0; });
+      b.supplier = s || (b.pos.length ? b.contact_name : null); b.url = xbUrl(b.invoice_id); b.total = Number(b.total) || 0; b.amount_due = Number(b.amount_due) || 0; b.amount_paid = Number(b.amount_paid) || 0;
+      b.writeoff = !!(b.supplier && b.status === 'AUTHORISED' && b.amount_paid > 0.004 && b.amount_due > 0.004 && b.amount_due < ACC_WRITEOFF_MAX); });   // v28.283: a small under-payment that can be credited off
     const synced = {}; (await pool.query(`SELECT lower(region) region, to_char(max(synced_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.xero_bills GROUP BY 1`)).rows.forEach(r => { synced[r.region] = r.at; });
-    res.set('Cache-Control', 'no-store').json({ bills, synced, today: new Date().toISOString().slice(0, 10) });
+    // v28.283 (Ben 12-Oct-26): is the bill in HORIZON, and does it match? PO numbers come from the bill's links and from its number / reference
+    // (PO-xxxx); HORIZON's PO value, status and balance due date are compared with the Xero bill (value only when the currencies match).
+    try { const refs = new Map(); bills.forEach(b => { const s = new Set(b.pos); (String(b.invoice_number || '') + ' ' + String(b.reference || '')).toUpperCase().replace(/\bPO\s+(?=\d)/g, 'PO-').match(/\bPO-[A-Z0-9]+(?:-[A-Z0-9]+)*/g)?.forEach(x => s.add(x)); refs.set(b.invoice_id, [...s]); });
+      const all = [...new Set([...refs.values()].flat())];
+      const pf = new Map(all.length ? (await pool.query(`SELECT p.po, p.status, p.supplier_name, coalesce(f.val,0)::float8 val, to_char(f.bal_due_date,'YYYY-MM-DD') due, s.default_currency currency FROM planner.purchase_orders p LEFT JOIN planner.v_po_finance f ON f.po=p.po LEFT JOIN planner.suppliers s ON s.id=p.supplier_id WHERE p.po = ANY($1)`, [all]).catch(() => ({ rows: [] }))).rows.map(r => [r.po.toUpperCase(), r]) : []);
+      const fd = x => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(x || '')); return m ? m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + '-' + m[1].slice(2) : String(x || ''); };   // dd-mmm-yy (Ben)
+      bills.forEach(b => { const ps = refs.get(b.invoice_id) || [], found = ps.map(x => pf.get(String(x).toUpperCase())).filter(Boolean), miss = ps.filter(x => !pf.has(String(x).toUpperCase()));
+        const hz = { state: !ps.length ? 'no_po' : !found.length ? 'missing' : b.pos.length ? 'linked' : 'found', pos: found.map(f => ({ po: f.po, status: f.status, val: f.val, due: f.due })), missing: miss, checks: [] };
+        if (found.length) { const val = found.reduce((a, f) => a + (Number(f.val) || 0), 0), ccyOk = found.every(f => !f.currency || f.currency === b.currency_code); hz.val = val;
+          if (val > 0 && ccyOk) { const d = b.total - val; hz.value_match = Math.abs(d) <= Math.max(1, b.total * 0.005); hz.checks.push(hz.value_match ? 'Value matches HORIZON' : 'Xero bill ' + b.total.toFixed(2) + ' vs HORIZON PO ' + val.toFixed(2) + ' (' + (d > 0 ? '+' : '') + d.toFixed(2) + ')');
+            if (b.amount_paid > 0.004 && Math.abs(b.amount_paid - val) <= Math.max(1, val * 0.005) && !hz.value_match) { hz.paid_equals_po = true; hz.checks.push('Paid ' + b.amount_paid.toFixed(2) + ' = the HORIZON PO value: the amount still due is extra on the Xero bill'); } }
+          else if (val > 0) hz.checks.push('HORIZON PO in ' + (found[0].currency || '?') + ', bill in ' + b.currency_code + ': value not compared');
+          const due = found.map(f => f.due).filter(Boolean).sort().pop(); if (due && b.due_date) { const dd = Math.round((new Date(b.due_date) - new Date(due)) / 864e5); hz.due_match = Math.abs(dd) <= 1; hz.checks.push(hz.due_match ? 'Due date matches HORIZON' : 'Due ' + fd(b.due_date) + ' in Xero vs ' + fd(due) + ' in HORIZON'); }
+          if (hz.state === 'found') hz.checks.push('In HORIZON but the bill is not linked to the PO'); }
+        if (miss.length) hz.checks.push((miss.length > 1 ? 'POs ' : 'PO ') + miss.join(', ') + ' not in HORIZON');
+        if (!ps.length) hz.checks.push('No PO number on the bill');
+        b.hz = hz; }); } catch (e) { console.warn('[payables hz] ' + e.message); }
+    const cn = new Map(); try { (await pool.query(`SELECT invoice_id, credit_note_id, credit_note_number, status, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD') at, run_by FROM planner.accounts_credit_log WHERE status IN ('created','creating')`)).rows.forEach(r => cn.set(r.invoice_id, r)); } catch (_) {}
+    bills.forEach(b => { const c = cn.get(b.invoice_id); if (c) { b.credit_note = { number: c.credit_note_number, at: c.at, by: c.run_by, status: c.status, url: c.credit_note_id ? 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + c.credit_note_id : null }; b.writeoff = false; } });
+    res.set('Cache-Control', 'no-store').json({ bills, synced, today: new Date().toISOString().slice(0, 10), writeoff_max: ACC_WRITEOFF_MAX });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══ v28.283 (Ben 12-Oct-26): Payables "Create supplier credit note". A part-paid supplier bill whose amount still due is under ACC_WRITEOFF_MAX
+// (200, Ben, in the bill's currency) is written off: an ACCPAYCREDIT (Awaiting payment) for the amount due, coded like the bill's main line
+// (or the account the person picks), allocated to the bill so it shows as paid. Preview reads the bill (one Xero GET); create re-reads it, so a
+// payment made in between is never over-credited. Admins and ACCOUNTS users, after a confirm in the drawer. Logged in accounts_credit_log (mig 359).
+const ACC_WRITEOFF_MAX = Number(process.env.ACC_WRITEOFF_MAX) || 200;
+async function accCnBill(org, id) {
+  const j = await xeroFetch(org, '/api.xro/2.0/Invoices/' + encodeURIComponent(id)); const inv = j && j.Invoices && j.Invoices[0]; if (!inv) throw new Error('Bill not found in Xero');
+  const due = Number(inv.AmountDue) || 0, paid = Number(inv.AmountPaid) || 0, lines = inv.LineItems || [];
+  const main = lines.slice().sort((a, b) => Math.abs(Number(b.LineAmount) || 0) - Math.abs(Number(a.LineAmount) || 0))[0] || {};
+  const why = inv.Type !== 'ACCPAY' ? 'Not a bill' : inv.Status !== 'AUTHORISED' ? 'Bill is ' + String(inv.Status || '').toLowerCase() + ', not awaiting payment' : !(paid > 0.004) ? 'Nothing has been paid on this bill: it is not an under-payment' : !(due > 0.004) ? 'Nothing left to pay' : due >= ACC_WRITEOFF_MAX ? 'Amount due ' + due.toFixed(2) + ' is not under ' + ACC_WRITEOFF_MAX : null;
+  return { inv, due, paid, total: Number(inv.Total) || 0, currency: inv.CurrencyCode, contact: (inv.Contact || {}).Name, contact_id: (inv.Contact || {}).ContactID, number: inv.InvoiceNumber || inv.Reference || '',
+    line_types: inv.LineAmountTypes || 'Exclusive', account_code: main.AccountCode || '', tax_type: main.TaxType || '', why };
+}
+app.get('/api/accounts/payables/credit-note/preview', async (req, res) => {
+  try { const org = String(req.query.org || '').toLowerCase(), id = String(req.query.invoice_id || ''); if (!['uk', 'au'].includes(org) || !/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'org and invoice_id required' });
+    const done = (await pool.query(`SELECT credit_note_number FROM planner.accounts_credit_log WHERE invoice_id=$1 AND status IN ('created','creating')`, [id]).catch(() => ({ rows: [] }))).rows[0];
+    const b = await accCnBill(org, id); delete b.inv;
+    res.json(Object.assign(b, { ok: !b.why && !done, why: done ? 'Already written off (' + (done.credit_note_number || 'credit note') + ')' : b.why, reference: ('WRITE-OFF ' + b.number).slice(0, 250), date: new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }), max: ACC_WRITEOFF_MAX }));
+  } catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
+app.post('/api/accounts/payables/credit-note', async (req, res) => {
+  const bd = req.body || {}, org = String(bd.org || '').toLowerCase(), id = String(bd.invoice_id || ''), by = (req.me && req.me.email) || 'user';
+  if (!['uk', 'au'].includes(org) || !/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'org and invoice_id required' });
+  let lg = null;
+  try {
+    const b = await accCnBill(org, id); if (b.why) return res.status(409).json({ error: b.why });
+    const acct = String(bd.account_code || b.account_code || '').trim(), tax = String(bd.tax_type == null ? b.tax_type : bd.tax_type).trim(), ref = (String(bd.reference || '').trim() || ('WRITE-OFF ' + b.number)).slice(0, 250);
+    if (!acct) return res.status(400).json({ error: 'Pick the account for the write-off' });
+    try { lg = (await pool.query(`INSERT INTO planner.accounts_credit_log (org, invoice_id, invoice_number, contact, currency, amount, account_code, tax_type, reference, reason, status, run_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
+      [org, id, b.number, b.contact, b.currency, b.due, acct, tax || null, ref, String(bd.reason || '').slice(0, 300) || null, by])).rows[0].id; }
+    catch (e) { if (/accounts_credit_log_once|duplicate key/.test(e.message)) return res.status(409).json({ error: 'This bill has already been written off' }); throw e; }
+    const lt = b.line_types === 'NoTax' ? 'NoTax' : 'Inclusive';
+    const body = { Type: 'ACCPAYCREDIT', Contact: { ContactID: b.contact_id }, Date: new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }), Reference: ref, CurrencyCode: b.currency, Status: 'AUTHORISED', LineAmountTypes: lt,
+      LineItems: [{ Description: 'Write-off of under-payment on ' + b.number + (bd.reason ? ': ' + String(bd.reason).slice(0, 200) : ''), Quantity: 1, UnitAmount: b.due, AccountCode: acct, ...(lt === 'NoTax' || !tax ? {} : { TaxType: tax }) }] };
+    const cr = await xeroFetch(org, '/api.xro/2.0/CreditNotes', { method: 'POST', body: { CreditNotes: [body] } });
+    const cn = cr && cr.CreditNotes && cr.CreditNotes[0]; if (!cn || !cn.CreditNoteID) throw new Error('Xero returned no credit note');
+    try { xeroPreflightBust(); } catch (_) {}
+    let allocated = false, allocErr = null;
+    try { await xeroFetch(org, '/api.xro/2.0/CreditNotes/' + cn.CreditNoteID + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: id }, Amount: b.due, Date: body.Date }] } }); allocated = true; }
+    catch (ae) { allocErr = ae.message; }
+    await pool.query(`UPDATE planner.accounts_credit_log SET status='created', credit_note_id=$2, credit_note_number=$3, allocated=$4, error=$5 WHERE id=$1`, [lg, cn.CreditNoteID, cn.CreditNoteNumber || null, allocated, allocErr ? 'Credit note created but not allocated: ' + allocErr : null]);
+    if (allocated) await pool.query(`UPDATE planner.xero_bills SET amount_due=0, amount_paid=coalesce(amount_paid,0)+$2, status='PAID' WHERE invoice_id=$1`, [id, b.due]).catch(() => {});   // the hourly sync confirms it
+    res.json({ ok: true, credit_note_id: cn.CreditNoteID, credit_note_number: cn.CreditNoteNumber, amount: b.due, currency: b.currency, allocated, allocation_error: allocErr,
+      url: 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID });
+  } catch (e) {
+    if (lg) await pool.query(`UPDATE planner.accounts_credit_log SET status='error', error=$2 WHERE id=$1`, [lg, String(e.message).slice(0, 400)]).catch(() => {});
+    log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message });
+  }
 });
 // ═══ v28.249 (Ben 10-Oct-26): ACCOUNTS > Bank ageing (interim). Background job reads Xero UK + AU (GET only) for items ENTERED on a bank
 // account but not reconciled: spend / receive money, bill / invoice payments whose account is a bank account (payments to loan / prepayment
@@ -4429,7 +4498,8 @@ app.get('/api/accounts/bills/metrics', async (req, res) => {
     const add = (m, k, r) => { const x = m[k] || (m[k] = { created: 0, matched: 0, awaiting: 0, incorrect: 0, failed: 0 }); const c = cls(r); x[c]++; if (c !== 'failed') x.created++; };
     const tot = {}, byMon = {}, byPayee = {}, byMode = {}; rows.forEach(r => { add(tot, 'all', r); add(byMon, r.mon, r); add(byPayee, r.org + '|' + r.payee_key, r); add(byMode, r.mode || 'batch', r); });
     const att = (await pool.query(`SELECT status, count(*)::int n FROM planner.accounts_attach_log GROUP BY 1`).catch(() => ({ rows: [] }))).rows.reduce((a, r) => (a[r.status] = r.n, a), {});
-    res.set('Cache-Control', 'no-store').json({ total: tot.all || { created: 0, matched: 0, awaiting: 0, incorrect: 0, failed: 0 }, by_month: byMon, by_payee: byPayee, by_mode: byMode, attachments: att });
+    const credits = (await pool.query(`SELECT status, count(*)::int n, sum(amount)::float8 amt FROM planner.accounts_credit_log GROUP BY 1`).catch(() => ({ rows: [] }))).rows.reduce((a, r) => (a[r.status] = { n: r.n, amount: r.amt }, a), {});   // v28.283
+    res.set('Cache-Control', 'no-store').json({ total: tot.all || { created: 0, matched: 0, awaiting: 0, incorrect: 0, failed: 0 }, by_month: byMon, by_payee: byPayee, by_mode: byMode, attachments: att, credits });
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ total: {}, by_month: {}, by_payee: {}, by_mode: {}, attachments: {} }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/accounts/bills/:id/voided', async (req, res) => {   // a person voided a wrong bill in Xero: keep the receipt from being billed again

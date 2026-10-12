@@ -19166,7 +19166,7 @@
   // v28.282 (Ben 12-Oct-26): Xero contact, account and tax are picked from Xero (search dropdowns), not typed. Used by Rules > Payee treatments and the Reconcile drawer.
   var AC_XTAX={};
   function acTaxLoad(org){ if(AC_XTAX[org])return; AC_XTAX[org]={busy:true}; fetch('/api/accounts/xero-taxrates?org='+org).then(function(r){ return r.json(); }).then(function(j){ AC_XTAX[org]={rows:(j&&j.rows)||[]}; acPickersLoaded(org); }).catch(function(){ AC_XTAX[org]={rows:[]}; }); }
-  function acPickersLoaded(org){ if(AC_DR.r&&AC_DR.r.org===org)acDrPaint(); else if(ACCOUNTS_SUB==='config'&&AC_CF.edit!=null){ var b=document.getElementById('accounts-body'); var p=AC_CF.d&&AC_CF.d.payees[AC_CF.edit]; if(b&&p&&p.org===org)acCfPaint(b); } }
+  function acPickersLoaded(org){ if(AC_CN&&AC_CN.bill&&AC_CN.bill.region===org){ acCnPaint(); return; } if(AC_DR.r&&AC_DR.r.org===org)acDrPaint(); else if(ACCOUNTS_SUB==='config'&&AC_CF.edit!=null){ var b=document.getElementById('accounts-body'); var p=AC_CF.d&&AC_CF.d.payees[AC_CF.edit]; if(b&&p&&p.org===org)acCfPaint(b); } }
   function acTaxOpts(org,cur,blank){ var X=AC_XTAX[org], rows=(X&&X.rows&&X.rows.length)?X.rows.map(function(t){ return [t.type,t.name]; }):(AC_TAXES[org]||[]).slice(); if(cur&&!rows.some(function(t){ return t[0]===cur; }))rows.unshift([cur,cur]);
     return (blank||!cur?'<option value=""'+(cur?'':' selected')+'>'+esc(blank||'choose…')+'</option>':'')+rows.map(function(t){ return '<option value="'+esc(t[0])+'"'+(t[0]===cur?' selected':'')+'>'+esc(t[1])+'</option>'; }).join(''); }
   function acAcctLabel(org,code){ var X=AC_XACC[org], a=X&&X.rows&&X.rows.filter(function(x){ return x.code===code; })[0]; return code?(a?code+' · '+a.name:code):''; }
@@ -19198,7 +19198,7 @@
   function acDrJson(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }
   function acDrEnsure(){ var bg=document.getElementById('acdrawer-bg'); if(bg)return bg; bg=document.createElement('div'); bg.id='acdrawer-bg'; bg.innerHTML='<div id="acdrawer"></div>'; document.body.appendChild(bg);
     bg.addEventListener('click',function(e){ if(e.target===bg)acDrClose(); }); document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&bg.classList.contains('open'))acDrClose(); }); return bg; }
-  function acDrClose(){ var bg=document.getElementById('acdrawer-bg'); if(!bg)return; bg.classList.remove('open'); setTimeout(function(){ if(!bg.classList.contains('open'))bg.classList.remove('show'); },230); AC_DR={r:null}; }
+  function acDrClose(){ AC_CN=null; var bg=document.getElementById('acdrawer-bg'); if(!bg)return; bg.classList.remove('open'); setTimeout(function(){ if(!bg.classList.contains('open'))bg.classList.remove('show'); },230); AC_DR={r:null}; }
   function acDrOpen(r){ AC_DR={r:r,c:null,busy:true,view:'email',em:null,auto:r.treatment==='autobill',confirm:false,done:null,err:'',f:{}};
     var bg=acDrEnsure(); bg.classList.add('show'); setTimeout(function(){ bg.classList.add('open'); },10); acXaccLoad(r.org); acTaxLoad(r.org); acDrPaint();
     var mine=AC_DR;
@@ -19363,43 +19363,106 @@
   function acBucket(days){ return days<=0?0:days<=30?1:days<=60?2:days<=90?3:4; }
   function acMoney(n,ccy){ n=Number(n)||0; var sym={GBP:'£',USD:'$',AUD:'A$',EUR:'€'}[ccy]; return (sym||(esc(ccy||'')+' '))+n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function acSynced(s){ if(!s)return 'never'; var p=String(s).split(' '); return hzTrkDate(p[0])+(p[1]?' '+p[1]:''); }
+  // v28.283 (Ben 12-Oct-26): Payables = groups always expanded, one Overdue and one Total due column (no ageing buckets), each bill with its
+  // HORIZON check (in HORIZON? value / due date match?) and a recommendation; a part-paid supplier bill with less than 200 still due gets
+  // "Create supplier credit note" (drawer, confirm, then the credit note is created in Xero and allocated to the bill).
+  function acPayRec(x,age){ if(x.credit_note)return {k:'done',t:'Written off with '+(x.credit_note.number||'a credit note')};
+    if(x.writeoff)return {k:'writeoff',t:'Write off the under-payment with a supplier credit note'+(x.hz&&x.hz.paid_equals_po?' (paid = HORIZON PO value)':'')};
+    if(age<=0)return {k:'',t:''};
+    if(x.amount_paid>0.004)return {k:'partpaid',t:'Part-paid: check the balance with the supplier, then pay it or ask for a credit note'};
+    return {k:'unpaid',t:'Overdue: pay it, or query it with the supplier'}; }
+  function acPayHz(x){ var z=x.hz; if(!z)return {k:'',h:''};
+    var lab={linked:['In HORIZON','p-ok'],found:['In HORIZON, not linked','p-warn'],missing:['Not in HORIZON','p-bad'],no_po:['No PO','p-warn']}[z.state]||['',''], bad=z.value_match===false||z.due_match===false;
+    var k=z.state==='missing'||z.state==='no_po'||z.state==='found'?'nothz':(bad?'mismatch':'');
+    return {k:k,bad:bad,h:'<span class="pill" style="cursor:default;'+(lab[1]==='p-ok'&&!bad?'':'color:var(--neg);border-color:var(--neg)')+'">'+esc(lab[0])+(z.state==='linked'||z.state==='found'?(bad?' · differs':' · matches'):'')+'</span>'+(z.checks||[]).map(function(c){ return '<div class="tiny'+(/matches/.test(c)?' mut':'')+'">'+esc(c)+'</div>'; }).join('')}; }
   function acRenderPayables(b){
     if(!AC_PAY.d){ if(AC_PAY.busy)return; AC_PAY.busy=true;
       fetch('/api/accounts/payables').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
         .then(function(j){ AC_PAY.d=j; AC_PAY.busy=false; if(ACCOUNTS_SUB==='payables')acRenderPayables(document.getElementById('accounts-body')); })
         .catch(function(e){ AC_PAY.busy=false; b.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; });
       return; }
-    var d=AC_PAY.d, today=d.today, q=AC_PAY.q.toLowerCase();
-    var bills=d.bills.filter(function(x){ if(AC_PAY.org!=='all'&&x.region!==AC_PAY.org)return false; if(AC_PAY.scope==='sup'&&!x.supplier)return false;
-      var age=acAge(x.due_date,today); if(AC_PAY.due==='over'&&age<=0)return false; if(AC_PAY.due==='30'&&age<=30)return false;
+    var d=AC_PAY.d, today=d.today, q=AC_PAY.q.toLowerCase(), R=AC_PAY.rec||'';
+    var base=d.bills.filter(function(x){ if(AC_PAY.org!=='all'&&x.region!==AC_PAY.org)return false; if(AC_PAY.scope==='sup'&&!x.supplier)return false; return true; });
+    var rc={writeoff:0,partpaid:0,unpaid:0,mismatch:0,nothz:0,done:0}, woTot={};
+    base.forEach(function(x){ var age=acAge(x.due_date,today), r=acPayRec(x,age), z=acPayHz(x); x._rec=r; x._hz=z; if(r.k)rc[r.k]++; if(r.k==='writeoff')woTot[x.currency_code]=(woTot[x.currency_code]||0)+x.amount_due; if(age>0&&z.k)rc[z.k]++; });
+    var bills=base.filter(function(x){ var age=acAge(x.due_date,today); if(AC_PAY.due==='over'&&age<=0)return false; if(AC_PAY.due==='30'&&age<=30)return false;
+      if(R&&!(x._rec.k===R||(age>0&&x._hz.k===R)))return false;
       if(q&&(x.contact_name+' '+(x.supplier||'')+' '+(x.invoice_number||'')+' '+(x.reference||'')+' '+x.pos.join(' ')).toLowerCase().indexOf(q)<0)return false; return true; });
     var groups={}, tot={};
-    bills.forEach(function(x){ var k=x.region+'|'+x.contact_name+'|'+x.currency_code; var g=groups[k]||(groups[k]={k:k,region:x.region,contact:x.contact_name,supplier:x.supplier,ccy:x.currency_code,bills:[],b:[0,0,0,0,0],due:0,pos:{},next:null,maxAge:-1e9});
-      var age=acAge(x.due_date,today); g.bills.push(x); g.b[acBucket(age)]+=x.amount_due; g.due+=x.amount_due; x.pos.forEach(function(p){g.pos[p]=1;}); if(age>g.maxAge)g.maxAge=age; if(x.due_date&&age<=0&&(!g.next||x.due_date<g.next))g.next=x.due_date;
+    bills.forEach(function(x){ var k=x.region+'|'+x.contact_name+'|'+x.currency_code; var g=groups[k]||(groups[k]={k:k,region:x.region,contact:x.contact_name,supplier:x.supplier,ccy:x.currency_code,bills:[],over:0,due:0,pos:{},next:null,maxAge:-1e9});
+      var age=acAge(x.due_date,today); g.bills.push(x); if(age>0)g.over+=x.amount_due; g.due+=x.amount_due; x.pos.forEach(function(p){g.pos[p]=1;}); if(age>g.maxAge)g.maxAge=age; if(x.due_date&&age<=0&&(!g.next||x.due_date<g.next))g.next=x.due_date;
       var t=tot[x.currency_code]||(tot[x.currency_code]={due:0,over:0,over30:0,n:0}); t.due+=x.amount_due; t.n++; if(age>0)t.over+=x.amount_due; if(age>30)t.over30+=x.amount_due; });
-    var G=Object.keys(groups).map(function(k){return groups[k];}).sort(function(a,c){ return (c.b[4]+c.b[3]+c.b[2]+c.b[1])-(a.b[4]+a.b[3]+a.b[2]+a.b[1]) || c.due-a.due; });
+    var G=Object.keys(groups).map(function(k){return groups[k];}).sort(function(a,c){ return c.over-a.over || c.due-a.due; });
     function pill(grp,val,lab){ return '<span class="pill'+(AC_PAY[grp]===val?' active':'')+'" data-g="'+grp+'" data-v="'+val+'">'+lab+'</span>'; }
     var cards=Object.keys(tot).sort().map(function(c){ var t=tot[c]; return '<div class="ac-card"><div class="k">Due · '+esc(c)+'</div><div class="v">'+acMoney(t.due,c)+'</div><div class="tiny mut">'+t.n+' bills · <span style="color:'+(t.over?'var(--neg)':'inherit')+'">'+acMoney(t.over,c)+' overdue</span> · '+acMoney(t.over30,c)+' over 30 d</div></div>'; }).join('');
+    var chip=function(k,l,n,sub){ return '<span class="pill'+(R===k?' active':'')+'" data-rec="'+k+'" title="Show only these bills">'+esc(l)+' ('+n+')'+(sub?' <span class="mut">'+sub+'</span>':'')+'</span>'; };
+    var recBar='<div class="annot" style="margin:8px 0 10px"><b>Recommendations</b> <span class="tiny mut">(overdue supplier bills; click to show only those)</span><div class="bar" style="margin:6px 0 0;flex-wrap:wrap">'
+      +chip('writeoff','Write off small under-payments (under '+(d.writeoff_max||200)+')',rc.writeoff,Object.keys(woTot).map(function(c){ return acMoney(woTot[c],c); }).join(' + '))+chip('partpaid','Part-paid, larger balance',rc.partpaid)+chip('unpaid','Unpaid and overdue',rc.unpaid)
+      +chip('mismatch','Differs from HORIZON',rc.mismatch)+chip('nothz','Not in HORIZON or not linked',rc.nothz)+(rc.done?chip('done','Written off',rc.done):'')+(R?'<span class="save-btn light" data-rec="">Show all</span>':'')+'</div></div>';
     var cell=function(v,ccy,red){ return '<td class="l"'+(v&&red?' style="color:var(--neg);font-weight:600"':'')+'>'+(v?acMoney(v,ccy):'<span class="mut">·</span>')+'</td>'; };
-    var rows=G.map(function(g){ var op=!!AC_PAY.open[g.k], np=Object.keys(g.pos).length;
+    var rows=G.map(function(g){ var op=AC_PAY.open[g.k]!==false, np=Object.keys(g.pos).length;
       var h='<tr class="ac-g" data-k="'+esc(g.k)+'" style="cursor:pointer"><td class="l"><b>'+(op?'▾ ':'▸ ')+esc(g.contact||'(no contact)')+'</b></td><td class="l">'+(g.supplier?'<span class="pill" style="cursor:default">Supplier'+(np?' · '+np+' PO'+(np>1?'s':''):'')+'</span>':'<span class="mut">Other</span>')+'</td><td class="l">'+g.region.toUpperCase()+'</td><td class="l">'+g.bills.length+'</td>'
-        +cell(g.b[0],g.ccy)+cell(g.b[1],g.ccy,1)+cell(g.b[2],g.ccy,1)+cell(g.b[3],g.ccy,1)+cell(g.b[4],g.ccy,1)+'<td class="l"><b>'+acMoney(g.due,g.ccy)+'</b></td><td class="l">'+(g.maxAge>0?'<span style="color:var(--neg)">'+g.maxAge+' d overdue</span>':(g.next?hzTrkDate(g.next):''))+'</td></tr>';
-      if(op)g.bills.forEach(function(x){ var age=acAge(x.due_date,today);
-        h+='<tr class="ac-sub"><td class="l" style="padding-left:24px">'+esc(x.invoice_number||'(no number)')+(x.reference?' <span class="mut">· '+esc(x.reference)+'</span>':'')+'</td><td class="l">'+(x.pos.length?x.pos.map(function(p){ return '<a href="#/supply/purchase-orders/'+encodeURIComponent(p)+'">'+esc(p)+'</a>'; }).join(', '):'')+'</td><td class="l">'+(x.status==='SUBMITTED'?'<span class="mut">Awaiting approval</span>':'Approved')+(x.auto_bill?' <span class="pill" style="cursor:default" title="Created by HORIZON from an accounts@ receipt; paid by card or direct debit, reconciled with Match (never in a payment run)">Auto bill</span>':'')+'</td><td class="l">'+hzTrkDate(x.invoice_date)+'</td>'
-          +'<td class="l" colspan="4">due '+hzTrkDate(x.due_date)+' · '+(age>0?'<span style="color:var(--neg);font-weight:600">'+age+' d overdue</span>':(age===0?'due today':'in '+(-age)+' d'))+' · total '+acMoney(x.total,x.currency_code)+'</td><td class="l"></td><td class="l"><b>'+acMoney(x.amount_due,x.currency_code)+'</b></td><td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'; });
+        +cell(g.over,g.ccy,1)+'<td class="l"><b>'+acMoney(g.due,g.ccy)+'</b></td><td class="l">'+(g.maxAge>0?'<span style="color:var(--neg)">'+g.maxAge+' d overdue</span>':(g.next?hzTrkDate(g.next):''))+'</td><td class="l"></td></tr>';
+      if(op)g.bills.forEach(function(x){ var age=acAge(x.due_date,today), i=d.bills.indexOf(x), rr=x._rec, z=x._hz;
+        var act=x.credit_note?(x.credit_note.url?'<a href="'+esc(x.credit_note.url)+'" target="_blank" rel="noopener">Credit note ↗</a>':''):(x.writeoff?'<span class="save-btn" data-cn="'+i+'">Create supplier credit note</span>':'');
+        h+='<tr class="ac-sub"><td class="l" style="padding-left:24px">'+esc(x.invoice_number||'(no number)')+(x.reference?' <span class="mut">· '+esc(x.reference)+'</span>':'')+'<div class="tiny mut">'+(x.status==='SUBMITTED'?'Awaiting approval':'Approved')+' · '+hzTrkDate(x.invoice_date)+(x.auto_bill?' · <span class="pill" style="cursor:default" title="Created by HORIZON from an accounts@ receipt; paid by card or direct debit, reconciled with Match (never in a payment run)">Auto bill</span>':'')+'</div></td>'
+          +'<td class="l">'+(x.pos.length?x.pos.map(function(p){ return '<a href="#/supply/purchase-orders/'+encodeURIComponent(p)+'">'+esc(p)+'</a>'; }).join(', '):'')+'</td>'
+          +'<td class="l" colspan="2" style="white-space:normal">due '+hzTrkDate(x.due_date)+' · '+(age>0?'<span style="color:var(--neg);font-weight:600">'+age+' d overdue</span>':(age===0?'due today':'in '+(-age)+' d'))+'<div class="tiny mut">total '+acMoney(x.total,x.currency_code)+(x.amount_paid>0.004?' · paid '+acMoney(x.amount_paid,x.currency_code):'')+'</div></td>'
+          +'<td class="l"><b>'+acMoney(x.amount_due,x.currency_code)+'</b></td>'
+          +'<td class="l" style="max-width:300px;white-space:normal">'+(z.h||'')+'</td>'
+          +'<td class="l" style="max-width:280px;white-space:normal">'+(rr.t?'<div class="tiny"'+(rr.k==='writeoff'?' style="font-weight:600"':'')+'>'+esc(rr.t)+'</div>':'')+(act?'<div style="margin-top:4px">'+act+'</div>':'')+'</td>'
+          +'<td class="l"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'; });
       return h; }).join('');
     var sy=d.synced||{};
     b.innerHTML='<div class="bar">'+pill('org','all','Both')+pill('org','uk','UK')+pill('org','au','AU')+'<span style="width:10px"></span>'+pill('scope','sup','Suppliers')+pill('scope','all','All contacts')+'<span style="width:10px"></span>'+pill('due','all','All')+pill('due','over','Overdue')+pill('due','30','Over 30 d')
       +'<input class="fci" id="ac-pq" placeholder="Search contact, bill, PO" style="width:220px" value="'+esc(AC_PAY.q)+'"><span class="save-btn light" id="ac-prf">Refresh</span><span class="tiny mut" style="margin-left:auto">Xero bills synced: UK '+esc(acSynced(sy.uk))+' · AU '+esc(acSynced(sy.au))+'</span></div>'
-      +'<div class="ac-cards">'+(cards||'<div class="mut">Nothing due.</div>')+'</div>'
-      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Contact</th><th>Type</th><th>Org</th><th>Bills</th><th>Not due</th><th>1-30 d</th><th>31-60 d</th><th>61-90 d</th><th>90+ d</th><th>Total due</th><th>Oldest / next due</th></tr></thead><tbody>'
-      +(rows||'<tr><td colspan="11" class="l mut">No open bills match.</td></tr>')+'</tbody></table></div>'
-      +'<div class="tiny mut" style="margin-top:8px">Open Xero bills (approved or awaiting approval) with an amount due, aged by due date, in bill currency. Supplier = linked to a HORIZON PO, or a Xero contact named "&lt;name&gt; - &lt;supplier code&gt;". Click a contact for its bills.</div>';
+      +'<div class="ac-cards">'+(cards||'<div class="mut">Nothing due.</div>')+'</div>'+recBar
+      +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Contact / bill</th><th>Type / PO</th><th>Org</th><th>Bills</th><th>Overdue / due</th><th>Total due / HORIZON</th><th>Oldest / recommendation</th><th></th></tr></thead><tbody>'
+      +(rows||'<tr><td colspan="8" class="l mut">No open bills match.</td></tr>')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:8px">Open Xero bills (approved or awaiting approval) with an amount due, in bill currency. Supplier = linked to a HORIZON PO, or a Xero contact named "&lt;name&gt; - &lt;supplier code&gt;". HORIZON check: the PO numbers on the bill (linked, or found in its number / reference) compared with HORIZON\'s PO value and balance due date. Click a contact to fold it.</div>';
     b.querySelectorAll('.pill[data-g]').forEach(function(p){ p.onclick=function(){ AC_PAY[p.dataset.g]=p.dataset.v; acRenderPayables(b); }; });
-    b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_PAY.open[k]=!AC_PAY.open[k]; acRenderPayables(b); }; });
+    b.querySelectorAll('[data-rec]').forEach(function(p){ p.onclick=function(){ AC_PAY.rec=(AC_PAY.rec===p.dataset.rec?'':p.dataset.rec); acRenderPayables(b); }; });
+    b.querySelectorAll('tr.ac-g').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.k; AC_PAY.open[k]=(AC_PAY.open[k]===false); acRenderPayables(b); }; });
+    b.querySelectorAll('[data-cn]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); var bill=AC_PAY.d.bills[+x.dataset.cn]; if(bill)acCnOpen(bill); }; });
     var qi=document.getElementById('ac-pq'); qi.oninput=function(){ AC_PAY.q=qi.value; clearTimeout(AC_PAY._t); AC_PAY._t=setTimeout(function(){ acRenderPayables(b); var n=document.getElementById('ac-pq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     document.getElementById('ac-prf').onclick=function(){ AC_PAY.d=null; acRenderPayables(b); };
   }
+  // Credit note drawer (shares #acdrawer with the Reconcile review).
+  var AC_CN=null;
+  function acCnOpen(bill){ AC_DR={r:null}; AC_CN={bill:bill,p:null,err:'',confirm:false,busy:false,done:null,reason:''}; var bg=acDrEnsure(); bg.classList.add('show'); setTimeout(function(){ bg.classList.add('open'); },10);
+    acXaccLoad(bill.region); acTaxLoad(bill.region); acCnPaint(); var mine=AC_CN;
+    fetch('/api/accounts/payables/credit-note/preview?org='+bill.region+'&invoice_id='+encodeURIComponent(bill.invoice_id)).then(acDrJson).then(function(j){ if(AC_CN!==mine)return; AC_CN.p=j; AC_CN.f={account_code:j.account_code||'',tax_type:j.tax_type||'',reference:j.reference||''}; acCnPaint(); })
+      .catch(function(e){ if(AC_CN!==mine)return; AC_CN.err=e.message; acCnPaint(); }); }
+  function acCnPaint(){ var el=document.getElementById('acdrawer'); if(!el||!AC_CN)return; var c=AC_CN, x=c.bill, p=c.p, f=c.f||{}, ccy=x.currency_code;
+    var fld=function(lab,html){ return '<label style="display:grid;gap:3px;font-size:12px"><span class="mut">'+lab+'</span>'+html+'</label>'; }, dis=c.done||c.busy?' disabled':'';
+    var body='';
+    if(c.err&&!p)body='<div class="annot" style="border-color:var(--neg)">'+esc(c.err)+'</div>';
+    else if(!p)body='<div class="count">Reading the bill in Xero…</div>';
+    else if(c.done)body='<div class="annot" style="border-color:var(--pos)"><b>Credit note '+esc(c.done.credit_note_number||'')+' created</b> for '+esc(acMoney(c.done.amount,c.done.currency))+(c.done.allocated?' and allocated to '+esc(x.invoice_number||'the bill')+': the bill now shows as paid.':'. <span style="color:var(--neg)">It was not allocated to the bill ('+esc(c.done.allocation_error||'')+'): allocate it in Xero.</span>')+' <a href="'+esc(c.done.url)+'" target="_blank" rel="noopener">Open the credit note ↗</a></div>';
+    else { body='<div class="tw" style="margin-bottom:12px"><table style="width:100%"><tbody>'
+        +'<tr><td class="l mut">Supplier</td><td class="l"><b>'+esc(p.contact||x.contact_name)+'</b></td></tr><tr><td class="l mut">Bill</td><td class="l">'+esc(p.number||x.invoice_number||'')+' · <a href="'+esc(x.url)+'" target="_blank" rel="noopener">Xero ↗</a></td></tr>'
+        +'<tr><td class="l mut">Bill total</td><td class="l">'+acMoney(p.total,p.currency)+'</td></tr><tr><td class="l mut">Paid</td><td class="l">'+acMoney(p.paid,p.currency)+'</td></tr><tr><td class="l mut">Still due (written off)</td><td class="l"><b>'+acMoney(p.due,p.currency)+'</b></td></tr>'
+        +(x.hz&&(x.hz.checks||[]).length?'<tr><td class="l mut">HORIZON</td><td class="l">'+x.hz.checks.map(function(t){ return '<div class="tiny">'+esc(t)+'</div>'; }).join('')+'</td></tr>':'')+'</tbody></table></div>'
+        +(p.why?'<div class="annot" style="border-color:var(--neg);margin-bottom:10px">'+esc(p.why)+'</div>':'')
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+fld('Account (defaults to the bill\'s main line)',acComboHtml('account',x.region,f.account_code,acAcctLabel(x.region,f.account_code),'accn-acct',dis))
+        +fld('Tax (as on the bill)',p.line_types==='NoTax'?'<div style="padding:5px 0">No tax (bill has no tax)</div>':'<select class="acdr-in" id="accn-tax"'+dis+'>'+acTaxOpts(x.region,f.tax_type||'')+'</select>')
+        +fld('Reference','<input class="acdr-in" id="accn-ref" value="'+esc(f.reference||'')+'"'+dis+'>')+fld('Reason (on the credit note line, optional)','<input class="acdr-in" id="accn-why" value="'+esc(c.reason||'')+'" placeholder="e.g. bank charges deducted by the bank"'+dis+'>')+'</div>'
+        +'<div class="tiny mut" style="margin-top:8px">Creates an approved supplier credit note in Xero for '+acMoney(p.due,p.currency)+', dated today, and allocates it to this bill so it shows as paid. Nothing is paid out.</div>'
+        +(c.err?'<div class="count" style="color:var(--neg);margin-top:8px">'+esc(c.err)+'</div>':''); }
+    el.innerHTML='<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><div style="font-weight:700;font-size:15px">Supplier credit note · '+esc(x.contact_name)+'</div><div class="tiny mut">'+esc(x.region.toUpperCase()+' · '+(x.invoice_number||'')+' · write off '+acMoney(x.amount_due,ccy))+'</div></div><span class="save-btn light" id="accn-x">✕</span></div>'
+      +'<div style="flex:1;overflow:auto;padding:14px 18px">'+body+'</div>'
+      +'<div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center">'+(c.done?'<span class="save-btn" id="accn-x2">Close</span>':(p&&!p.why?(c.confirm?'<span class="save-btn" id="accn-go" style="background:var(--neg);border-color:var(--neg)">'+(c.busy?'Creating…':'Confirm: create the credit note in Xero')+'</span><span class="save-btn light" id="accn-no">Cancel</span>':'<span class="save-btn" id="accn-push">Create supplier credit note</span>'):'<span class="save-btn light" id="accn-x2">Close</span>'))+'</div>';
+    var g=function(id){ return document.getElementById(id); }; acComboWire(el);
+    var keep=function(){ var a=g('accn-acct'), t=g('accn-tax'), rf=g('accn-ref'), w=g('accn-why'); if(a){ var v=acComboVal(a); c.f.account_code=v.ok?v.v:''; } if(t)c.f.tax_type=t.value; if(rf)c.f.reference=rf.value.trim(); if(w)c.reason=w.value; };
+    [g('accn-x'),g('accn-x2')].forEach(function(z){ if(z)z.onclick=function(){ AC_CN=null; acDrClose(); }; });
+    var pu=g('accn-push'); if(pu)pu.onclick=function(){ keep(); if(!c.f.account_code){ window.hzCopiedTip&&window.hzCopiedTip('Pick the account from the Xero list',pu); return; } c.confirm=true; c.err=''; acCnPaint(); };
+    var no=g('accn-no'); if(no)no.onclick=function(){ c.confirm=false; acCnPaint(); };
+    var go=g('accn-go'); if(go)go.onclick=function(){ if(c.busy)return; c.busy=true; acCnPaint();
+      fetch('/api/accounts/payables/credit-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({org:x.region,invoice_id:x.invoice_id,account_code:c.f.account_code,tax_type:c.f.tax_type,reference:c.f.reference,reason:c.reason})}).then(acDrJson)
+        .then(function(j){ if(AC_CN!==c)return; c.busy=false; c.confirm=false; c.done=j; x.credit_note={number:j.credit_note_number,url:j.url}; x.writeoff=false; if(j.allocated){ x.amount_due=0; } acCnPaint(); if(ACCOUNTS_SUB==='payables'){ var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acRenderPayables(document.getElementById('accounts-body')); sc.scrollTop=y; } })
+        .catch(function(e){ if(AC_CN!==c)return; c.busy=false; c.confirm=false; c.err=e.message; acCnPaint(); }); };
+    ['accn-acct','accn-tax','accn-ref','accn-why'].forEach(function(id){ var z=g(id); if(z)z.addEventListener('change',keep); }); }
+
   // ── CLIENTS & AGENTS ──
   function cpRenderClients(b){ var q='', typeF='';
     var _cj=cpGet('/api/client/clients');   // v28.086: fire the clients fetch immediately, in parallel with lookups (was serial → ~1.7s cold on click)
