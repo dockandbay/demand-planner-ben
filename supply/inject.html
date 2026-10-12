@@ -2237,7 +2237,7 @@
         ?('<button class="lnk-btn poln-xsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Xero bills by number, reference or supplier">'+((linked||voided)?'✎ change bill':'🔍 link bill')+'</button>'
           +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="xero" style="color:var(--neg);white-space:nowrap" title="remove the manual link (the auto-resolver can find it again)">unlink</button>':''))
         :(s.system==='fulfil'   // v28.199 (Ben): Fulfil uses the read-only search picker (the link becomes the push target)
-          ?('<button class="lnk-btn poln-fsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Fulfil POs by number, reference, supplier or sales order">'+(linked?'✎ change PO':'🔍 link Fulfil PO')+'</button>'
+          ?('<button class="lnk-btn poln-fsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Fulfil POs by number, reference, supplier or sales order">'+(linked?'✎ change PO':'🔍 link Fulfil PO')+'</button>'+((!linked&&poActionsAll(poBy[po]||{}).indexOf('fulfil_link')>=0)?' <span class="ex-badge" title="1 open action">1</span> '+actMark(po,'fulfil_link'):'')
             +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="fulfil" style="color:var(--neg);white-space:nowrap" title="remove the manual Fulfil link">unlink</button>':''))
           :('<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">'+(linked?'✎ change':'＋ add link')+'</button>'));
       return '<tr style="border-top:1px solid #eef2f7">'
@@ -2259,6 +2259,7 @@
       .catch(function(e){ el._loading=0; el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Failed to load linkages: '+esc(e&&e.message||e)+' <button class="lnk-btn poln-retry" style="color:var(--blue)">retry</button></div>'; var rt=el.querySelector('.poln-retry'); if(rt)rt.onclick=function(){ el._loaded=0; loadPoLinks(el,false); }; });
   }
   function wirePoLinks(el){
+    try{ bindActMark(el); }catch(e){}   // v28.302: the Link Fulfil PO Ⓐ / SNOOZE marker renders after the drawer was bound
     el.querySelectorAll('.poln-refresh').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='↻ Finding…'; loadPoLinks(el,true); }; });
     el.querySelectorAll('.poln-xsearch').forEach(function(b){ b.onclick=function(){ xeroBillPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); }); }; });
     el.querySelectorAll('.poln-fsearch').forEach(function(b){ b.onclick=function(){ fulfilPoPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); try{fillErpFulfil();}catch(e){} }); }; });   // v28.199 (Ben)
@@ -2957,6 +2958,20 @@
     return '<span class="act-wrap" data-mk="samp|'+esc(ref)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
   var ACT_HELP={
+    // v28.302 (Ben): explainers for every drawer action, so each tab's Open actions strip says what to do
+    sup_invoice_pending:'Supplier invoice awaiting approval: the supplier submitted a final invoice in the portal. Approve or reject it in the PAYMENTS tab.',
+    sup_invoice_diff:'Supplier invoice differs from the final invoice: the approved supplier invoice amount does not match the final invoice on this PO. Correct the final invoice or ask the supplier for a corrected invoice.',
+    no_freight_rate:'No freight rate: there is no sea freight rate (or Flexport quote) for this destination, so landed cost cannot be estimated. Add a rate in SUPPLY > Config or assign a shipment.',
+    sup_completion_pending:'Supplier completion date awaiting approval: the supplier proposed a new production completion date in the portal. Approve or reject it in the DATES tab.',
+    prod_start_status:'Production start status: this production needs supplier confirmation and the start is missing or late. Ask the supplier to confirm, or update the start date in the DATES tab.',
+    prod_end_status:'Production end status: this production needs supplier confirmation and the end is missing or late. Ask the supplier to confirm, or update the end date in the DATES tab.',
+    timeline_unread:'Unread supplier messages: the supplier posted on this PO and nobody has read it. Open the TIMELINE tab; reading marks it read.',
+    orderplan_unconfirmed:'Unconfirmed order-plan changes: lines changed by the supplier or the ERP sync are waiting for review. Confirm or revert them in the ORDER PLAN tab.',
+    op_partials:'Partial cartons to approve: one or more order-plan lines are not a whole number of cartons. Approve the partial carton or round the quantity in the ORDER PLAN tab.',
+    op_suprisk:'Supplier risk to approve: a line is with a supplier flagged as a risk. Approve it in the ORDER PLAN tab (or move the line).',
+    op_disc:'Discontinued arrival to approve: a discontinued SKU is due to arrive on this PO. Approve the arrival or remove the line in the ORDER PLAN tab.',
+    op_country:'Country risk to approve: a line ships to a country flagged as a risk for this SKU. Approve it in the ORDER PLAN tab (or change the destination).',
+    docs_awaiting:'Supplier documents awaiting approval: the supplier uploaded documents in the portal. Approve or reject them under Documents on this tab.',
     missing_prod_start:'Production start date missing — mandatory on an active PO (it drives ship, delivery, cashflow and Flexport dates). Set it in the Start cell.',
     missing_prod_end:'Production end date missing — mandatory on an active PO (it drives ship, delivery, cashflow and Flexport dates). Set it in the End cell.',
     payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
@@ -4234,6 +4249,9 @@
   // d (po-detail) is optional; the supplier-invoice discrepancy only resolves once it's loaded.
   function poExceptions(r,d){ if(!r)return {pay:[],dates:[],client:[],landed:[],timeline:[],oplan:[],all:[]};
     var n=function(v){return Number(v)||0;};
+    // v28.302 (Ben): every drawer action carries a code (kc: label -> code) so each tab can show it with its explainer and snooze;
+    // P() skips an item whose code is snoozed (unless show-snoozed), like the coded PO actions.
+    var kc={}, P=function(arr,code,lbl){ if(!_poShowSnoozed && poActSnoozed(r.po,code))return; if(arr.indexOf(lbl)<0)arr.push(lbl); kc[lbl]=code; };
     var today=new Date().toISOString().slice(0,10);
     var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount);
     var totalDue=Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100;
@@ -4247,32 +4265,32 @@
     // Overdue payments surface even on COMPLETE POs (an owed payment shouldn't hide) — but only if due on/after
     // PDUE_MIN_DUE (old payments excluded). Non-payment freight/date actions keep the `open` (not-complete) gate.
     if(!_payOverSnz){
-      if(totalDue>0.02 && r.start_due && r.start_due>=PDUE_MIN_DUE && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
-      if(r.is_final && totalDue>0.02 && r.completion_due && r.completion_due>=PDUE_MIN_DUE && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');   // completion ACTION only when a final invoice amount is showing (Ben) — the payment can still appear in cashflow by production date, just not as an action
-      if(r.balance_due && r.balance_due>=PDUE_MIN_DUE && r.balance_due<today && totalDue>0.02 && n(r.balance_owing)>0.009) pay.push('Balance overdue ('+fd(r.balance_due)+')');   // only if the BALANCE milestone actually owes something (was firing on $0 balances when the completion drove totalDue>0)
+      if(totalDue>0.02 && r.start_due && r.start_due>=PDUE_MIN_DUE && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) P(pay,'payment_overdue','Start deposit overdue ('+fd(r.start_due)+')');
+      if(r.is_final && totalDue>0.02 && r.completion_due && r.completion_due>=PDUE_MIN_DUE && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) P(pay,'payment_overdue','Completion payment overdue ('+fd(r.completion_due)+')');   // completion ACTION only when a final invoice amount is showing (Ben) — the payment can still appear in cashflow by production date, just not as an action
+      if(r.balance_due && r.balance_due>=PDUE_MIN_DUE && r.balance_due<today && totalDue>0.02 && n(r.balance_owing)>0.009) P(pay,'payment_overdue','Balance overdue ('+fd(r.balance_due)+')');   // only if the BALANCE milestone actually owes something (was firing on $0 balances when the completion drove totalDue>0)
     }
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)
-    if(r.sup_invoice_pending!=null) pay.push('Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');
+    if(r.sup_invoice_pending!=null) P(pay,'sup_invoice_pending','Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');
     if(d&&d.sup_invoice&&d.sup_invoice.status==='applied'){ var sv=Number(d.sup_invoice.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
-      if(fv!=null&&Math.abs(sv-fv)>0.01) pay.push('Supplier invoice '+money(sv)+' differs from final '+money(fv)); }
+      if(fv!=null&&Math.abs(sv-fv)>0.01) P(pay,'sup_invoice_diff','Supplier invoice '+money(sv)+' differs from final '+money(fv)); }
     // FOB = no import-warehouse destination AND no shipment yet (pickup; once a shipment is assigned it takes priority).
     var isFOB=isFOBdest(r);
     var frEst; if(r.flex_quote!=null) frEst=Number(r.flex_quote); else { var se=seaEst(r.sea_tiers,r.pallets); frEst=se?se.cost:null; }
-    var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) landed.push('No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
-    var dates=[]; if(r.sup_completion_pending && String(r.sup_completion_pending).slice(0,10)!==String(r.prod_end||'').slice(0,10)) dates.push('Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');   // v28.187 (Ben): skipped when it equals the current end date
+    var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) P(landed,'no_freight_rate','No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
+    var dates=[]; if(r.sup_completion_pending && String(r.sup_completion_pending).slice(0,10)!==String(r.prod_end||'').slice(0,10)) P(dates,'sup_completion_pending','Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');   // v28.187 (Ben): skipped when it equals the current end date
     // ERP delivery-date drift (materiality-thresholded server-side) → DATES sub-tab count comes from the
     // snooze-aware mirror loop below (erp_date is now a PO_ACTCOND action mapped to the dates tab).
     // only flag a missing/late production status when this production actually requires supplier confirmation
     // Count the production-start and production-end exceptions SEPARATELY — the DATES panel shows a ⚠ on each row,
     // so collapsing them (old prodStatusException = start||end) undercounted the tab when both fired.
     if(r.require_confirmation){ var _pss=prodStatusStart(r.status, r.prod_start, today), _pse=prodStatusEnd(r.status, r.prod_end, today);
-      if(_pss) dates.push('Production start: '+_pss);
-      if(_pse) dates.push('Production end: '+_pse); }
-    var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
-    var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
+      if(_pss) P(dates,'prod_start_status','Production start: '+_pss);
+      if(_pse) P(dates,'prod_end_status','Production end: '+_pse); }
+    var timeline=[]; if(Number(r.unread_notes)>0) P(timeline,'timeline_unread',r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
+    var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) P(oplan,'orderplan_unconfirmed',r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     // unapproved order-plan exceptions for this PO (from /api/supply/order-plan-exceptions) → ORDER PLAN sub-tab badge
     var _oe=(_opExc&&_opExc.byPo)?_opExc.byPo[r.po]:null;
-    if(_oe){ if(_oe.partials)oplan.push('Unapproved partial carton(s)'); if(_oe.suprisk)oplan.push('Supplier risk to approve'); if(_oe.disc)oplan.push('Discontinued arrival to approve'); if(_oe.country)oplan.push('Country risk to approve'); }
+    if(_oe){ if(_oe.partials)P(oplan,'op_partials','Unapproved partial carton(s)'); if(_oe.suprisk)P(oplan,'op_suprisk','Supplier risk to approve'); if(_oe.disc)P(oplan,'op_disc','Discontinued arrival to approve'); if(_oe.country)P(oplan,'op_country','Country risk to approve'); }
     // Pre-shipment docs (SHIPMENTS tab): overdue once production has ended (prod_end = override ▸ computed) and
     // the required branch document is missing. Rule 1 (AU Coghlans): ASN pallet labels.
     // Only PRODUCTION / ready-to-ship orders raise a pre-shipment-docs action; a "not required" tick suppresses it.
@@ -4281,9 +4299,9 @@
     var _preThresh=new Date(Date.now()+7*86400000).toISOString().slice(0,10);   // preship due 1 week before production end (Ben)
     if(_preshipActive && r.prod_end && r.prod_end<_preThresh){
       var _br=r.branch||'', _dc=String(r.doc_cats||''), _late=(r.prod_end<today?' overdue — production ended '+fd(r.prod_end):' due soon — production ends '+fd(r.prod_end));
-      if(/coghlans/i.test(_br)){ if(!String(r.asn_numbers||'').trim()) ship.push('ASN pallet labels'+_late+', no ASN numbers entered'); }
-      else if(/fba|awd/i.test(_br)){ if(_dc.indexOf('carton_barcode')<0) ship.push('Carton barcodes'+_late+', not uploaded'); if(_dc.indexOf('pallet_barcode')<0) ship.push('Pallet barcodes'+_late+', not uploaded'); }
-      else if(/ifulfillment/i.test(_br)){ if(_dc.indexOf('idn_pallet_label')<0) ship.push('IDN pallet labels'+_late+', not uploaded'); }
+      if(/coghlans/i.test(_br)){ if(!String(r.asn_numbers||'').trim()) P(ship,'preship','ASN pallet labels'+_late+', no ASN numbers entered'); }
+      else if(/fba|awd/i.test(_br)){ if(_dc.indexOf('carton_barcode')<0) P(ship,'preship','Carton barcodes'+_late+', not uploaded'); if(_dc.indexOf('pallet_barcode')<0) P(ship,'preship','Pallet barcodes'+_late+', not uploaded'); }
+      else if(/ifulfillment/i.test(_br)){ if(_dc.indexOf('idn_pallet_label')<0) P(ship,'preship','IDN pallet labels'+_late+', not uploaded'); }
     }
     var client=[], master=[];
     // Mirror the red-badge action conditions onto their detail sub-tabs (snooze-aware) so the tabs light up
@@ -4292,8 +4310,8 @@
     poActionsAll(r).forEach(function(k){ if(_mirrorSkip[k])return; if(!_poShowSnoozed && poActSnoozed(r.po,k))return;
       var cat=PO_ACT_TAB[k], lbl=(k==='crossdock_needed'?xdockMsg(r):(PO_ACT_LABEL[k]||k));   // v28.187: crossdock line names the shipment / 3PL / client
       var arr=(cat==='pay'?pay:cat==='dates'?dates:cat==='shipments'?ship:cat==='client'?client:cat==='masterdata'?master:cat==='oplan'?oplan:null);
-      if(arr && arr.indexOf(lbl)<0) arr.push(lbl); });
-    return { pay:pay, dates:dates, client:client, master:master, landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(client).concat(master).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
+      if(arr){ if(arr.indexOf(lbl)<0)arr.push(lbl); kc[lbl]=k; } });
+    return { pay:pay, dates:dates, client:client, master:master, landed:landed, timeline:timeline, oplan:oplan, ship:ship, codes:kc, all:pay.concat(dates).concat(client).concat(master).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
     var bal1=Number(r.balance_1_amount), owe=Number(r.balance_owing)||0;
@@ -5409,6 +5427,18 @@
     var masterH2='<div style="margin:2px 0 14px"><button class="save-btn po-pdf-dl" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue);border:1px solid #93c5fd;font-weight:700;font-size:13px;padding:6px 14px">⤓ Download PO details (PDF)</button> <span class="mut tiny">all PO details — header, client/FBA, packing &amp; labelling, order plan (SUG-0034)</span></div>'
       +masterH+_sep+linkedRecordsPanel(po)+_sep+docsH;               // MASTER DATA + Linked records + documents + full-PO PDF download (SUG-0034)
     var _docsAwaiting=((d&&d.all_docs)||[]).filter(function(x){return (x.approval_status||'')==='submitted';}).length;   // supplier docs awaiting approval → flag the tab
+    if(_docsAwaiting&&!_poShowSnoozed&&poActSnoozed(po,'docs_awaiting'))_docsAwaiting=0;   // v28.302: snoozable like every other action
+    // v28.302 (Ben): "all actions must have this": every tab with open actions starts with an Open actions (n) strip, one row per action
+    // with its explainer and the shared Ⓐ / SNOOZE marker (same snooze store and keys as the grid and the PO badge).
+    var _EX=poExceptions(poBy[po]||{},d), _KC=_EX.codes||{};
+    var _strip=function(lbls){ lbls=lbls||[]; if(!lbls.length)return '';
+      return '<div class="po-tab-acts" style="margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);border-left:3px solid var(--neg);border-radius:8px;background:var(--hover);text-align:left">'
+        +'<div style="font-weight:700;font-size:12px;margin-bottom:4px">⚠ Open actions <span class="ex-badge">'+lbls.length+'</span></div>'
+        +lbls.map(function(l){ var c=_KC[l]||(l.indexOf('documents awaiting')>=0?'docs_awaiting':null); var help=(c&&ACT_HELP[c])||'';
+          return '<div style="padding:4px 0;border-top:1px solid var(--line)"><div style="font-size:12px;font-weight:600">'+esc(l)+(c?' '+actMark(po,c):'')+'</div>'+(help?'<div class="mut tiny" style="white-space:normal;max-width:900px">'+esc(help)+'</div>':'')+'</div>'; }).join('')+'</div>'; };
+    var _docsLbl=_docsAwaiting?[_docsAwaiting+' supplier document'+(_docsAwaiting>1?'s':'')+' awaiting approval']:[];
+    payH2=_strip(_EX.pay.concat(_EX.landed))+payH2; masterH2=_strip((_EX.master||[]).concat(_docsLbl))+masterH2;
+    p.dates=_strip(_EX.dates)+p.dates; p.client=_strip(_EX.client)+p.client; oplanH=_strip(_EX.oplan)+oplanH; shipH=_strip(_EX.ship)+shipH; timelineH=_strip(_EX.timeline)+timelineH;
     var tabs=[['pay','PAYMENTS',payH2,(p.ex.pay||0)+(p.ex.landed||0)],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['masterdata','MASTER DATA & DOCS',masterH2,(p.ex.master||0)+_docsAwaiting],['timeline','TIMELINE',timelineH,p.ex.timeline]];
     if(poBy[po]&&poBy[po].is_master){ tabs.push(['childpo','CHILD PO',childPoPanel(po,d),0]); }   // masters only — final tab after Timeline (no count badge)
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }

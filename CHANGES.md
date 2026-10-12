@@ -1,3 +1,13 @@
+## v28.302 (Ben, branch review-fixes-2026-10-05): every PO drawer action shown in its tab with explainer and snooze
+
+**Files:** `supply/inject.html`, `lib/ai-logic/actions.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben (PO-1881859): "there is 1 open action but not clear what it is. if it is link Fulfil PO it should have a (1) next to it and explainer of the action, with snooze etc. all actions must have this".
+- Every PO drawer tab with open actions now starts with **Open actions (n)**: one row per action, its explainer, and the Ⓐ / SNOOZE marker (1, 3, 7 days or indefinitely; same shared snooze store as the PO grid).
+- Actions that had no explainer or snooze now have both: supplier invoice awaiting approval / differs from final, no freight rate, supplier completion date awaiting approval, production start / end status, unread supplier messages, unconfirmed order-plan changes, partial cartons, supplier risk, discontinued arrival, country risk, supplier documents awaiting approval. Snoozing one drops it from its tab count.
+- **Link Fulfil PO**: a 1 badge and the Ⓐ / SNOOZE marker next to the 🔍 link Fulfil PO button in Master data > Linked records.
+- Verified on the sandbox (PO158): Master data shows Open actions 3 (Not confirmed by supplier, Deposit not assigned, Link Fulfil PO) with explainers and snooze; Payments 1, Client/FBA 1; tab counts unchanged.
+
 ## v28.301 (Ben, branch review-fixes-2026-10-05): Xero bill permissions for ACCOUNTS and CLIENT users
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.207
+verified_version: v28.302
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -270,6 +270,7 @@ verified_version: v28.207
   - Fulfil generates these POs from the sales order, so the guard refuses to push them until someone links the Fulfil PO (Master data > Linked records > Link Fulfil PO).
   - Not on complete or cancelled POs; child POs raise nothing. Clears by itself once linked.
   - Same SQL rule (FULFIL_LINK_NEEDED_SQL) in the PO grid, SUPPLY > Actions (type "Link Fulfil PO", priority, Client group) and the open-actions metric po_actions.
+- In the PO drawer (v28.302, Ben 13-Oct-26: "all actions must have this"): every tab with open actions starts with an Open actions (n) strip, one row per action with its explainer and the Ⓐ / SNOOZE marker. This covers the coded actions above and the drawer-only ones: supplier invoice awaiting approval or differing from the final, no freight rate, supplier completion date awaiting approval, production start / end status, unread supplier messages, unconfirmed order-plan changes, partial cartons / supplier risk / discontinued arrival / country risk to approve, supplier documents awaiting approval. Each is snoozable (same supply_action_state store, key poact|<po>|<code>) and a snoozed one drops from its tab count. Link Fulfil PO also shows a 1 badge and the marker next to its button in Linked records.
 (source: supply/inject.html :: PO_ACTCOND)
 
 ## ERP Compare (Fulfil only)
