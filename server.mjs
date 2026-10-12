@@ -18577,7 +18577,7 @@ async function computeOpenActions() {
         for (const p of _poAll) {
           if (!p.is_final) continue;   // milestones surface only once the final invoice amount is confirmed
           if (Number(p.completion_calc) > 0.009 && p.completion_due && _ov(Number(p.completion_assigned) > 0.009, p.completion_due)) payments_overdue++;
-          if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Number(p.balance_1_amount) > 0.009, p.balance_due)) payments_overdue++;
+          if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Math.round((Number(p.balance_owing) - (Number(p.balance_1_amount) || 0) - (Number(p.balance_2_amount) || 0)) * 100) / 100 <= 0.009, p.balance_due)) payments_overdue++;   // v28.294 (Ben): paid only when fully paid
         }
         for (const d of _deps) { if (String(d.status).toLowerCase() === 'closed') continue; if (_ov(!!d.date_paid, d.date_due)) payments_overdue++; }
       } catch (e) {}

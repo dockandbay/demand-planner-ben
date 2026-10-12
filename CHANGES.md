@@ -1,3 +1,11 @@
+## v28.294 (Ben, branch review-fixes-2026-10-05): Payments Due: a balance is paid only when fully paid
+
+**Files:** `supply/inject.html`, `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "fully paid is required, not just a balance payment. Any balance remaining should surface as a payment due." Before, any balance payment 1 amount marked the whole balance paid, so part-paid POs dropped off Payments Due (on live: PO-54USXR1-FEB USD 60,936.38, PO-55EULX2 18,948.00, PO-56UKLX3-AIR 737.86, PO-57UKNL1 2.64).
+- Part-paid balances now show a paid row per payment and an unpaid **Balance (remaining)** row for the rest, due on the balance due date. Paying it records balance payment 2.
+- Same rule for the SUPPLY nav overdue badge and the App health payments-overdue count.
+
 ## v28.293 (Ben, branch review-fixes-2026-10-05): AU deposit credit notes for starting deposits dated 01-Oct-26 onward
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

@@ -70,12 +70,12 @@ fingerprints:
   artifact_v16.7.html::buildInsightsData: 92660fc8f972
   artifact_v16.7.html::getInsights: e9c5f0485a0e
   supply/inject.html::renderBIMetrics: 53246c47c4c2
-  supply/inject.html::buildPaymentsDue: b6260329df5f
+  supply/inject.html::buildPaymentsDue: 676d892a4508
   supply/inject.html::renderProductReports: 4aa694e16e7f
   supply/inject.html::renderProductCatalogue: e590a8dc271a
   supply/inject.html::renderPimWaitingRoom: d6c089a9c8e7
   server.mjs::_kpiBaseCompute: 8e09912ef657
-  server.mjs::computeOpenActions: 378be156b1bc
+  server.mjs::computeOpenActions: 46c12f955420
   server.mjs::/api/supply/:section: 6338a43b5269
   server.mjs::/api/scenario/slow-moving: fb22071cbe1a
   server.mjs::/api/scenario/markdown-eos: bb925e0e2b9b
@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.287
+verified_version: v28.294
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -409,7 +409,7 @@ verified_version: v28.287
   - PO Completion and Balance milestones, only for final POs (is_final) with a due date and amount > 0.01.
   - Deposits and Other payments, unless closed.
   - Child POs are excluded. Rows due before 01-Jan-26 are hidden.
-- Paid: a PO milestone is paid once an amount is assigned; a deposit is paid once it has a paid date.
+- Paid: a Completion is paid once an amount is assigned; a deposit once it has a paid date. A Balance is paid only when balance payments 1 + 2 cover the whole balance owing; a part-paid balance shows its paid rows plus an unpaid "Balance (remaining)" row (v28.294).
 - Overdue = unpaid and due before today. "+4wk" = due within 28 days, or no date.
 - Amounts are in supplier currency.
 (source: supply/inject.html :: buildPaymentsDue)

@@ -6020,10 +6020,13 @@
     return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
+  // v28.294 (Ben 12-Oct-26): "fully paid is required, not just a balance payment. Any balance remaining should surface as a payment due."
+  // Balance still owed = balance owing (after start deposit and completion) less balance payments 1 and 2.
+  function balRemaining(p){ var n=function(v){ return Number(v)||0; }; return Math.round((n(p.balance_owing)-n(p.balance_1_amount)-n(p.balance_2_amount))*100)/100; }
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
     (Array.isArray(pos)?pos:[]).forEach(function(p){ if(p.master_po)return; if(!p.is_final)return;   // child POs: master owns the money → skip
       if(Number(p.completion_calc)>0.009 && p.completion_due && !(Number(p.completion_assigned)>0.009) && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
-      if(Number(p.balance_owing)>0.009 && p.balance_due && !(Number(p.balance_1_amount)>0.009) && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });
+      if(balRemaining(p)>0.009 && p.balance_due && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });   // v28.294 (Ben): a balance is paid only when fully paid
     (deps||[]).forEach(function(d){ if(d.status==='closed')return; if(!(Number(d.amount)>0.009)&&!d.date_paid&&!d.date_due)return;
       if(!d.date_paid && d.date_due && d.date_due>=PDUE_MIN_DUE && d.date_due<today)n++; });
     return n; }
@@ -10983,13 +10986,18 @@
     (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
       var _lComp=lmap['comp:'+p.po]||p.likely_completion, _lb1=lmap['bal:'+p.po]||p.likely_balance_1, _lb2=lmap['bal2:'+p.po]||p.likely_balance_2;   // fresh likely-date overlay beats a briefly-stale poRowsCache
       if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:_lComp,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
-      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:(_lb1||_lb2),bal2:!_lb1&&!!_lb2,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
+      if(Number(p.balance_owing)>0.009 && p.balance_due){ var _b1=Number(p.balance_1_amount)||0, _b2=Number(p.balance_2_amount)||0, _rem=balRemaining(p);
+        if(!(_b1>0.009)&&!(_b2>0.009)) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:(_lb1||_lb2),bal2:!_lb1&&!!_lb2,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true});
+        else {   // v28.294: part payments show as paid rows; whatever is still owed is its own unpaid row, recorded into balance payment 2
+          if(_b1>0.009) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:_b1,due:p.balance_due,likely:_lb1,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true});
+          if(_b2>0.009) rows.push({sup:p.supplier_name||'',type:'Balance 2',ref:p.po,due_amt:_b2,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:p.balance_2_amount,dt_field:'pay_balance_2_date',dt_val:p.balance_2_date,po:true});
+          if(_rem>0.009) rows.push({sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:Math.round((_b2+_rem)*100)/100,remaining:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:null,dt_field:'pay_balance_2_date',dt_val:null,po:true}); } } });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
     rows=rows.filter(function(r){ return !(r.due && r.due<PDUE_MIN_DUE); });   // exclude old payments (due date before 2026-01-01); no-due-date rows are kept
     // PO milestone = paid once an AMOUNT is assigned (matches the PO detail); a scheduled date with no amount is NOT paid → still due. Deposits/other = date_paid.
-    rows.forEach(function(r){ r.paid = r.po ? (Number(r.amt_val)>0.009) : !!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });
+    rows.forEach(function(r){ r.paid = r.po ? (!r.remaining && Number(r.amt_val)>0.009) : !!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });   // v28.294: a remaining balance is never paid
     _navCounts.paydue=rows.filter(function(r){return r.overdue;}).length; updateNavBadges();   // keep the sub-menu overdue counter fresh
     var sups=Array.from(new Set(rows.map(function(r){return r.sup;}))).filter(Boolean).sort();
     function pass(r){ if(PDUE_STATE.status==='outstanding'&&r.paid)return false;
@@ -11012,7 +11020,7 @@
       var badge='<span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span>'+(r.overdue?' <span class="tool-badge bg-red">overdue</span>':(r.paid?' <span class="tool-badge bg-green">paid</span>':''));
       var f=mobFld('Amount due',fmtCur(r.due_amt, supCcyOf(r.sup)))+mobFld('Due date',dueTxt)+mobFld('Likely pay',likelyC)
         +mobFld('Assigned',editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',editCell(r.ep,r.dt_field,r.dt_val,'date'));
-      var act=!r.paid?'<button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:#15803d;padding:3px 12px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'';
+      var act=!r.paid?'<button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.pay_amt!=null?r.pay_amt:r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:#15803d;padding:3px 12px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'';
       return mobCard(refCell,badge,f,act);
     }
     function draw(){ var f=rows.filter(pass);
@@ -11053,7 +11061,7 @@
             +'<td class="l">'+likelyC+'</td>'
             +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
             +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')
-              +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:var(--pos);padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
+              +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.pay_amt!=null?r.pay_amt:r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:var(--pos);padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
               +'</td></tr>'; }); });
       var _curs=Array.from(new Set(f.map(function(r){return supCcyOf(r.sup);})));   // one symbol only if every visible row shares a currency; else flag mixed
       var _totCell=_curs.length===1?fmtCur(grand,_curs[0]):(money(grand)+' <span class="tiny mut">(mixed currencies)</span>');

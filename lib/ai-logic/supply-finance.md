@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.293
+verified_version: v28.294
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -264,6 +264,11 @@ verified_version: v28.293
 - Balance due date: the final-payment-due override if set. Otherwise, for a PO not complete with value below 500: invoice_processed_date, else ship. Otherwise: credit_type on_shipment counts from ship, anything else from delivery, plus suppliers.credit_days. Shown only when balance owing is above 0. (source: v_po_finance :: bal_due_date)
 - Payment overdue flag (due dates from 01-Jan-26 on, applies to complete POs too): start overdue with no assignment and no deposit_ref; completion overdue with no assignment, but only once a final invoice amount exists; balance overdue with balance_1 unset and more than 0.01 owing. (source: server.mjs :: PO_ROWS_SQL payment_overdue)
 - Plan vs ledger: the app records payments on purchase_orders (pay_start_deposit_*, pay_completion_*, pay_balance_1_*, pay_balance_2_*). Start deposits drawn on a register deposit are allocations, not cash payments.
+
+## Payments Due: balance paid only when fully paid (v28.294)
+- A PO balance counts as paid only when balance payment 1 + balance payment 2 cover the whole balance owing (remaining = balance_owing − balance_1_amount − balance_2_amount ≤ 0.009). Any part payment leaves the rest due. (source: supply/inject.html :: balRemaining, buildPaymentsDue)
+- A part-paid balance shows as a paid "Balance" row (payment 1), a paid "Balance 2" row if payment 2 exists, and an unpaid "Balance (remaining)" row for what is still owed, due on the balance due date. Marking that row paid records balance payment 2 = existing payment 2 + the remaining amount. (source: supply/inject.html :: buildPaymentsDue)
+- The SUPPLY nav overdue badge and the App health "payments overdue" count use the same rule. (source: supply/inject.html :: paymentsDueOverdueCount; server.mjs :: payments_overdue)
 
 ## Deposits, productions, prod_no
 - deposit_ref links a PO to the deposits register (deposits.reference). All deposit money keys off deposit_ref, not prod_no. (source: v_po_finance :: da)
