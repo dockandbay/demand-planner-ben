@@ -3614,7 +3614,16 @@ async function accStmtUploadUncoded(req, res, name, text) {
     const known = (await pool.query(`SELECT org, account_id, name, coalesce(code,'') code FROM planner.accounts_bank_accounts`)).rows;
     const pick = a => known.find(k => a.code && k.code === a.code && (k.name === a.name || k.name === a.raw)) || known.find(k => k.name === a.raw) || known.find(k => k.name === a.name) || (a.code ? known.find(k => k.code === a.code) : null) || null;
     const matched = p.accounts.map(a => ({ a, k: pick(a) })), orgVotes = {}; matched.forEach(x => { if (x.k) orgVotes[x.k.org] = (orgVotes[x.k.org] || 0) + 1; });
-    const fileOrg = Object.keys(orgVotes).sort((x, y) => orgVotes[y] - orgVotes[x])[0] || 'uk';
+    // v28.298 (Ben 13-Oct-26): live had no Xero bank account list yet (accounts-bank-sync not run), so nothing matched and the AU file was filed
+    // as UK by default. When no account matches, the org comes from the file itself (AU: .com.au, AUD, ANZ, NAB, Westpac, Pty; UK: .co.uk,
+    // GBP, Lloyds, Barclays, LTD). If that is not clear either, the upload is refused instead of guessed.
+    let fileOrg = Object.keys(orgVotes).sort((x, y) => orgVotes[y] - orgVotes[x])[0] || null;
+    if (!fileOrg) { const sc = { au: 0, uk: 0 };
+      p.accounts.forEach(a => { const t = [a.raw, a.number].concat(a.lines.slice(0, 20).map(l => l.payee)).join(' ');
+        if (/\.com\.au\b|\bAUD\b|\bANZ\b|\bNAB\b|westpac|commonwealth bank|\bpty\b/i.test(t)) sc.au++;
+        if (/\.co\.uk\b|\bGBP\b|lloyds|barclays|\bLTD\b/i.test(t)) sc.uk++; });
+      fileOrg = sc.au > sc.uk ? 'au' : sc.uk > sc.au ? 'uk' : null;
+      if (!fileOrg) return res.status(400).json({ error: 'Could not tell whether this file is UK or AU: none of its bank accounts are known yet. Run the bank sync in ACCOUNTS first, then upload again.' }); }
     const c = await pool.connect(); let lines = 0, cleared = 0, unmatched = [];
     try { await c.query('BEGIN');
       for (const { a, k } of matched) {
@@ -3777,7 +3786,7 @@ app.post('/api/accounts/gmail/disconnect', async (req, res) => {
 function gmailParts(p, out) { if (!p) return out; if (p.filename) out.push({ name: p.filename, type: p.mimeType, size: (p.body && p.body.size) || 0 }); (p.parts || []).forEach(x => gmailParts(x, out)); return out; }
 app.get('/api/accounts/gmail/messages', async (req, res) => {
   try {
-    const q = String(req.query.q || 'newer_than:30d').slice(0, 300), n = Math.min(50, Math.max(1, parseInt(req.query.n, 10) || 25));
+    const q = String(req.query.q || 'newer_than:60d').slice(0, 300), n = Math.min(50, Math.max(1, parseInt(req.query.n, 10) || 50));   // v28.298 (Ben): last 2 months, newest 50
     const list = await gmailGet('messages?' + new URLSearchParams({ q, maxResults: String(n) }).toString());
     const ids = (list.messages || []).map(m => m.id), out = [];
     for (let i = 0; i < ids.length; i += 10) out.push(...await Promise.all(ids.slice(i, i + 10).map(id => gmailGet('messages/' + id + '?format=full&fields=' +

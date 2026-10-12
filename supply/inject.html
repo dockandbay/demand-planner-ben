@@ -18938,12 +18938,23 @@
       +'<div class="ac-cards">'+(cards||'<div class="mut">'+(ups.length?'Every uploaded account is fully reconciled.':'No statement lines yet: upload a Bank Reconciliation report.')+'</div>')+'</div>'
       +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Bank account</th><th>Org</th><th>Ccy</th><th>Lines</th><th>0-30 d</th><th>31-60 d</th><th>61-90 d</th><th>90+ d</th><th>Money out</th><th>Money in</th><th>Oldest</th></tr></thead><tbody>'+(rows||'<tr><td colspan="11" class="l mut">No statement lines match.</td></tr>')+'</tbody></table></div>'
       +(clean.length?'<div class="tiny mut" style="margin-top:6px">'+clean.length+' other account'+(clean.length===1?' is':'s are')+' fully reconciled as at the last upload.</div>':'')+'<div class="tiny mut" style="margin-top:8px">Statement lines Xero has received from the bank feed that are not yet reconciled (uncoded), from the latest upload. Aged by statement date. These are the lines the Reconcile will match receipts against.</div>'; }
-  function acBkUpload(file){ if(!file||AC_BK.upBusy)return; AC_BK.upBusy=true; AC_BK.up=null; acBkRerender();
+  function acBkUpload(file,done){ if(!file||AC_BK.upBusy)return; if(!done)AC_BK.upLog=[]; AC_BK.upBusy=true; AC_BK.up=null; acBkRerender();
     var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^,]*,/,'');
       fetch('/api/accounts/bank-ageing/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:file.name,content_base64:b64})}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
-        .then(function(j){ AC_BK.up=j; AC_BK.upBusy=false; AC_BK.d=null; acBkRerender(); })
-        .catch(function(e){ AC_BK.up={error:e.message}; AC_BK.upBusy=false; acBkRerender(); }); };
+        .then(function(j){ AC_BK.up=j; AC_BK.upBusy=false; AC_BK.d=null; acBkRerender(); if(done)done(j); })
+        .catch(function(e){ AC_BK.up={error:file.name+': '+e.message}; AC_BK.upBusy=false; acBkRerender(); if(done)done(null); }); };
     rd.readAsDataURL(file); }
+  // v28.298 (Ben): drag and drop onto the Bank statement upload box. Several files (UK and AU exports) upload one after the other;
+  // anything not .csv / .xlsx is refused here with a message. The per-file result lines are kept so both outcomes stay visible.
+  function acBkUploadMany(list){ var fs=Array.prototype.slice.call(list||[]); if(!fs.length||AC_BK.upBusy)return;
+    var bad=fs.filter(function(f){ return !/\.(csv|xlsx)$/i.test(f.name); }); fs=fs.filter(function(f){ return /\.(csv|xlsx)$/i.test(f.name); });
+    AC_BK.upLog=bad.map(function(f){ return {error:f.name+': not a .csv or .xlsx file'}; });
+    if(!fs.length){ AC_BK.up=AC_BK.upLog[0]||null; AC_BK.upLog=[]; acBkRerender(); return; }
+    (function next(i){ if(i>=fs.length){ AC_BK.up=null; acBkRerender(); return; } acBkUpload(fs[i],function(j){ AC_BK.upLog.push(j||AC_BK.up); next(i+1); }); })(0); }
+  function acBkDropWire(dz){ if(!dz)return; var hi=function(on){ dz.style.borderColor=on?'var(--blue)':''; dz.style.background=on?'var(--blue-soft)':''; };
+    ['dragenter','dragover'].forEach(function(ev){ dz.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); if(!AC_BK.upBusy)hi(true); }); });
+    dz.addEventListener('dragleave',function(e){ if(!dz.contains(e.relatedTarget))hi(false); });
+    dz.addEventListener('drop',function(e){ e.preventDefault(); e.stopPropagation(); hi(false); var f=e.dataTransfer&&e.dataTransfer.files; if(f&&f.length)acBkUploadMany(f); }); }
   function acBkRerender(){ AC_IN.p=null; if(ACCOUNTS_SUB==='bank')acRenderStmt(document.getElementById('accounts-body')); }
   function acRenderBank(b){
     if(!AC_BK.d){ if(AC_BK.busy)return; AC_BK.busy=true;
@@ -19154,7 +19165,7 @@
   }
   // ── v28.248 ACCOUNTS > Reconcile, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.
-  var AC_IN={st:null,msgs:null,q:'newer_than:30d',busy:false,err:'',flash:'',disc:false,p:null,pBusy:false,pF:'needs',pQ:'',readBusy:false,readMsg:''};
+  var AC_IN={st:null,msgs:null,q:'newer_than:60d',busy:false,err:'',flash:'',disc:false,p:null,pBusy:false,pF:'needs',pQ:'',readBusy:false,readMsg:''};
   // v28.269: statement lines (Bank ageing upload) with a treatment per payee and the matching accounts@ receipt. Read only: nothing is sent to Xero.
   var AC_TR=[['autobill','Auto bill'],['bill','Bill (review)'],['rule','Xero bank rule (no receipt)'],['ignore','Ignore']];   // v28.276: one process (a bill with the receipt); Spend Money retired
   var AC_BS={sel:{},busy:false,chk:null,msg:''};   // v28.276 Bill (review): ticked lines -> check -> confirm -> bills in Xero
@@ -19188,18 +19199,19 @@
       var last=u.reduce(function(a,x){ return String(x.at)>String(a.at)?x:a; }), asAt=u.reduce(function(a,x){ return String(x.as_at)>a?String(x.as_at):a; },''), age=acAge(asAt,today), ok=age<=5;
       return '<tr><td class="l"><b>'+o.toUpperCase()+'</b> <span class="tiny mut">'+name+'</span></td><td class="l">'+esc(acSynced(last.at))+'</td><td class="l">'+esc(hzTrkDate(asAt))+'</td><td class="l">'+esc(String(last.uploaded_by||'').split('@')[0]+(last.uploaded_by?'@':''))+'</td><td class="l">'
         +(ok?'<span class="pill" style="cursor:default">up to date</span>':'<span class="pill" style="cursor:default;color:var(--neg);border-color:var(--neg)">'+age+' days old</span>')+'</td></tr>'; };
-    var up=AC_BK.up, upMsg=up?(up.error?'<span style="color:var(--neg)">'+esc(up.error)+'</span>':'<b>'+esc(String(up.org||'').toUpperCase())+'</b> uploaded'+(up.as_at?' as at '+esc(hzTrkDate(up.as_at)):'')+(up.unreconciled!=null?': '+up.unreconciled+' uncoded line'+(up.unreconciled===1?'':'s')+(up.accounts_with_lines!=null?' in '+up.accounts_with_lines+' of '+up.accounts+' accounts':''):'')):'';
+    var upOne=function(up){ return up?(up.error?'<span style="color:var(--neg)">'+esc(up.error)+'</span>':'<b>'+esc(String(up.org||'').toUpperCase())+'</b> uploaded'+(up.as_at?' as at '+esc(hzTrkDate(up.as_at)):'')+(up.unreconciled!=null?': '+up.unreconciled+' uncoded line'+(up.unreconciled===1?'':'s')+(up.accounts_with_lines!=null?' in '+up.accounts_with_lines+' of '+up.accounts+' accounts':''):'')):''; };
+    var upMsg=(AC_BK.upLog||[]).concat(AC_BK.up&&(AC_BK.upLog||[]).indexOf(AC_BK.up)<0?[AC_BK.up]:[]).map(upOne).filter(Boolean).join('<br>');
     b.innerHTML='<div style="text-align:left;max-width:980px"><div class="sect-h">Bank statement</div><div class="tiny mut" style="margin-bottom:8px">Xero does not give statement lines through its API (confirmed by Xero support), so upload Xero\'s <b>Uncoded statement lines</b> export for UK and for AU at least weekly. Ageing and Reconcile are built from it. rita@, sarah@ and ben@ are emailed when an upload is more than 5 days old.</div>'
       +'<div class="tw"><table style="width:auto"><thead><tr><th>Organisation</th><th>Last upload</th><th>Statement as at</th><th>By</th><th>Status</th></tr></thead><tbody>'+orgRow('uk','Dock &amp; Bay Ltd')+orgRow('au','Dock &amp; Bay Pty Ltd')+'</tbody></table></div>'
-      +'<div class="bar" style="margin-top:10px">'+(d.can_upload?'<label class="save-btn" style="cursor:pointer">'+(AC_BK.upBusy?'Uploading…':'Upload Uncoded statement lines (.csv)')+'<input type="file" id="ac-bupf" accept=".csv,.xlsx" style="display:none"></label>':'<span class="tiny mut">Uploading needs the ACCOUNTS grant.</span>')+'<span class="tiny">'+upMsg+'</span></div>'
+      +(d.can_upload?'<div id="ac-bdrop" style="margin-top:10px;border:2px dashed var(--line);border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;text-align:left"><label class="save-btn" style="cursor:pointer">'+(AC_BK.upBusy?'Uploading…':'Upload Uncoded statement lines (.csv)')+'<input type="file" id="ac-bupf" accept=".csv,.xlsx" multiple style="display:none"'+(AC_BK.upBusy?' disabled':'')+'></label><span class="tiny mut">or drag the Xero export here (UK and AU together is fine)</span>'+(upMsg?'<div class="tiny" style="flex-basis:100%">'+upMsg+'</div>':'')+'</div>':'<div class="bar" style="margin-top:10px"><span class="tiny mut">Uploading needs the ACCOUNTS grant.</span><span class="tiny">'+upMsg+'</span></div>')
       +'<div class="annot" style="margin:10px 0"><b>How to export it from Xero (about 1 minute per organisation)</b><ol style="margin:6px 0 0 18px;padding:0;display:grid;gap:4px">'
       +'<li>In Xero, switch to <b>Dock &amp; Bay Ltd</b> (UK) or <b>Dock &amp; Bay Pty Ltd</b> (AU) and open <b>Accounting ▸ Bank accounts</b>.</li>'
       +'<li>Open the <b>⋯ menu</b> at the top right of the page and choose <b>Uncoded statement lines</b>.</li>'
       +'<li>Under Bank Account choose <b>All bank accounts</b>, set the date from 1 January this year to today, and press <b>Update</b>.</li>'
       +'<li><b>Export ▸ CSV</b>. Keep Xero\'s file name (it carries the date).</li>'
-      +'<li>Press <b>Upload Uncoded statement lines</b> above and choose the file. Every account in it is refreshed; lines reconciled since the last upload drop off.</li>'
+      +'<li>Press <b>Upload Uncoded statement lines</b> above and choose the file, or drag it onto the box. Every account in it is refreshed; lines reconciled since the last upload drop off.</li>'
       +'<li>Repeat for the other organisation.</li></ol></div></div>';
-    var upf=document.getElementById('ac-bupf'); if(upf)upf.onchange=function(){ acBkUpload(upf.files&&upf.files[0]); }; }
+    var upf=document.getElementById('ac-bupf'); if(upf)upf.onchange=function(){ acBkUploadMany(upf.files); }; acBkDropWire(document.getElementById('ac-bdrop')); }
   // ── AGEING ──
   var AC_AG={tab:'all',q:''};
   function acRenderAgeing(b){ if(!b)return;
@@ -19433,7 +19445,7 @@
       if(st.can_write) h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
     h+='</div></div>';
     var card=h; h=hTop; if(!st.connected)h+=card;
-    if(st.connected){ if(!AC_IN.p&&!AC_IN.pBusy)acInLoadP(); h+=acInLinesHtml()+'<div class="sect-h" id="ac-mbx" style="margin-top:28px;cursor:pointer"><span>'+(AC_IN.mbx?'▾ ':'▸ ')+'</span>accounts@ mailbox, receipts not reaching accounts@, recent mail</div><div id="ac-mbxbody" style="'+(AC_IN.mbx?'':'display:none')+'">'+card+acFwHtml()+'<div class="sect-h" style="margin-top:18px">Recent mail in accounts@</div>';
+    if(st.connected){ if(!AC_IN.p&&!AC_IN.pBusy)acInLoadP(); h+=acInLinesHtml()+'<div class="sect-h" id="ac-mbx" style="margin-top:28px;cursor:pointer"><span>'+(AC_IN.mbx?'▾ ':'▸ ')+'</span>accounts@ mailbox, receipts not reaching accounts@, recent mail</div><div id="ac-mbxbody" style="'+(AC_IN.mbx?'':'display:none')+'">'+card+acFwHtml()+'<div class="sect-h" style="margin-top:18px">Recent mail in accounts@ <span class="tiny mut">last 2 months, newest 50</span></div>';
       h+='<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input id="ac-gm-q" value="'+esc(AC_IN.q)+'" style="min-width:320px" placeholder="Gmail search, e.g. has:attachment newer_than:7d"><button class="save-btn light" id="ac-gm-go">Search</button><span class="count">Gmail search syntax · newest 25</span></div>';
       if(AC_IN.err) h+='<div class="count" style="color:var(--neg)">'+esc(AC_IN.err)+'</div>';
       else if(!AC_IN.msgs) h+='<div class="count">Loading mail…</div>';
@@ -19448,7 +19460,7 @@
     var cb=document.getElementById('ac-gm-connect'); if(cb)cb.onclick=function(){ location.href='/api/accounts/gmail/connect'; };
     var db=document.getElementById('ac-gm-disc'); if(db)db.onclick=function(){ if(!AC_IN.disc){ AC_IN.disc=true; acInRender(); setTimeout(function(){ if(AC_IN.disc){ AC_IN.disc=false; acInRender(); } },5000); return; }
       AC_IN.disc=false; fetch('/api/accounts/gmail/disconnect',{method:'POST'}).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); AC_IN.st=null; AC_IN.msgs=null; AC_IN.flash='Gmail disconnected'; acInRender(); }).catch(function(e){ AC_IN.st=null; AC_IN.flash=e.message; acInRender(); }); };
-    var go=function(){ var i=document.getElementById('ac-gm-q'); AC_IN.q=(i&&i.value.trim())||'newer_than:30d'; AC_IN.flash=''; AC_IN.msgs=null; AC_IN.st=null; acInRender(); };
+    var go=function(){ var i=document.getElementById('ac-gm-q'); AC_IN.q=(i&&i.value.trim())||'newer_than:60d'; AC_IN.flash=''; AC_IN.msgs=null; AC_IN.st=null; acInRender(); };
     var gb=document.getElementById('ac-gm-go'); if(gb)gb.onclick=go; var qi=document.getElementById('ac-gm-q'); if(qi)qi.onkeydown=function(e){ if(e.key==='Enter')go(); }; }
   // ── ACCOUNTS > Payables: aged open Xero bills (UK + AU) from the hourly-synced bill cache; suppliers first ──
   function acAge(due,today){ if(!due)return 0; var d=(new Date(today+'T00:00:00Z')-new Date(due+'T00:00:00Z'))/86400000; return Math.round(d); }
