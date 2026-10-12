@@ -1,3 +1,16 @@
+## v28.276 (Ben, branch review-fixes-2026-10-05): one process for receipts: Xero bills from accounts@ (Auto bill + Bill review), bank rules retired
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `migrations/358_accounts_auto_bills.sql` (+ package.json, CHANGES.md). **Migration 358** (additive: `accounts_payee_rules.contact_id / bill_from / bank_rule_done_at / bank_rule_done_by`, treatment check widened to `autobill, bill, rule, ignore`, saved `spend` rows become `bill`, new `accounts_bill_log`). No new env vars.
+
+- Ben 12-Oct-26: "the bill route would be better for all transactions, including snap ... 1 process, we start to remove bank rules when the receipt can be added from accounts@". Status **Awaiting payment** (not Draft). Snapchat (and Optus) start from their unreconciled statement lines.
+- **Auto bill** treatment: every accounts@ receipt for the payee becomes a Xero bill (receipt PDF attached, coded from the payee's reconciled history or a saved contact / account / tax type), every 6 hours with the health-check cron, or Config ▸ Auto bills ▸ Preview bills then Run now (confirm step). Starts from the oldest open statement line of the payee when switched on.
+- **Bill (review)**: tick matched lines in Inbox matcher ▸ Create bills… ▸ check ▸ confirm. Admins and ACCOUNTS users.
+- Safeguards: one bill per email (log row before the Xero call); skipped when Xero already has it reconciled or a bill for the same contact and amount; waits for a person when the amount is unclear or in another currency; contact never created; Xero daily allowance below 200 = skipped.
+- Watchdog log in Config: not matched after 10 days, possible duplicate (Spend Money reconciled for the same payee and amount), Voided button. Bank-rule retirement list (Xero API cannot change bank rules) with Done. Payables tags these bills **Auto bill**.
+- Spend Money treatment retired; auto-attach (v28.275) stays as the fallback for hand-reconciled Spend Money and is switched off for a payee moved to Auto bill.
+- **Prod:** apply mig 358. The cron already calls the health-check route. Nothing bills on live until a payee is switched to Auto bill there (Snapchat UK, Optus AU: switch on after deploy; their start date is taken from live's open statement lines).
+- Verified on the sandbox: dry run = 7 ready (Snapchat 09, 10, 12-Oct; Optus AMEX 182.70 + 119.00 for Sep and Oct), Optus Oct bill email waits for its statement line; jsdom render of Config and Inbox matcher (no writes). **No bill has been created in Xero yet** (the sandbox uses the live Xero connection: first run on Ben's confirm).
+
 ## v28.275 (Ben, branch review-fixes-2026-10-05): automatic receipt attachment to reconciled Spend Money (Snapchat from 12-Oct-26)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/357_accounts_attach_rules.sql` (+ package.json, CHANGES.md). **Migration 357** (additive: `accounts_payee_rules.attach_auto / attach_from`, `planner.accounts_attach_log`). No env. **Writes to Xero (attachments)**, approved by Ben 12-Oct as automatic once a payee is switched on.

@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|payee-rule\/coding|payee-rule\/bank-rule-done)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3367,7 +3367,8 @@ app.get('/api/accounts/payables', async (req, res) => {
     const bills = (await pool.query(
       `SELECT b.invoice_id, lower(b.region) region, b.invoice_number, b.reference, b.contact_name, b.total, b.amount_paid, b.amount_due, b.currency_code, upper(b.status) status,
               to_char(b.invoice_date,'YYYY-MM-DD') invoice_date, to_char(b.due_date,'YYYY-MM-DD') due_date,
-              coalesce((SELECT array_agg(DISTINCT l.po) FROM planner.po_links l WHERE l.system='xero' AND l.status='linked' AND l.external_id=b.invoice_id), '{}') pos
+              coalesce((SELECT array_agg(DISTINCT l.po) FROM planner.po_links l WHERE l.system='xero' AND l.status='linked' AND l.external_id=b.invoice_id), '{}') pos,
+              EXISTS (SELECT 1 FROM planner.accounts_bill_log ab WHERE ab.invoice_id=b.invoice_id AND ab.status='created') auto_bill   -- v28.276: card / direct-debit receipts billed by HORIZON (reconciled by Match, never paid in a payment run)
          FROM planner.xero_bills b
         WHERE upper(coalesce(b.status,'')) IN ('AUTHORISED','SUBMITTED') AND coalesce(b.amount_due,0) > 0.004
           AND ($1 = 'all' OR lower(b.region) = $1)
@@ -3945,6 +3946,7 @@ function accPayeeKey(ref, desc) {
   if (!w.length) return '(blank)';
   return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
 }
+const accSameP = (ck, rk) => ck === rk || (rk.length >= 4 && ck.length >= 4 && (ck.startsWith(rk) || rk.startsWith(ck)));   // v28.276 (from v28.275): Xero contact 'SnapChat' (SNAPCHAT) vs bank text payee 'SNAP'
 const ACC_RULE_KEYS = /^(GOOGLE|LINKEDIN|FACEBOOK|META|FB|TIKTOK|STRIPE|PAYPAL|PP ZETTLE|SHOPIFY|KLARNA|ADYEN|AMAZON|AMZNMKTPLACE|AMZNBUSINESS|XERO|XRO|DISPUTE|INTEREST|SNAP)$/;
 const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN|FLEXPORT|WAGES|PAYROLL|WEBSITE|US CUSTOMS|CUSTOMS|SUPERANNUATION|ATO|AIRWALLEX|AWX|BANK|TD BANK|LLOYDS|BARCLAYS|HSBC|ANZ|WESTPAC|WORLD|WORLDFIRST|STATEMENT)$/;   // v28.272: + banks, FX and transfer providers (fees and transfers)   // v28.270: + FLEXPORT (Ben: freight is billed through its own flow)
 function accDefaultTreatment(key, amount, match, supKeys) {
@@ -3953,8 +3955,7 @@ function accDefaultTreatment(key, amount, match, supKeys) {
   if (ACC_TPL_RE.test(key)) return 'ignore';   // v28.274: 3PLs (Coghlans, ILG, I-Fulfilment, Geneva) are billed through 3PL invoicing   // v28.270 (Ben): product suppliers are paid against POs and supplier bills, never from a receipt                     // money in: customer payments / payouts, reconciled against sales in Xero
   if (ACC_IGNORE_KEYS.test(key)) return 'ignore';
   if (ACC_RULE_KEYS.test(key)) return 'rule';
-  if (match && /invoice|inv[-\s]?\d|statement/i.test(match.subject || '') && !/receipt/i.test((match.subject || '') + ' ' + (match.from || ''))) return 'bill';
-  return 'spend';
+  return 'bill';   // v28.276 (Ben 12-Oct-26): one process, a bill with the receipt (reviewed, or automatic once the payee is switched to Auto bill); Spend Money is retired
 }
 async function accInboxProposals() {
   const lines = (await pool.query(`SELECT s.org, s.account_name, coalesce(a.currency,'') currency, to_char(s.line_date,'YYYY-MM-DD') line_date, s.amount::float8 amount, s.reference, s.description
@@ -3993,22 +3994,28 @@ app.get('/api/accounts/inbox/proposals', async (req, res) => {
 // Remember a payee's treatment (admins and ACCOUNTS users, Ben 12-Oct).
 app.post('/api/accounts/payee-rule', async (req, res) => {
   try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase().slice(0, 80), t = String(b.treatment || '');
-    if (!['uk', 'au'].includes(org) || !key || !['bill', 'spend', 'rule', 'ignore'].includes(t)) return res.status(400).json({ error: 'org, payee_key and treatment (bill, spend, rule, ignore) required' });
-    await pool.query(`INSERT INTO planner.accounts_payee_rules (org, payee_key, treatment, source, updated_by, updated_at) VALUES ($1,$2,$3,'manual',$4,now()) ON CONFLICT (org, payee_key) DO UPDATE SET treatment=EXCLUDED.treatment, source='manual', updated_by=EXCLUDED.updated_by, updated_at=now()`,
-      [org, key, t, (req.me && req.me.email) || null]);
-    res.json({ ok: true });
+    if (!['uk', 'au'].includes(org) || !key || !['autobill', 'bill', 'rule', 'ignore'].includes(t)) return res.status(400).json({ error: 'org, payee_key and treatment (autobill, bill, rule, ignore) required' });
+    // v28.276: Auto bill starts from the oldest OPEN statement line of that payee (Ben: "start from any unreconciled transactions"), else today
+    let from = null; if (t === 'autobill') { from = /^\d{4}-\d{2}-\d{2}$/.test(String(b.from || '')) ? b.from : null;
+      if (!from) { const open = (await pool.query(`SELECT to_char(line_date,'YYYY-MM-DD') d, reference, description FROM planner.accounts_stmt_lines WHERE org=$1 AND NOT reconciled AND amount < 0`, [org]).catch(() => ({ rows: [] }))).rows
+          .filter(l => accSameP(accPayeeKey(l.reference, l.description), key)).map(l => l.d).sort(); from = open[0] || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); } }
+    await pool.query(`INSERT INTO planner.accounts_payee_rules (org, payee_key, treatment, source, updated_by, updated_at, bill_from) VALUES ($1,$2,$3,'manual',$4,now(),$5) ON CONFLICT (org, payee_key) DO UPDATE SET treatment=EXCLUDED.treatment, source='manual', updated_by=EXCLUDED.updated_by, updated_at=now(),
+      bill_from=CASE WHEN EXCLUDED.treatment='autobill' THEN coalesce(EXCLUDED.bill_from, planner.accounts_payee_rules.bill_from) ELSE planner.accounts_payee_rules.bill_from END,
+      attach_auto=CASE WHEN EXCLUDED.treatment='autobill' THEN false ELSE planner.accounts_payee_rules.attach_auto END`,   // the bill carries the receipt: no attaching as well
+      [org, key, t, (req.me && req.me.email) || null, from]);
+    res.json({ ok: true, bill_from: from });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.271 (Ben 12-Oct-26): ACCOUNTS > Config. Every rule in one place: per-payee treatments (saved overrides + the payees seen on open statement
 // lines with HORIZON's suggestion), the built-in defaults, the UK / AU tax rules and the alert settings.
 app.get('/api/accounts/config', async (req, res) => {
   try {
-    const saved = (await pool.query(`SELECT org, payee_key, treatment, source, updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at, attach_auto, to_char(attach_from,'YYYY-MM-DD') attach_from FROM planner.accounts_payee_rules ORDER BY org, payee_key`).catch(() => ({ rows: [] }))).rows;
+    const saved = (await pool.query(`SELECT org, payee_key, treatment, source, updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at, attach_auto, to_char(attach_from,'YYYY-MM-DD') attach_from, to_char(bill_from,'YYYY-MM-DD') bill_from, contact, account_code, tax_type, bank_rule_done_at IS NOT NULL bank_rule_done, bank_rule_done_by FROM planner.accounts_payee_rules ORDER BY org, payee_key`).catch(() => ({ rows: [] }))).rows;
     let lines = []; try { lines = await accInboxProposals(); } catch (_) {}
     const seen = new Map(); lines.forEach(l => { const k = l.org + '|' + l.payee_key; const x = seen.get(k) || { org: l.org, payee_key: l.payee_key, lines: 0, out: 0, inn: 0, matched: 0, treatment: l.treatment, source: l.treatment_source, example: l.reference };
       x.lines++; if (l.amount < 0) x.out += -l.amount; else x.inn += l.amount; if (l.match) x.matched++; seen.set(k, x); });
     saved.forEach(r => { const k = r.org + '|' + r.payee_key; const x = seen.get(k) || { org: r.org, payee_key: r.payee_key, lines: 0, out: 0, inn: 0, matched: 0, example: '' };
-      Object.assign(x, { treatment: r.treatment, source: r.source, updated_by: r.updated_by, updated_at: r.updated_at, attach_auto: !!r.attach_auto, attach_from: r.attach_from }); seen.set(k, x); });
+      Object.assign(x, { treatment: r.treatment, source: r.source, updated_by: r.updated_by, updated_at: r.updated_at, attach_auto: !!r.attach_auto, attach_from: r.attach_from, bill_from: r.bill_from, contact: r.contact, account_code: r.account_code, tax_type: r.tax_type, bank_rule_done: r.bank_rule_done, bank_rule_done_by: r.bank_rule_done_by }); seen.set(k, x); });
     const payees = [...seen.values()].sort((a, b) => b.lines - a.lines || a.payee_key.localeCompare(b.payee_key));
     res.set('Cache-Control', 'no-store').json({
       payees,
@@ -4017,8 +4024,7 @@ app.get('/api/accounts/config', async (req, res) => {
         { rule: 'Flexport and HORIZON product suppliers', treatment: 'ignore', note: 'Paid against POs and supplier bills (Ben 12-Oct-26)' },
         { rule: 'Payee is one of: ' + String(ACC_IGNORE_KEYS.source).replace(/^\^\(|\)\$$/g, '').split('|').join(', '), treatment: 'ignore', note: 'Transfers, loans, tax, card repayments' },
         { rule: 'Payee is one of: ' + String(ACC_RULE_KEYS.source).replace(/^\^\(|\)\$$/g, '').split('|').join(', '), treatment: 'rule', note: 'Platforms Xero codes with a bank rule (Google Ads: Ben 12-Oct-26)' },
-        { rule: 'The matched email is an invoice or statement (not a receipt)', treatment: 'bill', note: 'Supplier invoice with terms' },
-        { rule: 'Anything else that is money out', treatment: 'spend', note: 'Card or direct-debit spend: Spend Money with the receipt' }],
+        { rule: 'Anything else that is money out', treatment: 'bill', note: 'A bill with the receipt attached, created from a ticked batch; switch a regular payee to Auto bill (Ben 12-Oct-26: one process, bank rules retired where accounts@ has the receipt)' }],
       matching: 'Receipt = an accounts@ email with the same amount, from 45 days before to 7 days after the bank line, with the payee in the sender or subject; without the payee only a short email (8 amounts or fewer) in the same currency within 5 days counts. 3PLs (Coghlans, ILG, I-Fulfilment, Geneva) are billed through 3PL invoicing.',
       tax: [
         { org: 'UK', rule: 'GBP expenses: 20% VAT on Expenses, or No VAT where no VAT is charged' },
@@ -4088,7 +4094,7 @@ app.get('/api/accounts/forwarding', async (req, res) => {
       return Object.assign(x, { payee_key: key, treatment: t, recent, matched: c.matched || 0, window_txns: c.txns || 0, xero_files: c.xero_files || 0, sender: c.sender || null,
         avg_amount: x.total ? Math.round(x.amount / x.total * 100) / 100 : null, status: a ? a.status : 'open', actioned_by: a && a.actioned_by, actioned_at: a && a.actioned_at }); })
       // repeating bank spend that needs a receipt and is not mostly found in accounts@
-      .filter(x => !ACC_TPL_RE.test(x.contact) && !sup.has(x.payee_key) && x.recent >= 3 && (x.status !== 'open' || ((x.treatment === 'bill' || x.treatment === 'spend') && x.window_txns > 0 && x.matched * 2 < x.window_txns)))   // v28.273: only payees paid in the last 120 days, so receipt coverage is known
+      .filter(x => !ACC_TPL_RE.test(x.contact) && !sup.has(x.payee_key) && x.recent >= 3 && (x.status !== 'open' || ((x.treatment === 'bill' || x.treatment === 'autobill') && x.window_txns > 0 && x.matched * 2 < x.window_txns)))   // v28.273: only payees paid in the last 120 days, so receipt coverage is known
       .sort((a, b) => b.recent - a.recent || a.contact.localeCompare(b.contact));
     const last = (await pool.query(`SELECT to_char(max(updated_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_spend_history`)).rows[0].at;
     res.set('Cache-Control', 'no-store').json({ rows, years: yrs, history_at: last, building: !!_accHistRun, days: ACC_LEARN_DAYS });
@@ -4207,6 +4213,175 @@ app.get('/api/accounts/attach/log', async (req, res) => {
 });
 app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person removed a wrong attachment in Xero: record it (it will not be re-attached)
   try { await pool.query(`UPDATE planner.accounts_attach_log SET status='removed', error=coalesce(error,'') || $2 WHERE id=$1 AND status='attached'`, [req.params.id, 'removed by ' + ((req.me && req.me.email) || 'user')]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══ v28.276 (Ben 12-Oct-26): BILL ROUTE for every payee whose receipt reaches accounts@ (Snapchat included). "1 process, we start to remove
+// bank rules when the receipt can be added from accounts@". HORIZON creates the Xero bill (status Awaiting payment, Ben: not Draft) with the
+// receipt PDF attached; the person reconciles the statement line with Match. Payees on Auto bill are created by the 6-hourly job (approved as
+// an automatic rule, from the oldest open statement line of that payee: Ben "start from any unreconciled transactions"); payees on Bill
+// (review) are created from a ticked batch in Inbox matcher. Safeguards: one bill per email (log row written BEFORE the Xero call), never when a
+// reconciled transaction or an existing Xero bill already covers the receipt, never when the amount is unclear (several amounts and no statement
+// line to pick one), coding from the payee's own reconciled history (or set by a person), contact looked up by name and never created.
+// Watchdog: a bill not matched (not PAID) after 10 days, or a Spend Money reconciled for the same payee and amount (the old bank rule used:
+// duplicate), is flagged in Config > Auto bills.
+const ACC_BILL_STALE_DAYS = 10, ACC_RATE_AMTS = new Set(['20.00', '10.00', '5.00', '0.00', '12.50', '15.00']);   // VAT / GST rates printed next to the total
+const ACC_ORG_CCY = { uk: 'GBP', au: 'AUD' }, ACC_CCY_SYM = { uk: ['', '£', 'GBP'], au: ['', '$', 'A$', 'AUD'] };
+function accEmailRef(subject) { const m = /(?:account|acct|invoice|inv|receipt|order|statement)\b[^A-Z0-9]{0,12}(?:no\.?|number|#)?[^A-Z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i.exec(String(subject || '')); return m && /\d/.test(m[1]) ? m[1] : ''; }
+async function accPayeeCoding(org, key) {   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days)
+  const rows = (await pool.query(`SELECT contact, account, tax, count(*)::int n FROM planner.accounts_recon_txns WHERE org=$1 AND kind='spend' AND recon AND txn_date >= current_date - 400 GROUP BY 1,2,3`, [org])).rows
+    .filter(r => r.contact && accSameP(accPayeeKey(r.contact, ''), key));
+  if (!rows.length) return null;
+  const top = (f) => { const m = new Map(); rows.forEach(r => m.set(r[f], (m.get(r[f]) || 0) + r.n)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
+  return { contact: top('contact'), account_code: top('account'), tax_type: top('tax'), n: rows.reduce((a, r) => a + r.n, 0) };
+}
+// Candidates. rules: [{org, payee_key, bill_from, contact, contact_id, account_code, tax_type}]; only (batch): [{org, payee_key, email_id}].
+async function accBillCandidates(rules, only) {
+  const out = []; if (!rules.length) return out;
+  const minFrom = rules.reduce((m, r) => (r.bill_from || '2000-01-01') < m ? (r.bill_from || '2000-01-01') : m, '9999-12-31');
+  const onlyIds = only ? only.map(o => o.email_id) : null;
+  const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
+  const used = new Set((await pool.query(`SELECT org || '|' || email_id k FROM planner.accounts_bill_log WHERE status IN ('created','creating')`)).rows.map(r => r.k));
+  const lines = (await pool.query(`SELECT org, account_name, to_char(line_date,'YYYY-MM-DD') d, amount::float8 amount, reference, description FROM planner.accounts_stmt_lines WHERE NOT reconciled AND amount < 0`)).rows
+    .map(l => Object.assign(l, { key: accPayeeKey(l.reference, l.description), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
+  const usedLine = new Set((await pool.query(`SELECT stmt_line FROM planner.accounts_bill_log WHERE status IN ('created','creating') AND stmt_line IS NOT NULL`)).rows.map(r => r.stmt_line));
+  const recon = (await pool.query(`SELECT org, to_char(txn_date,'YYYY-MM-DD') d, amount::float8 amount, contact FROM planner.accounts_recon_txns WHERE kind='spend' AND recon AND txn_date >= $1::date - 10`, [minFrom])).rows;
+  const xb = (await pool.query(`SELECT lower(region) org, contact_name, total::float8 total, to_char(invoice_date,'YYYY-MM-DD') d FROM planner.xero_bills WHERE invoice_date >= $1::date - 10 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED')`, [minFrom])).rows;
+  const days = (a, b) => Math.round((new Date(a) - new Date(b)) / 864e5);
+  const claimed = new Set();
+  for (const r of rules) {
+    const toks = r.payee_key.toLowerCase().split(' ').filter(t => t.length >= 3);
+    const coding = (r.account_code && r.tax_type && r.contact) ? null : await accPayeeCoding(r.org, r.payee_key);
+    const code = { contact: r.contact || (coding && coding.contact) || '', account_code: r.account_code || (coding && coding.account_code) || '', tax_type: r.tax_type || (coding && coding.tax_type) || '' };
+    const mine = em.filter(e => only ? only.some(o => o.email_id === e.id && o.org === r.org && o.payee_key === r.payee_key) : (days(e.d, r.bill_from) >= -5 && toks.some(t => (e.from_addr + ' ' + e.subject).toLowerCase().includes(t))));
+    for (const e of mine) {
+      if (used.has(r.org + '|' + e.id) || claimed.has(e.id)) continue;
+      const pairs = [...(e.amounts || []), ...(e.pdf_amounts || [])], amts = [...new Set(pairs.map(a => a[0]))];
+      const sym = new Map(pairs.map(a => [a[0], a[1] || ''])), real = amts.length > 1 ? amts.filter(a => !ACC_RATE_AMTS.has(a)) : amts;
+      const c = { org: r.org, payee_key: r.payee_key, email_id: e.id, email_date: e.d, subject: e.subject, from: e.from_addr, currency: ACC_ORG_CCY[r.org], ...code, contact_id: r.contact_id || null, ok: false };
+      const line = lines.filter(l => l.org === r.org && !usedLine.has(l.id) && accSameP(l.key, r.payee_key) && amts.includes(Math.abs(l.amount).toFixed(2)) && days(l.d, e.d) >= -5 && days(l.d, e.d) <= 25)
+        .sort((a, b) => Math.abs(days(a.d, e.d)) - Math.abs(days(b.d, e.d)))[0];
+      // the charge can follow the email by up to 25 days (Optus: bill emailed ~6th, debited ~21st): a receipt already reconciled in Xero needs nothing
+      if (!line && recon.some(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && real.includes(Math.abs(t.amount).toFixed(2)) && days(t.d, e.d) >= -5 && days(t.d, e.d) <= 25)) { if (only) { c.reason = 'Already reconciled in Xero'; out.push(c); } continue; }
+      if (line) Object.assign(c, { amount: Math.abs(line.amount), date: line.d, stmt_line: line.id, bank: line.account_name });
+      else if (real.length === 1) Object.assign(c, { amount: Number(real[0]), date: e.d });
+      else { c.reason = amts.length ? 'Several amounts in the email (' + real.slice(0, 4).join(', ') + ') and no open statement line to pick one: wait for the next statement upload, or create it by hand' : 'No amount found in the email'; out.push(c); continue; }
+      const k = c.amount.toFixed(2);
+      if (!ACC_CCY_SYM[r.org].includes(sym.get(k) || '')) { c.reason = 'Receipt is in ' + sym.get(k) + ', not ' + ACC_ORG_CCY[r.org]; out.push(c); continue; }
+      const xbill = xb.find(b => b.org === r.org && code.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(code.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
+      if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
+      if (!code.contact || !code.account_code || !code.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
+      const ref = accEmailRef(e.subject);
+      c.invoice_number = (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date).slice(0, 250);
+      c.ok = true; claimed.add(e.id); if (line) usedLine.add(line.id); out.push(c);
+    }
+  }
+  return out;
+}
+async function accCreateBill(c, by, mode) {
+  const lg = (await pool.query(`INSERT INTO planner.accounts_bill_log (org, payee_key, email_id, invoice_number, contact, bill_date, amount, currency, account_code, tax_type, stmt_line, mode, status, run_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'creating',$13) RETURNING id`, [c.org, c.payee_key, c.email_id, c.invoice_number, c.contact, c.date, c.amount, c.currency, c.account_code, c.tax_type, c.stmt_line || null, mode, by || 'job'])).rows[0].id;
+  try {
+    let cid = c.contact_id;
+    if (!cid) { const k = await xeroContactLookup(c.org, c.contact); if (!k.ok) throw new Error(k.error.replace(/, or change the supplier's.*$/, '')); cid = k.ContactID;
+      await pool.query(`UPDATE planner.accounts_payee_rules SET contact_id=$3, contact=coalesce(contact,$4) WHERE org=$1 AND payee_key=$2`, [c.org, c.payee_key, cid, c.contact]); }
+    const body = { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Inclusive',
+      LineItems: [{ Description: (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', Quantity: 1, UnitAmount: c.amount, AccountCode: c.account_code, TaxType: c.tax_type }] };
+    const j = await xeroFetch(c.org, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
+    const inv = (j && j.Invoices && j.Invoices[0]) || {}; if (!inv.InvoiceID) throw new Error('Xero returned no bill');
+    let attErr = null;
+    try { const pdf = await accEmailPdf(c.email_id); await xeroFetch(c.org, '/api.xro/2.0/Invoices/' + inv.InvoiceID + '/Attachments/' + encodeURIComponent(pdf.filename), { method: 'PUT', body: pdf.buf, headers: { 'Content-Type': 'application/pdf' }, timeoutMs: 45000 }); }
+    catch (e) { attErr = 'Bill created but the receipt was not attached: ' + e.message; }
+    await pool.query(`UPDATE planner.accounts_bill_log SET status='created', invoice_id=$2, error=$3 WHERE id=$1`, [lg, inv.InvoiceID, attErr]);
+    return { ok: true, invoice_id: inv.InvoiceID, warning: attErr };
+  } catch (e) {
+    await pool.query(`UPDATE planner.accounts_bill_log SET status='error', error=$2 WHERE id=$1`, [lg, String(e.message).slice(0, 400)]).catch(() => {});
+    throw e;
+  }
+}
+let _accBillRun = null;
+async function accAutoBillRun(by, opts) {
+  opts = opts || {}; if (_accBillRun) return _accBillRun;
+  _accBillRun = (async () => {
+    const rules = (await pool.query(`SELECT org, payee_key, to_char(bill_from,'YYYY-MM-DD') bill_from, contact, contact_id, account_code, tax_type FROM planner.accounts_payee_rules WHERE treatment='autobill' AND bill_from IS NOT NULL`)).rows;
+    const out = { ok: true, dry: !!opts.dry, rules: rules.length, candidates: [], created: 0, errors: [] }; if (!rules.length) return out;
+    if (!opts.dry && !(await accJobLock('accounts_autobill', 10 * 60000, by))) return Object.assign(out, { ok: false, running: true });
+    try {
+      try { if (await gmailRow().then(g => g && !g.missing).catch(() => false)) await accGmailCache(15, new AccBudget(60000)); } catch (e) { out.errors.push('accounts@ read: ' + e.message); }   // pick up the newest receipts first (Gmail only)
+      out.candidates = await accBillCandidates(rules);
+      if (!opts.dry) for (const c of out.candidates.filter(x => x.ok)) {
+        const q = xeroQuota(c.org); if (q && q.day != null && q.day < XERO_DAY_ALERT) { c.result = 'skipped: Xero ' + c.org.toUpperCase() + ' daily allowance low'; continue; }
+        try { const r = await accCreateBill(c, by, 'auto'); c.result = 'created'; c.invoice_id = r.invoice_id; if (r.warning) out.errors.push(r.warning); out.created++; }
+        catch (e) { c.result = 'error: ' + e.message; out.errors.push(c.payee_key + ' ' + c.date + ': ' + e.message); if (e && e.xero_daily) break; }
+      }
+    } finally { if (!opts.dry) await accJobUnlock('accounts_autobill'); }
+    if (!opts.dry) try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_autobill',$1,$2,$3)`, [out.errors.length ? 'error' : 'success', out.created, (out.created + ' bill(s) created from ' + out.candidates.filter(x => x.ok).length + ' ready, ' + out.candidates.filter(x => !x.ok).length + ' need a person, ' + rules.length + ' Auto bill payee(s)' + (out.errors.length ? ' · ' + out.errors.slice(0, 3).join('; ') : '') + ' (' + (by || 'job') + ')').slice(0, 500)]); } catch (_) {}
+    return out;
+  })().finally(() => { _accBillRun = null; });
+  return _accBillRun;
+}
+async function accAutoBillMaybe() {   // every 6 hours with the health checks, claimed across instances
+  const r = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('acc_autobill_claim', now()::text, 'autobill', now()) ON CONFLICT (key) DO UPDATE SET value=now()::text, updated_at=now() WHERE planner.app_settings.updated_at < now() - interval '6 hours' RETURNING key`);
+  if (!r.rowCount) return { skipped: true };
+  return accAutoBillRun('schedule');
+}
+app.post('/api/accounts/bills/run', async (req, res) => {   // ?dry=1 = preview (no writes). Admins and ACCOUNTS users.
+  try { if (_accBillRun) return res.status(409).json({ running: true }); res.json(await accAutoBillRun((req.me && req.me.email) || 'button', { dry: req.query.dry === '1' })); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Bill (review): the person ticked these Inbox matcher lines and confirmed. items: [{org, payee_key, email_id}]; ?dry=1 checks them only.
+app.post('/api/accounts/bills/create', async (req, res) => {
+  try { const items = ((req.body || {}).items || []).filter(i => i && ['uk', 'au'].includes(String(i.org)) && /^[0-9a-f]{8,32}$/i.test(String(i.email_id || '')) && i.payee_key).slice(0, 50);
+    if (!items.length) return res.status(400).json({ error: 'items (org, payee_key, email_id) required' });
+    const saved = new Map((await pool.query(`SELECT org, payee_key, contact, contact_id, account_code, tax_type FROM planner.accounts_payee_rules`)).rows.map(r => [r.org + '|' + r.payee_key, r]));
+    const rules = [...new Map(items.map(i => [i.org + '|' + i.payee_key, Object.assign({ org: i.org, payee_key: String(i.payee_key).toUpperCase(), bill_from: '2000-01-01' }, saved.get(i.org + '|' + String(i.payee_key).toUpperCase()) || {})])).values()];
+    const cands = await accBillCandidates(rules, items.map(i => ({ org: i.org, payee_key: String(i.payee_key).toUpperCase(), email_id: i.email_id })));
+    const out = { ok: true, dry: req.query.dry === '1', candidates: cands, created: 0, errors: [] };
+    if (!out.dry) for (const c of cands.filter(x => x.ok)) {
+      try { const r = await accCreateBill(c, (req.me && req.me.email) || 'button', 'batch'); c.result = 'created'; c.invoice_id = r.invoice_id; if (r.warning) out.errors.push(r.warning); out.created++; }
+      catch (e) { c.result = 'error: ' + e.message; out.errors.push(c.payee_key + ': ' + e.message); if (e && e.xero_daily) break; }
+    }
+    res.json(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Log + watchdog: Xero status from the hourly bill cache (PAID = matched), duplicates = a reconciled Spend Money for the same payee and amount.
+app.get('/api/accounts/bills/log', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT l.id, l.org, l.payee_key, l.email_id, l.invoice_id, l.invoice_number, l.contact, to_char(l.bill_date,'YYYY-MM-DD') bill_date, l.amount::float8 amount, l.currency, l.account_code, l.tax_type, l.stmt_line, l.mode, l.status, l.error, l.run_by,
+        to_char(l.created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, (now() - l.created_at) > make_interval(days => $1) old, upper(b.status) xero_status
+      FROM planner.accounts_bill_log l LEFT JOIN planner.xero_bills b ON b.invoice_id = l.invoice_id ORDER BY l.created_at DESC LIMIT 300`, [ACC_BILL_STALE_DAYS])).rows;
+    const recon = rows.length ? (await pool.query(`SELECT org, to_char(txn_date,'YYYY-MM-DD') d, amount::float8 amount, contact, xero_id FROM planner.accounts_recon_txns WHERE kind='spend' AND recon AND txn_date >= current_date - 120`)).rows : [];
+    rows.forEach(r => { r.xero_url = r.invoice_id ? xbUrl(r.invoice_id) : null; r.mail_url = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + r.email_id;
+      if (r.status !== 'created') { r.flag = r.status === 'creating' ? 'Check Xero: the run stopped while creating this bill' : null; return; }
+      const dup = recon.find(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && Math.abs(t.amount).toFixed(2) === Number(r.amount).toFixed(2) && Math.abs(Math.round((new Date(t.d) - new Date(r.bill_date)) / 864e5)) <= 5);
+      r.state = r.xero_status === 'PAID' ? 'matched' : (r.xero_status === 'VOIDED' || r.xero_status === 'DELETED') ? 'voided' : 'open';
+      r.flag = dup && r.state !== 'matched' ? 'Possible duplicate: a Spend Money for ' + r.amount.toFixed(2) + ' on ' + dup.d + ' was reconciled (old bank rule?). Void one of them'
+        : r.state === 'open' && r.old ? 'Not matched after ' + ACC_BILL_STALE_DAYS + ' days: check the statement line in Xero' : null; });
+    const flags = rows.filter(r => r.flag).length;
+    res.set('Cache-Control', 'no-store').json({ rows, flags, stale_days: ACC_BILL_STALE_DAYS });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/bills/:id/voided', async (req, res) => {   // a person voided a wrong bill in Xero: keep the receipt from being billed again
+  try { await pool.query(`UPDATE planner.accounts_bill_log SET status='voided', error=coalesce(error,'') || $2 WHERE id=$1 AND status IN ('created','creating')`, [req.params.id, ' voided by ' + ((req.me && req.me.email) || 'user')]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/payee-rule/coding', async (req, res) => {   // the Xero contact, account code and tax type for a payee's bills (blank = from history)
+  try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase().slice(0, 80);
+    if (!['uk', 'au'].includes(org) || !key) return res.status(400).json({ error: 'org and payee_key required' });
+    const v = f => (String(b[f] == null ? '' : b[f]).trim().slice(0, 120)) || null;
+    await pool.query(`INSERT INTO planner.accounts_payee_rules (org, payee_key, treatment, source, updated_by, updated_at, contact, account_code, tax_type) VALUES ($1,$2,'bill','manual',$3,now(),$4,$5,$6)
+      ON CONFLICT (org, payee_key) DO UPDATE SET contact=EXCLUDED.contact, contact_id=CASE WHEN EXCLUDED.contact IS DISTINCT FROM planner.accounts_payee_rules.contact THEN NULL ELSE planner.accounts_payee_rules.contact_id END,
+        account_code=EXCLUDED.account_code, tax_type=EXCLUDED.tax_type, updated_by=EXCLUDED.updated_by, updated_at=now()`, [org, key, (req.me && req.me.email) || null, v('contact'), v('account_code'), v('tax_type')]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/payee-rule/bank-rule-done', async (req, res) => {   // the person deleted (or never had) the Xero bank rule for an Auto bill payee
+  try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase();
+    await pool.query(`UPDATE planner.accounts_payee_rules SET bank_rule_done_at=CASE WHEN $3 THEN now() ELSE NULL END, bank_rule_done_by=CASE WHEN $3 THEN $4 ELSE NULL END WHERE org=$1 AND payee_key=$2`, [org, key, b.done !== false, (req.me && req.me.email) || null]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/accounts/bills/coding', async (req, res) => {   // what a payee's bills would be coded as (history), for the Config row
+  try { const org = String(req.query.org || '').toLowerCase(), key = String(req.query.payee_key || '').toUpperCase(); res.json({ coding: await accPayeeCoding(org, key) }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
@@ -25771,7 +25946,7 @@ async function accStmtStaleCheck(opts) {
 }
 app.post('/api/cron/health-checks', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } try { r.attach = await accAttachMaybe(); } catch (e) { r.attach = { error: e.message }; } }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
+  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } try { r.attach = await accAttachMaybe(); } catch (e) { r.attach = { error: e.message }; } try { r.autobill = await accAutoBillMaybe(); } catch (e) { r.autobill = { error: e.message }; }   /* v28.276 */ }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 if (!process.env.VERCEL && process.env.HZ_HEALTH_CHECKS !== '0') {
