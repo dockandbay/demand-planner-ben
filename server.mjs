@@ -3941,8 +3941,8 @@ async function accLearnMatch(by) {
       rows.push([x.org, 'receipt', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, null, x.link, e.id, e.d, e.from_addr, e.subject,
         files.some(f => /\.pdf$/i.test(f)) ? 'pdf' : files.length ? 'other attachment' : e.stripe_link ? 'stripe link' : 'email body', JSON.stringify(files), best.lag, !!(c[1] && c[1].score >= best.score - 5)]); }
   });
-  txns.filter(x => x.org === 'uk' && x.kind === 'spend' && /REVERSECHARGES/.test(x.tax) && !ACC_TPL_RE.test(x.contact) && !isSup(x.contact)).forEach(x =>
-    rows.push([x.org, 'tax', x.id, x.kind, x.date, x.amount, x.ccy, x.contact, x.bank, x.account, x.tax, x.ccy === 'GBP' ? '20% VAT on Expenses or No VAT' : 'Zero Rated Expenses', null, null, null, null, null, null, null, null, null]));
+  // v28.308 (Ben 13-Oct-26): reverse charge on UK spend is CORRECT (accountants: foreign web services / SaaS to a UK VAT registered company
+  // are always reverse charge), so it is no longer listed under "Tax to review" (was suggesting 20% VAT / No VAT / Zero Rated).
   const cl = await pool.connect();
   try { await cl.query('BEGIN'); await cl.query('DELETE FROM planner.accounts_backdate');
     for (let i = 0; i < rows.length; i += 200) { const ch = rows.slice(i, i + 200);
@@ -4382,7 +4382,11 @@ async function accPayeeCoding(org, key) {   // the payee's most used Xero contac
     .filter(r => r.contact && accSameP(accPayeeKey(r.contact, ''), key));
   if (!rows.length) return null;
   const top = (f) => { const m = new Map(); rows.forEach(r => m.set(r[f], (m.get(r[f]) || 0) + r.n)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
-  return { contact: top('contact'), account_code: top('account'), tax_type: top('tax'), n: rows.reduce((a, r) => a + r.n, 0) };
+  // v28.308 (Ben 13-Oct-26, from the accountants): "Web based services or SaaS products charged by foreign businesses to UK VAT registered
+  // companies should always be coded to reverse charge VAT". When any of the payee's past UK transactions is Reverse Charge, keep using it,
+  // even where older ones were coded otherwise before the accountants' adjustments.
+  const rc = org === 'uk' && rows.some(r => /^REVERSECHARGES$/i.test(String(r.tax || '')));
+  return { contact: top('contact'), account_code: top('account'), tax_type: rc ? 'REVERSECHARGES' : top('tax'), n: rows.reduce((a, r) => a + r.n, 0) };
 }
 // Candidates. rules: [{org, payee_key, bill_from, contact, contact_id, account_code, tax_type}]; only (batch): [{org, payee_key, email_id}].
 async function accBillCandidates(rules, only) {

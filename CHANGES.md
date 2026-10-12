@@ -1,3 +1,11 @@
+## v28.308 (Ben, branch review-fixes-2026-10-05): reverse charge VAT is correct, keep it per contact
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben, from the accountants: "Web based services or SaaS products charged by foreign businesses to UK VAT registered companies should always be coded to reverse charge VAT in a UK VAT return, hence the adjustments." Keep following that pattern for the same contact.
+- **Bill creation (ACCOUNTS, UK):** the tax type now comes out as Reverse Charge whenever any of the payee's reconciled past Spend Money in Xero UK is Reverse Charge (was: the most used tax type, so older pre-adjustment codings could win). A tax type set by a person on the payee's rule still wins. AU unchanged.
+- **Back-date > Tax to review:** reverse-charge UK spends are no longer flagged (they were listed with a suggestion of Zero Rated / 20% VAT / No VAT, the opposite of the accountants' advice). The list fills from the next Learn run.
+
 ## v28.307 (Ben, branch review-fixes-2026-10-05): balance payments 3, 4, 5 ...
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/362_po_balance_payments.sql`, `lib/ai-logic/{supply-finance,reports,actions}.md` (+ package.json, CHANGES.md). **Migration 362.** No env vars.
