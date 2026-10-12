@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.247
+verified_version: v28.267
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -447,3 +447,7 @@ verified_version: v28.247
 - Status by the deadline, at that location only: In stock (stock there; US FBA includes AWD); On track (an inbound ETA to that location on or before the deadline; for FBA this includes pending transfers from the 3PL, planned or dispatched, from /api/supply/fba-transfers/list, and a planned transfer with no ETA counts as No ETA); No ETA; Late (earliest inbound after the deadline, by N days); Missing (no stock there, nothing inbound). Missing, Late and No ETA are alerts. (source: intakeRows, _ikInbound)
 - Snooze hides an alert until a date (planner.alert_snoozes, key intake|SKU|location), optional reason; bulk set SKU dates and bulk snooze on selected rows. (source: renderIntakeView; server.mjs :: /api/demand/intake)
 - The red counter on DEMAND ▸ Analysis and on the Intake deadlines tab = alerts not snoozed whose deadline is overdue or within 60 days. (source: intakeAlertCount, intakeBadgeSync)
+
+## 3PL invoicing: Coghlans weekly (from v28.267)
+- Coghlans (AU 3PL) invoices weekly by email from accounts.receivable@coghlan.com.au ("Coghlan Invoice DOK#####", .xlsx + .pdf). HORIZON scans accounts@ (read only) at most every 6 hours with the health checks, and on "Check accounts@ now", and imports each new invoice's .xlsx into 3PL invoicing (AU Coghlans, period = the month of the invoice's own Period End). An invoice already uploaded by hand (DOK number in the filename) is linked, not duplicated. (source: server.mjs :: coghlansMailImport)
+- The Weekly bills view lists every DOK invoice with its Xero bill. Processed = a Xero bill named FULFILLMENT-AU-<period end>-<DOK> (from Aug-26) or FULFILLMENT-AU-<period end> (older bills) that is not deleted or voided; otherwise To process, or Not imported when the email had no readable .xlsx. Filters: Unprocessed (default), Processed, All. Open takes the user to that month's Invoices tools with the file. (source: server.mjs :: /api/supply/tpl/coghlans/weekly)

@@ -1,3 +1,11 @@
+## v28.267 (Ben, branch review-fixes-2026-10-05): Coghlans weekly invoices auto-imported from accounts@, and a Weekly bills view
+
+**Files:** `server.mjs`, `artifact_v16.7.html`, `migrations/353_tpl_coghlans_mail.sql`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). **Migration 353** (additive: `tpl_invoice_files.invoice_no / period_end / source_msg_id`, backfills invoice numbers from filenames; new `planner.tpl_coghlans_mail`). No env. Gmail reads only; nothing is written to Xero.
+
+- **(a) Auto import:** accounts@ is scanned for "Coghlan Invoice DOK#####" emails from accounts.receivable@coghlan.com.au (last 180 days). Each new invoice's .xlsx is imported into 3PL invoicing ▸ AU Coghlans with the month of its own Period End. An invoice already uploaded by hand is linked, not duplicated. Runs with the health checks at most every 6 hours (claimed across instances), and on **Check accounts@ now**. Logged in etl_runs as `coghlans_mail_import`.
+- **(b) Weekly bills** (new first tab for AU Coghlans, the default): one row per invoice with week ending, received date, total inc GST, status (Processed / To process / Not imported) and the Xero bill link and status. Filters **Unprocessed** (default), **Processed**, **All**, instant. **Open** jumps to that month in Invoices with the file ready to parse and bill. Processed = a Xero bill `FULFILLMENT-AU-<week ending>-<DOK>`, or the older `FULFILLMENT-AU-<week ending>`, not deleted or voided.
+- Sandbox: 26 emails found, 24 imported, 2 linked to earlier uploads, second scan imports nothing. 20 processed, 6 to process (DOK50366 to DOK50370, Sep to Oct, and DOK50349 from 15-May-26, which has no Xero bill). jsdom: tab opens on Weekly bills, filters instant, Open lands on Oct-26 with DOK50370 listed, no writes.
+
 ## v28.266 (Ben, branch review-fixes-2026-10-05): email when a bank statement upload is more than 5 days old (UK or AU)
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration. Optional env `ACC_STMT_MAX_DAYS` (default 5), `ACC_STMT_ALERT_TO` (default rita@, sarah@, ben@dockandbay.com).

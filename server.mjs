@@ -15414,6 +15414,87 @@ app.get('/api/supply/portal-attachment/:id', staffOnly, async (req, res) => {   
 // 3PLs: uk_ilg | us_geneva | eu_ifulfilment (=Blade) | au_coghlans. Phase 1: uploaded invoice files per
 // 3PL+month, per-3PL storage/other cost-account config, and the region×channel account map (read-only).
 const TPL_KEYS = ['uk_ilg', 'us_geneva', 'eu_ifulfilment', 'au_coghlans'];
+// ═══ v28.267 (Ben 12-Oct-26): Coghlans weekly invoices. (a) accounts@ is scanned (Gmail, read only) for "Coghlan Invoice DOK#####" emails from
+// accounts.receivable@coghlan.com.au; each new invoice's .xlsx is imported into 3PL invoicing (tpl au_coghlans, period = the month of the
+// invoice's own Period End). An invoice already uploaded by hand (filename carries the DOK number) is linked, not duplicated.
+// (b) GET /api/supply/tpl/coghlans/weekly lists every invoice with its Xero bill: processed = a bill FULFILLMENT-AU-<date>-<DOK> that is not
+// deleted or voided. Runs with the health checks at most every 6 hours, and from the "Check accounts@ now" button.
+const COG_FROM = 'accounts.receivable@coghlan.com.au', COG_SCAN_EVERY_MS = 6 * 3600000;
+async function _cogGrids(buf) { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const grids = [];
+  wb.eachSheet(ws => { const grid = []; ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (c, i) => { let v = c.value; if (v && typeof v === 'object') v = v.result != null ? v.result : (v.richText ? v.richText.map(t => t.text).join('') : (v instanceof Date ? v : (v.text || null))); arr[i - 1] = v; }); grid.push(arr); }); grids.push({ name: ws.name, grid }); });
+  return grids; }
+let _cogScanRun = null;
+async function coghlansMailImport(by) {
+  if (_cogScanRun) return _cogScanRun;
+  _cogScanRun = (async () => {
+    const g = await gmailRow(); if (!g || g.missing) return { ok: false, error: 'accounts@ Gmail is not connected (ACCOUNTS > Inbox matcher)' };
+    const ids = []; let tok = '';
+    do { const j = await gmailGetPaced('messages?' + new URLSearchParams(Object.assign({ q: 'from:' + COG_FROM + ' subject:"Coghlan Invoice" has:attachment newer_than:180d', maxResults: '100' }, tok ? { pageToken: tok } : {})).toString()); ids.push(...(j.messages || []).map(m => m.id)); tok = j.nextPageToken; } while (tok && ids.length < 400);
+    const known = new Map((await pool.query(`SELECT invoice_no, msg_id, file_id FROM planner.tpl_coghlans_mail`)).rows.map(r => [r.msg_id, r]));
+    const out = { ok: true, seen: ids.length, imported: 0, linked: 0, skipped: 0, errors: [] };
+    const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    for (const id of ids) {
+      const k = known.get(id); if (k && k.file_id) { out.skipped++; continue; }
+      let invNo = null;
+      try {
+        const m = await gmailGetPaced('messages/' + id + '?format=full'); if (!m || !m.payload) continue;
+        const H = n => ((m.payload.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
+        invNo = ((/(DOK\d+)/i.exec(H('subject')) || [])[1] || '').toUpperCase(); if (!invNo) { out.skipped++; continue; }
+        const emailDate = new Date(Number(m.internalDate)).toISOString().slice(0, 10);
+        const atts = []; const walk = p => { if (!p) return; if (p.filename && p.body && p.body.attachmentId) atts.push(p); (p.parts || []).forEach(walk); }; walk(m.payload);
+        const x = atts.find(a => /\.xlsx$/i.test(a.filename)); if (!x) throw new Error('no .xlsx attachment on ' + invNo);
+        // already uploaded by hand? link it
+        const prev = (await pool.query(`SELECT id, period_end FROM planner.tpl_invoice_files WHERE tpl='au_coghlans' AND (upper(invoice_no)=$1 OR filename ILIKE $2) ORDER BY id DESC LIMIT 1`, [invNo, '%' + invNo + '%'])).rows[0];
+        if (prev) { let pe = prev.period_end, ti = null;
+          if (!pe) { try { const fr = (await pool.query(`SELECT content FROM planner.tpl_invoice_files WHERE id=$1`, [prev.id])).rows[0]; if (fr && fr.content) { const cm = _coghlansMeta(await _cogGrids(fr.content)); pe = cm.periodEnd || null; ti = cm.totalInc; if (pe) await pool.query(`UPDATE planner.tpl_invoice_files SET period_end=$2, invoice_no=coalesce(invoice_no,$3) WHERE id=$1`, [prev.id, pe, invNo]); } } catch (_) {} }
+          await pool.query(`INSERT INTO planner.tpl_coghlans_mail (invoice_no, msg_id, email_date, file_id, period_end, total_inc, error, scanned_at) VALUES ($1,$2,$3,$4,$5,$6,null,now()) ON CONFLICT (invoice_no) DO UPDATE SET msg_id=EXCLUDED.msg_id, email_date=EXCLUDED.email_date, file_id=EXCLUDED.file_id, period_end=coalesce(EXCLUDED.period_end, planner.tpl_coghlans_mail.period_end), total_inc=coalesce(EXCLUDED.total_inc, planner.tpl_coghlans_mail.total_inc), error=null, scanned_at=now()`, [invNo, id, emailDate, prev.id, pe, ti]); out.linked++; continue; }
+        const att = await gmailGetPaced('messages/' + id + '/attachments/' + x.body.attachmentId); const buf = b64(att.data);
+        const cm = _coghlansMeta(await _cogGrids(buf)); const pe = cm.periodEnd || emailDate;
+        const ins = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, byte_size, uploaded_by, invoice_no, period_end, source_msg_id) VALUES ('au_coghlans',$1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [pe.slice(0, 7), x.filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buf, buf.length, 'accounts@ (auto import)', invNo, pe, id]);
+        await pool.query(`INSERT INTO planner.tpl_coghlans_mail (invoice_no, msg_id, email_date, file_id, period_end, total_inc, error, scanned_at) VALUES ($1,$2,$3,$4,$5,$6,null,now()) ON CONFLICT (invoice_no) DO UPDATE SET msg_id=EXCLUDED.msg_id, email_date=EXCLUDED.email_date, file_id=EXCLUDED.file_id, period_end=EXCLUDED.period_end, total_inc=EXCLUDED.total_inc, error=null, scanned_at=now()`,
+          [invNo, id, emailDate, ins.rows[0].id, pe, cm.totalInc]);
+        out.imported++;
+      } catch (e) { out.errors.push((invNo || id) + ': ' + e.message); if (invNo) try { await pool.query(`INSERT INTO planner.tpl_coghlans_mail (invoice_no, msg_id, error, scanned_at) VALUES ($1,$2,$3,now()) ON CONFLICT (invoice_no) DO UPDATE SET error=EXCLUDED.error, scanned_at=now()`, [invNo, id, String(e.message).slice(0, 300)]); } catch (_) {} }
+    }
+    try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('coghlans_mail_import',$1,$2,$3)`, [out.errors.length ? 'error' : 'success', out.imported, (out.imported + ' imported, ' + out.linked + ' linked to uploads, ' + out.skipped + ' already in, ' + out.seen + ' emails' + (out.errors.length ? ' · ' + out.errors.join('; ') : '') + ' (' + (by || 'job') + ')').slice(0, 500)]); } catch (_) {}
+    try { await accSettingSet('coghlans_mail_scanned', { at: new Date().toISOString(), by: by || 'job' }); } catch (_) {}
+    return out;
+  })().finally(() => { _cogScanRun = null; });
+  return _cogScanRun;
+}
+async function coghlansMailMaybe() {   // from the health-check run: at most every 6 hours, claimed across instances
+  const r = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('coghlans_mail_claim', now()::text, 'cog', now()) ON CONFLICT (key) DO UPDATE SET value=now()::text, updated_at=now() WHERE planner.app_settings.updated_at < now() - make_interval(secs => $1::int) RETURNING key`, [Math.round(COG_SCAN_EVERY_MS / 1000)]);
+  if (!r.rowCount) return { skipped: true };
+  return coghlansMailImport('schedule');
+}
+app.post('/api/supply/tpl/coghlans/scan', async (req, res) => {
+  try { const me = await permsFor(req).catch(() => ({})); const r = await coghlansMailImport((me && me.email) || 'button'); res.status(r.ok ? 200 : 409).json(r); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/tpl/coghlans/weekly', async (req, res) => {
+  try {
+    const rows = (await pool.query(`WITH inv AS (
+        SELECT upper(coalesce(f.invoice_no, substring(f.filename from '(?i)(DOK[0-9]+)'))) invoice_no FROM planner.tpl_invoice_files f WHERE f.tpl='au_coghlans' AND coalesce(f.invoice_no, substring(f.filename from '(?i)(DOK[0-9]+)')) IS NOT NULL
+        UNION SELECT invoice_no FROM planner.tpl_coghlans_mail
+        UNION SELECT upper(substring(b.invoice_number from '(?i)(DOK[0-9]+)')) FROM planner.xero_bills b WHERE lower(b.region)='au' AND b.invoice_number ~* '^FULFILLMENT-AU-.*DOK[0-9]+')
+      SELECT i.invoice_no,
+        to_char(coalesce(m.period_end, f.period_end, b.invoice_date),'YYYY-MM-DD') period_end, to_char(m.email_date,'YYYY-MM-DD') email_date, m.error, m.total_inc::float8 total_inc,
+        f.id file_id, f.filename, f.period, f.uploaded_by, to_char(f.uploaded_at,'YYYY-MM-DD') uploaded_at,
+        b.invoice_id bill_id, b.invoice_number bill_number, upper(b.status) bill_status, b.total::float8 bill_total, b.amount_due::float8 bill_due
+      FROM inv i
+      LEFT JOIN planner.tpl_coghlans_mail m ON m.invoice_no = i.invoice_no
+      LEFT JOIN LATERAL (SELECT * FROM planner.tpl_invoice_files f WHERE f.tpl='au_coghlans' AND (f.id = m.file_id OR upper(coalesce(f.invoice_no,'')) = i.invoice_no OR f.filename ILIKE '%' || i.invoice_no || '%') ORDER BY (f.id = m.file_id) DESC, f.id DESC LIMIT 1) f ON true
+      LEFT JOIN LATERAL (SELECT * FROM planner.xero_bills b WHERE lower(b.region)='au' AND upper(coalesce(b.status,'')) NOT IN ('DELETED','VOIDED')
+          AND (upper(b.invoice_number) LIKE '%-' || i.invoice_no   -- FULFILLMENT-AU-<date>-<DOK> (from Aug-26)
+               OR upper(b.invoice_number) = 'FULFILLMENT-AU-' || to_char(coalesce(m.period_end, f.period_end),'YYYY-MM-DD'))   -- older bills named by period end only
+          ORDER BY (upper(b.invoice_number) LIKE '%-' || i.invoice_no) DESC, b.invoice_date DESC LIMIT 1) b ON true
+      WHERE i.invoice_no IS NOT NULL
+      ORDER BY i.invoice_no DESC`)).rows;
+    rows.forEach(r => { r.status = r.bill_id ? 'processed' : r.file_id ? 'imported' : 'missing'; if (r.bill_id) r.bill_url = xbUrl(r.bill_id); });
+    const scanned = await accSettingGet('coghlans_mail_scanned'), g = await gmailRow().catch(() => null);
+    res.set('Cache-Control', 'no-store').json({ rows, scanned, gmail_connected: !!(g && !g.missing) });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/tpl/data', async (req, res) => {
   const tpl = String(req.query.tpl || ''), period = String(req.query.period || '');
   if (!TPL_KEYS.includes(tpl)) return res.status(400).json({ error: 'bad tpl' });
@@ -25362,11 +25443,11 @@ async function accStmtStaleCheck(opts) {
 }
 app.post('/api/cron/health-checks', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
+  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 if (!process.env.VERCEL && process.env.HZ_HEALTH_CHECKS !== '0') {
-  const _hc = () => accStmtStaleCheck({}).catch(e => console.warn('[stmt-alert] ' + e.message)).then(() => runHealthChecks({})).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
+  const _hc = () => accStmtStaleCheck({}).catch(e => console.warn('[stmt-alert] ' + e.message)).then(() => coghlansMailMaybe().then(x => { if (x && !x.skipped) console.log('[coghlans-mail] ' + JSON.stringify(x).slice(0, 200)); }).catch(e => console.warn('[coghlans-mail] ' + e.message))).then(() => runHealthChecks({})).then(r => { if (r && r.findings && r.findings.length) console.log('[health] checks: ' + r.findings.length + ' finding(s) in ' + r.ms + 'ms'); }, e => console.warn('[health] checks failed: ' + (e && e.message)));
   setTimeout(_hc, 180000).unref?.(); setInterval(_hc, 3600000).unref?.();
 }
 // Local verification only (HZ_HEALTH_TEST=1, never on Vercel): a slow statement, a synthetic red alert, the claim race.

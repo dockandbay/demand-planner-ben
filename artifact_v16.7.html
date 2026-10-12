@@ -16846,6 +16846,7 @@ var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices',fcgrain:'month'};
 function tplCin7Era(tpl,period){ var cut=(tpl==='uk_ilg')?'2026-11':'2026-10'; return !period||String(period)<cut; }
 function render3plInvoice(body){
   try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if((_h3[0]==='reports'||_h3[0]==='accounts')&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
+  if(TPL3_STATE.tpl==='au_coghlans'&&TPL3_STATE.mode==='invoices'&&!TPL3_STATE._cogSeen){ TPL3_STATE.mode='weekly'; TPL3_STATE._cogSeen=1; }   // v28.267: Coghlans opens on Weekly bills
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function su(x){ x=String(x||''); return /@dockandbay\.com$/i.test(x)?x.split('@')[0]+'@':x; }   // ben@dockandbay.com → ben@
   function lastMonth(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); }
@@ -17005,7 +17006,8 @@ function render3plInvoice(body){
   }
   function shell(){
     var tabs=TPL3.map(function(t){var on=(t[0]===TPL3_STATE.tpl);return '<button class="dnav3'+(on?' active':'')+'" data-tpl="'+t[0]+'"">'+e(t[1])+'</button>';}).join('');
-    var modes=[['invoices','Invoices'],['config','Config / Accounts'],['log','Import log'],['forecast','Forecast']].map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
+    if(TPL3_STATE.mode==='weekly'&&TPL3_STATE.tpl!=='au_coghlans')TPL3_STATE.mode='invoices';   // v28.267: Weekly bills is Coghlans only
+    var modes=(TPL3_STATE.tpl==='au_coghlans'?[['weekly','Weekly bills']]:[]).concat([['invoices','Invoices'],['config','Config / Accounts'],['log','Import log'],['forecast','Forecast']]).map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
     host.innerHTML='<div id="tpl-subnav" class="d3nav">'+tabs+'</div>'   // standard level-3 row, flush under the REPORTS tabs; page header removed (Ben, v27.471)
       +'<div style="padding:4px 2px 10px;text-align:left">'
       +((TPL3_STATE.mode==='invoices')?_tplGuide(TPL3_STATE.tpl):'')
@@ -17013,13 +17015,45 @@ function render3plInvoice(body){
         +'<span style="width:1px;height:16px;background:var(--line);margin:0 4px"></span>'
         +'<label style="font-size:12px;color:var(--muted)">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;margin-left:4px"></label>'
       +'</div><div id="tpl-body"><div style="color:var(--faint);font-size:12px">Loading…</div></div></div>';
-    host.querySelectorAll('.dnav3[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(window.writeHash)window.writeHash(['accounts','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
+    host.querySelectorAll('.dnav3[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(TPL3_STATE.tpl==='au_coghlans'&&TPL3_STATE.mode==='invoices'&&!TPL3_STATE._cogSeen){ TPL3_STATE.mode='weekly'; TPL3_STATE._cogSeen=1; } if(window.writeHash)window.writeHash(['accounts','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
     host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
     var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
   }
+  // v28.267 (Ben): Coghlans invoices weekly. Every DOK invoice from accounts@ (auto-imported) or uploaded, with its Xero bill. Processed = a Xero
+  // bill FULFILLMENT-AU-<period end>[-<DOK>] that is not deleted or voided. Filter All / Unprocessed / Processed; "Open" jumps to that month's
+  // invoice tools with the file; "Check accounts@ now" runs the import (it also runs every 6 hours).
+  function drawCoghlansWeekly(b,cached){ var F=TPL3_STATE.cogF||'unprocessed';
+    var go=function(d){ TPL3_STATE._cogD=d; var rows=(d.rows||[]), n={all:rows.length,unprocessed:0,processed:0}; rows.forEach(function(r){ if(r.status==='processed')n.processed++; else n.unprocessed++; });
+      var vis=rows.filter(function(r){ return F==='all'||(F==='processed'?r.status==='processed':r.status!=='processed'); });
+      var dd=function(x){ if(!x)return ''; var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],p=String(x).slice(0,10).split('-'); return p[2]+'-'+m[+p[1]-1]+'-'+p[0].slice(2); };
+      var money=function(v){ return v==null?'':'A$'+Number(v).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      var pill=function(k,l){ return '<button class="pill catpill'+(F===k?' active':'')+'" data-cogf="'+k+'">'+l+' ('+n[k]+')</button>'; };
+      var badge=function(r){ return r.status==='processed'?'<span style="background:var(--green-bg,#e7f6ec);color:var(--pos);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700">Processed</span>'
+        :r.status==='imported'?'<span style="background:var(--amber-bg);color:var(--amber);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700">To process</span>'
+        :'<span style="background:var(--neg-bg,#fdecec);color:var(--neg);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700">Not imported</span>'; };
+      var sc=d.scanned||null;
+      b.innerHTML='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;text-align:left">'+pill('unprocessed','Unprocessed')+pill('processed','Processed')+pill('all','All')
+        +'<button class="save-btn" id="cog-scan" style="margin-left:8px">Check accounts@ now</button><span id="cog-msg" style="font-size:12px;color:var(--muted)">'+(d.gmail_connected?('Auto-imported from accounts@ every 6 hours'+(sc&&sc.at?' · last check '+dd(sc.at)+' '+String(sc.at).slice(11,16)+' UTC':'')):'<span style="color:var(--neg)">accounts@ Gmail is not connected (ACCOUNTS ▸ Inbox matcher)</span>')+'</span></div>'
+        +'<div style="overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr style="background:var(--hover)"><th style="text-align:left;padding:7px 10px">Invoice</th><th style="text-align:left;padding:7px 10px">Week ending</th><th style="text-align:left;padding:7px 10px">Received</th><th style="text-align:left;padding:7px 10px">Total inc GST</th><th style="text-align:left;padding:7px 10px">Status</th><th style="text-align:left;padding:7px 10px">Xero bill</th><th style="text-align:left;padding:7px 10px"></th></tr></thead><tbody>'
+        +(vis.length?vis.map(function(r){ return '<tr style="border-top:1px solid var(--line)"><td style="padding:6px 10px;font-weight:700">'+e(r.invoice_no)+(r.error?'<div style="color:var(--neg);font-weight:400">'+e(r.error)+'</div>':'')+'</td><td style="padding:6px 10px">'+dd(r.period_end)+'</td><td style="padding:6px 10px">'+dd(r.email_date||r.uploaded_at)+(r.uploaded_by&&!/auto import/.test(r.uploaded_by)?' <span style="color:var(--faint)">(uploaded)</span>':'')+'</td><td style="padding:6px 10px">'+money(r.total_inc!=null?r.total_inc:r.bill_total)+'</td><td style="padding:6px 10px">'+badge(r)+'</td>'
+          +'<td style="padding:6px 10px">'+(r.bill_id?'<a href="'+e(r.bill_url)+'" target="_blank" rel="noopener">'+e(r.bill_number)+'</a> <span style="color:var(--faint)">'+e(String(r.bill_status||'').toLowerCase())+(r.bill_due?' · due '+money(r.bill_due):'')+'</span>':'<span style="color:var(--faint)">none</span>')+'</td>'
+          +'<td style="padding:6px 10px;white-space:nowrap">'+(r.file_id?'<button class="save-btn light" data-cogopen="'+e(r.period||String(r.period_end||'').slice(0,7))+'">Open</button> <a href="/api/supply/tpl/file/'+r.file_id+'" target="_blank" rel="noopener">file</a>':'')+'</td></tr>'; }).join('')
+          :'<tr><td colspan="7" style="padding:12px 10px;color:var(--faint)">'+(F==='processed'?'No processed invoices yet.':'Every Coghlans invoice has a Xero bill.')+'</td></tr>')
+        +'</tbody></table></div><div style="font-size:11px;color:var(--faint);margin-top:8px;text-align:left">Processed = a Xero bill FULFILLMENT-AU-&lt;week ending&gt;-&lt;invoice&gt; exists (draft, awaiting payment or paid). Open takes you to that month in Invoices with the file ready to parse and bill.</div>';
+      b.querySelectorAll('[data-cogf]').forEach(function(x){ x.onclick=function(){ TPL3_STATE.cogF=x.dataset.cogf; drawCoghlansWeekly(b,true); }; });   // instant: filters the loaded list
+      b.querySelectorAll('[data-cogopen]').forEach(function(x){ x.onclick=function(){ TPL3_STATE.period=x.dataset.cogopen; TPL3_STATE.mode='invoices'; shell(); load(); }; });
+      var sb=b.querySelector('#cog-scan'); if(sb)sb.onclick=function(){ sb.disabled=true; sb.textContent='Checking accounts@…';
+        fetch('/api/supply/tpl/coghlans/scan',{method:'POST'}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+          .then(function(j){ TPL3_STATE._cogMsg=j.imported?(j.imported+' new invoice'+(j.imported===1?'':'s')+' imported'):'No new invoices'; drawCoghlansWeekly(b); })
+          .catch(function(err){ sb.disabled=false; sb.textContent='Check accounts@ now'; var m=b.querySelector('#cog-msg'); if(m)m.innerHTML='<span style="color:var(--neg)">'+e(err.message)+'</span>'; }); };
+      if(TPL3_STATE._cogMsg){ var m=b.querySelector('#cog-msg'); if(m)m.innerHTML='<b>'+e(TPL3_STATE._cogMsg)+'</b>'; TPL3_STATE._cogMsg=null; } };
+    if(cached&&TPL3_STATE._cogD){ go(TPL3_STATE._cogD); return; }
+    b.innerHTML='<div style="color:var(--faint);font-size:12px">Loading…</div>';
+    fetch('/api/supply/tpl/coghlans/weekly').then(function(r){ return r.json(); }).then(go).catch(function(err){ b.innerHTML='<div style="color:var(--neg);font-size:12px">Failed: '+e(err.message||err)+'</div>'; }); }
   function load(silent){ var b=host.querySelector('#tpl-body'); if(!b)return; if(!silent)b.innerHTML='<div style="color:var(--faint);font-size:12px">Loading…</div>';
     if(TPL3_STATE.mode==='log'){ drawImportLog(b); return; }
     if(TPL3_STATE.mode==='forecast'){ draw3plForecast(b); return; }
+    if(TPL3_STATE.mode==='weekly'){ drawCoghlansWeekly(b); return; }   // v28.267
     fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period='+encodeURIComponent(TPL3_STATE.mode==='invoices'?TPL3_STATE.period:''))
       .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'load failed');
         if(TPL3_STATE.mode==='config')drawConfig(b,d); else drawInvoices(b,d); })
