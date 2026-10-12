@@ -16843,6 +16843,30 @@ var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iF
 var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices',fcgrain:'month'};
 // v27.905 (Diviyaj): Cin7 is the order source up to Sep-2026 (Oct-2026 for UK ILG). From the cut-over month the invoice refs
 // resolve from Diviyaj's Fulfil shipment table instead, so the Import Cin7 orders + Clean-up sweep steps are hidden.
+// v28.299 (Ben): Duplicate charges across months, copied as an email-ready table (HTML for Gmail / Outlook, tab-separated text as the
+// fallback): a short request for a credit memo, every duplicated order (not only the first 40 shown), amount, month(s) already billed, total.
+function tplDupCopy(dup,tpl,period,msgEl){
+  var M=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var mon=function(p){ p=String(p||''); var m=/^(\d{4})-(\d{2})/.exec(p); return m?M[+m[2]-1]+' '+m[1]:p; };
+  var mshort=function(p){ var m=/^(\d{4})-(\d{2})/.exec(String(p||'')); return m?M[+m[2]-1].slice(0,3)+'-'+m[1].slice(2):String(p||''); };
+  var ccy={uk_ilg:'GBP',us_geneva:'USD',eu_ifulfilment:'EUR',au_coghlans:'AUD'}[tpl]||'';
+  var name=((TPL3.filter(function(t){ return t[0]===tpl; })[0])||[tpl,tpl])[1];
+  var money=function(n){ return (Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var esc=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  var refs=(dup.refs||[]).slice().sort(function(a,b){ return String(a.ref).localeCompare(String(b.ref)); });
+  var months=(dup.by_month||[]).map(function(m){ return mon(m.period); });
+  var intro='Our '+mon(period)+' invoice from '+name.replace(/^(UK|US|EU|AU) /,'')+' includes '+dup.orders+' order'+(dup.orders===1?'':'s')+' that were already billed in '+(months.join(' and ')||'another month')+', totalling '+ccy+' '+money(dup.amount)+'. Please issue a credit memo for this amount. The orders are listed below.';
+  var more=(dup.orders>refs.length)?('Only the first '+refs.length+' of '+dup.orders+' orders are listed.'):'';
+  var TH='style="border:1px solid #cbd5e1;padding:4px 8px;text-align:left;background:#f1f5f9;font-weight:bold"', TDs='style="border:1px solid #cbd5e1;padding:4px 8px;text-align:left"', TDr='style="border:1px solid #cbd5e1;padding:4px 8px;text-align:right"';
+  var html='<p>'+esc(intro)+'</p><table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px"><thead><tr><th '+TH+'>Order reference</th><th '+TH.replace('left','right')+'>Amount ('+ccy+')</th><th '+TH+'>Already billed in</th></tr></thead><tbody>'
+    +refs.map(function(r){ return '<tr><td '+TDs+'>'+esc(r.ref)+'</td><td '+TDr+'>'+money(r.amount)+'</td><td '+TDs+'>'+esc((r.also_in||[]).map(mshort).join(', '))+'</td></tr>'; }).join('')
+    +'<tr><td '+TDs+'><b>Total ('+dup.orders+' order'+(dup.orders===1?'':'s')+')</b></td><td '+TDr+'><b>'+money(dup.amount)+'</b></td><td '+TDs+'></td></tr></tbody></table>'+(more?'<p>'+esc(more)+'</p>':'');
+  var text=intro+'\n\nOrder reference\tAmount ('+ccy+')\tAlready billed in\n'+refs.map(function(r){ return r.ref+'\t'+money(r.amount)+'\t'+(r.also_in||[]).map(mshort).join(', '); }).join('\n')+'\nTotal ('+dup.orders+' orders)\t'+money(dup.amount)+'\t'+(more?'\n\n'+more:'');
+  var ok=function(){ if(msgEl){ msgEl.textContent='Copied: paste into the email'; setTimeout(function(){ msgEl.textContent=''; },4000); } };
+  var fail=function(){ if(msgEl)msgEl.textContent='Copy blocked by the browser'; };
+  try{ if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){ navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})})]).then(ok,function(){ navigator.clipboard.writeText(text).then(ok,fail); }); }
+    else if(navigator.clipboard)navigator.clipboard.writeText(text).then(ok,fail); else fail(); }catch(_){ fail(); }
+}
 function tplCin7Era(tpl,period){ var cut=(tpl==='uk_ilg')?'2026-11':'2026-10'; return !period||String(period)<cut; }
 function render3plInvoice(body){
   try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if((_h3[0]==='reports'||_h3[0]==='accounts')&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
@@ -16870,6 +16894,7 @@ function render3plInvoice(body){
           +'<div style="font-weight:800;font-size:13px">⛔ DUPLICATE CHARGES ACROSS MONTHS — '+_dup.orders+' order'+(_dup.orders===1?'':'s')+' on this invoice were already billed in another month · '+fmt(_dup.amount)+' on this invoice</div>'
           +'<div style="margin-top:4px">Also billed in: '+_dm+'. Ask the 3PL for a credit memo and short-pay this invoice by the duplicated amount (the analysis below still includes it).</div>'
           +(_dr?('<div style="margin-top:6px;line-height:1.7">'+_dr+((_dup.refs||[]).length>40?(' … +'+((_dup.refs||[]).length-40)+' more'):'')+'</div>'):'')
+          +'<div style="margin-top:8px;display:flex;align-items:center;gap:8px"><button type="button" id="tpl-dup-copy" style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;border:1px solid var(--neg);background:var(--card);color:var(--neg);cursor:pointer">Copy for email</button><span id="tpl-dup-copied" style="font-size:11px"></span></div>'
           +'</div>'; }
       var _sa=d.source_analysis||null, saBox='';
       if(_sa){ var chip=function(lbl,n,bg,fg,ti){ return '<span title="'+e(ti||'')+'" style="display:inline-block;padding:4px 10px;border-radius:999px;background:'+bg+';color:'+fg+';font-size:11px;font-weight:700;margin:0 6px 4px 0">'+lbl+': '+n+'</span>'; };
@@ -16888,6 +16913,7 @@ function render3plInvoice(body){
       var _ra=d.ruleAssigned||{}; if((_ra.fba||0)+(_ra.trf||0)>0){ html+='<div style="font-size:11px;color:var(--blue-ink);margin-top:6px">Assigned by rule (excluded from the Cin7 sweep): '+((_ra.fba||0)?('<b>'+_ra.fba+'</b> FBA → Amazon fulfilment'):'')+((_ra.fba&&_ra.trf)?' · ':'')+((_ra.trf||0)?('<b>'+_ra.trf+'</b> TRF → Other costs (branch transfers)'):'')+'.</div>'; }
       if(um.orders>0){ var _urefs=(um.refs||[]).slice(0,50); html+='<div style="font-size:11px;color:var(--amber);margin-top:8px">'+um.orders+' order(s) unmapped (freight '+fmt(um.freight)+' / fulfilment '+fmt(um.fulfilment)+') — their reference isn&rsquo;t in the imported Cin7 set, or the Cin7 order has no Cost Centre. <b>This is the gap vs the invoice freight total.</b> Run Import / Sweep up for the month, or set the Cost Centre in Cin7.'+(_urefs.length?('<div style="margin-top:6px;color:var(--amber)"><b>First '+_urefs.length+' unmapped ref'+(_urefs.length===1?'':'s')+':</b> '+_urefs.map(function(x){return e(String(x));}).join(', ')+(um.orders>_urefs.length?' …':'')+'</div>'):'')+'</div>'; }
       html+='</div><div id="tpl-journal-out" style="max-width:820px;text-align:left;margin-top:12px"></div>'; cont.innerHTML=missBanner+aoBox+html;
+      var _dcb=document.getElementById('tpl-dup-copy'); if(_dcb&&_dup)_dcb.onclick=function(){ tplDupCopy(_dup,TPL3_STATE.tpl,TPL3_STATE.period,document.getElementById('tpl-dup-copied')); };
       (function(){ var jo=document.getElementById('tpl-journal-out'); if(!jo)return;   // cross-month reclass journal (orders shipped in an earlier month than the invoice)
         fetch('/api/supply/tpl/journal/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({preview:true})}).then(function(r){return r.json();}).then(function(jd){
           if(!jd||!jd.ok||!(jd.months&&jd.months.length)){ jo.innerHTML=''; return; }

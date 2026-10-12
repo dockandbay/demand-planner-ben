@@ -1,3 +1,9 @@
+## v28.299 (Ben, branch review-fixes-2026-10-05): Duplicate 3PL charges, Copy for email
+
+**Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- ACCOUNTS > 3PL INVOICING, the red DUPLICATE CHARGES ACROSS MONTHS box has a **Copy for email** button. It copies a short request for a credit memo (3PL, invoice month, order count, months already billed, total in the 3PL's currency) and a table of every duplicated order (all of them, not only the first 40 shown): Order reference, Amount, Already billed in (Mmm-yy), Total row. Pastes as a formatted table into Gmail / Outlook; plain text (tab-separated) where the browser blocks rich copy.
+
 ## v28.298 (Ben, branch review-fixes-2026-10-05): Bank statement drag and drop; AU upload filed as UK; mailbox shows 2 months
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
