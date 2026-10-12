@@ -1,3 +1,12 @@
+## v28.309 (Ben, branch review-fixes-2026-10-05): completion % cleared = 0%; Balance N boxes in the drawer and Payments Due
+
+**Files:** `supply/inject.html`, `lib/ai-logic/{supply-finance,reports}.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben (PO-54UKXR3-FBA): "i set completion from 20% to null (using delete), it reverted to 20%. it should revert to 0%". An emptied start deposit or completion % box in PO > Payments now saves 0%. (Before, blank meant the supplier's terms.) To go back to the terms, type the supplier's %.
+- "on balance 3 there is no amount i can enter into amount or date paid, only a pay button": the Balance N row in the PO drawer has the amount and date-paid boxes like every other row. Filling either records the payment (amount typed, or the remainder when only a date is given; no date = unpaid). pay » and + add stay.
+- Payments Due: the remaining row that records the next balance payment shows the standard Assigned amount and Payment date boxes (the "pay records the next balance payment" note is gone). The first box filled creates the payment and the second updates it; PAY turns to paid once the boxes have created it.
+- Verified on the sandbox (PO-54UKXR3-FBA): typing 100 in Balance 3 created it (unpaid) and Balance 4 offered the remaining 4,044.40; Payments Due showed the boxes; an emptied completion % stayed 0. Test payment removed.
+
 ## v28.308 (Ben, branch review-fixes-2026-10-05): reverse charge VAT is correct, keep it per contact
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

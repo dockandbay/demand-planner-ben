@@ -4550,10 +4550,12 @@
     if(r.balance_2_amount!=null && _bxRem>0.009 && totalDue>0.02){ var _nx=3+(r.balance_x||[]).length;
       h+=tr('<td class="l"><b>Balance '+_nx+'</b><div class="mut tiny" style="margin-top:2px">remainder</div></td>'
         +'<td>'+money(_bxRem)+' <span class="mut tiny">owing</span> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="'+esc(_bxRem)+'" title="record the rest as balance payment '+_nx+', dated today">pay &raquo;</button> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="" title="add balance payment '+_nx+' with an amount you type">+ add</button></td>'
-        +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>'
+        +'<td class="l"><input class="fci balx-newin" data-k="amount" data-ep="'+esc(ep+'/balance-x')+'" data-rem="'+esc(_bxRem)+'" placeholder="'+esc(money(_bxRem))+'" title="type an amount to record balance payment '+_nx+'"></td>'
+        +'<td class="l">'+dateField('',{attrs:'data-k="date" data-ep="'+esc(ep+'/balance-x')+'" data-rem="'+esc(_bxRem)+'" title="date paid: records balance payment '+_nx+' (amount = the remainder unless typed)"',cls:'balx-newin'})+'</td>'
+        +'<td class="l"><span class="mut">—</span></td>'
         +dueCell(r.balance_due,true)+'<td class="l"><span class="mut">—</span></td><td class="l">'+payBadge('owing','bg-amber')+'</td>'); }
     h+='</tbody></table></div>'
-      +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial, Balance 3 onward when balance 2 is used and money is still owed · clear a % to revert to the supplier&rsquo;s terms · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
+      +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial, Balance 3 onward when balance 2 is used and money is still owed · an emptied % saves 0% (type the supplier&rsquo;s % to go back to its terms) · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
     if(r.deposit_ref) h+='<div class="dep-ctx" data-po="'+esc(r.po)+'" style="margin:2px 2px 10px"></div>';   // deposit analysis box (filled async in bindPay)
     var payH=h;
     // ---- DATES chunk — only production start & end are editable; ship/delivery/completion are always calculated
@@ -4941,7 +4943,7 @@
     document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
     // date payin (start/completion/balance dates): resolve any typed/pasted format → ISO, validate
     if(inp.classList.contains('dateinp')){ var _raw=(inp.value||'').trim(), _iso=_raw?parseDateLoose(_raw):''; if(_raw&&!_iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_iso; }
-    else { inp.value=payEvalAmount(inp.value); }   // amount cells (completion / balance / starting deposit): resolve currency symbols, commas + arithmetic (e.g. "$5,099.60-2,393.69" → 2705.91)
+    else { inp.value=payEvalAmount(inp.value); if(inp.classList.contains('pctin')&&String(inp.value).trim()==='')inp.value='0'; }   // v28.309 (Ben): an emptied % box means 0%, not the supplier's terms · amount cells (completion / balance / starting deposit): resolve currency symbols, commas + arithmetic (e.g. "$5,099.60-2,393.69" → 2705.91)
     // Starting deposit can't exceed what the deposit ref still holds — clamp + roll the rest into completion.
     if(inp.dataset.field==='pay_start_deposit_assigned' && inp.dataset.avail!=null){ var av=Number(inp.dataset.avail), v=Number(String(inp.value).replace(/,/g,''));
       if(isFinite(av)&&isFinite(v)&&v>av+0.005){ inp.value=av.toFixed(2); alert('Starting deposit capped at the deposit ref’s availability ('+money(av)+'). The remainder rolls into the completion deposit.'); } }
@@ -4971,6 +4973,17 @@
         if(!amt){ var v=prompt('Amount of the next balance payment'); if(v==null)return; amt=payEvalAmount(v); if(!(Number(String(amt).replace(/,/g,''))>0))return alert('Enter an amount above 0'); dt=''; }
         b.disabled=true; fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({amount:String(amt).replace(/,/g,''),date:dt})}).then(function(r){return r.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
+    // v28.309 (Ben): the Balance N row takes an amount and / or a date like the other rows; either one creates the payment
+    // (amount typed, or the remainder when only a date is given; no date = recorded unpaid).
+    document.querySelectorAll('#podet-'+i+' .balx-newin').forEach(function(inp){ inp.onchange=function(){ var row=inp.closest('tr'); if(!row||row._busy)return;
+        var a=row.querySelector('.balx-newin[data-k="amount"]'), d=row.querySelector('.balx-newin[data-k="date"]');
+        var amt=a&&a.value.trim()?payEvalAmount(a.value):'', dt=d&&d.value.trim()?parseDateLoose(d.value.trim()):'';
+        if(d&&d.value.trim()&&!dt){ d.classList.add('err'); return; }
+        if(!amt&&!dt)return; if(!amt)amt=inp.dataset.rem;
+        if(!(Number(String(amt).replace(/,/g,''))>0)){ if(a)a.classList.add('err'); return; }
+        row._busy=1; inp.classList.add('saved');
+        fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({amount:String(amt).replace(/,/g,''),date:dt})}).then(function(r){return r.json();})
+          .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); }).catch(function(e){ row._busy=0; inp.classList.remove('saved'); inp.classList.add('err'); inp.title='Not saved: '+(e.message||e); }); }; });
     document.querySelectorAll('#podet-'+i+' .balx-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this balance payment?'))return; b.disabled=true;
         fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({remove:true})}).then(function(r){return r.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
@@ -11101,6 +11114,23 @@
     pduePaidBox();
     ensurePayFilt();
     // mobile: one card per payment (same inline fields + pay button; bindings attach by class as on the table)
+    // v28.309 (Ben): the remaining row that records the NEXT balance payment (3, 4, ...) gets the standard Assigned amount + Payment date
+    // boxes. The first box filled creates the payment (amount typed, else the remaining amount; date blank = unpaid); after that both
+    // boxes point at the new payment, so the second box updates it rather than adding another.
+    function pdueBxIn(r,k){ var i=rows.indexOf(r);
+      return k==='amount'?'<input class="fci pdue-bxin" data-k="amount" data-ri="'+i+'" value="">'
+        :dateField('',{attrs:'data-k="date" data-ri="'+i+'"',cls:'pdue-bxin'}); }
+    function bindPdueBx(){ document.querySelectorAll('#pdue-wrap .pdue-bxin').forEach(function(inp){ inp.onchange=function(){ var r=rows[+inp.dataset.ri]; if(!r||r._bxBusy)return;
+        var v=inp.value.trim(), body={};
+        if(inp.dataset.k==='amount'){ if(!v)return; v=payEvalAmount(v); if(!(Number(String(v).replace(/,/g,''))>0)){ inp.classList.add('err'); return; } body.amount=String(v).replace(/,/g,''); }
+        else { var iso=v?parseDateLoose(v):''; if(v&&!iso){ inp.classList.add('err'); return; } body.date=iso||''; }
+        var create=!/\/balance-x\/\d+$/.test(r.ep); if(create){ if(body.amount==null)body.amount=String(r.due_amt); if(body.date==null)body.date=''; }
+        r._bxBusy=1; inp.classList.remove('err'); inp.classList.add('saved');
+        fetch(r.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(x){return x.json();}).then(function(j){ r._bxBusy=0; if(j&&j.error)throw new Error(j.error);
+            if(create&&j.row&&(j.row.balance_x||[]).length){ var nx=j.row.balance_x[j.row.balance_x.length-1]; r.ep=r.ep+'/'+nx.id; r.amt_val=nx.amount; r.dt_val=nx.date; r.paid=true; r.overdue=false;
+              var host=inp.closest('tr')||inp.closest('.mob-card')||inp.parentNode; var pb=host&&host.querySelector('.pdue-pay'); if(pb)pb.outerHTML='<span class="tool-badge bg-green">paid</span>'; }   // the payment exists now: no second create from PAY
+            if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; } invalidateDerived(); setTimeout(function(){ inp.classList.remove('saved'); },1000); })
+          .catch(function(e){ r._bxBusy=0; inp.classList.remove('saved'); inp.classList.add('err'); inp.title='Not saved: '+(e.message||e); }); }; }); }
     function pdueCard(r){
       var dueTxt=r.due?(r.overdue?'<span style="color:var(--neg);font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
       var _lk=r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null;
@@ -11112,7 +11142,7 @@
         : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>';
       var badge='<span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span>'+(r.overdue?' <span class="tool-badge bg-red">overdue</span>':(r.paid?' <span class="tool-badge bg-green">paid</span>':''));
       var f=mobFld('Amount due',fmtCur(r.due_amt, supCcyOf(r.sup)))+mobFld('Due date',dueTxt)+mobFld('Likely pay',likelyC)
-        +mobFld('Assigned',r.noedit?'<span class="mut">—</span>':editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',r.noedit?'<span class="mut">pay records the next balance payment</span>':editCell(r.ep,r.dt_field,r.dt_val,'date'));   // v28.307: the next-balance row has nothing to edit until paid
+        +mobFld('Assigned',r.noedit?pdueBxIn(r,'amount'):editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',r.noedit?pdueBxIn(r,'date'):editCell(r.ep,r.dt_field,r.dt_val,'date'));   // v28.309: next balance payment = standard boxes
       var act=!r.paid?'<button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.pay_amt!=null?r.pay_amt:r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:#15803d;padding:3px 12px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'';
       return mobCard(refCell,badge,f,act);
     }
@@ -11152,8 +11182,8 @@
             +'<td>'+fmtCur(r.due_amt, supCcyOf(r.sup))+'</td>'
             +'<td class="l">'+dueCell+'</td>'
             +'<td class="l">'+likelyC+'</td>'
-            +'<td>'+(r.noedit?'<span class="mut">—</span>':editCell(r.ep,r.amt_field,r.amt_val))+'</td>'
-            +'<td class="l">'+(r.noedit?'<span class="mut tiny">pay records the next balance payment</span>':editCell(r.ep,r.dt_field,r.dt_val,'date'))
+            +'<td>'+(r.noedit?pdueBxIn(r,'amount'):editCell(r.ep,r.amt_field,r.amt_val))+'</td>'
+            +'<td class="l">'+(r.noedit?pdueBxIn(r,'date'):editCell(r.ep,r.dt_field,r.dt_val,'date'))
               +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.pay_amt!=null?r.pay_amt:r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:var(--pos);padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
               +'</td></tr>'; }); });
       var _curs=Array.from(new Set(f.map(function(r){return supCcyOf(r.sup);})));   // one symbol only if every visible row shares a currency; else flag mixed
@@ -11169,6 +11199,7 @@
         document.getElementById('pdue-wrap').innerHTML=mobCards(cardsHtml);
       } else document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();   // deposit likely (date_likely_pay) auto-binds here; PO-milestone likely is bound below
+      bindPdueBx();   // v28.309: next balance payment boxes
       // PO-milestone Likely pay date (overdue rows only) → payment_likely_dates via line_key. Silent save.
       document.querySelectorAll('#pdue-wrap .pdue-likely').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
         var raw=(inp.value||'').trim(), iso=raw?parseDateLoose(raw):''; if(raw&&!iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=iso;
