@@ -16833,24 +16833,30 @@ async function _tplIlgDiItems(buf) {
   const lines = t.split(/\n/).map(l => l.trim()).filter(Boolean);
   const num = s => parseFloat(String(s).replace(/[,£\s]/g, '')) || 0;
   const diRef = (t.match(/DI\d{7}/) || [])[0] || '', siRef = (t.match(/SI\d{7}/) || [])[0] || '';
-  const chan = (t.match(/Dock & Bay ([A-Za-z]+)/) || [])[1] || '';
+  const invRef = (t.match(/\bINVA\d{4,}\b/) || [])[0] || '';   // v28.296: ILG's new invoice layout (Sep-26 on), account code DOCKBAYE = Ecom
+  const chan = (t.match(/Dock & Bay ([A-Za-z]+)/) || [])[1] || ({ E: 'Ecom', W: 'Wholesale' }[(t.match(/Account Code:\s*DOCKBAY([A-Z])\b/i) || [])[1] || ''] || '');
+  const _pt = [...t.matchAll(/\bTotal:?\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})/g)].pop();   // the invoice's own printed total (net, VAT, gross)
+  const printed = _pt ? { net: num(_pt[1]), vat: num(_pt[2]), total: num(_pt[3]) } : null;
+  const reworkText = [...t.matchAll(/REWORK[^\n]*/gi)].map(m => m[0]);   // rework lines name the order (INVA: "REWORK NEXT23106 - 14"; DI: "Rework SA17380500 - ...")
   const items = []; let pending = '';   // ILG wraps long descriptions onto extra lines; amounts can land on their own line
   const AMT = '(-?[\\d,]+\\.\\d{2})';
   for (const l of lines) {
     const only3 = new RegExp('^' + AMT + '\\s+' + AMT + '\\s+' + AMT + '$').exec(l);
-    if (only3) { const label = (pending || '').trim(); pending = ''; if (label && !/^total$/i.test(label)) items.push({ label, price: num(only3[1]), vat: num(only3[2]), total: num(only3[3]) }); continue; }
+    if (only3) { const label = (pending || '').trim(); pending = ''; if (label && !/^total:?$/i.test(label)) items.push({ label, price: num(only3[1]), vat: num(only3[2]), total: num(only3[3]) }); continue; }
     const inline = new RegExp('^(.+?)\\s+' + AMT + '\\s+' + AMT + '\\s+' + AMT + '$').exec(l);
-    if (inline) { const lab = ((pending ? pending + ' ' : '') + inline[1]).trim(); pending = ''; if (!/^total$/i.test(inline[1].trim())) items.push({ label: lab, price: num(inline[2]), vat: num(inline[3]), total: num(inline[4]) }); continue; }
-    if (/charge code|international logistics|invoice to|all figures|terms|www\.|tel:|email|registered|payments|bank|sort code|standard trad|page \d|invoice no|invoice date|other reference|account code|sales invoice/i.test(l)) { pending = ''; continue; }   // structural / footer lines reset the pending label
+    if (inline) { const lab = ((pending ? pending + ' ' : '') + inline[1]).trim(); pending = ''; if (!/^total:?$/i.test(inline[1].trim())) items.push({ label: lab, price: num(inline[2]), vat: num(inline[3]), total: num(inline[4]) }); continue; }
+    if (/charge code|charge description|quantity rate|invoice charge|international logistics|invoice to|all figures|terms|www\.|tel:|email|registered|payments|bank|sort code|standard trad|page \d|invoice no|invoice date|other reference|account code|sales invoice/i.test(l)) { pending = ''; continue; }   // structural / footer lines reset the pending label
     pending = (pending ? pending + ' ' : '') + l;
   }
-  return { diRef, siRef, channel: chan, items };
+  return { diRef, siRef, invRef, channel: chan, items, printed, reworkText };
 }
 // Classify a DI charge line → { account, kind:'freight'|'fulfilment'|'overhead' }.
 function _ilgClassify(label, channel) {
   const U = label.toUpperCase();
   for (const code of Object.keys(ILG_FEEMAP)) { if (U.startsWith(code)) return { account: ILG_FEEMAP[code], kind: /Storage|Other Fees/.test(ILG_FEEMAP[code]) ? 'overhead' : 'fulfilment' }; }
   if (/^STORAGE-WK/i.test(label)) return { account: 'Storage Fees', kind: 'overhead' };
+  if (/\bMMFEE/i.test(label)) return { account: 'Other Fees', kind: 'overhead' };   // v28.296 INVA monthly management fee
+  if (/\b(HANDE\w*|VAS\w*)\b/i.test(label)) return { account: 'Fulfilment - UK - ' + (ILG_CHAN[String(channel).toUpperCase()] || channel || 'Wholesale'), kind: 'fulfilment' };   // v28.296 INVA handling / value-added services
   if (/brokerage|customs admin|deferment|export duty|^duty/i.test(label)) return { account: 'Other Fees', kind: 'overhead' };   // customs/duty
   const acc = 'Fulfilment - UK - ' + (ILG_CHAN[String(channel).toUpperCase()] || channel || 'Wholesale');
   if (/order charge/i.test(label)) return { account: acc, kind: 'fulfilment' };   // pick/pack per-order
@@ -16866,10 +16872,37 @@ async function _tplIlgShipDetail(buf, isCsv) {
   } else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0]; if (ws) ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); grid.push(a); }); }
   if (!grid.length) return [];
   const H = grid[0].map(x => String(x == null ? '' : x).trim().toLowerCase());
-  const ri = H.findIndex(h => /your reference/.test(h)), gi = H.indexOf('gross'), vpi = H.indexOf('vat%'), vai = H.indexOf('vat');
+  const ri = H.findIndex(h => /your reference/.test(h)), gi = H.indexOf('gross'), vpi = H.indexOf('vat%'), vai = H.indexOf('vat'), sai = H.findIndex(h => /dispatch reference 2/.test(h));
   const out = [];
-  for (let r = 1; r < grid.length; r++) { const row = grid[r] || []; const ref = String(row[ri] == null ? '' : row[ri]).trim(); const g = _tplNum(row[gi]); if (!ref || g == null) continue; out.push({ ref, gross: g, vatAmt: vai >= 0 ? (_tplNum(row[vai]) || 0) : 0, vat: (vpi >= 0 ? (_tplNum(row[vpi]) || 0) : 0) > 0 }); }
+  for (let r = 1; r < grid.length; r++) { const row = grid[r] || []; const ref = String(row[ri] == null ? '' : row[ri]).trim(); const g = _tplNum(row[gi]); if (!ref || g == null) continue; out.push({ ref, gross: g, vatAmt: vai >= 0 ? (_tplNum(row[vai]) || 0) : 0, vat: (vpi >= 0 ? (_tplNum(row[vpi]) || 0) : 0) > 0, sa: sai >= 0 ? String(row[sai] == null ? '' : row[sai]).trim().toUpperCase() : '' }); }
   return out;
+}
+// v28.296 (Ben 12-Oct-26): ILG's new invoice layout (Sep-26 on) = an INVA… PDF plus an "Invoice Detail Report" .xlsx that lists
+// every charge with its ChargeType and the order (Client Ref). Handling (HANDE…) and value-added services (VAS…) are per-order
+// fulfilment and go to that order's cost centre; rows without an order (MMFEE) are Other Fees; REWORK goes to the order the
+// PDF names ("rework for an order should go to the same cost centre as that order").
+async function _tplIlgInvaDetail(buf) {
+  const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0]; if (!ws) return null;
+  const grid = []; ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); grid.push(a); });
+  const H = (grid[0] || []).map(h => String(h == null ? '' : h).replace(/\s+/g, ' ').trim().toLowerCase());
+  const ci = H.indexOf('chargetype'), ri = H.indexOf('client ref'), ni = H.indexOf('total charge'), vi = H.findIndex(h => /^total vat/.test(h)), gi = H.indexOf('total inc vat');
+  if (ci < 0 || ni < 0) return null;
+  const rows = [];
+  for (let i = 1; i < grid.length; i++) { const row = grid[i] || []; const type = String(row[ci] == null ? '' : row[ci]).trim().toUpperCase(); if (!type) continue;
+    const net = _tplNum(row[ni]) || 0, vat = vi >= 0 ? (_tplNum(row[vi]) || 0) : 0, g = gi >= 0 ? _tplNum(row[gi]) : null;
+    let ref = ri >= 0 ? String(row[ri] == null ? '' : row[ri]).trim() : ''; if (ref === '-') ref = '';
+    rows.push({ type, ref, net, vat, gross: g != null ? g : net + vat }); }
+  return rows;
+}
+async function _tplIlgInvaRows(files) {   // every detail report among the period's files (any .xlsx that is not a shipping file and has ChargeType)
+  let rows = [];
+  for (const f of files) { if (!/\.xlsx$/i.test(f.filename || '') || /invoice_0/i.test(f.filename || '')) continue; try { const d = await _tplIlgInvaDetail(f.content); if (d) rows = rows.concat(d); } catch (e) {} }
+  return rows;
+}
+function _ilgReworkRef(text) {   // "Rework SA17380500 - barcode relabelling" -> { sa }; "REWORK NEXT23106 - 14" -> { ref: NEXT23106-14, base: NEXT23106 }
+  const s = String(text || ''); const sa = s.match(/\bSA\d{6,}\b/i); if (sa) return { sa: sa[0].toUpperCase() };
+  const m = s.match(/REWORK[\s:-]+([A-Z]{2,}[A-Z0-9]*\d{3,})(?:\s*-\s*(\d+[A-Z]?)\b)?/i);
+  return m ? { ref: m[1].toUpperCase() + (m[2] ? '-' + m[2].toUpperCase() : ''), base: m[1].toUpperCase() } : null;
 }
 async function _tplIlgAllocate(period) {
   const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
@@ -16877,24 +16910,53 @@ async function _tplIlgAllocate(period) {
   if (!pdfs.length) return { ok: false, error: 'Upload the ILG DI invoice PDFs for this period first.' };
   const bucket = {}; const key = (a, k, v) => a + '|' + k + '|' + (v ? 'V' : 'N');
   const add = (a, k, v, amt, tax) => { const kk = key(a, k, v); if (!bucket[kk]) bucket[kk] = { account: a, kind: k, vat: v, amount: 0, tax: 0 }; bucket[kk].amount += amt; bucket[kk].tax += tax; };
-  const seen = [], channels = new Set();
-  for (const f of pdfs) { let di; try { di = await _tplIlgDiItems(f.content); } catch (e) { continue; } if (!di.items.length) continue;
-    seen.push({ di: di.diRef, si: di.siRef, channel: di.channel, total: Math.round(di.items.reduce((s, i) => s + i.total, 0) * 100) / 100, tax: Math.round(di.items.reduce((s, i) => s + (i.vat || 0), 0) * 100) / 100 });
+  const r2 = x => Math.round(x * 100) / 100;
+  const seen = [], channels = new Set(), readWarn = [], reworks = [];   // reworks: { text, total, vat } booked to their order's cost centre below
+  const inva = await _tplIlgInvaRows(files); let invaUsed = false;   // v28.296: INVA detail report rows (per-order handling)
+  const checkPrinted = (ref, got, printed) => { if (printed && Math.abs(r2(got) - printed.total) > 0.05) readWarn.push((ref || 'An ILG invoice') + ': HORIZON read ' + r2(got).toFixed(2) + ' but the invoice total is ' + printed.total.toFixed(2) + '. Check this file before posting the bill.'); };
+  for (const f of pdfs) { let di; try { di = await _tplIlgDiItems(f.content); } catch (e) { continue; }
+    if (di.invRef && inva.length && !invaUsed) {   // v28.296: the detail report carries this invoice's lines, by order
+      invaUsed = true;
+      const tot = inva.reduce((s, x) => s + x.gross, 0), tax = inva.reduce((s, x) => s + x.vat, 0);
+      seen.push({ di: di.invRef, si: di.siRef, channel: di.channel || 'Ecom', total: r2(tot), tax: r2(tax), detail: true });
+      if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
+      checkPrinted(di.invRef, tot, di.printed);
+      inva.filter(x => x.type === 'REWORK' && !x.ref).forEach((x, i) => reworks.push({ text: di.reworkText[i] || di.reworkText[0] || '', total: x.gross, vat: x.vat }));
+      continue; }
+    if (!di.items.length) continue;
+    const dtot = di.items.reduce((s, i) => s + i.total, 0);
+    seen.push({ di: di.diRef || di.invRef, si: di.siRef, channel: di.channel, total: r2(dtot), tax: r2(di.items.reduce((s, i) => s + (i.vat || 0), 0)) });
+    checkPrinted(di.diRef || di.invRef || di.siRef, dtot, di.printed);
     if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
-    di.items.forEach(it => { const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
+    di.items.forEach(it => { if (/^\s*REWORK\b/i.test(it.label) && _ilgReworkRef(it.label)) { reworks.push({ text: it.label, total: it.total, vat: it.vat }); return; }   // v28.296: rework follows its order
+      const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
   // Shipping detail (invoice_00) → per-order Gross freight → Cin7 cost centre → channel freight (VAT / No-VAT).
   const shipFiles = files.filter(f => /invoice_0/i.test(f.filename || ''));   // ALL per-order freight files (invoice_00…) — combine them
   let shipUnmapped = 0, shipTotal = 0, shipVat = 0, shipRefCount = 0; const unmappedRefs = new Set(); let ship = [];   // v27.906: hoisted for the duplicate check
-  if (shipFiles.length) {
-    for (const sf of shipFiles) { const isCsv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, isCsv)); } catch (e) {} }
-    const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))]; shipRefCount = refs.length;
-    const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
-    const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
-    const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'uk_ilg')));   // v27.905: Fulfil shipment table after Cin7
-    ship.forEach(s => { shipTotal += s.gross; shipVat += (s.vatAmt || 0); const ov = _tplRefOverride(s.ref, 'uk_ilg'); const cc = ov || ((byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : (shipByRef[s.ref] ? shipByRef[s.ref].cc : null)));
-      if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt);
-      else { shipUnmapped += s.gross; add('Other Fees', 'freight', s.vat, s.gross, s.vatAmt); if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // no Cin7 cost centre → auto-book freight to Other Fees (nothing stranded); track sweepable refs so the Clean-up sweep can still reclassify to the real channel
-  }
+  for (const sf of shipFiles) { const isCsv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, isCsv)); } catch (e) {} }
+  shipRefCount = new Set(ship.map(s => s.ref).filter(Boolean)).size;
+  // v28.296: one cost-centre lookup for every order reference (freight, INVA handling, rework).
+  const saToRef = {}; ship.forEach(s => { if (s.sa && s.ref && !saToRef[s.sa]) saToRef[s.sa] = s.ref; });
+  reworks.forEach(w => { const k = _ilgReworkRef(w.text); w.ref = k ? (k.sa ? (saToRef[k.sa] || '') : k.ref) : ''; w.base = k && k.base ? k.base : ''; w.key = k ? (k.sa || k.ref) : ''; });
+  const refs = [...new Set([...ship.map(s => s.ref), ...inva.map(x => x.ref), ...reworks.map(w => w.ref)].filter(Boolean))];
+  const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
+  const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
+  const shipByRef = await _tplFulfilShipLookup(refs.filter(rf => byRef[rf] == null && byCon[rf] == null && !_tplRefOverride(rf, 'uk_ilg')));   // v27.905: Fulfil shipment table after Cin7
+  const ccOf = ref => { if (!ref) return null; const ov = _tplRefOverride(ref, 'uk_ilg'); return ov || ((byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : (shipByRef[ref] ? shipByRef[ref].cc : null))) || null; };
+  const ccAcct = cc => 'Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, '');
+  ship.forEach(s => { shipTotal += s.gross; shipVat += (s.vatAmt || 0); const cc = ccOf(s.ref);
+    if (cc) add(ccAcct(cc), 'freight', s.vat, s.gross, s.vatAmt);
+    else { shipUnmapped += s.gross; add('Other Fees', 'freight', s.vat, s.gross, s.vatAmt); if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // no Cin7 cost centre → auto-book freight to Other Fees (nothing stranded); track sweepable refs so the Clean-up sweep can still reclassify to the real channel
+  // v28.296: INVA rows. With an order = per-order fulfilment on that order's cost centre; without (MMFEE) = Other Fees. REWORK handled below.
+  inva.forEach(x => { if (x.type === 'REWORK' && !x.ref) return; if (!x.ref) { add('Other Fees', 'overhead', x.vat > 0.005, x.gross, x.vat); return; }
+    const cc = ccOf(x.ref); if (cc) add(ccAcct(cc), 'fulfilment', x.vat > 0.005, x.gross, x.vat); else { add('Other Fees', 'fulfilment', x.vat > 0.005, x.gross, x.vat); if (!_tplRefOverride(x.ref, 'uk_ilg')) unmappedRefs.add(x.ref); } });
+  // v28.296 (Ben): "rework for an order should go to the same cost centre as that order". Exact order first, else every Cin7
+  // order sharing the base reference (NEXT23106-…) when they all sit on one cost centre; otherwise Other Fees and listed.
+  const reworkOut = [];
+  for (const w of reworks) { let cc = ccOf(w.ref);
+    if (!cc && w.base) { try { const pre = (await pool.query(`SELECT DISTINCT coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference ILIKE $1`, [w.base.replace(/[%_]/g, '') + '%'])).rows.map(r => String(r.cc || '').trim()).filter(Boolean); if (pre.length === 1) cc = pre[0]; } catch (e) {} }
+    add(cc ? ccAcct(cc) : 'Other Fees', cc ? 'fulfilment' : 'overhead', w.vat > 0.005, w.total, w.vat);
+    reworkOut.push({ order: w.ref || w.key || '', account: cc ? ccAcct(cc) : 'Other Fees', amount: r2(w.total), text: String(w.text || '').slice(0, 120) }); }
   const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ILG_CODE[b.account] || '' }));
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
@@ -16902,6 +16964,9 @@ async function _tplIlgAllocate(period) {
   if (!shipFiles.length) missing.push('Shipping-detail file (invoice_00 .csv/.xlsx) — the per-order Ecom/Shopify/Marketplace freight (the largest part of the bill). Not uploaded.');
   const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
   if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
+  readWarn.forEach(w => missing.push(w));   // v28.296: an invoice whose printed total differs from what was read
+  reworkOut.filter(w => w.account === 'Other Fees' && w.order).forEach(w => missing.push('Rework ' + w.order + ' ' + w.amount.toFixed(2) + ': order not found, booked to Other Fees.'));
+  if (files.some(f => /\bINVA\d{4,}/i.test(f.filename || '')) && !inva.length) missing.push('ILG Invoice Detail Report (.xlsx) for the INVA invoice: without it the handling charges cannot be split by order. Not uploaded.');
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
   lines.forEach(l => { if (!ccAgg[l.account]) ccAgg[l.account] = { costCenter: l.account, orders: 0, freight: 0, fulfilment: 0 }; if (l.kind === 'freight') ccAgg[l.account].freight += l.amount; else ccAgg[l.account].fulfilment += l.amount; });
   const costCenters = Object.values(ccAgg).map(c => ({ ...c, freight: Math.round(c.freight * 100) / 100, fulfilment: Math.round(c.fulfilment * 100) / 100, total: Math.round((c.freight + c.fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
@@ -16912,7 +16977,7 @@ async function _tplIlgAllocate(period) {
     totals: { orders: shipRefCount, matched: Math.max(0, shipRefCount - unmappedRefs.size), freight: 0, fulfilment: 0 },
     unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] },   // freight with no cost centre is auto-booked to Other Fees, not left as a "COST CENTRE MISSING" gap
     autoOther: { orders: unmappedRefs.size, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
-    invoicesSeen: seen, channelsCovered: [...channels], missing };
+    invoicesSeen: seen, channelsCovered: [...channels], missing, rework: reworkOut };
 }
 // v27.788 (Ben): FULFIL sales-order side of the 3PL invoice mapping. Import the orders named on the invoice (by
 // reference) into planner.tpl_fulfil_orders, and map a Fulfil CHANNEL → the account row's cost centre via
@@ -18311,6 +18376,9 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
       let ship = [];
       for (const sf of shipFiles) { const csv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, csv)); } catch (e) {} }
       orders = ship.map(s => ({ reference: s.ref, shipping: s.gross || 0, fulfilment: 0 }));
+      // v28.296: ILG's INVA detail report bills handling per order (Client Ref) -> that order's fulfilment
+      const invaFiles = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 AND filename ~* '\\.xlsx$' AND filename !~* 'invoice_0'`, [period])).rows;
+      (await _tplIlgInvaRows(invaFiles)).forEach(x => { if (x.ref) orders.push({ reference: x.ref, shipping: 0, fulfilment: x.gross || 0 }); });
     } else {
       orders = await _tplOrderRows(row.content, isCsv, tpl0, period);   // per-order {reference, shipping, fulfilment}
     }

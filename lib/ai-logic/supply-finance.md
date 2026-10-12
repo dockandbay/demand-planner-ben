@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.295
+verified_version: v28.296
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -367,6 +367,9 @@ verified_version: v28.295
 - Cost-type accounts (storage, returns, inbound, other) are stored per 3PL in tpl_cost_accounts. Per-order freight and fulfilment go to the "region - channel" account map (tpl_account_map). Unmapped amounts appear as UNMAPPED lines. (source: server.mjs :: tpl/xero-bill)
 - iFulfilment consumables: added into the total only when the "Consumables Cost" column sits outside "Total Excl Shipping" (Jul-26 and earlier). From Aug-26 it is inside, so it is not added again. (source: server.mjs :: _tplConsumablesInside)
 - Tax: UK and EU at 20% VAT tax-inclusive (EU sheets are grossed up), AU GST 10% inclusive, US zero-rated. Geneva books by fee type to 303.2x cost-centre accounts; ILG books by DI charge code. (source: server.mjs :: tpl/xero-bill)
+- ILG new invoice layout (v28.296, from Sep-26): an INVA… PDF plus an "Invoice Detail Report" .xlsx. The report lists each charge with its order (Client Ref): handling (HANDE…) and value-added services (VAS…) are fulfilment on that order's cost centre (Cin7, then the Fulfil shipment table); rows with no order (MMFEE) go to Other Fees. Without the report the PDF is read (handling to the invoice's channel, DOCKBAYE = Ecom) and a warning asks for it. The PDF's "Total:" row is never read as a charge. (source: server.mjs :: _tplIlgInvaDetail, _tplIlgAllocate)
+- ILG rework (v28.296, Ben: "rework for an order should go to the same cost centre as that order"): a line starting "Rework" that names an order goes to that order's cost centre. An "SA…" ILG dispatch number is traced to the order through the shipping file's "Dispatch reference 2"; a reference like NEXT23106-14 that is not found uses the cost centre shared by every Cin7 order starting NEXT23106. Not found = Other Fees plus a warning. (source: server.mjs :: _ilgReworkRef, _tplIlgAllocate)
+- ILG read check (v28.296): each invoice's printed total is compared with what HORIZON read; a difference over 0.05 is listed as a warning. (source: server.mjs :: _tplIlgDiItems, _tplIlgAllocate)
 
 ## Fulfil integration (active ERP)
 - Push: every PO is received at China Port (stock.location CHP). The Horizon branch goes in the final_destination metafield and in the PO comment. Incoterm is always FOB. requested_shipping_date = production end. requested_delivery_date (and line delivery) = the PO grid completion date, else the estimated delivery. (source: server.mjs :: fulfilPushLines, fulfilCompletionMap)

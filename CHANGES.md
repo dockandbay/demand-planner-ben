@@ -1,3 +1,13 @@
+## v28.296 (Ben, branch review-fixes-2026-10-05): ILG new invoice layout (INVA), rework to its order's cost centre, read check
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: September UK ILG had no per-order fulfilment and Other Fees of 14,643.24. Cause: ILG's new INVA000378 invoice (from Sep-26) was read as a DI invoice. Its "Total:" row was counted as a charge, so the invoice was counted twice (18,643.28 for 9,321.64) and **September was overstated by 9,321.64** (135,146.79; correct 125,825.15). Its handling had no channel and fell into Wholesale freight.
+- The INVA **Invoice Detail Report (.xlsx)** is now used: 534 orders' handling and 4 VAS charges go to each order's cost centre as fulfilment, the monthly fee to Other Fees. The cross-month journal includes these per-order costs.
+- **Rework follows its order** (Ben): REWORK NEXT23106-14 (8,100.00) goes to UK Wholesale. Rework SA17380500 (432.00) names an ILG dispatch number found in no shipping file, so it stays in Other Fees with a warning.
+- **Read check:** an invoice whose printed total differs from what HORIZON read is listed as a warning. "Total:" rows are never charges.
+- Verified on the sandbox: July ILG analysis byte-identical before and after (160,408.91); a September test set (real CSV and detail report, test INVA and DI PDFs) reads INVA once at 9,321.64, NEXT23106 rework to Wholesale, SA17380500 to Other Fees with a warning; without the detail report the PDF is read once and a warning asks for the report. Test files removed.
+
 ## v28.295 (Ben, branch review-fixes-2026-10-05): email sender and reply-to by part of the system
 
 **Files:** `server.mjs`, `.env.example` (+ package.json, CHANGES.md). No migration. **New optional env vars** (below).
