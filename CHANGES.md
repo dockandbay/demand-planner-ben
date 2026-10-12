@@ -1,3 +1,11 @@
+## v28.277 (Ben, branch review-fixes-2026-10-05): ACCOUNTS "Inbox matcher" renamed "Reconcile", a filter pill per bank / card account
+
+**Files:** `supply/inject.html`, `server.mjs` (one message), `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- The tab is now **Reconcile** (the link stays `#/accounts/inbox`, so bookmarks keep working).
+- Statement lines get a pill row: **All accounts** plus one pill per bank or card account (org, name, open-line count, busiest first), combined with the Receipt found / Needs receipt / No receipt needed pills and the search.
+- Verified: jsdom render, 22 account pills, AU AMEX pill shows its 52 lines only, no errors.
+
 ## v28.276 (Ben, branch review-fixes-2026-10-05): one process for receipts: Xero bills from accounts@ (Auto bill + Bill review), bank rules retired
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `migrations/358_accounts_auto_bills.sql` (+ package.json, CHANGES.md). **Migration 358** (additive: `accounts_payee_rules.contact_id / bill_from / bank_rule_done_at / bank_rule_done_by`, treatment check widened to `autobill, bill, rule, ignore`, saved `spend` rows become `bill`, new `accounts_bill_log`). No new env vars.

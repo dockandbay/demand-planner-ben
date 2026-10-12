@@ -15930,7 +15930,7 @@ let _cogScanRun = null;
 async function coghlansMailImport(by) {
   if (_cogScanRun) return _cogScanRun;
   _cogScanRun = (async () => {
-    const g = await gmailRow(); if (!g || g.missing) return { ok: false, error: 'accounts@ Gmail is not connected (ACCOUNTS > Inbox matcher)' };
+    const g = await gmailRow(); if (!g || g.missing) return { ok: false, error: 'accounts@ Gmail is not connected (ACCOUNTS > Reconcile)' };
     const ids = []; let tok = '';
     do { const j = await gmailGetPaced('messages?' + new URLSearchParams(Object.assign({ q: 'from:' + COG_FROM + ' subject:"Coghlan Invoice" has:attachment newer_than:180d', maxResults: '100' }, tok ? { pageToken: tok } : {})).toString()); ids.push(...(j.messages || []).map(m => m.id)); tok = j.nextPageToken; } while (tok && ids.length < 400);
     const known = new Map((await pool.query(`SELECT invoice_no, msg_id, file_id FROM planner.tpl_coghlans_mail`)).rows.map(r => [r.msg_id, r]));
