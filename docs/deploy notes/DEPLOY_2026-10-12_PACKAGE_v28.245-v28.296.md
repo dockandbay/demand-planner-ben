@@ -20,8 +20,8 @@ Branch `review-fixes-2026-10-05`, code HEAD `8fed453f` (`8fed453fa1cdae3d1074b69
 
 ## 2. Env
 **New, needed for ACCOUNTS Gmail (read only; heads-up as a new external service):**
-- Ben already has the Google OAuth client (used on the sandbox; Internal consent screen, scope `gmail.readonly`); the live callback `https://horizon.dockandbay.com/api/accounts/gmail/callback` is on it. Ben will send you the ID and secret securely.
-- Set in Vercel production: `GMAIL_CLIENT_ID_ACCOUNTS`, `GMAIL_CLIENT_SECRET_ACCOUNTS`, and a NEW `GMAIL_SEAL_KEY` (any long random string; do not reuse the sandbox one).
+- DONE by Ben: `GMAIL_CLIENT_ID_ACCOUNTS` and `GMAIL_CLIENT_SECRET_ACCOUNTS` are set in Vercel production (Google OAuth client, Internal consent screen, scope `gmail.readonly`, live callback `https://horizon.dockandbay.com/api/accounts/gmail/callback` registered).
+- You: please confirm `GMAIL_SEAL_KEY` is set in Vercel production too (any long random string, not the sandbox one). Without it the token is sealed with a key derived from the client secret, which still works but needs a reconnect if the secret is ever rotated.
 - After deploy Ben clicks Connect Gmail in ACCOUNTS > Reconcile as accounts@.
 - Optional: `GMAIL_MAILBOX_ACCOUNTS` (default accounts@dockandbay.com), `GMAIL_REDIRECT_URI_ACCOUNTS`.
 
@@ -72,7 +72,7 @@ All `POST https://horizon.dockandbay.com/...`, header `x-webhook-secret: <N8N_WE
 ## 6. After deploy
 - Ben: grant ACCOUNTS in CONFIG > Admin > Permissions; connect Gmail as accounts@; upload the UK and AU bank exports; switch Snapchat UK / Optus AU to Auto bill when ready.
 - You: smoke `/api/version` = v28.296; ACCOUNTS opens for an admin; one dry run each of accounts-bank-sync and up-fx-statement; email test per channel once the From env vars are set.
-- Ben: re-open UK ILG September and check the total is 125,825.15 before the bill goes to Xero.
+- Ben: re-open UK ILG September and check the total against Rita's reconciled figure before the bill goes to Xero (not yet in Xero). Rework SA17380500 (432.00) stays in Other Fees by choice.
 - Check `planner.etl_runs` for `accounts_bank_ageing`, `accounts_learn`, `up_fx_statement` after the first scheduled runs.
 
 Detail per version in CHANGES.md.
