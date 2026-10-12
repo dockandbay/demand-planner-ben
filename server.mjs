@@ -10533,10 +10533,10 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
     // (one column "AU 602"); earlier AU deposits stay in the pooled "AU" column (Xero UK 620.00 AU). UK P58+ deposits keep a column each
     // AND get a "UK 602" total column (Xero UK's single 602 Stock Deposits account), built after the balances below.
     const pnum = v => { const x = String(v || '').replace(/[^0-9]/g, ''); return /^[0-9]+$/.test(x) ? parseInt(x, 10) : null; };
-    const colKeyFor = (d) => d.country === 'AU' ? ((pnum(d.prod_no) || 0) >= 58 ? 'AU-602' : 'AU') : (d.prod_no || '—');
+    const colKeyFor = (d) => d.country === 'AU' ? 'AU' : (d.prod_no || '—');   // v28.289 (Ben): one AU column again, all AU deposits now sit in Xero AU 602 (moved from Xero UK 620.00 AU on 30-Sep-26)
     deps.forEach(d => { const isAu = d.country === 'AU'; const key = colKeyFor(d); const ccy = d.ccy || 'USD'; refToCol[d.reference] = key; refToCcy[d.reference] = ccy;
       let c = cols[key];
-      if (!c) c = cols[key] = { key, prod: key === 'AU-602' ? 'AU 602 Stock Deposits (P58+, Xero AU)' : key === 'AU' ? 'AU (pre-P58, Xero UK 620.00 AU)' : key, isAu, prodNum: isAu ? (key === 'AU-602' ? -2 : -1) : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
+      if (!c) c = cols[key] = { key, prod: key === 'AU' ? 'AU Stock Deposits (Xero AU 602)' : key, isAu, prodNum: isAu ? -1 : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
       c.nDeps++; const usd = toUsd(Number(d.amount || 0), ccy); const pm = d.paid_month || '';
       c.paid += usd;
       if (pm) c.mov[pm] = (c.mov[pm] || 0) + usd;
@@ -10555,8 +10555,9 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
         if (c && m) c.mov[m] = (c.mov[m] || 0) - outstanding;
         tx.push({ prod: ri.col, ref: ri.ref, ccy: ri.ccy, amount: -(Math.round(outstanding * 100) / 100), usd: -(Math.round(outstanding * 100) / 100), date: ri.lastDate || '', po: '', kind: ri.closed ? 'rebase to 0 (closed)' : 'rebase to 0 (settled)' }); } });
     const mset = new Set(); Object.values(cols).forEach(c => Object.keys(c.mov).forEach(m => mset.add(m)));
+    if (cols.AU) mset.add('2026-09');   // v28.289: the AU transfer note's month always has a row
     const months = [...mset].filter(Boolean).sort();
-    const columns = Object.values(cols).sort((a, b) => (b.isAu - a.isAu) || (a.prodNum - b.prodNum) || (a.key < b.key ? -1 : 1));
+    const columns = Object.values(cols).sort((a, b) => (b.isAu - a.isAu) || ((a.prodNum >= 999999) - (b.prodNum >= 999999)) || (b.prodNum - a.prodNum) || (a.key < b.key ? -1 : 1));   // v28.289 (Ben): newest production first (P59, P58 ... P48), unnumbered last
     const balances = {};
     columns.forEach(c => { let run = 0; balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round(run * 100) / 100; });
       c.remaining = Math.round(run * 100) / 100; c.drawn = Math.round((c.paid - c.remaining) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
@@ -10568,7 +10569,8 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
       ['paid', 'drawn', 'remaining'].forEach(k => { t[k] = Math.round(t[k] * 100) / 100; });
       balances['UK-602'] = {}; months.forEach(m => { balances['UK-602'][m] = Math.round(uk58.reduce((a, c) => a + (balances[c.key][m] || 0), 0) * 100) / 100; });
       const at = columns.findIndex(c => !c.isAu); columns.splice(at < 0 ? columns.length : at, 0, t); }
-    res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx, gbpRate: rUSD });
+    const notes = { AU: { '2026-09': 'Transferred to Xero AU' } };   // v28.289 (Ben): AU balance moved from Xero UK 620.00 AU to Xero AU 602 by journals dated 30-Sep-26
+    res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, notes, transactions: tx, gbpRate: rUSD });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v27.561 Barcode scanner: resolve a scanned / typed code to a SKU card. Digits-only compare (EAN exports carry a leading apostrophe).

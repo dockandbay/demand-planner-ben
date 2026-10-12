@@ -1,3 +1,11 @@
+## v28.289 (Ben, branch review-fixes-2026-10-05): Deposits drawdown: one AU column (Xero AU 602) with a Sep-26 transfer note; productions newest first
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- The AU 602 / AU (pre-P58) split from v28.286 is merged back into one **AU Stock Deposits (Xero AU 602)** column: the whole AU balance moved from Xero UK 620.00 AU to Xero AU on 30-Sep-26 (journals posted by Ben). The Sep-26 AU cell shows **"Transferred to Xero AU"**; Sep-26 always has a row.
+- UK production columns are now **newest first** (P59, P58 ... P48), after AU and the UK 602 total.
+- Verified (sandbox + jsdom): order AU, UK-602, 59, 56, 55 ... 48; the note renders under the AU Sep-26 balance; no errors.
+
 ## v28.288 (Ben, branch review-fixes-2026-10-05): Payments Report "Paid" with a bank account: one confirm marks paid and creates the Xero payments
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/360_xero_run_payments.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 360** (new `planner.xero_run_payments`; `payment_fx.bank_account_id / bank_name`). No new env vars.
