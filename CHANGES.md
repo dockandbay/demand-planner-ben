@@ -1,3 +1,11 @@
+## v28.297 (Ben, branch review-fixes-2026-10-05): Diviyaj's production fixes taken upstream
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- **cron:401 false alerts:** the per-run cron logger now skips health-sweep requests (`x-hz-health-sweep`), like the other health loggers. The post-deploy smoke test that checks each cron route returns 401 without the secret no longer raises "n8n is sending the wrong secret". Real cron runs are still logged; the alert threshold and wording are unchanged. Same as Diviyaj's production edit.
+- **lookupFailed in permsFor:** when the permission row cannot be read (database error), permsFor flags `lookupFailed`, does not memoise the result and logs it. The write gate, the ACCOUNTS gate and /api/me answer 503 "try again" instead of treating the user as having no rights. Super admins keep their rights. Matches the fix Diviyaj re-applied on each port; Diviyaj to diff against theirs.
+- Stale comment on `/api/cron/action-metrics` corrected: no scheduler calls it (n8n uses /api/supply/action-metrics/snapshot; vercel.json has no crons key). Route kept for a manual admin run.
+
 ## v28.296 (Ben, branch review-fixes-2026-10-05): ILG new invoice layout (INVA), rework to its order's cost centre, read check
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

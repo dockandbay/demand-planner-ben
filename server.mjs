@@ -998,7 +998,8 @@ app.use((req, res, next) => _reqStore.run({ req, t0: Date.now(), q: 0 }, () => {
     // v28.231 (Ben, gap G4): the first request this instance serves = a cold start: module init time and that request's time
     if (!_hzColdDone) { _hzColdDone = true; hzHealthEvt('instance', 'cold_start', { path: 'instance cold start', ms, message: 'Cold start: module init ' + HZ_BOOT_UPTIME_MS + 'ms, first request ' + req.method + ' ' + path.slice(0, 120) + ' ' + ms + 'ms', meta: { init_ms: HZ_BOOT_UPTIME_MS, first_path: path.slice(0, 200), max_first_ms: ms } }); }
     // v28.231 (Ben, gap G6): every cron / scheduler hit is recorded (count, max ms, last status per route per hour), not only slow or failing ones
-    if (HZ_CRON_RE.test(path)) { const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
+    // v28.297 (Diviyaj's prod fix upstream): health-sweep probes (x-hz-health-sweep, e.g. the post-deploy unauthenticated 401 check) are not logged, so they no longer raise cron:401
+    if (HZ_CRON_RE.test(path) && !req.get('x-hz-health-sweep')) { const route = (req.route && typeof req.route.path === 'string') ? ((req.baseUrl || '') + req.route.path) : path;
       hzHealthEvt('cron_run', route + '|' + res.statusCode + '|' + new Date().toISOString().slice(0, 13), { method: req.method, path: route, status: res.statusCode, ms, message: req.method + ' ' + route + ' ' + res.statusCode }); }
     if (!path.startsWith('/api/')) return;   // page/static loads aren't what we're measuring
     _perfRing.push({ t: new Date().toISOString(), m: req.method, path, status: res.statusCode, ms, q, db: (s && s.dbms) || 0 }); if (_perfRing.length > PERF_RING_MAX) _perfRing.shift();
@@ -1451,6 +1452,7 @@ app.use(async (req, res, next) => {
     const cap = requiredCap(req.method, (String(req.path || '').toLowerCase().replace(/\/+$/, '') || '/'));   // v28.255: lower-case, no trailing slash (Express would still match /api/x/)
     if (!cap) return next();
     const me = await permsFor(req);
+    if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });   // v28.297
     if (!me.live) return next();   // sandbox / no auth proxy → full access
     const ok = cap === 'demand' ? (me.demand_edit || me.is_admin)
              : cap === 'supply' ? (me.supply_edit || me.is_admin)
@@ -3352,6 +3354,7 @@ if (!process.env.VERCEL && process.env.HZ_PREORDERS_CRON !== '0') {
 // ═══ v28.247 (Ben 10-Oct-26): ACCOUNTS top menu. Every /api/accounts/* call, READS included, needs the ACCOUNTS grant or admin. ═══
 async function accountsGate(req, res, next) {
   try { const me = await permsFor(req);
+    if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });   // v28.297
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
@@ -14858,17 +14861,17 @@ async function permsFor(req) {
   if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, client_access: true, commissions: true, accounts_access: true, landing_page: 'supply/purchase-orders', favourites: [], inbox_types: INBOX_TYPES_ALL };
   const e = email.toLowerCase();
   const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
-  let row = null;
+  let row = null, lookupFailed = false;
   const m = _permsMemo.get(e);
   if (m && Date.now() - m.at < PERMS_MEMO_MS) row = m.row;
   else {
-    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (_) {}
+    try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, inbox_types FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; _permsMemo.set(e, { at: Date.now(), row }); } catch (err) { lookupFailed = true; log500(err); }   // v28.297 (Diviyaj's prod fix upstream): a failed lookup is not memoised and is flagged, so callers answer 503 instead of acting on zero rights
   }
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
   // inbox_types: which top-bar Inbox item types this user sees. NULL/unset = all (back-compat); a saved array (incl. empty) is explicit.
   let inboxTypes = INBOX_TYPES_ALL;
   if (row && row.inbox_types != null) { try { const a = typeof row.inbox_types === 'string' ? JSON.parse(row.inbox_types) : row.inbox_types; if (Array.isArray(a)) inboxTypes = a.filter(t => INBOX_TYPES_ALL.includes(t)); } catch (_) {} }
-  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), accounts_access: sa || !!(row && (row.accounts_access || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes };
+  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), client_access: sa || !!(row && (row.client_access || row.is_admin)), commissions: sa || !!(row && (row.commissions || row.is_admin)), accounts_access: sa || !!(row && (row.accounts_access || row.is_admin)), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [], inbox_types: inboxTypes, ...(lookupFailed && !sa ? { lookupFailed: true } : {}) };
 }
 // Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
 // No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
@@ -14886,6 +14889,7 @@ app.post('/api/me/favourites', async (req, res) => {
 });
 // What the client asks on load to decide what to enable (read-only UI otherwise).
 app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
+  if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });   // v28.297: never hand the client zero rights on a DB blip
   // logout URL for the client session-guard (SUG-0007) — set app_settings.auth_logout_url to your proxy's sign-out path
   let lo = ''; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='auth_logout_url'`)).rows[0]; lo = (r && r.value) || ''; } catch (e) {}
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -18749,9 +18753,8 @@ app.get('/api/supply/action-metrics/pos', async (_req, res) => {
     res.json({ ok: true, pos });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// Weekly snapshot target — now driven by the n8n workflow (Thursday 11:59 GMT, live 2026-08-18); computes + upserts this
-// week's row (idempotent). NOTE: vercel.json still has a legacy cron `59 23 * * 4` pointing here — redundant with n8n
-// (and blocked by the webhook-secret gate); Diviyaj to remove or retime it.
+// Weekly snapshot: n8n now calls /api/supply/action-metrics/snapshot (Thursday 11:59 GMT). This route has no scheduler calling it
+// (vercel.json has no crons key, v28.297); kept for a manual admin run. Same idempotent upsert of this week's row.
 // v28.255: writes an open-actions snapshot, so it needs the webhook secret (n8n) or an admin (manual). GET kept for an existing scheduler.
 const _actionMetricsRun = async (req, res) => {
   try { const secret = process.env.N8N_WEBHOOK_SECRET; if (!(secret && safeEq(req.get('x-webhook-secret'), secret))) { const me = await hzAdminOnly(req, res); if (!me) return; }
