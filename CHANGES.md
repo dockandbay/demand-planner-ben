@@ -1,3 +1,12 @@
+## v28.284 (Ben, branch review-fixes-2026-10-05): ACCOUNTS drawers left aligned and styled; credit note button at the top, in blue
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars. No logic change.
+
+- The Reconcile / credit note drawer is now mounted inside `#accounts-root`, so the ACCOUNTS styles (buttons, pills, tabs, small text) apply; it was on `body` and fell back to browser defaults (centred cells, unstyled buttons).
+- Everything in the drawer is left aligned.
+- Supplier credit note: the action bar sits at the top, under the title: **Create supplier credit note for <amount>** in blue; the confirm step shows the amount too. Reconcile's **Push bill to Xero** is blue as well.
+- Verified (jsdom): drawer inside accounts-root, cells left aligned, button above the details, colour rgb(37,99,235); no writes.
+
 ## v28.283 (Ben, branch review-fixes-2026-10-05): Payables recommendations, HORIZON match check, "Create supplier credit note" write-off (under 200)
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `migrations/359_accounts_credit_notes.sql` (+ package.json, CHANGES.md). **Migration 359** (new `accounts_credit_log`). Optional env `ACC_WRITEOFF_MAX` (default 200).
