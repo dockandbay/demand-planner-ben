@@ -1,3 +1,12 @@
+## v28.279 (Ben, branch review-fixes-2026-10-05): ACCOUNTS Config renamed RULES, split into sub-tabs, silent refresh on save
+
+**Files:** `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Top tab **Config** is now **RULES** (link unchanged: `#/accounts/config`).
+- Sub-tabs: **PAYEE TREATMENTS** (count), **AUTO BILLS** (Auto bill payees, flags), **RECEIPT ATTACHMENTS**, **BUILT-IN RULES**, **TAX RULES**, **ALERTS AND SCHEDULES**.
+- Ben: clicking Done on the Optus bank-rule item refreshed the whole page. Saves (treatment, coding, bank rule Done / Undo, Voided, Removed) now update in place: an optimistic change shows at once, the data reloads in the background, the scroll position and sub-tab are kept, no Loading state.
+- Verified (jsdom): 6 sub-tabs render; Done shows "bank rule removed" immediately, no Loading, stays on AUTO BILLS; no errors.
+
 ## v28.278 (Ben, branch review-fixes-2026-10-05): ACCOUNTS ▸ Reconcile statement lines tabbed by account
 
 **Files:** `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
