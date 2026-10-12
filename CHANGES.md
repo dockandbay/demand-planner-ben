@@ -1,3 +1,12 @@
+## v28.301 (Ben, branch review-fixes-2026-10-05): Xero bill permissions for ACCOUNTS and CLIENT users
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "anyone with accounts permission can push a xero bill from 3pl invoicing and anyone with client permission can push a commissions bill to xero."
+- **3PL invoicing bill** (`/api/supply/tpl/xero-bill/:id`): creating the Xero bill needs the ACCOUNTS grant or admin (was admin only). The preview (writes nothing) is open to ACCOUNTS, SUPPLY edit or admin. The route no longer needs SUPPLY edit from the write gate; the handler checks.
+- **Commission bill** (`/api/client/commission/runs/:id/xero-bill`): needs the CLIENT grant or admin (was admin only).
+- Both keep the confirm step; a failed permission lookup answers 503.
+
 ## v28.300 (Ben, branch review-fixes-2026-10-05): Sync from Xero button on ACCOUNTS > Bank statement
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.

@@ -157,7 +157,7 @@ fingerprints:
   server.mjs::cpSalesTeam: fc161fffe290
   server.mjs::/api/client/portal-orders/:id: f994a90fd00a
   server.mjs::/api/client/commission/runs/build: 9f79554f891a
-  server.mjs::/api/client/commission/runs/:id/xero-bill: fd75919ebdf4
+  server.mjs::/api/client/commission/runs/:id/xero-bill: 5b7ee1a895ce
   server.mjs::cpAllowedOrderKeys: b6d23180e894
   server.mjs::cpPortalThreads: 84a27797a150
   server.mjs::cpOrderThreadFind: 00c107366099
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.300
+verified_version: v28.301
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -365,6 +365,7 @@ verified_version: v28.300
 
 ## 3PL invoices
 - Four 3PLs: uk_ilg, us_geneva, eu_ifulfilment, au_coghlans. Bill number: FULFILLMENT-<region>-<period end>. For Coghlans the bill date is the file's period end and the invoice number is added. (source: server.mjs :: TPL_KEYS, tpl/xero-bill)
+- Who may create Xero bills (v28.301, Ben 13-Oct-26): the 3PL invoicing bill needs the ACCOUNTS grant or admin (the preview, which writes nothing, also allows SUPPLY edit); the commission bill needs the CLIENT grant or admin. Both still need the confirm step. If the permission lookup fails the answer is 503 try again. (source: server.mjs :: /api/client/commission/runs/:id/xero-bill)
 - Cost-type accounts (storage, returns, inbound, other) are stored per 3PL in tpl_cost_accounts. Per-order freight and fulfilment go to the "region - channel" account map (tpl_account_map). Unmapped amounts appear as UNMAPPED lines. (source: server.mjs :: tpl/xero-bill)
 - iFulfilment consumables: added into the total only when the "Consumables Cost" column sits outside "Total Excl Shipping" (Jul-26 and earlier). From Aug-26 it is inside, so it is not added again. (source: server.mjs :: _tplConsumablesInside)
 - Tax: UK and EU at 20% VAT tax-inclusive (EU sheets are grossed up), AU GST 10% inclusive, US zero-rated. Geneva books by fee type to 303.2x cost-centre accounts; ILG books by DI charge code. (source: server.mjs :: tpl/xero-bill)

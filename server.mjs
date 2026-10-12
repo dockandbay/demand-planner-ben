@@ -1432,6 +1432,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p === '/api/export/token') return 'config';             // v28.001: rotating the Sheets export token = a config write
+  if (method === 'POST' && /^\/api\/supply\/tpl\/xero-bill\/\d+$/.test(p)) return null;   // v28.301 (Ben): 3PL Xero bill = ACCOUNTS grant (or SUPPLY edit for the preview), checked in the handler
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   // v28.255 (deep dive P0 #1, #2): the default is now FAIL CLOSED (admin only). Families with their own check are listed explicitly.
   if (p.startsWith('/api/cron/')) return null;                // every cron handler checks x-webhook-secret (safeEq); action-metrics too from v28.255
@@ -18462,6 +18463,9 @@ async function _tplIfulPdfTotals(period) {
   } catch (e) { return null; }
 }
 app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
+  // v28.301 (Ben 13-Oct-26): anyone with the ACCOUNTS grant (or admin) may create the bill; the preview (no Xero write) also allows SUPPLY edit.
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' });
+    if (me.live && !(me.is_admin || me.accounts_access || me.supply_edit)) return res.status(403).json({ error: 'ACCOUNTS access required (CONFIG > Admin > Permissions)' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   try {
     const period = String((req.body && req.body.period) || req.query.period || '').trim();
     const tpl0 = String((req.body && req.body.tpl) || req.query.tpl || '') || null;
@@ -18574,7 +18578,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     // v28.038 (Ben): CREATE the 3PL bill directly in Xero (DRAFT), instead of the CSV. Coghlans → AU org, everything
     // else → the UK org. A test run prefixes the reference with TEST-. Keeps the CSV download alongside.
     if (req.body && req.body.create) {
-      try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+      try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required to create a 3PL bill in Xero (CONFIG > Admin > Permissions)' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
       const xregion = meta.region === 'AU' ? 'au' : 'uk';   // Coghlans (AU) → Xero AU; ILG/Geneva/iFulfilment → Xero UK org
       const isTest = req.body.test === true;                // real reference by default; TEST- prefix only when explicitly test:true
       const ref = (isTest ? 'TEST-' : '') + invNo;
@@ -26902,7 +26906,8 @@ app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
 // v28.059 (Ben): create the commission bill directly in Xero (UK org) instead of the CSV. Admin + confirm; draft
 // by default, approved when {approved:true}. Contact = the rep group's Xero contact; single line coded to its account.
 app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required to create a bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  // v28.301 (Ben 13-Oct-26): anyone with the CLIENT grant (or admin) may create the commission bill, not only admins.
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required to create a commission bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
   try {
     const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
