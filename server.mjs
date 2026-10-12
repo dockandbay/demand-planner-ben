@@ -8387,6 +8387,7 @@ app.post('/api/supply/payments/pay', async (req, res) => {
 });
 // Starting-deposit DRAW-DOWN via a Xero credit note — the new feature, P58 ONWARDS ONLY (earlier productions draw down
 // as-is). Creates an ACCPAYCREDIT coded to Stock Deposits (602), tagged with the production, allocated to the PO's bill.
+const AU_CN_FROM = '2026-10-01';   // v28.293 (Ben 12-Oct-26): "anything dated october 1st onwards" gets an AU deposit credit note
 const _prodNum = pn => { const m = /(\d+)/.exec(String(pn || '')); return m ? parseInt(m[1], 10) : null; };
 // v28.290 (Ben 12-Oct-26): the deposit credit note from the PO itself (PO drawer and PLAN > PO > Payments), not only Xero payments > Exceptions.
 // Status only, no Xero call: is the PO on the credit-note route (AU always, UK from P58), is there a starting deposit, a linked Xero bill, a credit note already.
@@ -8398,11 +8399,11 @@ app.get('/api/supply/xero/deposit-credit-note/status', async (req, res) => {
         EXISTS (SELECT 1 FROM planner.xero_push_queue q WHERE q.po=p.po AND q.kind='credit_note' AND q.status NOT IN ('cancelled','pushed')) queued
       FROM planner.purchase_orders p WHERE p.po=$1`, [po])).rows[0];
     if (!r) return res.status(404).json({ error: 'PO not found' });
-    // AU: only drawdowns dated on or after 30-Sep-26, when the AU deposits moved from Xero UK 620.00 AU to Xero AU 602; earlier AU drawdowns were settled in Xero UK
-    const region = _poXeroRegion(r.cc, r.branch), pn = _prodNum(r.prod_no), auNew = region === 'au' && !!r.dep_date && r.dep_date >= '2026-09-30', route = auNew || (region !== 'au' && pn != null && pn >= 58), amount = Math.round(r.dep * 100) / 100;
+    // AU: only drawdowns dated on or after AU_CN_FROM (01-Oct-26, Ben); the AU deposits moved from Xero UK 620.00 AU to Xero AU 602 on 30-Sep-26, earlier AU drawdowns were settled in Xero UK
+    const region = _poXeroRegion(r.cc, r.branch), pn = _prodNum(r.prod_no), auNew = region === 'au' && !!r.dep_date && r.dep_date >= AU_CN_FROM, route = auNew || (region !== 'au' && pn != null && pn >= 58), amount = Math.round(r.dep * 100) / 100;
     const out = { po, region, route, amount, deposit_ref: r.deposit_ref, bill: r.bill ? Object.assign(r.bill, { url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + r.bill.id }) : null, credit_note: r.cn || null, queued: !!r.queued };
     out.can_create = !!(route && amount > 0.009 && r.bill && !r.cn && !r.queued);
-    out.reason = !route ? (region === 'au' ? 'Drawn down in Xero UK (before AU deposits moved to Xero AU on 30-Sep-26)' : 'Draws down the old way (UK before P58)') : !(amount > 0.009) ? 'No starting deposit assigned' : r.cn ? null : r.queued ? 'Queued in Xero payments' : !r.bill ? 'Link the Xero bill first (Linked records)' : null;
+    out.reason = !route ? (region === 'au' ? 'Drawn down before 01-Oct-26 (settled in Xero UK, before the AU deposits moved to Xero AU)' : 'Draws down the old way (UK before P58)') : !(amount > 0.009) ? 'No starting deposit assigned' : r.cn ? null : r.queued ? 'Queued in Xero payments' : !r.bill ? 'Link the Xero bill first (Linked records)' : null;
     res.set('Cache-Control', 'no-store').json(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -8416,7 +8417,7 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     const pn = _prodNum(poRow.prod_no);
     const region = _poXeroRegion(poRow.cc, poRow.branch);
     if (region !== 'au' && (pn == null || pn < 58)) return res.status(400).json({ error: 'Credit-note draw-down applies from P58 onwards (UK); ' + (poRow.prod_no ? 'P' + pn : 'this PO') + ' draws down the old way. (AU always uses credit notes.)' });
-    if (region === 'au') { const dd = (await pool.query(`SELECT to_char(pay_start_deposit_date,'YYYY-MM-DD') d FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]; if (!dd || !dd.d || dd.d < '2026-09-30') return res.status(400).json({ error: 'This AU starting deposit was drawn down in Xero UK, before the AU deposits moved to Xero AU (30-Sep-26): no credit note.' }); }   // v28.290
+    if (region === 'au') { const dd = (await pool.query(`SELECT to_char(pay_start_deposit_date,'YYYY-MM-DD') d FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]; if (!dd || !dd.d || dd.d < AU_CN_FROM) return res.status(400).json({ error: 'AU credit notes are for starting deposits dated 01-Oct-26 onward; this one was settled in Xero UK: no credit note.' }); }   // v28.290
     const amount = Math.round((Number(poRow.dep) || 0) * 100) / 100;
     if (!(amount > 0)) return res.status(400).json({ error: 'No starting deposit assigned to this PO to draw down.' });
     const cfg = await _xeroFinanceCfg();
@@ -8655,7 +8656,7 @@ async function _computeXeroExceptions() {
        JOIN planner.po_links l ON l.po=p.po AND l.system='xero' AND l.status='linked'
       WHERE coalesce(p.pay_start_deposit_assigned,0) > 0.009
         AND ${PROD_OK}
-        AND ( ((upper(coalesce(p.country_code,''))='AU' OR (coalesce(p.country_code,'')='' AND p.branch ILIKE '%coghlan%')) AND p.pay_start_deposit_date >= '2026-09-30')   -- v28.290: AU drawdowns before the 30-Sep-26 move to Xero AU were settled in Xero UK
+        AND ( ((upper(coalesce(p.country_code,''))='AU' OR (coalesce(p.country_code,'')='' AND p.branch ILIKE '%coghlan%')) AND p.pay_start_deposit_date >= '2026-10-01')   -- v28.290 / v28.293 (Ben): AU credit notes for drawdowns dated 01-Oct-26 onward (AU_CN_FROM)
               OR (regexp_replace(coalesce(p.prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$' AND regexp_replace(p.prod_no,'[^0-9]','','g')::int >= 58) )
         AND NOT EXISTS (SELECT 1 FROM planner.po_links c WHERE c.po=p.po AND c.system='xero_credit_note' AND c.status='linked')
         AND NOT EXISTS (SELECT 1 FROM planner.xero_push_queue q WHERE q.po=p.po AND q.kind='credit_note' AND q.status <> 'cancelled')

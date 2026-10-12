@@ -1,3 +1,9 @@
+## v28.293 (Ben, branch review-fixes-2026-10-05): AU deposit credit notes for starting deposits dated 01-Oct-26 onward
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "anything dated october 1st onwards". The AU credit-note rule (PO drawer / PLAN > PO > Payments button, Xero payments > Exceptions, and the create action) now starts at **01-Oct-26** (was 30-Sep-26), one constant `AU_CN_FROM`. UK unchanged (P58+). PO-57AULX1 (01-Oct-26) still qualifies.
+
 ## v28.292 (Ben, branch review-fixes-2026-10-05): Paid popup: AU banks (Wise FX USD, Gentium FX USD) pay UK runs via the 901 loans; unselect a bank
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
