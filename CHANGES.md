@@ -1,3 +1,10 @@
+## v28.312 (Ben, branch review-fixes-2026-10-05): App health, "needs input" apart from real errors
+
+**Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben's live App health report (v28.296) listed 13 errors, all fast 400 / 404 with 0KB: routes the sweep calls without the parameter or record a real screen sends (barcode, id, period; the test supplier has no price list). Now a fast 400 / 404 / 409 / 422 is listed under **NEEDS INPUT** (not faults) and counted apart; ERRORS holds 5xx, timeouts and 401 / 403 only. The page shows a "need input" tile and a grey badge on those rows. Saved runs keep the count (counts.needs_input; older runs are split on display).
+- Sandbox run: 0 errors, 11 need input (was counted as 11 errors).
+
 ## v28.311 (Ben, branch review-fixes-2026-10-05): likely pay date editable on balance 3 onward
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

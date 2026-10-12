@@ -9438,7 +9438,7 @@
           +'<span class="count" id="ah-status" style="align-self:center"></span></div>'
           +'<div id="ah-results" style="margin-top:8px"></div><div id="ah-hist" style="margin-top:18px"></div>';
         var runBtn=document.getElementById('ah-run'), liveCb=document.getElementById('ah-live'), stat=document.getElementById('ah-status');
-        function badge(r){ if(r.status>=400||r.status<=0)return '<span class="tool-badge bg-red">'+(r.status<=0?esc(r.err||'fail'):r.status)+'</span>'; if(r.ms>=1000)return '<span class="tool-badge bg-amber">'+r.ms+'ms</span>'; if(r.ms>=400)return '<span class="tool-badge" style="background:var(--line);color:var(--muted)">'+r.ms+'ms</span>'; return '<span class="tool-badge bg-green">'+r.ms+'ms</span>'; }
+        function badge(r){ if(ahNeeds(r))return '<span class="tool-badge bg-neutral" title="needs a parameter or record the sweep does not send: not a fault">'+r.status+' input</span>'; if(r.status>=400||r.status<=0)return '<span class="tool-badge bg-red">'+(r.status<=0?esc(r.err||'fail'):r.status)+'</span>'; if(r.ms>=1000)return '<span class="tool-badge bg-amber">'+r.ms+'ms</span>'; if(r.ms>=400)return '<span class="tool-badge" style="background:var(--line);color:var(--muted)">'+r.ms+'ms</span>'; return '<span class="tool-badge bg-green">'+r.ms+'ms</span>'; }
         function kpi(n,l,col){ return '<div class="tile" style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--card)"><b style="display:block;font-size:22px;color:'+(col||'var(--ink)')+'">'+n+'</b><span class="mut tiny">'+esc(l)+'</span></div>'; }
         // v28.306 (Ben): runs are saved (migration 361). The page opens on the last run; History lists every saved run (newest 200), click to reopen.
         var _ahCur=null;
@@ -9458,15 +9458,16 @@
         function ahOpen(id){ stat.textContent='Opening saved run…';
           fetch('/api/config/health-check/runs/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){ stat.innerHTML='<span style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</span>'; return; }
             _ahCur=d.id; stat.textContent=''; drawHC(d); ahHist(); }).catch(function(e){ stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); }
-        function drawHC(d){ var rows=d.results||[]; var errN=d.counts.errors, slowN=d.counts.slow, modN=d.counts.moderate, okN=d.counts.total-errN-slowN-modN;
+        function ahNeeds(r){ return [400,404,409,422].indexOf(r.status)>=0 && r.ms<1000; }   // v28.312: a route that needs a parameter, not a fault
+        function drawHC(d){ var rows=d.results||[]; var needN=(d.counts.needs_input!=null?d.counts.needs_input:rows.filter(ahNeeds).length), errN=(d.counts.needs_input!=null?d.counts.errors:Math.max(0,d.counts.errors-needN)), slowN=d.counts.slow, modN=d.counts.moderate, okN=d.counts.total-errN-slowN-modN-needN;
           var _when=d.at||'';
           var html='<div class="mut tiny" style="margin-top:4px">Run '+esc(ahWhen(_when))+(d.by?' by '+esc(shortUser(d.by)):'')+(d.includeLive?' · incl. live Xero / Flexport':'')+(d.saved===false?' · <span style="color:var(--amber)">not saved (migration 361 missing)</span>':'')+'</div>'
             +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:8px 0">'
-            +kpi(errN,'errors',errN?'var(--neg)':'var(--pos)')+kpi(slowN,'slow >1s',slowN?'var(--amber)':'var(--pos)')+kpi(modN,'moderate')+kpi(okN,'fast <0.4s','var(--pos)')+kpi(d.counts.total,'total')+'</div>'
+            +kpi(errN,'errors',errN?'var(--neg)':'var(--pos)')+kpi(slowN,'slow >1s',slowN?'var(--amber)':'var(--pos)')+kpi(modN,'moderate')+kpi(okN,'fast <0.4s','var(--pos)')+kpi(needN,'need input (not faults)')+kpi(d.counts.total,'total')+'</div>'
             +'<div class="bar" style="gap:8px"><button class="save-btn" id="ah-copy" style="background:var(--blue);color:#fff;border-color:var(--blue)">📋 Copy analysis for Claude Code</button>'
             +'<span class="mut tiny" style="align-self:center">portals: supplier '+(d.portals.supplier?'✓':'— no test user')+' · client '+(d.portals.client?'✓':'— no test user')+' · '+esc(d.version)+'</span></div>'
             +'<div class="tw" style="margin-top:10px;max-height:58vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Time</th><th class="l">Status</th><th class="l">Size</th><th class="l">Area</th><th class="l">Endpoint</th></tr></thead><tbody>'
-            +rows.map(function(r){ var bad=(r.status>=400||r.status<=0), warn=(!bad&&r.ms>=1000);
+            +rows.map(function(r){ var bad=(r.status>=400||r.status<=0)&&!ahNeeds(r), warn=(!bad&&r.ms>=1000&&r.status<400);
               return '<tr'+(bad?' style="background:var(--neg-bg)"':warn?' style="background:var(--amber-bg)"':'')+'><td class="l">'+badge(r)+'</td><td class="l">'+r.status+'</td><td class="l" style="white-space:nowrap">'+r.kb+'KB</td><td class="l"><span class="tool-badge bg-neutral">'+esc(r.group)+'</span></td><td class="l" style="font-family:ui-monospace,Menlo,monospace">'+esc(r.path)+'</td></tr>'; }).join('')
             +'</tbody></table></div>';
           document.getElementById('ah-results').innerHTML=html;

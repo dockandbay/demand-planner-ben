@@ -25776,7 +25776,11 @@ app.get('/api/config/health-check', async (req, res) => {
     for (const c of cleanup) { try { await c(); } catch (e) {} }
     // 4) analyse: flag slow (>1s) + errors (status>=400 or <=0). Rank slowest first.
     results.sort((a, b) => b.ms - a.ms);
-    const errors = results.filter(r => r.status >= 400 || r.status <= 0);
+    // v28.312 (Ben, live report 13-Oct-26): a fast 400 / 404 / 409 / 422 is a route that needs a parameter or a record the sweep does not send
+    // (barcode, id, period; a test supplier with no price list). Listed apart as "needs input" so ERRORS holds real faults only:
+    // 5xx, timeouts (status <= 0) and 401 / 403 (the sweep's own sessions refused).
+    const _needsIn = r => [400, 404, 409, 422].includes(r.status) && r.ms < 1000;
+    const errors = results.filter(r => (r.status >= 400 || r.status <= 0) && !_needsIn(r)), needsInput = results.filter(_needsIn);
     const slow = results.filter(r => r.status >= 200 && r.status < 400 && r.ms >= 1000);
     const mid = results.filter(r => r.status >= 200 && r.status < 400 && r.ms >= 400 && r.ms < 1000);
     const fmt = r => `${String(r.ms).padStart(6)}ms  ${String(r.status).padStart(3)}  ${String(r.kb).padStart(5)}KB  ${r.path}${r.err ? '  (' + r.err + ')' : ''}`;
@@ -25784,14 +25788,15 @@ app.get('/api/config/health-check', async (req, res) => {
     lines.push(`HORIZON app health check — ${APP_VERSION} — ${new Date().toISOString()}`);
     lines.push(`Base ${base} · ${targets.length} endpoints timed · live external ${includeLive ? 'INCLUDED' : 'skipped'}`);
     lines.push(`Portals: supplier ${psid ? 'ok' : 'no test user'} · client ${csid ? 'ok' : 'no test user'}`);
-    lines.push(`Totals: ${errors.length} error(s), ${slow.length} slow (>1s), ${mid.length} moderate (0.4–1s)`);
+    lines.push(`Totals: ${errors.length} error(s), ${slow.length} slow (>1s), ${mid.length} moderate (0.4–1s), ${needsInput.length} need input (not faults)`);
     lines.push('');
     if (errors.length) { lines.push(`## ERRORS (${errors.length}) — investigate first (a 400/404 with 0KB is usually an endpoint that needs a query param, not a real fault; a timeout=0 or -1 is a real problem)`); errors.forEach(r => lines.push(fmt(r))); lines.push(''); }
     if (slow.length) { lines.push(`## SLOW >1s (${slow.length}) — candidates for caching / query work`); slow.forEach(r => lines.push(fmt(r))); lines.push(''); }
     if (mid.length) { lines.push(`## MODERATE 0.4–1s (${mid.length})`); mid.forEach(r => lines.push(fmt(r))); lines.push(''); }
+    if (needsInput.length) { lines.push(`## NEEDS INPUT (${needsInput.length}): answered 400 / 404 without the parameter or record a real screen sends. Not faults; listed so a change in this set is visible`); needsInput.forEach(r => lines.push(fmt(r))); lines.push(''); }
     lines.push(`## OK <0.4s: ${results.length - errors.length - slow.length - mid.length} endpoints`);
     const report = lines.join('\n');
-    const counts = { total: targets.length, errors: errors.length, slow: slow.length, moderate: mid.length }, portals = { supplier: !!psid, client: !!csid };
+    const counts = { total: targets.length, errors: errors.length, slow: slow.length, moderate: mid.length, needs_input: needsInput.length }, portals = { supplier: !!psid, client: !!csid };
     // v28.306 (Ben): every run is saved (migration 361) so the page opens on the last run and keeps a history; newest 200 kept.
     // Before the migration the run still answers, just unsaved (saved:false).
     let saved = null; try { saved = (await pool.query(`INSERT INTO planner.health_check_runs (ran_by, version, include_live, duration_ms, total, errors, slow, moderate, portals, results, report)
