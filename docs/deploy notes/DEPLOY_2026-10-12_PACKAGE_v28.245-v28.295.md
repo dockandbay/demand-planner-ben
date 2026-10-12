@@ -19,9 +19,10 @@ Branch `review-fixes-2026-10-05`, HEAD `7c0ba156` (`7c0ba156b62b00b3ca3ae9abd548
 - 360 `xero_run_payments`, `payment_fx.bank_account_id / bank_name`
 
 ## 2. Env
-**New, needed for ACCOUNTS Gmail (new external service, your OK please):**
-- `GMAIL_CLIENT_ID_ACCOUNTS`, `GMAIL_CLIENT_SECRET_ACCOUNTS`: Google OAuth web client, Internal consent screen, scope `gmail.readonly`. Redirect URI `https://horizon.dockandbay.com/api/accounts/gmail/callback`.
-- `GMAIL_SEAL_KEY`: any long random string (seals the stored refresh token).
+**New, needed for ACCOUNTS Gmail (read only; heads-up as a new external service):**
+- Ben already has the Google OAuth client (used on the sandbox; Internal consent screen, scope `gmail.readonly`); the live callback `https://horizon.dockandbay.com/api/accounts/gmail/callback` is on it. Ben will send you the ID and secret securely.
+- Set in Vercel production: `GMAIL_CLIENT_ID_ACCOUNTS`, `GMAIL_CLIENT_SECRET_ACCOUNTS`, and a NEW `GMAIL_SEAL_KEY` (any long random string; do not reuse the sandbox one).
+- After deploy Ben clicks Connect Gmail in ACCOUNTS > Reconcile as accounts@.
 - Optional: `GMAIL_MAILBOX_ACCOUNTS` (default accounts@dockandbay.com), `GMAIL_REDIRECT_URI_ACCOUNTS`.
 
 **Email senders (v28.295), only after `dockandbay.com` is verified in Resend:**
