@@ -1,3 +1,10 @@
+## v28.270 (Ben, branch review-fixes-2026-10-05): Inbox matcher: Flexport and product suppliers default to Ignore
+
+**Files:** `server.mjs` (+ package.json, CHANGES.md). No migration.
+
+- Ben (12-Oct): Flexport → Ignore; suppliers → Ignore. Flexport is in the ignore list, and any statement line whose payee key matches a HORIZON product supplier (`planner.suppliers`, kind supplier, same payee normaliser) defaults to Ignore: those are paid against POs and supplier bills, not from a receipt. A person's per-payee choice still wins.
+- UK lines now: 107 no receipt needed (Flexport 8 moved there), 58 need a receipt, 2 receipts found.
+
 ## v28.269 (Ben, branch review-fixes-2026-10-05): Inbox matcher: statement lines with a treatment per payee and the matching accounts@ receipt (read only)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/354_accounts_payee_rules.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 354** (additive: `planner.accounts_payee_rules`). No env. Gmail reads only; nothing written to Xero.

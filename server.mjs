@@ -3934,9 +3934,10 @@ function accPayeeKey(ref, desc) {
   return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
 }
 const ACC_RULE_KEYS = /^(GOOGLE|LINKEDIN|FACEBOOK|META|FB|TIKTOK|STRIPE|PAYPAL|PP ZETTLE|SHOPIFY|KLARNA|ADYEN|AMAZON|AMZNMKTPLACE|AMZNBUSINESS|XERO|XRO|DISPUTE|INTEREST|SNAP)$/;
-const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN)$/;
-function accDefaultTreatment(key, amount, match) {
-  if (amount > 0) return 'ignore';                     // money in: customer payments / payouts, reconciled against sales in Xero
+const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN|FLEXPORT)$/;   // v28.270: + FLEXPORT (Ben: freight is billed through its own flow)
+function accDefaultTreatment(key, amount, match, supKeys) {
+  if (amount > 0) return 'ignore';
+  if (supKeys && supKeys.has(key)) return 'ignore';   // v28.270 (Ben): product suppliers are paid against POs and supplier bills, never from a receipt                     // money in: customer payments / payouts, reconciled against sales in Xero
   if (ACC_IGNORE_KEYS.test(key)) return 'ignore';
   if (ACC_RULE_KEYS.test(key)) return 'rule';
   if (match && /invoice|inv[-\s]?\d|statement/i.test(match.subject || '') && !/receipt/i.test((match.subject || '') + ' ' + (match.from || ''))) return 'bill';
@@ -3946,6 +3947,8 @@ async function accInboxProposals() {
   const lines = (await pool.query(`SELECT s.org, s.account_name, coalesce(a.currency,'') currency, to_char(s.line_date,'YYYY-MM-DD') line_date, s.amount::float8 amount, s.reference, s.description
     FROM planner.accounts_stmt_lines s LEFT JOIN planner.accounts_bank_accounts a ON a.org=s.org AND a.account_id=s.account_id WHERE NOT s.reconciled ORDER BY s.line_date DESC`)).rows;
   const rules = new Map((await pool.query(`SELECT org, payee_key, treatment, source FROM planner.accounts_payee_rules`)).rows.map(r => [r.org + '|' + r.payee_key, r]));
+  // v28.270: payee keys of HORIZON product suppliers (and their Xero "<name> - <code>" contacts): the same normaliser over the supplier names
+  const supKeys = new Set(); try { (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(trim(name),'')<>''`)).rows.forEach(r => { const k = accPayeeKey(r.name, ''); if (k && k !== '(blank)' && k.length >= 3) supKeys.add(k); }); } catch (_) {}
   const minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31');
   const em = lines.length ? (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 60`, [minD])).rows
     .map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) })) : [];
@@ -3962,7 +3965,7 @@ async function accInboxProposals() {
     const best = c[0] && c[0].score >= 40 ? c[0] : null;
     const match = best ? { id: best.e.id, date: best.e.d, from: best.e.from_addr, subject: best.e.subject, files: best.e.files || [], stripe: best.e.stripe_link, lag: best.lag, name: best.name, ambiguous: !!(c[1] && c[1].score >= best.score - 5),
       url: 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + best.e.id } : null;
-    const rule = rules.get(l.org + '|' + key), treatment = rule ? rule.treatment : accDefaultTreatment(key, l.amount, match);
+    const rule = rules.get(l.org + '|' + key), treatment = rule ? rule.treatment : accDefaultTreatment(key, l.amount, match, supKeys);
     const status = (treatment === 'rule' || treatment === 'ignore') ? 'not_needed' : match ? 'matched' : 'needs_receipt';
     return Object.assign(l, { payee_key: key, treatment, treatment_source: rule ? rule.source : 'auto', status, match });
   });
