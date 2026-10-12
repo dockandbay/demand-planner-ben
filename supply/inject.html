@@ -9397,12 +9397,32 @@
           +'<div class="bar" style="gap:12px"><button class="save-btn primary" id="ah-run">▶ Run health check</button>'
           +'<label style="font-size:12px;cursor:pointer;align-self:center"><input type="checkbox" id="ah-live" style="vertical-align:middle;margin-right:5px">include live Xero / Flexport</label>'
           +'<span class="count" id="ah-status" style="align-self:center"></span></div>'
-          +'<div id="ah-results" style="margin-top:8px"></div>';
+          +'<div id="ah-results" style="margin-top:8px"></div><div id="ah-hist" style="margin-top:18px"></div>';
         var runBtn=document.getElementById('ah-run'), liveCb=document.getElementById('ah-live'), stat=document.getElementById('ah-status');
         function badge(r){ if(r.status>=400||r.status<=0)return '<span class="tool-badge bg-red">'+(r.status<=0?esc(r.err||'fail'):r.status)+'</span>'; if(r.ms>=1000)return '<span class="tool-badge bg-amber">'+r.ms+'ms</span>'; if(r.ms>=400)return '<span class="tool-badge" style="background:var(--line);color:var(--muted)">'+r.ms+'ms</span>'; return '<span class="tool-badge bg-green">'+r.ms+'ms</span>'; }
         function kpi(n,l,col){ return '<div class="tile" style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--card)"><b style="display:block;font-size:22px;color:'+(col||'var(--ink)')+'">'+n+'</b><span class="mut tiny">'+esc(l)+'</span></div>'; }
+        // v28.306 (Ben): runs are saved (migration 361). The page opens on the last run; History lists every saved run (newest 200), click to reopen.
+        var _ahCur=null;
+        function ahWhen(at){ if(!at)return ''; var t=new Date(at); if(isNaN(t))return String(at); var p=function(n){return (n<10?'0':'')+n;}; return hzTrkDate(t.getFullYear()+'-'+p(t.getMonth()+1)+'-'+p(t.getDate()))+' '+p(t.getHours())+':'+p(t.getMinutes()); }   // viewer's local time
+        function ahHist(){ var el=document.getElementById('ah-hist'); if(!el)return;
+          fetch('/api/config/health-check/runs').then(function(r){return r.json();}).then(function(j){ var runs=(j&&j.runs)||[];
+            if(j&&j.missing){ el.innerHTML='<div class="mut tiny">History needs migration 361 (planner.health_check_runs). Runs work but are not saved yet.</div>'; return; }
+            if(!runs.length){ el.innerHTML=''; return; }
+            el.innerHTML='<div class="sect-h">History <span class="mut tiny">'+runs.length+' saved run'+(runs.length===1?'':'s')+', newest first · click to open</span></div>'
+              +'<div class="tw" style="max-height:40vh;overflow:auto"><table class="pay-tbl" style="width:auto;font-size:12.5px"><thead><tr><th class="l">Run</th><th class="l">By</th><th class="l">Version</th><th class="l">Errors</th><th class="l">Slow &gt;1s</th><th class="l">Moderate</th><th class="l">Total</th><th class="l">Time</th></tr></thead><tbody>'
+              +runs.map(function(r){ var cur=(_ahCur===r.id);
+                return '<tr class="ah-run" data-id="'+r.id+'" style="cursor:pointer'+(cur?';background:var(--blue-soft)':'')+'"><td class="l" style="white-space:nowrap">'+(cur?'▸ ':'')+esc(ahWhen(r.at))+(r.include_live?' <span class="tool-badge bg-neutral">live</span>':'')+'</td><td class="l">'+esc(shortUser(r.ran_by||'')||'')+'</td><td class="l">'+esc(r.version||'')+'</td>'
+                  +'<td class="l"'+(r.errors?' style="color:var(--neg);font-weight:700"':'')+'>'+(r.errors||0)+'</td><td class="l"'+(r.slow?' style="color:var(--amber);font-weight:700"':'')+'>'+(r.slow||0)+'</td><td class="l">'+(r.moderate||0)+'</td><td class="l">'+(r.total||0)+'</td><td class="l">'+(r.duration_ms?(r.duration_ms/1000).toFixed(1)+'s':'')+'</td></tr>'; }).join('')
+              +'</tbody></table></div>';
+            el.querySelectorAll('.ah-run').forEach(function(tr){ tr.onclick=function(){ ahOpen(+tr.dataset.id); }; });
+          }).catch(function(){}); }
+        function ahOpen(id){ stat.textContent='Opening saved run…';
+          fetch('/api/config/health-check/runs/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){ stat.innerHTML='<span style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</span>'; return; }
+            _ahCur=d.id; stat.textContent=''; drawHC(d); ahHist(); }).catch(function(e){ stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); }
         function drawHC(d){ var rows=d.results||[]; var errN=d.counts.errors, slowN=d.counts.slow, modN=d.counts.moderate, okN=d.counts.total-errN-slowN-modN;
-          var html='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:8px 0">'
+          var _when=d.at||'';
+          var html='<div class="mut tiny" style="margin-top:4px">Run '+esc(ahWhen(_when))+(d.by?' by '+esc(shortUser(d.by)):'')+(d.includeLive?' · incl. live Xero / Flexport':'')+(d.saved===false?' · <span style="color:var(--amber)">not saved (migration 361 missing)</span>':'')+'</div>'
+            +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:8px 0">'
             +kpi(errN,'errors',errN?'var(--neg)':'var(--pos)')+kpi(slowN,'slow >1s',slowN?'var(--amber)':'var(--pos)')+kpi(modN,'moderate')+kpi(okN,'fast <0.4s','var(--pos)')+kpi(d.counts.total,'total')+'</div>'
             +'<div class="bar" style="gap:8px"><button class="save-btn" id="ah-copy" style="background:var(--blue);color:#fff;border-color:var(--blue)">📋 Copy analysis for Claude Code</button>'
             +'<span class="mut tiny" style="align-self:center">portals: supplier '+(d.portals.supplier?'✓':'— no test user')+' · client '+(d.portals.client?'✓':'— no test user')+' · '+esc(d.version)+'</span></div>'
@@ -9415,10 +9435,11 @@
             if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(d.report).then(ok).catch(function(){ var ta=document.createElement('textarea'); ta.value=d.report; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); ok(); }); }
             else { var ta=document.createElement('textarea'); ta.value=d.report; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); ok(); } };
         }
+        fetch('/api/config/health-check/runs').then(function(r){return r.json();}).then(function(j){ var runs=(j&&j.runs)||[]; if(runs.length&&!_ahCur&&!runBtn.disabled)ahOpen(runs[0].id); else ahHist(); }).catch(function(){});
         runBtn.onclick=function(){ runBtn.disabled=true; var t0=Date.now(); stat.textContent='Running… (up to ~1 min)'; document.getElementById('ah-results').innerHTML='';
           fetch('/api/config/health-check'+(liveCb.checked?'?live=1':'')).then(function(r){return r.json();}).then(function(d){ runBtn.disabled=false;
             if(!d||d.error){ stat.innerHTML='<span style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</span>'; return; }
-            stat.textContent='Done in '+((Date.now()-t0)/1000).toFixed(1)+'s'; drawHC(d);
+            stat.textContent='Done in '+((Date.now()-t0)/1000).toFixed(1)+'s'+(d.saved?' · saved':''); _ahCur=d.id||null; drawHC(d); ahHist();
           }).catch(function(e){ runBtn.disabled=false; stat.innerHTML='<span style="color:var(--neg)">'+esc(e.message||e)+'</span>'; }); };
       };
       // v28.159 (Ben): CONFIG ▸ Admin ▸ Health log. The persistent log behind the weekly health email (migration 328): server 5xx +

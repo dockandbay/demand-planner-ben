@@ -25645,6 +25645,7 @@ async function _selfTime(base, path, cookie, timeoutMs) {
   finally { clearTimeout(to); }
 }
 app.get('/api/config/health-check', async (req, res) => {
+  const _hcT0 = Date.now();   // v28.306: run duration, saved with the run
   try {
     const me = await permsFor(req);
     if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' });
@@ -25708,10 +25709,31 @@ app.get('/api/config/health-check', async (req, res) => {
     if (mid.length) { lines.push(`## MODERATE 0.4–1s (${mid.length})`); mid.forEach(r => lines.push(fmt(r))); lines.push(''); }
     lines.push(`## OK <0.4s: ${results.length - errors.length - slow.length - mid.length} endpoints`);
     const report = lines.join('\n');
-    res.set('Cache-Control', 'no-store').json({ ok: true, version: APP_VERSION, at: new Date().toISOString(), base, includeLive,
-      counts: { total: targets.length, errors: errors.length, slow: slow.length, moderate: mid.length },
-      portals: { supplier: !!psid, client: !!csid },
-      results, report });
+    const counts = { total: targets.length, errors: errors.length, slow: slow.length, moderate: mid.length }, portals = { supplier: !!psid, client: !!csid };
+    // v28.306 (Ben): every run is saved (migration 361) so the page opens on the last run and keeps a history; newest 200 kept.
+    // Before the migration the run still answers, just unsaved (saved:false).
+    let saved = null; try { saved = (await pool.query(`INSERT INTO planner.health_check_runs (ran_by, version, include_live, duration_ms, total, errors, slow, moderate, portals, results, report)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [me.email || authUser(req) || null, APP_VERSION, !!includeLive, Date.now() - _hcT0, counts.total, counts.errors, counts.slow, counts.moderate, JSON.stringify(portals), JSON.stringify(results), report])).rows[0].id;
+      pool.query(`DELETE FROM planner.health_check_runs WHERE id NOT IN (SELECT id FROM planner.health_check_runs ORDER BY ran_at DESC LIMIT 200)`).catch(() => {}); }
+    catch (e) { if (!/does not exist/.test(e.message)) log500(e); }
+    res.set('Cache-Control', 'no-store').json({ ok: true, id: saved, saved: !!saved, version: APP_VERSION, at: new Date().toISOString(), by: me.email || null, base, includeLive,
+      counts, portals, results, report });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.306: App health history. List = newest first, counts only; one run = the full saved result (same shape as a fresh run).
+app.get('/api/config/health-check/runs', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' });
+    const rows = (await pool.query(`SELECT id, ran_at at, ran_by, version, include_live, duration_ms, total, errors, slow, moderate FROM planner.health_check_runs ORDER BY ran_at DESC LIMIT 200`)).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, runs: rows });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ ok: true, runs: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/config/health-check/runs/:id', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin required' });
+    if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'bad id' });
+    const r = (await pool.query(`SELECT id, ran_at, to_char(ran_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at_local, ran_by, version, include_live, duration_ms, total, errors, slow, moderate, portals, results, report FROM planner.health_check_runs WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, id: r.id, saved: true, at: r.ran_at, at_local: r.at_local, by: r.ran_by, version: r.version, includeLive: r.include_live, duration_ms: r.duration_ms,
+      counts: { total: r.total, errors: r.errors, slow: r.slow, moderate: r.moderate }, portals: r.portals || {}, results: r.results || [], report: r.report || '' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

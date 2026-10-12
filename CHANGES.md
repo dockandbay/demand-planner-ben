@@ -1,3 +1,13 @@
+## v28.306 (Ben, branch review-fixes-2026-10-05): App health runs saved, with history
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/361_health_check_runs.sql` (+ package.json, CHANGES.md). **Migration 361.** No env vars.
+
+- Ben: "clicking this analyse should persist and also save history" (CONFIG > Admin > App health).
+- Every Run health check is saved (planner.health_check_runs: counts, every endpoint result, the Claude Code report, version, who, when, duration). The newest 200 are kept.
+- The page opens on the last run. A History table lists every saved run (when, by, version, errors, slow, moderate, total, run time); click one to reopen it, including Copy analysis for Claude Code. Times show in the viewer's local time.
+- New read routes (admin): GET /api/config/health-check/runs and /runs/:id. Until migration 361 is applied, runs still work and the page says they are not saved.
+- Verified on the sandbox: a run saved (202 endpoints, 32 s), History shows it, and a page reload reopens it.
+
 ## v28.305 (Ben, branch review-fixes-2026-10-05): Payments Report, paid and Xero submit for ACCOUNTS or admin only
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
