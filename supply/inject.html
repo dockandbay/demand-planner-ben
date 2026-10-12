@@ -19203,6 +19203,11 @@
     var upMsg=(AC_BK.upLog||[]).concat(AC_BK.up&&(AC_BK.upLog||[]).indexOf(AC_BK.up)<0?[AC_BK.up]:[]).map(upOne).filter(Boolean).join('<br>');
     b.innerHTML='<div style="text-align:left;max-width:980px"><div class="sect-h">Bank statement</div><div class="tiny mut" style="margin-bottom:8px">Xero does not give statement lines through its API (confirmed by Xero support), so upload Xero\'s <b>Uncoded statement lines</b> export for UK and for AU at least weekly. Ageing and Reconcile are built from it. rita@, sarah@ and ben@ are emailed when an upload is more than 5 days old.</div>'
       +'<div class="tw"><table style="width:auto"><thead><tr><th>Organisation</th><th>Last upload</th><th>Statement as at</th><th>By</th><th>Status</th></tr></thead><tbody>'+orgRow('uk','Dock &amp; Bay Ltd')+orgRow('au','Dock &amp; Bay Pty Ltd')+'</tbody></table></div>'
+      // v28.300 (Ben): the old Bank ageing screen (with Refresh now) has had no tab since v28.280, so the Xero bank sync had no button.
+      // It reads Xero (bank accounts + unreconciled items, about 2 min) and is what tells an upload's accounts apart by organisation. Admin only (server).
+      +(function(){ var L=d.last, adm=!!(window.ME&&(ME.is_admin||ME.live===false));
+        return '<div class="bar" style="margin-top:8px"><span class="tiny mut">Xero bank accounts: '+(AC_BK.run?'<span id="ac-bstage">Refreshing: '+esc(AC_BK.stage||'starting')+'…</span>':L?('last synced '+esc(acSynced(L.at))+(L.status!=='success'?' <span style="color:var(--neg)">(failed: '+esc(String(L.message||'').slice(0,160))+')</span>':'')):'<span style="color:var(--neg)">never synced</span>')+(AC_BK.err?' <span style="color:var(--neg)">'+esc(AC_BK.err)+'</span>':'')+'. Synced hourly once scheduled; used to tell UK and AU accounts apart.</span>'
+          +(adm?'<span class="save-btn light" id="ac-bsync">'+(AC_BK.run?'Syncing…':'Sync from Xero')+'</span>':'')+'</div>'; })()
       +(d.can_upload?'<div id="ac-bdrop" style="margin-top:10px;border:2px dashed var(--line);border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;text-align:left"><label class="save-btn" style="cursor:pointer">'+(AC_BK.upBusy?'Uploading…':'Upload Uncoded statement lines (.csv)')+'<input type="file" id="ac-bupf" accept=".csv,.xlsx" multiple style="display:none"'+(AC_BK.upBusy?' disabled':'')+'></label><span class="tiny mut">or drag the Xero export here (UK and AU together is fine)</span>'+(upMsg?'<div class="tiny" style="flex-basis:100%">'+upMsg+'</div>':'')+'</div>':'<div class="bar" style="margin-top:10px"><span class="tiny mut">Uploading needs the ACCOUNTS grant.</span><span class="tiny">'+upMsg+'</span></div>')
       +'<div class="annot" style="margin:10px 0"><b>How to export it from Xero (about 1 minute per organisation)</b><ol style="margin:6px 0 0 18px;padding:0;display:grid;gap:4px">'
       +'<li>In Xero, switch to <b>Dock &amp; Bay Ltd</b> (UK) or <b>Dock &amp; Bay Pty Ltd</b> (AU) and open <b>Accounting ▸ Bank accounts</b>.</li>'
@@ -19211,7 +19216,10 @@
       +'<li><b>Export ▸ CSV</b>. Keep Xero\'s file name (it carries the date).</li>'
       +'<li>Press <b>Upload Uncoded statement lines</b> above and choose the file, or drag it onto the box. Every account in it is refreshed; lines reconciled since the last upload drop off.</li>'
       +'<li>Repeat for the other organisation.</li></ol></div></div>';
-    var upf=document.getElementById('ac-bupf'); if(upf)upf.onchange=function(){ acBkUploadMany(upf.files); }; acBkDropWire(document.getElementById('ac-bdrop')); }
+    var upf=document.getElementById('ac-bupf'); if(upf)upf.onchange=function(){ acBkUploadMany(upf.files); }; acBkDropWire(document.getElementById('ac-bdrop'));
+    var bs=document.getElementById('ac-bsync'); if(bs)bs.onclick=function(){ if(AC_BK.run)return; AC_BK.run=true; AC_BK.err=''; acRenderStmt(b);
+      fetch('/api/accounts/bank-ageing/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(r.status!==202&&r.status!==409)throw new Error(j.error||('HTTP '+r.status)); }); })
+        .then(function(){ acBankPoll(); }).catch(function(e){ AC_BK.run=false; AC_BK.err=e.message; acRenderStmt(b); }); }; }
   // ── AGEING ──
   var AC_AG={tab:'all',q:''};
   function acRenderAgeing(b){ if(!b)return;

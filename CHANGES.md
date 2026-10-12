@@ -1,3 +1,9 @@
+## v28.300 (Ben, branch review-fixes-2026-10-05): Sync from Xero button on ACCOUNTS > Bank statement
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "accounts > ageing there is no button to run a sync". The old Bank ageing screen with **Refresh now** lost its tab in v28.280, so the Xero bank sync (bank accounts + unreconciled Xero items) could only run from the hourly n8n schedule, which is not set on live yet. Bank statement now shows when the Xero bank accounts were last synced (or "never synced", or the failure) and, for admins, a **Sync from Xero** button. It reads Xero only (about 2 minutes, progress shown); nothing is written to Xero. The account list it stores is what tells an upload's accounts apart by organisation.
+
 ## v28.299 (Ben, branch review-fixes-2026-10-05): Duplicate 3PL charges, Copy for email
 
 **Files:** `artifact_v16.7.html` (+ package.json, CHANGES.md). No migration, no env vars.
