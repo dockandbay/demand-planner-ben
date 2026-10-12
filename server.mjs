@@ -12072,7 +12072,7 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     if (!process.env.RESEND_API_KEY) { console.log('[portal remind] no RESEND_API_KEY — would email ' + emails.join(', ')); return res.json({ ok: true, sent: 0, emails, sandbox: true }); }
     const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
+      body: JSON.stringify({ ...emailSender('supplier'), to: emails, subject, html }) });
     if (!r.ok) { const t = await r.text().catch(() => ''); logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', by: authUser(req), status: 'error', error: 'resend ' + r.status }); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
     const _rid = await r.json().then(j => j && j.id).catch(() => null);
     logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', ref: b.supplier_name || null, by: authUser(req), status: 'sent', resend_id: _rid });
@@ -12215,16 +12215,25 @@ async function logEmail(m) {
   } catch (e) { /* table absent pre-migration 159, or insert failed — never block the send */ }
 }
 // v28.137 (Ben): every email Horizon sends (portal, suppliers, internal notifications) replies to ops@ — one place to set it.
-const EMAIL_REPLY_TO = (process.env.EMAIL_REPLY_TO || 'ops@dockandbay.com').trim();
-async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments }) {
+// v28.295 (Ben 12-Oct-26): sender and reply-to follow the part of the system. All three addresses are aliases of the ops@ inbox.
+//   admin (team, internal, partners) = horizon@ · supplier portal (anything sent to suppliers) = supplierportal@ · client portal = clientportal@
+// Reply-to switches straight away. The From address only switches once EMAIL_FROM_ADMIN / _SUPPLIER / _CLIENT are set (dockandbay.com must be
+// verified in Resend first); until then it stays PORTAL_FROM. EMAIL_REPLY_TO_ADMIN / _SUPPLIER / _CLIENT override the reply-to defaults.
+const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com' }, supplier: { reply: 'supplierportal@dockandbay.com' }, client: { reply: 'clientportal@dockandbay.com' } };
+function emailSender(channel) {
+  const ch = EMAIL_CHANNELS[channel] ? channel : 'admin', K = ch.toUpperCase();
+  return { from: (process.env['EMAIL_FROM_' + K] || process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>').trim(),
+    reply_to: (process.env['EMAIL_REPLY_TO_' + K] || EMAIL_CHANNELS[ch].reply).trim() };
+}
+async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
   if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject + ((attachments && attachments.length) ? ' [+' + attachments.length + ' attachment]' : '')); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   try {
-    const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: list, subject, html };
+    const payload = { ...emailSender(channel), to: list, subject, html };   // v28.295: channel = admin (default) | supplier | client
     if (cclist.length) payload.cc = cclist;
-    // v28.137: reply-to is ALWAYS EMAIL_REPLY_TO (ops@), set in the payload above. Was the person who triggered the email (replyTo
+    // v28.137/v28.295: reply-to is the channel's ops@ alias (emailSender), set in the payload above. Was the person who triggered the email (replyTo
     // arg: submitter / escalator / supplier) — callers still pass it; it is now ignored.
     if (attachments && attachments.length) payload.attachments = attachments.map(a => ({ filename: a.filename || 'attachment', content: a.content }));   // Resend: content = base64 string
     const resp = await _fetchT('https://api.resend.com/emails', { method: 'POST',
@@ -12237,7 +12246,7 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, 
   } catch (e) { console.error('[email] Resend failed:', e.message); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: e.message }); return { sent: 0, error: e.message }; }
 }
 // Escalation email now goes through the shared best-effort sender (like the magic link) — never throws.
-async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html, kind: 'escalation', ref: r.ref, replyTo: r.replyTo }); }
+async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html, kind: 'escalation', ref: r.ref, replyTo: r.replyTo, channel: r.channel }); }
 // A supplier submitting invoice / completion info should be VISIBLE, not silent: drop an UNREAD timeline note
 // on the PO (author_kind='supplier', read_at NULL → shows on the PO timeline + increments the ✉ unread badge).
 // Best-effort — never break the submit if the note fails.
@@ -12384,7 +12393,7 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy, region
   const subject = `Payment ${sym}${amtNum} made to ${supplier}`;
   // Always return a preview (so the sandbox can pop it up for testing); only actually send if someone's opted in.
   const preview = { to, cc, subject, html, recipients: to.length };
-  const result = to.length ? await sendResendEmail({ to, cc, subject, html }) : { skipped: 'no opted-in recipients' };
+  const result = to.length ? await sendResendEmail({ channel: 'supplier', to, cc, subject, html }) : { skipped: 'no opted-in recipients' };
   return { preview, result };
 }
 async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote, replyTo }) {
@@ -12441,7 +12450,7 @@ async function escalateCore({ initiator, kind, ref, message, user, supplierId, s
   const html = '<p><b>' + _eh(user || 'A user') + '</b> has escalated this message on ' + kindWord + ' <b>' + _eh(ref) + '</b>:</p>'
     + '<blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
     + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
-  const sent = await escalateSend({ emails, subject, html, replyTo });   // reply goes back to whoever escalated
+  const sent = await escalateSend({ emails, subject, html, replyTo, channel: initiator === 'internal' ? 'supplier' : 'admin' });   // reply goes back to whoever escalated
   return { ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox, emailError: sent.error || null, link };
 }
 app.post('/api/supply/escalate', async (req, res) => {
@@ -14031,7 +14040,7 @@ app.post('/api/product/escalate', async (req, res) => {
     const link = PORTAL_URL + '#/product/' + encodeURIComponent(ref);
     const html = '<p><b>' + _eh(user) + '</b> escalated product <b>' + _eh(ref) + '</b>:</p><blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
       + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
-    const sent = await sendResendEmail({ to: emails, subject: 'horizon escalation - ' + ref, html, kind: 'escalation', ref: ref });
+    const sent = await sendResendEmail({ channel: 'supplier', to: emails, subject: 'horizon escalation - ' + ref, html, kind: 'escalation', ref: ref });
     res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -15709,7 +15718,7 @@ async function sendPaymentNotify(row) {
     + '<p>Thank you,<br>Dock &amp; Bay Accounts</p></div>';
   const attachments = await Promise.all(rem.map(async a => ({ filename: a.filename || 'remittance', content: (a.storage_path ? await storageFetch(a.storage_path) : Buffer.from(a.data)).toString('base64') })));
   const subj = 'Payment made — Dock & Bay' + (money ? (' (' + money + ' ' + (row.currency || '') + ')') : '');
-  return sendResendEmail({ to: row.to_emails.split(',').map(s => s.trim()).filter(Boolean), subject: subj, html,
+  return sendResendEmail({ channel: 'supplier', to: row.to_emails.split(',').map(s => s.trim()).filter(Boolean), subject: subj, html,
     kind: 'payment-remittance', ref: row.run_key, by: row.created_by, attachments });
 }
 // Worker: every 30s, claim + send any queued email whose 5-min window has elapsed.
@@ -22924,7 +22933,7 @@ async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient,
   try {
     const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: emails, subject, html }) });
+      body: JSON.stringify({ ...emailSender('admin'), to: emails, subject, html }) });
     const j = await r.json().catch(() => ({}));
     logEmail({ recipients: emails.join(', '), subject, kind: 'sample-shipped', ref, by, status: r.ok ? 'sent' : 'error', error: r.ok ? null : ('resend ' + r.status), resend_id: j && j.id });
   } catch (ex) { logEmail({ recipients: emails.join(', '), subject, kind: 'sample-shipped', ref, by, status: 'error', error: ex.message }); }
@@ -23724,7 +23733,7 @@ const portalSuppliers = (email) => pool.query(
   [email]).then(r => r.rows);
 async function sendMagicEmail(email, url) {
   // Uses the shared best-effort Resend sender (same method escalation now uses).
-  await sendResendEmail({ kind: 'magic-link', ref: email, to: email, subject: 'Your Dock & Bay supplier portal link',
+  await sendResendEmail({ channel: 'supplier', kind: 'magic-link', ref: email, to: email, subject: 'Your Dock & Bay supplier portal link',
     html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid ${PORTAL_LINK_HOURS} hours, single use):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
 // SUG-0019 P3: notify each directed supplier of a new spec needing confirmation, with an auto-login portal link.
@@ -23739,7 +23748,7 @@ async function emailSpecToSuppliers(names, specType, base) {
       if (done.has(email)) continue; done.add(email);
       let url = base + '/portal';
       try { const tok = portalToken(); await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now() + make_interval(hours => $3))`, [tokHash(tok), email, PORTAL_LINK_HOURS]); url = base + '/portal?token=' + tok; } catch (e) {}   // v28.186 (Ben): 24 h link life. v28.210 (Ben, H2): stored hashed
-      await sendResendEmail({ kind: 'spec-approval', ref: name, to: email,
+      await sendResendEmail({ channel: 'supplier', kind: 'spec-approval', ref: name, to: email,
         subject: 'New ' + specType + ' specification to confirm — Dock & Bay',
         html: `<p>Hi,</p><p>Dock &amp; Bay has published a new <b>${specType}</b> specification that requires your confirmation.</p><p>Please review and confirm it under <b>Specifications</b> in your supplier portal:</p><p><a href="${url}">${url}</a></p>` });
       sent++;
@@ -25133,7 +25142,7 @@ async function emailForecastCountry(country) {
   if (!process.env.RESEND_API_KEY) return { country: co, ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email, rows: rowCount };
   const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
+    body: JSON.stringify({ ...emailSender('admin'), to: [email],
       subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)',
       html: '<p>Attached is the latest 12-month forecast for <b>' + co + '</b> (DTC / FBA / B2B by SKU).</p>',
       attachments: [{ filename: 'forecast_' + co + '_12mo.csv', content: Buffer.from(csv).toString('base64') }] }) });
@@ -25161,7 +25170,7 @@ app.post('/api/export/email-csv', async (req, res) => {
     if (!process.env.RESEND_API_KEY) return res.json({ ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email });
     const r = await _fetchT('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to: [email],
+      body: JSON.stringify({ ...emailSender('admin'), to: [email],
         subject: 'Dock & Bay — ' + KEYS[key] + ' (' + new Date().toISOString().slice(0, 10) + ')',
         html: '<p>Attached is the latest <b>' + KEYS[key] + '</b> export from the Demand Planner.</p>',
         attachments: [{ filename, content: Buffer.from(csv).toString('base64') }] }) });
@@ -25483,7 +25492,7 @@ app.post('/api/client/users/:uid/delete', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function cpSendLink(email, url, clientName) {
-  await sendResendEmail({ kind: 'client-magic-link', ref: email, to: email, subject: 'Your Dock & Bay client portal link',
+  await sendResendEmail({ channel: 'client', kind: 'client-magic-link', ref: email, to: email, subject: 'Your Dock & Bay client portal link',
     html: `<p>Hi,</p><p>Here is your link to the Dock &amp; Bay client portal${clientName ? ' for <b>' + clientName + '</b>' : ''} (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
 app.post('/api/client/users/:uid/invite', async (req, res) => {
@@ -26007,7 +26016,7 @@ async function hzHealthEmail(days, to) {
       + tbl('Portal clients', ['Client', 'Users', 'Last seen', 'Page views', 'Slow views', 'Failures'], (d.client_portal.clients || []).slice(0, 10).map(r => [r.client, r.users, r.last_seen ? hzSydney(r.last_seen) : '', r.page_views, r.slow_views, r.failures]))
       + tbl('Client portal failures', ['Kind', 'Where', 'Status', 'Count'], (d.client_portal.failures || []).slice(0, 5).map(r => [r.kind, r.path, r.status || '', r.n])) : '')
     + `<p style="font-size:13px;margin-top:18px;padding:10px 12px;background:#eff6ff;border-radius:8px">Full details attached: upload the .md to Claude Code.</p></div>`;
-  const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html,
+  const payload = { ...emailSender('admin'), to, subject, html,
     attachments: [{ filename, content: Buffer.from(d.markdown, 'utf8').toString('base64') }] };
   return { payload, report: d };
 }
@@ -26237,7 +26246,7 @@ function hzRedAlertPayload(rows, to) {
       + ((m.examples || []).length ? '<ul style="margin:4px 0 4px 18px;padding:0;font-size:12px">' + m.examples.slice(0, 3).map(x => `<li>${E(String(x).slice(0, 240))}</li>`).join('') + '</ul>' : '')
       + `<div style="font-size:12px">Likely file: ${E(m.file || 'server.mjs')}</div></div>`; }).join('')
     + `<p style="font-size:13px;margin-top:14px">Full log: CONFIG ▸ Admin ▸ Health log</p></div>`;
-  return { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', reply_to: EMAIL_REPLY_TO, to, subject, html };
+  return { ...emailSender('admin'), to, subject, html };
 }
 // Raise alerts: drop those already alerted in the last 24h (unless the count doubled), store the rest as PENDING red_alert rows,
 // then try to send everything pending. A throttled alert stays pending and rides the next allowed health email. No retries.
@@ -26992,7 +27001,7 @@ async function cpNotifyClientMessage(threadId, req) {   // email the client's ac
       for (const u of users) { if ((await cpAllowedOrderKeys(cl, u, [t.order_key, t.okey])).size) keep.push(u); } users = keep; }
     const to = users.map(u => u.email); if (!to.length) return;
     const link = t.order_key ? cpBase(req) + '/client#/orders/' + encodeURIComponent(cpOkeyToPortalId(t.okey || t.order_key)) : cpBase(req) + '/client#/messages/' + threadId;
-    await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${escHtml(t.subject || 'your message')}</b> in the client portal.</p><p><a href="${escHtml(link)}">Open the conversation</a></p>` }); } catch (e) {}
+    await sendResendEmail({ channel: 'client', kind: 'client-message', ref: String(threadId), to, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${escHtml(t.subject || 'your message')}</b> in the client portal.</p><p><a href="${escHtml(link)}">Open the conversation</a></p>` }); } catch (e) {}
 }
 async function cpNotifyOpsMessage(threadId, client, req) {
   try { const to = String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean); if (client.owner_email && !to.includes(client.owner_email)) to.push(client.owner_email); if (!to.length) { console.log('[client portal] message from ' + client.name + ' — no cp_message_default_to / owner set, not emailed'); return; }
@@ -27408,7 +27417,7 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
     const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${E(l.sku)}</td><td align="right">${E(l.qty)}</td><td align="right">${l.cartons == null ? '' : E(l.cartons)}</td><td align="right">${l.price == null ? '' : E(l.price.toFixed(2))}</td><td>${E(l.flags.join(', '))}</td></tr>`).join('') + '</table>';
     const toClient = String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false';
     const to = toClient ? req.cp.user.email : team; const cc = toClient ? team.filter(x => x.toLowerCase() !== String(req.cp.user.email).toLowerCase()) : [];
-    if ((Array.isArray(to) ? to.length : to)) await sendResendEmail({ kind: 'client-order-confirm', ref: String(o.id), to, cc, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id + (b.customer_po ? ' (PO ' + String(b.customer_po).trim() + ')' : '') + ' · ' + c.name,
+    if ((Array.isArray(to) ? to.length : to)) await sendResendEmail({ channel: 'client', kind: 'client-order-confirm', ref: String(o.id), to, cc, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id + (b.customer_po ? ' (PO ' + String(b.customer_po).trim() + ')' : '') + ' · ' + c.name,
       html: `<p>Hi ${E(req.cp.user.name || '')},</p><p>Thanks, we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + E(b.customer_po) + ')' : ''} for <b>${E(c.name)}</b>. Our team will review and confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + E(c.currency) + ' ' + total.toFixed(2) + ' ex shipping'}${b.requested_date ? ' · requested ' + E(b.requested_date) : ''}</p>${lineHtml}${b.notes ? '<p>Notes: ' + E(b.notes) + '</p>' : ''}<p><a href="${E(base)}/client#/orders">View your orders</a></p>` });
     if (auto && !fulfil.ok && team.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: team, subject: 'Client order #' + o.id + ' from ' + c.name + ' — auto-post to Fulfil failed', html: `<p>The Fulfil draft for portal order <b>#${o.id}</b> (${E(c.name)}) was not created: ${E(fulfil.reason)}.</p><p><a href="${E(adminBase(req))}/#/client/orders">Review and push it in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
     res.json({ ok: true, id: o.id, status, fulfil, units, total, lines });
@@ -28105,7 +28114,7 @@ function onbEmails(s) { return String(s || '').split(/[,;\s]+/).map(x => x.trim(
 async function onbNotifyTeam(subject, html, ref) {
   const to = onbEmails(await onbSetting('onboarding_notify_to')), cc = onbEmails(await onbSetting('onboarding_notify_cc'));
   if (!to.length && !cc.length) { console.log('[onboarding] no reviewers configured (app_settings.onboarding_notify_to) — not emailing: ' + subject); return { sent: 0 }; }
-  return sendResendEmail({ to: to.length ? to : cc, cc: to.length ? cc : [], subject, html, kind: 'onboarding', ref });
+  return sendResendEmail({ channel: 'supplier', to: to.length ? to : cc, cc: to.length ? cc : [], subject, html, kind: 'onboarding', ref });
 }
 // v28.189 (Ben): the onboarding SQL as constants, shared by the step-by-step helpers (admin routes) and the portal's one-round-trip load.
 const ONB_RULES_SQL = `SELECT id, title, coalesce(detail,'') detail, warehouse, active, sort, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.warehouse_requirements ORDER BY sort, id`;
@@ -28293,7 +28302,7 @@ app.post('/api/supply/onb/requests/:id/section', async (req, res) => {
     let status = r.status, note = r.return_note; const log = onbLogPush(r, sec + ' ' + decision + ' by ' + by, by);
     if (decision === 'returned') { status = 'returned'; note = (sec.charAt(0).toUpperCase() + sec.slice(1)) + ': ' + String(b.note || '').trim(); log.push({ t: onbNow(), m: 'Returned to supplier: ' + note, by });
       const contact = (r.form && r.form.contacts || []).find(c => c && c.email) || {}; const to = r.submitted_by || contact.email;
-      if (to) await sendResendEmail({ to, subject: '[Dock & Bay] Your supplier profile needs a correction (' + r.ref + ')', html: '<p>Hello,</p><p>We reviewed your profile and one section needs a change before we can approve it:</p><p><b>' + escHtml(note) + '</b></p><p>Please sign in to the supplier portal, open PROFILE, fix that section and resubmit. Everything else you entered is kept.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by }); }
+      if (to) await sendResendEmail({ channel: 'supplier', to, subject: '[Dock & Bay] Your supplier profile needs a correction (' + r.ref + ')', html: '<p>Hello,</p><p>We reviewed your profile and one section needs a change before we can approve it:</p><p><b>' + escHtml(note) + '</b></p><p>Please sign in to the supplier portal, open PROFILE, fix that section and resubmit. Everything else you entered is kept.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by }); }
     else if (status === 'submitted') status = 'in_review';
     await pool.query(`UPDATE planner.supplier_onboarding_requests SET sections=$2::jsonb, status=$3, return_note=$4, log=$5::jsonb, updated_at=now() WHERE id=$1`, [r.id, JSON.stringify(sections), status, note, JSON.stringify(log)]);
     try { portalCacheMarkStale(r.supplier_name); } catch (_) {}
@@ -28344,9 +28353,9 @@ app.post('/api/supply/onb/requests/:id/approve', async (req, res) => {
     const log = onbLogPush(r, 'Approved by ' + by + ' · supplier record updated' + (nProd ? ' · ' + nProd + ' product(s) queued for the PIM' : '') + (invites.length ? ' · ' + invites.length + ' portal invite(s) sent' : ''), by);
     await client.query(`UPDATE planner.supplier_onboarding_requests SET status='approved', decided_by=$2, decided_at=now(), log=$3::jsonb, updated_at=now() WHERE id=$1`, [r.id, by, JSON.stringify(log)]);
     await client.query('COMMIT'); client.release(); var _released = true;   // v28.116 (review S10): hoisted flag — the emails below run AFTER release; a throw there must not rollback/release again
-    for (const inv of invites) await sendResendEmail({ to: inv.email, subject: 'Your Dock & Bay supplier portal access', html: '<p>Hello ' + escHtml(inv.name) + ',</p><p>You now have access to the Dock & Bay supplier portal for ' + escHtml(r.supplier_name) + '. Use this link to sign in (valid ' + PORTAL_LINK_HOURS + ' hours; you can request a new one from the portal afterwards):</p><p><a href="' + inv.url + '">' + inv.url + '</a></p>', kind: 'portal-invite', ref: r.ref, by });
+    for (const inv of invites) await sendResendEmail({ channel: 'supplier', to: inv.email, subject: 'Your Dock & Bay supplier portal access', html: '<p>Hello ' + escHtml(inv.name) + ',</p><p>You now have access to the Dock & Bay supplier portal for ' + escHtml(r.supplier_name) + '. Use this link to sign in (valid ' + PORTAL_LINK_HOURS + ' hours; you can request a new one from the portal afterwards):</p><p><a href="' + inv.url + '">' + inv.url + '</a></p>', kind: 'portal-invite', ref: r.ref, by });
     const contact = (f.contacts || []).find(c => c && c.email) || {}; const supTo = r.submitted_by || contact.email;
-    if (supTo) await sendResendEmail({ to: supTo, subject: '[Dock & Bay] Your supplier profile is approved (' + r.ref + ')', html: '<p>Hello,</p><p>Your ' + (r.type === 'change' ? 'profile changes are' : 'supplier profile is') + ' approved and now live in Horizon.' + (nProd ? ' Your ' + nProd + ' product entries are with our product team.' : '') + ' You can update your profile at any time from the portal; changes go through the same review.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by });
+    if (supTo) await sendResendEmail({ channel: 'supplier', to: supTo, subject: '[Dock & Bay] Your supplier profile is approved (' + r.ref + ')', html: '<p>Hello,</p><p>Your ' + (r.type === 'change' ? 'profile changes are' : 'supplier profile is') + ' approved and now live in Horizon.' + (nProd ? ' Your ' + nProd + ' product entries are with our product team.' : '') + ' You can update your profile at any time from the portal; changes go through the same review.</p><p><a href="' + PORTAL_URL + '">' + PORTAL_URL + '</a></p>', kind: 'onboarding', ref: r.ref, by });
     await onbNotifyTeam('[Horizon] ' + r.ref + ' approved · ' + escHtml(r.supplier_name), '<p>' + escHtml(by) + ' approved ' + r.ref + ' (' + escHtml(r.supplier_name) + '). Supplier record updated' + (nProd ? ', ' + nProd + ' product submission(s) pending in the PIM queue' : '') + '.</p>', r.ref);
     try { invalidateSupplyCaches(); } catch (_) {}
     res.json({ ok: true, invites: invites.length, products_queued: nProd });
@@ -28360,7 +28369,7 @@ app.post('/api/supply/onb/requests/:id/reject', async (req, res) => {
     const log = onbLogPush(r, 'Rejected by ' + by + (note ? ': ' + note : ''), by);
     await pool.query(`UPDATE planner.supplier_onboarding_requests SET status='rejected', return_note=$2, decided_by=$3, decided_at=now(), log=$4::jsonb, updated_at=now() WHERE id=$1`, [r.id, note || null, by, JSON.stringify(log)]);
     const contact = (r.form && r.form.contacts || []).find(c => c && c.email) || {}; const to = r.submitted_by || contact.email;
-    if (to) await sendResendEmail({ to, subject: '[Dock & Bay] Supplier profile request declined (' + r.ref + ')', html: '<p>Hello,</p><p>Your request ' + r.ref + ' was declined.' + (note ? ' Reason: <b>' + escHtml(note) + '</b>' : '') + '</p><p>You can start a new submission from the portal at any time.</p>', kind: 'onboarding', ref: r.ref, by });
+    if (to) await sendResendEmail({ channel: 'supplier', to, subject: '[Dock & Bay] Supplier profile request declined (' + r.ref + ')', html: '<p>Hello,</p><p>Your request ' + r.ref + ' was declined.' + (note ? ' Reason: <b>' + escHtml(note) + '</b>' : '') + '</p><p>You can start a new submission from the portal at any time.</p>', kind: 'onboarding', ref: r.ref, by });
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

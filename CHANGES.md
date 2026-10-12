@@ -1,3 +1,15 @@
+## v28.295 (Ben, branch review-fixes-2026-10-05): email sender and reply-to by part of the system
+
+**Files:** `server.mjs`, `.env.example` (+ package.json, CHANGES.md). No migration. **New optional env vars** (below).
+
+- Ben: admin emails reply to horizon@, supplier portal to supplierportal@, client portal to clientportal@ (all aliases of ops@).
+- Every email is tagged admin (default), supplier or client by who receives it:
+  - **Supplier portal:** portal sign-in links, open-actions reminders, escalations to a supplier, payment confirmations and remittances, spec approvals, onboarding and profile approve / return / decline, portal access invites.
+  - **Client portal:** client sign-in links, replies to client messages, order and sample confirmations.
+  - **Admin:** everything to the team (mentions, suggestions, health, alerts, statements, COGS, auto forecast, supplier-submission notices, client-message alerts) and the forecast CSVs to warehouses.
+- **Reply-to switches on deploy** (no setup needed). `EMAIL_REPLY_TO` is no longer read.
+- **From switches only when set:** `EMAIL_FROM_ADMIN`, `EMAIL_FROM_SUPPLIER`, `EMAIL_FROM_CLIENT`. Until then From stays `PORTAL_FROM`. Verify `dockandbay.com` in Resend before setting them.
+
 ## v28.294 (Ben, branch review-fixes-2026-10-05): Payments Due: a balance is paid only when fully paid
 
 **Files:** `supply/inject.html`, `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
