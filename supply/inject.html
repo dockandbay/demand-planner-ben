@@ -10536,6 +10536,18 @@
   // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
   var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='', PAY_Q='';
   var OTH_STATE={status:'unpaid',supplier:''};   // Other Payments filters (persist across re-renders); default to unpaid
+  // v28.303 (Ben): running total of what PAY marked paid on Payments Due this session (green box above the table). Kept until the page
+  // reloads or Clear; a failed save takes its entry back out. Totals per currency (suppliers pay in USD, GBP, EUR, AUD).
+  var PDUE_PAID=[];
+  function pduePaidBox(){ var el=document.getElementById('pdue-paid'); if(!el)return; if(!PDUE_PAID.length){ el.innerHTML=''; return; }
+    var by={}; PDUE_PAID.forEach(function(x){ var t=by[x.ccy]||(by[x.ccy]={n:0,amt:0}); t.n++; t.amt+=x.amt; });
+    var tot=Object.keys(by).sort().map(function(c){ return '<span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;margin-right:18px">'+esc(fmtCur(Math.round(by[c].amt*100)/100,c))+'</span>'; }).join('');
+    var sups={}; PDUE_PAID.forEach(function(x){ var k=x.sup+'|'+x.ccy; sups[k]=(sups[k]||0)+x.amt; });
+    el.innerHTML='<div style="margin:8px 0 12px;padding:10px 14px;border:2px solid var(--pos);border-radius:8px;background:var(--pos-bg,transparent);text-align:left">'
+      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="color:var(--pos)">✓ Paid this session</b><span class="tiny mut">'+PDUE_PAID.length+' payment'+(PDUE_PAID.length===1?'':'s')+'</span><span class="lnk-btn" id="pdue-paid-clr" style="margin-left:auto;cursor:pointer;color:var(--blue)">Clear</span></div>'
+      +'<div style="margin-top:4px">'+tot+'</div>'
+      +'<div class="tiny mut" style="margin-top:4px">'+Object.keys(sups).sort().map(function(k){ var p=k.split('|'); return esc(p[0]||'Other')+' '+esc(fmtCur(Math.round(sups[k]*100)/100,p[1])); }).join(' · ')+'</div></div>';
+    var c=document.getElementById('pdue-paid-clr'); if(c)c.onclick=function(){ PDUE_PAID=[]; pduePaidBox(); }; }
   var PDUE_STATE={status:'outstanding4w',supplier:''};   // Payments Due filters (persist across re-renders); default = outstanding due within 4 weeks (incl. overdue)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
   var CF_TYPES=['Deposit','Completion','Balance','Other','Freight','Import duty','Import tax'];
@@ -11035,7 +11047,8 @@
       if(PDUE_STATE.status==='overdue'&&!r.overdue)return false;
       if(PDUE_STATE.status==='paid'&&!r.paid)return false;
       if(PDUE_STATE.supplier&&r.sup!==PDUE_STATE.supplier)return false; return true; }
-    b.innerHTML=lookupDatalists()+'<button class="pay-filt-toggle">⚙ Filters</button><div class="bar pay-filters" id="pdue-bar"></div><div id="pdue-wrap"></div>';
+    b.innerHTML=lookupDatalists()+'<button class="pay-filt-toggle">⚙ Filters</button><div class="bar pay-filters" id="pdue-bar"></div><div id="pdue-paid"></div><div id="pdue-wrap"></div>';
+    pduePaidBox();
     ensurePayFilt();
     // mobile: one card per payment (same inline fields + pay button; bindings attach by class as on the table)
     function pdueCard(r){
@@ -11129,6 +11142,7 @@
         var prev=r?{amt_val:r.amt_val,dt_val:r.dt_val,paid:r.paid,overdue:r.overdue}:null;
         if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;
           _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); }   // NB: no draw() — see above
+        var _pe={sup:(r&&r.sup)||'',ref:(r&&r.ref)||'',amt:Number(b.dataset.amt)||0,ccy:String(supCcyOf((r&&r.sup)||'')||'USD').toUpperCase()}; PDUE_PAID.push(_pe); pduePaidBox();   // v28.303
         var host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
         if(host){ var amtI=host.querySelector('.fci[data-field="'+b.dataset.af+'"]'); if(amtI)amtI.value=b.dataset.amt;
           var dtI=host.querySelector('[data-field="'+b.dataset.df+'"]'); if(dtI){ try{ dtI.value=fd(iso); }catch(e){ dtI.value=iso; } }
@@ -11138,7 +11152,7 @@
           .then(function(j){ if(j&&j.error)throw new Error(j.error);
             if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; }   // keep the PO row fresh so opening the PO shows the payment
             invalidateDerived();
-          }).catch(function(e){ if(r&&prev){ r.amt_val=prev.amt_val; r.dt_val=prev.dt_val; r.paid=prev.paid; r.overdue=prev.overdue; _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); } alert('Save failed: '+(e.message||e)); }); }; }); }
+          }).catch(function(e){ var _i=PDUE_PAID.indexOf(_pe); if(_i>=0){ PDUE_PAID.splice(_i,1); pduePaidBox(); } if(r&&prev){ r.amt_val=prev.amt_val; r.dt_val=prev.dt_val; r.paid=prev.paid; r.overdue=prev.overdue; _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); } alert('Save failed: '+(e.message||e)); }); }; }); }
     draw(); }
   // PAYMENTS ▸ By Supplier — one row per supplier PO: invoice total + starting / completion / balance (summed).
   // Filter by supplier / production / batch; PO opens the drawer; a totals footer sums the current view.

@@ -1,3 +1,11 @@
+## v28.303 (Ben, branch review-fixes-2026-10-05): Payments Due, running total of payments marked paid
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "as you click PAY can it sum up the total paid in a summary in top section in a green outlined box".
+- SUPPLY > Payments > Payments Due: each PAY click adds to a green outlined **Paid this session** box above the table: number of payments, the total per currency (suppliers are paid in USD, GBP, EUR, AUD, never added together) and a line per supplier. A save that fails is taken back out. Clear resets it; it also resets when the page reloads.
+- Verified on the sandbox with the save stubbed (no data written): 3 PAY clicks on XR Textile rows showed 3 payments, $66,280.79 USD.
+
 ## v28.302 (Ben, branch review-fixes-2026-10-05): every PO drawer action shown in its tab with explainer and snooze
 
 **Files:** `supply/inject.html`, `lib/ai-logic/actions.md` (+ package.json, CHANGES.md). No migration, no env vars.
