@@ -1,3 +1,15 @@
+## v28.280 (Ben, branch review-fixes-2026-10-05): ACCOUNTS reworked: BANK STATEMENT, AGEING, RECONCILE with a review drawer; Back-date removed
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Tabs: **BANK STATEMENT | AGEING | RECONCILE | PAYABLES | 3PL INVOICING | RULES** (mockup option A approved by Ben). Default tab = Bank statement.
+- **Bank statement**: last upload, statement date, who, status (red after 5 days) for UK and AU, the upload button and the export steps. No summary tables.
+- **Ageing**: one flat table of open statement lines (Org, Account, Date, Days, Payee, Statement text, Amount, Receipt), oldest first, account tabs, search. Xero-entered items view dropped (Ben).
+- **Reconcile**: Receipt found / No receipt / Ignored + account tabs. **Review** opens a right drawer: the email inside HORIZON (new read-only `GET /api/accounts/email/:id`, sandboxed iframe, scripts and remote content blocked) or the PDF to be attached; the bill pre-filled and editable (contact, reference, account, tax); **Push bill to Xero** with a confirm step; tick to create an **Auto bill rule** (saves coding + switches the payee); **Ignore payee** (no bank-rule option: same as ignore). A billed receipt shows "Bill in Xero ↗". Mailbox card, forwarding list and recent mail moved to a collapsed section.
+- Server: `bills/create` accepts the drawer's edits (`override`), proposals carry `bill` when a receipt was already billed.
+- **Back-date tab removed** (Ben: backdating is done in Claude Code). The weekly learn job stays (receipt coverage, forwarding list).
+- Verified (jsdom): all tabs render; Ageing 281 lines, AMEX AU 52; Reconcile 18 / 103 / 160; drawer opens, email srcdoc with CSP, bill pre-filled, Push → confirm shown, closes; no writes, no errors.
+
 ## v28.279 (Ben, branch review-fixes-2026-10-05): ACCOUNTS Config renamed RULES, split into sub-tabs, silent refresh on save
 
 **Files:** `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

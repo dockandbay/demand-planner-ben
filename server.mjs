@@ -3983,6 +3983,9 @@ async function accInboxProposals() {
     const status = (treatment === 'rule' || treatment === 'ignore') ? 'not_needed' : match ? 'matched' : 'needs_receipt';
     return Object.assign(l, { payee_key: key, treatment, treatment_source: rule ? rule.source : 'auto', status, match });
   });
+  try { const ids = [...new Set(out.filter(l => l.match).map(l => l.match.id))];   // v28.280: a bill HORIZON already created from this receipt (match it in Xero)
+    if (ids.length) { const bl = new Map((await pool.query(`SELECT email_id, invoice_id, invoice_number, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_bill_log WHERE status='created' AND email_id = ANY($1)`, [ids])).rows.map(x => [x.email_id, x]));
+      out.forEach(l => { const x = l.match && bl.get(l.match.id); if (x) l.bill = { invoice_id: x.invoice_id, number: x.invoice_number, at: x.at, url: xbUrl(x.invoice_id) }; }); } } catch (_) {}
   return out;
 }
 app.get('/api/accounts/inbox/proposals', async (req, res) => {
@@ -4257,7 +4260,9 @@ async function accBillCandidates(rules, only) {
       if (used.has(r.org + '|' + e.id) || claimed.has(e.id)) continue;
       const pairs = [...(e.amounts || []), ...(e.pdf_amounts || [])], amts = [...new Set(pairs.map(a => a[0]))];
       const sym = new Map(pairs.map(a => [a[0], a[1] || ''])), real = amts.length > 1 ? amts.filter(a => !ACC_RATE_AMTS.has(a)) : amts;
+      const ov = (only && (only.find(o => o.email_id === e.id) || {}).override) || null;   // v28.280: the person's edits in the Reconcile drawer
       const c = { org: r.org, payee_key: r.payee_key, email_id: e.id, email_date: e.d, subject: e.subject, from: e.from_addr, currency: ACC_ORG_CCY[r.org], ...code, contact_id: r.contact_id || null, ok: false };
+      if (ov) { ['contact', 'account_code', 'tax_type'].forEach(f => { const v = String(ov[f] == null ? '' : ov[f]).trim().slice(0, 120); if (v) c[f] = v; }); if (c.contact !== (r.contact || code.contact)) c.contact_id = null; }
       const line = lines.filter(l => l.org === r.org && !usedLine.has(l.id) && accSameP(l.key, r.payee_key) && amts.includes(Math.abs(l.amount).toFixed(2)) && days(l.d, e.d) >= -5 && days(l.d, e.d) <= 25)
         .sort((a, b) => Math.abs(days(a.d, e.d)) - Math.abs(days(b.d, e.d)))[0];
       // the charge can follow the email by up to 25 days (Optus: bill emailed ~6th, debited ~21st): a receipt already reconciled in Xero needs nothing
@@ -4267,11 +4272,11 @@ async function accBillCandidates(rules, only) {
       else { c.reason = amts.length ? 'Several amounts in the email (' + real.slice(0, 4).join(', ') + ') and no open statement line to pick one: wait for the next statement upload, or create it by hand' : 'No amount found in the email'; out.push(c); continue; }
       const k = c.amount.toFixed(2);
       if (!ACC_CCY_SYM[r.org].includes(sym.get(k) || '')) { c.reason = 'Receipt is in ' + sym.get(k) + ', not ' + ACC_ORG_CCY[r.org]; out.push(c); continue; }
-      const xbill = xb.find(b => b.org === r.org && code.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(code.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
+      const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
       if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
-      if (!code.contact || !code.account_code || !code.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
+      if (!c.contact || !c.account_code || !c.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
       const ref = accEmailRef(e.subject);
-      c.invoice_number = (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date).slice(0, 250);
+      c.invoice_number = ((ov && String(ov.invoice_number || '').trim()) || (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date)).slice(0, 250);
       c.ok = true; claimed.add(e.id); if (line) usedLine.add(line.id); out.push(c);
     }
   }
@@ -4334,7 +4339,7 @@ app.post('/api/accounts/bills/create', async (req, res) => {
     if (!items.length) return res.status(400).json({ error: 'items (org, payee_key, email_id) required' });
     const saved = new Map((await pool.query(`SELECT org, payee_key, contact, contact_id, account_code, tax_type FROM planner.accounts_payee_rules`)).rows.map(r => [r.org + '|' + r.payee_key, r]));
     const rules = [...new Map(items.map(i => [i.org + '|' + i.payee_key, Object.assign({ org: i.org, payee_key: String(i.payee_key).toUpperCase(), bill_from: '2000-01-01' }, saved.get(i.org + '|' + String(i.payee_key).toUpperCase()) || {})])).values()];
-    const cands = await accBillCandidates(rules, items.map(i => ({ org: i.org, payee_key: String(i.payee_key).toUpperCase(), email_id: i.email_id })));
+    const cands = await accBillCandidates(rules, items.map(i => ({ org: i.org, payee_key: String(i.payee_key).toUpperCase(), email_id: i.email_id, override: i.override && typeof i.override === 'object' ? i.override : null })));
     const out = { ok: true, dry: req.query.dry === '1', candidates: cands, created: 0, errors: [] };
     if (!out.dry) for (const c of cands.filter(x => x.ok)) {
       try { const r = await accCreateBill(c, (req.me && req.me.email) || 'button', 'batch'); c.result = 'created'; c.invoice_id = r.invoice_id; if (r.warning) out.errors.push(r.warning); out.created++; }
@@ -4383,6 +4388,22 @@ app.post('/api/accounts/payee-rule/bank-rule-done', async (req, res) => {   // t
 app.get('/api/accounts/bills/coding', async (req, res) => {   // what a payee's bills would be coded as (history), for the Config row
   try { const org = String(req.query.org || '').toLowerCase(), key = String(req.query.payee_key || '').toUpperCase(); res.json({ coding: await accPayeeCoding(org, key) }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.280 (Ben 12-Oct-26): view a receipt email inside HORIZON (Reconcile drawer) instead of opening Gmail. Read only. The HTML is shown in a
+// sandboxed iframe with a CSP that blocks scripts and remote content (no tracking pixels); attachments are listed, the PDF is served by attach/preview.
+app.get('/api/accounts/email/:id', async (req, res) => {
+  try { const id = String(req.params.id || ''); if (!/^[0-9a-f]{8,32}$/i.test(id)) return res.status(400).json({ error: 'email id required' });
+    const m = await gmailGetPaced('messages/' + id + '?format=full'); if (!m || !m.payload) return res.status(404).json({ error: 'email not found' });
+    const H = n => ((m.payload.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
+    const b64 = x => Buffer.from(String(x || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    let text = '', html = ''; const atts = [];
+    const walk = p => { if (!p) return; if (p.filename && p.body && (p.body.attachmentId || p.body.data)) atts.push({ name: p.filename, type: p.mimeType, size: p.body.size || 0, pdf: /\.pdf$/i.test(p.filename) });
+      else if (p.mimeType === 'text/plain' && p.body && p.body.data) text += b64(p.body.data).toString('utf8'); else if (p.mimeType === 'text/html' && p.body && p.body.data) html += b64(p.body.data).toString('utf8'); (p.parts || []).forEach(walk); };
+    walk(m.payload);
+    html = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
+    res.set('Cache-Control', 'no-store').json({ id, from: H('from'), to: H('to'), date: new Date(Number(m.internalDate)).toISOString(), subject: H('subject'), html, text: html ? '' : text, attachments: atts,
+      gmail_url: 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + id });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
 app.post('/api/accounts/inbox/read-mail', async (req, res) => {
