@@ -4549,7 +4549,7 @@
     var _bxRem=Math.round((owe-n(r.balance_1_amount)-n(r.balance_2_amount)-n(r.balance_x_amount))*100)/100;
     if(r.balance_2_amount!=null && _bxRem>0.009 && totalDue>0.02){ var _nx=3+(r.balance_x||[]).length;
       h+=tr('<td class="l"><b>Balance '+_nx+'</b><div class="mut tiny" style="margin-top:2px">remainder</div></td>'
-        +'<td>'+money(_bxRem)+' <span class="mut tiny">owing</span> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="'+esc(_bxRem)+'" title="record the rest as balance payment '+_nx+', dated today">pay &raquo;</button> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="" title="add balance payment '+_nx+' with an amount you type">+ add</button></td>'
+        +'<td>'+money(_bxRem)+' <span class="mut tiny">owing</span> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="'+esc(_bxRem)+'" title="record the rest as balance payment '+_nx+', dated today">pay &raquo;</button></td>'
         +'<td class="l"><input class="fci balx-newin" data-k="amount" data-ep="'+esc(ep+'/balance-x')+'" data-rem="'+esc(_bxRem)+'" placeholder="'+esc(money(_bxRem))+'" title="type an amount to record balance payment '+_nx+'"></td>'
         +'<td class="l">'+dateField('',{attrs:'data-k="date" data-ep="'+esc(ep+'/balance-x')+'" data-rem="'+esc(_bxRem)+'" title="date paid: records balance payment '+_nx+' (amount = the remainder unless typed)"',cls:'balx-newin'})+'</td>'
         +'<td class="l"><span class="mut">—</span></td>'

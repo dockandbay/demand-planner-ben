@@ -1,3 +1,9 @@
+## v28.310 (Ben, branch review-fixes-2026-10-05): remove + add on the Balance N row
+
+**Files:** `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "you added a + add button but not required on payments sub tab under PO. remove that. we just type it in or click PAY." The Balance N row in PO > Payments keeps pay » and its amount / date boxes only.
+
 ## v28.309 (Ben, branch review-fixes-2026-10-05): completion % cleared = 0%; Balance N boxes in the drawer and Payments Due
 
 **Files:** `supply/inject.html`, `lib/ai-logic/{supply-finance,reports}.md` (+ package.json, CHANGES.md). No migration, no env vars.
