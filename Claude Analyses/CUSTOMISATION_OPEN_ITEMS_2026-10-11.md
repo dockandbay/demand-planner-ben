@@ -102,3 +102,10 @@ Business logo orders can go by DHL straight to the customer: about $5.40 a towel
 - Sea freight and EU duty for white label.
 - TikTok order personalisation field check.
 - Re-engagement list send from January 2027.
+
+## Lead list (Ben, 13-Oct-26)
+- Full contact list of customisation and white label enquiries: `~/Downloads/Custom_Inquiry_-_Shopify2026-10-12_18_22_01.xlsx` (Jotform "Custom Inquiry" export from Shopify). Personal data: keep it out of git and out of any published page.
+- 825 enquiries, 757 unique emails, 778 with a company, Oct-21 to 09-Oct-26 (2022 156, 2023 179, 2024 175, 2025 187, 2026 122).
+- Countries: US 470, UK 184, AU 68, CA 45, NZ 7, DE 6.
+- Customisation type: Standard Logo 590, Logo and Text 123, White Label / Custom Design 67, Plain Text 27, None 18.
+- Columns include desired delivery date, event yes/no, product link, size, quantities, pouches, polybags, care tags, hang tags: usable to seed the re-engagement list (from January 2027) and to size demand by type.
