@@ -2866,7 +2866,7 @@ async function cashflowResponse(pos, q) {
     const _bRem = Math.round((num(p.balance_owing) - num(p.balance_1_amount) - num(p.balance_2_amount) - num(p.balance_x_amount)) * 100) / 100;
     if (owes && (p.balance_1_amount != null || p.balance_2_amount != null || (p.balance_x || []).length) && _bRem > 0.009)
       add({ key: (p.balance_2_amount != null ? 'balrem:' : 'bal2:') + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
-        amount: _bRem, due: p.balance_due, likely: likely['bal2:' + p.po] || null, paid_date: null });
+        amount: _bRem, due: p.balance_due, paid_date: null });   // v28.311: likely date by its own key (bal2: while balance 2 is unused, else balrem:)
   }
   // 4. referenced-deposit pools — one line per reference
   for (const d of depPools) {
@@ -24660,7 +24660,11 @@ async function poBalX(rows) {
         FROM planner.po_balance_payments WHERE po = ANY($1) GROUP BY po`, [rows.map(r => r.po)]); m = new Map(r.rows.map(x => [x.po, x.x])); }
     catch (e) { if (/does not exist/.test(e.message)) { _balxOn = false; } else log500(e); }
   }
-  for (const p of rows) { const x = m.get(p.po) || []; p.balance_x = x;
+  // v28.311: likely pay dates for balance 3 onward (line key balx:<id>) and for the remainder once balance 2 is used (balrem:<po>)
+  const lk = new Map();
+  try { const keys = []; rows.forEach(p => { keys.push('balrem:' + p.po); (m.get(p.po) || []).forEach(x => keys.push('balx:' + x.id)); });
+    (await pool.query(`SELECT line_key, to_char(likely_date,'YYYY-MM-DD') d FROM planner.payment_likely_dates WHERE line_key = ANY($1)`, [keys])).rows.forEach(r => lk.set(r.line_key, r.d)); } catch (_) {}
+  for (const p of rows) { const x = m.get(p.po) || []; x.forEach(y => { y.likely = lk.get('balx:' + y.id) || null; }); p.balance_x = x; p.likely_balance_rem = lk.get('balrem:' + p.po) || null;
     p.balance_x_amount = Math.round(x.reduce((a, y) => a + (Number(y.amount) || 0), 0) * 100) / 100;
     p.balance_x_paid = Math.round(x.reduce((a, y) => a + (y.date ? (Number(y.amount) || 0) : 0), 0) * 100) / 100; }
   return rows;

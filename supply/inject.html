@@ -4545,7 +4545,7 @@
         +'<td class="l">'+payIn(xep,'amount',x.amount)+'</td>'
         +'<td class="l">'+payIn(xep,'date',x.date,true)+'</td>'
         +'<td class="l"><button class="lnk-btn balx-rm" data-ep="'+esc(xep)+'" style="color:var(--neg)" title="remove this balance payment">remove</button></td>'
-        +dueCell(r.balance_due,totalDue>0.02 && !x.date)+'<td class="l"><span class="mut">—</span></td><td class="l">'+payBadge(x.date?'paid':'unpaid',x.date?'bg-green':'bg-amber')+'</td>'); });
+        +dueCell(r.balance_due,totalDue>0.02 && !x.date)+likelyCell('balx:'+x.id,totalDue>0.02 && !x.date,x.likely)+'<td class="l">'+payBadge(x.date?'paid':'unpaid',x.date?'bg-green':'bg-amber')+'</td>'); });   // v28.311: likely pay date editable
     var _bxRem=Math.round((owe-n(r.balance_1_amount)-n(r.balance_2_amount)-n(r.balance_x_amount))*100)/100;
     if(r.balance_2_amount!=null && _bxRem>0.009 && totalDue>0.02){ var _nx=3+(r.balance_x||[]).length;
       h+=tr('<td class="l"><b>Balance '+_nx+'</b><div class="mut tiny" style="margin-top:2px">remainder</div></td>'
@@ -4553,7 +4553,7 @@
         +'<td class="l"><input class="fci balx-newin" data-k="amount" data-ep="'+esc(ep+'/balance-x')+'" data-rem="'+esc(_bxRem)+'" placeholder="'+esc(money(_bxRem))+'" title="type an amount to record balance payment '+_nx+'"></td>'
         +'<td class="l">'+dateField('',{attrs:'data-k="date" data-ep="'+esc(ep+'/balance-x')+'" data-rem="'+esc(_bxRem)+'" title="date paid: records balance payment '+_nx+' (amount = the remainder unless typed)"',cls:'balx-newin'})+'</td>'
         +'<td class="l"><span class="mut">—</span></td>'
-        +dueCell(r.balance_due,true)+'<td class="l"><span class="mut">—</span></td><td class="l">'+payBadge('owing','bg-amber')+'</td>'); }
+        +dueCell(r.balance_due,true)+likelyCell('balrem:'+r.po,true,r.likely_balance_rem)+'<td class="l">'+payBadge('owing','bg-amber')+'</td>'); }   // v28.311: likely pay date editable
     h+='</tbody></table></div>'
       +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial, Balance 3 onward when balance 2 is used and money is still owed · an emptied % saves 0% (type the supplier&rsquo;s % to go back to its terms) · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
     if(r.deposit_ref) h+='<div class="dep-ctx" data-po="'+esc(r.po)+'" style="margin:2px 2px 10px"></div>';   // deposit analysis box (filled async in bindPay)
@@ -4959,8 +4959,10 @@
       var raw=(inp.value||'').trim(), iso=raw?parseDateLoose(raw):''; if(raw&&!iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=iso; inp.classList.add('saved');
       fetch('/api/supply/likely-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line_key:inp.dataset.key,likely_date:inp.value})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error);
-          var pfx=inp.dataset.key.split(':')[0], f={dep:'likely_start',comp:'likely_completion',bal:'likely_balance_1',bal2:'likely_balance_2'}[pfx];
-          if(f&&poBy[po])poBy[po][f]=inp.value||null; delete cache['cashflow']; })
+          var pfx=inp.dataset.key.split(':')[0], f={dep:'likely_start',comp:'likely_completion',bal:'likely_balance_1',bal2:'likely_balance_2',balrem:'likely_balance_rem'}[pfx];
+          if(f&&poBy[po])poBy[po][f]=inp.value||null;
+          if(pfx==='balx'&&poBy[po]){ var _xid=inp.dataset.key.split(':')[1]; (poBy[po].balance_x||[]).forEach(function(x){ if(String(x.id)===_xid)x.likely=inp.value||null; }); }   // v28.311
+          delete cache['cashflow']; })
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // "pay »" quick-fill — record the calc amount + today's date for this milestone in one save, then refresh
     document.querySelectorAll('#podet-'+i+' .pay-fill').forEach(function(b){ b.onclick=function(){ var orig=b.innerHTML; b.disabled=true; b.textContent='…';
@@ -11092,11 +11094,11 @@
           if(_b1>0.009) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:_b1,due:p.balance_due,likely:_lb1,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true});
           if(_b2>0.009) rows.push({sup:p.supplier_name||'',type:'Balance 2',ref:p.po,due_amt:_b2,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:p.balance_2_amount,dt_field:'pay_balance_2_date',dt_val:p.balance_2_date,po:true});
           // v28.307: balance payment 3 onward, each its own row (paid when dated)
-          (p.balance_x||[]).forEach(function(x){ rows.push({sup:p.supplier_name||'',type:'Balance '+x.seq,ref:p.po,due_amt:Number(x.amount)||0,due:p.balance_due,likely:_lb2,bal2:true,ep:ep+'/balance-x/'+x.id,amt_field:'amount',amt_val:x.amount,dt_field:'date',dt_val:x.date,po:true}); });
+          (p.balance_x||[]).forEach(function(x){ rows.push({sup:p.supplier_name||'',type:'Balance '+x.seq,ref:p.po,due_amt:Number(x.amount)||0,due:p.balance_due,likely:lmap['balx:'+x.id]||x.likely,lk:'balx:'+x.id,ep:ep+'/balance-x/'+x.id,amt_field:'amount',amt_val:x.amount,dt_field:'date',dt_val:x.date,po:true}); });
           // the rest: into balance payment 2 while it is unused or unpaid, else recorded as the next balance payment (3, 4, ...)
           if(_rem>0.009){ var _b2free=!(_b2>0.009)||!p.balance_2_date;
             rows.push(_b2free?{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:Math.round((_b2+_rem)*100)/100,remaining:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:null,dt_field:'pay_balance_2_date',dt_val:null,po:true}
-              :{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:_rem,remaining:true,noedit:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep+'/balance-x',amt_field:'amount',amt_val:null,dt_field:'date',dt_val:null,po:true}); } } } });
+              :{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:_rem,remaining:true,noedit:true,due:p.balance_due,likely:lmap['balrem:'+p.po]||p.likely_balance_rem,lk:'balrem:'+p.po,ep:ep+'/balance-x',amt_field:'amount',amt_val:null,dt_field:'date',dt_val:null,po:true}); } } } });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
@@ -11133,7 +11135,7 @@
           .catch(function(e){ r._bxBusy=0; inp.classList.remove('saved'); inp.classList.add('err'); inp.title='Not saved: '+(e.message||e); }); }; }); }
     function pdueCard(r){
       var dueTxt=r.due?(r.overdue?'<span style="color:var(--neg);font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
-      var _lk=r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null;
+      var _lk=r.lk||(r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null);
       var likelyC = r.overdue
         ? (r.po ? dateField(r.likely,{attrs:'data-key="'+esc(_lk)+'" title="likely payment date (drives cash flow)"',cls:'pdue-likely'}) : editCell(r.ep,'date_likely_pay',r.likely,'date'))
         : (r.likely?esc(fd(r.likely)):'<span class="mut">—</span>');
@@ -11165,7 +11167,7 @@
           var dueCell=r.due?(r.overdue?'<span style="color:var(--neg);font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
           // Likely pay date: editable ONLY for overdue payments. PO milestones write payment_likely_dates by
           // line_key (comp:/bal:), deposits/other write their own date_likely_pay. Non-overdue rows: read-only.
-          var _lk=r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null;
+          var _lk=r.lk||(r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null);
           var likelyC = r.overdue
             ? (r.po ? dateField(r.likely,{attrs:'data-key="'+esc(_lk)+'" title="likely payment date (drives cash flow)"',cls:'pdue-likely'})
                     : editCell(r.ep,'date_likely_pay',r.likely,'date'))

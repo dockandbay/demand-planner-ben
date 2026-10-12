@@ -1,3 +1,11 @@
+## v28.311 (Ben, branch review-fixes-2026-10-05): likely pay date editable on balance 3 onward
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "the LIKELY PAY DATE is not editable, it should be". PO > Payments: the Balance N (remainder) row and every unpaid balance payment 3 onward now have the likely pay date box, like Completion and Balance 1 and 2.
+- Each has its own likely date (payment_likely_dates line key balx:<id>, or balrem:<po> for the remainder once balance 2 is used); the cash flow times those lines by it. The remainder no longer borrows balance 2's likely date. Payments Due uses the same keys (editable on overdue rows, as for every row).
+- Verified on the sandbox (PO-54UKXR3-FBA): a likely date of 20-Nov-26 on Balance 3 moved its 4,144.40 cash-flow line to 20-Nov-26 (date kind likely). Test date cleared.
+
 ## v28.310 (Ben, branch review-fixes-2026-10-05): remove + add on the Balance N row
 
 **Files:** `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
