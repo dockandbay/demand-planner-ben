@@ -70,7 +70,7 @@ fingerprints:
   artifact_v16.7.html::buildInsightsData: 92660fc8f972
   artifact_v16.7.html::getInsights: e9c5f0485a0e
   supply/inject.html::renderBIMetrics: 53246c47c4c2
-  supply/inject.html::buildPaymentsDue: 676d892a4508
+  supply/inject.html::buildPaymentsDue: 0db26e54963c
   supply/inject.html::renderProductReports: 4aa694e16e7f
   supply/inject.html::renderProductCatalogue: e590a8dc271a
   supply/inject.html::renderPimWaitingRoom: d6c089a9c8e7
@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.294
+verified_version: v28.303
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -412,6 +412,7 @@ verified_version: v28.294
 - Paid: a Completion is paid once an amount is assigned; a deposit once it has a paid date. A Balance is paid only when balance payments 1 + 2 cover the whole balance owing; a part-paid balance shows its paid rows plus an unpaid "Balance (remaining)" row (v28.294).
 - Overdue = unpaid and due before today. "+4wk" = due within 28 days, or no date.
 - Amounts are in supplier currency.
+- Paid this session (v28.303): each PAY click adds to a green box above the table, totalled per currency and per supplier; a failed save is removed, Clear or a page reload resets it.
 (source: supply/inject.html :: buildPaymentsDue)
 
 ## PRODUCT Reports
