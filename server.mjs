@@ -3660,7 +3660,7 @@ app.get('/api/accounts/gmail/status', async (req, res) => {
 });
 // Connect: signed state (HMAC, 10 minutes) bound to a short-lived cookie in this browser, so a forged callback cannot plant a mailbox.
 app.get('/api/accounts/gmail/connect', (req, res) => {
-  const cfg = gmailCfg(); if (!cfg) return res.redirect('/?gmail=' + encodeURIComponent('Gmail client not set on this server') + '#/accounts/inbox');
+  const cfg = gmailCfg(); if (!cfg) return res.redirect('/?gmail=' + encodeURIComponent('Gmail client not set on this server') + '#/accounts/reconcile');
   const nonce = crypto.randomBytes(16).toString('base64url'), ts = Date.now().toString(36);
   const state = ts + '.' + nonce + '.' + crypto.createHmac('sha256', gmailKey('state')).update(ts + '.' + nonce).digest('base64url');
   res.append('Set-Cookie', 'hz_gstate=' + nonce + '; Path=/api/accounts/gmail; Max-Age=600; HttpOnly; SameSite=Lax' + (_reqHttps(req) ? '; Secure' : ''));
@@ -3668,7 +3668,7 @@ app.get('/api/accounts/gmail/connect', (req, res) => {
     access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false', login_hint: GMAIL_MAILBOX_HINT, state }).toString());
 });
 app.get('/api/accounts/gmail/callback', async (req, res) => {
-  const back = (msg) => res.redirect('/?gmail=' + encodeURIComponent(msg) + '#/accounts/inbox');
+  const back = (msg) => res.redirect('/?gmail=' + encodeURIComponent(msg) + '#/accounts/reconcile');
   try {
     const cfg = gmailCfg(); if (!cfg) return back('Gmail client not set on this server');
     if (req.query.error) return back('Google: ' + String(req.query.error).slice(0, 80));
@@ -4164,6 +4164,30 @@ async function accEmailPdf(msgId) {
   const day = new Date(Number(m.internalDate)).toISOString().slice(0, 10);
   return { buf: Buffer.from(await doc.save()), filename: ('Receipt ' + day + ' ' + (H('subject') || 'email')).replace(/[^\w.\- ]+/g, '_').slice(0, 80) + '.pdf' };
 }
+// v28.282 (Ben 12-Oct-26): searchable Xero pickers (Rules payee coding, Reconcile drawer): contacts by search term (2+ letters, cached
+// 10 minutes per org and term, one Xero call per new term) and the tax rates that apply to expenses (cached 1 hour). Read only.
+const _accXc = new Map();
+app.get('/api/accounts/xero-contacts', async (req, res) => {
+  try { const org = String(req.query.org || '').toLowerCase(), q = String(req.query.q || '').trim().slice(0, 60); if (!['uk', 'au'].includes(org)) return res.status(400).json({ error: 'org required' });
+    if (q.length < 2) return res.json({ rows: [] });
+    const k = org + '|' + q.toLowerCase(), c = _accXc.get(k); if (c && Date.now() - c.at < 600000) return res.json({ rows: c.rows, cached: true });
+    const j = await xeroFetch(org, '/api.xro/2.0/Contacts?summaryOnly=true&page=1&searchTerm=' + encodeURIComponent(q));
+    const rows = ((j && j.Contacts) || []).filter(x => x.ContactStatus === 'ACTIVE').map(x => ({ id: x.ContactID, name: x.Name, supplier: !!x.IsSupplier }))
+      .map(x => { const n = x.name.toLowerCase(), ql = q.toLowerCase(); return Object.assign(x, { rank: n === ql ? 0 : n.startsWith(ql) ? 1 : new RegExp('\\b' + ql.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(n) ? 2 : n.includes(ql) ? 3 : 4 }); })   // the name match first (Xero also matches emails)
+      .sort((a, b) => a.rank - b.rank || (b.supplier - a.supplier) || a.name.localeCompare(b.name)).slice(0, 40).map(({ rank, ...x }) => x);
+    _accXc.set(k, { at: Date.now(), rows }); if (_accXc.size > 500) _accXc.delete(_accXc.keys().next().value);
+    res.json({ rows });
+  } catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
+const _accTax = {};
+app.get('/api/accounts/xero-taxrates', async (req, res) => {
+  try { const org = String(req.query.org || '').toLowerCase(); if (!['uk', 'au'].includes(org)) return res.status(400).json({ error: 'org required' });
+    const c = _accTax[org]; if (c && Date.now() - c.at < 3600000) return res.json({ rows: c.rows });
+    const j = await xeroFetch(org, '/api.xro/2.0/TaxRates');
+    const rows = ((j && j.TaxRates) || []).filter(t => t.Status === 'ACTIVE' && t.CanApplyToExpenses !== false).map(t => ({ type: t.TaxType, name: t.Name, rate: Number(t.EffectiveRate) || 0 }));
+    _accTax[org] = { at: Date.now(), rows }; res.json({ rows });
+  } catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
 // v28.281: the Xero accounts for the Reconcile drawer's account picker (code and name). One Xero call per org per 10 minutes (xeroFetch memo).
 app.get('/api/accounts/xero-accounts', async (req, res) => {
   try { const org = String(req.query.org || '').toLowerCase(); if (!['uk', 'au'].includes(org)) return res.status(400).json({ error: 'org required' });
@@ -4393,6 +4417,20 @@ app.get('/api/accounts/bills/log', async (req, res) => {
     const flags = rows.filter(r => r.flag).length;
     res.set('Cache-Control', 'no-store').json({ rows, flags, stale_days: ACC_BILL_STALE_DAYS });
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.282 (Ben 12-Oct-26): Rules > Metrics. Bills HORIZON created in Xero, correct (matched, or awaiting payment) vs incorrect (deleted or
+// voided in Xero, or marked Voided in HORIZON), plus failed attempts; by month, payee, organisation and route (automatic / reviewed); and the
+// fallback receipt attachments (attached vs removed). Xero status from the hourly bill cache.
+app.get('/api/accounts/bills/metrics', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT l.org, l.payee_key, l.mode, to_char(l.created_at AT TIME ZONE 'Europe/London','YYYY-MM') mon, l.status, upper(coalesce(b.status,'')) xs, l.amount::float8 amount, l.currency
+      FROM planner.accounts_bill_log l LEFT JOIN planner.xero_bills b ON b.invoice_id = l.invoice_id WHERE l.status IN ('created','voided','error','creating')`)).rows;
+    const cls = r => r.status === 'error' ? 'failed' : (r.status === 'voided' || r.xs === 'DELETED' || r.xs === 'VOIDED') ? 'incorrect' : r.xs === 'PAID' ? 'matched' : 'awaiting';
+    const add = (m, k, r) => { const x = m[k] || (m[k] = { created: 0, matched: 0, awaiting: 0, incorrect: 0, failed: 0 }); const c = cls(r); x[c]++; if (c !== 'failed') x.created++; };
+    const tot = {}, byMon = {}, byPayee = {}, byMode = {}; rows.forEach(r => { add(tot, 'all', r); add(byMon, r.mon, r); add(byPayee, r.org + '|' + r.payee_key, r); add(byMode, r.mode || 'batch', r); });
+    const att = (await pool.query(`SELECT status, count(*)::int n FROM planner.accounts_attach_log GROUP BY 1`).catch(() => ({ rows: [] }))).rows.reduce((a, r) => (a[r.status] = r.n, a), {});
+    res.set('Cache-Control', 'no-store').json({ total: tot.all || { created: 0, matched: 0, awaiting: 0, incorrect: 0, failed: 0 }, by_month: byMon, by_payee: byPayee, by_mode: byMode, attachments: att });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ total: {}, by_month: {}, by_payee: {}, by_mode: {}, attachments: {} }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/accounts/bills/:id/voided', async (req, res) => {   // a person voided a wrong bill in Xero: keep the receipt from being billed again
   try { await pool.query(`UPDATE planner.accounts_bill_log SET status='voided', error=coalesce(error,'') || $2 WHERE id=$1 AND status IN ('created','creating')`, [req.params.id, ' voided by ' + ((req.me && req.me.email) || 'user')]); res.json({ ok: true }); }
@@ -25985,7 +26023,7 @@ async function accStmtStaleCheck(opts) {
     if (!claim.rowCount) continue;   // already emailed today for this org
     const ORG = r.org.toUpperCase(), when = r.as_at || null;
     const fmt = d => { const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p = d.split('-'); return p[2] + '-' + m[+p[1] - 1] + '-' + p[0].slice(2); };
-    const link = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '') + '/#/accounts/bank';
+    const link = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '') + '/#/accounts/bank-statement';
     const html = '<p>The <b>' + ORG + '</b> bank statement in HORIZON is ' + (when ? '<b>' + r.days + ' days old</b> (last upload as at ' + fmt(when) + (r.account ? ', ' + escHtml(r.account) : '') + ')' : '<b>not uploaded yet</b>') + '. It should be refreshed at least every ' + ACC_STMT_MAX_DAYS + ' days so Bank ageing and the Inbox matcher see current statement lines.</p>'
       + '<p><b>To update (about 2 minutes):</b></p><ol><li>In Xero (' + (r.org === 'au' ? 'Dock &amp; Bay Pty Ltd' : 'Dock &amp; Bay Ltd') + ') open <b>Accounting ▸ Bank accounts</b>.</li><li>Open the menu at the top right and choose <b>Uncoded statement lines</b>.</li><li>Choose <b>All bank accounts</b>, set a wide date range, and export as <b>CSV</b>.</li><li>In HORIZON open <a href="' + link + '">ACCOUNTS ▸ Bank ageing</a> and press <b>Upload Xero report</b>.</li></ol>'
       + '<p style="color:#64748b;font-size:12px">You get this once a day while the statement is more than ' + ACC_STMT_MAX_DAYS + ' days old. Sent by HORIZON.</p>';

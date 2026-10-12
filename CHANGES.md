@@ -1,3 +1,13 @@
+## v28.282 (Ben, branch review-fixes-2026-10-05): Xero search pickers, PDF drawn in the drawer, deep links = menu names, Rules ▸ Metrics
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- **Pick from Xero, not typed** (Rules ▸ Payee treatments ▸ Edit, and the Reconcile drawer): contact = search dropdown (`GET /api/accounts/xero-contacts?org=&q=`, 2+ letters, debounced, cached 10 min, names starting with the text ranked first); account = searchable list of the active chart, code and name; tax = Xero tax rates that apply to expenses (`GET /api/accounts/xero-taxrates`, cached 1 h). Arrow keys + Enter work; an unpicked typed value is refused.
+- **PDF preview fixed**: the drawer draws the PDF pages with HORIZON's self-hosted pdf.js (`/vendor/pdfjs`, already in the Vercel bundle) instead of the browser's PDF viewer (blank when Chrome is set to download PDFs).
+- **Deep links match the menu**: `#/accounts/bank-statement`, `/ageing`, `/reconcile`, `/payables`, `/3pl-invoicing`, `/rules`. Old `bank`, `inbox`, `config`, `backdate` links still open the right tab. Gmail connect redirect and the stale-statement email link updated.
+- **Rules ▸ METRICS**: bills created by HORIZON, correct (matched / awaiting) vs incorrect (deleted or voided in Xero, or marked Voided), failed attempts, correct %; by route (automatic / reviewed), month and payee; fallback attachments attached vs removed (`GET /api/accounts/bills/metrics`).
+- Verified: contact search "snap" lists SNAP, SNAP Fashions, Snapbar, SnapChat first; Rules edit picks contact and account from lists (jsdom; save mocked); links switch and old links still work; Metrics renders (0 bills so far); no errors.
+
 ## v28.281 (Ben, branch review-fixes-2026-10-05): Reconcile drawer: yellow left-aligned fields, account picker with names, images in receipt PDFs
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

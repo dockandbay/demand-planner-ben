@@ -55,6 +55,7 @@
 #acdrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease;display:none}#acdrawer-bg.show{display:block}#acdrawer-bg.open{background:rgba(15,23,42,.32)}
 #acdrawer{position:absolute;top:0;right:0;height:100%;width:min(680px,100vw);background:var(--card);color:var(--ink);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);text-align:left}#acdrawer-bg.open #acdrawer{transform:translateX(0)}   /* v28.280 Reconcile review drawer */
 #acdrawer .acdr-in{width:100%;box-sizing:border-box;text-align:left;background:#fff3b0;color:#141413;border:1px solid #d9b800;border-radius:6px;padding:7px 9px;font:inherit;font-size:13px}#acdrawer .acdr-in:focus{outline:2px solid #b38f00;outline-offset:1px}#acdrawer .acdr-in:disabled{opacity:.6}   /* v28.281 (Ben): yellow, left-aligned, full width */
+#accounts-root .ac-hl,#acdrawer .ac-hl{width:100%;box-sizing:border-box;text-align:left;background:#fff3b0;color:#141413;border:1px solid #d9b800;border-radius:6px;padding:6px 9px;font:inherit;font-size:13px}#accounts-root .ac-cb,#acdrawer .ac-cb{position:relative}#accounts-root .ac-cb-list,#acdrawer .ac-cb-list{position:absolute;left:0;right:0;top:100%;z-index:100005;max-height:260px;overflow:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 20px rgba(15,23,42,.18);margin-top:2px;text-align:left}#accounts-root .ac-cb-list div,#acdrawer .ac-cb-list div{padding:6px 9px;cursor:pointer;font-size:13px}#accounts-root .ac-cb-list div:hover,#accounts-root .ac-cb-list div.on,#acdrawer .ac-cb-list div:hover,#acdrawer .ac-cb-list div.on{background:var(--hover)}   /* v28.282 searchable Xero pickers */
 #accounts-root #accounts-subnav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 4px;align-items:center;flex-wrap:wrap}
 #accounts-root #accounts-subnav .ver{margin-left:auto}
 #accounts-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;text-decoration:none;display:inline-block}
@@ -13175,7 +13176,7 @@
     if((seg[0]==='reports'||seg[0]==='exec')&&(seg[1]==='3pl-invoicing'||seg[1]==='tpl')){ location.replace('#/accounts/3pl-invoicing'+(seg[2]?'/'+seg[2]:'')); return; }   // v28.247: moved from REPORTS
     if(seg[0]!=='accounts'&&typeof hideAccounts==='function')hideAccounts();   // v28.247: leaving ACCOUNTS
     if(seg[0]==='accounts'){ if(!ME){ if(!window._acWaitAt)window._acWaitAt=Date.now(); if(Date.now()-window._acWaitAt<10000){ setTimeout(applyRoute,250); return; } }   /* permissions not loaded yet: wait up to 10s (v28.251: by time, reset in fetchMe, so a slow /api/me never poisons later routes) */
-      if(!accountsCan()){ location.replace('#/supply/purchase-orders'); return; } showAccounts(); var _as=seg[1]||ACCOUNTS_SUB||'bank'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='bank'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
+      if(!accountsCan()){ location.replace('#/supply/purchase-orders'); return; } showAccounts(); var _as=(AC_SLUG_IN[seg[1]]||seg[1])||ACCOUNTS_SUB||'bank'; if(!ACCOUNTS_TABS.some(function(t){return t[0]===_as;}))_as='bank'; selectAccountsSub(_as,true); return; }   // #/accounts/<bank|payables|inbox|backdate|3pl-invoicing>[/<3pl>]
     if(seg[0]==='client'){ showClient(); var _cs=seg[1]||'clients'; if({clients:1,orders:1,commission:1,messages:1,config:1}[_cs]!==1)_cs='clients'; if(seg[2])_cpPending={sub:_cs,id:decodeURIComponent(seg[2]),tab:seg[3]?decodeURIComponent(seg[3]):''}; selectClientSub(_cs); return; }   // v28.008: #/client/<clients|orders|commission|messages|config>[/<id>]
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
@@ -18778,6 +18779,7 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Reconcile and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+  var AC_SLUG={bank:'bank-statement',inbox:'reconcile',config:'rules'}, AC_SLUG_IN={'bank-statement':'bank',reconcile:'inbox',rules:'config',backdate:'bank'};   // v28.282 (Ben): deep links match the menu names; old links (bank, inbox, config, backdate) still work
   var ACCOUNTS_TABS=[['bank','Bank statement'],['ageing','Ageing'],['inbox','Reconcile'],['payables','Payables'],['3pl-invoicing','3PL invoicing'],['config','Rules']], ACCOUNTS_SUB='bank';   // v28.280 (Ben): statement, ageing, reconcile first; Back-date removed
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
@@ -18792,7 +18794,7 @@
   function hideAccounts(){ try{ clearTimeout(AC_BD.poll); clearTimeout(AC_BK.poll); }catch(e){} var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
     app.classList.remove('accounts-active'); document.body.classList.remove('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='none'; var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.remove('active'); }
   function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; try{ if(k!=='backdate')clearTimeout(AC_BD.poll); if(k!=='bank')clearTimeout(AC_BK.poll); }catch(e){} document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
-    if(!fromRoute){ try{ writeHash(['accounts',k]); }catch(e){} }
+    if(!fromRoute){ try{ writeHash(['accounts',AC_SLUG[k]||k]); }catch(e){} }
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
     if(k==='inbox'){ acInRender(); return; }
@@ -18948,7 +18950,9 @@
     return '<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>When</th><th>Payee</th><th>Bank date</th><th>Amount</th><th>File</th><th>Status</th><th></th></tr></thead><tbody>'+L.slice(0,60).map(function(r){ return '<tr><td class="l">'+esc(acSynced(r.at))+'</td><td class="l">'+esc(r.payee_key||'')+'</td><td class="l">'+esc(hzTrkDate(r.txn_date))+'</td><td class="l">'+acMoney(Math.abs(r.amount),r.currency)+'</td><td class="l tiny">'+esc(r.filename||'')+'</td><td class="l">'+(r.status==='error'?'<span style="color:var(--neg)">'+esc(r.error||'error')+'</span>':esc(r.status))+'</td><td class="l" style="white-space:nowrap"><a href="'+esc(r.xero_url)+'" target="_blank" rel="noopener">Xero ↗</a>'+(r.mail_url?' · <a href="'+esc(r.mail_url)+'" target="_blank" rel="noopener">email ↗</a>':'')+(r.status==='attached'?' · <span class="save-btn light" data-atrm="'+r.id+'">Removed</span>':'')+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
   // v28.276: the coding a payee's bills get (saved, else "from history"), editable inline; Auto bill shows its start date.
   function acCodingCell(p,i,can){ if(p.treatment!=='autobill'&&p.treatment!=='bill'&&p.treatment!=='spend')return '<span class="mut">·</span>';
-    if(AC_CF.edit===i)return '<input class="fci" id="ac-cdc" placeholder="Xero contact" value="'+esc(p.contact||'')+'" style="width:120px"> <input class="fci" id="ac-cda" placeholder="Account" value="'+esc(p.account_code||'')+'" style="width:64px"> <input class="fci" id="ac-cdt" placeholder="Tax type" value="'+esc(p.tax_type||'')+'" style="width:80px"> <span class="save-btn" id="ac-cds" data-i="'+i+'">Save</span> <span class="save-btn light" id="ac-cdx">Cancel</span><div class="tiny mut">blank = from the payee\'s reconciled history</div>';
+    if(AC_CF.edit===i){ acXaccLoad(p.org); acTaxLoad(p.org);   // v28.282: picked from Xero
+      return '<div style="display:grid;grid-template-columns:200px 260px 200px auto;gap:6px;align-items:start;white-space:normal">'+acComboHtml('contact',p.org,p.contact||'',p.contact||'','ac-cdc','','Xero contact (blank = history)')+acComboHtml('account',p.org,p.account_code||'',acAcctLabel(p.org,p.account_code),'ac-cda','','Account (blank = history)')
+        +'<select class="ac-hl" id="ac-cdt">'+acTaxOpts(p.org,p.tax_type||'','Tax from history')+'</select><span style="white-space:nowrap"><span class="save-btn" id="ac-cds" data-i="'+i+'">Save</span> <span class="save-btn light" id="ac-cdx">Cancel</span></span></div><div class="tiny mut">Pick from Xero; leave blank to use the payee\'s reconciled history.</div>'; }
     var cd=(p.contact||p.account_code||p.tax_type)?esc([p.contact,p.account_code,p.tax_type].filter(Boolean).join(' · ')):'<span class="tiny mut">from history</span>';
     return (p.treatment==='autobill'?'from <b>'+esc(hzTrkDate(p.bill_from))+'</b> · ':'')+cd+(can?' <span class="save-btn light" data-cde="'+i+'">Edit</span>':''); }
   function acBillLogHtml(){ var L=AC_CF.blLog; if(!L){ if(!AC_CF.blLogBusy){ AC_CF.blLogBusy=true; fetch('/api/accounts/bills/log').then(function(r){ return r.json(); }).then(function(j){ AC_CF.blLog=j.rows||[]; AC_CF.blLogBusy=false; if(ACCOUNTS_SUB==='config')acRenderConfig(document.getElementById('accounts-body')); }).catch(function(){ AC_CF.blLogBusy=false; }); } return ''; }
@@ -18960,6 +18964,19 @@
         +'<td class="l">'+(r.status==='created'?esc(ST[r.state]||r.xero_status||'not synced yet'):r.status==='error'?'<span style="color:var(--neg)">'+esc(r.error||'error')+'</span>':esc(r.status))+'</td>'
         +'<td class="l" style="max-width:300px;white-space:normal">'+(r.flag?'<span style="color:var(--neg)">'+esc(r.flag)+'</span>':(r.status==='created'&&r.error?'<span class="tiny mut">'+esc(r.error)+'</span>':''))+'</td>'
         +'<td class="l" style="white-space:nowrap">'+(r.xero_url?'<a href="'+esc(r.xero_url)+'" target="_blank" rel="noopener">Xero ↗</a> · ':'')+'<a href="'+esc(r.mail_url)+'" target="_blank" rel="noopener">email ↗</a>'+((r.status==='created'||r.status==='creating')&&r.state!=='matched'?' · <span class="save-btn light" data-blv="'+r.id+'" title="You voided or deleted this bill in Xero: keep the receipt from being billed again">Voided</span>':'')+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
+  // v28.282 (Ben 12-Oct-26): Rules > Metrics: bills HORIZON created in Xero, correct vs incorrect (deleted / voided), failed attempts.
+  function acMetricsHtml(){ var M=AC_CF.mt; if(!M){ if(!AC_CF.mtBusy){ AC_CF.mtBusy=true; fetch('/api/accounts/bills/metrics').then(function(r){ return r.json(); }).then(function(j){ AC_CF.mt=j; AC_CF.mtBusy=false; if(ACCOUNTS_SUB==='config'&&AC_CF.tab==='metrics')acCfPaint(document.getElementById('accounts-body')); }).catch(function(){ AC_CF.mtBusy=false; }); } return '<div class="count">Loading metrics…</div>'; }
+    if(M.error)return '<div class="count" style="color:var(--neg)">'+esc(M.error)+'</div>';
+    var T=M.total||{}, pct=function(x){ return x.created?Math.round((x.created-x.incorrect)/x.created*100)+'%':'·'; };
+    var card=function(k,v,sub,neg){ return '<div class="ac-card"><div class="k">'+esc(k)+'</div><div class="v"'+(neg?' style="color:var(--neg)"':'')+'>'+v+'</div><div class="tiny mut">'+sub+'</div></div>'; };
+    var tbl=function(title,obj,lab){ var ks=Object.keys(obj||{}).sort(); if(lab==='month')ks.reverse(); if(!ks.length)return '';
+      return '<div class="sect-h" style="margin-top:18px">'+esc(title)+'</div><div class="tw"><table style="width:auto;min-width:60%"><thead><tr><th>'+esc(lab==='month'?'Month':lab==='payee'?'Payee':'Route')+'</th><th>Created</th><th>Matched</th><th>Awaiting match</th><th>Incorrect (deleted / voided)</th><th>Correct %</th><th>Failed attempts</th></tr></thead><tbody>'
+        +ks.map(function(k){ var x=obj[k], l=lab==='month'?hzTrkDate(k+'-01').replace(/^01-/,''):lab==='payee'?k.split('|')[0].toUpperCase()+' '+k.split('|')[1]:(k==='auto'?'Automatic (Auto bill)':'Reviewed (Reconcile / batch)');
+          return '<tr><td class="l">'+esc(l)+'</td><td class="l">'+x.created+'</td><td class="l">'+x.matched+'</td><td class="l">'+x.awaiting+'</td><td class="l"'+(x.incorrect?' style="color:var(--neg);font-weight:600"':'')+'>'+x.incorrect+'</td><td class="l">'+pct(x)+'</td><td class="l">'+(x.failed||'<span class="mut">·</span>')+'</td></tr>'; }).join('')+'</tbody></table></div>'; };
+    var A=M.attachments||{};
+    return '<div class="sect-h">Bills created in Xero by HORIZON</div><div class="tiny mut" style="margin-bottom:6px">Correct = still in Xero (matched to the bank line, or awaiting the match). Incorrect = deleted or voided in Xero afterwards, or marked Voided here. Failed = Xero refused the bill (nothing created). Xero status from the hourly bill sync.</div>'
+      +'<div class="ac-cards">'+card('Bills created',T.created||0,'automatic and reviewed')+card('Correct',(T.created||0)-(T.incorrect||0),pct(T)+' of created · '+(T.matched||0)+' matched, '+(T.awaiting||0)+' awaiting')+card('Incorrect',T.incorrect||0,'deleted or voided',T.incorrect>0)+card('Failed attempts',T.failed||0,'nothing created in Xero',T.failed>0)+card('Receipts attached (fallback)',A.attached||0,(A.removed||0)+' removed as wrong')+'</div>'
+      +tbl('By route',M.by_mode,'mode')+tbl('By month',M.by_month,'month')+tbl('By payee',M.by_payee,'payee')+(T.created||T.failed?'':'<div class="count" style="margin-top:10px">No bills created yet.</div>'); }
   function acAutoBillHtml(d){ var ab=(d.payees||[]).filter(function(p){ return p.treatment==='autobill'; });
     var h='<div class="sect-h" style="margin-top:20px">Auto bills</div><div class="tiny mut" style="margin-bottom:6px;max-width:980px">For payees on <b>Auto bill</b>: each accounts@ receipt from the start date becomes a Xero bill (Awaiting payment, the receipt PDF attached, coded from the payee\'s history). Reconcile the card or bank line in Xero with <b>Match</b>. Every 6 hours, and from Run now. A receipt is skipped when Xero already has it reconciled or billed; it waits for a person when the amount is unclear (several amounts and no statement line yet). A bill not matched after 10 days, or a Spend Money reconciled for the same payee and amount (the old bank rule used), is flagged in the log.</div>'
       +'<div class="bar"><span class="save-btn light" id="ac-bldry">'+(AC_CF.blBusy?'Working…':'Preview bills')+'</span>'+(d.can_edit?(AC_CF.blConfirm?'<span class="save-btn" id="ac-blgo" style="background:var(--neg);border-color:var(--neg)">Create '+AC_CF.blConfirm+' bill'+(AC_CF.blConfirm>1?'s':'')+' in Xero now</span><span class="save-btn light" id="ac-blno">Cancel</span>':'<span class="save-btn" id="ac-blrun">Run now</span>'):'')+'<span class="tiny mut">'+esc(AC_CF.blMsg||'')+'</span></div>';
@@ -19005,11 +19022,11 @@
       +'<li>Xero API allowance: red alert below <b>'+esc(a.xero_day_alert)+'</b> calls left in the day (1,000 per organisation on our Xero plan, shared by live and the sandbox).</li>'
       +'<li>Coghlans invoices: accounts@ checked every <b>'+esc(a.coghlans_scan_hours)+' hours</b> and imported into 3PL invoicing.</li>'
       +'<li>Bank ageing (entered items): hourly. Back-date analysis: weekly.</li></ul><div class="tiny mut" style="margin-top:6px">These settings are changed by Diviyaj in the server settings (ACC_STMT_MAX_DAYS, ACC_STMT_ALERT_TO, XERO_DAY_ALERT).</div>';
-    S.alerts=h; var T=AC_CF.tab||'payees', nab=(d.payees||[]).filter(function(p){ return p.treatment==='autobill'; }).length, nfl=(AC_CF.blLog||[]).filter(function(x){ return x.flag; }).length;
+    S.alerts=h; S.metrics=(AC_CF.tab==='metrics')?acMetricsHtml():''; var T=AC_CF.tab||'payees', nab=(d.payees||[]).filter(function(p){ return p.treatment==='autobill'; }).length, nfl=(AC_CF.blLog||[]).filter(function(x){ return x.flag; }).length;
     if(T==='autobills'&&!AC_CF.blLog)acBillLogHtml();
-    var tabs=[['payees','PAYEE TREATMENTS',(d.payees||[]).length],['autobills','AUTO BILLS',nab+(nfl?' · '+nfl+' flagged':'')],['attach','RECEIPT ATTACHMENTS',''],['builtin','BUILT-IN RULES',(d.builtin||[]).length],['tax','TAX RULES',(d.tax||[]).length],['alerts','ALERTS AND SCHEDULES','']];
+    var tabs=[['payees','PAYEE TREATMENTS',(d.payees||[]).length],['autobills','AUTO BILLS',nab+(nfl?' · '+nfl+' flagged':'')],['attach','RECEIPT ATTACHMENTS',''],['builtin','BUILT-IN RULES',(d.builtin||[]).length],['tax','TAX RULES',(d.tax||[]).length],['alerts','ALERTS AND SCHEDULES',''],['metrics','METRICS','']];
     b.innerHTML='<div style="text-align:left"><div style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:4px 0 12px;flex-wrap:wrap">'+tabs.map(function(t){ return '<button class="stab'+(T===t[0]?' active':'')+'" data-cft="'+t[0]+'">'+esc(t[1])+(t[2]!==''?' <span class="mut">'+esc(String(t[2]))+'</span>':'')+'</button>'; }).join('')+'</div>'+S[T]+'</div>';
-    b.querySelectorAll('[data-cft]').forEach(function(x){ x.onclick=function(){ AC_CF.tab=x.dataset.cft; acRenderConfig(b); }; });
+    b.querySelectorAll('[data-cft]').forEach(function(x){ x.onclick=function(){ AC_CF.tab=x.dataset.cft; if(AC_CF.tab==='metrics')AC_CF.mt=null; acRenderConfig(b); }; });
     b.querySelectorAll('[data-cg]').forEach(function(x){ x.onclick=function(){ AC_CF[x.dataset.cg]=x.dataset.cv; acRenderConfig(b); }; });
     var qi=document.getElementById('ac-cfq'); if(qi)qi.oninput=function(){ AC_CF.q=qi.value; clearTimeout(AC_CF._t); AC_CF._t=setTimeout(function(){ acRenderConfig(b); var n=document.getElementById('ac-cfq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     // v28.279 (Ben): saves refresh silently: the page stays as it is (optimistic change where given), the data reloads in the background and re-renders in place
@@ -19019,7 +19036,10 @@
     b.querySelectorAll('[data-cfr]').forEach(function(x){ x.onclick=function(){ var p=d.payees[+x.dataset.cfr]; post('/api/accounts/payee-rule/delete',{org:p.org,payee_key:p.payee_key},x); }; });
     b.querySelectorAll('[data-cde]').forEach(function(x){ x.onclick=function(){ AC_CF.edit=+x.dataset.cde; acRenderConfig(b); }; });   // v28.276 coding
     var cdx=document.getElementById('ac-cdx'); if(cdx)cdx.onclick=function(){ AC_CF.edit=null; acRenderConfig(b); };
-    var cds=document.getElementById('ac-cds'); if(cds)cds.onclick=function(){ var p=d.payees[+cds.dataset.i]; AC_CF.edit=null; post('/api/accounts/payee-rule/coding',{org:p.org,payee_key:p.payee_key,contact:document.getElementById('ac-cdc').value,account_code:document.getElementById('ac-cda').value,tax_type:document.getElementById('ac-cdt').value},cds); };
+    acComboWire(b);
+    var cds=document.getElementById('ac-cds'); if(cds)cds.onclick=function(){ var p=d.payees[+cds.dataset.i], c=acComboVal(document.getElementById('ac-cdc')), a=acComboVal(document.getElementById('ac-cda')), tx=document.getElementById('ac-cdt').value;
+      if(!c.ok||!a.ok){ window.hzCopiedTip&&window.hzCopiedTip('Pick the '+(!c.ok?'contact':'account')+' from the Xero list',cds); return; }
+      AC_CF.edit=null; post('/api/accounts/payee-rule/coding',{org:p.org,payee_key:p.payee_key,contact:c.v,account_code:a.v,tax_type:tx},cds,function(){ p.contact=c.v||null; p.account_code=a.v||null; p.tax_type=tx||null; }); };
     b.querySelectorAll('[data-brd]').forEach(function(x){ x.onclick=function(){ var p=d.payees[+x.dataset.brd], on=x.dataset.v==='1'; post('/api/accounts/payee-rule/bank-rule-done',{org:p.org,payee_key:p.payee_key,done:on},x,function(){ p.bank_rule_done=on; p.bank_rule_done_by=on?((window.HZ_ME&&HZ_ME.email)||'you'):null; }); }; });
     var blPost=function(dry){ AC_CF.blBusy=true; AC_CF.blMsg=''; AC_CF.blConfirm=0; acRenderConfig(b); fetch('/api/accounts/bills/run'+(dry?'?dry=1':''),{method:'POST'}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||(j.running?'already running':'HTTP '+r.status)); return j; }); })
       .then(function(j){ AC_CF.blBusy=false; AC_CF.blPrev=j.candidates||[]; var ok=AC_CF.blPrev.filter(function(c){ return c.ok; }).length; AC_CF.blMsg=dry?(ok+' ready, '+(AC_CF.blPrev.length-ok)+' waiting for a person'):(j.created+' bill'+(j.created===1?'':'s')+' created'); if(j.errors&&j.errors.length)AC_CF.blMsg+=' · '+j.errors.join('; '); if(!dry)AC_CF.blLog=null; AC_CF.blReady=dry?ok:0; acRenderConfig(b); })
@@ -19142,13 +19162,45 @@
   // ── RECONCILE: the review drawer ──
   var AC_TAXES={uk:[['INPUT2','20% VAT on Expenses'],['ZERORATEDINPUT','Zero Rated Expenses'],['EXEMPTINPUT','Exempt Expenses'],['NONE','No VAT']],au:[['INPUT','GST on Expenses'],['EXEMPTEXPENSES','GST Free Expenses'],['INPUTTAXED','Input Taxed'],['BASEXCLUDED','BAS Excluded']]};
   var AC_DR={r:null}, AC_XACC={};   // v28.281: Xero accounts per org (code + name) for the account picker
-  function acXaccLoad(org){ if(AC_XACC[org])return; AC_XACC[org]={busy:true}; fetch('/api/accounts/xero-accounts?org='+org).then(function(r){ return r.json(); }).then(function(j){ AC_XACC[org]={rows:(j&&j.rows)||[],error:j&&j.error}; if(AC_DR.r&&AC_DR.r.org===org)acDrPaint(); }).catch(function(e){ AC_XACC[org]={rows:[],error:e.message}; }); }
+  function acXaccLoad(org){ if(AC_XACC[org])return; AC_XACC[org]={busy:true}; fetch('/api/accounts/xero-accounts?org='+org).then(function(r){ return r.json(); }).then(function(j){ AC_XACC[org]={rows:(j&&j.rows)||[],error:j&&j.error}; acPickersLoaded(org); }).catch(function(e){ AC_XACC[org]={rows:[],error:e.message}; }); }
+  // v28.282 (Ben 12-Oct-26): Xero contact, account and tax are picked from Xero (search dropdowns), not typed. Used by Rules > Payee treatments and the Reconcile drawer.
+  var AC_XTAX={};
+  function acTaxLoad(org){ if(AC_XTAX[org])return; AC_XTAX[org]={busy:true}; fetch('/api/accounts/xero-taxrates?org='+org).then(function(r){ return r.json(); }).then(function(j){ AC_XTAX[org]={rows:(j&&j.rows)||[]}; acPickersLoaded(org); }).catch(function(){ AC_XTAX[org]={rows:[]}; }); }
+  function acPickersLoaded(org){ if(AC_DR.r&&AC_DR.r.org===org)acDrPaint(); else if(ACCOUNTS_SUB==='config'&&AC_CF.edit!=null){ var b=document.getElementById('accounts-body'); var p=AC_CF.d&&AC_CF.d.payees[AC_CF.edit]; if(b&&p&&p.org===org)acCfPaint(b); } }
+  function acTaxOpts(org,cur,blank){ var X=AC_XTAX[org], rows=(X&&X.rows&&X.rows.length)?X.rows.map(function(t){ return [t.type,t.name]; }):(AC_TAXES[org]||[]).slice(); if(cur&&!rows.some(function(t){ return t[0]===cur; }))rows.unshift([cur,cur]);
+    return (blank||!cur?'<option value=""'+(cur?'':' selected')+'>'+esc(blank||'choose…')+'</option>':'')+rows.map(function(t){ return '<option value="'+esc(t[0])+'"'+(t[0]===cur?' selected':'')+'>'+esc(t[1])+'</option>'; }).join(''); }
+  function acAcctLabel(org,code){ var X=AC_XACC[org], a=X&&X.rows&&X.rows.filter(function(x){ return x.code===code; })[0]; return code?(a?code+' · '+a.name:code):''; }
+  function acComboHtml(kind,org,val,label,id,dis,ph){ return '<div class="ac-cb"><input class="ac-hl" id="'+id+'" data-cb="'+kind+'" data-org="'+org+'" data-val="'+esc(val||'')+'" data-picked="1" value="'+esc(label||'')+'" placeholder="'+esc(ph||(kind==='contact'?'Search Xero contacts':'Search account code or name'))+'" autocomplete="off"'+(dis||'')+'><div class="ac-cb-list" hidden></div></div>'; }
+  function acComboVal(inp){ if(!inp)return {ok:true,v:''}; if(inp.dataset.picked==='1')return {ok:true,v:inp.dataset.cb==='account'?(inp.dataset.val||''):inp.value.trim()}; return {ok:!inp.value.trim(),v:''}; }
+  function acComboWire(root){ root.querySelectorAll('input[data-cb]').forEach(function(inp){ if(inp._cb)return; inp._cb=1; var list=inp.nextElementSibling, kind=inp.dataset.cb, org=inp.dataset.org, t=null, items=[], hi=-1;
+    var show=function(rows,msg){ items=rows; hi=-1; list.innerHTML=msg?'<div class="mut" style="cursor:default">'+esc(msg)+'</div>':(rows.map(function(x,i){ return '<div data-i="'+i+'">'+esc(x.label)+'</div>'; }).join('')||'<div class="mut" style="cursor:default">No match in Xero</div>'); list.hidden=false;
+      list.querySelectorAll('[data-i]').forEach(function(el){ el.onmousedown=function(e){ e.preventDefault(); pick(items[+el.dataset.i]); }; }); };
+    var pick=function(x){ if(!x)return; inp.value=x.label; inp.dataset.val=x.value; inp.dataset.picked='1'; list.hidden=true; inp.dispatchEvent(new Event('change',{bubbles:true})); };
+    var search=function(q){
+      if(kind==='account'){ var X=AC_XACC[org]; if(!X||!X.rows){ show([],'Loading Xero accounts…'); acXaccLoad(org); return; } var ql=q.toLowerCase(); show(X.rows.filter(function(a){ return !ql||(a.code+' '+a.name).toLowerCase().indexOf(ql)>=0; }).slice(0,80).map(function(a){ return {value:a.code,label:a.code+' · '+a.name}; })); return; }
+      if(q.length<2){ show([],'Type 2 or more letters to search Xero'); return; }
+      clearTimeout(t); t=setTimeout(function(){ show([],'Searching Xero…'); fetch('/api/accounts/xero-contacts?org='+org+'&q='+encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(j){ if(inp.value.trim()!==q)return; if(j.error){ show([],j.error); return; } show((j.rows||[]).map(function(c){ return {value:c.name,label:c.name}; })); }).catch(function(e){ show([],e.message); }); },300); };
+    inp.addEventListener('input',function(){ inp.dataset.picked=''; inp.dataset.val=''; search(inp.value.trim()); });
+    inp.addEventListener('focus',function(){ if(inp.dataset.picked==='1'){ if(kind==='account')search(''); } else search(inp.value.trim()); });
+    inp.addEventListener('blur',function(){ setTimeout(function(){ list.hidden=true; },150); });
+    inp.addEventListener('keydown',function(e){ var els=list.querySelectorAll('[data-i]'); if(e.key==='Escape'){ list.hidden=true; return; } if(list.hidden||!els.length)return;
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){ e.preventDefault(); hi=(hi+(e.key==='ArrowDown'?1:els.length-1))%els.length; els.forEach(function(x,i){ x.classList.toggle('on',i===hi); }); els[hi].scrollIntoView({block:'nearest'}); }
+      else if(e.key==='Enter'){ e.preventDefault(); pick(items[hi<0?0:hi]); } }); }); }
+  // v28.282 (Ben: "pdf is not loading in preview"): draw the PDF pages with HORIZON's own pdf.js (/vendor/pdfjs) instead of the browser's PDF viewer,
+  // which a browser set to download PDFs leaves blank inside a frame.
+  function acPdfRender(box,url){ if(!box)return; var tok=box._tok=(box._tok||0)+1;
+    import('/vendor/pdfjs/pdf.min.mjs').then(function(lib){ try{ lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs'; }catch(e){}
+      return fetch(url).then(function(r){ if(!r.ok)return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error(j.error||('HTTP '+r.status)); }); return r.arrayBuffer(); }).then(function(ab){ return lib.getDocument({data:ab}).promise; }); })
+      .then(function(pdf){ if(box._tok!==tok)return; box.innerHTML=''; var n=Math.min(pdf.numPages,8), w=Math.max(300,(box.clientWidth||600)-16), dpr=Math.min(2,window.devicePixelRatio||1), chain=Promise.resolve();
+        for(var i=1;i<=n;i++)(function(i){ chain=chain.then(function(){ return pdf.getPage(i).then(function(page){ if(box._tok!==tok)return; var vp=page.getViewport({scale:1}), sc=w/vp.width, v2=page.getViewport({scale:sc*dpr}); var cv=document.createElement('canvas'); cv.width=Math.ceil(v2.width); cv.height=Math.ceil(v2.height); cv.style.cssText='display:block;width:100%;margin:0 0 8px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.18)'; box.appendChild(cv); return page.render({canvasContext:cv.getContext('2d'),viewport:v2}).promise; }); }); })(i);
+        return chain.then(function(){ if(pdf.numPages>n&&box._tok===tok)box.insertAdjacentHTML('beforeend','<div class="tiny mut">'+(pdf.numPages-n)+' more page(s): open the PDF in a new tab</div>'); }); })
+      .catch(function(e){ if(box._tok===tok)box.innerHTML='<div class="count" style="padding:12px;color:var(--neg)">Could not show the PDF: '+esc(e.message||String(e))+'</div>'; }); }
   function acDrJson(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }
   function acDrEnsure(){ var bg=document.getElementById('acdrawer-bg'); if(bg)return bg; bg=document.createElement('div'); bg.id='acdrawer-bg'; bg.innerHTML='<div id="acdrawer"></div>'; document.body.appendChild(bg);
     bg.addEventListener('click',function(e){ if(e.target===bg)acDrClose(); }); document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&bg.classList.contains('open'))acDrClose(); }); return bg; }
   function acDrClose(){ var bg=document.getElementById('acdrawer-bg'); if(!bg)return; bg.classList.remove('open'); setTimeout(function(){ if(!bg.classList.contains('open'))bg.classList.remove('show'); },230); AC_DR={r:null}; }
   function acDrOpen(r){ AC_DR={r:r,c:null,busy:true,view:'email',em:null,auto:r.treatment==='autobill',confirm:false,done:null,err:'',f:{}};
-    var bg=acDrEnsure(); bg.classList.add('show'); setTimeout(function(){ bg.classList.add('open'); },10); acXaccLoad(r.org); acDrPaint();
+    var bg=acDrEnsure(); bg.classList.add('show'); setTimeout(function(){ bg.classList.add('open'); },10); acXaccLoad(r.org); acTaxLoad(r.org); acDrPaint();
     var mine=AC_DR;
     fetch('/api/accounts/email/'+encodeURIComponent(r.match.id)).then(acDrJson).then(function(j){ if(AC_DR!==mine)return; AC_DR.em=j; if((j.attachments||[]).some(function(a){ return a.pdf; }))AC_DR.view='pdf'; acDrPaint(); })
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.em={error:e.message}; acDrPaint(); });
@@ -19156,10 +19208,7 @@
       .then(function(j){ if(AC_DR!==mine)return; var c=(j.candidates||[])[0]||{reason:'This receipt has already been billed, or it no longer matches an open line'}; AC_DR.busy=false; AC_DR.c=c;
         AC_DR.f={contact:c.contact||'',account_code:c.account_code||'',tax_type:c.tax_type||'',invoice_number:c.invoice_number||''}; acDrPaint(); })
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.busy=false; AC_DR.c={reason:e.message}; acDrPaint(); }); }
-  function acDrAcctHtml(org,code,dis){ var X=AC_XACC[org];
-    if(!X||X.busy||X.error||!(X.rows||[]).length)return '<input class="acdr-in" id="acdr-acct" value="'+esc(code||'')+'" placeholder="Account code"'+dis+'>'+(X&&X.error?'<span class="tiny mut">account names unavailable: '+esc(X.error)+'</span>':'');
-    var rows=X.rows.slice(); if(code&&!rows.some(function(a){ return a.code===code; }))rows.unshift({code:code,name:'(not an active account)'});
-    return '<select class="acdr-in" id="acdr-acct"'+dis+'>'+(code?'':'<option value="" selected>choose…</option>')+rows.map(function(a){ return '<option value="'+esc(a.code)+'"'+(a.code===code?' selected':'')+'>'+esc(a.code+' · '+a.name)+'</option>'; }).join('')+'</select>'; }
+  function acDrAcctHtml(org,code,dis){ return acComboHtml('account',org,code||'',acAcctLabel(org,code),'acdr-acct',dis); }   // v28.282: searchable
   function acDrCanPush(){ var c=AC_DR.c, f=AC_DR.f; return !!(c&&(c.ok||/No coding yet/.test(c.reason||''))&&f.contact&&f.account_code&&f.tax_type&&!AC_DR.done); }
   function acDrPaint(){ var el=document.getElementById('acdrawer'); if(!el||!AC_DR.r)return; var r=AC_DR.r, c=AC_DR.c, em=AC_DR.em, f=AC_DR.f||{};
     var amt=acMoney(-r.amount,r.currency);
@@ -19167,9 +19216,9 @@
     var mail='';
     if(!em)mail='<div class="count" style="padding:12px">Loading the email…</div>';
     else if(em.error)mail='<div class="count" style="padding:12px;color:var(--neg)">'+esc(em.error)+'</div>';
-    else if(AC_DR.view==='pdf')mail='<div style="position:relative;width:100%;height:100%"><div class="count" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;text-align:center">Loading the PDF… if it stays blank, use Open PDF in a new tab below.</div><iframe title="Receipt PDF" src="/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id)+'" style="position:relative;width:100%;height:100%;border:0;background:transparent"></iframe></div>';
+    else if(AC_DR.view==='pdf')mail='<div id="acdr-pdf" style="width:100%;height:100%;overflow:auto;background:#e9ebef;padding:8px;box-sizing:border-box"><div class="count" style="padding:12px">Loading the PDF…</div></div>';
     else mail='<iframe title="Receipt email" sandbox="" style="width:100%;height:100%;border:0;background:#fff" srcdoc="'+esc(csp+'<base target="_blank">'+(em.html||('<pre style="white-space:pre-wrap;font:13px/1.45 -apple-system,Segoe UI,sans-serif">'+esc(em.text||'(empty email)')+'</pre>')))+'"></iframe>';
-    var tax=(AC_TAXES[r.org]||[]).slice(); if(f.tax_type&&!tax.some(function(t){ return t[0]===f.tax_type; }))tax.unshift([f.tax_type,f.tax_type]);
+
     var dis=AC_DR.done||AC_DR.busy?' disabled':'';
     var fld=function(lab,html){ return '<label style="display:grid;gap:3px;font-size:12px"><span class="mut">'+lab+'</span>'+html+'</label>'; };
     var form='';
@@ -19177,10 +19226,10 @@
     else if(AC_DR.busy)form='<div class="count">Checking the bill…</div>';
     else { if(c&&!c.ok)form+='<div class="annot" style="border-color:var(--neg);margin-bottom:8px">'+esc(c.reason||'Cannot create this bill')+'</div>';
       form+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-        +fld('Xero contact (existing contact, never created)','<input class="acdr-in" id="acdr-contact" value="'+esc(f.contact||'')+'"'+dis+'>')
+        +fld('Xero contact (pick from Xero, never created)',acComboHtml('contact',r.org,f.contact||'',f.contact||'','acdr-contact',dis))
         +fld('Reference','<input class="acdr-in" id="acdr-ref" value="'+esc(f.invoice_number||'')+'"'+dis+'>')
         +fld('Account',acDrAcctHtml(r.org,f.account_code,dis))
-        +fld('Tax','<select class="acdr-in" id="acdr-tax"'+dis+'>'+tax.map(function(t){ return '<option value="'+esc(t[0])+'"'+(t[0]===f.tax_type?' selected':'')+'>'+esc(t[1])+'</option>'; }).join('')+(f.tax_type?'':'<option value="" selected>choose…</option>')+'</select>')
+        +fld('Tax (from Xero)','<select class="acdr-in" id="acdr-tax"'+dis+'>'+acTaxOpts(r.org,f.tax_type||'')+'</select>')
         +fld('Bill date and due date','<div style="padding:5px 0">'+esc(hzTrkDate((c&&c.date)||r.line_date))+'</div>')
         +fld('Amount (tax inclusive)','<div style="padding:5px 0;font-weight:700">'+esc(c&&c.amount!=null?acMoney(c.amount,c.currency):amt)+'</div>')+'</div>'
         +(r.treatment==='autobill'?'<div class="tiny" style="margin-top:12px">'+esc(r.payee_key)+' is on Auto bill. <b>Push bill to Xero</b> creates this one now; the automatic run then skips it.</div>'
@@ -19199,8 +19248,8 @@
       +(AC_DR.done?'<span class="save-btn" id="acdr-x2">Close</span>'
         :(AC_DR.confirm?'<span class="save-btn" id="acdr-go" style="background:var(--neg);border-color:var(--neg)">'+(AC_DR.pushing?'Creating…':'Confirm: create the bill in Xero')+'</span><span class="save-btn light" id="acdr-no">Cancel</span>'
           :'<span class="save-btn" id="acdr-push"'+(can?'':' style="opacity:.45;pointer-events:none"')+'>Push bill to Xero</span>')+'<span class="save-btn light" id="acdr-ig" style="margin-left:auto">Ignore payee '+esc(r.payee_key)+'</span>')+'</div>';
-    var g=function(id){ return document.getElementById(id); };
-    var keep=function(){ ['contact','ref','acct','tax'].forEach(function(k){ var x=g('acdr-'+k); if(x){ var key={contact:'contact',ref:'invoice_number',acct:'account_code',tax:'tax_type'}[k]; AC_DR.f[key]=x.value.trim(); } }); var a=g('acdr-auto'); if(a&&!a.disabled)AC_DR.auto=a.checked; };
+    var g=function(id){ return document.getElementById(id); }; acComboWire(el); if(AC_DR.view==='pdf'&&em&&!em.error)acPdfRender(g('acdr-pdf'),'/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id));
+    var keep=function(){ ['contact','ref','acct','tax'].forEach(function(k){ var x=g('acdr-'+k); if(x){ var key={contact:'contact',ref:'invoice_number',acct:'account_code',tax:'tax_type'}[k]; AC_DR.f[key]=x.dataset.cb?acComboVal(x).v:x.value.trim(); } }); var a=g('acdr-auto'); if(a&&!a.disabled)AC_DR.auto=a.checked; };
     ['contact','ref','acct','tax','auto'].forEach(function(k){ var x=g('acdr-'+k); if(x){ x.oninput=x.onchange=function(){ keep(); var p=g('acdr-push'); if(p){ var ok=acDrCanPush(); p.style.opacity=ok?'':'.45'; p.style.pointerEvents=ok?'':'none'; } }; } });
     [g('acdr-x'),g('acdr-x2')].forEach(function(x){ if(x)x.onclick=acDrClose; });
     el.querySelectorAll('[data-drv]').forEach(function(x){ x.onclick=function(){ keep(); AC_DR.view=x.dataset.drv; acDrPaint(); }; });
