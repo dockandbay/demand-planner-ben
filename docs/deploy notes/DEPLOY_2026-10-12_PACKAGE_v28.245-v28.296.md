@@ -1,6 +1,6 @@
-# HORIZON deploy: v28.245 to v28.295
+# HORIZON deploy: v28.245 to v28.296
 
-Branch `review-fixes-2026-10-05`, HEAD `7c0ba156` (`7c0ba156b62b00b3ca3ae9abd5486b4860a47bb3`, v28.295). Live checked 12-Oct-26: v28.244. Migrations 347 to 360 are not on live.
+Branch `review-fixes-2026-10-05`, code HEAD `8fed453f` (`8fed453fa1cdae3d1074b6921c45ca9e609203e1`, v28.296). Live checked 12-Oct-26: v28.244. Migrations 347 to 360 are not on live.
 
 ## 1. Migrations (in order, all additive and idempotent)
 - 347 `app_permissions.accounts_access` (ACCOUNTS grant; until applied only admins see ACCOUNTS)
@@ -50,6 +50,7 @@ All `POST https://horizon.dockandbay.com/...`, header `x-webhook-secret: <N8N_WE
 - **ACCOUNTS writes are admin only (v28.252);** the ACCOUNTS grant alone is read access.
 - **Live Xero writes happen only on a user action or a payee switched on:** Paid popup (creates Xero payments, v28.288), supplier credit notes (v28.283), deposit credit notes (v28.290/293), Auto bill and auto-attach (off on live until Ben switches payees on).
 - **Payments Due (v28.294):** part-paid balances now show as due. On live 4 POs appear (PO-54USXR1-FEB, PO-55EULX2, PO-56UKLX3-AIR, PO-57UKNL1).
+- **UK ILG 3PL invoicing (v28.296):** ILG's new INVA invoice layout (from Sep-26) was counted twice, so live overstates September UK ILG by 9,321.64 (shows 135,146.79; correct 125,825.15). After deploy the INVA detail report splits handling per order, and rework goes to its order's cost centre. No data change needed; re-open September to see it.
 - **Stale statement email (v28.266):** AU will email once a day until an AU bank export is uploaded in ACCOUNTS > Bank statement.
 
 ## 5. What's in it
@@ -66,10 +67,12 @@ All `POST https://horizon.dockandbay.com/...`, header `x-webhook-secret: <N8N_WE
 - 289-293 deposits drawdown AU column; deposit credit notes (PO drawer, PLAN > PO > Payments; AU from 01-Oct-26); Wise FX USD in the FX statement; AU banks pay UK runs via 901 loans
 - 294 Payments Due: balance paid only when fully paid
 - 295 email sender and reply-to by part of the system
+- 296 UK ILG: INVA invoice read once, per-order handling from the detail report, rework to its order's cost centre, printed-total read check
 
 ## 6. After deploy
 - Ben: grant ACCOUNTS in CONFIG > Admin > Permissions; connect Gmail as accounts@; upload the UK and AU bank exports; switch Snapchat UK / Optus AU to Auto bill when ready.
-- You: smoke `/api/version` = v28.295; ACCOUNTS opens for an admin; one dry run each of accounts-bank-sync and up-fx-statement; email test per channel once the From env vars are set.
+- You: smoke `/api/version` = v28.296; ACCOUNTS opens for an admin; one dry run each of accounts-bank-sync and up-fx-statement; email test per channel once the From env vars are set.
+- Ben: re-open UK ILG September and check the total is 125,825.15 before the bill goes to Xero.
 - Check `planner.etl_runs` for `accounts_bank_ageing`, `accounts_learn`, `up_fx_statement` after the first scheduled runs.
 
 Detail per version in CHANGES.md.
