@@ -16846,7 +16846,7 @@ var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices',fcgrain:'month'};
 function tplCin7Era(tpl,period){ var cut=(tpl==='uk_ilg')?'2026-11':'2026-10'; return !period||String(period)<cut; }
 function render3plInvoice(body){
   try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if((_h3[0]==='reports'||_h3[0]==='accounts')&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
-  if(TPL3_STATE.tpl==='au_coghlans'&&TPL3_STATE.mode==='invoices'&&!TPL3_STATE._cogSeen){ TPL3_STATE.mode='weekly'; TPL3_STATE._cogSeen=1; }   // v28.267: Coghlans opens on Weekly bills
+  if(TPL3_STATE.tpl==='au_coghlans'&&TPL3_STATE.mode==='invoices'){ TPL3_STATE.mode='weekly'; }   // v28.287 (Ben): Coghlans is weekly only, no monthly Invoices view
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function su(x){ x=String(x||''); return /@dockandbay\.com$/i.test(x)?x.split('@')[0]+'@':x; }   // ben@dockandbay.com → ben@
   function lastMonth(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); }
@@ -17006,16 +17006,18 @@ function render3plInvoice(body){
   }
   function shell(){
     var tabs=TPL3.map(function(t){var on=(t[0]===TPL3_STATE.tpl);return '<button class="dnav3'+(on?' active':'')+'" data-tpl="'+t[0]+'"">'+e(t[1])+'</button>';}).join('');
-    if(TPL3_STATE.mode==='weekly'&&TPL3_STATE.tpl!=='au_coghlans')TPL3_STATE.mode='invoices';   // v28.267: Weekly bills is Coghlans only
-    var modes=(TPL3_STATE.tpl==='au_coghlans'?[['weekly','Weekly bills']]:[]).concat([['invoices','Invoices'],['config','Config / Accounts'],['log','Import log'],['forecast','Forecast']]).map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
+    var _cog=TPL3_STATE.tpl==='au_coghlans';
+    if((TPL3_STATE.mode==='weekly'||TPL3_STATE.mode==='coginv')&&!_cog)TPL3_STATE.mode='invoices';   // v28.267: Weekly bills is Coghlans only
+    if(_cog&&TPL3_STATE.mode==='invoices')TPL3_STATE.mode='weekly';   // v28.287 (Ben): Coghlans is weekly only; one invoice = one Xero bill
+    var modes=(_cog?[['weekly','Weekly bills']]:[['invoices','Invoices']]).concat([['config','Config / Accounts'],['log','Import log'],['forecast','Forecast']]).map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode||(m[0]==='weekly'&&TPL3_STATE.mode==='coginv')?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
     host.innerHTML='<div id="tpl-subnav" class="d3nav">'+tabs+'</div>'   // standard level-3 row, flush under the REPORTS tabs; page header removed (Ben, v27.471)
       +'<div style="padding:4px 2px 10px;text-align:left">'
       +((TPL3_STATE.mode==='invoices')?_tplGuide(TPL3_STATE.tpl):'')
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+modes
-        +'<span style="width:1px;height:16px;background:var(--line);margin:0 4px"></span>'
-        +'<label style="font-size:12px;color:var(--muted)">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;margin-left:4px"></label>'
+        +(_cog?'':'<span style="width:1px;height:16px;background:var(--line);margin:0 4px"></span>'
+        +'<label style="font-size:12px;color:var(--muted)">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;margin-left:4px"></label>')   // v28.287: no month for Coghlans
       +'</div><div id="tpl-body"><div style="color:var(--faint);font-size:12px">Loading…</div></div></div>';
-    host.querySelectorAll('.dnav3[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(TPL3_STATE.tpl==='au_coghlans'&&TPL3_STATE.mode==='invoices'&&!TPL3_STATE._cogSeen){ TPL3_STATE.mode='weekly'; TPL3_STATE._cogSeen=1; } if(window.writeHash)window.writeHash(['accounts','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
+    host.querySelectorAll('.dnav3[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(TPL3_STATE.tpl==='au_coghlans'&&TPL3_STATE.mode==='invoices'){ TPL3_STATE.mode='weekly'; } if(window.writeHash)window.writeHash(['accounts','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
     host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
     var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
   }
@@ -17033,15 +17035,19 @@ function render3plInvoice(body){
         :'<span style="background:var(--neg-bg,#fdecec);color:var(--neg);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700">Not imported</span>'; };
       var sc=d.scanned||null;
       b.innerHTML='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;text-align:left">'+pill('unprocessed','Unprocessed')+pill('processed','Processed')+pill('all','All')
-        +'<button class="save-btn" id="cog-scan" style="margin-left:8px">Check accounts@ now</button><span id="cog-msg" style="font-size:12px;color:var(--muted)">'+(d.gmail_connected?('Auto-imported from accounts@ every 6 hours'+(sc&&sc.at?' · last check '+dd(sc.at)+' '+String(sc.at).slice(11,16)+' UTC':'')):'<span style="color:var(--neg)">accounts@ Gmail is not connected (ACCOUNTS ▸ Inbox matcher)</span>')+'</span></div>'
+        +'<button class="save-btn" id="cog-scan" style="margin-left:8px">Check accounts@ now</button><label class="save-btn light" style="cursor:pointer" title="Upload a Coghlans weekly invoice workbook by hand (the DOK number and week are read from the file)">Upload invoice (.xlsx)<input type="file" id="cog-upf" accept=".xlsx" style="display:none"></label><span id="cog-msg" style="font-size:12px;color:var(--muted)">'+(d.gmail_connected?('Auto-imported from accounts@ every 6 hours'+(sc&&sc.at?' · last check '+dd(sc.at)+' '+String(sc.at).slice(11,16)+' UTC':'')):'<span style="color:var(--neg)">accounts@ Gmail is not connected (ACCOUNTS ▸ Inbox matcher)</span>')+'</span></div>'
         +'<div style="overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr style="background:var(--hover)"><th style="text-align:left;padding:7px 10px">Invoice</th><th style="text-align:left;padding:7px 10px">Week ending</th><th style="text-align:left;padding:7px 10px">Received</th><th style="text-align:left;padding:7px 10px">Total inc GST</th><th style="text-align:left;padding:7px 10px">Status</th><th style="text-align:left;padding:7px 10px">Xero bill</th><th style="text-align:left;padding:7px 10px"></th></tr></thead><tbody>'
         +(vis.length?vis.map(function(r){ return '<tr style="border-top:1px solid var(--line)"><td style="padding:6px 10px;font-weight:700">'+e(r.invoice_no)+(r.error?'<div style="color:var(--neg);font-weight:400">'+e(r.error)+'</div>':'')+'</td><td style="padding:6px 10px">'+dd(r.period_end)+'</td><td style="padding:6px 10px">'+dd(r.email_date||r.uploaded_at)+(r.uploaded_by&&!/auto import/.test(r.uploaded_by)?' <span style="color:var(--faint)">(uploaded)</span>':'')+'</td><td style="padding:6px 10px">'+money(r.total_inc!=null?r.total_inc:r.bill_total)+'</td><td style="padding:6px 10px">'+badge(r)+'</td>'
           +'<td style="padding:6px 10px">'+(r.bill_id?'<a href="'+e(r.bill_url)+'" target="_blank" rel="noopener">'+e(r.bill_number)+'</a> <span style="color:var(--faint)">'+e(String(r.bill_status||'').toLowerCase())+(r.bill_due?' · due '+money(r.bill_due):'')+'</span>':'<span style="color:var(--faint)">none</span>')+'</td>'
-          +'<td style="padding:6px 10px;white-space:nowrap">'+(r.file_id?'<button class="save-btn light" data-cogopen="'+e(r.period||String(r.period_end||'').slice(0,7))+'">Open</button> <a href="/api/supply/tpl/file/'+r.file_id+'" target="_blank" rel="noopener">file</a>':'')+'</td></tr>'; }).join('')
+          +'<td style="padding:6px 10px;white-space:nowrap">'+(r.file_id?'<button class="save-btn light" data-cogopen="'+rows.indexOf(r)+'">Open</button> <a href="/api/supply/tpl/file/'+r.file_id+'" target="_blank" rel="noopener">file</a>':'')+'</td></tr>'; }).join('')
           :'<tr><td colspan="7" style="padding:12px 10px;color:var(--faint)">'+(F==='processed'?'No processed invoices yet.':'Every Coghlans invoice has a Xero bill.')+'</td></tr>')
-        +'</tbody></table></div><div style="font-size:11px;color:var(--faint);margin-top:8px;text-align:left">Processed = a Xero bill FULFILLMENT-AU-&lt;week ending&gt;-&lt;invoice&gt; exists (draft, awaiting payment or paid). Open takes you to that month in Invoices with the file ready to parse and bill.</div>';
+        +'</tbody></table></div><div style="font-size:11px;color:var(--faint);margin-top:8px;text-align:left">Processed = a Xero bill FULFILLMENT-AU-&lt;week ending&gt;-&lt;invoice&gt; exists (draft, awaiting payment or paid). Open shows that one invoice: analyse it, check it and create its own Xero bill (one bill per weekly invoice).</div>';
       b.querySelectorAll('[data-cogf]').forEach(function(x){ x.onclick=function(){ TPL3_STATE.cogF=x.dataset.cogf; drawCoghlansWeekly(b,true); }; });   // instant: filters the loaded list
-      b.querySelectorAll('[data-cogopen]').forEach(function(x){ x.onclick=function(){ TPL3_STATE.period=x.dataset.cogopen; TPL3_STATE.mode='invoices'; shell(); load(); }; });
+      b.querySelectorAll('[data-cogopen]').forEach(function(x){ x.onclick=function(){ var r=rows[+x.dataset.cogopen]; if(!r)return; TPL3_STATE.cogInv=r; TPL3_STATE.period=String(r.period_end||r.period||'').slice(0,7)||TPL3_STATE.period; TPL3_STATE.mode='coginv'; shell(); load(); }; });   // v28.287: Open = that ONE invoice
+      var cu=b.querySelector('#cog-upf'); if(cu)cu.onchange=function(){ var f=cu.files&&cu.files[0]; if(!f)return; var um=b.querySelector('#cog-msg'); if(um)um.innerHTML='Uploading '+e(f.name)+'…';   // v28.287: a hand upload reads its DOK number + week from the file
+        hzUpload(f,{field:'data_base64',category:'tpl'}).then(function(up){ return fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({tpl:'au_coghlans',period:new Date().toISOString().slice(0,7),filename:f.name,uploaded_by:(window.ME&&ME.email)||''},up))}).then(function(r){ return r.json(); }); })
+          .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'upload failed'); TPL3_STATE._cogMsg=(j.coghlans&&j.coghlans.invoice_no)?('Uploaded '+j.coghlans.invoice_no+(j.coghlans.period_end?' (week ending '+dd(j.coghlans.period_end)+')':'')):('Uploaded '+f.name+(j.coghlans&&j.coghlans.error?': '+j.coghlans.error:': no DOK invoice number found in the file')); drawCoghlansWeekly(b); })
+          .catch(function(err){ if(um)um.innerHTML='<span style="color:var(--neg)">'+e(err.message||err)+'</span>'; }); };
       var sb=b.querySelector('#cog-scan'); if(sb)sb.onclick=function(){ sb.disabled=true; sb.textContent='Checking accounts@…';
         fetch('/api/supply/tpl/coghlans/scan',{method:'POST'}).then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
           .then(function(j){ TPL3_STATE._cogMsg=j.imported?(j.imported+' new invoice'+(j.imported===1?'':'s')+' imported'):'No new invoices'; drawCoghlansWeekly(b); })
@@ -17050,15 +17056,29 @@ function render3plInvoice(body){
     if(cached&&TPL3_STATE._cogD){ go(TPL3_STATE._cogD); return; }
     b.innerHTML='<div style="color:var(--faint);font-size:12px">Loading…</div>';
     fetch('/api/supply/tpl/coghlans/weekly').then(function(r){ return r.json(); }).then(go).catch(function(err){ b.innerHTML='<div style="color:var(--neg);font-size:12px">Failed: '+e(err.message||err)+'</div>'; }); }
+  // v28.287 (Ben 12-Oct-26): one Coghlans weekly invoice on its own: the invoice tools (Analyse, Xero bill preview, Create bill, Push actuals,
+  // cross-month reclass journal) run on THIS file only, never on the other weeks of the month. Its Xero bill is FULFILLMENT-AU-<week ending>-<DOK>.
+  function drawCoghlansOne(b){ var R=TPL3_STATE.cogInv; if(!R||!R.file_id){ TPL3_STATE.mode='weekly'; shell(); load(); return; }
+    var dd=function(x){ if(!x)return ''; var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],p=String(x).slice(0,10).split('-'); return p[2]+'-'+m[+p[1]-1]+'-'+p[0].slice(2); };
+    fetch('/api/supply/tpl/data?tpl=au_coghlans&period=').then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'load failed');
+      var f=(d.files||[]).filter(function(x){ return String(x.id)===String(R.file_id); });
+      var head='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;text-align:left"><button class="save-btn light" id="cog-back">&larr; Weekly bills</button>'
+        +'<span style="font-weight:700;font-size:14px">'+e(R.invoice_no||'')+'</span><span style="color:var(--muted);font-size:12px">week ending '+e(dd(R.period_end))+(R.total_inc!=null?' &middot; A$'+Number(R.total_inc).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})+' incl GST':'')+'</span>'
+        +(R.bill_id?'<span style="font-size:12px">Xero bill <a href="'+e(R.bill_url)+'" target="_blank" rel="noopener">'+e(R.bill_number)+'</a> <span style="color:var(--faint)">'+e(String(R.bill_status||'').toLowerCase())+'</span></span>':'<span style="font-size:12px;color:var(--amber);font-weight:700">No Xero bill yet: FULFILLMENT-AU-'+e(String(R.period_end||'').slice(0,10))+'-'+e(R.invoice_no||'')+'</span>')+'</div>';
+      if(!f.length){ b.innerHTML=head+'<div style="color:var(--neg);font-size:12px">The file for '+e(R.invoice_no||'this invoice')+' is no longer stored. Go back and re-import it.</div>'; }
+      else { b.innerHTML=head+'<div id="cog-one"></div>'; drawInvoices(b.querySelector('#cog-one'),{files:f,cin7_summary:null},{single:true,label:R.invoice_no||''}); }
+      var bk=b.querySelector('#cog-back'); if(bk)bk.onclick=function(){ TPL3_STATE.mode='weekly'; TPL3_STATE._cogD=null; shell(); load(); }; })
+      .catch(function(err){ b.innerHTML='<div style="color:var(--neg);font-size:12px">Failed: '+e(err.message||err)+'</div>'; }); }
   function load(silent){ var b=host.querySelector('#tpl-body'); if(!b)return; if(!silent)b.innerHTML='<div style="color:var(--faint);font-size:12px">Loading…</div>';
     if(TPL3_STATE.mode==='log'){ drawImportLog(b); return; }
     if(TPL3_STATE.mode==='forecast'){ draw3plForecast(b); return; }
     if(TPL3_STATE.mode==='weekly'){ drawCoghlansWeekly(b); return; }   // v28.267
+    if(TPL3_STATE.mode==='coginv'){ drawCoghlansOne(b); return; }   // v28.287
     fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period='+encodeURIComponent(TPL3_STATE.mode==='invoices'?TPL3_STATE.period:''))
       .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'load failed');
         if(TPL3_STATE.mode==='config')drawConfig(b,d); else drawInvoices(b,d); })
       .catch(function(err){ b.innerHTML='<div style="color:var(--neg);font-size:12px">Failed: '+e(err.message||err)+'</div>'; }); }
-  function drawInvoices(b,d){
+  function drawInvoices(b,d,opt){ opt=opt||{};
     var files=d.files||[];
     var TDL='padding:6px 12px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--hover)';
     var rows=files.length?files.map(function(f){ return '<tr>'
@@ -17076,11 +17096,11 @@ function render3plInvoice(body){
     var _ilgGuide='';   // the "what to upload each month" box now renders in the shell (under the L3 nav) for every 3PL — see _tplGuide
     var _cin7=tplCin7Era(TPL3_STATE.tpl,TPL3_STATE.period);   // v27.905: Cin7 steps only in the Cin7 era
     b.innerHTML=_ilgGuide
-      +'<div style="'+_card+'">'+_step('1','Upload file',e(_lbl)+' · '+e(TPL3_STATE.period))
-        +'<div id="tpl-drop" style="border:2px dashed var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px;background:var(--hover);transition:background .12s,border-color .12s">'
+      +'<div style="'+_card+'">'+_step('1',opt.single?'Invoice file':'Upload file',e(_lbl)+' · '+(opt.single?e(opt.label):e(TPL3_STATE.period)))
+        +(opt.single?'':'<div id="tpl-drop" style="border:2px dashed var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px;background:var(--hover);transition:background .12s,border-color .12s">'
           +'<input type="file" id="tpl-file" multiple style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:var(--blue);color:#fff;border-color:var(--blue)">Upload</button>'
           +'<span style="font-size:11px;color:var(--faint);margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
-          +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
+          +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>')   // v28.287: no upload box on a single Coghlans invoice
         +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left"><thead><tr style="background:var(--band);font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">'
           +['File','Size','By','Uploaded','Status',''].map(function(h){return '<th style="padding:6px 12px;text-align:left;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'</div>'
@@ -17126,7 +17146,7 @@ function render3plInvoice(body){
         var f=list[i]; msg.style.color='var(--muted)'; msg.textContent=(list.length>1?('Uploading '+(i+1)+' of '+list.length+': '):'Uploading ')+f.name+'…';
         uploadOne(f).then(function(){ ok++; next(i+1); }).catch(function(err){ fail.push(f.name+' ('+(err&&err.message||err)+')'); next(i+1); }); })(0);
     }
-    up.onclick=function(){ doUpload(fi&&fi.files); };
+    if(up)up.onclick=function(){ doUpload(fi&&fi.files); };
     if(fi)fi.onchange=function(){ if(fi.files&&fi.files.length)doUpload(fi.files); };   // auto-upload on select (multiple ok)
     if(drop){ var hi=function(on){ drop.style.background=on?'var(--blue-soft)':'var(--hover)'; drop.style.borderColor=on?'var(--blue)':'var(--line)'; };
       ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); hi(true); }); });

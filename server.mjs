@@ -16255,7 +16255,13 @@ app.post('/api/supply/tpl/upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, storage_path, byte_size, uploaded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [b.tpl, b.period, b.filename || 'invoice', safeMime(b.mime), buf, up.storagePath, byteSize, b.uploaded_by || null]);
-    res.json({ ok: true, id: r.rows[0].id, byte_size: byteSize });
+    // v28.287 (Ben 12-Oct-26): Coghlans is weekly only. A hand-uploaded Coghlans workbook takes its invoice number, period end and month from
+    // the file itself (as the accounts@ import does), so it lists under Weekly bills and its bill / journal use the right week and month.
+    let cog = null;
+    if (b.tpl === 'au_coghlans' && buf && /\.xlsx$/i.test(String(b.filename || ''))) { try { const cm = _coghlansMeta(await _cogGrids(buf));
+      if (cm.invoiceNo || cm.periodEnd) { cog = { invoice_no: cm.invoiceNo ? String(cm.invoiceNo).toUpperCase() : null, period_end: cm.periodEnd || null };
+        await pool.query(`UPDATE planner.tpl_invoice_files SET invoice_no=coalesce($2, invoice_no), period_end=coalesce($3::date, period_end), period=coalesce(to_char($3::date,'YYYY-MM'), period) WHERE id=$1`, [r.rows[0].id, cog.invoice_no, cog.period_end]); } } catch (e) { cog = { error: 'could not read the invoice number / period end: ' + e.message }; } }
+    res.json({ ok: true, id: r.rows[0].id, byte_size: byteSize, coghlans: cog || undefined });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/tpl/file/:id', async (req, res) => {
@@ -18317,6 +18323,15 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
         const bad = [...new Set(li.map(x => x.AccountCode).filter(c => c && !valid.has(String(c))))];
         if (bad.length) return res.status(400).json({ error: 'Account code(s) not in Xero ' + xregion.toUpperCase() + ': ' + bad.join(', ') + '. Fix them in 3PL invoicing ▸ Config / Accounts (or create the account in Xero).', invalid_codes: bad });
       } catch (e) { /* if the accounts lookup fails, fall through and let Xero validate on create */ }
+      // v28.287 (Ben 12-Oct-26): one Xero bill per Coghlans weekly invoice. Refuse a second bill with the same number (cache + a live Xero read), so the
+      // same week can never be billed twice. Read only until it passes.
+      if (tpl0 === 'au_coghlans' && !isTest) {
+        const cached = (await pool.query(`SELECT invoice_id, invoice_number, upper(status) status FROM planner.xero_bills WHERE lower(region)='au' AND upper(invoice_number)=upper($1) AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') LIMIT 1`, [ref])).rows[0];
+        let live = null; try { const ex = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + String(ref).replace(/["\\]/g, '') + '"')); live = ((ex && ex.Invoices) || []).find(x => !/^(DELETED|VOIDED)$/i.test(String(x.Status || ''))) || null; }
+        catch (e) { return res.status(502).json({ error: 'Could not check Xero AU for an existing bill ' + ref + ' (' + e.message + '). Nothing created; try again.' }); }
+        const hit = live ? { id: live.InvoiceID, status: live.Status } : (cached ? { id: cached.invoice_id, status: cached.status } : null);
+        if (hit) return res.status(409).json({ error: 'A Xero AU bill ' + ref + ' already exists (' + String(hit.status || '').toLowerCase() + '). This week is processed; nothing created.', xero_id: hit.id, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + hit.id });
+      }
       const body = { Type: 'ACCPAY', Contact: { Name: meta.contact }, Date: endISO, DueDate: endISO, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: billStatus, LineAmountTypes: latMode, LineItems: li };
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });

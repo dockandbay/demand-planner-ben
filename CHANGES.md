@@ -1,3 +1,13 @@
+## v28.287 (Ben, branch review-fixes-2026-10-05): Coghlans 3PL invoicing is weekly only (one invoice = one Xero bill)
+
+**Files:** `artifact_v16.7.html`, `server.mjs`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: opening September showed several weekly invoices in one month view, so the Xero bill looked corrupted. Root cause: "Open" on a week jumped to the month's Invoices view, which lists every weekly file of the month, Analyse picked the first data file (not the week opened) and the last analysis was remembered per month. Bills were already per file (FULFILLMENT-AU-<week ending>-<DOK>) but nothing stopped a second bill for the same week.
+- AU Coghlans: no Month picker and no Invoices mode; it opens on **Weekly bills**. **Open** shows that ONE invoice (header: DOK, week ending, total, its Xero bill or the bill number it will get) with the usual steps (Cin7 import, Analyse, Xero bill preview, Create bill, Push actuals, cross-month reclass journal) on that file only; Back returns to the list. Other 3PLs unchanged.
+- **Upload invoice (.xlsx)** on Weekly bills for a hand upload: the server reads the DOK number and Period End from the workbook and files it under that week and month (as the accounts@ import does).
+- Create bill for Coghlans refuses a second bill with the same FULFILLMENT-AU-<date>-<DOK> number (bill cache plus a live Xero AU read; 409, nothing created).
+- Verified (jsdom on a second server, every POST mocked): Coghlans modes = Weekly bills / Config / Import log / Forecast, no month picker; Open DOK50369 shows 1 file, no upload box, Create button present, "No Xero bill yet: FULFILLMENT-AU-2026-09-25-DOK50369"; Back returns to the list; UK ILG still shows Invoices with the month picker and upload box; no errors, no writes.
+
 ## v28.286 (Ben, branch review-fixes-2026-10-05): Deposits drawdown matches the Xero accounts (AU 602, UK 602 total); split-payment key as ONE line
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/pay_split_note.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

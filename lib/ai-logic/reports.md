@@ -93,7 +93,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.267
+verified_version: v28.287
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -451,3 +451,4 @@ verified_version: v28.267
 ## 3PL invoicing: Coghlans weekly (from v28.267)
 - Coghlans (AU 3PL) invoices weekly by email from accounts.receivable@coghlan.com.au ("Coghlan Invoice DOK#####", .xlsx + .pdf). HORIZON scans accounts@ (read only) at most every 6 hours with the health checks, and on "Check accounts@ now", and imports each new invoice's .xlsx into 3PL invoicing (AU Coghlans, period = the month of the invoice's own Period End). An invoice already uploaded by hand (DOK number in the filename) is linked, not duplicated. (source: server.mjs :: coghlansMailImport)
 - The Weekly bills view lists every DOK invoice with its Xero bill. Processed = a Xero bill named FULFILLMENT-AU-<period end>-<DOK> (from Aug-26) or FULFILLMENT-AU-<period end> (older bills) that is not deleted or voided; otherwise To process, or Not imported when the email had no readable .xlsx. Filters: Unprocessed (default), Processed, All. Open takes the user to that month's Invoices tools with the file. (source: server.mjs :: /api/supply/tpl/coghlans/weekly)
+- Weekly only (v28.287, Ben 12-Oct-26: "coghlans should only be based on weekly and we dont need to choose the month anymore"): AU Coghlans has no Month picker and no monthly Invoices view; it opens on Weekly bills. Open shows that ONE invoice: its file, the Cin7 import for its week's month, Analyse, the Xero bill preview, Create bill, Push actuals to Fulfil and the cross-month reclass journal all run on that file only (the monthly view used to list every weekly file of the month, analysed the first one and remembered the last analysis per month, which mixed the weeks up). The bill is FULFILLMENT-AU-<week ending>-<DOK>, dated the week ending. Creating a second bill with the same number is refused (bill cache plus a live Xero AU read), so a week can only be billed once. A hand upload (Upload invoice on Weekly bills) reads the DOK number and Period End from the workbook and files it under that week and month, like the accounts@ import. Other 3PLs keep their monthly flow. (source: artifact_v16.7.html :: drawCoghlansWeekly, drawCoghlansOne, drawInvoices; server.mjs :: /api/supply/tpl/upload, /api/supply/tpl/xero-bill/:id)
