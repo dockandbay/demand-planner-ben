@@ -1,3 +1,12 @@
+## v28.292 (Ben, branch review-fixes-2026-10-05): Paid popup: AU banks (Wise FX USD, Gentium FX USD) pay UK runs via the 901 loans; unselect a bank
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "wise fx usd is ok to come from AU. also gentium fx in AU. they can be selected even for UK only payments because payments just go to the loan account. paid from AU org". Favourites: BOA #5237 USD, Universal Partners FX USD (UK), **Wise FX USD** and **Gentium FX USD** (AU, "paid from AU org" on UK runs). The search also lists the other org's banks.
+- A bank in the other org pays cross-org: the bills' org pays each bill from its **901 intercompany loan**; the bank's org gets one **Spend Money** from that bank (contact = the supplier's contact there) coded to its **901 loan**. Same currency as the bills only (USD). The popup explains this when such a bank is selected; the result links the Spend Money.
+- **Unselect:** click the selected bank again, or "unselect" next to it; with no bank only HORIZON is marked paid.
+- Verified: pay-plan for a UK XR Textile run lists Wise and Gentium as available cross-org favourites; dry run pays SUPPLIER-PAYMENT-XR-2026-07-25 from the UK 901 loan and builds the AU Spend Money from Wise FX USD to the AU 901 loan; jsdom: select, unselect by click and by link, Xero button enables / disables accordingly. Nothing written. Live check needed: 901 must accept payments in Xero UK (it is already used for cross-org settlements).
+
 ## v28.291 (Ben, branch review-fixes-2026-10-05): Wise FX USD (Xero AU) added to the FX statement process
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `deploy notes/CRON_UPFX_STATEMENT_2026-10-12.md` (+ package.json, CHANGES.md). No migration, no env vars. Optional app_settings `wise_fx_bank_account_id` (else found by name).

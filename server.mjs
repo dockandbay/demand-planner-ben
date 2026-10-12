@@ -8258,7 +8258,12 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
 const PAY_FAVS = [
   { key: 'bofa_usd', label: 'BOA #5237 USD', org: 'uk', re: /bank of america|\b5237\b/i },
   { key: 'universal_partners_usd', label: 'Universal Partners FX USD', org: 'uk', re: /universal partners/i },
-  { key: 'wise_fx_usd', label: 'Wise FX USD', org: 'au', re: /\bwise\b/i, ccy: 'USD' }];   // set up in Xero AU 12-Oct-26 (resolved by name unless bound in CONFIG)
+  { key: 'wise_fx_usd', label: 'Wise FX USD', org: 'au', re: /\bwise\b/i, ccy: 'USD' },   // set up in Xero AU 12-Oct-26 (resolved by name unless bound in CONFIG)
+  { key: 'gentium_usd', label: 'Gentium FX USD', org: 'au', re: /gentium/i, ccy: 'USD' }];   // v28.292 (Ben)
+// v28.292 (Ben 12-Oct-26): "wise fx usd is ok to come from AU. also gentium fx in AU. they can be selected even for UK only payments because
+// payments just go to the loan account. paid from AU org". A bank in the OTHER org pays the run cross-org: in the bills' org each bill is paid
+// from the intercompany loan account (901, payments enabled), and in the bank's org one Spend Money from that bank is coded to its own 901
+// loan, so the bank line there reconciles and the two loans move together. Same currency as the bills only (USD).
 const PAY_BASE = { uk: 'GBP', au: 'AUD' };
 const _payBankMemo = new Map();   // org -> { at, rows } (Xero bank accounts, 10 minutes)
 async function payBanks(org, xget) {
@@ -8272,10 +8277,15 @@ const _payRunKey = run => run.run_key || ((run.dt || '') + '|' + (run.supplier |
 async function payRunPlan(run) {
   const org = xeroRegion(run.paying_org || (String(run.region || '').toUpperCase() === 'AU' ? 'au' : 'uk')), rk = _payRunKey(run), base = PAY_BASE[org];
   const lines = Array.isArray(run.lines) ? run.lines : [], checks = [];
-  const banks = await payBanks(org); const cfg = await _xeroFinanceCfg(); const reg = (cfg.banks && cfg.banks[org]) || {};
-  const favourites = PAY_FAVS.map(f => { if (f.org !== org) return { key: f.key, label: f.label, org: f.org, available: false, note: 'in Xero ' + f.org.toUpperCase() + ': pays ' + f.org.toUpperCase() + ' runs only' };
-    const bound = reg[f.key] && reg[f.key].account_id, hit = banks.find(b => bound ? b.id === bound : (f.re.test(b.name) && (!f.ccy || b.ccy === f.ccy)));
-    return hit ? { key: f.key, label: f.label, org: f.org, available: true, bank_id: hit.id, ccy: hit.ccy, name: hit.name } : { key: f.key, label: f.label, org: f.org, available: false, note: 'not set up in Xero ' + org.toUpperCase() + ' yet' }; });
+  const other = org === 'uk' ? 'au' : 'uk', cfg = await _xeroFinanceCfg();
+  const own = (await payBanks(org)).map(b => Object.assign({}, b, { org, cross: false }));
+  let oth = []; try { oth = (await payBanks(other)).map(b => Object.assign({}, b, { org: other, cross: true, name: b.name + ' (paid from ' + other.toUpperCase() + ' org)' })); } catch (e) { checks.push({ level: 'warn', msg: 'Could not read the Xero ' + other.toUpperCase() + ' bank accounts: ' + e.message }); }
+  const banks = own.concat(oth);
+  const favourites = PAY_FAVS.map(f => { const reg = (cfg.banks && cfg.banks[f.org]) || {}, pool2 = f.org === org ? own : oth, bound = reg[f.key] && reg[f.key].account_id;
+    const hit = pool2.find(b => bound ? b.id === bound : (f.re.test(b.name) && (!f.ccy || b.ccy === f.ccy)));
+    if (!hit) return { key: f.key, label: f.label, org: f.org, available: false, note: 'not set up in Xero ' + f.org.toUpperCase() + ' yet' };
+    return { key: f.key, label: f.label + (f.org !== org ? ' (paid from ' + f.org.toUpperCase() + ' org)' : ''), org: f.org, cross: f.org !== org, available: true, bank_id: hit.id, ccy: hit.ccy, name: hit.name,
+      note: f.org !== org ? 'Xero ' + org.toUpperCase() + ' bills paid from the 901 loan; Spend Money from ' + hit.name.replace(/ \(paid from.*$/, '') + ' in Xero ' + f.org.toUpperCase() + ' to its 901 loan' : null }; });
   let last = null; try { last = (await pool.query(`SELECT bank_account_id, bank_name FROM planner.payment_fx WHERE run_date=$1 AND supplier=$2 AND region=$3`, [run.dt, run.supplier, org === 'au' ? 'AU' : 'UK'])).rows[0] || null; } catch (_) {}
   const bills = [];
   // 1) the SUPPLIER-PAYMENT bill (recorded by xero-post per run), else it will be created
@@ -8327,7 +8337,14 @@ app.post('/api/supply/payments/pay', async (req, res) => {
     if (!bank) return res.status(400).json({ error: 'Choose a bank account in Xero ' + plan.org.toUpperCase() });
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? b.date : run.dt, amount = Math.round((Number(String(b.amount || '').replace(/,/g, '')) || 0) * 100) / 100;
     const blocks = plan.checks.filter(c => c.level === 'error').map(c => c.msg).concat(plan.bills.filter(x => x.problem).map(x => x.problem));
-    if (bank.ccy !== plan.bill_ccy && bank.ccy !== plan.base_ccy) blocks.push('A ' + bank.ccy + ' bank cannot pay ' + plan.bill_ccy + ' bills in Xero ' + plan.org.toUpperCase() + ': choose a ' + plan.bill_ccy + ' or ' + plan.base_ccy + ' bank');
+    const cross = !!bank.cross;   // v28.292: a bank in the other org pays via the intercompany loans
+    let loanBill = null, loanBank = null, xcBank = null;
+    if (cross) { if (bank.ccy !== plan.bill_ccy) blocks.push('A bank in Xero ' + bank.org.toUpperCase() + ' can pay these ' + plan.bill_ccy + ' bills only in ' + plan.bill_ccy + ': choose a ' + plan.bill_ccy + ' bank');
+      loanBill = await _xeroLoanAcct(plan.org); loanBank = await _xeroLoanAcct(bank.org);
+      if (!loanBill || !loanBill.id) blocks.push('Intercompany loan (901) not found in Xero ' + plan.org.toUpperCase());
+      if (!loanBank || !loanBank.code) blocks.push('Intercompany loan (901) not found in Xero ' + bank.org.toUpperCase());
+      xcBank = await xeroContactFor(bank.org, run.supplier); if (!xcBank || !xcBank.ok) blocks.push('Xero ' + bank.org.toUpperCase() + ' contact for ' + run.supplier + ' not found: ' + ((xcBank && xcBank.error) || 'create or merge it in Xero')); }
+    else if (bank.ccy !== plan.bill_ccy && bank.ccy !== plan.base_ccy) blocks.push('A ' + bank.ccy + ' bank cannot pay ' + plan.bill_ccy + ' bills in Xero ' + plan.org.toUpperCase() + ': choose a ' + plan.bill_ccy + ' or ' + plan.base_ccy + ' bank');
     if (!(amount > 0)) blocks.push('Enter the amount that left the bank');
     else if (bank.ccy === plan.bill_ccy && Math.abs(amount - plan.total) > 0.01) blocks.push('The bank amount ' + bank.ccy + ' ' + amount.toFixed(2) + ' differs from the bills total ' + plan.bill_ccy + ' ' + plan.total.toFixed(2));
     const todo = plan.bills.filter(x => !x.paid);
@@ -8335,10 +8352,12 @@ app.post('/api/supply/payments/pay', async (req, res) => {
     const sp = todo.find(x => x.kind === 'supplier_payment' && x.will_create);
     if (sp && !dry) blocks.push('Create the supplier payment bill first (Create in Xero), then pay');
     if (blocks.length) return res.status(409).json({ error: blocks.join('; '), blocks, plan });
-    const rate = bank.ccy === plan.bill_ccy ? null : Math.round(plan.total / amount * 1e6) / 1e6;   // foreign per 1 base (Xero CurrencyRate)
+    const rate = (cross || bank.ccy === plan.bill_ccy) ? null : Math.round(plan.total / amount * 1e6) / 1e6;   // foreign per 1 base (Xero CurrencyRate); cross-org loan payments take Xero's day rate
     const approve = todo.filter(x => x.approve || (x.kind === 'supplier_payment' && x.will_create)).map(x => ({ InvoiceID: x.invoice_id || '(created by Create in Xero)', Status: 'AUTHORISED' }));
-    const payments = todo.map(x => Object.assign({ Invoice: { InvoiceID: x.invoice_id || '(created by Create in Xero)' }, Account: { AccountID: bank.id }, Date: date, Amount: x.pay_amount, Reference: plan.reference }, rate ? { CurrencyRate: rate } : {}));
-    if (dry) return res.json({ ok: true, dry: true, org: plan.org, bank, rate, approve, payments, bills: todo.map(x => ({ number: x.number, pay_amount: x.pay_amount, approve: !!(x.approve || x.will_create), note: x.note || null })) });
+    const payments = todo.map(x => Object.assign({ Invoice: { InvoiceID: x.invoice_id || '(created by Create in Xero)' }, Account: { AccountID: cross ? loanBill.id : bank.id }, Date: date, Amount: x.pay_amount, Reference: plan.reference + (cross ? ' (paid from ' + bank.org.toUpperCase() + ')' : '') }, rate ? { CurrencyRate: rate } : {}));
+    const spend = cross ? { Type: 'SPEND', Contact: { ContactID: xcBank.ContactID }, BankAccount: { AccountID: bank.id }, Date: date, Reference: plan.reference, CurrencyCode: bank.ccy, Status: 'AUTHORISED', LineAmountTypes: 'NoTax',
+      LineItems: [{ Description: 'Paid for Xero ' + plan.org.toUpperCase() + ' (intercompany loan): ' + todo.map(x => x.number + ' ' + x.pay_amount.toFixed(2)).join(', '), Quantity: 1, UnitAmount: Math.round(todo.reduce((a, x) => a + x.pay_amount, 0) * 100) / 100, AccountCode: loanBank.code }] } : null;
+    if (dry) return res.json({ ok: true, dry: true, org: plan.org, bank, cross, rate, approve, payments, spend, bills: todo.map(x => ({ number: x.number, pay_amount: x.pay_amount, approve: !!(x.approve || x.will_create), note: x.note || null })) });
     const by = authUser(req) || 'system', rk = plan.run_key;
     return await _withXactLock('xero_run_pay:' + rk, { code: 'XERO_PAY_BUSY', message: 'This run is already being paid in Xero. Wait for it to finish, then refresh.' }, async () => {
       const out = { ok: true, org: plan.org, bank: bank.name, rate, approved: [], payments: [], errors: [] };
@@ -8354,6 +8373,13 @@ app.post('/api/supply/payments/pay', async (req, res) => {
           await pool.query(`UPDATE planner.xero_run_payments SET status='created', xero_payment_id=$2 WHERE id=$1`, [lg, pay && pay.PaymentID]);
           out.payments.push({ number: x.number, amount: x.pay_amount, payment_id: pay && pay.PaymentID, url: x.invoice_id ? 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + x.invoice_id : null }); }
         catch (e) { await pool.query(`UPDATE planner.xero_run_payments SET status='error', error=$2 WHERE id=$1`, [lg, String(e.message).slice(0, 400)]).catch(() => {}); out.errors.push(x.number + ': ' + e.message); if (e && e.xero_daily) break; } }
+      if (cross && out.payments.length && !out.errors.length) {   // v28.292: the money left the other org's bank: Spend Money there, coded to its 901 loan
+        let lg2; try { lg2 = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'creating',$10) RETURNING id`,
+            [rk, bank.org, 'intercompany:' + bank.org, 'Spend Money ' + plan.reference, bank.id, bank.name, spend.LineItems[0].UnitAmount, bank.ccy, date, by])).rows[0].id;
+          const sr = await xeroFetch(bank.org, '/api.xro/2.0/BankTransactions', { method: 'PUT', body: { BankTransactions: [spend] } }); const bt = sr && sr.BankTransactions && sr.BankTransactions[0];
+          await pool.query(`UPDATE planner.xero_run_payments SET status='created', xero_payment_id=$2 WHERE id=$1`, [lg2, bt && bt.BankTransactionID]);
+          out.spend = { org: bank.org, bank: bank.name, amount: spend.LineItems[0].UnitAmount, id: bt && bt.BankTransactionID, url: bt && bt.BankTransactionID ? 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + bt.BankTransactionID : null }; }
+        catch (e) { if (lg2) await pool.query(`UPDATE planner.xero_run_payments SET status='error', error=$2 WHERE id=$1`, [lg2, String(e.message).slice(0, 400)]).catch(() => {}); out.errors.push('Spend Money in Xero ' + bank.org.toUpperCase() + ': ' + (/duplicate key/.test(e.message) ? 'already created from HORIZON' : e.message)); } }
       try { await pool.query(`UPDATE planner.payment_fx SET bank_account_id=$4, bank_name=$5, updated_at=now() WHERE run_date=$1 AND supplier=$2 AND region=$3`, [run.dt, run.supplier, plan.org === 'au' ? 'AU' : 'UK', bank.id, bank.name]); } catch (_) {}
       try { xeroPreflightBust(); } catch (_) {} try { invalidateSupplyCaches('payment'); } catch (_) {}
       out.ok = !out.errors.length; res.json(out); });
