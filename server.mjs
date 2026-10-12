@@ -7316,37 +7316,49 @@ const UPFX_EMAILED_KEY = 'up_fx_statement_emailed', UPFX_KEEP_DAYS = 120, UPFX_B
 const UPFX_PAY_OUT = new Set(['ACCPAYPAYMENT', 'ARCREDITPAYMENT', 'AROVERPAYMENTPAYMENT', 'ARPREPAYMENTPAYMENT']);   // bill paid, customer refund
 const UPFX_PAY_IN = new Set(['ACCRECPAYMENT', 'APCREDITPAYMENT', 'APOVERPAYMENTPAYMENT', 'APPREPAYMENTPAYMENT']);    // invoice received, supplier refund
 async function upfxSetting(key) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0]; return r ? r.value : null; } catch (e) { return null; } }
-async function upfxConfig() {
-  const acc = String((await upfxSetting('up_fx_bank_account_id')) || '').replace(/"/g, '').trim();
+// v28.291 (Ben 12-Oct-26): a second account, Wise FX USD in Xero AU ("same situation as Universal Partners FX"). Each statement account
+// has its own org, Xero bank account, emailed-ids setting, file name and etl job; the weekly cron covers both (one email per account).
+const UPFX_ACCTS = { up: { org: 'uk', label: 'UP FX', name: 'Universal Partners FX USD', setting: 'up_fx_bank_account_id', emailed: UPFX_EMAILED_KEY, job: 'up_fx_statement' },
+  wise: { org: 'au', label: 'Wise FX', name: 'Wise FX USD', setting: 'wise_fx_bank_account_id', emailed: 'wise_fx_statement_emailed', job: 'wise_fx_statement' } };
+const _upfxAcctMemo = {};
+async function upfxConfig(key) {
+  const A = UPFX_ACCTS[key] || UPFX_ACCTS.up;
+  let acc = String((await upfxSetting(A.setting)) || '').replace(/"/g, '').trim();
+  if (A !== UPFX_ACCTS.up && !/^[0-9a-f-]{36}$/i.test(acc)) {   // Wise: found by name in Xero AU (memoised 6 h); a saved id wins
+    const m = _upfxAcctMemo[key]; if (m && Date.now() - m.at < 6 * 3600000) acc = m.id;
+    else { const j = await xeroFetch(A.org, '/api.xro/2.0/Accounts?where=' + encodeURIComponent('Type=="BANK"'));
+      const hit = ((j && j.Accounts) || []).find(x => x.Status === 'ACTIVE' && String(x.Name || '').trim().toLowerCase() === A.name.toLowerCase());
+      if (!hit) { const e = new Error(A.name + ' not found as a bank account in Xero ' + A.org.toUpperCase()); e.code = 404; throw e; }
+      acc = hit.AccountID; _upfxAcctMemo[key] = { id: acc, at: Date.now() }; } }
   let to = null; const raw = await upfxSetting('up_fx_statement_recipients');
   try { const j = raw ? JSON.parse(raw) : null; to = Array.isArray(j) ? j : (typeof j === 'string' ? j.split(/[,;\s]+/) : null); } catch (e) { to = String(raw || '').split(/[,;\s]+/); }
   to = hzEmailList(to); if (!to.length) to = UPFX_DEFAULT_RECIPIENTS.slice();
-  return { account_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(acc) ? acc.toLowerCase() : UPFX_DEFAULT_ACCOUNT, recipients: to };
+  return { key: UPFX_ACCTS[key] ? key : 'up', org: A.org, label: A.label, default_name: A.name, emailed_key: A.emailed, job: A.job, account_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(acc) ? acc.toLowerCase() : UPFX_DEFAULT_ACCOUNT, recipients: to };
 }
 // Xero dates: "/Date(1790294400000+0000)/" or "2026-09-29T00:00:00" -> YYYY-MM-DD (UTC; Xero stores the date at 00:00 UTC)
 function upfxXd(v) { const m = /\/Date\((-?\d+)/.exec(String(v || '')); if (m) return new Date(Number(m[1])).toISOString().slice(0, 10); const s = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; }
 function upfxLondonToday() { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const g = t => (p.find(x => x.type === t) || {}).value; return g('year') + '-' + g('month') + '-' + g('day'); }
 const _upfxLeg = new Map();   // bank transaction id -> { total, currency, at } (a transfer leg's own-currency total; 6 h)
-async function upfxPaged(path, key) {   // Xero pages are 100 rows; ~1 call per page, xeroFetch backs off on 429
+async function upfxPaged(path, key, org) {   // Xero pages are 100 rows; ~1 call per page, xeroFetch backs off on 429
   const out = [];
-  for (let p = 1; p <= 50; p++) { const j = await xeroFetch('uk', path + (path.includes('?') ? '&' : '?') + 'page=' + p); const rows = (j && j[key]) || []; out.push(...rows); if (rows.length < 100) break; }
+  for (let p = 1; p <= 50; p++) { const j = await xeroFetch(org || 'uk', path + (path.includes('?') ? '&' : '?') + 'page=' + p); const rows = (j && j[key]) || []; out.push(...rows); if (rows.length < 100) break; }
   return out;
 }
 async function buildUpfxStatement(opts) {
   opts = opts || {}; const all = !!opts.all;
   const from = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.from || '')) ? String(opts.from) : null, to = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.to || '')) ? String(opts.to) : null;
-  const cfg = await upfxConfig(), ACC = cfg.account_id, G = 'Guid("' + ACC + '")';
+  const cfg = await upfxConfig(opts.acct), ACC = cfg.account_id, G = 'Guid("' + ACC + '")', ORG = cfg.org;
   const dw = (from ? ' AND Date>=DateTime(' + from.replace(/-/g, ',') + ')' : '') + (to ? ' AND Date<=DateTime(' + to.replace(/-/g, ',') + ')' : '');
-  const aj = await xeroFetch('uk', '/api.xro/2.0/Accounts/' + ACC); const A = (aj && aj.Accounts && aj.Accounts[0]) || {};
+  const aj = await xeroFetch(ORG, '/api.xro/2.0/Accounts/' + ACC); const A = (aj && aj.Accounts && aj.Accounts[0]) || {};
   if (A.Type && A.Type !== 'BANK') { const e = new Error('Xero account ' + ACC + ' is not a bank account (' + A.Type + ')'); e.code = 400; throw e; }
-  const acct = { id: ACC, name: A.Name || 'Universal Partners FX USD', currency: A.CurrencyCode || 'USD' };
+  const acct = { id: ACC, key: cfg.key, org: ORG, label: cfg.label, name: A.Name || cfg.default_name, currency: A.CurrencyCode || 'USD' };
   const counts = { payments: 0, bank_txns: 0, transfers: 0, excluded_status: 0, reconciled_skipped: 0, transfer_legs_skipped: 0, zero_skipped: 0 };
   const warnings = [], lines = new Map();
   const inRange = d => !!d && (!from || d >= from) && (!to || d <= to);
   const add = (l) => { if (!inRange(l.date)) return; if (!(Math.abs(l.amount) >= 0.005)) { counts.zero_skipped++; return; } if (!lines.has(l.id)) lines.set(l.id, l); };
   // 1. Payments on the account
   // no Status in the where: DELETED / VOIDED are read and dropped here so counts.excluded_status shows them
-  const pays = await upfxPaged('/api.xro/2.0/Payments?where=' + encodeURIComponent('Account.AccountID==' + G + dw) + '&order=Date', 'Payments');
+  const pays = await upfxPaged('/api.xro/2.0/Payments?where=' + encodeURIComponent('Account.AccountID==' + G + dw) + '&order=Date', 'Payments', ORG);
   for (const p of pays) {
     if (String(p.Status || '').toUpperCase() !== 'AUTHORISED') { counts.excluded_status++; continue; }
     const t = String(p.PaymentType || '').toUpperCase(), dir = UPFX_PAY_OUT.has(t) ? 'out' : UPFX_PAY_IN.has(t) ? 'in' : null;
@@ -7366,7 +7378,7 @@ async function buildUpfxStatement(opts) {
   while (ws <= btTo) {
     const n = new Date(ws + 'T00:00:00Z'); n.setUTCMonth(n.getUTCMonth() + 6); const nx = n.toISOString().slice(0, 10);
     const we = new Date(n.getTime() - 86400000).toISOString().slice(0, 10), end = we < btTo ? we : btTo;
-    bts.push(...await upfxPaged('/api.xro/2.0/BankTransactions?where=' + encodeURIComponent('BankAccount.AccountID==' + G + ' AND Status=="AUTHORISED" AND Date>=DateTime(' + ws.replace(/-/g, ',') + ') AND Date<=DateTime(' + end.replace(/-/g, ',') + ')'), 'BankTransactions'));
+    bts.push(...await upfxPaged('/api.xro/2.0/BankTransactions?where=' + encodeURIComponent('BankAccount.AccountID==' + G + ' AND Status=="AUTHORISED" AND Date>=DateTime(' + ws.replace(/-/g, ',') + ') AND Date<=DateTime(' + end.replace(/-/g, ',') + ')'), 'BankTransactions', ORG));
     ws = nx;
   }
   const legIds = new Set();
@@ -7382,7 +7394,7 @@ async function buildUpfxStatement(opts) {
   }
   // 3. Bank transfers from / to the account: amount from THIS account's leg (own currency)
   const trw = '(FromBankAccount.AccountID==' + G + ' OR ToBankAccount.AccountID==' + G + ')' + dw;
-  const tj = await xeroFetch('uk', '/api.xro/2.0/BankTransfers?where=' + encodeURIComponent(trw));
+  const tj = await xeroFetch(ORG, '/api.xro/2.0/BankTransfers?where=' + encodeURIComponent(trw));
   for (const x of ((tj && tj.BankTransfers) || [])) {
     if (/^(DELETED|VOIDED)$/i.test(String(x.Status || ''))) { counts.excluded_status++; continue; }
     const isIn = String((x.ToBankAccount || {}).AccountID || '').toLowerCase() === ACC, isOut = String((x.FromBankAccount || {}).AccountID || '').toLowerCase() === ACC;
@@ -7391,7 +7403,7 @@ async function buildUpfxStatement(opts) {
       if (rec && !all) { counts.reconciled_skipped++; continue; }
       const legId = dir === 'in' ? x.ToBankTransactionID : x.FromBankTransactionID; let leg = legId ? _upfxLeg.get(legId) : null;
       if (!leg || Date.now() - leg.at > 6 * 3600000) {
-        try { const bj = await xeroFetch('uk', '/api.xro/2.0/BankTransactions/' + legId); const b = bj && bj.BankTransactions && bj.BankTransactions[0];
+        try { const bj = await xeroFetch(ORG, '/api.xro/2.0/BankTransactions/' + legId); const b = bj && bj.BankTransactions && bj.BankTransactions[0];
           leg = b ? { total: Math.abs(Number(b.Total) || 0), currency: b.CurrencyCode || '', at: Date.now() } : null; if (leg) _upfxLeg.set(legId, leg); }
         catch (e) { leg = null; warnings.push('transfer ' + x.BankTransferID + ': could not read its ' + dir + ' leg (' + e.message + ')'); }
       }
@@ -7416,13 +7428,13 @@ function upfxCsv(lines) {
   const dmy = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; };
   return ['*Date,*Amount,Payee,Description,Reference,Check Number'].concat((lines || []).map(l => [dmy(l.date), Number(l.amount).toFixed(2), l.payee, l.description, l.reference, ''].map(q).join(','))).join('\r\n') + '\r\n';
 }
-const upfxFileName = (suffix) => 'UP FX Statement' + (suffix ? ' ' + suffix : '') + ' ' + ddMonYy(upfxLondonToday()) + '.csv';
+const upfxFileName = (suffix, label) => (label || 'UP FX') + ' Statement' + (suffix ? ' ' + suffix : '') + ' ' + ddMonYy(upfxLondonToday()) + '.csv';
 async function upfxAdmin(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return false; } return true; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return false; } }
-const upfxQuery = q => ({ from: q.from, to: q.to, all: String(q.all || '') === '1' || String(q.all || '') === 'true' });
+const upfxQuery = q => ({ from: q.from, to: q.to, all: String(q.all || '') === '1' || String(q.all || '') === 'true', acct: UPFX_ACCTS[String(q.acct || '')] ? String(q.acct) : 'up' });
 app.get('/api/supply/xero/up-fx-statement.csv', async (req, res) => {
   if (!(await upfxAdmin(req, res))) return;
   try { const s = await buildUpfxStatement(upfxQuery(req.query));
-    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + upfxFileName() + '"', 'Cache-Control': 'no-store', 'X-Statement-Lines': String(s.lines.length) }).send(upfxCsv(s.lines)); }
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + upfxFileName('', s.account.label) + '"', 'Cache-Control': 'no-store', 'X-Statement-Lines': String(s.lines.length) }).send(upfxCsv(s.lines)); }
   catch (e) { if (!(e.code >= 400 && e.code < 500) && e.code !== 503) log500(e); res.status(e.code === 503 ? 503 : (e.code >= 400 && e.code < 500 ? e.code : 500)).json({ error: e.message }); }
 });
 app.get('/api/supply/xero/up-fx-statement', async (req, res) => {
@@ -7434,7 +7446,7 @@ app.get('/api/supply/xero/up-fx-statement', async (req, res) => {
 // Sends ONLY when an unreconciled line exists that no earlier email carried (ids in up_fx_statement_emailed). ?dry=1 (or
 // { dry_run: true }) returns what would be sent and writes nothing. Ids are only marked emailed after Resend accepts the
 // email (sandbox has no RESEND_API_KEY: nothing sends and nothing is marked). Every real run logs etl_runs job up_fx_statement.
-async function upfxEmailed() { let j = null; try { j = JSON.parse((await upfxSetting(UPFX_EMAILED_KEY)) || 'null'); } catch (e) { j = null; } const ids = (j && j.ids && typeof j.ids === 'object') ? j.ids : {};
+async function upfxEmailed(key) { let j = null; try { j = JSON.parse((await upfxSetting(key || UPFX_EMAILED_KEY)) || 'null'); } catch (e) { j = null; } const ids = (j && j.ids && typeof j.ids === 'object') ? j.ids : {};
   const cut = new Date(Date.now() - UPFX_KEEP_DAYS * 86400000).toISOString().slice(0, 10); let pruned = 0;
   for (const k of Object.keys(ids)) if (!(String(ids[k]) >= cut)) { delete ids[k]; pruned++; }
   return { ids, pruned }; }
@@ -7445,22 +7457,28 @@ function upfxEmailHtml(s, fresh, today) {
   return '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;max-width:760px">'
     + '<p style="font-size:14px"><b>' + fresh.length + ' new unreconciled transaction' + (fresh.length === 1 ? '' : 's') + '</b> on <b>' + he(s.account.name) + '</b> (' + he(s.account.currency) + ') since the last email. ' + s.lines.length + ' unreconciled in total.</p>'
     + '<table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Date</th><th style="' + th + '">In / Out</th><th style="' + th + ';text-align:right">Amount (' + he(s.account.currency) + ')</th><th style="' + th + '">Payee</th><th style="' + th + '">Reference</th></tr>' + fresh.map(row).join('') + '</table>'
-    + '<p style="font-size:13px;margin-top:16px;padding:10px 12px;background:#eff6ff;border-radius:8px"><b>To import:</b> in Xero go to Accounting &gt; Bank accounts &gt; ' + he(s.account.name) + ' &gt; Manage Account &gt; Import a Statement, and choose <b>' + he(upfxFileName('NEW')) + '</b> (the new lines only). '
-    + '<b>' + he(upfxFileName()) + '</b> holds every unreconciled line (' + s.lines.length + '); use it only if earlier statements were not imported, otherwise lines already imported will be duplicated. Then reconcile each line in Xero.</p>'
+    + '<p style="font-size:13px;margin-top:16px;padding:10px 12px;background:#eff6ff;border-radius:8px"><b>To import:</b> in Xero go to Accounting &gt; Bank accounts &gt; ' + he(s.account.name) + ' &gt; Manage Account &gt; Import a Statement, and choose <b>' + he(upfxFileName('NEW', s.account.label)) + '</b> (the new lines only). '
+    + '<b>' + he(upfxFileName('', s.account.label)) + '</b> holds every unreconciled line (' + s.lines.length + '); use it only if earlier statements were not imported, otherwise lines already imported will be duplicated. Then reconcile each line in Xero.</p>'
     + '<p style="font-size:12px;color:#64748b">Sent by HORIZON on ' + he(ddMonYy(today)) + '. Only sent when there are new unreconciled lines.</p></div>';
 }
-async function runUpfxStatementCron(opts) {
+async function runUpfxStatementCron(opts) {   // v28.291: every statement account (Universal Partners FX USD in UK, Wise FX USD in AU), one email each
+  const out = { ok: true, accounts: {} };
+  for (const key of Object.keys(UPFX_ACCTS)) { try { out.accounts[key] = await runUpfxStatementOne(key, opts); if (out.accounts[key] && out.accounts[key].ok === false) out.ok = false; }
+    catch (e) { out.ok = false; out.accounts[key] = { ok: false, error: e.message }; if (!(opts && opts.dry)) { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ($1,'error',0,$2)`, [UPFX_ACCTS[key].job, String(e.message).slice(0, 500)]); } catch (_) {} } } }
+  const up = out.accounts.up || {}; return Object.assign({}, up, out);   // the UP fields stay at the top level for the existing callers
+}
+async function runUpfxStatementOne(key, opts) {
   const dry = !!(opts && opts.dry), today = upfxLondonToday();
-  const cfg = await upfxConfig(); const s = await buildUpfxStatement({ all: false });
-  const em = await upfxEmailed(); const fresh = s.lines.filter(l => !em.ids[l.id]);
-  const subject = 'Universal Partners FX: ' + fresh.length + ' new unreconciled transaction' + (fresh.length === 1 ? '' : 's') + ' (' + ddMonYy(today) + ')';
+  const cfg = await upfxConfig(key); const s = await buildUpfxStatement({ all: false, acct: key });
+  const em = await upfxEmailed(cfg.emailed_key); const fresh = s.lines.filter(l => !em.ids[l.id]);
+  const subject = s.account.name + ': ' + fresh.length + ' new unreconciled transaction' + (fresh.length === 1 ? '' : 's') + ' (' + ddMonYy(today) + ')';
   const base = { account: s.account, to: cfg.recipients, unreconciled: s.lines.length, new_lines: fresh.length, previously_emailed: s.lines.length - fresh.length, warnings: s.warnings };
   if (dry) return Object.assign({ ok: true, dry_run: true, would_send: fresh.length > 0, subject, lines: fresh, csv_new: upfxCsv(fresh), csv_all: upfxCsv(s.lines), html: fresh.length ? upfxEmailHtml(s, fresh, today) : null, emailed_tracked: Object.keys(em.ids).length, would_prune: em.pruned }, base);
-  const etl = async (status, rows, msg) => { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('up_fx_statement',$1,$2,$3)`, [status, rows, String(msg).slice(0, 500)]); } catch (e) { console.warn('[up-fx] etl_runs insert failed: ' + (e && e.message)); } };
-  const save = async () => pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [UPFX_EMAILED_KEY, JSON.stringify({ ids: em.ids, updated_at: new Date().toISOString() })]);
+  const etl = async (status, rows, msg) => { try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ($4,$1,$2,$3)`, [status, rows, String(msg).slice(0, 500), cfg.job]); } catch (e) { console.warn('[up-fx] etl_runs insert failed: ' + (e && e.message)); } };
+  const save = async () => pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2`, [cfg.emailed_key, JSON.stringify({ ids: em.ids, updated_at: new Date().toISOString() })]);
   if (!fresh.length) { if (em.pruned) await save().catch(() => {}); await etl('success', 0, 'no change: ' + s.lines.length + ' unreconciled, 0 new, not sent' + (s.warnings.length ? ' | ' + s.warnings.length + ' warning(s)' : '')); return Object.assign({ ok: true, sent: 0, reason: 'no new unreconciled lines' }, base); }
   const r = await sendResendEmail({ to: cfg.recipients, subject, html: upfxEmailHtml(s, fresh, today), kind: 'up-fx-statement', ref: s.account.name, by: 'cron',
-    attachments: [{ filename: upfxFileName('NEW'), content: Buffer.from(upfxCsv(fresh), 'utf8').toString('base64') }, { filename: upfxFileName(), content: Buffer.from(upfxCsv(s.lines), 'utf8').toString('base64') }] });
+    attachments: [{ filename: upfxFileName('NEW', s.account.label), content: Buffer.from(upfxCsv(fresh), 'utf8').toString('base64') }, { filename: upfxFileName('', s.account.label), content: Buffer.from(upfxCsv(s.lines), 'utf8').toString('base64') }] });
   if (r.sandbox) { await etl('success', 0, 'no change: sandbox (no RESEND_API_KEY), ' + fresh.length + ' new not sent and not marked'); return Object.assign({ ok: true, sent: 0, sandbox: true }, base); }
   if (r.error || !r.sent) { await etl('error', 0, 'email failed: ' + (r.error || 'not sent') + ' (' + fresh.length + ' new kept for next run)'); return Object.assign({ ok: false, sent: 0, error: r.error || 'not sent' }, base); }
   for (const l of s.lines) if (!em.ids[l.id]) em.ids[l.id] = today;   // mark every line the email carried (the new ones; the rest were already marked)

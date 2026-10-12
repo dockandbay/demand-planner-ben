@@ -1,3 +1,12 @@
+## v28.291 (Ben, branch review-fixes-2026-10-05): Wise FX USD (Xero AU) added to the FX statement process
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md`, `deploy notes/CRON_UPFX_STATEMENT_2026-10-12.md` (+ package.json, CHANGES.md). No migration, no env vars. Optional app_settings `wise_fx_bank_account_id` (else found by name).
+
+- The Universal Partners FX USD statement process now also covers **Wise FX USD in Xero AU**: same statement file (Xero import layout), same weekly email rules, its own emailed-ids (`wise_fx_statement_emailed`) and etl job (`wise_fx_statement`).
+- The existing weekly cron `POST /api/cron/up-fx-statement` runs both accounts and sends one email per account, each only when it has new unreconciled lines (no new schedule). The UP fields stay at the top of the response; both accounts are under `accounts`.
+- Payments Report: **Wise FX Statement** button next to UP FX Statement. CSV / JSON endpoints take `?acct=wise`.
+- Verified: Wise FX USD resolved in Xero AU (USD), 0 unreconciled lines so far (header-only file "Wise FX Statement 12-Oct-26.csv"); UP FX unchanged (6 lines); cron dry run: UP would send 6, Wise would not send (nothing new). Nothing sent.
+
 ## v28.290 (Ben, branch review-fixes-2026-10-05): Create deposit credit note from the PO drawer and PLAN > PO > Payments; AU rule from 30-Sep-26
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

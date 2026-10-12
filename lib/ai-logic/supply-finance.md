@@ -169,19 +169,19 @@ fingerprints:
   server.mjs::/api/supply/charge/:id/accept: 2726245218bd
   server.mjs::/api/supply/po-polybags/:po: abcb96e2dee0
   server.mjs::afLoadCommon: c726c90779ce
-  server.mjs::buildUpfxStatement: 55fca54cf96a
+  server.mjs::buildUpfxStatement: 048c815d0ff6
   server.mjs::upfxCsv: 4f84929a2c4b
-  server.mjs::upfxConfig: 9883c0395688
-  server.mjs::runUpfxStatementCron: c69c19fb5017
-  server.mjs::upfxEmailed: 9f27ac33e9d1
-  server.mjs::/api/supply/xero/up-fx-statement.csv: 529bf12ec978
+  server.mjs::upfxConfig: 852db12499f2
+  server.mjs::runUpfxStatementCron: 2f88d59bfde4
+  server.mjs::upfxEmailed: 41540676aae3
+  server.mjs::/api/supply/xero/up-fx-statement.csv: aba03fb932bf
   server.mjs::/api/cron/up-fx-statement: e01616997794
   supply/inject.html::PO_STATUSES: b735ad053af6
   supply/inject.html::stGroup: 0d2f0b12bf7b
   supply/inject.html::prodStatusException: dedfa68a3f75
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
-  supply/inject.html::upfxDownload: 0924ecaf4755
+  supply/inject.html::upfxDownload: 13f375924b7e
   server.mjs::syncXeroBills: aa83d71fb7e3
   server.mjs::_syncXeroBillsRun: 96082099a446
   server.mjs::xbUpsert: 7f5a5479a726
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.290
+verified_version: v28.291
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -312,6 +312,7 @@ verified_version: v28.290
 - Change-bill picker (PO drawer > MASTER DATA & DOCS > Linked records): lists cached bills (voided ones last), always including the current link; when it opens it re-checks the listed bills and the current one live in Xero (GET Invoices?IDs, 50 per call, per org) and searches Xero for the typed text so a bill created since the last sync appears. Voided / deleted bills are struck through and cannot be picked; a voided current link shows "⚠ voided". (source: supply/inject.html :: xeroBillPicker; server.mjs :: /api/supply/xero/bills/search, /api/supply/xero/bills/verify, xbRefreshLive)
 
 ## Universal Partners FX USD statement (from v28.174)
+- v28.291 (Ben 12-Oct-26): the same statement process also covers **Wise FX USD in Xero AU** ("same situation as Universal Partners FX"). Each statement account has its own org, Xero bank account (Wise found by its exact name among Xero AU bank accounts, or app_settings wise_fx_bank_account_id), emailed-ids setting (wise_fx_statement_emailed), file name ("Wise FX Statement dd-mmm-yy.csv") and etl job (wise_fx_statement). The weekly cron POST /api/cron/up-fx-statement runs both and sends one email per account, each only when that account has new unreconciled lines. Payments Report has a Wise FX Statement button next to UP FX Statement; the CSV / JSON endpoints take ?acct=wise. (source: server.mjs :: UPFX_ACCTS, upfxConfig, runUpfxStatementCron, runUpfxStatementOne; supply/inject.html :: upfxDownload)
 - Why: Xero's API cannot create bank statement lines, so HORIZON builds a statement file for the Universal Partners FX USD bank account (UK org; account id in app_settings up_fx_bank_account_id) that someone imports in Xero (the account > Manage Account > Import a Statement). Each in/out then has a statement line to reconcile against. Read only: Xero GET calls only. (source: server.mjs :: buildUpfxStatement, upfxConfig)
 - Sources. (1) Payments on the account with Status AUTHORISED (DELETED and VOIDED are dropped). ACCPAYPAYMENT, ARCREDITPAYMENT and AR overpayment/prepayment refunds are money OUT (negative); ACCRECPAYMENT, APCREDITPAYMENT and AP overpayment/prepayment refunds are money IN (positive). Amount = BankAmount (the bank account's currency). Payee = the invoice or credit note contact; Reference = the invoice or credit note number. (2) Spend / receive money on the account, AUTHORISED: SPEND* = OUT, RECEIVE* = IN; transfer legs (SPEND-TRANSFER / RECEIVE-TRANSFER) are skipped. Read in 6-month date windows, from 24 months back by default, because Xero refuses an account-only filter on this org. (3) Bank transfers from or to the account: IN when it is the To account, OUT when it is the From account. The amount comes from this account's own leg (the To or From bank transaction), so it is in USD; a cross-currency transfer's Amount is in the From currency and is not used. Payee = the other bank account's name; Reference = the transfer reference. (source: server.mjs :: buildUpfxStatement)
 - Unreconciled: IsReconciled for payments and bank transactions; ToIsReconciled (IN) or FromIsReconciled (OUT) for transfers. Default = unreconciled only; all=1 adds reconciled lines; from / to filter by date. Lines are deduplicated by source id and sorted by date. Description is "FX Transfer In" for money in and "FX Payment Out" for money out. (source: server.mjs :: buildUpfxStatement)
