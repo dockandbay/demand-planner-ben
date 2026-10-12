@@ -1,3 +1,14 @@
+## v28.288 (Ben, branch review-fixes-2026-10-05): Payments Report "Paid" with a bank account: one confirm marks paid and creates the Xero payments
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/360_xero_run_payments.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 360** (new `planner.xero_run_payments`; `payment_fx.bank_account_id / bank_name`). No new env vars.
+
+- **Paid opens a popup** (mockup approved by Ben): favourites **BOA #5237 USD**, **Universal Partners FX USD** (Xero UK) and **Wise FX USD** (Xero AU, set up 12-Oct-26), a search box for the paying org's other bank accounts, date paid, amount that left the bank, and the Xero bills it pays with live amount due and a total check. A paid run gets a small **bank ↗** link to reopen it.
+- **No bank is preselected** (Ben: "if no bank is selected the transactions will not be created"). Without a bank, only HORIZON is marked paid; **Mark paid + create Xero payment** stays disabled until a bank is picked.
+- **Mark paid + create Xero payment** (admins, in-page confirm): records HORIZON paid (as before, plus the bank), creates the supplier payment bill via Create in Xero when the run has none, approves draft bills, then creates one Xero payment per bill (the SUPPLIER-PAYMENT bill and each Other payment's own bill, e.g. PO-DHL-XR-2026-07) from the same bank and date, so the one bank line matches them all.
+- **Blocks** the Xero part: bank amount not equal to the bills' total (same-currency bank), a payment above a bill's amount due, a missing / voided / already paid bill, a bank in neither the bills' nor the base currency. A GBP or AUD bank paying USD bills sets CurrencyRate = USD total / bank amount.
+- New `POST /api/supply/payments/pay-plan` (read only) and `POST /api/supply/payments/pay` (`confirm:true`, admin; `?dry=1` returns the exact payloads). One `xero_run_payments` row per bill, written before the Xero call; a bill is never paid twice for the same run. CONFIG bank registry gains the `wise_fx_usd` role (AU).
+- Verified on a second server (8128, sandbox DB + live Xero reads only): dry runs for UK 2026-07-25 XR Textile (BOA, USD 16,475.34, no rate; Lloyds GBP gives CurrencyRate; +5 USD blocked) and AU 2026-10-01 (Wise FX USD resolved in Xero AU, ANZ AUD rate); an Other payment with no Xero bill (SR-14) blocks. jsdom: popup opens from Paid, no bank preselected (Xero button disabled, HORIZON-only enabled), favourites (Wise disabled on a UK run), search finds the Lloyds accounts, picking BOA enables the Xero button, confirm step names bank, amount and bill; the confirm path calls payment-fx, xero-post, pay in that order (all mocked). No live writes.
+
 ## v28.287 (Ben, branch review-fixes-2026-10-05): Coghlans 3PL invoicing is weekly only (one invoice = one Xero bill)
 
 **Files:** `artifact_v16.7.html`, `server.mjs`, `lib/ai-logic/reports.md` (+ package.json, CHANGES.md). No migration, no env vars.
