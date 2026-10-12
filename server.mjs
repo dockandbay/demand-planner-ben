@@ -12,6 +12,7 @@ import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
+import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
@@ -8008,6 +8009,19 @@ async function computeXeroRunPlan(run, ctx) {
     const ok = legacyLines.filter(l => l.account && l.account.code);
     if (ok.length) checks.push({ level: 'ok', msg: ok.length + ' pre-P58 line(s) → production account (legacy mapping, e.g. ' + ok[0].account.code + ')' });
   }
+  // v28.285 (Ben 12-Oct-26): one bank payment split across several Xero bills: the run's "Other" payments have their own bills. The
+  // supplier-payment bill then gets $0 KEY lines (bank total, each bill's share, one PO per line). Only when an Other payment is in the run.
+  let keyLines = [];
+  try { const others = lines.filter(l => l && /other/i.test(String(l.type || '')) && Math.abs(Number(l.amount) || 0) > 0.005);
+    if (others.length) {
+      const nums = new Map(); for (const o of others) { const ref = String(o.reference || '').trim(); if (!ref) continue;
+        const b = (await pool.query(`SELECT invoice_number FROM planner.xero_bills WHERE lower(region)=$1 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND (upper(invoice_number)=upper($2) OR upper(invoice_number) LIKE upper($2) || ' /%') ORDER BY (upper(invoice_number)=upper($2)) DESC LIMIT 1`, [paying, ref])).rows[0];
+        if (b) nums.set(ref, String(b.invoice_number).split(' / ')[0]); }
+      keyLines = paySplitKeyLines({ number: ref, amount: total, lines: outLines.map(l => ({ type: l.type, reference: l.reference, amount: l.amount })) },
+        others.map(o => ({ number: nums.get(String(o.reference || '').trim()) || null, reference: o.reference, description: o.description || '', amount: Number(o.amount) || 0 })),
+        { ccy: String(run.base_ccy || 'USD').toUpperCase(), date: run.dt, accountCode: (outLines.find(l => l.account && l.account.code) || {}).account ? outLines.find(l => l.account && l.account.code).account.code : undefined });
+      if (keyLines.length) checks.push({ level: 'ok', msg: 'Split payment: the bill gets ' + keyLines.length + ' $0 key lines explaining the ' + (1 + others.length) + ' bills paid by this bank payment (' + others.map(o => nums.get(String(o.reference || '').trim()) || o.reference).join(', ') + ').' });
+    } } catch (e) { console.warn('[xero-plan] split key lines: ' + e.message); }
   const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
   const noBill = outLines.filter(l => !l.linked_bill && !l.blocked).map(l => l.reference);
@@ -8018,7 +8032,7 @@ async function computeXeroRunPlan(run, ctx) {
   if (voidedLinks.length) checks.push({ level: 'error', msg: 'Linked Xero bill voided, choose the right bill (PO drawer > Linked records > change bill): ' + voidedLinks.map(f => f.po + ' (' + (f.candidates ? f.candidates + ' candidate bills' : 'no live bill found') + ')').join(', ') });
   return { ok: true, region: paying, paying_org: paying, supplier: run.supplier, voided_links: voidedLinks, healed_links: heal.healed || [],
     contact: { ok: !!contact.ok, id: contact.ContactID || null, name: contact.ok ? contact.Name : (contact.target || ''), target: contact.target || '', configured: !!contact.configured, lookup_failed: !!contact.lookup_failed, error: contact.ok ? null : contact.error },   // v28.176 (Ben)
-    reference: ref, currency: String(run.base_ccy || 'USD').toUpperCase(), run_key: run.run_key || null, date: run.dt, bank, lines: outLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
+    reference: ref, currency: String(run.base_ccy || 'USD').toUpperCase(), run_key: run.run_key || null, date: run.dt, bank, lines: outLines, key_lines: keyLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
 }
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
   try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
@@ -8175,7 +8189,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {
     //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
     for (const l of plan.lines) { if (l.tracking && l.tracking.option && !l.tracking.exists) await _ensureProductionOption(region, l.tracking.option); }
     const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference + (l.cross ? ' (cross-org via loan, USD ' + (Math.round(l.amount * 100) / 100) + ')' : ''), Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
-    const billBody = { Type: 'ACCPAY', Contact: { ContactID: plan.contact.id }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: plan.currency || 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: billLines };
+    const billBody = { Type: 'ACCPAY', Contact: { ContactID: plan.contact.id }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: plan.currency || 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: (plan.key_lines || []).concat(billLines) };   // v28.285: $0 key lines first when the bank payment is split across several bills
     const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
     xeroPreflightBust();   // v28.173 (Ben): the run is posted + bill amounts due move: drop the preflight badges' cache
     const binv = br && br.Invoices && br.Invoices[0];

@@ -1,3 +1,10 @@
+## v28.285 (Ben, branch review-fixes-2026-10-05): supplier-payment bills explain a bank payment split across several Xero bills
+
+**Files:** `server.mjs`, `lib/pay_split_note.mjs` (new), `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: SUPPLIER-PAYMENT-XR-2026-09-28 (61,501.41) and PO-DHL-XR-2026-07 (7,967.35) were one bank payment of 69,468.76. When a run includes Other payments (own Xero bills), the supplier-payment bill now starts with **$0 key lines**: "KEY: bank payment 28-Sep-26 of USD 69,468.76 is split across 2 Xero bills (match both to the one bank line)", then "1. <this bill>: amount, made up of:" with **one PO per line**, then "2. PO-DHL-XR-2026-07: 7,967.35". Only when more than one bill is in play. The Xero preview shows a check line saying so.
+- **Live test (Ben asked):** DRAFT bill **TEST-SUPPLIER-PAYMENT-XR-2026-09-28** created in Xero UK (InvoiceID 131047c2-c476-431d-9175-9a4fb7695308): the original 3 PO balance lines (620.36 P56) plus the key lines, total 61,501.41. Draft only: no payment, nothing approved. Delete it in Xero after review.
+
 ## v28.284 (Ben, branch review-fixes-2026-10-05): ACCOUNTS drawers left aligned and styled; credit note button at the top, in blue
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars. No logic change.
