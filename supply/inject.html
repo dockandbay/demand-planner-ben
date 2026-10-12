@@ -54,6 +54,7 @@
 #app.accounts-active #view-tabs-row .tool-bar{display:none!important}
 #acdrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease;display:none}#acdrawer-bg.show{display:block}#acdrawer-bg.open{background:rgba(15,23,42,.32)}
 #acdrawer{position:absolute;top:0;right:0;height:100%;width:min(680px,100vw);background:var(--card);color:var(--ink);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);text-align:left}#acdrawer-bg.open #acdrawer{transform:translateX(0)}   /* v28.280 Reconcile review drawer */
+#acdrawer .acdr-in{width:100%;box-sizing:border-box;text-align:left;background:#fff3b0;color:#141413;border:1px solid #d9b800;border-radius:6px;padding:7px 9px;font:inherit;font-size:13px}#acdrawer .acdr-in:focus{outline:2px solid #b38f00;outline-offset:1px}#acdrawer .acdr-in:disabled{opacity:.6}   /* v28.281 (Ben): yellow, left-aligned, full width */
 #accounts-root #accounts-subnav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 4px;align-items:center;flex-wrap:wrap}
 #accounts-root #accounts-subnav .ver{margin-left:auto}
 #accounts-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;text-decoration:none;display:inline-block}
@@ -19140,13 +19141,14 @@
     var mb=document.getElementById('ac-mbx'); if(mb)mb.onclick=function(){ AC_IN.mbx=!AC_IN.mbx; var x=document.getElementById('ac-mbxbody'); if(x)x.style.display=AC_IN.mbx?'':'none'; mb.firstChild.textContent=AC_IN.mbx?'▾ ':'▸ '; }; }
   // ── RECONCILE: the review drawer ──
   var AC_TAXES={uk:[['INPUT2','20% VAT on Expenses'],['ZERORATEDINPUT','Zero Rated Expenses'],['EXEMPTINPUT','Exempt Expenses'],['NONE','No VAT']],au:[['INPUT','GST on Expenses'],['EXEMPTEXPENSES','GST Free Expenses'],['INPUTTAXED','Input Taxed'],['BASEXCLUDED','BAS Excluded']]};
-  var AC_DR={r:null};
+  var AC_DR={r:null}, AC_XACC={};   // v28.281: Xero accounts per org (code + name) for the account picker
+  function acXaccLoad(org){ if(AC_XACC[org])return; AC_XACC[org]={busy:true}; fetch('/api/accounts/xero-accounts?org='+org).then(function(r){ return r.json(); }).then(function(j){ AC_XACC[org]={rows:(j&&j.rows)||[],error:j&&j.error}; if(AC_DR.r&&AC_DR.r.org===org)acDrPaint(); }).catch(function(e){ AC_XACC[org]={rows:[],error:e.message}; }); }
   function acDrJson(r){ return r.json().catch(function(){ return {error:'HTTP '+r.status}; }).then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); }
   function acDrEnsure(){ var bg=document.getElementById('acdrawer-bg'); if(bg)return bg; bg=document.createElement('div'); bg.id='acdrawer-bg'; bg.innerHTML='<div id="acdrawer"></div>'; document.body.appendChild(bg);
     bg.addEventListener('click',function(e){ if(e.target===bg)acDrClose(); }); document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&bg.classList.contains('open'))acDrClose(); }); return bg; }
   function acDrClose(){ var bg=document.getElementById('acdrawer-bg'); if(!bg)return; bg.classList.remove('open'); setTimeout(function(){ if(!bg.classList.contains('open'))bg.classList.remove('show'); },230); AC_DR={r:null}; }
   function acDrOpen(r){ AC_DR={r:r,c:null,busy:true,view:'email',em:null,auto:r.treatment==='autobill',confirm:false,done:null,err:'',f:{}};
-    var bg=acDrEnsure(); bg.classList.add('show'); setTimeout(function(){ bg.classList.add('open'); },10); acDrPaint();
+    var bg=acDrEnsure(); bg.classList.add('show'); setTimeout(function(){ bg.classList.add('open'); },10); acXaccLoad(r.org); acDrPaint();
     var mine=AC_DR;
     fetch('/api/accounts/email/'+encodeURIComponent(r.match.id)).then(acDrJson).then(function(j){ if(AC_DR!==mine)return; AC_DR.em=j; if((j.attachments||[]).some(function(a){ return a.pdf; }))AC_DR.view='pdf'; acDrPaint(); })
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.em={error:e.message}; acDrPaint(); });
@@ -19154,6 +19156,10 @@
       .then(function(j){ if(AC_DR!==mine)return; var c=(j.candidates||[])[0]||{reason:'This receipt has already been billed, or it no longer matches an open line'}; AC_DR.busy=false; AC_DR.c=c;
         AC_DR.f={contact:c.contact||'',account_code:c.account_code||'',tax_type:c.tax_type||'',invoice_number:c.invoice_number||''}; acDrPaint(); })
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.busy=false; AC_DR.c={reason:e.message}; acDrPaint(); }); }
+  function acDrAcctHtml(org,code,dis){ var X=AC_XACC[org];
+    if(!X||X.busy||X.error||!(X.rows||[]).length)return '<input class="acdr-in" id="acdr-acct" value="'+esc(code||'')+'" placeholder="Account code"'+dis+'>'+(X&&X.error?'<span class="tiny mut">account names unavailable: '+esc(X.error)+'</span>':'');
+    var rows=X.rows.slice(); if(code&&!rows.some(function(a){ return a.code===code; }))rows.unshift({code:code,name:'(not an active account)'});
+    return '<select class="acdr-in" id="acdr-acct"'+dis+'>'+(code?'':'<option value="" selected>choose…</option>')+rows.map(function(a){ return '<option value="'+esc(a.code)+'"'+(a.code===code?' selected':'')+'>'+esc(a.code+' · '+a.name)+'</option>'; }).join('')+'</select>'; }
   function acDrCanPush(){ var c=AC_DR.c, f=AC_DR.f; return !!(c&&(c.ok||/No coding yet/.test(c.reason||''))&&f.contact&&f.account_code&&f.tax_type&&!AC_DR.done); }
   function acDrPaint(){ var el=document.getElementById('acdrawer'); if(!el||!AC_DR.r)return; var r=AC_DR.r, c=AC_DR.c, em=AC_DR.em, f=AC_DR.f||{};
     var amt=acMoney(-r.amount,r.currency);
@@ -19161,7 +19167,7 @@
     var mail='';
     if(!em)mail='<div class="count" style="padding:12px">Loading the email…</div>';
     else if(em.error)mail='<div class="count" style="padding:12px;color:var(--neg)">'+esc(em.error)+'</div>';
-    else if(AC_DR.view==='pdf')mail='<iframe title="Receipt PDF" src="/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id)+'" style="width:100%;height:100%;border:0"></iframe>';
+    else if(AC_DR.view==='pdf')mail='<div style="position:relative;width:100%;height:100%"><div class="count" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;text-align:center">Loading the PDF… if it stays blank, use Open PDF in a new tab below.</div><iframe title="Receipt PDF" src="/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id)+'" style="position:relative;width:100%;height:100%;border:0;background:transparent"></iframe></div>';
     else mail='<iframe title="Receipt email" sandbox="" style="width:100%;height:100%;border:0;background:#fff" srcdoc="'+esc(csp+'<base target="_blank">'+(em.html||('<pre style="white-space:pre-wrap;font:13px/1.45 -apple-system,Segoe UI,sans-serif">'+esc(em.text||'(empty email)')+'</pre>')))+'"></iframe>';
     var tax=(AC_TAXES[r.org]||[]).slice(); if(f.tax_type&&!tax.some(function(t){ return t[0]===f.tax_type; }))tax.unshift([f.tax_type,f.tax_type]);
     var dis=AC_DR.done||AC_DR.busy?' disabled':'';
@@ -19171,13 +19177,14 @@
     else if(AC_DR.busy)form='<div class="count">Checking the bill…</div>';
     else { if(c&&!c.ok)form+='<div class="annot" style="border-color:var(--neg);margin-bottom:8px">'+esc(c.reason||'Cannot create this bill')+'</div>';
       form+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-        +fld('Xero contact (existing contact, never created)','<input class="fci" id="acdr-contact" value="'+esc(f.contact||'')+'"'+dis+'>')
-        +fld('Reference','<input class="fci" id="acdr-ref" value="'+esc(f.invoice_number||'')+'"'+dis+'>')
-        +fld('Account code','<input class="fci" id="acdr-acct" value="'+esc(f.account_code||'')+'"'+dis+'>')
-        +fld('Tax','<select id="acdr-tax"'+dis+'>'+tax.map(function(t){ return '<option value="'+esc(t[0])+'"'+(t[0]===f.tax_type?' selected':'')+'>'+esc(t[1])+'</option>'; }).join('')+(f.tax_type?'':'<option value="" selected>choose…</option>')+'</select>')
+        +fld('Xero contact (existing contact, never created)','<input class="acdr-in" id="acdr-contact" value="'+esc(f.contact||'')+'"'+dis+'>')
+        +fld('Reference','<input class="acdr-in" id="acdr-ref" value="'+esc(f.invoice_number||'')+'"'+dis+'>')
+        +fld('Account',acDrAcctHtml(r.org,f.account_code,dis))
+        +fld('Tax','<select class="acdr-in" id="acdr-tax"'+dis+'>'+tax.map(function(t){ return '<option value="'+esc(t[0])+'"'+(t[0]===f.tax_type?' selected':'')+'>'+esc(t[1])+'</option>'; }).join('')+(f.tax_type?'':'<option value="" selected>choose…</option>')+'</select>')
         +fld('Bill date and due date','<div style="padding:5px 0">'+esc(hzTrkDate((c&&c.date)||r.line_date))+'</div>')
         +fld('Amount (tax inclusive)','<div style="padding:5px 0;font-weight:700">'+esc(c&&c.amount!=null?acMoney(c.amount,c.currency):amt)+'</div>')+'</div>'
-        +'<label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="acdr-auto"'+(AC_DR.auto?' checked':'')+(r.treatment==='autobill'?' disabled':'')+'> '+(r.treatment==='autobill'?esc(r.payee_key)+' is already on Auto bill':'Create a rule: Auto bill '+esc(r.payee_key)+' from now on (its receipts become bills automatically, with this coding)')+'</label>'
+        +(r.treatment==='autobill'?'<div class="tiny" style="margin-top:12px">'+esc(r.payee_key)+' is on Auto bill. <b>Push bill to Xero</b> creates this one now; the automatic run then skips it.</div>'
+          :'<label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="acdr-auto"'+(AC_DR.auto?' checked':'')+'> Create a rule: Auto bill '+esc(r.payee_key)+' from now on (its receipts become bills automatically, with this coding)</label>')
         +(AC_DR.err?'<div class="count" style="color:var(--neg);margin-top:8px">'+esc(AC_DR.err)+'</div>':''); }
     var can=acDrCanPush();
     el.innerHTML='<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc(r.payee_key)+' · '+amt+'</div><div class="tiny mut">'+esc(r.org.toUpperCase()+' · '+r.account_name+' · '+hzTrkDate(r.line_date))+' · '+esc(String(r.reference||'').slice(0,80))+'</div></div><span class="save-btn light" id="acdr-x" title="Close (Esc)">✕</span></div>'
@@ -19186,7 +19193,7 @@
         +(em&&!em.error?'<span class="tiny mut" style="margin-left:auto;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(em.from)+'">'+esc(String(em.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,''))+' · '+esc(hzTrkDate(String(em.date).slice(0,10)))+'</span>':'')+'</div>'
         +(em&&!em.error?'<div class="tiny" style="margin:6px 0"><b>'+esc(em.subject||'')+'</b>'+((em.attachments||[]).length?' · '+esc(em.attachments.map(function(a){ return a.name; }).join(', ').slice(0,90)):'')+'</div>':'')
         +'<div style="height:46vh;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff">'+mail+'</div>'
-        +(AC_DR.view==='pdf'?'<div class="tiny mut" style="margin-top:4px">This PDF is what gets attached to the bill: the email\'s own PDF, else the email printed to PDF.</div>':'')+'</div>'
+        +(AC_DR.view==='pdf'?'<div class="tiny mut" style="margin-top:4px">This PDF is what gets attached to the bill: the email\'s own PDF, else the email printed to PDF with its images. <a href="/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id)+'" target="_blank" rel="noopener">Open PDF in a new tab ↗</a></div>':'')+'</div>'
       +'<div><div class="sect-h" style="margin:0 0 8px">Bill</div>'+form+'</div></div>'
       +'<div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
       +(AC_DR.done?'<span class="save-btn" id="acdr-x2">Close</span>'

@@ -4125,25 +4125,54 @@ async function accEmailPdf(msgId) {
   const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');
   const H = n => ((m.payload.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
   const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  let text = '', html = ''; const pdfs = [];
-  const walk = p => { if (!p) return; if (p.filename && /\.pdf$/i.test(p.filename) && p.body && p.body.attachmentId) pdfs.push(p);
+  let text = '', html = ''; const pdfs = [], cids = new Map();
+  const walk = p => { if (!p) return; const cid = ((p.headers || []).find(h => h.name.toLowerCase() === 'content-id') || {}).value;
+    if (cid && /^image\//i.test(p.mimeType || '') && p.body && (p.body.attachmentId || p.body.data)) cids.set(cid.replace(/[<>]/g, '').toLowerCase(), p.body);   // v28.281: inline (cid:) images
+    if (p.filename && /\.pdf$/i.test(p.filename) && p.body && p.body.attachmentId) pdfs.push(p);
     else if (p.mimeType === 'text/plain' && p.body && p.body.data) text += b64(p.body.data).toString('utf8'); else if (p.mimeType === 'text/html' && p.body && p.body.data) html += b64(p.body.data).toString('utf8'); (p.parts || []).forEach(walk); };
   walk(m.payload);
   if (pdfs.length) { const a = await gmailGetPaced('messages/' + msgId + '/attachments/' + pdfs[0].body.attachmentId); return { buf: b64(a.data), filename: pdfs[0].filename.replace(/[^\w.\- ]+/g, '_').slice(0, 90) }; }
-  const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/\uFFE1/g, '£').replace(/\uFFE5/g, '¥'))   // v28.275: numeric entities (Snapchat sends the pound as &#xFFE1;)
+  const toText = h => h.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<head[\s\S]*?<\/head>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d|table)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&#x([0-9a-f]+);/gi, (_, x) => String.fromCodePoint(parseInt(x, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/\uFFE1/g, '£').replace(/\uFFE5/g, '¥')   // v28.275: numeric entities (Snapchat sends the pound as &#xFFE1;)
     .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica), bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const clean = t => String(t || '').replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€]/g, ' ');   // WinAnsi only
+  const clean = t => String(t || '').replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€]/g, ' ');   // WinAnsi only
   let page = doc.addPage([595, 842]), y = 800; const W = 515, put = (t, f, size) => { const words = clean(t).split(/(\s+)/); let line = '';
     const flush = () => { if (y < 50) { page = doc.addPage([595, 842]); y = 800; } page.drawText(line, { x: 40, y, size, font: f, color: rgb(0.1, 0.1, 0.1) }); y -= size + 4; line = ''; };
     for (const w of words) { if (w === '\n' || /\n/.test(w)) { flush(); continue; } if (f.widthOfTextAtSize(line + w, size) > W && line) flush(); line += w; } if (line) flush(); };
+  // v28.281 (Ben 12-Oct-26): the email's images go into the PDF where they sit in the email (inline cid: parts, data: URIs, and https images:
+  // public hosts only, 6 s, 3 MB, at most 15). PNG and JPEG only (pdf-lib); tracking pixels (3 px or less) are skipped.
+  let nImg = 0;
+  const imgBytes = async src => { src = String(src || '').replace(/&amp;/g, '&').trim();
+    if (/^cid:/i.test(src)) { const b = cids.get(src.slice(4).toLowerCase()); if (!b) return null; if (b.data) return b64(b.data); const a = await gmailGetPaced('messages/' + msgId + '/attachments/' + b.attachmentId); return b64(a.data); }
+    if (/^data:image\/(png|jpe?g);base64,/i.test(src)) return Buffer.from(src.slice(src.indexOf(',') + 1), 'base64');
+    let u; try { u = new URL(src); } catch (_) { return null; }
+    if (u.protocol !== 'https:' || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.|\[)/i.test(u.hostname) || /\.(internal|local)$/i.test(u.hostname)) return null;
+    const r = await _fetchT(u.href, { headers: { 'User-Agent': 'Mozilla/5.0 HORIZON receipt' } }, 6000).catch(() => null);
+    if (!r || !r.ok || Number(r.headers.get('content-length') || 0) > 3e6) return null; const buf = Buffer.from(await r.arrayBuffer()); return buf.length > 3e6 ? null : buf; };
+  const drawImg = async tag => { if (nImg >= 15) return; const a = n => { const x = new RegExp('\\b' + n + '\\s*=\\s*("([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i').exec(tag); return x ? (x[2] ?? x[3] ?? x[4]) : ''; };
+    const wa = parseFloat(a('width')) || 0, ha = parseFloat(a('height')) || 0; if ((wa && wa <= 3) || (ha && ha <= 3)) return;
+    let buf; try { buf = await imgBytes(a('src')); } catch (_) { buf = null; } if (!buf || buf.length < 100) return;
+    let im; try { im = buf[0] === 0x89 && buf[1] === 0x50 ? await doc.embedPng(buf) : (buf[0] === 0xFF && buf[1] === 0xD8 ? await doc.embedJpg(buf) : null); } catch (_) { im = null; } if (!im || im.width <= 3 || im.height <= 3) return;
+    nImg++; let w = Math.min(W, (wa || im.width) * 0.75), h = im.height * (w / im.width); if (h > 420) { w = w * 420 / h; h = 420; }
+    if (y - h < 50) { page = doc.addPage([595, 842]); y = 800; } page.drawImage(im, { x: 40, y: y - h, width: w, height: h }); y -= h + 8; };
   put('Email receipt (attached by HORIZON from accounts@dockandbay.com)', bold, 9); y -= 4;
   put('From: ' + H('from'), font, 10); put('Date: ' + H('date'), font, 10); put('Subject: ' + H('subject'), bold, 11); y -= 8;
-  body.split('\n').forEach(l => put(l || ' ', font, 10));
+  if (html) { const parts = html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<head[\s\S]*?<\/head>/gi, ' ').split(/(<img\b[^>]*>)/i);
+    for (const seg of parts) { if (/^<img\b/i.test(seg)) await drawImg(seg); else { const t = toText(seg); if (t) t.split('\n').forEach(l => put(l || ' ', font, 10)); } } }
+  else toText(text).split('\n').forEach(l => put(l || ' ', font, 10));
   const day = new Date(Number(m.internalDate)).toISOString().slice(0, 10);
   return { buf: Buffer.from(await doc.save()), filename: ('Receipt ' + day + ' ' + (H('subject') || 'email')).replace(/[^\w.\- ]+/g, '_').slice(0, 80) + '.pdf' };
 }
+// v28.281: the Xero accounts for the Reconcile drawer's account picker (code and name). One Xero call per org per 10 minutes (xeroFetch memo).
+app.get('/api/accounts/xero-accounts', async (req, res) => {
+  try { const org = String(req.query.org || '').toLowerCase(); if (!['uk', 'au'].includes(org)) return res.status(400).json({ error: 'org required' });
+    const j = await xeroFetch(org, '/api.xro/2.0/Accounts');
+    const rows = ((j && j.Accounts) || []).filter(a => a.Status === 'ACTIVE' && a.Code && a.Type !== 'BANK').map(a => ({ code: a.Code, name: a.Name, type: a.Type, tax: a.TaxType || '' }))
+      .sort((a, b) => String(a.code).localeCompare(String(b.code), 'en', { numeric: true }));
+    res.set('Cache-Control', 'private, max-age=600').json({ rows });
+  } catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
 let _accAttachRun = null;
 async function accAttachRun(by, opts) {
   opts = opts || {}; if (_accAttachRun) return _accAttachRun;

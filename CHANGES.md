@@ -1,3 +1,14 @@
+## v28.281 (Ben, branch review-fixes-2026-10-05): Reconcile drawer: yellow left-aligned fields, account picker with names, images in receipt PDFs
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Drawer fields (contact, reference, account, tax) are full width, left aligned, on a yellow background.
+- **Account** is a picker of the organisation's active Xero accounts showing code and name (e.g. "406.2 · Marketing - Snap Chat Ads - UK"); new read-only `GET /api/accounts/xero-accounts?org=` (one Xero call per org per 10 minutes).
+- Auto bill payees: the drawer says Push bill to Xero creates the bill now and the automatic run skips it (it always could; the old wording read as blocked).
+- PDF tab: a loading note behind the PDF and an **Open PDF in a new tab** link (the Uber Eats PDFs are valid 2-page files; a blank frame is the browser's PDF viewer).
+- **Images in receipt PDFs**: emails without their own PDF are printed with their images in place (cid: inline parts, data: URIs, https images from public hosts only, 6 s, 3 MB, up to 15; PNG / JPEG; tracking pixels skipped). Snapchat receipts now show the Snap Ads banner.
+- Verified: Snapchat PDF rendered with the banner; drawer (jsdom) SNAP account 406.2 with name, 20% VAT, push enabled; UBER opens on the PDF tab; no writes, no errors.
+
 ## v28.280 (Ben, branch review-fixes-2026-10-05): ACCOUNTS reworked: BANK STATEMENT, AGEING, RECONCILE with a review drawer; Back-date removed
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
