@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|inbox\/read-mail|forwarding\/action)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -4003,12 +4003,12 @@ app.post('/api/accounts/payee-rule', async (req, res) => {
 // lines with HORIZON's suggestion), the built-in defaults, the UK / AU tax rules and the alert settings.
 app.get('/api/accounts/config', async (req, res) => {
   try {
-    const saved = (await pool.query(`SELECT org, payee_key, treatment, source, updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.accounts_payee_rules ORDER BY org, payee_key`).catch(() => ({ rows: [] }))).rows;
+    const saved = (await pool.query(`SELECT org, payee_key, treatment, source, updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at, attach_auto, to_char(attach_from,'YYYY-MM-DD') attach_from FROM planner.accounts_payee_rules ORDER BY org, payee_key`).catch(() => ({ rows: [] }))).rows;
     let lines = []; try { lines = await accInboxProposals(); } catch (_) {}
     const seen = new Map(); lines.forEach(l => { const k = l.org + '|' + l.payee_key; const x = seen.get(k) || { org: l.org, payee_key: l.payee_key, lines: 0, out: 0, inn: 0, matched: 0, treatment: l.treatment, source: l.treatment_source, example: l.reference };
       x.lines++; if (l.amount < 0) x.out += -l.amount; else x.inn += l.amount; if (l.match) x.matched++; seen.set(k, x); });
     saved.forEach(r => { const k = r.org + '|' + r.payee_key; const x = seen.get(k) || { org: r.org, payee_key: r.payee_key, lines: 0, out: 0, inn: 0, matched: 0, example: '' };
-      Object.assign(x, { treatment: r.treatment, source: r.source, updated_by: r.updated_by, updated_at: r.updated_at }); seen.set(k, x); });
+      Object.assign(x, { treatment: r.treatment, source: r.source, updated_by: r.updated_by, updated_at: r.updated_at, attach_auto: !!r.attach_auto, attach_from: r.attach_from }); seen.set(k, x); });
     const payees = [...seen.values()].sort((a, b) => b.lines - a.lines || a.payee_key.localeCompare(b.payee_key));
     res.set('Cache-Control', 'no-store').json({
       payees,
@@ -4106,6 +4106,108 @@ app.post('/api/accounts/forwarding/action', async (req, res) => {
     else return res.status(400).json({ error: 'status must be actioned, ignored or open' });
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ═══ v28.275 (Ben 12-Oct-26): automatic receipt attachment (approved: automatic once a payee is switched on as an automatic rule).
+// For each payee with attach_auto: RECONCILED Spend Money in Xero dated on or after attach_from, with no file yet, whose receipt is certain
+// (payee named in the sender or subject, exact amount, email 2 days before to 3 days after) gets that receipt attached: the email's own PDF,
+// else the email rendered to a PDF. One attachment per transaction (unique log row). Xero's API cannot delete attachments: the log links each
+// transaction so a person can remove a wrong one in Xero and mark it removed. Runs daily with the health checks and from "Run now".
+async function accEmailPdf(msgId) {
+  const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');
+  const H = n => ((m.payload.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
+  const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  let text = '', html = ''; const pdfs = [];
+  const walk = p => { if (!p) return; if (p.filename && /\.pdf$/i.test(p.filename) && p.body && p.body.attachmentId) pdfs.push(p);
+    else if (p.mimeType === 'text/plain' && p.body && p.body.data) text += b64(p.body.data).toString('utf8'); else if (p.mimeType === 'text/html' && p.body && p.body.data) html += b64(p.body.data).toString('utf8'); (p.parts || []).forEach(walk); };
+  walk(m.payload);
+  if (pdfs.length) { const a = await gmailGetPaced('messages/' + msgId + '/attachments/' + pdfs[0].body.attachmentId); return { buf: b64(a.data), filename: pdfs[0].filename.replace(/[^\w.\- ]+/g, '_').slice(0, 90) }; }
+  const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/\uFFE1/g, '£').replace(/\uFFE5/g, '¥'))   // v28.275: numeric entities (Snapchat sends the pound as &#xFFE1;)
+    .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
+  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+  const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica), bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const clean = t => String(t || '').replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€]/g, ' ');   // WinAnsi only
+  let page = doc.addPage([595, 842]), y = 800; const W = 515, put = (t, f, size) => { const words = clean(t).split(/(\s+)/); let line = '';
+    const flush = () => { if (y < 50) { page = doc.addPage([595, 842]); y = 800; } page.drawText(line, { x: 40, y, size, font: f, color: rgb(0.1, 0.1, 0.1) }); y -= size + 4; line = ''; };
+    for (const w of words) { if (w === '\n' || /\n/.test(w)) { flush(); continue; } if (f.widthOfTextAtSize(line + w, size) > W && line) flush(); line += w; } if (line) flush(); };
+  put('Email receipt (attached by HORIZON from accounts@dockandbay.com)', bold, 9); y -= 4;
+  put('From: ' + H('from'), font, 10); put('Date: ' + H('date'), font, 10); put('Subject: ' + H('subject'), bold, 11); y -= 8;
+  body.split('\n').forEach(l => put(l || ' ', font, 10));
+  const day = new Date(Number(m.internalDate)).toISOString().slice(0, 10);
+  return { buf: Buffer.from(await doc.save()), filename: ('Receipt ' + day + ' ' + (H('subject') || 'email')).replace(/[^\w.\- ]+/g, '_').slice(0, 80) + '.pdf' };
+}
+let _accAttachRun = null;
+async function accAttachRun(by, opts) {
+  opts = opts || {}; if (_accAttachRun) return _accAttachRun;
+  _accAttachRun = (async () => {
+    const rules = (await pool.query(`SELECT org, payee_key, to_char(attach_from,'YYYY-MM-DD') attach_from FROM planner.accounts_payee_rules WHERE attach_auto AND attach_from IS NOT NULL`)).rows;
+    const out = { ok: true, dry: !!opts.dry, rules: rules.length, candidates: [], attached: 0, errors: [] }; if (!rules.length) return out;
+    for (const org of [...new Set(rules.map(r => r.org))]) { try { await accReconSyncOrg(org); } catch (e) { out.errors.push(org.toUpperCase() + ' Xero read: ' + e.message); } }   // incremental (watermark): a few calls
+    const minFrom = rules.reduce((m, r) => r.attach_from < m ? r.attach_from : m, '9999-12-31');
+    const txns = (await pool.query(`SELECT t.org, t.xero_id, to_char(t.txn_date,'YYYY-MM-DD') d, t.amount::float8 amount, t.currency, t.contact, t.bank FROM planner.accounts_recon_txns t
+      WHERE t.kind='spend' AND t.recon AND NOT t.has_att AND t.txn_date >= $1::date AND NOT EXISTS (SELECT 1 FROM planner.accounts_attach_log l WHERE l.org=t.org AND l.xero_id=t.xero_id AND l.status IN ('attached','removed'))`, [minFrom])).rows;
+    const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 5`, [minFrom])).rows;
+    const usedMsg = new Set((await pool.query(`SELECT email_id FROM planner.accounts_attach_log WHERE status='attached'`)).rows.map(r => r.email_id));
+    for (const r of rules) {
+      const toks = r.payee_key.toLowerCase().split(' ').filter(t => t.length >= 3);
+      const sameP = (ck, rk) => ck === rk || (rk.length >= 4 && ck.length >= 4 && (ck.startsWith(rk) || rk.startsWith(ck)));   // Xero contact 'SnapChat' (SNAPCHAT) vs bank text payee 'SNAP'
+      for (const t of txns.filter(x => x.org === r.org && x.d >= r.attach_from && sameP(accPayeeKey(x.contact, ''), r.payee_key))) {
+        const k = Math.abs(t.amount).toFixed(2), td = new Date(t.d);
+        const cands = em.filter(e => !usedMsg.has(e.id) && (e.amounts || []).concat(e.pdf_amounts || []).some(a => a[0] === k)).map(e => ({ e, lag: Math.round((new Date(e.d) - td) / 864e5) }))
+          .filter(c => c.lag >= -2 && c.lag <= 3 && toks.some(tk => (c.e.from_addr + ' ' + c.e.subject).toLowerCase().includes(tk))).sort((a, b) => Math.abs(a.lag) - Math.abs(b.lag));
+        if (cands.length !== 1 && !(cands.length > 1 && Math.abs(cands[0].lag) < Math.abs(cands[1].lag))) continue;   // certain only: one candidate, or one clearly closest
+        const c = cands[0]; usedMsg.add(c.e.id);
+        const cand = { org: t.org, payee_key: r.payee_key, xero_id: t.xero_id, date: t.d, amount: t.amount, currency: t.currency, bank: t.bank, email_id: c.e.id, email_date: c.e.d, subject: c.e.subject };
+        out.candidates.push(cand); if (opts.dry) continue;
+        try {
+          const pdf = await accEmailPdf(c.e.id);
+          const j = await xeroFetch(t.org, '/api.xro/2.0/BankTransactions/' + t.xero_id + '/Attachments/' + encodeURIComponent(pdf.filename), { method: 'PUT', body: pdf.buf, headers: { 'Content-Type': 'application/pdf' }, timeoutMs: 45000 });
+          const att = (j && j.Attachments && j.Attachments[0]) || {};
+          await pool.query(`INSERT INTO planner.accounts_attach_log (org, payee_key, xero_id, txn_date, amount, currency, email_id, filename, attachment_id, status, run_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'attached',$10)`,
+            [t.org, r.payee_key, t.xero_id, t.d, t.amount, t.currency, c.e.id, pdf.filename, att.AttachmentID || null, by || 'job']);
+          await pool.query(`UPDATE planner.accounts_recon_txns SET has_att=true WHERE org=$1 AND xero_id=$2`, [t.org, t.xero_id]); out.attached++;
+        } catch (e) { out.errors.push(r.payee_key + ' ' + t.d + ': ' + e.message); try { await pool.query(`INSERT INTO planner.accounts_attach_log (org, payee_key, xero_id, txn_date, amount, currency, email_id, status, error, run_by) VALUES ($1,$2,$3,$4,$5,$6,$7,'error',$8,$9)`, [t.org, r.payee_key, t.xero_id, t.d, t.amount, t.currency, c.e.id, String(e.message).slice(0, 300), by || 'job']); } catch (_) {} if (e && e.xero_daily) break; }
+      }
+    }
+    if (!opts.dry) try { await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message) VALUES ('accounts_attach',$1,$2,$3)`, [out.errors.length ? 'error' : 'success', out.attached, (out.attached + ' attached from ' + out.candidates.length + ' certain matches, ' + rules.length + ' payee rule(s)' + (out.errors.length ? ' · ' + out.errors.slice(0, 3).join('; ') : '') + ' (' + (by || 'job') + ')').slice(0, 500)]); } catch (_) {}
+    return out;
+  })().finally(() => { _accAttachRun = null; });
+  return _accAttachRun;
+}
+async function accAttachMaybe() {   // daily, claimed across instances
+  const r = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('acc_attach_claim', now()::text, 'attach', now()) ON CONFLICT (key) DO UPDATE SET value=now()::text, updated_at=now() WHERE planner.app_settings.updated_at < now() - interval '20 hours' RETURNING key`);
+  if (!r.rowCount) return { skipped: true };
+  const g = await gmailRow().catch(() => null); if (!g || g.missing) return { skipped: true, reason: 'gmail not connected' };
+  return accAttachRun('schedule');
+}
+app.post('/api/accounts/payee-rule/attach', async (req, res) => {   // switch automatic attachment on / off for a payee (admins and ACCOUNTS users)
+  try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase().slice(0, 80);
+    if (!['uk', 'au'].includes(org) || !key) return res.status(400).json({ error: 'org and payee_key required' });
+    const on = b.on !== false, from = /^\d{4}-\d{2}-\d{2}$/.test(String(b.from || '')) ? b.from : new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+    const cur = (await pool.query(`SELECT treatment FROM planner.accounts_payee_rules WHERE org=$1 AND payee_key=$2`, [org, key])).rows[0];
+    await pool.query(`INSERT INTO planner.accounts_payee_rules (org, payee_key, treatment, source, updated_by, updated_at, attach_auto, attach_from) VALUES ($1,$2,$3,'manual',$4,now(),$5,$6)
+      ON CONFLICT (org, payee_key) DO UPDATE SET attach_auto=EXCLUDED.attach_auto, attach_from=CASE WHEN EXCLUDED.attach_auto THEN EXCLUDED.attach_from ELSE planner.accounts_payee_rules.attach_from END, updated_by=EXCLUDED.updated_by, updated_at=now()`,
+      [org, key, (cur && cur.treatment) || String(b.treatment || 'rule'), (req.me && req.me.email) || null, on, from]);
+    res.json({ ok: true, on, from });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/attach/run', async (req, res) => {   // ?dry=1 lists what would be attached without writing (admins and ACCOUNTS users)
+  try { if (_accAttachRun) return res.status(409).json({ running: true }); const r = await accAttachRun((req.me && req.me.email) || 'button', { dry: req.query.dry === '1' }); res.json(r); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/accounts/attach/preview', async (req, res) => {   // the PDF that would be attached for an accounts@ email (read only)
+  try { const id = String(req.query.email_id || ''); if (!/^[0-9a-f]{8,32}$/i.test(id)) return res.status(400).json({ error: 'email_id required' });
+    const p = await accEmailPdf(id); res.set('Content-Type', 'application/pdf').set('Content-Disposition', 'inline; filename="' + p.filename.replace(/"/g, '') + '"').set('Cache-Control', 'no-store').send(p.buf);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/accounts/attach/log', async (req, res) => {
+  try { const rows = (await pool.query(`SELECT id, org, payee_key, xero_id, to_char(txn_date,'YYYY-MM-DD') txn_date, amount::float8 amount, currency, email_id, filename, status, error, run_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_attach_log ORDER BY created_at DESC LIMIT 200`)).rows;
+    rows.forEach(r => { r.xero_url = 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + r.xero_id; if (r.email_id) r.mail_url = 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + r.email_id; });
+    res.set('Cache-Control', 'no-store').json({ rows });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [] }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person removed a wrong attachment in Xero: record it (it will not be re-attached)
+  try { await pool.query(`UPDATE planner.accounts_attach_log SET status='removed', error=coalesce(error,'') || $2 WHERE id=$1 AND status='attached'`, [req.params.id, 'removed by ' + ((req.me && req.me.email) || 'user')]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
 app.post('/api/accounts/inbox/read-mail', async (req, res) => {
@@ -6684,7 +6786,7 @@ async function _xeroFetch0(region, path, opts) { const token = await xeroToken(r
   let r;
   for (let attempt = 0; ; attempt++) {   // v28.120 (review S22 / Diviyaj): honour Xero's 60 calls/min — back off on 429/503 instead of failing the whole sync
     _xeroCallN[(opts.method || 'GET') === 'GET' ? 'get' : 'write']++;   // v28.183 (Ben): per-instance call counter (bills-sync status)
-    try { r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined }, opts.timeoutMs || 20000); }
+    try { r = await _fetchT('https://api.xero.com' + path, { method: opts.method || 'GET', headers, body: opts.body ? ((typeof opts.body === 'string' || Buffer.isBuffer(opts.body)) ? opts.body : JSON.stringify(opts.body)) : undefined }, opts.timeoutMs || 20000); }   // v28.275: a Buffer body is sent raw (attachments)
     catch (e) { if ((opts.method || 'GET') === 'GET' && attempt < 1 && /abort|timeout/i.test(String(e && (e.name + ' ' + e.message)))) continue; throw e; }   // v28.253: a timed-out GET is retried once (opts.timeoutMs sets the per-call limit, default 20 s)
     xeroQuotaNote(region, r);
     if (r.status === 429 && r.headers.get('x-rate-limit-problem') === 'day') { try { await r.text(); } catch (_) {} const q = _xeroQuota[region];
@@ -25669,7 +25771,7 @@ async function accStmtStaleCheck(opts) {
 }
 app.post('/api/cron/health-checks', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
-  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
+  try { const b = req.body || {}; const r = await runHealthChecks({ dry: b.dry_run === true || b.dry_run === 'true' }); try { r.stmt_stale = await accStmtStaleCheck({ dry: b.dry_run === true || b.dry_run === 'true' }); } catch (e) { r.stmt_stale = { error: e.message }; } if (!(b.dry_run === true || b.dry_run === 'true')) { try { r.coghlans_mail = await coghlansMailMaybe(); } catch (e) { r.coghlans_mail = { error: e.message }; } try { r.attach = await accAttachMaybe(); } catch (e) { r.attach = { error: e.message }; } }   /* v28.267 */ res.status(r.unreachable ? 503 : 200).json(r); }   // 503 when the DB is down, so the n8n error workflow fires
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 if (!process.env.VERCEL && process.env.HZ_HEALTH_CHECKS !== '0') {

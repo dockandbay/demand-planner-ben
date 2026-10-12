@@ -1,3 +1,13 @@
+## v28.275 (Ben, branch review-fixes-2026-10-05): automatic receipt attachment to reconciled Spend Money (Snapchat from 12-Oct-26)
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/357_accounts_attach_rules.sql` (+ package.json, CHANGES.md). **Migration 357** (additive: `accounts_payee_rules.attach_auto / attach_from`, `planner.accounts_attach_log`). No env. **Writes to Xero (attachments)**, approved by Ben 12-Oct as automatic once a payee is switched on.
+
+- Config ▸ Payee treatments gains **Auto-attach receipt** (on from a start date; admins and ACCOUNTS users). Ben: Snapchat stays Spend Money via the Xero bank rule, receipts attached going forward, no backdating: switched on from 12-Oct-26.
+- Daily (with the health checks) and on **Run now**: reconciled Spend Money for that payee, dated on or after the start date, with no file in Xero, gets its accounts@ receipt attached: the email's own PDF, else the email rendered to a one-page PDF (pdf-lib, no browser). Only certain matches: payee in the sender or subject, exact amount, email 2 days before to 3 after, one email per transaction, one attachment per transaction. Xero's read is incremental (a few calls); one call per attachment.
+- **Preview what would be attached** (dry run, no writes) with a **PDF ↗** link per receipt; an **attachment log** with Xero and email links. Xero's API cannot delete attachments (Files API scope not granted): a wrong one is removed in Xero by hand and marked **Removed** so it is never attached again.
+- Sandbox: preview from 1-Oct finds 8 Snapchat matches (one daily email each, the day after); start date set to 12-Oct so nothing was written. UK Xero allowance 833 left.
+- Note for Ben: Snapchat's daily email says it is not a VAT invoice; the monthly VAT invoice is in Snap Business Manager.
+
 ## v28.274 (Ben, branch review-fixes-2026-10-05): AU uncoded statement lines: payee keys skip transaction ids; 3PLs ignored in the matcher
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration.
