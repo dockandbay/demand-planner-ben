@@ -49,13 +49,13 @@ fingerprints:
   artifact_v16.7.html::scanBIPatterns: d2ea6bd0080c
   artifact_v16.7.html::scanAnomalyAlerts: 371e8b968fc6
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
-  supply/inject.html::PO_ACTCOND: 9a5ea992d251
+  supply/inject.html::PO_ACTCOND: c295b79fd5d6
   supply/inject.html::cfUnpaidActions: fe40096c76b7
   supply/inject.html::renderRecsTab: cb6e7811b196
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: cc552c111189
+  server.mjs::buildActionsRows: 87b583bee037
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 645a4102e9a0
@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.302
+verified_version: v28.307
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -256,7 +256,7 @@ verified_version: v28.302
 - unassigned_shipment: no shipment, non-FOB market, and production end within 21 days.
 - erp_date: drift >= max(5% of days out, 3 days).
 - preship: documents due from production end minus 7 days.
-- Also: not approved, missing production dates, missing master, payment invalid, shipped to master.
+- Also: not approved, missing production dates, missing master, payment invalid, shipped to master. Payment invalid also covers a balance payment 3 onward with an amount and no date (v28.307).
 - crossdock_needed, "Crossdock likely required" (v28.187, red, Client/FBA tab):
   - The PO ships past the 3PL: branch country DIRECT, or a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or (v28.202) an Amazon FBA or AWD branch (UK/US/AU/CA FBA, US AWD), or a key account PO whose own branch is not a 3PL.
   - Its shipment lands at a 3PL. A 3PL branch has a market country (UK, US, EU, AU, CA) and a Fulfil id, and is not AWD (v28.202): UK ILG, US Geneva, EU iFulfillment, AU Coghlans. US AWD is an Amazon destination, not a 3PL.

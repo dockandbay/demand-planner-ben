@@ -1,3 +1,16 @@
+## v28.307 (Ben, branch review-fixes-2026-10-05): balance payments 3, 4, 5 ...
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/362_po_balance_payments.sql`, `lib/ai-logic/{supply-finance,reports,actions}.md` (+ package.json, CHANGES.md). **Migration 362.** No env vars.
+
+- Ben (PO-51USXR1): "there is a 3rd payment of 57,609.72 on 17/11/25 but i cannot add balance 3 ... we can have balance 3,4,5 in reality".
+- Balance payments 1 and 2 stay on the PO. Balance payment 3 onward are rows in the new planner.po_balance_payments (one per payment: amount, paid date, who).
+- **PO drawer > Payments:** a row per Balance 3, 4, ... (edit amount and date, remove). When balance 2 is used and money is still owed, a **Balance N** row shows the remainder: **pay »** records it dated today, **+ add** takes a typed amount (part payment).
+- **Counted everywhere:** fully paid, total due, remaining, payment overdue / unpaid / invalid actions, Payments Due (each its own row; the remaining row records the next balance payment once balance 2 is paid), the overdue count, cash flow (one line each), Payments Report and payment run detail, By Supplier, supplier statements and the portal payments list, the Xero bill reconciliation paid figure.
+- New route: POST /api/supply/po/:po/balance-x (create) and /balance-x/:id (update or remove), SUPPLY edit like balance payments 1 and 2.
+- Before migration 362 on a database everything behaves as v28.306 (empty list, reports leave the table out; the add buttons answer that the migration is needed).
+- Verified on the sandbox: with no balance 3 rows, cash flow, Payments Report, By Supplier and all 1,378 PO rows are byte-identical to v28.306. PO-51USXR1 + Balance 3 57,609.72 dated 17-Nov-25: the 57.6k remaining line left the cash flow, a paid Balance line took its place, the supplier statement and Payments Report list it, the drawer shows Balance 3 paid. PO-55CALX-FBA2: Balance 3 163.40 offered, pay » recorded it and the PO became fully paid. Test rows removed; cash flow back to baseline.
+- Not covered: Balance 3+ changes are not written to the PO change log yet, and the payment-confirmed supplier email fires from the Payments Report run, not from these rows.
+
 ## v28.306 (Ben, branch review-fixes-2026-10-05): App health runs saved, with history
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/361_health_check_runs.sql` (+ package.json, CHANGES.md). **Migration 361.** No env vars.

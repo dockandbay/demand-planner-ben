@@ -2844,7 +2844,7 @@ async function cashflowResponse(pos, q) {
     // outstanding on this PO = value used (+credit) − everything assigned/paid. When it's fully paid (owes ≤ 0),
     // its unpaid milestone TERMS are phantom — a paid-in-full PO must not show a milestone as due/overdue.
     const poDue = Math.round((num(p.value_used) + num(p.credit_amount)
-      - num(p.start_assigned) - num(p.completion_assigned) - num(p.balance_1_amount) - num(p.balance_2_amount)) * 100) / 100;
+      - num(p.start_assigned) - num(p.completion_assigned) - num(p.balance_1_amount) - num(p.balance_2_amount) - num(p.balance_x_amount)) * 100) / 100;   // v28.307: + balance 3 onward
     const owes = poDue > 0.02;   // still money outstanding on the PO (0.02 absorbs rounding)
     // 1. start deposit — ONLY when no deposit_ref (the referenced pool covers it instead). Skip an UNPAID term when nothing's owed.
     if (!hasRef && (p.start_date || owes)) add({ key: 'dep:' + p.po, type: 'Deposit', ref: p.po, supplier: p.supplier_name, country: p.country,
@@ -2860,8 +2860,11 @@ async function cashflowResponse(pos, q) {
     // v28.304 (Ben 13-Oct-26): the balance left after balance payments 1 and 2 was missing (same gap as Payments Due before v28.294):
     // once balance 1 had an amount, only that amount (and balance 2) reached the cash flow, so a part-paid balance understated the outflow.
     // The remainder is its own unpaid line on the balance due date; it is paid through balance 2, so it takes balance 2's likely date.
-    const _bRem = Math.round((num(p.balance_owing) - num(p.balance_1_amount) - num(p.balance_2_amount)) * 100) / 100;
-    if (owes && (p.balance_1_amount != null || p.balance_2_amount != null) && _bRem > 0.009)
+    // v28.307: balance payment 3 onward, one line each (paid when dated); the remainder after all of them stays one unpaid line
+    (p.balance_x || []).forEach(x => { if (x.date || owes) add({ key: 'balx:' + x.id, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
+      amount: x.amount, due: p.balance_due, paid_date: x.date || null }); });
+    const _bRem = Math.round((num(p.balance_owing) - num(p.balance_1_amount) - num(p.balance_2_amount) - num(p.balance_x_amount)) * 100) / 100;
+    if (owes && (p.balance_1_amount != null || p.balance_2_amount != null || (p.balance_x || []).length) && _bRem > 0.009)
       add({ key: (p.balance_2_amount != null ? 'balrem:' : 'bal2:') + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
         amount: _bRem, due: p.balance_due, likely: likely['bal2:' + p.po] || null, paid_date: null });
   }
@@ -6177,7 +6180,7 @@ app.post('/api/supply/additional-cost-approve', async (req, res) => {
 });
 // One PO's fully-computed grid row (same SQL as the grid) — for in-place row refresh after an edit.
 app.get('/api/supply/po-row/:po', async (req, res) => {
-  try { res.json((await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows); }
+  try { res.json((await poRowsQ(' WHERE calc4.po = $1', [req.params.po])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Lean PO picker for one supplier — just po/prod_no/country for the "assign a PO to a production" popover
@@ -8623,7 +8626,7 @@ async function _computeXeroExceptions() {
   const linked = (await pool.query(
     `SELECT p.po, coalesce(p.supplier_name,'') supplier, upper(coalesce(p.country_code,'')) cc, coalesce(p.branch,'') branch,
             coalesce(nullif(p.supplier_invoice_total,0), p.order_value_estimation, 0) total_h,
-            (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)) paid_h,
+            (coalesce(p.pay_start_deposit_assigned,0)+coalesce(p.pay_completion_assigned,0)+coalesce(p.pay_balance_1_amount,0)+coalesce(p.pay_balance_2_amount,0)+${balxSumSql('p.po')}) paid_h,
             to_char(coalesce(p.balance_due_date_overide, p.pay_balance_1_date, p.pay_completion_date),'YYYY-MM-DD') due_h,
             l.external_id bill_id, l.external_ref bill_ref,
             b.total b_total, b.amount_paid b_paid, b.amount_due b_due, b.currency_code b_ccy, b.status b_status,
@@ -10196,7 +10199,7 @@ async function buildActionsRows() {
               (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
               (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
               (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
-              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) )
+              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL)${_balxOn ? ` OR EXISTS (SELECT 1 FROM planner.po_balance_payments bx WHERE bx.po=purchase_orders.po AND coalesce(bx.amount,0)>0 AND bx.paid_date IS NULL)` : ''} )
               -- (removed the "final invoice entered but no Final payment due" branch: balance_due_date_overide is an OPTIONAL override — blank = calculated balance due date — so it false-positived on every invoiced PO)
           UNION ALL
           SELECT 'amber','Over 20 pallets', z.po,
@@ -10911,7 +10914,7 @@ supplySectionHandler = async (req, res, next) => {
         // Landing imports from linked Flexport (FLEX) unless manually overridden (M).
         // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
         if (req.params.section === 'purchase-orders' && req.query.supplier) {   // admin portal-preview: only this supplier's POs (full rows, unthinned)
-          return res.json((await queryCapped(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows.filter(r => !r.master_po));
+          return res.json((await poRowsQ(' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows.filter(r => !r.master_po));
         }
         // Both non-supplier paths derive from ONE cached full PO_ROWS_SQL build (poRowsCache) — see the 10-min
         // stale-while-revalidate cache. Cash Flow uses the full set as before (cashflowResponse doesn't mutate it).
@@ -11385,6 +11388,10 @@ supplySectionHandler = async (req, res, next) => {
           SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
             o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND ${KIND('o.supplier_name')}
+          ${_balxOn ? `UNION ALL
+          SELECT to_char(bx.paid_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
+            o.po, round(bx.amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,''), 'UK'
+          FROM planner.po_balance_payments bx JOIN planner.purchase_orders o ON o.po=bx.po WHERE bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0 AND ${KIND('o.supplier_name')}` : ''}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
             coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', 'deposit',
@@ -11455,12 +11462,12 @@ supplySectionHandler = async (req, res, next) => {
             round(coalesce(o.supplier_invoice_total,0),2) invoice_total,
             round(coalesce(o.pay_start_deposit_assigned,0),2) starting,
             round(coalesce(o.pay_completion_assigned,0),2) completion,
-            round(coalesce(o.pay_balance_1_amount,0)+coalesce(o.pay_balance_2_amount,0),2) balance,
+            round(coalesce(o.pay_balance_1_amount,0)+coalesce(o.pay_balance_2_amount,0)+${balxSumSql('o.po')},2) balance,
             coalesce(o.status,'') status
           FROM planner.purchase_orders o
           WHERE EXISTS (SELECT 1 FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim(o.supplier_name)) AND coalesce(s.kind,'')='supplier')
             AND (coalesce(o.supplier_invoice_total,0)<>0 OR coalesce(o.pay_start_deposit_assigned,0)<>0
-                 OR coalesce(o.pay_completion_assigned,0)<>0 OR coalesce(o.pay_balance_1_amount,0)<>0 OR coalesce(o.pay_balance_2_amount,0)<>0)
+                 OR coalesce(o.pay_completion_assigned,0)<>0 OR coalesce(o.pay_balance_1_amount,0)<>0 OR coalesce(o.pay_balance_2_amount,0)<>0 OR ${balxSumSql('o.po')}<>0)
           ORDER BY o.supplier_name, o.prod_no, o.po`));
       }
       case 'email-log': {   // CONFIG ▸ Email log (admin only) — every Resend send (migration 159). Default last 7 days; search overrides the date range.
@@ -12363,6 +12370,8 @@ async function paymentRunDetail(runDate, supplier, region) {   // v28.133: regio
         FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0
       UNION ALL SELECT o.po, o.pay_balance_2_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.supplier_name, 'UK'
         FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0
+      ${_balxOn ? `UNION ALL SELECT o.po, bx.amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(bx.paid_date,'YYYY-MM-DD'), o.supplier_name, 'UK'
+        FROM planner.po_balance_payments bx JOIN planner.purchase_orders o ON o.po=bx.po WHERE bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0` : ''}
       UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Deposit', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
         FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
       UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Other', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name, CASE WHEN upper(coalesce(country,''))='AU' THEN 'AU' ELSE 'UK' END
@@ -16254,6 +16263,9 @@ app.get('/api/supply/supplier-payments/:name', async (req, res) => {
       UNION ALL
       SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,'')
         FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+      ${_balxOn ? `UNION ALL
+      SELECT to_char(bx.paid_date,'YYYY-MM-DD'), o.po, round(bx.amount,2), 'Balance', coalesce(o.deposit_ref,'')
+        FROM planner.po_balance_payments bx JOIN planner.purchase_orders o ON o.po=bx.po WHERE bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)` : ''}
       UNION ALL
       SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', ''
         FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
@@ -18679,7 +18691,7 @@ async function computeOpenActions() {
         for (const p of _poAll) {
           if (!p.is_final) continue;   // milestones surface only once the final invoice amount is confirmed
           if (Number(p.completion_calc) > 0.009 && p.completion_due && _ov(Number(p.completion_assigned) > 0.009, p.completion_due)) payments_overdue++;
-          if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Math.round((Number(p.balance_owing) - (Number(p.balance_1_amount) || 0) - (Number(p.balance_2_amount) || 0)) * 100) / 100 <= 0.009, p.balance_due)) payments_overdue++;   // v28.294 (Ben): paid only when fully paid
+          if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Math.round((Number(p.balance_owing) - (Number(p.balance_1_amount) || 0) - (Number(p.balance_2_amount) || 0) - (Number(p.balance_x_amount) || 0)) * 100) / 100 <= 0.009, p.balance_due)) payments_overdue++;   // v28.294 (Ben): paid only when fully paid
         }
         for (const d of _deps) { if (String(d.status).toLowerCase() === 'closed') continue; if (_ov(!!d.date_paid, d.date_due)) payments_overdue++; }
       } catch (e) {}
@@ -20381,7 +20393,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
         // return the recomputed grid row ONLY for non-cosmetic edits (drives the client repaint). A cosmetic-but-tracked
         // edit (e.g. the confirmed_in_3pl tickbox) logs the change but returns NO row → no panel re-render → the box stays ticked.
         return Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))
-          ? { row: (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null } : {}; }
+          ? { row: (await poRowsQ(' WHERE calc4.po = $1', [req.params.po])).rows[0] || null } : {}; }
     : undefined));
 });
 // Advance a PO (and every PO on the same master shipment still in PRODUCTION) to SHIPPING. Offered on the
@@ -21275,7 +21287,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     _oldShip = (await pool.query(`SELECT departure_date::text dep, landing_date::text land, delivery_date::text del, arrival_date::text arr, tracked_delivery_date::text trk FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
     _oldShipFull = (await pool.query(`SELECT master_po, carrier, carrier_ref, status, mode, cost_manual::text, departure_date::text, landing_date::text, delivery_date::text, arrival_date::text, tracked_delivery_date::text, branch, export_port FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
     const _pa = (await pool.query(`SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
-    if (_pa.length) (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [_pa])).rows.forEach(r => { _preCheckin[r.po] = r.checkin ? String(r.checkin).slice(0, 10) : ''; });
+    if (_pa.length) (await poRowsQ(' WHERE calc4.po = ANY($1)', [_pa])).rows.forEach(r => { _preCheckin[r.po] = r.checkin ? String(r.checkin).slice(0, 10) : ''; });
   } catch (e) { /* snapshot best-effort */ }
   try {
     const up = await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
@@ -21290,7 +21302,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
       const aboard = (await pool.query(
         `SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1
          UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
-      if (aboard.length) rows = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [aboard])).rows;
+      if (aboard.length) rows = (await poRowsQ(' WHERE calc4.po = ANY($1)', [aboard])).rows;
     } catch (e) { /* non-fatal — client falls back to per-PO refresh */ }
     // Record of change: for every aboard PO whose effective completion shifted from the shipment date edit, log it.
     try {
@@ -21402,7 +21414,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
       await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [po]);
       await client.query('COMMIT');
-      const row0 = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;
+      const row0 = (await poRowsQ(' WHERE calc4.po=$1', [po])).rows[0] || null;
       return res.json({ ok: true, mode: '', is_shipment: false, ship: null, row: row0 });
     }
     const ins = await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, mode, branch, country_code)
@@ -21416,7 +21428,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
     await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [po]);
     await client.query('COMMIT');
     const ship = await poShipObj(po);   // includes the FINAL calculated dates so the client can fill them silently
-    const row1 = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;   // recomputed grid row (ship/landing/delivery dates) so the main PO grid stays bound
+    const row1 = (await poRowsQ(' WHERE calc4.po=$1', [po])).rows[0] || null;   // recomputed grid row (ship/landing/delivery dates) so the main PO grid stays bound
     res.json({ ok: true, mode, is_shipment: true, manufacturing, ship, row: row1 });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -24626,6 +24638,33 @@ function plEstimate(pl, supplier, sku, qty, prod) {
   const q = Number(qty) || 1; let tier = null; e.tiers.forEach((t) => { if (Number(t.mq) <= q && (!tier || Number(t.mq) >= Number(tier.mq))) tier = t; }); if (!tier) tier = e.tiers[0];
   return Number(tier.uc);
 }
+// v28.307 (Ben 13-Oct-26): balance payment 3 onward (planner.po_balance_payments, migration 362). Every PO_ROWS_SQL read goes through
+// poRowsQ, which adds to each row: balance_x (the payments, seq order), balance_x_amount (their sum) and balance_x_paid (sum of the dated
+// ones). Every "paid" / "remaining" figure adds balance_x_amount to balance payments 1 and 2. Before the migration on a database the
+// rows get an empty list and the SQL reports leave the table out (_balxOn), so nothing breaks.
+let _balxOn = false, _balxAt = 0;
+async function balxCheck() {
+  if (Date.now() - _balxAt < 60000) return _balxOn; _balxAt = Date.now();
+  try { _balxOn = !!(await pool.query(`SELECT to_regclass('planner.po_balance_payments') t`)).rows[0].t; } catch (_) {}
+  return _balxOn;
+}
+async function poBalX(rows) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  let m = new Map();
+  if (await balxCheck()) {
+    try { const r = await pool.query(`SELECT po, json_agg(json_build_object('id', id, 'seq', seq, 'amount', round(amount,2), 'date', to_char(paid_date,'YYYY-MM-DD')) ORDER BY seq) x
+        FROM planner.po_balance_payments WHERE po = ANY($1) GROUP BY po`, [rows.map(r => r.po)]); m = new Map(r.rows.map(x => [x.po, x.x])); }
+    catch (e) { if (/does not exist/.test(e.message)) { _balxOn = false; } else log500(e); }
+  }
+  for (const p of rows) { const x = m.get(p.po) || []; p.balance_x = x;
+    p.balance_x_amount = Math.round(x.reduce((a, y) => a + (Number(y.amount) || 0), 0) * 100) / 100;
+    p.balance_x_paid = Math.round(x.reduce((a, y) => a + (y.date ? (Number(y.amount) || 0) : 0), 0) * 100) / 100; }
+  return rows;
+}
+async function poRowsQ(tail, params) { const r = await queryCapped(PO_ROWS_SQL + tail, params); await poBalX(r.rows); return r; }
+// SQL fragments for the reports: '' (or 0) until the table exists.
+balxCheck().catch(() => {});   // know at boot whether migration 362 is applied (re-checked every minute after)
+const balxSumSql = (poCol) => _balxOn ? `coalesce((SELECT sum(bx.amount) FROM planner.po_balance_payments bx WHERE bx.po=${poCol}),0)` : '0';
 const PO_ROWS_SQL = `
           -- Canonical per-PO payment/date core comes from the SHARED view planner.v_po_finance (migration 123),
           -- so admin + supplier portal compute identical figures (no drift). Admin layers shipment MASTERING on
@@ -24910,16 +24949,51 @@ function _poRowArchived(r, cutoff) {
 }
 // Full, unfiltered PO grid rows (the expensive PO_ROWS_SQL, run once). Feeds the admin PO grid (archive-filtered in
 // JS per request) and Cash Flow (uses the full set as today). The per-supplier / portal-preview path stays live.
-const poRowsCache = makeCache('po-rows', async () => (await queryCapped(PO_ROWS_SQL + ' ORDER BY po')).rows.filter(r => !r.master_po), SUPPLY_CACHE_TTL_MS, { proactive: false });   // CHILD POs are consolidated into their master and hidden from the grid + cash flow (the master, is_master, stays)
+const poRowsCache = makeCache('po-rows', async () => (await poRowsQ(' ORDER BY po')).rows.filter(r => !r.master_po), SUPPLY_CACHE_TTL_MS, { proactive: false });   // CHILD POs are consolidated into their master and hidden from the grid + cash flow (the master, is_master, stays)
 // v27.881: after a write to ONE PO, re-read just that PO's row (PO_ROWS_SQL is used as a black box, same as the other
 // per-PO callers) and swap it into the cached grid — the writer sees their edit exact on the next read without a full
 // rebuild. A PO that became a child (master_po set) leaves the grid; a new PO is inserted in po order. Best-effort.
 // v27.881: child POs (consolidated under a master) were re-read with PO_ROWS_SQL on EVERY grid load (prod: 15,048 calls at
 // 0.29s since 20-Aug). Same epoch-aware cache as the parent rows; the grid appends them from here.
-const poKidsCache = makeCache('po-kids', async () => (await queryCapped(PO_ROWS_SQL + ` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows, SUPPLY_CACHE_TTL_MS, { proactive: false });
+const poKidsCache = makeCache('po-kids', async () => (await poRowsQ(` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows, SUPPLY_CACHE_TTL_MS, { proactive: false });
+// v28.307 (Ben): balance payment 3 onward. POST /api/supply/po/:po/balance-x creates the next one ({amount, date}); /:id updates it
+// ({amount} and/or {date}, blank date = unpaid) or removes it ({remove:true}). SUPPLY edit, like balance payments 1 and 2 on the PO.
+// Answers { row } (the recomputed grid row, with balance_x) like a PO edit, and keeps the grid cache exact.
+async function balxWrite(req, res) {
+  const po = String(req.params.po || ''), id = req.params.id ? String(req.params.id) : null, b = req.body || {};
+  if (!(await balxCheck())) return res.status(409).json({ error: 'Balance payment 3 onward needs migration 362 (planner.po_balance_payments)' });
+  if (id && !/^\d+$/.test(id)) return res.status(400).json({ error: 'bad id' });
+  const num = v => { if (v === '' || v == null) return null; const n = Number(String(v).replace(/,/g, '').trim()); return isFinite(n) ? Math.round(n * 100) / 100 : NaN; };
+  const day = v => (v === '' || v == null) ? null : (/^\d{4}-\d{2}-\d{2}$/.test(String(v).slice(0, 10)) ? String(v).slice(0, 10) : 'bad');
+  const by = authUser(req) || null;
+  try {
+    if (!(await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [po])).rowCount) return res.status(404).json({ error: 'PO not found' });
+    if (id && b.remove === true) { await pool.query(`DELETE FROM planner.po_balance_payments WHERE id=$1 AND po=$2`, [id, po]); }
+    else if (id) {
+      const sets = [], vals = [];
+      if ('amount' in b) { const a = num(b.amount); if (a == null || isNaN(a) || a <= 0) return res.status(400).json({ error: 'Enter an amount above 0 (or remove the payment)' }); vals.push(a); sets.push('amount=$' + vals.length); }
+      if ('date' in b) { const d = day(b.date); if (d === 'bad') return res.status(400).json({ error: 'Date must be YYYY-MM-DD' }); vals.push(d); sets.push('paid_date=$' + vals.length + '::date'); }
+      if (!sets.length) return res.status(400).json({ error: 'nothing to change' });
+      vals.push(by, id, po);
+      const r = await pool.query(`UPDATE planner.po_balance_payments SET ${sets.join(',')}, updated_by=$${vals.length - 2}, updated_at=now() WHERE id=$${vals.length - 1} AND po=$${vals.length}`, vals);
+      if (!r.rowCount) return res.status(404).json({ error: 'payment not found' });
+    } else {
+      const a = num(b.amount), d = day(b.date);
+      if (a == null || isNaN(a) || a <= 0) return res.status(400).json({ error: 'Enter an amount above 0' });
+      if (d === 'bad') return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+      await pool.query(`INSERT INTO planner.po_balance_payments (po, seq, amount, paid_date, created_by, updated_by)
+        SELECT $1, greatest(3, coalesce(max(seq),2)+1), $2, $3::date, $4, $4 FROM planner.po_balance_payments WHERE po=$1`, [po, a, d, by]);
+    }
+    try { await poRowsPatchPo(po); } catch (_) {}
+    invalidateSupplyCaches(_patchScope('planner.purchase_orders', { pay_balance_2_amount: 1 }));
+    res.json({ ok: true, row: (await poRowsQ(' WHERE calc4.po = $1', [po])).rows[0] || null });
+  } catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: 'Another balance payment was added at the same time, refresh and try again' }); log500(e); res.status(500).json({ error: e.message }); }
+}
+app.post('/api/supply/po/:po/balance-x', balxWrite);
+app.post('/api/supply/po/:po/balance-x/:id', balxWrite);
 async function poRowsPatchPo(po) {
   if (!po || !poRowsCache.peek()) return false;
-  const fresh = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [po])).rows[0] || null;
+  const fresh = (await poRowsQ(' WHERE calc4.po = $1', [po])).rows[0] || null;
   return poRowsCache.patch((cur) => {
     const rows = cur.slice();   // v28.167: a NEW array (cached values are never mutated in place; payload memos key on the object)
     const i = rows.findIndex(r => r.po === po);
@@ -28617,6 +28691,9 @@ function portalPaymentsQ(names) { const _pnames = names.map(n => String(n).toLow
         UNION ALL
         SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        ${_balxOn ? `UNION ALL
+        SELECT to_char(bx.paid_date,'YYYY-MM-DD'), o.po, round(bx.amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
+          FROM planner.po_balance_payments bx JOIN planner.purchase_orders o ON o.po=bx.po WHERE bx.paid_date IS NOT NULL AND coalesce(bx.amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)` : ''}
         UNION ALL
         SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', supplier_name
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)

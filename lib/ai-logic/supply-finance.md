@@ -80,9 +80,9 @@ fingerprints:
   server.mjs::upsertTracking: aaba6026cb4a
   server.mjs::case 'deposits': 491aae204483
   server.mjs::case 'productions': 535e6383bf1d
-  server.mjs::case 'payments-report': a377af9242ab
+  server.mjs::case 'payments-report': e30568f69d63
   server.mjs::PAY_REGION_SPLIT_FROM: dc36a85b870b
-  server.mjs::cashflowResponse: 4385d2022c29
+  server.mjs::cashflowResponse: 24ed673d6b13
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
   server.mjs::computeXeroRunPlan: dff569013199
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.305
+verified_version: v28.307
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -263,7 +263,7 @@ verified_version: v28.305
 - Due dates. Start: production start + 7, only if start calc > 0. Completion, only if completion calc > 0: with a final invoice, the ship date (master's, else own, else production end); without one, production end, or today if production end has passed. (source: server.mjs :: PO_ROWS_SQL start_due, completion_due)
 - Balance due date: the final-payment-due override if set. Otherwise, for a PO not complete with value below 500: invoice_processed_date, else ship. Otherwise: credit_type on_shipment counts from ship, anything else from delivery, plus suppliers.credit_days. Shown only when balance owing is above 0. (source: v_po_finance :: bal_due_date)
 - Payment overdue flag (due dates from 01-Jan-26 on, applies to complete POs too): start overdue with no assignment and no deposit_ref; completion overdue with no assignment, but only once a final invoice amount exists; balance overdue with balance_1 unset and more than 0.01 owing. (source: server.mjs :: PO_ROWS_SQL payment_overdue)
-- Plan vs ledger: the app records payments on purchase_orders (pay_start_deposit_*, pay_completion_*, pay_balance_1_*, pay_balance_2_*). Start deposits drawn on a register deposit are allocations, not cash payments.
+- Plan vs ledger: the app records payments on purchase_orders (pay_start_deposit_*, pay_completion_*, pay_balance_1_*, pay_balance_2_*). Balance payment 3 onward (v28.307, Ben 13-Oct-26: "we can have balance 3,4,5 in reality") are rows in planner.po_balance_payments (po, seq 3+, amount, paid date), added to every paid / remaining figure, the Payments Report, payment run detail, By Supplier and supplier statements. PO drawer > Payments shows one row each (amount, date, remove) and, once balance 2 is used and money is still owed, a Balance N row: pay » records the rest dated today, + add takes a typed amount. Start deposits drawn on a register deposit are allocations, not cash payments.
 
 ## Payments Due: balance paid only when fully paid (v28.294)
 - A PO balance counts as paid only when balance payment 1 + balance payment 2 cover the whole balance owing (remaining = balance_owing − balance_1_amount − balance_2_amount ≤ 0.009). Any part payment leaves the rest due. (source: supply/inject.html :: balRemaining, buildPaymentsDue)
@@ -280,7 +280,7 @@ verified_version: v28.305
 
 ## Cash flow (SUPPLY ▸ Cash Flow)
 - Lines are built from the PO grid rows. A line is timed on: the paid date, else the likely date (the deposit's date_likely_pay or a manual payment_likely_dates override), else the due date. Lines of 0 or less are dropped. (source: server.mjs :: cashflowResponse mkLine)
-- Per PO: Deposit (only when there is no deposit_ref), Completion, Balance, and Balance 2 if set. When balance 1 (or 2) has an amount but they do not cover the whole balance owing, the rest is its own unpaid Balance line on the balance due date, timed by balance 2's likely date (v28.304; before that it was missing, understating the outflow). An unpaid milestone is dropped once the PO is fully paid (less than 0.02 outstanding). (source: server.mjs :: cashflowResponse)
+- Per PO: Deposit (only when there is no deposit_ref), Completion, Balance, and Balance 2 if set. When balance 1 (or 2) has an amount but they do not cover the whole balance owing, the rest is its own unpaid Balance line on the balance due date, timed by balance 2's likely date (v28.304; before that it was missing, understating the outflow). Balance payment 3 onward (v28.307, planner.po_balance_payments) are each their own Balance line (paid when dated), and the remainder is what is left after all of them. An unpaid milestone is dropped once the PO is fully paid (less than 0.02 outstanding). (source: server.mjs :: cashflowResponse)
 - Each referenced deposit gives one pool line. Due date = the register's date_due, else the earliest linked PO start due. It counts as paid only when every row on the ref has date_paid. (source: server.mjs :: cashflowResponse)
 - Freight, import duty and import tax are estimate lines for non-complete POs, and only while the landing date is today or later. They are sized per shipment (duty and tax = Σ member POs) or per PO. Freight is due at landing + 14 days. Duty and tax are due at landing, or landing + 7 for US. FOB shipments and FOB POs post none. (source: server.mjs :: cashflowResponse)
 - PO-level estimates: freight = the Flexport quote split by pallet share, else freight_rates for destination + container size. Duty = Σ qty × cost_price × duty_rates.duty_pct(category, country). Tax = tax % × goods value when the tax base is "goods", else × (goods + duty + freight). (source: v_po_finance; server.mjs :: PO_ROWS_SQL)

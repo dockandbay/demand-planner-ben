@@ -2538,7 +2538,7 @@
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus();
     }); }
   // fully paid = value(+credit) − all assigned/paid milestones ≤ 0 → no deposit is "needed" any more
-  function poFullyPaid(r){ var n=function(v){return Number(v)||0;}; var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount); return Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100 <= 0.02; }
+  function poFullyPaid(r){ var n=function(v){return Number(v)||0;}; var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount)+n(r.balance_x_amount); return Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100 <= 0.02; }
   // notApplicable = the PO has no start % (0%), so a deposit doesn't apply → show "not applicable" (same grey) instead of "no deposit".
   function depPickBtn(po,val,needed,notApplicable){ var empty=!val; var cls='dep-pick'+(needed&&empty?' needdep':(empty?' nodep':''));
     return '<button class="'+cls+'" data-po="'+esc(po)+'">'+(val?esc(val):(needed?'— assign':(notApplicable?'not applicable':'no deposit')))+' ▾</button>'; }
@@ -2818,7 +2818,8 @@
     // Surfaced for open POs, and for completed POs from production 55 onwards (payment issues still matter).
     payment_invalid:function(r){ if(!(r.progress!=='complete'||(/^[0-9]+$/.test(String(r.prod_no||''))&&parseInt(r.prod_no,10)>=55)))return false;
       var A=function(x){return Number(x)>0;};
-      return (A(r.start_assigned)&&!r.start_date)||(A(r.completion_assigned)&&!r.completion_date)||(A(r.balance_1_amount)&&!r.balance_1_date)||(A(r.balance_2_amount)&&!r.balance_2_date); },   // DROPPED the final-invoice branch: it checked final_payment_due (balance_due_date_overide), an OPTIONAL override (blank = calculated balance due date), so it false-positived on every invoiced PO. A genuinely assigned-but-undated balance is still caught by the balance_1/balance_2 checks.
+      return (A(r.start_assigned)&&!r.start_date)||(A(r.completion_assigned)&&!r.completion_date)||(A(r.balance_1_amount)&&!r.balance_1_date)||(A(r.balance_2_amount)&&!r.balance_2_date)||(r.balance_x||[]).some(function(x){ return A(x.amount)&&!x.date; }); },   // v28.307: balance payment 3 onward too
+        // DROPPED the final-invoice branch: it checked final_payment_due (balance_due_date_overide), an OPTIONAL override (blank = calculated balance due date), so it false-positived on every invoiced PO. A genuinely assigned-but-undated balance is still caught by the balance_1/balance_2 checks.
     // "Late - should be Completed": the COMPLETION date (checkin = delivery + 7, the Fulfil/Cin7 completion) has
     // passed but the PO isn't marked complete yet. (Was wrongly keyed on the production-end date.)
     late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
@@ -4253,7 +4254,7 @@
     // P() skips an item whose code is snoozed (unless show-snoozed), like the coded PO actions.
     var kc={}, P=function(arr,code,lbl){ if(!_poShowSnoozed && poActSnoozed(r.po,code))return; if(arr.indexOf(lbl)<0)arr.push(lbl); kc[lbl]=code; };
     var today=new Date().toISOString().slice(0,10);
-    var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount);
+    var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount)+n(r.balance_x_amount);   // v28.307: + balance 3 onward
     var totalDue=Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100;
     var startUnpaid=(r.start_assigned==null && !r.deposit_ref), compUnpaid=(r.completion_assigned==null);
     var open=(r.progress!=='complete');   // completed POs don't raise payment/freight actions (not actionable noise)
@@ -4325,7 +4326,7 @@
     function tr(c){return '<tr>'+c+'</tr>';}
     // total still owed = value − everything paid so far (lets you pay the remainder however you like)
     var n=function(v){return Number(v)||0;};
-    var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount);
+    var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount)+n(r.balance_x_amount);   // v28.307: + balance 3 onward
     var totalDue=Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100;
     var today=new Date().toISOString().slice(0,10);
     // a due milestone is OVERDUE when its date has passed and it hasn't been paid/covered.
@@ -4536,8 +4537,23 @@
         +'<td class="l">'+payIn(ep,'pay_balance_2_date',r.balance_2_date,true,!(n(r.balance_2_amount)>0))+'</td>'
         +'<td class="l"><span class="mut">—</span></td>'
         +dueCell(r.balance_due,totalDue>0.02 && !bal2Paid)+likelyCell('bal2:'+r.po,totalDue>0.02 && !bal2Paid,r.likely_balance_2)+'<td class="l">'+payBadge(r.balance_2_amount!=null?'paid':'est',r.balance_2_amount!=null?'bg-green':'bg-amber')+'</td>'); }
+    // v28.307 (Ben 13-Oct-26: "we can have balance 3,4,5 in reality"): balance payment 3 onward, one row each (own amount + date, remove),
+    // then, once balance 2 is used and money is still owed, a "Balance N" row whose pay » records the rest as the next payment.
+    (r.balance_x||[]).forEach(function(x){ var xep=ep+'/balance-x/'+x.id;
+      h+=tr('<td class="l"><b>Balance '+esc(x.seq)+'</b><div class="mut tiny" style="margin-top:2px">part payment</div></td>'
+        +'<td>'+money(x.amount)+'</td>'
+        +'<td class="l">'+payIn(xep,'amount',x.amount)+'</td>'
+        +'<td class="l">'+payIn(xep,'date',x.date,true)+'</td>'
+        +'<td class="l"><button class="lnk-btn balx-rm" data-ep="'+esc(xep)+'" style="color:var(--neg)" title="remove this balance payment">remove</button></td>'
+        +dueCell(r.balance_due,totalDue>0.02 && !x.date)+'<td class="l"><span class="mut">—</span></td><td class="l">'+payBadge(x.date?'paid':'unpaid',x.date?'bg-green':'bg-amber')+'</td>'); });
+    var _bxRem=Math.round((owe-n(r.balance_1_amount)-n(r.balance_2_amount)-n(r.balance_x_amount))*100)/100;
+    if(r.balance_2_amount!=null && _bxRem>0.009 && totalDue>0.02){ var _nx=3+(r.balance_x||[]).length;
+      h+=tr('<td class="l"><b>Balance '+_nx+'</b><div class="mut tiny" style="margin-top:2px">remainder</div></td>'
+        +'<td>'+money(_bxRem)+' <span class="mut tiny">owing</span> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="'+esc(_bxRem)+'" title="record the rest as balance payment '+_nx+', dated today">pay &raquo;</button> <button class="pbtn balx-new" data-ep="'+esc(ep+'/balance-x')+'" data-amt="" title="add balance payment '+_nx+' with an amount you type">+ add</button></td>'
+        +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>'
+        +dueCell(r.balance_due,true)+'<td class="l"><span class="mut">—</span></td><td class="l">'+payBadge('owing','bg-amber')+'</td>'); }
     h+='</tbody></table></div>'
-      +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial · clear a % to revert to the supplier&rsquo;s terms · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
+      +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial, Balance 3 onward when balance 2 is used and money is still owed · clear a % to revert to the supplier&rsquo;s terms · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
     if(r.deposit_ref) h+='<div class="dep-ctx" data-po="'+esc(r.po)+'" style="margin:2px 2px 10px"></div>';   // deposit analysis box (filled async in bindPay)
     var payH=h;
     // ---- DATES chunk — only production start & end are editable; ship/delivery/completion are always calculated
@@ -4950,6 +4966,14 @@
       fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); })   // fast row-only re-render (payment fill → lines unchanged)
         .catch(function(e){ b.disabled=false; b.innerHTML=orig; alert('Failed: '+(e.message||e)); }); }; });
+    // v28.307: balance payment 3 onward: pay » (rest, today) / + add (typed amount) / remove
+    document.querySelectorAll('#podet-'+i+' .balx-new').forEach(function(b){ b.onclick=function(){ var amt=b.dataset.amt, dt=localToday();
+        if(!amt){ var v=prompt('Amount of the next balance payment'); if(v==null)return; amt=payEvalAmount(v); if(!(Number(String(amt).replace(/,/g,''))>0))return alert('Enter an amount above 0'); dt=''; }
+        b.disabled=true; fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({amount:String(amt).replace(/,/g,''),date:dt})}).then(function(r){return r.json();})
+          .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
+    document.querySelectorAll('#podet-'+i+' .balx-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this balance payment?'))return; b.disabled=true;
+        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({remove:true})}).then(function(r){return r.json();})
+          .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,function(){ poRefetchPanel(po,i); }); }; });
     // Additional costs (supplier-submitted, PAYMENTS tab) — edit / approve / un-approve / remove / add. Same
     // add/edit/remove endpoints the portal uses, plus an approve toggle. Any value edit resets approval (server-side).
@@ -6052,7 +6076,7 @@
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   // v28.294 (Ben 12-Oct-26): "fully paid is required, not just a balance payment. Any balance remaining should surface as a payment due."
   // Balance still owed = balance owing (after start deposit and completion) less balance payments 1 and 2.
-  function balRemaining(p){ var n=function(v){ return Number(v)||0; }; return Math.round((n(p.balance_owing)-n(p.balance_1_amount)-n(p.balance_2_amount))*100)/100; }
+  function balRemaining(p){ var n=function(v){ return Number(v)||0; }; return Math.round((n(p.balance_owing)-n(p.balance_1_amount)-n(p.balance_2_amount)-n(p.balance_x_amount))*100)/100; }   // v28.307: + balance 3 onward
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
     (Array.isArray(pos)?pos:[]).forEach(function(p){ if(p.master_po)return; if(!p.is_final)return;   // child POs: master owns the money → skip
       if(Number(p.completion_calc)>0.009 && p.completion_due && !(Number(p.completion_assigned)>0.009) && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
@@ -11054,7 +11078,12 @@
         else {   // v28.294: part payments show as paid rows; whatever is still owed is its own unpaid row, recorded into balance payment 2
           if(_b1>0.009) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:_b1,due:p.balance_due,likely:_lb1,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true});
           if(_b2>0.009) rows.push({sup:p.supplier_name||'',type:'Balance 2',ref:p.po,due_amt:_b2,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:p.balance_2_amount,dt_field:'pay_balance_2_date',dt_val:p.balance_2_date,po:true});
-          if(_rem>0.009) rows.push({sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:Math.round((_b2+_rem)*100)/100,remaining:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:null,dt_field:'pay_balance_2_date',dt_val:null,po:true}); } } });
+          // v28.307: balance payment 3 onward, each its own row (paid when dated)
+          (p.balance_x||[]).forEach(function(x){ rows.push({sup:p.supplier_name||'',type:'Balance '+x.seq,ref:p.po,due_amt:Number(x.amount)||0,due:p.balance_due,likely:_lb2,bal2:true,ep:ep+'/balance-x/'+x.id,amt_field:'amount',amt_val:x.amount,dt_field:'date',dt_val:x.date,po:true}); });
+          // the rest: into balance payment 2 while it is unused or unpaid, else recorded as the next balance payment (3, 4, ...)
+          if(_rem>0.009){ var _b2free=!(_b2>0.009)||!p.balance_2_date;
+            rows.push(_b2free?{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:Math.round((_b2+_rem)*100)/100,remaining:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep,amt_field:'pay_balance_2_amount',amt_val:null,dt_field:'pay_balance_2_date',dt_val:null,po:true}
+              :{sup:p.supplier_name||'',type:'Balance (remaining)',ref:p.po,due_amt:_rem,pay_amt:_rem,remaining:true,noedit:true,due:p.balance_due,likely:_lb2,bal2:true,ep:ep+'/balance-x',amt_field:'amount',amt_val:null,dt_field:'date',dt_val:null,po:true}); } } } });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
@@ -11083,7 +11112,7 @@
         : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>';
       var badge='<span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span>'+(r.overdue?' <span class="tool-badge bg-red">overdue</span>':(r.paid?' <span class="tool-badge bg-green">paid</span>':''));
       var f=mobFld('Amount due',fmtCur(r.due_amt, supCcyOf(r.sup)))+mobFld('Due date',dueTxt)+mobFld('Likely pay',likelyC)
-        +mobFld('Assigned',editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',editCell(r.ep,r.dt_field,r.dt_val,'date'));
+        +mobFld('Assigned',r.noedit?'<span class="mut">—</span>':editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',r.noedit?'<span class="mut">pay records the next balance payment</span>':editCell(r.ep,r.dt_field,r.dt_val,'date'));   // v28.307: the next-balance row has nothing to edit until paid
       var act=!r.paid?'<button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.pay_amt!=null?r.pay_amt:r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:#15803d;padding:3px 12px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'';
       return mobCard(refCell,badge,f,act);
     }
@@ -11123,8 +11152,8 @@
             +'<td>'+fmtCur(r.due_amt, supCcyOf(r.sup))+'</td>'
             +'<td class="l">'+dueCell+'</td>'
             +'<td class="l">'+likelyC+'</td>'
-            +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
-            +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')
+            +'<td>'+(r.noedit?'<span class="mut">—</span>':editCell(r.ep,r.amt_field,r.amt_val))+'</td>'
+            +'<td class="l">'+(r.noedit?'<span class="mut tiny">pay records the next balance payment</span>':editCell(r.ep,r.dt_field,r.dt_val,'date'))
               +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.pay_amt!=null?r.pay_amt:r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:var(--pos);color:#fff;border-color:var(--pos);padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
               +'</td></tr>'; }); });
       var _curs=Array.from(new Set(f.map(function(r){return supCcyOf(r.sup);})));   // one symbol only if every visible row shares a currency; else flag mixed
