@@ -3354,7 +3354,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/bank-ageing\/upload\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|inbox\/read-mail)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -3919,6 +3919,76 @@ if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
 }
 // v28.258 (deep dive P1 #15): the counts come from the data cache (no work); ?deep=1 runs the eight builders as before (3 s, 8 queries into a
 // pool of 4 on Vercel, so never from an uptime monitor). Without a cache and without ?deep=1 it answers with a SELECT 1 round trip only.
+// ═══ v28.269 (Ben 12-Oct-26): ACCOUNTS > Inbox matcher, step 2 (READ ONLY). Every open bank statement line (Bank ageing upload) is given a
+// payee key, a treatment and, where accounts@ has one, the matching receipt email. Treatments (remembered per org + payee in
+// planner.accounts_payee_rules, mig 354): bill (supplier invoice with terms), spend (card / direct-debit spend: Spend Money with the receipt),
+// rule (a Xero bank rule codes it, no receipt needed; Google Ads by default, Ben), ignore (transfers, loans, tax, money in). HORIZON pre-fills
+// the treatment; a person's choice wins. Nothing is written to Xero in this step.
+const ACC_PK_STOP = new Set(['DEBIT','CREDIT','DEPOSIT','POSDEBIT','POSCREDIT','FPI','FPO','DD','BGC','PAY','TFR','DEB','CR','DR','SO','CHQ','BP','PAYMENT','THANK','YOU','DES','ID','INDN','CO','LTD','LIMITED','PLC','INC','THE','UK','GB','CC','COM','WWW','GO','CARD','TRANSACTION','PENDING','REFERENCE']);
+const ACC_PK_PREFIX = new Set(['SQ','SP','PP','MR','MRS','MS','ZPS','ACH','NEW','WITH','TEAM','ORDER','WIRE','INVOICE']);
+function accPayeeKey(ref, desc) {
+  const s = String((desc && String(desc).length > 2 ? desc : '') || ref || '').toUpperCase(), parts = s.split('|').map(x => x.trim());
+  const body = parts.length > 1 && /^[A-Z]{2,8}$/.test(parts[0]) ? parts.slice(1).join(' ') : s;
+  const w = body.split(/[^A-Z]+/).filter(t => t.length >= 2 && !ACC_PK_STOP.has(t));
+  if (!w.length) return '(blank)';
+  return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
+}
+const ACC_RULE_KEYS = /^(GOOGLE|LINKEDIN|FACEBOOK|META|FB|TIKTOK|STRIPE|PAYPAL|PP ZETTLE|SHOPIFY|KLARNA|ADYEN|AMAZON|AMZNMKTPLACE|AMZNBUSINESS|XERO|XRO|DISPUTE|INTEREST|SNAP)$/;
+const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN)$/;
+function accDefaultTreatment(key, amount, match) {
+  if (amount > 0) return 'ignore';                     // money in: customer payments / payouts, reconciled against sales in Xero
+  if (ACC_IGNORE_KEYS.test(key)) return 'ignore';
+  if (ACC_RULE_KEYS.test(key)) return 'rule';
+  if (match && /invoice|inv[-\s]?\d|statement/i.test(match.subject || '') && !/receipt/i.test((match.subject || '') + ' ' + (match.from || ''))) return 'bill';
+  return 'spend';
+}
+async function accInboxProposals() {
+  const lines = (await pool.query(`SELECT s.org, s.account_name, coalesce(a.currency,'') currency, to_char(s.line_date,'YYYY-MM-DD') line_date, s.amount::float8 amount, s.reference, s.description
+    FROM planner.accounts_stmt_lines s LEFT JOIN planner.accounts_bank_accounts a ON a.org=s.org AND a.account_id=s.account_id WHERE NOT s.reconciled ORDER BY s.line_date DESC`)).rows;
+  const rules = new Map((await pool.query(`SELECT org, payee_key, treatment, source FROM planner.accounts_payee_rules`)).rows.map(r => [r.org + '|' + r.payee_key, r]));
+  const minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31');
+  const em = lines.length ? (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 60`, [minD])).rows
+    .map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) })) : [];
+  const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
+  const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$', CAD: '$' };
+  const out = lines.map(l => {
+    const key = accPayeeKey(l.reference, l.description), k = Math.abs(l.amount).toFixed(2), td = new Date(l.line_date), toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
+    const c = l.amount < 0 ? (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 45) return null;
+        const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = toks.some(t => hay.includes(t)), cs = e.am.get(k) || e.pam.get(k) || '';
+        const ccyOk = !cs || cs === l.currency || cs === sym[l.currency], nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
+        if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 5)) return null;
+        return { e, lag, name, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; })
+      .filter(Boolean).sort((a, b) => b.score - a.score) : [];
+    const best = c[0] && c[0].score >= 40 ? c[0] : null;
+    const match = best ? { id: best.e.id, date: best.e.d, from: best.e.from_addr, subject: best.e.subject, files: best.e.files || [], stripe: best.e.stripe_link, lag: best.lag, name: best.name, ambiguous: !!(c[1] && c[1].score >= best.score - 5),
+      url: 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + best.e.id } : null;
+    const rule = rules.get(l.org + '|' + key), treatment = rule ? rule.treatment : accDefaultTreatment(key, l.amount, match);
+    const status = (treatment === 'rule' || treatment === 'ignore') ? 'not_needed' : match ? 'matched' : 'needs_receipt';
+    return Object.assign(l, { payee_key: key, treatment, treatment_source: rule ? rule.source : 'auto', status, match });
+  });
+  return out;
+}
+app.get('/api/accounts/inbox/proposals', async (req, res) => {
+  try { const rows = await accInboxProposals(); const cnt = {}; rows.forEach(r => { cnt[r.status] = (cnt[r.status] || 0) + 1; });
+    const lastMail = (await pool.query(`SELECT to_char(max(parsed_at) AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_gmail_msgs`).catch(() => ({ rows: [{}] }))).rows[0].at || null;
+    res.set('Cache-Control', 'no-store').json({ rows, counts: cnt, mail_read_at: lastMail });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], counts: {}, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+// Remember a payee's treatment (admins and ACCOUNTS users, Ben 12-Oct).
+app.post('/api/accounts/payee-rule', async (req, res) => {
+  try { const b = req.body || {}, org = String(b.org || '').toLowerCase(), key = String(b.payee_key || '').trim().toUpperCase().slice(0, 80), t = String(b.treatment || '');
+    if (!['uk', 'au'].includes(org) || !key || !['bill', 'spend', 'rule', 'ignore'].includes(t)) return res.status(400).json({ error: 'org, payee_key and treatment (bill, spend, rule, ignore) required' });
+    await pool.query(`INSERT INTO planner.accounts_payee_rules (org, payee_key, treatment, source, updated_by, updated_at) VALUES ($1,$2,$3,'manual',$4,now()) ON CONFLICT (org, payee_key) DO UPDATE SET treatment=EXCLUDED.treatment, source='manual', updated_by=EXCLUDED.updated_by, updated_at=now()`,
+      [org, key, t, (req.me && req.me.email) || null]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Read new accounts@ mail into the amount cache now (the weekly learn job also does it). Gmail reads only; 4-minute budget.
+app.post('/api/accounts/inbox/read-mail', async (req, res) => {
+  try { if (!(await gmailRow().then(g => g && !g.missing).catch(() => false))) return res.status(409).json({ error: 'accounts@ Gmail is not connected' });
+    const r = await accGmailCache(ACC_LEARN_DAYS + 15, new AccBudget(Math.min(ACC_LEARN_BUDGET_MS, 240000))); res.json(Object.assign({ ok: true }, r));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/health', async (req, res) => {
   try {
     const deep = String(req.query.deep || '') === '1', cached = !deep && _dataCache && _dataCache.vals;

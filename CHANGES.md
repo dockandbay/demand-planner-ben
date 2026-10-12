@@ -1,3 +1,13 @@
+## v28.269 (Ben, branch review-fixes-2026-10-05): Inbox matcher: statement lines with a treatment per payee and the matching accounts@ receipt (read only)
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/354_accounts_payee_rules.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). **Migration 354** (additive: `planner.accounts_payee_rules`). No env. Gmail reads only; nothing written to Xero.
+
+- New section in ACCOUNTS ▸ Inbox matcher, **Bank statement lines and receipts**: every open line from the Bank ageing upload with its payee, a **treatment** (Bill / Spend money / Xero bank rule / Ignore, Ben 12-Oct: not every line needs a bill, e.g. Google) and the matching receipt email from accounts@ with a link.
+- Treatment is remembered per org + payee (choosing one in the list saves it for every line of that payee; admins and ACCOUNTS users). HORIZON pre-fills it (money in = ignore; Google, LinkedIn, Stripe, PayPal, Amazon, Snap, Xero = bank rule; transfers, loans, HMRC and other tax = ignore; a matched invoice email = bill; otherwise spend money).
+- Filters: Receipt found, Needs receipt (default), No receipt needed, All; search; **Read new mail** pulls new accounts@ emails into the amount cache now (Gmail reads, 4-minute budget).
+- Sandbox, Ben's 167 UK lines: 99 need no receipt (bank rule or ignore), 2 receipts found (Harper James invoice as a bill, Microsoft 365 as spend money), 66 need a receipt (Flexport 8, Fineline 4, OpenAI, Figma, Airbnb, ...): those receipts are not reaching accounts@ (same 13 to 15% coverage as the back-date analysis).
+- Next step (approved by Ben 12-Oct, admins and ACCOUNTS users): Create bill / Create spend money in Xero for ticked lines, dated to the bank line, exact amount, receipt attached, no payment.
+
 ## v28.268 (Ben, branch review-fixes-2026-10-05): Bank ageing reads Xero's Uncoded statement lines export (all bank accounts, one CSV per org)
 
 **Files:** `server.mjs`, `lib/xero_recon_xlsx.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env.

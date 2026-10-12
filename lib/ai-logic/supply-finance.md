@@ -46,7 +46,7 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
-  server.mjs::accountsGate: 0cf706c7b57a
+  server.mjs::accountsGate: 56414926c286
   server.mjs::/api/accounts/payables: f95bff782b95
   supply/inject.html::acRenderPayables: dcfac50320fe
   supply/inject.html::accountsCan: c51271303351
@@ -186,7 +186,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.268
+verified_version: v28.269
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -325,6 +325,7 @@ verified_version: v28.268
 - Back-date runs in stages (v28.253): reconciled Xero items go into a cache (planner.accounts_recon_txns, incremental after the first run), then new accounts@ mail is parsed, then the match runs in memory. Each call works for at most 4 minutes (ACC_LEARN_BUDGET_MS) and resumes from the saved stage next time, so it fits a Vercel function; the weekly cron is called until it reports done. One run at a time across instances (lock row, 20 minutes). (source: server.mjs :: accountsLearn)
 - Back-date (v28.250): a weekly learn job (read only on Xero and Gmail) pairs RECONCILED Xero spend and bill payments (UK and AU, last 120 days) with accounts@ emails. "Receipts to attach" = pairs where the Xero item has no file. Pairing: exact amount, email from 60 days before to 7 days after the bank date, and the payee name in the sender or subject; without the name only an email with 8 amounts or fewer, the same explicit currency and a gap of -2 to +3 days counts. Amounts are read from the subject, body and up to 2 PDF attachments. Left out of matching: feeds (payees with 60 or more items in the window), 3PLs (Coghlans, ILG, I-Fulfilment, Geneva: billed through 3PL invoicing) and HORIZON product suppliers. Nothing is attached or changed in Xero from this page. (source: server.mjs :: accountsLearn)
 - Back-date "Tax to review" = every reconciled UK spend coded Reverse Charge (feeds included, 3PLs and product suppliers left out), with the treatment Ben set: non-GBP expenses = Zero Rated Expenses, GBP = 20% VAT on Expenses or No VAT, UK bank fees = No VAT. Reverse Charge is never proposed. (source: server.mjs :: accountsLearn)
+- Inbox matcher, statement lines (v28.269): every open statement line gets a payee key (the first meaningful word of the bank text, e.g. GOOGLE, HMRC, FLEXPORT) and a treatment remembered per organisation and payee: Bill (supplier invoice with terms), Spend money (card or direct-debit spend with a receipt), Xero bank rule (Xero codes it, no receipt needed; Google Ads by default) or Ignore (transfers, loans, tax, and all money in). HORIZON suggests the treatment (money in = ignore; known platforms such as Google, LinkedIn, Stripe, PayPal, Amazon = bank rule; a matched email titled invoice = bill; otherwise spend money); a person's choice wins. For money-out lines it looks for the receipt in accounts@: same amount, email from 45 days before to 7 days after the line, payee in the sender or subject (or a short email in the same currency within 5 days). Nothing is written to Xero at this step. (source: server.mjs :: accInboxProposals, accPayeeKey, accDefaultTreatment)
 - Inbox matcher (v28.248, step 1): one Gmail mailbox (accounts@) is connected by a user with ACCOUNTS access, read-only scope (gmail.readonly); HORIZON never sends, labels or deletes mail. The refresh token is stored sealed (AES-256-GCM) in planner.accounts_gmail. The tab shows the newest 25 emails for a Gmail search (default last 30 days) with their attachments, and flags Stripe emails without attachments (receipt link). Matching to unreconciled bank lines and bill creation are not built yet. (source: server.mjs :: /api/accounts/gmail/*; supply/inject.html :: acInRender)
 
 ## 3PL invoices

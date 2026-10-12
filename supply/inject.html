@@ -18935,7 +18935,41 @@
   }
   // ── v28.248 ACCOUNTS > Inbox matcher, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.
-  var AC_IN={st:null,msgs:null,q:'newer_than:30d',busy:false,err:'',flash:'',disc:false};
+  var AC_IN={st:null,msgs:null,q:'newer_than:30d',busy:false,err:'',flash:'',disc:false,p:null,pBusy:false,pF:'needs',pQ:'',readBusy:false,readMsg:''};
+  // v28.269: statement lines (Bank ageing upload) with a treatment per payee and the matching accounts@ receipt. Read only: nothing is sent to Xero.
+  var AC_TR=[['bill','Bill'],['spend','Spend money'],['rule','Xero bank rule'],['ignore','Ignore']];
+  function acInLoadP(){ if(AC_IN.pBusy)return; AC_IN.pBusy=true; fetch('/api/accounts/inbox/proposals').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+    .then(function(j){ AC_IN.p=j; AC_IN.pBusy=false; acInRender(); }).catch(function(e){ AC_IN.p={rows:[],counts:{},error:e.message}; AC_IN.pBusy=false; acInRender(); }); }
+  function acInLinesHtml(){ var P=AC_IN.p; if(!P)return '<div class="count" style="margin:10px 0">Loading statement lines…</div>';
+    if(P.error)return '<div class="count" style="color:var(--neg)">'+esc(P.error)+'</div>';
+    var rows=P.rows||[], c=P.counts||{}, F=AC_IN.pF, q=AC_IN.pQ.toLowerCase();
+    var vis=rows.filter(function(r){ if(F==='needs'&&r.status!=='needs_receipt')return false; if(F==='matched'&&r.status!=='matched')return false; if(F==='not'&&r.status!=='not_needed')return false; if(q&&(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)<0)return false; return true; });
+    var pill=function(k,l,n){ return '<span class="pill'+(F===k?' active':'')+'" data-pf="'+k+'">'+l+(n!=null?' ('+n+')':'')+'</span>'; };
+    var h='<div class="sect-h" style="margin-top:18px">Bank statement lines and receipts</div>'
+      +'<div class="bar">'+pill('matched','Receipt found',c.matched||0)+pill('needs','Needs receipt',c.needs_receipt||0)+pill('not','No receipt needed',c.not_needed||0)+pill('all','All',rows.length)
+      +'<input class="fci" id="ac-pq2" placeholder="Search payee, line, email" style="width:200px" value="'+esc(AC_IN.pQ)+'"><span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
+      +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
+    if(!rows.length)return h+'<div class="count">No open statement lines: upload the Uncoded statement lines export in Bank ageing first.</div>';
+    h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Statement line</th><th>Amount</th><th>Payee</th><th>Treatment</th><th>Receipt in accounts@</th></tr></thead><tbody>';
+    h+=vis.slice(0,400).map(function(r,i){ var m=r.match, ccy=r.currency;
+      var tr='<select class="ac-tr" data-i="'+rows.indexOf(r)+'" style="font-size:12px">'+AC_TR.map(function(t){ return '<option value="'+t[0]+'"'+(t[0]===r.treatment?' selected':'')+'>'+t[1]+'</option>'; }).join('')+'</select>'+(r.treatment_source==='auto'?' <span class="tiny mut" title="Suggested by HORIZON; choosing one remembers it for this payee">auto</span>':'');
+      var rc=m?('<div>'+esc(hzTrkDate(m.date))+' · <span title="'+esc(m.from)+'">'+esc(String(m.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from)+'</span>'+(m.ambiguous?' <span class="pill" style="cursor:default">check</span>':'')+'</div><div class="tiny mut">'+esc(String(m.subject||'').slice(0,70))+((m.files||[]).length?' · '+esc(m.files.join(', ').slice(0,50)):(m.stripe?' · Stripe link':''))+' · <a href="'+esc(m.url)+'" target="_blank" rel="noopener">email ↗</a></div>')
+        :(r.status==='not_needed'?'<span class="tiny mut">not needed</span>':'<span class="tiny" style="color:var(--neg)">none found</span>');
+      return '<tr><td class="l">'+esc(hzTrkDate(r.line_date))+'</td><td class="l">'+esc(r.account_name)+'</td><td class="l" style="max-width:280px;white-space:normal"><span class="tiny">'+esc(String(r.reference||'').slice(0,90))+'</span></td><td class="l">'+(r.amount<0?acMoney(-r.amount,ccy):'<span class="pos">+'+acMoney(r.amount,ccy)+'</span>')+'</td><td class="l"><b>'+esc(r.payee_key)+'</b></td><td class="l">'+tr+'</td><td class="l" style="max-width:320px;white-space:normal">'+rc+'</td></tr>'; }).join('')
+      +(vis.length?'':'<tr><td colspan="7" class="l mut">Nothing in this filter.</td></tr>')+'</tbody></table></div>'
+      +'<div class="tiny mut" style="margin-top:8px">Treatment is remembered per payee: <b>Bill</b> = supplier invoice with terms, <b>Spend money</b> = card or direct-debit spend with a receipt, <b>Xero bank rule</b> = Xero codes it, no receipt needed (Google Ads), <b>Ignore</b> = transfers, loans, tax, money in. A receipt is matched by exact amount, with the payee in the sender or subject (or a short email within a few days). Creating the bill or spend money in Xero is the next step; nothing is sent to Xero from this list.</div>';
+    return h; }
+  function acInWireLines(b){
+    b.querySelectorAll('[data-pf]').forEach(function(x){ x.onclick=function(){ AC_IN.pF=x.dataset.pf; acInRender(); }; });
+    var q=document.getElementById('ac-pq2'); if(q)q.oninput=function(){ AC_IN.pQ=q.value; clearTimeout(AC_IN._qt); AC_IN._qt=setTimeout(function(){ acInRender(); var n=document.getElementById('ac-pq2'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
+    b.querySelectorAll('select.ac-tr').forEach(function(s){ s.onchange=function(){ var r=AC_IN.p.rows[+s.dataset.i]; if(!r)return; var t=s.value; s.disabled=true;
+      fetch('/api/accounts/payee-rule',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({org:r.org,payee_key:r.payee_key,treatment:t})}).then(function(x){ return x.json().then(function(j){ if(!x.ok||j.error)throw new Error(j.error||('HTTP '+x.status)); }); })
+        .then(function(){ AC_IN.p=null; acInLoadP(); }).catch(function(e){ s.disabled=false; window.hzCopiedTip&&window.hzCopiedTip(e.message,s); }); }; });
+    var rm=document.getElementById('ac-readm'); if(rm)rm.onclick=function(){ if(AC_IN.readBusy)return; AC_IN.readBusy=true; AC_IN.readMsg=''; acInRender();
+      fetch('/api/accounts/inbox/read-mail',{method:'POST'}).then(function(x){ return x.json().then(function(j){ if(!x.ok||j.error)throw new Error(j.error||('HTTP '+x.status)); return j; }); })
+        .then(function(j){ AC_IN.readBusy=false; AC_IN.readMsg=j.parsed+' new email'+(j.parsed===1?'':'s')+(j.pending?' ('+j.pending+' left, press again)':''); AC_IN.p=null; acInLoadP(); })
+        .catch(function(e){ AC_IN.readBusy=false; AC_IN.readMsg=e.message; acInRender(); }); }; }
+
   function acInFlash(){ try{ var m=/[?&]gmail=([^&#]*)/.exec(location.search); if(!m)return; AC_IN.flash=decodeURIComponent(m[1].replace(/\+/g,' ')); AC_IN.st=null; AC_IN.msgs=null;
     history.replaceState(null,'',location.pathname+location.hash); }catch(e){} }
   function acInLoad(){ if(AC_IN.busy)return; AC_IN.busy=true; AC_IN.err='';
@@ -18946,7 +18980,7 @@
       .catch(function(e){ AC_IN.busy=false; AC_IN.err=e.message; acInRender(); }); }
   function acInRender(){ var b=document.getElementById('accounts-body'); if(!b||ACCOUNTS_SUB!=='inbox')return; acInFlash();
     if(!AC_IN.st){ b.innerHTML='<div class="count">Loading…</div>'; acInLoad(); return; }
-    var st=AC_IN.st, h='<div style="text-align:left;max-width:1100px">';
+    var st=AC_IN.st, h='<div style="text-align:left">';   /* v28.269: full width for the statement-lines table */
     if(AC_IN.flash){ var ok=/^connected /.test(AC_IN.flash); h+='<div class="count" style="padding:8px 10px;border-radius:6px;margin-bottom:10px;background:'+(ok?'var(--pos-bg,#e7f6ec)':'var(--neg-bg,#fdecec)')+';color:'+(ok?'var(--pos)':'var(--neg)')+'">'+esc(ok?('Gmail '+AC_IN.flash):AC_IN.flash)+'</div>'; }
     h+='<div class="ac-cards"><div class="ac-card" style="min-width:340px"><div style="font-weight:600;margin-bottom:6px">Gmail mailbox</div>';
     if(!st.configured) h+='<div class="count">Google client not set on this server (GMAIL_CLIENT_ID_ACCOUNTS / GMAIL_CLIENT_SECRET_ACCOUNTS).</div>';
@@ -18957,7 +18991,7 @@
       if(st.last_error) h+='<div class="count" style="color:var(--neg)">'+esc(st.last_error)+'</div>';
       if(st.can_write) h+='<div style="margin-top:8px"><button class="save-btn light" id="ac-gm-connect">Reconnect</button> '+(AC_IN.disc?'<button class="save-btn light" id="ac-gm-disc" style="color:var(--neg)">Click again to disconnect</button>':'<button class="save-btn light" id="ac-gm-disc">Disconnect</button>')+'</div>'; }
     h+='</div></div>';
-    if(st.connected){
+    if(st.connected){ if(!AC_IN.p&&!AC_IN.pBusy)acInLoadP(); h+=acInLinesHtml()+'<div class="sect-h" style="margin-top:18px">Recent mail in accounts@</div>';
       h+='<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input id="ac-gm-q" value="'+esc(AC_IN.q)+'" style="min-width:320px" placeholder="Gmail search, e.g. has:attachment newer_than:7d"><button class="save-btn light" id="ac-gm-go">Search</button><span class="count">Gmail search syntax · newest 25</span></div>';
       if(AC_IN.err) h+='<div class="count" style="color:var(--neg)">'+esc(AC_IN.err)+'</div>';
       else if(!AC_IN.msgs) h+='<div class="count">Loading mail…</div>';
@@ -18968,6 +19002,7 @@
           h+='<tr style="border-top:1px solid var(--line,#e5e5e5)"><td style="white-space:nowrap;padding:4px 8px 4px 0">'+esc(hzTrkDate(m.date.slice(0,10)))+'</td><td style="padding:4px 8px 4px 0" title="'+esc(m.from)+'">'+esc(f)+'</td><td style="padding:4px 8px 4px 0"><div>'+esc(m.subject||'(no subject)')+'</div><div class="count">'+esc(String(m.snippet||'').slice(0,120))+'</div></td><td style="padding:4px 0">'+at+'</td></tr>'; });
         h+='</tbody></table>'; } }
     b.innerHTML=h+'</div>';
+    try{ acInWireLines(b); }catch(e){}
     var cb=document.getElementById('ac-gm-connect'); if(cb)cb.onclick=function(){ location.href='/api/accounts/gmail/connect'; };
     var db=document.getElementById('ac-gm-disc'); if(db)db.onclick=function(){ if(!AC_IN.disc){ AC_IN.disc=true; acInRender(); setTimeout(function(){ if(AC_IN.disc){ AC_IN.disc=false; acInRender(); } },5000); return; }
       AC_IN.disc=false; fetch('/api/accounts/gmail/disconnect',{method:'POST'}).then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); AC_IN.st=null; AC_IN.msgs=null; AC_IN.flash='Gmail disconnected'; acInRender(); }).catch(function(e){ AC_IN.st=null; AC_IN.flash=e.message; acInRender(); }); };
