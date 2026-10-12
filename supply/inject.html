@@ -9385,10 +9385,16 @@
           function chk(email,field,val){ return '<input type="checkbox" class="pm-chk" data-em="'+esc(email)+'" data-f="'+field+'"'+(val?' checked':'')+'>'; }
           // Inbox item-type grants (v28.070): null = see all (back-compat); an array = only those types. Checkboxes: Sample / PO / Product / Client.
           var INBOX_KEYS=[['samples','Sample'],['purchase_order','PO'],['product','Product'],['client','Client']];
-          function inboxCell(email,types){ var all=(types==null);
-            return '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">'+INBOX_KEYS.map(function(k){ var on=all||(Array.isArray(types)&&types.indexOf(k[0])>=0);
-              return '<label style="font-size:9.5px;white-space:nowrap;cursor:pointer"><input type="checkbox" class="pm-inbox" data-em="'+esc(email)+'" data-t="'+k[0]+'"'+(on?' checked':'')+' style="vertical-align:middle;margin-right:2px">'+k[1]+'</label>'; }).join('')+'</div>'; }
-          var LAND_OPTS=[['supply/purchase-orders','SUPPLY ▸ Purchase Orders'],['supply/actions','SUPPLY ▸ Actions'],['demand','DEMAND'],['buy','BUY'],['fba','FBA'],['reports','REPORTS'],['product/plan','PRODUCT'],['client/clients','CLIENT'],['config','CONFIG'],['demand/scenario','DEMAND ▸ Scenario planner']];
+          // v28.313 (Ben): a multi-select dropdown instead of four tickboxes. The button names what is on (All / None / Sample, PO ...);
+          // the list holds the same .pm-inbox checkboxes, so saving is unchanged.
+          function inboxSum(on){ return on.length===INBOX_KEYS.length?'All':(on.length?INBOX_KEYS.filter(function(k){ return on.indexOf(k[0])>=0; }).map(function(k){ return k[1]; }).join(', '):'None'); }
+          function inboxCell(email,types){ var all=(types==null), on=INBOX_KEYS.filter(function(k){ return all||(Array.isArray(types)&&types.indexOf(k[0])>=0); }).map(function(k){ return k[0]; });
+            return '<div class="pm-ibx" style="position:relative;display:inline-block">'
+              +'<button type="button" class="pm-ibx-btn" style="font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap;min-width:90px;text-align:left">'+esc(inboxSum(on))+' ▾</button>'
+              +'<div class="pm-ibx-list" style="display:none;position:absolute;z-index:50;top:100%;left:0;margin-top:2px;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:6px 8px;min-width:130px;text-align:left">'
+              +INBOX_KEYS.map(function(k){ return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;cursor:pointer;white-space:nowrap"><input type="checkbox" class="pm-inbox" data-em="'+esc(email)+'" data-t="'+k[0]+'"'+(on.indexOf(k[0])>=0?' checked':'')+'>'+k[1]+'</label>'; }).join('')
+              +'</div></div>'; }
+          var LAND_OPTS=[['supply/purchase-orders','SUPPLY ▸ Purchase Orders'],['supply/actions','SUPPLY ▸ Actions'],['demand','DEMAND'],['buy','BUY'],['fba','FBA'],['reports','REPORTS'],['product/plan','PRODUCT'],['client/clients','CLIENT'],['config','CONFIG'],['demand/scenario','DEMAND ▸ Scenario planner'],['accounts/3pl-invoicing','ACCOUNTS ▸ 3PL invoicing']];   // v28.313 (Ben): ACCOUNTS ▸ 3PL invoicing (users without ACCOUNTS fall back to Purchase Orders)
           function landSel(val){ var v=val||'supply/purchase-orders'; return '<select class="pm-land" style="font-size:11px;padding:2px 5px;border:1px solid var(--line);border-radius:4px">'+LAND_OPTS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+esc(o[1])+'</option>';}).join('')+'</select>'; }
           var body=(rows||[]).map(function(r){ return '<tr data-em="'+esc(r.email)+'"><td class="l" style="white-space:nowrap">'+esc(r.email)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'supply_edit',r.supply_edit)+'</td>'
@@ -9422,7 +9428,15 @@
             inbox_types:Array.prototype.map.call(tr.querySelectorAll('.pm-inbox:checked'),function(c){return c.dataset.t;}),
             landing_page:(tr.querySelector('.pm-land')||{}).value||'' }; }
           b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
-          b.querySelectorAll('.pm-inbox').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
+          b.querySelectorAll('.pm-inbox').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'), w=cb.closest('.pm-ibx'); cb.disabled=true;
+              if(w){ var on=Array.prototype.map.call(w.querySelectorAll('.pm-inbox:checked'),function(c){ return c.dataset.t; }); w.querySelector('.pm-ibx-btn').textContent=inboxSum(on)+' ▾'; }
+              save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
+          b.querySelectorAll('.pm-ibx-btn').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); var l=btn.nextElementSibling, open=l.style.display!=='none';
+              b.querySelectorAll('.pm-ibx-list').forEach(function(x){ x.style.display='none'; }); if(open)return;
+              var rc=btn.getBoundingClientRect(); l.style.position='fixed'; l.style.top=(rc.bottom+2)+'px'; l.style.left=rc.left+'px'; l.style.zIndex='9999'; l.style.display='block'; }; });   // fixed: the table's scroll box clipped it
+          b.querySelectorAll('.pm-ibx-list').forEach(function(l){ l.onclick=function(e){ e.stopPropagation(); }; });
+          if(!window._pmIbxDoc){ window._pmIbxDoc=1; var _ibxClose=function(){ document.querySelectorAll('.pm-ibx-list').forEach(function(x){ x.style.display='none'; }); };
+            document.addEventListener('click',_ibxClose); window.addEventListener('scroll',_ibxClose,true); }   // click outside or scroll closes
           b.querySelectorAll('.pm-land').forEach(function(sel){ sel.onchange=function(){ save(rowPayload(sel.closest('tr')),function(j){ if(j&&j.error){ alert(j.error); showSub(); } }); }; });
           b.querySelectorAll('.pm-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove '+btn.dataset.em+'? They revert to read-only everywhere.'))return; fetch('/api/config/permissions/'+encodeURIComponent(btn.dataset.em),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); showSub(); }); }; });
           document.getElementById('pm-add').onclick=function(){ var em=(document.getElementById('pm-nemail').value||'').trim(); var err=b.querySelector('.pm-err'); err.textContent='';

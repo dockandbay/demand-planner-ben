@@ -1,3 +1,11 @@
+## v28.313 (Ben, branch review-fixes-2026-10-05): Permissions, ACCOUNTS 3PL invoicing landing page + Inbox multi-select
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "add ACCOUNTS > 3pl invoicing as a landing page" (CONFIG > Admin > Permissions). New landing option **ACCOUNTS ▸ 3PL invoicing** (#/accounts/3pl-invoicing). A user without the ACCOUNTS grant who has it set lands on Purchase Orders instead.
+- Ben: "can inbox be multi select dropdown instead of tickboxes". The Inbox column is a dropdown button naming what is on (All, None, or e.g. "Sample, Product, Client"); click it for the four tick options. Saves on each tick as before; the list floats above the table and closes on an outside click or scroll.
+- Verified on the sandbox: the landing option is listed; unticking PO for accounts-test@ saved [samples, product, client] and the button read "Sample, Product, Client"; re-ticked (All).
+
 ## v28.312 (Ben, branch review-fixes-2026-10-05): App health, "needs input" apart from real errors
 
 **Files:** `server.mjs`, `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
