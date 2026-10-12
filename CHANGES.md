@@ -1,3 +1,10 @@
+## v28.278 (Ben, branch review-fixes-2026-10-05): ACCOUNTS ▸ Reconcile statement lines tabbed by account
+
+**Files:** `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- The v28.277 per-account pills are replaced by tabs (HORIZON's sub-tab style), each with its open-line count: **ALL, LLOYDS, BOA, AMEX UK, AMEX US, ANZ, AMEX AU, CAP ON TAP, OTHER**. OTHER = PayPal, Stripe, Wise, World First, Shopify payouts, Amex Europe, Bank of Ireland.
+- Verified (jsdom): 281 lines = 26 + 18 + 36 + 11 + 20 + 52 + 37 + 81, each tab shows only its accounts, no errors.
+
 ## v28.277 (Ben, branch review-fixes-2026-10-05): ACCOUNTS "Inbox matcher" renamed "Reconcile", a filter pill per bank / card account
 
 **Files:** `supply/inject.html`, `server.mjs` (one message), `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

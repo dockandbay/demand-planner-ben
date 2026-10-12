@@ -19034,18 +19034,23 @@
   function acBsCan(r){ return r.amount<0&&r.match&&(r.treatment==='bill'||r.treatment==='spend'); }
   function acInLoadP(){ if(AC_IN.pBusy)return; AC_IN.pBusy=true; fetch('/api/accounts/inbox/proposals').then(function(r){ return r.json().then(function(j){ if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
     .then(function(j){ AC_IN.p=j; AC_IN.pBusy=false; acInRender(); }).catch(function(e){ AC_IN.p={rows:[],counts:{},error:e.message}; AC_IN.pBusy=false; acInRender(); }); }
+  // v28.278 (Ben 12-Oct-26): statement lines tabbed by account: ALL, Lloyds, BOA, Amex UK, Amex US, ANZ, Amex AU, Cap on Tap, OTHER
+  var AC_ACC_TABS=[['all','ALL','Every open statement line'],['lloyds','LLOYDS','UK Lloyds accounts'],['boa','BOA','UK Bank of America'],['amexuk','AMEX UK','UK Amex in GBP (#3009)'],['amexus','AMEX US','UK Amex in USD (#1007)'],['anz','ANZ','AU ANZ accounts'],['amexau','AMEX AU','AU Amex'],['capontap','CAP ON TAP','UK Capital On Tap card'],['other','OTHER','Everything else: PayPal, Stripe, Wise, World First, Shopify payouts, Amex Europe, Bank of Ireland']];
+  function acAccTab(r){ var n=String(r.account_name||'').toLowerCase(), amex=/amex|american express/.test(n);
+    if(r.org==='uk'){ if(/lloyds/.test(n))return 'lloyds'; if(/capital on tap/.test(n))return 'capontap'; if(/bank of america|\bboa\b/.test(n))return 'boa'; if(amex&&/usd/.test(n))return 'amexus'; if(amex&&!/europe|eur\b/.test(n))return 'amexuk'; }
+    if(r.org==='au'){ if(/\banz\b/.test(n))return 'anz'; if(amex)return 'amexau'; }
+    return 'other'; }
   function acInLinesHtml(){ var P=AC_IN.p; if(!P)return '<div class="count" style="margin:10px 0">Loading statement lines…</div>';
     if(P.error)return '<div class="count" style="color:var(--neg)">'+esc(P.error)+'</div>';
-    var rows=P.rows||[], c=P.counts||{}, F=AC_IN.pF, q=AC_IN.pQ.toLowerCase(), A=AC_IN.pA||'all';   // v28.277 (Ben): + a pill per bank / card account
-    var vis=rows.filter(function(r){ if(A!=='all'&&r.org+'|'+r.account_name!==A)return false; if(F==='needs'&&r.status!=='needs_receipt')return false; if(F==='matched'&&r.status!=='matched')return false; if(F==='not'&&r.status!=='not_needed')return false; if(q&&(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)<0)return false; return true; });
+    var rows=P.rows||[], c=P.counts||{}, F=AC_IN.pF, q=AC_IN.pQ.toLowerCase(), A=AC_IN.pA||'all';   // v28.278 (Ben): account tabs
+    var vis=rows.filter(function(r){ if(A!=='all'&&acAccTab(r)!==A)return false; if(F==='needs'&&r.status!=='needs_receipt')return false; if(F==='matched'&&r.status!=='matched')return false; if(F==='not'&&r.status!=='not_needed')return false; if(q&&(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)<0)return false; return true; });
     var pill=function(k,l,n){ return '<span class="pill'+(F===k?' active':'')+'" data-pf="'+k+'">'+l+(n!=null?' ('+n+')':'')+'</span>'; };
     var h='<div class="sect-h" style="margin-top:18px">Bank statement lines and receipts</div>'
       +'<div class="bar">'+pill('matched','Receipt found',c.matched||0)+pill('needs','Needs receipt',c.needs_receipt||0)+pill('not','No receipt needed',c.not_needed||0)+pill('all','All',rows.length)
       +'<input class="fci" id="ac-pq2" placeholder="Search payee, line, email" style="width:200px" value="'+esc(AC_IN.pQ)+'"><span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
-    var accs={}; rows.forEach(function(r){ var k=r.org+'|'+r.account_name; accs[k]=(accs[k]||0)+1; });
-    var ak=Object.keys(accs).sort(function(a,b){ return accs[b]-accs[a]||a.localeCompare(b); });
-    if(ak.length>1)h+='<div class="bar"><span class="pill'+(A==='all'?' active':'')+'" data-pa="all">All accounts ('+rows.length+')</span>'+ak.map(function(k){ var o=k.split('|')[0]; return '<span class="pill'+(A===k?' active':'')+'" data-pa="'+esc(k)+'">'+esc(o.toUpperCase()+' '+k.slice(o.length+1))+' ('+accs[k]+')</span>'; }).join('')+'</div>';
+    var accs={all:rows.length}; rows.forEach(function(r){ var k=acAccTab(r); accs[k]=(accs[k]||0)+1; });
+    h+='<div style="display:flex;gap:2px;border-bottom:1px solid var(--line);margin:4px 0 8px;flex-wrap:wrap">'+AC_ACC_TABS.map(function(t){ return '<button class="stab'+(A===t[0]?' active':'')+'" data-pa="'+t[0]+'" title="'+esc(t[2])+'">'+esc(t[1])+' <span class="mut">'+(accs[t[0]]||0)+'</span></button>'; }).join('')+'</div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the Uncoded statement lines export in Bank ageing first.</div>';
     var nSel=Object.keys(AC_BS.sel).filter(function(k){ return AC_BS.sel[k]; }).length;
     if(nSel||AC_BS.msg||AC_BS.chk){ h+='<div class="bar" style="background:var(--hover);padding:8px;border-radius:8px">'
