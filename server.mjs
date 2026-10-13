@@ -4398,12 +4398,21 @@ function accEmailRef(subject) { const m = /(?:account|acct|invoice|inv|receipt|o
 // reconciled Spend Money, its coding comes from its recent Xero bills: the contact is the most billed contact in the bill cache whose name
 // matches the payee, then ONE read of its newest bills (with line items) gives the most used account and tax type, weighted by amount.
 // Memoised 6 hours per payee; skipped while the Xero daily allowance is low. Reverse charge kept as in v28.308 (UK).
+// v28.318 (Ben 13-Oct-26): "Mini Models Talent Agency synced to 24 Mini Cab Services". The payee key is short ("MINI"), so several contacts
+// share it and the one with the most history won. Candidates are now ranked by RELEVANCE first: how many words of the full text (the bank
+// line, the receipt's subject and sender) the contact name shares, as a share of the contact's own words; history count only breaks a tie.
+const ACC_CT_STOP = new Set(['PTY', 'LTD', 'LIMITED', 'THE', 'AND', 'CO', 'INC', 'LLC', 'GROUP', 'AU', 'UK', 'PAYMENT', 'INTERNET', 'BANKING', 'ANZ', 'TRANSFER', 'INV', 'INVOICE', 'RE', 'FWD', 'FROM', 'COM', 'WWW']);
+function accCtWords(t) { return String(t || '').toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 2 && !ACC_CT_STOP.has(w) && !/^\d+$/.test(w)); }
+function accCtScore(name, hint) { const nw = accCtWords(name); if (!nw.length || !hint) return 0; const hw = new Set(accCtWords(hint)); const hit = nw.filter(w => hw.has(w)).length;
+  return hit / nw.length + hit * 0.01; }   // share of the contact's words found in the text (+ a little for more words matched)
+function accCtRank(list, hint, nameOf, countOf) { return list.slice().sort((a, b) => (accCtScore(nameOf(b), hint) - accCtScore(nameOf(a), hint)) || (countOf(b) - countOf(a))); }
 const _accBillCod = new Map();
-async function accBillCodingXero(org, key) {
-  const mk = org + '|' + key, m = _accBillCod.get(mk); if (m && Date.now() - m.at < 6 * 3600000) return m.v;
+async function accBillCodingXero(org, key, hint) {
+  const mk = org + '|' + key + '|' + accCtWords(hint).slice(0, 12).join(' '), m = _accBillCod.get(mk); if (m && Date.now() - m.at < 6 * 3600000) return m.v;
   const q = xeroQuota(org); if (q && q.day != null && q.day < XERO_DAY_ALERT) return null;
   const names = (await pool.query(`SELECT contact_name, count(*)::int n FROM planner.xero_bills WHERE lower(region)=$1 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND invoice_date >= current_date - 730 GROUP BY 1`, [org])).rows
-    .filter(r => r.contact_name && accSameP(accPayeeKey(r.contact_name, ''), key)).sort((a, b) => b.n - a.n);
+    .filter(r => r.contact_name && accSameP(accPayeeKey(r.contact_name, ''), key));
+  const _rk = accCtRank(names, hint, r => r.contact_name, r => r.n); names.length = 0; names.push(..._rk);   // v28.318: most relevant first
   let v = null;
   if (names.length) {
     const nm = names[0].contact_name;
@@ -4418,10 +4427,16 @@ async function accBillCodingXero(org, key) {
   _accBillCod.set(mk, { at: Date.now(), v });
   return v;
 }
-async function accPayeeCoding(org, key) {   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days); else its Xero bills (v28.316)
-  const rows = (await pool.query(`SELECT contact, account, tax, count(*)::int n FROM planner.accounts_recon_txns WHERE org=$1 AND kind='spend' AND recon AND txn_date >= current_date - 400 GROUP BY 1,2,3`, [org])).rows
+async function accPayeeCoding(org, key, hint) {   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days); else its Xero bills (v28.316)
+  let rows = (await pool.query(`SELECT contact, account, tax, count(*)::int n FROM planner.accounts_recon_txns WHERE org=$1 AND kind='spend' AND recon AND txn_date >= current_date - 400 GROUP BY 1,2,3`, [org])).rows
     .filter(r => r.contact && accSameP(accPayeeKey(r.contact, ''), key));
-  if (!rows.length) { try { return await accBillCodingXero(org, key); } catch (e) { console.warn('[accounts] bill coding ' + key + ': ' + e.message); return null; } }
+  // v28.318: with the full text, keep only the most RELEVANT contact's rows (several contacts can share a short payee key); if none of the
+  // spend contacts shares a word beyond the key, try the Xero bills before settling for a weak match
+  if (hint && rows.length) { const byC = new Map(); rows.forEach(r => byC.set(r.contact, (byC.get(r.contact) || 0) + r.n));
+    const best = accCtRank([...byC.keys()], hint, c => c, c => byC.get(c))[0], sc = accCtScore(best, hint);
+    if (sc < 0.5) { try { const b = await accBillCodingXero(org, key, hint); if (b && accCtScore(b.contact, hint) > sc) return b; } catch (_) {} }
+    rows = rows.filter(r => r.contact === best); }
+  if (!rows.length) { try { return await accBillCodingXero(org, key, hint); } catch (e) { console.warn('[accounts] bill coding ' + key + ': ' + e.message); return null; } }
   // v28.316: a multi-line spend stores its accounts / tax types space-joined ("INPUT EXEMPTEXPENSES"), which is not a Xero code: count each
   // one. For tax, the standard GST / VAT type wins over a GST-free part (the v28.315 GST split adds the GST-free line from the receipt).
   const top = (f) => { const m = new Map(); rows.forEach(r => (f === 'contact' ? [r[f]] : String(r[f] || '').split(/\s+/)).filter(Boolean).forEach(v => m.set(v, (m.get(v) || 0) + r.n)));
@@ -4469,7 +4484,8 @@ async function accBillCandidates(rules, only) {
     const toks = r.payee_key.toLowerCase().split(' ').filter(t => t.length >= 3);
     const mine = em.filter(e => only ? only.some(o => o.email_id === e.id && o.org === r.org && o.payee_key === r.payee_key) : (days(e.d, r.bill_from) >= -5 && toks.some(t => (e.from_addr + ' ' + e.subject).toLowerCase().includes(t))));
     if (!mine.length) continue;   // v28.316: coding (which may read Xero bills) only for payees with a receipt to bill
-    const coding = (r.account_code && r.tax_type && r.contact) ? null : await accPayeeCoding(r.org, r.payee_key);
+    const _hint = mine.map(e => e.subject + ' ' + e.from_addr).concat(lines.filter(l => l.org === r.org && accSameP(l.key, r.payee_key)).slice(0, 5).map(l => l.reference + ' ' + (l.description || ''))).join(' ');   // v28.318
+    const coding = (r.account_code && r.tax_type && r.contact) ? null : await accPayeeCoding(r.org, r.payee_key, _hint);
     const code = { contact: r.contact || (coding && coding.contact) || '', account_code: r.account_code || (coding && coding.account_code) || '', tax_type: r.tax_type || (coding && coding.tax_type) || '', coding_source: (coding && coding.source) || (r.contact ? 'rule' : '') };
     for (const e of mine) {
       if (used.has(r.org + '|' + e.id) || claimed.has(e.id)) continue;
@@ -4629,7 +4645,13 @@ app.post('/api/accounts/payee-rule/bank-rule-done', async (req, res) => {   // t
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/accounts/bills/coding', async (req, res) => {   // what a payee's bills would be coded as (history), for the Config row
-  try { const org = String(req.query.org || '').toLowerCase(), key = String(req.query.payee_key || '').toUpperCase(); res.json({ coding: await accPayeeCoding(org, key) }); }
+  try { const org = String(req.query.org || '').toLowerCase(), key = String(req.query.payee_key || '').toUpperCase();
+    // v28.318: the full bank text of this payee's statement lines (and the receipts' subjects) to rank same-key contacts by relevance
+    const ln = (await pool.query(`SELECT reference, description FROM planner.accounts_stmt_lines WHERE org=$1 ORDER BY line_date DESC LIMIT 3000`, [org]).catch(() => ({ rows: [] }))).rows.filter(l => accSameP(accPayeeKey(l.reference, l.description), key)).slice(0, 5);
+    const toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
+    const em = toks.length ? (await pool.query(`SELECT subject, from_addr FROM planner.accounts_gmail_msgs WHERE msg_date >= current_date - 120 AND (` + toks.map((_, i) => `lower(subject || ' ' || from_addr) LIKE $${i + 1}`).join(' OR ') + `) ORDER BY msg_date DESC LIMIT 5`, toks.map(t => '%' + t + '%')).catch(() => ({ rows: [] }))).rows : [];
+    const hint = ln.map(l => l.reference + ' ' + (l.description || '')).concat(em.map(e => e.subject + ' ' + e.from_addr)).join(' ');
+    res.json({ coding: await accPayeeCoding(org, key, hint), hint_used: !!hint }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.280 (Ben 12-Oct-26): view a receipt email inside HORIZON (Reconcile drawer) instead of opening Gmail. Read only. The HTML is shown in a

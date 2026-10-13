@@ -1,3 +1,12 @@
+## v28.318 (Ben, branch review-fixes-2026-10-05): ACCOUNTS coding picks the most relevant Xero contact
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "Mini Models Talent Agency synced to 24 Mini Cab Services. but there is a xero contact called Mini Models Talent Agency. can you improve the matching logic to find most relevant not first found?" The payee key is the first word of the bank text (MINI), shared by both contacts, and the one with more history won.
+- The contact (from reconciled Spend Money or from Xero bills) is now ranked by relevance to the full text: the bank line ("ANZ INTERNET BANKING PAYMENT … Mini Models Talent Agency") and the receipt's subject and sender, scored by the share of the contact name's words found there; history count only breaks a tie. With no spend contact sharing a word beyond the key, the Xero bills are tried before a weak match.
+- Used by Review / batch / Auto bill (the receipt and statement text) and by Payee treatments Edit (the payee's latest statement lines and receipts).
+- Sandbox: MINI now suggests Mini Models Talent Agency (1000.22, GST on Expenses) where it suggested 24 Mini Cab Services; Wink unchanged. Scoring test: Mini Models 1.04 vs 24 Mini Cab 0.34 though the cab company had 40x the history.
+
 ## v28.317 (Ben, branch review-fixes-2026-10-05): Bank statement upload box in light purple
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
