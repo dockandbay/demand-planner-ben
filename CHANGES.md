@@ -1,3 +1,10 @@
+## v28.321 (Ben, branch review-fixes-2026-10-05): PO grid action marker + SNOOZE under the date
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "on po grid can the SNOOZE be under the date, not to the right". In the PO grid, the Ⓐ action marker and SNOOZE (Start / End and every other grid cell that carries one) sit on their own line under the date, keeping the date column narrow. The days badge (e.g. -22d) stays beside the date. PO drawer markers unchanged (grid-only CSS).
+- Verified on the sandbox: PO-1802892 / PO-MFG-DEMO2 Start and End show the date with Ⓐ SNOOZE ▾ beneath.
+
 ## v28.320 (Ben, branch review-fixes-2026-10-05): PO DATES tab shows the calculated production end
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
