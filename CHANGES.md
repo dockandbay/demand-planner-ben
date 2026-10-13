@@ -1,3 +1,36 @@
+## v28.332 (Ben, branch review-fixes-2026-10-05): commissions stage 2, the calculation
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/367_commission_engine.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+- **Engine (`cmEngine`):** one row per payment that earns in the month. It counts cash received, ex tax, on product lines only, for shipped orders. A deposit earns in the month the order ships (the Fulfil invoice). Sources:
+  - Fulfil: wholesale and Faire invoices, using each invoice's payment applications.
+  - Xero UK and AU: ACCREC payments for agents' customers, plus customer credit notes as negatives. An invoice already in Fulfil is counted once.
+- **Who earns:** agent = override > Fulfil agent code > customer list. Faire orders earn nobody. Rate = override > customer's own rate > agent rate. Amounts are converted to the agent's currency at the payment date (Fulfil daily rates).
+- **CLIENT ▸ Commissions ▸ Orders:**
+  - month picker and agent filter;
+  - per-agent tiles (commission, payments, cash) with **Build <month> run**;
+  - every payment row with shipped date, paid date, source, paid ex tax, commissionable, rate (and where it came from), commission and note;
+  - **override** pre-fills the order-override form below;
+  - no-commission orders hidden unless ticked.
+- **Exceptions:** order-level exceptions for the month (no agent: put the customer on an agent's list; Faire order of an agent's customer; Fulfil code vs customer list), above the set-up checks.
+- **Build run** now uses the engine: it replaces the calculated rows in an open run and keeps imported and hand rows. The run takes the agent's currency (migration 367: currency, source amount and currency, FX rate, invoice and earn dates, rate and agent source on each row).
+- **Safety:** Xero is skipped when fewer than 400 calls are left that day (shared with live). The calculation is cached for 15 minutes, and any commission settings change clears it. On localhost the Orders tab reads LIVE Fulfil (read only) for review.
+- **Checked against the paid sheet, Aug-26:**
+
+  | Agent | Engine | Sheet |
+  |---|---|---|
+  | TJ | EUR 1,443.64 | 1,507.55 |
+  | Ideco | EUR 1,090.07 | 1,331.02 |
+  | Harper | USD 296.55 | 525.10 |
+  | Patrickco | USD 174.83 | 152.33 |
+
+  Shipping now matches the sheet (e.g. CLASSICALLY CATE 915.00, Ashley's Attic 625.50). The remaining gaps:
+  - credit notes the sheet did not deduct (TJ −66.22, Ideco −60.22);
+  - a Faire order the sheet paid to Harper (Joson, 64.07);
+  - payments the sheet caught up from other months (Ideco EUWS-3177 July 163.73; Harper Frazzleberries, Inside Out).
+- **Sep-26:** TJ, Schauben, Patrickco, Ideco and Harper earned. **Oct-26 to date:** Harper and Schauben earned.
+- **Tested (sandbox):** a TJ Aug-26 run built with 8 rows, EUR 1,443.64, and it opens at #/client/commission/run/4. Xero calls used about 30 (UK) over the whole session.
+
 ## v28.331 (Ben, branch review-fixes-2026-10-05): commission settings merged into the client record; Commissions = the work
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/366_agent_clients.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
