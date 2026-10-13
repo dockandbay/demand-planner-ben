@@ -1,3 +1,8 @@
+## v28.341 (14-Oct-26) UP FX statement download on ACCOUNTS > Bank statement; Wise FX out of the statement process
+- ACCOUNTS > Bank statement: "Download UP FX statement" (Universal Partners FX USD, Xero UK) beside the Uncoded statement lines upload, with the Xero import steps. ACCOUNTS users may now download it (was admin only).
+- Wise FX USD is linked to Xero (bank feed), so it is out of the process: the Wise FX Statement button is gone from the Payments Report, the weekly cron no longer emails a Wise statement, and asking for one returns 410. Wise stays a pay-from bank in the Paid popup.
+- No migration, no env change.
+
 ## v28.340 (14-Oct-26) ILG and Geneva 3PL bills take every Xero code from the mapping tables
 - The ILG channel codes and the whole Geneva list (303.21 to 303.27, 303.26, 309) were written in the server. Channel lines now use the 3PL account map (fulfilment account per channel), and storage / other fees use 3PL invoicing > Config / Accounts. Codes are text.
 - Checked on the sandbox: ILG Jul-26 and Geneva Jul-26 bill previews are identical before and after (codes and amounts); live mapping holds the same codes.

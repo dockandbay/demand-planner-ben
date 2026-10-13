@@ -7499,8 +7499,8 @@ const UPFX_PAY_IN = new Set(['ACCRECPAYMENT', 'APCREDITPAYMENT', 'APOVERPAYMENTP
 async function upfxSetting(key) { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0]; return r ? r.value : null; } catch (e) { return null; } }
 // v28.291 (Ben 12-Oct-26): a second account, Wise FX USD in Xero AU ("same situation as Universal Partners FX"). Each statement account
 // has its own org, Xero bank account, emailed-ids setting, file name and etl job; the weekly cron covers both (one email per account).
-const UPFX_ACCTS = { up: { org: 'uk', label: 'UP FX', name: 'Universal Partners FX USD', setting: 'up_fx_bank_account_id', emailed: UPFX_EMAILED_KEY, job: 'up_fx_statement' },
-  wise: { org: 'au', label: 'Wise FX', name: 'Wise FX USD', setting: 'wise_fx_bank_account_id', emailed: 'wise_fx_statement_emailed', job: 'wise_fx_statement' } };
+// v28.341 (Ben 14-Oct-26): Wise FX USD is now linked to Xero (bank feed), so it is out of this process: no file, no weekly email.
+const UPFX_ACCTS = { up: { org: 'uk', label: 'UP FX', name: 'Universal Partners FX USD', setting: 'up_fx_bank_account_id', emailed: UPFX_EMAILED_KEY, job: 'up_fx_statement' } };
 const _upfxAcctMemo = {};
 async function upfxConfig(key) {
   const A = UPFX_ACCTS[key] || UPFX_ACCTS.up;
@@ -7516,6 +7516,7 @@ async function upfxConfig(key) {
   to = hzEmailList(to); if (!to.length) to = UPFX_DEFAULT_RECIPIENTS.slice();
   return { key: UPFX_ACCTS[key] ? key : 'up', org: A.org, label: A.label, default_name: A.name, emailed_key: A.emailed, job: A.job, account_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(acc) ? acc.toLowerCase() : UPFX_DEFAULT_ACCOUNT, recipients: to };
 }
+  if (key === 'wise') throw Object.assign(new Error('Wise FX USD is linked to Xero (bank feed) since 14-Oct-26: no statement file needed.'), { code: 410 });
 // Xero dates: "/Date(1790294400000+0000)/" or "2026-09-29T00:00:00" -> YYYY-MM-DD (UTC; Xero stores the date at 00:00 UTC)
 function upfxXd(v) { const m = /\/Date\((-?\d+)/.exec(String(v || '')); if (m) return new Date(Number(m[1])).toISOString().slice(0, 10); const s = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; }
 function upfxLondonToday() { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const g = t => (p.find(x => x.type === t) || {}).value; return g('year') + '-' + g('month') + '-' + g('day'); }
@@ -7610,8 +7611,9 @@ function upfxCsv(lines) {
   return ['*Date,*Amount,Payee,Description,Reference,Check Number'].concat((lines || []).map(l => [dmy(l.date), Number(l.amount).toFixed(2), l.payee, l.description, l.reference, ''].map(q).join(','))).join('\r\n') + '\r\n';
 }
 const upfxFileName = (suffix, label) => (label || 'UP FX') + ' Statement' + (suffix ? ' ' + suffix : '') + ' ' + ddMonYy(upfxLondonToday()) + '.csv';
-async function upfxAdmin(req, res) { try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Admin required' }); return false; } return true; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return false; } }
-const upfxQuery = q => ({ from: q.from, to: q.to, all: String(q.all || '') === '1' || String(q.all || '') === 'true', acct: UPFX_ACCTS[String(q.acct || '')] ? String(q.acct) : 'up' });
+async function upfxAdmin(req, res) { try { const me = await permsFor(req); if (me.lookupFailed) { res.status(503).json({ error: 'permission check failed, try again' }); return false; }   // v28.341: ACCOUNTS users too (download sits on ACCOUNTS > Bank statement)
+  if (me.live && !(me.is_admin || me.accounts_access)) { res.status(403).json({ error: 'ACCOUNTS access required (CONFIG > Admin > Permissions)' }); return false; } return true; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return false; } }
+const upfxQuery = q => ({ from: q.from, to: q.to, all: String(q.all || '') === '1' || String(q.all || '') === 'true', acct: UPFX_ACCTS[String(q.acct || '')] ? String(q.acct) : (String(q.acct || '') === 'wise' ? 'wise' : 'up') });
 app.get('/api/supply/xero/up-fx-statement.csv', async (req, res) => {
   if (!(await upfxAdmin(req, res))) return;
   try { const s = await buildUpfxStatement(upfxQuery(req.query));
