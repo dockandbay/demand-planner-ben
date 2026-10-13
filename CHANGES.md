@@ -1,3 +1,7 @@
+## v28.346 (14-Oct-26) Payments Report: Paid / Xero column wraps
+- The Paid / XERO cell (button, warning badge, bank link) no longer runs off the column: it wraps, and the column has a "Paid / Xero" header. The "Remittance & notify" header was cut off; the column is wider and the header wraps. Both SUPPLY and ACCOUNTS.
+- UI only. No migration, no env change.
+
 ## v28.345 (14-Oct-26) ACCOUNTS > Payments report looks the same as in SUPPLY
 - SUPPLY styles are scoped to the SUPPLY page, so the mirrored report was unstyled. On first open, ACCOUNTS copies every SUPPLY style rule (page and theme, phone sizes included) onto its own copy of the report; rules that show / hide the SUPPLY page itself are left out.
 - Checked on the sandbox: 20 elements (buttons, filters, table header and cells, pills) have identical computed styles in both places.
