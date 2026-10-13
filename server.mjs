@@ -26026,11 +26026,29 @@ app.get('/api/client/clients', async (req, res) => {
         to_char(c.updated_at,'YYYY-MM-DD') updated_at, c.updated_by,
         (SELECT count(*)::int FROM planner.client_users u WHERE u.client_id=c.id AND u.active) users,
         (SELECT count(*)::int FROM planner.client_users u WHERE u.client_id=c.id AND u.active AND u.last_login_at IS NULL) invited,
-        (SELECT count(*)::int FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=c.id AND m.sender_kind='client' AND m.read_by_ops_at IS NULL) unread
-      FROM planner.clients c LEFT JOIN planner.rep_groups rg ON rg.id=c.rep_group_id ORDER BY c.active DESC, c.name`)).rows;
+        (SELECT count(*)::int FROM planner.client_threads t JOIN planner.client_messages m ON m.thread_id=t.id WHERE t.client_id=c.id AND m.sender_kind='client' AND m.read_by_ops_at IS NULL) unread,
+        rg.default_rate rep_rate, to_jsonb(rg)->>'currency' rep_currency, (to_jsonb(rg)->>'no_commission')::boolean rep_no_commission, to_jsonb(rg)->'fulfil_codes' rep_codes,   -- v28.331: commission summary on the card (to_jsonb: safe before mig 364)
+        CASE WHEN c.type='agent' AND c.rep_group_id IS NOT NULL THEN (SELECT count(*)::int FROM planner.commission_customers cc WHERE cc.rep_group_id=c.rep_group_id) END rep_customers,
+        (SELECT r.rate FROM planner.commission_customer_rates r WHERE lower(r.customer_name)=lower(c.name) LIMIT 1) own_rate
+      FROM planner.clients c LEFT JOIN planner.rep_groups rg ON rg.id=c.rep_group_id ORDER BY c.active DESC, (c.type='agent'), c.name`)).rows;
     rows.forEach(r => { r.visibility = cpJson(r.visibility, {}); r.stock_scope = cpJson(r.stock_scope, {}); r.features = Object.assign({}, CP_FEATURE_DEFAULTS, cpJson(r.features, {})); });
     res.set('Cache-Control', 'no-store').json({ clients: rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.331 (Ben 13-Oct-26): an agent client's commission settings = its rep group (one per agent client). Created with the client, or by
+// "Set up commission" on an older agent client. Reuses a rep group of the same name when one exists and is not linked to another client.
+async function cpAgentGroup(clientId, who) {
+  const c = (await pool.query(`SELECT id, name, currency, rep_group_id FROM planner.clients WHERE id=$1`, [clientId])).rows[0];
+  if (!c) throw Object.assign(new Error('client not found'), { status: 404 }); if (c.rep_group_id) return c.rep_group_id;
+  let g = (await pool.query(`SELECT g.id FROM planner.rep_groups g WHERE lower(g.name)=lower($1) AND NOT EXISTS (SELECT 1 FROM planner.clients x WHERE x.rep_group_id=g.id) LIMIT 1`, [c.name])).rows[0];
+  if (!g) g = (await pool.query(`INSERT INTO planner.rep_groups (name, default_rate) VALUES ($1, 0) RETURNING id`, [c.name])).rows[0];
+  try { await pool.query(`UPDATE planner.rep_groups SET currency=$2 WHERE id=$1`, [g.id, String(c.currency || 'USD').toUpperCase()]); } catch (_) {}   // mig 364 column
+  await pool.query(`UPDATE planner.clients SET rep_group_id=$2, updated_at=now(), updated_by=$3 WHERE id=$1`, [clientId, g.id, who || null]);
+  await cpAudit(clientId, 'Commission settings set up', 'rep group ' + g.id, who); return g.id;
+}
+app.post('/api/client/clients/:id/agent-group', async (req, res) => {
+  try { res.json({ ok: true, rep_group_id: await cpAgentGroup(Number(req.params.id), req.me && req.me.email) }); }
+  catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
 app.post('/api/client/clients', async (req, res) => {
   const b = req.body || {}; const name = String(b.name || '').trim();
@@ -26043,6 +26061,7 @@ app.post('/api/client/clients', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.clients (name, code, type, owner_email, market, currency, warehouse_code, features, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$9) RETURNING id`,
       [name, code, type, b.owner_email || req.me.email || null, market, CP_MARKETS[market].currency, CP_MARKETS[market].wh, JSON.stringify(feats), req.me.email || 'sandbox']);
     await cpAudit(r.rows[0].id, 'Client created', type + ' · ' + market, req.me.email);
+    if (type === 'agent') await cpAgentGroup(r.rows[0].id, req.me.email);   // v28.331: an agent client carries its commission settings (rep group) from the start
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

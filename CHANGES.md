@@ -1,3 +1,17 @@
+## v28.331 (Ben, branch review-fixes-2026-10-05): commission settings merged into the client record; Commissions = the work
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/366_agent_clients.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+Ben 13-Oct-26: "we shouldn't have 2 sets of settings": settings live per client; Commissions is purely orders, exceptions and bills (mockup mockups/client_commission_merge_v1.html).
+- **Agents are clients.** Migration 366 makes a client of type Agent for every rep group with no client (18 in the sandbox), with portal OFF: every feature off and no users ("portal off till we clean up"). Market and warehouse come from the agent's currency. Creating a new agent client also creates its rep group (`cpAgentGroup`; reuses an unlinked one of the same name). An older agent client without one gets **Set up commission** (POST /api/client/clients/:id/agent-group).
+- **Agent record ▸ Commission tab:** rate, currency (with the "check" flag), no commission, Fulfil agent codes, Xero group UK and AU, Xero bill contact and account, statement email, portal view, notes, active. Each field saves on change. Replaces Commissions ▸ Agents.
+- **Agent record ▸ Customers tab:** the agent's customers (search, Sync all agents from Xero). Each has an **own rate** (blank = agency rate) and can be **moved** to another agent. Replaces Commissions ▸ Customers and ▸ Customer rates.
+- **Other clients ▸ Commission tab:** the agent whose commission this client's orders earn (a key account can sit under an agent and have its own logins, Ben), the agency rate, an **own rate**, and "open the agent".
+- **Client cards:** agent cards show rate · currency (or No commission), customer count and Fulfil codes; other cards show their agent and rate.
+- **CLIENT ▸ Commissions** tabs are Orders (order overrides until stage 2), Exceptions (agent currency not confirmed; agents with no Xero group and no Fulfil code; Fulfil wholesale customers on no agent's list, assignable), Monthly run & bills (the rep group settings table removed) and Paid history. Level 3 deep links: #/client/commission/orders, /exceptions, /run, /run/<id>, /paid (old #/client/commission/<run id> still works).
+- **Tested (sandbox, Chrome):** 18 agent clients made; cards show the commission summary; Schauben's Commission tab shows 15% USD appelman with its Xero group and 1,363 customers; a notes change saved; an own rate set and cleared on a customer; Exceptions, Monthly run and Orders open from their deep links.
+- **Deploy:** migration 366 after 364 (needs the mig 364 columns). Run it once on live; it is idempotent.
+
 ## v28.330 (Ben, branch review-fixes-2026-10-05): CLIENT ▸ Clients as cards
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md)
