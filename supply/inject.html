@@ -19180,11 +19180,21 @@
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.add('active'); try{ hzSyncDemandPills(); }catch(e){} }
   function hideAccounts(){ try{ clearTimeout(AC_BD.poll); clearTimeout(AC_BK.poll); }catch(e){} var app=document.getElementById('app'); if(!app||!app.classList.contains('accounts-active')){ var r0=document.getElementById('accounts-root'); if(r0)r0.style.display='none'; return; }
     app.classList.remove('accounts-active'); document.body.classList.remove('supply-on'); var r=document.getElementById('accounts-root'); if(r)r.style.display='none'; var pb=document.getElementById('accounts-btn'); if(pb)pb.classList.remove('active'); }
+  // v28.345 (Ben 14-Oct-26): the mirrored Payments report looked different because SUPPLY's styles are scoped to #supply-root.
+  // Copy every #supply-root rule (inject + theme, including media queries) once, re-scoped to #accounts-root #ac-sup, so both match.
+  function acSupplyCss(){ if(document.getElementById('ac-sup-css'))return; var out=[];
+    var split=function(sel){ var o=[], d=0, cur=''; for(var i=0;i<sel.length;i++){ var ch=sel[i]; if(ch==='('||ch==='[')d++; else if(ch===')'||ch===']')d--; if(ch===','&&d===0){ o.push(cur); cur=''; } else cur+=ch; } o.push(cur); return o; };   // top-level commas only (:is(#app, #pv-wrap) has its own)
+    var conv=function(sel){ return split(sel).filter(function(s){ return s.indexOf('#supply-root')>=0 && !/#supply-root(:[\w-]+(\([^)]*\))?)*\s*$/.test(s); }).map(function(s){ return s.replace(/#supply-root/g,'#accounts-root #ac-sup'); }).join(','); };   // skips rules on the root itself (show / hide SUPPLY)
+    var walk=function(rules,wrap){ for(var i=0;i<rules.length;i++){ var r=rules[i];
+      if(r.type===1&&r.selectorText&&r.selectorText.indexOf('#supply-root')>=0){ var s=conv(r.selectorText); if(s)out.push(wrap(s+'{'+r.style.cssText+'}')); }
+      else if(r.type===4&&r.cssRules){ (function(m){ walk(r.cssRules,function(x){ return wrap('@media '+m+'{'+x+'}'); }); })(r.media.mediaText); } } };
+    for(var i=0;i<document.styleSheets.length;i++){ var sh=document.styleSheets[i], rs=null; try{ rs=sh.cssRules; }catch(e){ continue; } if(rs)walk(rs,function(x){ return x; }); }
+    var st=document.createElement('style'); st.id='ac-sup-css'; st.textContent=out.join('\n'); document.head.appendChild(st); }
   function selectAccountsSub(k,fromRoute){ ACCOUNTS_SUB=k; try{ if(k!=='backdate')clearTimeout(AC_BD.poll); if(k!=='bank')clearTimeout(AC_BK.poll); }catch(e){} document.querySelectorAll('#accounts-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); });
     if(!fromRoute){ try{ writeHash(['accounts',AC_SLUG[k]||k]); }catch(e){} }
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
-    if(k==='payreport'){ renderPaymentsReport(b); return; }   // v28.344: the SUPPLY > Payments > Payments Report, same code and data
+    if(k==='payreport'){ acSupplyCss(); b.innerHTML='<div id="ac-sup"></div>'; renderPaymentsReport(document.getElementById('ac-sup')); return; }   // v28.344: the SUPPLY > Payments > Payments Report, same code and data; v28.345 same look (acSupplyCss)
     if(k==='inbox'){ acInRender(); return; }
     if(k==='bank'){ acRenderStmt(b); return; }
     if(k==='ageing'){ acRenderAgeing(b); return; }

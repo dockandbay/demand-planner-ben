@@ -1,3 +1,8 @@
+## v28.345 (14-Oct-26) ACCOUNTS > Payments report looks the same as in SUPPLY
+- SUPPLY styles are scoped to the SUPPLY page, so the mirrored report was unstyled. On first open, ACCOUNTS copies every SUPPLY style rule (page and theme, phone sizes included) onto its own copy of the report; rules that show / hide the SUPPLY page itself are left out.
+- Checked on the sandbox: 20 elements (buttons, filters, table header and cells, pills) have identical computed styles in both places.
+- UI only. No migration, no env change.
+
 ## v28.344 (14-Oct-26) Payments report also under ACCOUNTS
 - ACCOUNTS > Payments report (#/accounts/payments-report) shows the same Payments Report as SUPPLY > Payments > Payments Report (same code, data and buttons). It stays in SUPPLY too. One copy is on screen at a time.
 - UI only. No migration, no env change.
