@@ -1,3 +1,23 @@
+## v28.334 (Ben, branch review-fixes-2026-10-05): Faire month-end decision, commission written to Fulfil, commission dates
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+- **Faire = a month-end task (Ben):** an order placed on Faire by a customer of an earning agent is no longer excluded automatically.
+  - It shows on that agent at zero, as "Faire order: include or exclude (Exceptions)". It is not in the agent's total, and the Orders tile counts it ("1 Faire order to decide, USD 58.50").
+  - Exceptions has **Include for <agent>** and **Exclude**. The decision is saved as an order override, so the run picks it up on the next build.
+  - An undecided Faire row in a run is an exception at zero net, so finalising warns.
+  - Aug-26: Harper (Joson Fine Jewelry, 58.50) and Schauben (Lords Landscaping, 81.00).
+- **Push to Fulfil** (finalised or paid runs): writes sale metafield **COMMISSIONS_ACTUAL** (Number / Decimal).
+  - The value is the order's commission actually paid: the sum across all finalised and paid runs of that agent.
+  - It updates the existing value, never duplicates; orders not in Fulfil are skipped; the run shows "pushed n/n on dd-mmm-yy".
+  - Was a placeholder that wrote nothing.
+- **Fulfil set-up done 13-Oct-26 (Ben approved):** metafield.field COMMISSIONS_ACTUAL created on sale.sale in **live (id 98)** and **sandbox (id 99)**.
+- **Dates:** the run list and month filter show Mon-yy; run row paid dates use the dd-mmm-yy date field. Statement, email and portal were done in v28.333.
+- **Tested:**
+  - Fulfil sandbox push wrote 6 sales (EUWS-3284 92.52 and others); a second push updated the same 6 (still 6 values); 1 Xero-only order was skipped.
+  - The Aug-26 Faire decisions listed correctly.
+  - Not tested on live: the push (needs FULFIL_LIVE_WRITES and a finalised live run).
+
 ## v28.333 (Ben, branch review-fixes-2026-10-05): commission payout: Xero bill, statement email, portal view, credit notes, missed commission
 
 **Files:** `server.mjs`, `supply/inject.html`, `supply/client-view.js`, `migrations/368_commission_payout.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)

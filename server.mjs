@@ -27521,7 +27521,12 @@ async function cmEngine(month, opts) { opts = opts || {};
     const custAgent = (o.email && byEmail[o.email]) || (o.xid && byXid[o.org + '|' + o.xid]) || (o.customer && byName[String(o.customer).trim().toLowerCase()]) || null;
     if (o.code && codeTo[o.code] && custAgent && custAgent !== codeTo[o.code] && !(ov && ov.rep_group_id)) exc('code_vs_customer', { order_ref: o.order_ref, customer: o.customer, text: 'Fulfil code ' + o.code + ' (' + gBy[codeTo[o.code]].name + ') but the customer is on ' + (gBy[custAgent] || {}).name + '\'s list: paid to the code' });
     const isFaire = /faire/i.test(o.channel || '');
-    if (isFaire && !(ov && ov.rep_group_id)) { if (gid && !faire.includes(gid) && !gBy[gid].no_commission) exc('faire', { order_ref: o.order_ref, customer: o.customer, text: 'customer of ' + gBy[gid].name + ' ordered via Faire: earns nobody' }); gid = faire[0] || null; agentSrc = 'Faire channel'; }
+    // v28.334 (Ben): a Faire order of an earning agent's customer is a MONTH-END DECISION (include or exclude), not an automatic exclusion.
+    // Until decided it sits on that agent at zero (status exception); the decision is an order override (agent = include, Faire = exclude).
+    let decide = false;
+    if (isFaire && !(ov && ov.rep_group_id)) { if (gid && !faire.includes(gid) && !gBy[gid].no_commission) { decide = true;
+        exc('faire', { order_ref: o.order_ref, customer: o.customer, agent_id: gid, agent: gBy[gid].name, faire_id: faire[0] || null, amount: _cmR2(o.amount_src), currency: o.currency_src, text: 'customer of ' + gBy[gid].name + ' ordered via Faire: include or exclude for commission' }); }
+      else { gid = faire[0] || null; agentSrc = 'Faire channel'; } }
     if (!gid && o.quiet) return;   // a credit note of a customer with no agent: nothing to take back
     if (!gid) { exc('no_agent', { order_ref: o.order_ref, customer: o.customer, email: o.email, amount: _cmR2(o.amount_src), currency: o.currency_src, source: o.source, text: 'no agent: no Fulfil code and the customer is on no agent\'s list' }); return; }
     const g = gBy[gid]; const ccy = String(g.currency || 'USD').toUpperCase();
@@ -27538,7 +27543,8 @@ async function cmEngine(month, opts) { opts = opts || {};
     rows.push({ source: o.source, agent_id: gid, agent: g.name, currency: ccy, order_ref: o.order_ref, invoice_ref: o.invoice_ref, customer: o.customer, invoice_date: o.invoice_date, pay_date: o.pay_date,
       earn_date: o.invoice_date && o.invoice_date > o.pay_date ? o.invoice_date : o.pay_date, currency_src: o.currency_src, amount_src: _cmR2(o.amount_src), fx_rate: cv ? cv.r : null, commissionable,
       rate, rate_source: rateSrc, agent_source: agentSrc, commission: commissionable == null ? null : _cmR2(commissionable * rate / 100), override: ov ? { amount: ov.commissionable_amount, reason: ov.reason } : null,
-      status: commissionable == null ? 'exception' : (rate === 0 ? 'zero' : 'ok'), note: commissionable == null ? 'no FX rate ' + o.currency_src + '->' + ccy + ' on ' + o.pay_date : (o.credit_note ? 'credit note' : o.deposit ? 'deposit, earns at shipping' : null) });
+      status: (commissionable == null || decide) ? 'exception' : (rate === 0 ? 'zero' : 'ok'), decide: decide || undefined,
+      note: commissionable == null ? 'no FX rate ' + o.currency_src + '->' + ccy + ' on ' + o.pay_date : decide ? 'Faire order: include or exclude (Exceptions)' : (o.credit_note ? 'credit note' : o.deposit ? 'deposit, earns at shipping' : null) });
   };
   // ── Fulfil ──
   let fulfilOk = cfg.configured;
@@ -27616,7 +27622,8 @@ async function cmEngine(month, opts) { opts = opts || {};
   Object.values(byOrder).forEach(list => { const amt = Number(list[0].override.amount), cash = list.reduce((a, r) => a + (r.commissionable || 0), 0);
     list.forEach(r => { r.commissionable = _cmR2(cash ? amt * (r.commissionable || 0) / cash : amt / list.length); r.commission = _cmR2(r.commissionable * r.rate / 100); r.note = 'override amount ' + amt; }); });
   rows.sort((a, b) => a.agent.localeCompare(b.agent) || String(a.earn_date).localeCompare(String(b.earn_date)) || String(a.order_ref).localeCompare(String(b.order_ref)));
-  const agents = {}; rows.forEach(r => { const a = agents[r.agent_id] || (agents[r.agent_id] = { agent_id: r.agent_id, agent: r.agent, currency: r.currency, rows: 0, cash: 0, commission: 0, no_commission: gBy[r.agent_id].no_commission });
+  const agents = {}; rows.forEach(r => { const a = agents[r.agent_id] || (agents[r.agent_id] = { agent_id: r.agent_id, agent: r.agent, currency: r.currency, rows: 0, cash: 0, commission: 0, decide: 0, decide_commission: 0, no_commission: gBy[r.agent_id].no_commission });
+    if (r.status === 'exception') { if (r.decide) { a.decide++; a.decide_commission = _cmR2(a.decide_commission + (r.commission || 0)); } return; }   // undecided Faire / no FX: not in the total
     a.rows++; a.cash = _cmR2(a.cash + (r.commissionable || 0)); a.commission = _cmR2(a.commission + (r.commission || 0)); });
   const v = { ok: true, month, env, from: ms, to: me, rows, exceptions, agents: Object.values(agents).sort((a, b) => b.commission - a.commission), notes, fulfil_read: fulfilOk, built_at: new Date().toISOString() };
   _cmCache.set(key, { at: Date.now(), v }); return v;
@@ -27683,7 +27690,7 @@ app.post('/api/client/commission/runs/build', async (req, res) => {   // v28.332
       if (mine.length) { const col = k => mine.map(r => r[k] == null ? null : r[k]);
         added = (await client.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source,
             currency, currency_src, amount_src, fx_rate, invoice_date, earn_date, rate_source, agent_source)
-          SELECT $1, u.ref, u.inv, u.cust, u.paid, u.amt, u.rate, u.com, u.com, $2, u.st, u.note, 'engine ' || u.src, $3, u.csrc, u.asrc, u.fx, u.idate, u.edate, u.rsrc, u.gsrc
+          SELECT $1, u.ref, u.inv, u.cust, u.paid, u.amt, u.rate, u.com, CASE WHEN u.st='exception' THEN 0 ELSE u.com END, $2, u.st, u.note, 'engine ' || u.src, $3, u.csrc, u.asrc, u.fx, u.idate, u.edate, u.rsrc, u.gsrc
           FROM unnest($4::text[], $5::text[], $6::text[], $7::date[], $8::numeric[], $9::numeric[], $10::numeric[], $11::text[], $12::text[], $13::text[], $14::text[], $15::numeric[], $16::numeric[], $17::date[], $18::date[], $19::text[], $20::text[])
             AS u(ref, inv, cust, paid, amt, rate, com, st, note, src, csrc, asrc, fx, idate, edate, rsrc, gsrc)`,
           [run.id, month + ' ' + g.name, String(mine[0].currency || g.currency || 'USD'), col('order_ref'), col('invoice_ref'), col('customer'), col('pay_date'), col('commissionable'), col('rate'), col('commission'),
@@ -27985,12 +27992,37 @@ app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
   } catch (e) { log500(e); res.status(500).send('statement error: ' + e.message); }
 });
 
+// v28.334 (Ben 13-Oct-26): write the commission back to Fulfil. Sale metafield COMMISSIONS_ACTUAL (Number / Decimal; created 13-Oct-26: live
+// metafield.field 98, sandbox 99) = the commission actually paid on that order: the sum of its net across every FINALISED / PAID run (agent
+// currency). Upserts one metafield.value per sale (resource sale.sale,<id>); orders not in Fulfil (Xero-era) are skipped. {dry:true} = plan only.
 app.post('/api/client/commission/runs/:id/push-fulfil', async (req, res) => {
-  // Writes the commission back onto each Fulfil sale (metafield). The sale metafield code is not defined on the tenant yet —
-  // returns what WOULD be written until Diviyaj confirms the field; nothing is sent.
-  try { const rows = (await pool.query(`SELECT order_ref, net FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception'`, [req.params.id])).rows;
-    await pool.query(`UPDATE planner.commission_runs SET fulfil_push_status=$2 WHERE id=$1`, [req.params.id, 'pending: sale metafield not defined']);
-    res.json({ ok: false, reason: 'Fulfil sale commission metafield not defined yet (Diviyaj) — nothing written', would_write: rows.length }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
+    if (!run) return res.status(404).json({ error: 'run not found' });
+    if (run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: only finalised commission is written to Fulfil.' });
+    const refs = [...new Set((await pool.query(`SELECT DISTINCT order_ref FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' AND coalesce(order_ref,'')<>''`, [run.id])).rows.map(r => r.order_ref))];
+    if (!refs.length) return res.json({ ok: true, written: 0, reason: 'no orders in this run' });
+    const tot = {}; (await pool.query(`SELECT w.order_ref, round(sum(coalesce(w.net,0)),2) net FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id
+        WHERE x.rep_group_id=$1 AND x.status IN ('finalised','paid') AND w.status<>'exception' AND w.order_ref = ANY($2::text[]) GROUP BY 1`, [run.rep_group_id, refs])).rows.forEach(r => { tot[r.order_ref] = Number(r.net); });
+    const cfg = fulfilConfigFor(await activeFulfilEnv());
+    if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured: nothing written.' });
+    const def = await fulfilSearchOne('metafield.field', [['code', '=', 'COMMISSIONS_ACTUAL'], ['model_name', '=', 'sale.sale']], ['id']);
+    if (!def) return res.status(400).json({ error: 'Fulfil ' + cfg.env + ' has no sale metafield COMMISSIONS_ACTUAL: nothing written.' });
+    const sales = []; for (let i = 0; i < refs.length; i += 200) sales.push(...(await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['reference', 'in', refs.slice(i, i + 200)]], 0, 500, null, ['id', 'reference']]) || []));
+    const sid = {}; sales.forEach(x => { if (x.reference && !sid[x.reference]) sid[x.reference] = x.id; });
+    const plan = refs.filter(r => sid[r]).map(r => ({ order_ref: r, sale_id: sid[r], value: (tot[r] || 0).toFixed(2) })), skipped = refs.filter(r => !sid[r]);
+    if (req.body && req.body.dry) return res.json({ ok: true, dry: true, env: cfg.env, field_id: def.id, plan, skipped });
+    if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return res.status(423).json({ error: 'LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing written.', would_write: plan.length });
+    const ex = {}; for (let i = 0; i < plan.length; i += 400) (await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', 'in', plan.slice(i, i + 400).map(p => 'sale.sale,' + p.sale_id)]], 0, 500, null, ['id', 'resource']]) || []).forEach(v => { ex[v.resource] = v.id; });   // Fulfil pages max 500
+    let written = 0; const errors = [];
+    for (const p of plan) { const resource = 'sale.sale,' + p.sale_id;
+      try { if (ex[resource]) await fulfilFetch('PUT', '/model/metafield.value/' + ex[resource], { value_numeric: p.value });
+        else await fulfilFetch('POST', '/model/metafield.value', [{ field: def.id, resource, value_numeric: p.value }]); written++; }
+      catch (e) { errors.push(p.order_ref + ': ' + e.message); } }
+    const st = 'pushed ' + written + '/' + plan.length + ' on ' + ddMonYy(new Date().toISOString().slice(0, 10)) + (skipped.length ? ' · ' + skipped.length + ' not in Fulfil' : '') + (errors.length ? ' · ' + errors.length + ' failed' : '');
+    await pool.query(`UPDATE planner.commission_runs SET fulfil_push_status=$2 WHERE id=$1`, [run.id, st]);
+    await cpAudit(null, 'Commission written to Fulfil', run.month + ' · ' + run.group_name + ' · ' + st, req.me && req.me.email);
+    res.json({ ok: !errors.length, env: cfg.env, written, skipped, errors, status: st });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── messaging (admin side) ──
