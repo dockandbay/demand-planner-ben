@@ -1,3 +1,7 @@
+## v28.348 (14-Oct-26) Paid > Xero: PO numbers open the PO drawer
+- Steps 2 and 3: each PO number is a link that opens that PO in the drawer, stacked above the popup (the popup stays open underneath).
+- UI only. No migration, no env change.
+
 ## v28.347 (14-Oct-26) Paid > Xero: Paid and XERO merged into one 4-step popup
 - Payments Report (SUPPLY and ACCOUNTS): one green "Paid > Xero" button per run; the XERO and "bank ↗" buttons are removed. Steps: 1 choose bank (date, amount; or Mark paid in HORIZON only), 2 confirm the supplier payment bill, 3 confirm the PO bill payments and the bills the bank pays, 4 Mark paid and push to Xero (blue). Done runs show Paid ✓ / Xero ✓ with links and a Paid > Xero link to continue.
 - Server: xero-post uses the paid date for the bill and PO bill payments (was the run date); resume:true keeps the run's existing bill and pays only the PO bills not yet paid; every PO bill payment is logged in xero_run_payments before the Xero call, so a retry or double click never pays twice. xero-preview also returns the existing bill and PO bills already paid.
