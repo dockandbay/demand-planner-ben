@@ -32,7 +32,7 @@ Create the **supplier bill in Xero** (supplier = who is charging us, e.g. Lixin,
 Xero AU has only **1000.24 - SPEND - PHOTO, VIDEO & MEDIA CREATION (OTHER COSTS)**.
 
 ## Open questions (to settle before building)
-1. AU samples: always 1000.24 whatever the purpose, or should AU get the four purposes too (new accounts)?
+1. ~~AU samples~~ ANSWERED (Ben 13-Oct-26): the only reason to send a sample to AU is 1000.24 (Photo, video & media creation, other costs). Any other AU charge belongs to an AU order (Path A, Fulfil).
 2. Org for a sample charge with no PO: decided by the supplier's currency / the sample's market, or picked each time?
 3. Tax on these bills (supplier abroad, usually no GST / VAT; zero rated?).
 4. Fulfil supplier invoice: draft, or posted? Payment then via Payments Report as today?
