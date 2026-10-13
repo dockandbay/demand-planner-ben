@@ -1,3 +1,15 @@
+## v28.322 (Ben, branch review-fixes-2026-10-05): commission paid history table (Jan-22 onward) + paid runs recorded automatically
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/363_commission_paid_history.sql`, `scripts/import_commission_history.cjs` (+ package.json, CHANGES.md). **Migration 363.** No env vars.
+
+- Ben: "full paid history of commissions, lets put this into a database table. after we pay commissions we record them here".
+- New table planner.commission_paid_history: month paid, agent (rep group), customer, invoice, PO, invoice date, commissionable, rate %, commission due, credit note, status (paid / duplicate / not_paid / cancelled), amount paid, notes, payment codes, different-agency flag, source (sheet | horizon), run_id, and the raw sheet row.
+- Import script (one-off): `node scripts/import_commission_history.cjs "<PAID_HISTORY csv>" [--replace]`. Cleans the sheet: month labels to dates; invoice dates in every format found (M/D/Y and D/M/Y mixed, 5-June-26, 11-Jul-2024, 01 Jan 2022, Excel day numbers, no-year dates from the payment month), ambiguous day/month read as the date on or before the payment month; rates 15% / 15.00% / 0.15; € = EUR; "-" = blank. The CSV stays out of git (customer names).
+- Sandbox import: 8,408 rows, Jan-22 to Dec-26; paid 8,042 rows = 990,480.71, matching the sheet exactly; every invoice date parsed. Kept as written: 35 rows labelled "Dec-26" (invoices May to Dec 2025; likely Dec-25), 219 rows whose invoice date is after the payment month.
+- A commission run marked Paid now writes its rows to the history (source horizon, run_id; exception rows left out); reopening the run removes them. Tested on the sandbox (run 3: 4 rows in on Paid, out on reopen).
+- CLIENT > Commission > Paid now shows the full history: filters by agent, year, status, free text (invoice / PO / customer / credit note), totals by agent and by month, newest 1,000 rows.
+- Live: Diviyaj applies migration 363 and runs the import once with the CSV (Ben to send it).
+
 ## v28.321 (Ben, branch review-fixes-2026-10-05): PO grid action marker + SNOOZE under the date
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
