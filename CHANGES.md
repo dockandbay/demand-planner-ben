@@ -1,3 +1,7 @@
+## v28.342 (14-Oct-26) Messages point to SUPPLY > CONFIG > Xero
+- Payment run and Xero connection errors said "CONFIG > Payments", a menu that no longer exists. They now say SUPPLY > CONFIG > Xero (admin only), where the account mapping (Stock Deposits 602, Supplier Payments 602.1, loan 901) and bank registry live.
+- Text only. No migration, no env change.
+
 ## v28.341 (14-Oct-26) UP FX statement download on ACCOUNTS > Bank statement; Wise FX out of the statement process
 - ACCOUNTS > Bank statement: "Download UP FX statement" (Universal Partners FX USD, Xero UK) beside the Uncoded statement lines upload, with the Xero import steps. ACCOUNTS users may now download it (was admin only).
 - Wise FX USD is linked to Xero (bank feed), so it is out of the process: the Wise FX Statement button is gone from the Payments Report, the weekly cron no longer emails a Wise statement, and asking for one returns 410. Wise stays a pay-from bank in the Paid popup.

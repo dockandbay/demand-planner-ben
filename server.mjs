@@ -7237,7 +7237,7 @@ async function _xeroRefresh(region, store) {
       catch (e2) { if (!(e2.code === 400 && e2.oauthError === 'invalid_grant')) throw e2; store = fresh; }
     }
     console.error('[xero] ' + region.toUpperCase() + ' refresh token rejected (invalid_grant): dropping the stored connection; reconnect needed');
-    hzIntegFatal('xero', 'disconnected_' + region, 'Xero ' + region.toUpperCase() + ' disconnected: refresh token rejected (invalid_grant). An admin must reconnect (SUPPLY ▸ CONFIG ▸ Payments)', { region });   // v28.163 (Ben): health log + red alert
+    hzIntegFatal('xero', 'disconnected_' + region, 'Xero ' + region.toUpperCase() + ' disconnected: refresh token rejected (invalid_grant). An admin must reconnect (SUPPLY ▸ CONFIG ▸ Xero)', { region });   // v28.163 (Ben): health log + red alert
     await pool.query(`DELETE FROM planner.app_settings WHERE key=$1 AND (CASE WHEN key=$1 THEN (value::jsonb)->>'refresh_token' END) = $2`, ['xero_oauth_' + region, store.refresh_token]).catch(() => {});
     _xeroTok[region] = { token: null, exp: 0 };
     return null;
@@ -7294,7 +7294,7 @@ async function xeroFetch(region, path, opts) {
   if (_memoK) { const m = _xeroAccMemo.get(_memoK); if (m && Date.now() - m.at < 600000) return m.j; }
   const _j = await _xeroFetch0(region, path, opts); if (_memoK) _xeroAccMemo.set(_memoK, { at: Date.now(), j: _j }); return _j;
 }
-async function _xeroFetch0(region, path, opts) { const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Payments)'); e.code = 503; throw e; }
+async function _xeroFetch0(region, path, opts) { const token = await xeroToken(region); if (!token) { const e = new Error('Xero (' + region.toUpperCase() + ') not connected — an admin must Connect it (SUPPLY ▸ CONFIG ▸ Xero)'); e.code = 503; throw e; }
   const tenant = await xeroTenant(region); if (!tenant.id) { const e = new Error('Xero ' + region.toUpperCase() + ' connected but no organisation on record — reconnect'); e.code = 502; throw e; }
   const headers = Object.assign({ 'Authorization': 'Bearer ' + token, 'Xero-Tenant-Id': tenant.id, 'Accept': 'application/json' }, opts.headers || {});
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
@@ -8200,7 +8200,7 @@ async function computeXeroRunPlan(run, ctx) {
   if (crossPay.length) {
     const missOrgs = new Set();
     crossPay.forEach(l => { if (!(l.account && l.account.code)) missOrgs.add(paying.toUpperCase()); if (l.will_pay && !l.settle_account_id) missOrgs.add(l.home_org.toUpperCase()); });
-    if (missOrgs.size) checks.push({ level: 'error', msg: 'Intercompany loan (901) account not found in Xero ' + [...missOrgs].join(' + ') + ' — bind it in CONFIG ▸ Payments.' });
+    if (missOrgs.size) checks.push({ level: 'error', msg: 'Intercompany loan (901) account not found in Xero ' + [...missOrgs].join(' + ') + ' — bind it in SUPPLY ▸ CONFIG ▸ Xero (admin).' });
     else checks.push({ level: 'ok', msg: crossPay.length + ' cross-org line(s) settle via the intercompany loan (901): ' + [...new Set(crossPay.map(l => l.reference + ' → ' + l.home_org.toUpperCase()))].join(', ') });
   }
   ['stock_deposits', 'supplier_payments'].forEach(rk => { if (outLines.some(l => l.account_role === rk)) checks.push(accts[rk] ? { level: 'ok', msg: (rk === 'stock_deposits' ? 'Deposits' : 'Completion/balance') + ' → ' + accts[rk].code + ' ' + accts[rk].name + ' (P58+)' } : { level: 'error', msg: 'No ' + rk.replace('_', ' ') + ' account mapped for ' + paying.toUpperCase() }); });
@@ -8372,10 +8372,10 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const depBlocked = plan.lines.filter(l => l.blocked);
     if (depBlocked.length) return res.status(400).json({ error: depBlocked.some(l => l.flag === 'brightred') ? ('Deposits from more than one Xero org are mixed — run each org’s deposits separately: ' + [...new Set(depBlocked.filter(l => l.flag === 'brightred').map(l => l.reference))].join(', ')) : ('Deposit(s) belong to a different Xero org than the paying org (' + plan.paying_org.toUpperCase() + ') — pay each from its own org: ' + [...new Set(depBlocked.map(l => l.reference + ' (' + l.home_org.toUpperCase() + ')'))].join(', ')) });
     const badAcct = plan.lines.filter(l => Math.abs(l.amount) > 0.005 && !(l.account && l.account.code));
-    if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role === 'loan' ? 'intercompany loan (901)' : l.account_role))].join(', ') + ' — set it in CONFIG ▸ Payments' });
+    if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role === 'loan' ? 'intercompany loan (901)' : l.account_role))].join(', ') + ' — set it in SUPPLY ▸ CONFIG ▸ Xero (admin)' });
     // Cross-org completions need the home org's loan account for the settlement payment.
     const missLoan = plan.lines.filter(l => l.will_pay && l.settle_from === 'loan' && !l.settle_account_id);
-    if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in CONFIG ▸ Payments' });
+    if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in SUPPLY ▸ CONFIG ▸ Xero (admin)' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
     if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.amount) + ' > ' + _usd(l.bill_due) + ')').join('; ') });
     // v28.151 (review D5): server-side idempotency on run_key. A run that already has a recorded supplier-payment bill that
@@ -27052,7 +27052,7 @@ async function hzHealthPendingSends() {
 function hzIntegFatal(service, op, message, meta) {
   try { hzHealthEvt('integration_error', service + '|' + op, { path: service + ' ' + op, message, meta: Object.assign({ service, op, status: 0, timeout: false }, meta || {}) });
     _reqStore.exit(() => hzRedAlert([{ key: 'integ:' + service + ':' + op + (meta && meta.po ? ':' + meta.po : ''), trigger: 'integration', title: String(message).slice(0, 200), n: 1, first: new Date().toISOString(), last: new Date().toISOString(), examples: [message],
-      file: service === 'xero' ? 'server.mjs _xeroRefresh / xeroToken (SUPPLY ▸ CONFIG ▸ Payments to reconnect)' : 'server.mjs fulfil push (fulfilPOButton / reconfirm finally) + the PO in Fulfil' }])).catch(e => console.warn('[health] red alert failed: ' + (e && e.message)));
+      file: service === 'xero' ? 'server.mjs _xeroRefresh / xeroToken (SUPPLY ▸ CONFIG ▸ Xero to reconnect)' : 'server.mjs fulfil push (fulfilPOButton / reconfirm finally) + the PO in Fulfil' }])).catch(e => console.warn('[health] red alert failed: ' + (e && e.message)));
   } catch (_) {}
 }
 // POST /api/cron/health-checks (x-webhook-secret). { dry_run: true } returns findings + the alert payload without writing or sending.
