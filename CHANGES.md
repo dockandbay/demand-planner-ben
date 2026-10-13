@@ -1,3 +1,12 @@
+## v28.320 (Ben, branch review-fixes-2026-10-05): PO DATES tab shows the calculated production end
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "PO-58USMQ1 in live has end date in the po grid but not in the DATES sub tab, bug". The grid shows the effective end (override, else start + supplier production days: 08-Sep-26 + 45 = 23-Oct-26); the DATES tab's Production end box shows only a typed override, so it was blank with "start + supplier days".
+- Now, with no override, the DATES row says "calculated <date> (start + supplier days); type a date to override" and the box shows that date greyed (placeholder). Typing a date still sets the override. dateField lets a caller's placeholder replace the default "dd-mmm-yy".
+- Note: with no supplier production days (or no start), there is no calculated end (grid and DATES both blank).
+- Verified on the sandbox (PO158, Lixin 60 days): "calculated 20-Nov-26", placeholder 20-Nov-26.
+
 ## v28.319 (Ben, branch review-fixes-2026-10-05): longer payee keys where two companies share one
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
