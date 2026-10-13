@@ -1,3 +1,12 @@
+## v28.319 (Ben, branch review-fixes-2026-10-05): longer payee keys where two companies share one
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "longer keys if needed will help". A payee key (first word of the bank text) shared by two or more different Xero contacts of the same org now takes its next word when the text has one of theirs, so the two companies get separate treatments and suggestions: MINI MODELS vs MINI CAB.
+- Shared keys come from Xero contact names (reconciled spend + the bill cache, 2 years), never from bank text (store suburbs would split one company). Platform and ignore keys (GOOGLE, AMAZON, ...) are never lengthened.
+- Backward compatible: a rule saved on the short key (e.g. MINI) still applies to MINI MODELS and MINI CAB until a treatment is saved on the longer key, which then wins.
+- Sandbox before / after over all 226 open statement lines: 4 keys lengthened (AU MINI -> MINI MODELS, UK HARPER -> HARPER JAMES, AU CENTRAL -> CENTRAL COAST, AU AUSTRALIA -> AUSTRALIA POST), 0 treatments changed.
+
 ## v28.318 (Ben, branch review-fixes-2026-10-05): ACCOUNTS coding picks the most relevant Xero contact
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

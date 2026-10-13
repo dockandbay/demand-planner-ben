@@ -4057,7 +4057,29 @@ function accPayeeKey(ref, desc) {
   if (!w.length) return '(blank)';
   return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
 }
-const accSameP = (ck, rk) => ck === rk || (rk.length >= 4 && ck.length >= 4 && (ck.startsWith(rk) || rk.startsWith(ck)));   // v28.276 (from v28.275): Xero contact 'SnapChat' (SNAPCHAT) vs bank text payee 'SNAP'
+const accSameP = (ck, rk) => ck === rk || (rk.length >= 4 && ck.length >= 4 && (ck.startsWith(rk) || rk.startsWith(ck)));
+// v28.319 (Ben 13-Oct-26: "longer keys if needed will help"): a payee key shared by DIFFERENT Xero contacts of the same org (MINI = Mini Models
+// Talent Agency and 24 Mini Cab Services) gets its next word when the text has one of them: MINI MODELS / MINI CAB. Built from Xero contact
+// names (reconciled spend + the bill cache), never from bank text (store suburbs would split one company). Unshared keys are unchanged, and a
+// rule saved on the short key still applies (rule lookups fall back to it) until a treatment is saved on the longer one.
+function accKeyNext(text, base) { const w = String(text || '').toUpperCase().split(/[^A-Z]+/).filter(t => t.length >= 2 && !ACC_PK_STOP.has(t)), b = String(base || '').split(' ');
+  for (let i = 0; i + b.length <= w.length; i++) if (b.every((x, k) => w[i + k] === x)) { const n = w[i + b.length]; return n && n.length >= 3 ? n : ''; } return ''; }
+let _accAmb = null, _accAmbAt = 0;
+async function accAmbig() {   // org|base key -> Set of next words that tell its contacts apart (only keys with 2+ contacts); 10 min memo
+  if (_accAmb && Date.now() - _accAmbAt < 600000) return _accAmb;
+  const by = new Map();
+  try { const rows = (await pool.query(`SELECT org, contact FROM planner.accounts_recon_txns WHERE coalesce(contact,'')<>'' GROUP BY 1,2
+      UNION SELECT lower(region), contact_name FROM planner.xero_bills WHERE coalesce(contact_name,'')<>'' AND invoice_date >= current_date - 730 GROUP BY 1,2`)).rows;
+    rows.forEach(r => { const base = accPayeeKey(r.contact, ''); if (!base || base === '(blank)' || ACC_RULE_KEYS.test(base) || ACC_IGNORE_KEYS.test(base)) return;
+      const k = r.org + '|' + base; if (!by.has(k)) by.set(k, new Map()); const nx = accKeyNext(r.contact, base); by.get(k).set(String(r.contact).trim().toLowerCase(), nx); }); } catch (_) {}
+  const amb = new Map(); by.forEach((cs, k) => { const nxs = new Set([...cs.values()].filter(Boolean)); if (cs.size >= 2 && nxs.size >= 2) amb.set(k, nxs); });
+  _accAmb = amb; _accAmbAt = Date.now(); return amb;
+}
+function accPayeeKeyX(org, ref, desc, amb) {   // accPayeeKey, lengthened only where the short key is shared (amb from accAmbig)
+  const base = accPayeeKey(ref, desc), nx = amb && amb.get(org + '|' + base); if (!nx) return base;
+  const w = new Set(String((desc || '') + ' ' + (ref || '')).toUpperCase().split(/[^A-Z]+/)); for (const n of nx) if (w.has(n)) return base + ' ' + n; return base;
+}
+const accRuleFor = (rules, org, key) => rules.get(org + '|' + key) || (key.includes(' ') ? rules.get(org + '|' + key.split(' ').slice(0, -1).join(' ')) : undefined);   // v28.319: longer key falls back to the short one   // v28.276 (from v28.275): Xero contact 'SnapChat' (SNAPCHAT) vs bank text payee 'SNAP'
 const ACC_RULE_KEYS = /^(GOOGLE|LINKEDIN|FACEBOOK|META|FB|TIKTOK|STRIPE|PAYPAL|PP ZETTLE|SHOPIFY|KLARNA|ADYEN|AMAZON|AMZNMKTPLACE|AMZNBUSINESS|XERO|XRO|DISPUTE|INTEREST|SNAP)$/;
 const ACC_IGNORE_KEYS = /^(TRANSFER|LOAN|HMRC|OPEN BANKING|OPEN|FLOW|WISE|NEST|URZAD|NEW FINANZAMA|WPLATA|UKVI|DOCK|CBSA|WIRE TYPE|CAPITAL|AMEX|AMERICAN|FLEXPORT|WAGES|PAYROLL|WEBSITE|US CUSTOMS|CUSTOMS|SUPERANNUATION|ATO|AIRWALLEX|AWX|BANK|TD BANK|LLOYDS|BARCLAYS|HSBC|ANZ|WESTPAC|WORLD|WORLDFIRST|STATEMENT)$/;   // v28.272: + banks, FX and transfer providers (fees and transfers)   // v28.270: + FLEXPORT (Ben: freight is billed through its own flow)
 function accDefaultTreatment(key, amount, match, supKeys) {
@@ -4074,13 +4096,13 @@ async function accInboxProposals() {
   const rules = new Map((await pool.query(`SELECT org, payee_key, treatment, source FROM planner.accounts_payee_rules`)).rows.map(r => [r.org + '|' + r.payee_key, r]));
   // v28.270: payee keys of HORIZON product suppliers (and their Xero "<name> - <code>" contacts): the same normaliser over the supplier names
   const supKeys = new Set(); try { (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(trim(name),'')<>''`)).rows.forEach(r => { const k = accPayeeKey(r.name, ''); if (k && k !== '(blank)' && k.length >= 3) supKeys.add(k); }); } catch (_) {}
-  const minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31');
+  const minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31'), _amb = await accAmbig();   // v28.319
   const em = lines.length ? (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 60`, [minD])).rows
     .map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) })) : [];
   const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
   const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$', CAD: '$' };
   const out = lines.map(l => {
-    const key = accPayeeKey(l.reference, l.description), k = Math.abs(l.amount).toFixed(2), td = new Date(l.line_date), toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
+    const key = accPayeeKeyX(l.org, l.reference, l.description, _amb), k = Math.abs(l.amount).toFixed(2), td = new Date(l.line_date), toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
     const c = l.amount < 0 ? (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 45) return null;
         const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = toks.some(t => hay.includes(t)), cs = e.am.get(k) || e.pam.get(k) || '';
         const ccyOk = !cs || cs === l.currency || cs === sym[l.currency], nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
@@ -4090,7 +4112,7 @@ async function accInboxProposals() {
     const best = c[0] && c[0].score >= 40 ? c[0] : null;
     const match = best ? { id: best.e.id, date: best.e.d, from: best.e.from_addr, subject: best.e.subject, files: best.e.files || [], stripe: best.e.stripe_link, lag: best.lag, name: best.name, ambiguous: !!(c[1] && c[1].score >= best.score - 5),
       url: 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + best.e.id } : null;
-    const rule = rules.get(l.org + '|' + key), treatment = rule ? rule.treatment : accDefaultTreatment(key, l.amount, match, supKeys);
+    const rule = accRuleFor(rules, l.org, key), treatment = rule ? rule.treatment : accDefaultTreatment(key, l.amount, match, supKeys);
     const status = (treatment === 'rule' || treatment === 'ignore') ? 'not_needed' : match ? 'matched' : 'needs_receipt';
     return Object.assign(l, { payee_key: key, treatment, treatment_source: rule ? rule.source : 'auto', status, match });
   });
@@ -4410,8 +4432,9 @@ const _accBillCod = new Map();
 async function accBillCodingXero(org, key, hint) {
   const mk = org + '|' + key + '|' + accCtWords(hint).slice(0, 12).join(' '), m = _accBillCod.get(mk); if (m && Date.now() - m.at < 6 * 3600000) return m.v;
   const q = xeroQuota(org); if (q && q.day != null && q.day < XERO_DAY_ALERT) return null;
+  const _ambB = await accAmbig();   // v28.319
   const names = (await pool.query(`SELECT contact_name, count(*)::int n FROM planner.xero_bills WHERE lower(region)=$1 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND invoice_date >= current_date - 730 GROUP BY 1`, [org])).rows
-    .filter(r => r.contact_name && accSameP(accPayeeKey(r.contact_name, ''), key));
+    .filter(r => r.contact_name && accSameP(accPayeeKeyX(org, r.contact_name, '', _ambB), key));
   const _rk = accCtRank(names, hint, r => r.contact_name, r => r.n); names.length = 0; names.push(..._rk);   // v28.318: most relevant first
   let v = null;
   if (names.length) {
@@ -4427,9 +4450,9 @@ async function accBillCodingXero(org, key, hint) {
   _accBillCod.set(mk, { at: Date.now(), v });
   return v;
 }
-async function accPayeeCoding(org, key, hint) {   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days); else its Xero bills (v28.316)
+async function accPayeeCoding(org, key, hint) { const _ambP = await accAmbig();   // v28.319   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days); else its Xero bills (v28.316)
   let rows = (await pool.query(`SELECT contact, account, tax, count(*)::int n FROM planner.accounts_recon_txns WHERE org=$1 AND kind='spend' AND recon AND txn_date >= current_date - 400 GROUP BY 1,2,3`, [org])).rows
-    .filter(r => r.contact && accSameP(accPayeeKey(r.contact, ''), key));
+    .filter(r => r.contact && accSameP(accPayeeKeyX(org, r.contact, '', _ambP), key));
   // v28.318: with the full text, keep only the most RELEVANT contact's rows (several contacts can share a short payee key); if none of the
   // spend contacts shares a word beyond the key, try the Xero bills before settling for a weak match
   if (hint && rows.length) { const byC = new Map(); rows.forEach(r => byC.set(r.contact, (byC.get(r.contact) || 0) + r.n));
@@ -4470,11 +4493,11 @@ function accGstCheck(org, total, amts, taxType) {
 async function accBillCandidates(rules, only) {
   const out = []; if (!rules.length) return out;
   const minFrom = rules.reduce((m, r) => (r.bill_from || '2000-01-01') < m ? (r.bill_from || '2000-01-01') : m, '9999-12-31');
-  const onlyIds = only ? only.map(o => o.email_id) : null;
+  const onlyIds = only ? only.map(o => o.email_id) : null, _ambC = await accAmbig();   // v28.319
   const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
   const used = new Set((await pool.query(`SELECT org || '|' || email_id k FROM planner.accounts_bill_log WHERE status IN ('created','creating')`)).rows.map(r => r.k));
   const lines = (await pool.query(`SELECT org, account_name, to_char(line_date,'YYYY-MM-DD') d, amount::float8 amount, reference, description FROM planner.accounts_stmt_lines WHERE NOT reconciled AND amount < 0`)).rows
-    .map(l => Object.assign(l, { key: accPayeeKey(l.reference, l.description), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
+    .map(l => Object.assign(l, { key: accPayeeKeyX(l.org, l.reference, l.description, _ambC), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
   const usedLine = new Set((await pool.query(`SELECT stmt_line FROM planner.accounts_bill_log WHERE status IN ('created','creating') AND stmt_line IS NOT NULL`)).rows.map(r => r.stmt_line));
   const recon = (await pool.query(`SELECT org, to_char(txn_date,'YYYY-MM-DD') d, amount::float8 amount, contact FROM planner.accounts_recon_txns WHERE kind='spend' AND recon AND txn_date >= $1::date - 10`, [minFrom])).rows;
   const xb = (await pool.query(`SELECT lower(region) org, contact_name, total::float8 total, to_char(invoice_date,'YYYY-MM-DD') d FROM planner.xero_bills WHERE invoice_date >= $1::date - 10 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED')`, [minFrom])).rows;
@@ -4567,7 +4590,7 @@ async function accAutoBillRun(by, opts) {
 }
 // v28.316 (Ben 13-Oct-26): "be triggered when a bank statement is uploaded. if anything matches, create bill in xero". A successful statement
 // upload starts an Auto bill run in the background (kept alive with waitUntil); the run is single-flight and locked across instances.
-function accAutoBillAfterUpload() { try { hzWaitUntil(accAutoBillRun('statement upload').catch(e => console.warn('[autobill] after upload: ' + e.message))); } catch (_) {} }
+function accAutoBillAfterUpload() { _accAmb = null; try { hzWaitUntil(accAutoBillRun('statement upload').catch(e => console.warn('[autobill] after upload: ' + e.message))); } catch (_) {} }
 async function accAutoBillMaybe() {   // every 6 hours with the health checks, claimed across instances
   const r = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('acc_autobill_claim', now()::text, 'autobill', now()) ON CONFLICT (key) DO UPDATE SET value=now()::text, updated_at=now() WHERE planner.app_settings.updated_at < now() - interval '6 hours' RETURNING key`);
   if (!r.rowCount) return { skipped: true };
@@ -4646,8 +4669,9 @@ app.post('/api/accounts/payee-rule/bank-rule-done', async (req, res) => {   // t
 });
 app.get('/api/accounts/bills/coding', async (req, res) => {   // what a payee's bills would be coded as (history), for the Config row
   try { const org = String(req.query.org || '').toLowerCase(), key = String(req.query.payee_key || '').toUpperCase();
+    const _ambE = await accAmbig();   // v28.319
     // v28.318: the full bank text of this payee's statement lines (and the receipts' subjects) to rank same-key contacts by relevance
-    const ln = (await pool.query(`SELECT reference, description FROM planner.accounts_stmt_lines WHERE org=$1 ORDER BY line_date DESC LIMIT 3000`, [org]).catch(() => ({ rows: [] }))).rows.filter(l => accSameP(accPayeeKey(l.reference, l.description), key)).slice(0, 5);
+    const ln = (await pool.query(`SELECT reference, description FROM planner.accounts_stmt_lines WHERE org=$1 ORDER BY line_date DESC LIMIT 3000`, [org]).catch(() => ({ rows: [] }))).rows.filter(l => accSameP(accPayeeKeyX(org, l.reference, l.description, _ambE), key)).slice(0, 5);
     const toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
     const em = toks.length ? (await pool.query(`SELECT subject, from_addr FROM planner.accounts_gmail_msgs WHERE msg_date >= current_date - 120 AND (` + toks.map((_, i) => `lower(subject || ' ' || from_addr) LIKE $${i + 1}`).join(' OR ') + `) ORDER BY msg_date DESC LIMIT 5`, toks.map(t => '%' + t + '%')).catch(() => ({ rows: [] }))).rows : [];
     const hint = ln.map(l => l.reference + ' ' + (l.description || '')).concat(em.map(e => e.subject + ' ' + e.from_addr)).join(' ');
