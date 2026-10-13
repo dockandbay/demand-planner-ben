@@ -1,3 +1,8 @@
+## v28.347 (14-Oct-26) Paid > Xero: Paid and XERO merged into one 4-step popup
+- Payments Report (SUPPLY and ACCOUNTS): one green "Paid > Xero" button per run; the XERO and "bank ↗" buttons are removed. Steps: 1 choose bank (date, amount; or Mark paid in HORIZON only), 2 confirm the supplier payment bill, 3 confirm the PO bill payments and the bills the bank pays, 4 Mark paid and push to Xero (blue). Done runs show Paid ✓ / Xero ✓ with links and a Paid > Xero link to continue.
+- Server: xero-post uses the paid date for the bill and PO bill payments (was the run date); resume:true keeps the run's existing bill and pays only the PO bills not yet paid; every PO bill payment is logged in xero_run_payments before the Xero call, so a retry or double click never pays twice. xero-preview also returns the existing bill and PO bills already paid.
+- No migration (uses migration 360), no env change. Not pushed to real Xero in testing: steps 1 to 4 checked on the sandbox up to the push button.
+
 ## v28.346 (14-Oct-26) Payments Report: Paid / Xero column wraps
 - The Paid / XERO cell (button, warning badge, bank link) no longer runs off the column: it wraps, and the column has a "Paid / Xero" header. The "Remittance & notify" header was cut off; the column is wider and the header wraps. Both SUPPLY and ACCOUNTS.
 - UI only. No migration, no env change.

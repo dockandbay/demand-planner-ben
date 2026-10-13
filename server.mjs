@@ -8237,7 +8237,13 @@ async function computeXeroRunPlan(run, ctx) {
     reference: ref, currency: String(run.base_ccy || 'USD').toUpperCase(), run_key: run.run_key || null, date: run.dt, bank, lines: outLines, key_lines: keyLines, total_usd: total, tracking_checkable: trackOk !== null, has_deposits: depositOrgs.size > 0, deposit_orgs: [...depositOrgs], checks };
 }
 app.post('/api/supply/payments/xero-preview', async (req, res) => {
-  try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {}); res.json(plan); }
+  try { const plan = await computeXeroRunPlan((req.body && req.body.run) || {});
+    // v28.347 (Ben 14-Oct-26, Paid > Xero): the run's supplier-payment bill already in Xero (if any) and the PO bill payments
+    // already made by this run, so the steps show what is done and a retry continues instead of repeating.
+    try { const rr = (req.body && req.body.run) || {}, rk = _xeroRunKey(rr);
+      plan.existing_bill = (await pool.query(`SELECT bill_id, bill_number, bill_url, status FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') ORDER BY created_at DESC LIMIT 1`, [rk])).rows[0] || null;
+      plan.po_paid = (await pool.query(`SELECT invoice_id, invoice_number, amount, to_char(payment_date,'YYYY-MM-DD') payment_date, status FROM planner.xero_run_payments WHERE run_key=$1 AND status IN ('created','creating')`, [rk])).rows; } catch (_) {}
+    res.json(plan); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.173 (Ben): XERO PREFLIGHT for the Payments Report badges. Same plan + checks as the preview, for a batch of unposted
@@ -8253,6 +8259,7 @@ function _xeroPlanIssues(plan) {
   (plan.voided_links || []).forEach(v => add(block, v.po + ': linked Xero bill ' + (v.bill_ref || '') + ' was voided, choose the right bill (PO drawer > Linked records)'));   // v28.183 (Ben)
   (plan.lines || []).forEach(l => {
     const po = l.reference || '(no ref)', isDep = /deposit/i.test(String(l.type || ''));
+function _xeroRunKey(rr) { return rr.run_key || ((rr.dt || '') + '|' + (rr.supplier || '') + (String(rr.region || '').toUpperCase() === 'AU' && String(rr.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : '')); }
     if (l.blocked) add(block, po + ': ' + l.blocked);
     if (l.pay_ok === false) add(block, po + ': payment ' + _n(l.amount) + ' exceeds bill amount due ' + _n(l.bill_due));
     if (l.will_pay && !l.settle_account_id) add(block, po + ': ' + (l.settle_from === 'loan' ? 'no intercompany loan (901) account in Xero ' + String(l.settle_org || '').toUpperCase() : 'cannot settle, ' + (l.settle_problem || 'no settle account')));
@@ -8358,7 +8365,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
   try {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {}, { contactFresh: true });
     if (!plan.ok) return res.status(400).json({ error: plan.error });
-    const region = plan.region, today = new Date().toISOString().slice(0, 10), date = plan.date || today;
+    const region = plan.region, today = new Date().toISOString().slice(0, 10), _reqDate = String((req.body && req.body.date) || ''), date = (/^\d{4}-\d{2}-\d{2}$/.test(_reqDate) ? _reqDate : null) || plan.date || today;   // v28.347: the paid date from Paid > Xero
     // v28.176 (Ben): the bill references the supplier's Xero contact by ContactID (fresh lookup). Not found = nothing posted
     // (posting by Name would make Xero create a duplicate contact and undo Ben's merges).
     if (!plan.contact || !plan.contact.ok || !plan.contact.id) return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: (plan.contact && plan.contact.error) || 'Xero contact not resolved: nothing posted' });
@@ -8384,8 +8391,9 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const _rr0 = (req.body && req.body.run) || {};
     const _rk = _rr0.run_key || ((_rr0.dt || '') + '|' + (_rr0.supplier || '') + (String(_rr0.region || '').toUpperCase() === 'AU' && String(_rr0.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : ''));
     return await _withXactLock('xero_pay_post:' + _rk, { code: 'XERO_POST_BUSY', message: 'This payment run is already being posted to Xero. Wait for it to finish, then refresh.' }, async () => {
-    const _prior = (await pool.query(`SELECT bill_number, status FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, [_rk])).rows;
-    if (_prior.length && (req.body && req.body.repost) !== true) return res.status(409).json({ code: 'ALREADY_POSTED', error: 'This run already has a supplier-payment bill in Xero (' + _prior.map(b => (b.bill_number || '?') + (b.status ? ' ' + b.status : '')).join(', ') + '). Void or delete it in Xero first, or confirm a re-post.', bills: _prior });
+    const _prior = (await pool.query(`SELECT bill_id, bill_number, bill_url, status FROM planner.payment_xero_bills WHERE run_key=$1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') ORDER BY created_at DESC`, [_rk])).rows;
+    const _resume = _prior.length > 0 && (req.body && req.body.resume) === true;   // v28.347: keep the existing bill, pay only the PO bills not yet paid by this run
+    if (_prior.length && !_resume && (req.body && req.body.repost) !== true) return res.status(409).json({ code: 'ALREADY_POSTED', error: 'This run already has a supplier-payment bill in Xero (' + _prior.map(b => (b.bill_number || '?') + (b.status ? ' ' + b.status : '')).join(', ') + '). Void or delete it in Xero first, or confirm a re-post.', bills: _prior });
     const out = { region, paying_org: plan.paying_org, supplier: plan.supplier, xero_contact: plan.contact.name, reference: plan.reference, bill: null, payments: [], skipped: [] };
     // 1) the supplier-payment bill (DRAFT) in the PAYING org. Same-org lines → 602 / 602.1 (Production tracking on
     //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
@@ -8394,14 +8402,18 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const billBody = { Type: 'ACCPAY', Contact: { ContactID: plan.contact.id }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: plan.currency || 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: (plan.key_lines || []).concat(billLines) };   // v28.285: $0 key lines first when the bank payment is split across several bills
     const br = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [billBody] } });
     xeroPreflightBust();   // v28.173 (Ben): the run is posted + bill amounts due move: drop the preflight badges' cache
-    const binv = br && br.Invoices && br.Invoices[0];
+    binv = br && br.Invoices && br.Invoices[0]; }
     out.bill = { id: binv && binv.InvoiceID, number: binv && binv.InvoiceNumber, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/Edit.aspx?InvoiceID=' + binv.InvoiceID) : null };
     // v28.136 (Ben): keep the supplier-payment bill reference against this payment (migration 324) → Payments Report "done" link.
-    if (out.bill.id) { try { const rr = (req.body && req.body.run) || {};
+    if (out.bill.id && !_resume) { try { const rr = (req.body && req.body.run) || {};
       const rk = rr.run_key || ((rr.dt || '') + '|' + (rr.supplier || '') + (String(rr.region || '').toUpperCase() === 'AU' && String(rr.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : ''));
       await pool.query(`INSERT INTO planner.payment_xero_bills (bill_id, run_key, run_date, supplier, region, bill_number, bill_url, status, source, created_by)
         VALUES ($1,$2,$3::date,$4,$5,$6,$7,'DRAFT','post',$8) ON CONFLICT (bill_id) DO UPDATE SET run_key=excluded.run_key, status=excluded.status, updated_at=now()`,
         [out.bill.id, rk, rr.dt || null, rr.supplier || null, region === 'au' ? 'AU' : 'UK', out.bill.number || plan.reference, out.bill.url, authUser(req) || 'system']);
+    let binv = null;
+    if (_resume) { const pb = _prior[0]; let inv = null; try { const g = await xeroFetch(region, '/api.xro/2.0/Invoices/' + encodeURIComponent(pb.bill_id)); inv = g && g.Invoices && g.Invoices[0]; } catch (_) {}
+      binv = inv || { InvoiceID: pb.bill_id, InvoiceNumber: pb.bill_number }; out.resumed = true; }
+    else {
       try { invalidateSupplyCaches('payment'); } catch (_) {}
     } catch (e) { console.error('[payment_xero_bills] record failed (migration 324 applied?):', e.message); out.record_warning = 'bill posted but its reference was not recorded: ' + e.message; } }
     // Same-org payments post at the SUPPLIER-PAYMENT bill's rate (the paying org's daily USD rate) — one consistent run.
@@ -8421,8 +8433,10 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
         const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: l.settle_account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
         if (rate != null && rate > 0) payObj.CurrencyRate = rate;
         const pr = await xeroFetch(l.settle_org, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
-        const pay = pr && pr.Payments && pr.Payments[0]; out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill') });
-      } catch (pe) { console.error('[xero-post] payment ' + l.reference + ' failed:', pe.message); out.skipped.push({ po: l.reference, reason: pe.message, error: true }); }
+        const pay = pr && pr.Payments && pr.Payments[0];
+        await pool.query(`UPDATE planner.xero_run_payments SET status='created', xero_payment_id=$2 WHERE id=$1`, [lgp, pay && pay.PaymentID]).catch(() => {});
+        out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill') });
+      } catch (pe) { console.error('[xero-post] payment ' + l.reference + ' failed:', pe.message); if (lgp) await pool.query(`UPDATE planner.xero_run_payments SET status='error', error=$2 WHERE id=$1`, [lgp, String(pe.message).slice(0, 400)]).catch(() => {}); out.skipped.push({ po: l.reference, reason: pe.message, error: true }); }
     }
     // v28.151 (review D5): a payment that FAILED (not a by-design skip) makes the post ok:false so it can't read as complete.
     const _failed = out.skipped.filter(x => x.error).length;
@@ -8430,6 +8444,12 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : e.code === 'XERO_POST_BUSY' ? 409 : 500).json({ error: e.message, code: e.code === 'XERO_POST_BUSY' ? e.code : undefined }); }
 });
+      // v28.347: one log row per PO bill per run, written BEFORE the Xero call (unique run_key + invoice_id while creating /
+      // created, migration 360): a retry or a second click never pays the same PO bill twice for this run.
+      let lgp = null;
+      try { lgp = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, currency_rate, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
+          [_rk, l.settle_org, l.linked_bill.id, l.linked_bill.number || null, l.settle_account_id, 'PO bill from ' + (l.settle_from === 'loan' ? 'loan 901' : 'account'), Math.round(l.amount * 100) / 100, plan.currency || 'USD', rate, date, authUser(req) || 'system'])).rows[0].id; }
+      catch (le) { if (/duplicate key/.test(le.message)) { out.skipped.push({ po: l.reference, reason: 'already paid by this run' }); continue; } throw le; }
 // ═══ v28.288 (Ben 12-Oct-26): Payments Report "Paid" with a BANK ACCOUNT. "when selecting PAID in payments report i think we need a bank
 // account selection which then creates the payment in that bank account and allocates the payment transaction to the supplier bills".
 // The popup offers three favourites (BOA #5237 USD and Universal Partners FX USD in Xero UK, Wise FX USD in Xero AU) plus a search of the
