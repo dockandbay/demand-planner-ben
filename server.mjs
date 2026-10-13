@@ -27449,7 +27449,7 @@ app.get('/api/client/commission/runs', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ runs, months }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/runs/:id', async (req, res) => {
-  try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
+  try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, g.xero_contact, g.xero_account_code, to_jsonb(g)->>'statement_email' statement_email, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy, to_char(r.statement_sent_at,'YYYY-MM-DD') sent_on FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
     const rows = (await pool.query(`SELECT *, to_char(paid_date,'YYYY-MM-DD') paid FROM planner.commission_rows WHERE run_id=$1 ORDER BY status='exception' DESC, paid_date, order_ref`, [req.params.id])).rows;
     res.set('Cache-Control', 'no-store').json({ run, rows }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -27498,6 +27498,11 @@ async function cmEngine(month, opts) { opts = opts || {};
   const byEmail = {}, byName = {}, byXid = {}; cust.forEach(c => { if (c.email && !byEmail[c.email]) byEmail[c.email] = c.rep_group_id; if (c.name && !byName[c.name]) byName[c.name] = c.rep_group_id; if (c.xid) byXid[c.org + '|' + c.xid] = c.rep_group_id; });
   const ownRate = {}; (await pool.query(`SELECT lower(trim(customer_name)) n, rate FROM planner.commission_customer_rates`).catch(() => ({ rows: [] }))).rows.forEach(r => { ownRate[r.n] = Number(r.rate); });
   const ovr = {}; (await pool.query(`SELECT upper(trim(order_ref)) k, rep_group_id, rate, commissionable_amount, reason FROM planner.commission_overrides`)).rows.forEach(o => { ovr[o.k] = o; });
+  // credit notes already deducted in the paid commission history (Ben 13-Oct-26: "they should come off if they are missing in paid history")
+  const cnPaid = new Set((await pool.query(`SELECT DISTINCT upper(trim(credit_note)) k FROM planner.commission_paid_history WHERE coalesce(credit_note,'')<>''`).catch(() => ({ rows: [] }))).rows.map(r => r.k));
+  // a credit note only takes commission back when the invoice it credits was commissioned (paid history, any run, or paid in this month)
+  const histInv = new Set((await pool.query(`SELECT DISTINCT lower(trim(rep_group)) g, upper(trim(invoice_no)) i FROM planner.commission_paid_history WHERE coalesce(invoice_no,'')<>''`).catch(() => ({ rows: [] }))).rows.map(r => r.g + '|' + r.i));
+  const runInv = new Set((await pool.query(`SELECT x.rep_group_id g, upper(coalesce(w.invoice_ref,'')) i FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id WHERE coalesce(w.commission,0) > 0`).catch(() => ({ rows: [] }))).rows.map(r => r.g + '|' + r.i));
   const rows = [], exceptions = [], seen = new Set(), notes = [];
   const exc = (kind, o) => exceptions.push(Object.assign({ kind }, o));
   // FX: Fulfil daily rates, units per GBP; rate on/before the date
@@ -27517,8 +27522,13 @@ async function cmEngine(month, opts) { opts = opts || {};
     if (o.code && codeTo[o.code] && custAgent && custAgent !== codeTo[o.code] && !(ov && ov.rep_group_id)) exc('code_vs_customer', { order_ref: o.order_ref, customer: o.customer, text: 'Fulfil code ' + o.code + ' (' + gBy[codeTo[o.code]].name + ') but the customer is on ' + (gBy[custAgent] || {}).name + '\'s list: paid to the code' });
     const isFaire = /faire/i.test(o.channel || '');
     if (isFaire && !(ov && ov.rep_group_id)) { if (gid && !faire.includes(gid) && !gBy[gid].no_commission) exc('faire', { order_ref: o.order_ref, customer: o.customer, text: 'customer of ' + gBy[gid].name + ' ordered via Faire: earns nobody' }); gid = faire[0] || null; agentSrc = 'Faire channel'; }
+    if (!gid && o.quiet) return;   // a credit note of a customer with no agent: nothing to take back
     if (!gid) { exc('no_agent', { order_ref: o.order_ref, customer: o.customer, email: o.email, amount: _cmR2(o.amount_src), currency: o.currency_src, source: o.source, text: 'no agent: no Fulfil code and the customer is on no agent\'s list' }); return; }
     const g = gBy[gid]; const ccy = String(g.currency || 'USD').toUpperCase();
+    if (o.credit_note && Array.isArray(o.alloc) && !g.no_commission) {
+      const gn = String(g.name).trim().toLowerCase(), done = o.alloc.filter(i => histInv.has(gn + '|' + i) || runInv.has(gid + '|' + i) || rows.some(r => r.agent_id === gid && String(r.invoice_ref || '').toUpperCase() === i && (r.commission || 0) > 0));
+      if (!done.length) { exc('credit_note_uncommissioned', { order_ref: o.order_ref, customer: o.customer, amount: _cmR2(o.amount_src), currency: o.currency_src, source: o.source,
+        text: (o.alloc.length ? 'credits ' + o.alloc.join(', ') + ', never commissioned to ' + g.name : 'not allocated to an invoice (refund?)') + ': not deducted' }); return; } }
     const cv = conv(o.amount_src, o.currency_src, ccy, o.pay_date);
     let rate = Number(g.default_rate) || 0, rateSrc = 'agent';
     const own = ownRate[String(o.customer || '').trim().toLowerCase()]; if (own != null && Number.isFinite(own)) { rate = own; rateSrc = 'customer'; }
@@ -27539,8 +27549,15 @@ async function cmEngine(month, opts) { opts = opts || {};
     for (const scope of [['sales.reference', 'ilike', '%WS-%'], ['sales.channel.name', 'ilike', '%faire%']]) {
       (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', ms], ['invoice_date', '<=', me], scope], ['id'])).forEach(i => ids.add(i.id));
       (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', from180], ['invoice_date', '<', ms], ['write_date', '>=', ms + ' 00:00:00'], scope], ['id'])).forEach(i => ids.add(i.id)); }
+    // Fulfil credit notes (customer invoice with a negative total, e.g. from a return) dated in the month: a negative row against the order
+    (await fAll('account.invoice', [['type', '=', 'out'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', ms], ['invoice_date', '<=', me], ['total_amount', '<', 0]], ['id'])).forEach(i => ids.add(i.id));
     const invs = []; const idl = [...ids]; for (let i = 0; i < idl.length; i += 300) invs.push(...await fAll('account.invoice', [['id', 'in', idl.slice(i, i + 300)], ['state', 'in', ['posted', 'paid']]],
       ['id', 'number', 'reference', 'invoice_date', 'currency.code', 'company', 'untaxed_amount', 'total_amount', 'party.name', 'party.email', 'sales', 'payment_applications_data']));
+    // An amount applied to an invoice FROM a credit note is not cash received: the application's reference is the credit note's move line.
+    const mlRef = new Set(); invs.forEach(inv => (((inv.payment_applications_data || {}).rows) || []).forEach(r => { const ref = ((r.actions || {}).reference) || {}; if (ref.model === 'account.move.line' && ref.id) mlRef.add(ref.id); }));
+    const cnLine = new Set(); if (mlRef.size) { const ml = []; const L = [...mlRef]; for (let i = 0; i < L.length; i += 300) ml.push(...await fAll('account.move.line', [['id', 'in', L.slice(i, i + 300)]], ['id', 'invoices']));
+      const invOf = {}; ml.forEach(x => (x.invoices || []).forEach(v => { (invOf[v] = invOf[v] || []).push(x.id); }));
+      const vIds = Object.keys(invOf).map(Number); for (let i = 0; i < vIds.length; i += 300) (await fAll('account.invoice', [['id', 'in', vIds.slice(i, i + 300)], ['total_amount', '<', 0]], ['id'])).forEach(v => (invOf[v.id] || []).forEach(id => cnLine.add(id))); }
     const shipF = {}; for (let i = 0; i < invs.length; i += 200) (await fAll('account.invoice.line', [['invoice', 'in', invs.slice(i, i + 200).map(x => x.id)], ['type', '=', 'line']], ['invoice', 'amount', 'description', 'product.code']))
       .forEach(l => { if (!String(l['product.code'] || '').trim() || _CM_SHIP_RE.test(String(l['product.code'] || ''))) shipF[l.invoice] = (shipF[l.invoice] || 0) + _cmNum(l.amount); });   // lines with no product (shipping) are not commissionable
     const saleIds = [...new Set(invs.flatMap(i => i.sales || []))]; const sales = {};
@@ -27552,8 +27569,13 @@ async function cmEngine(month, opts) { opts = opts || {};
       const s = sales[(inv.sales || [])[0]] || {}, invDate = _cmDate(inv.invoice_date), ccy = String(inv['currency.code'] || 'USD').toUpperCase(), compCcy = Number(inv.company) === FULFIL_COMPANY_AU ? 'AUD' : 'GBP';
       const total = _cmNum(inv.total_amount), ratio = total ? (_cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0)) / total : 1;
       const ref = s.reference || s.number || inv.number; seen.add(String(inv.number || '').toUpperCase()); if (s.reference) seen.add(String(s.reference).toUpperCase()); if (inv.reference) seen.add(String(inv.reference).toUpperCase());
-      const apps = ((inv.payment_applications_data || {}).rows || []).map(r => r.values || {});
+      if (total < 0) {   // a credit note: one negative row in its own month, at the order's agent and rate (product lines, ex tax)
+        if (invDate >= ms && invDate <= me) add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '',
+          invoice_date: invDate, pay_date: invDate, amount_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0), currency_src: ccy, credit_note: true, quiet: true });
+        continue; }
+      const apps = ((inv.payment_applications_data || {}).rows || []).map(r => Object.assign({}, r.values || {}, { _ref: ((r.actions || {}).reference) || {} }));
       for (const a of apps) { const d = _cmDate(a.date); if (!d) continue;
+        if (a._ref.model === 'account.move.line' && cnLine.has(a._ref.id)) continue;   // applied from a credit note, not cash
         const amt = ccy === compCcy ? _cmNum(a.applied_amount) : (a.applied_amount_second_currency != null && a.applied_amount_second_currency !== '' ? _cmNum(a.applied_amount_second_currency) : null);
         if (amt == null || !amt) continue;   // FX difference lines (no invoice-currency amount)
         const earn = invDate && invDate > d ? invDate : d; if (earn < ms || earn > me) continue;
@@ -27580,12 +27602,14 @@ async function cmEngine(month, opts) { opts = opts || {};
       if (opts.debug && rows.length) rows[rows.length - 1].debug_lines = (v.LineItems || []).map(l => [l.ItemCode, l.Description, l.AccountCode, l.LineAmount]).slice(0, 40); }
     // customer credit notes dated in the month take commission back (ex tax, shipping excluded)
     let cns = []; try { cns = await upfxPaged('/api.xro/2.0/CreditNotes?where=' + encodeURIComponent('Type=="ACCRECCREDIT" AND (Status=="AUTHORISED" OR Status=="PAID") AND Date>=DateTime(' + y + ',' + m + ',1) AND Date<=DateTime(' + y + ',' + m + ',' + last + ')'), 'CreditNotes', org); } catch (e) { notes.push('Xero ' + org.toUpperCase() + ' credit notes not read: ' + e.message); }
-    let cnMine = 0;
+    let cnMine = 0, cnDone = 0;
     for (const cn of cns) { const c = cn.Contact || {}; if (!(byXid[org + '|' + c.ContactID] || byName[String(c.Name || '').trim().toLowerCase()])) continue; const no = String(cn.CreditNoteNumber || '').toUpperCase(), rf = String(cn.Reference || '').toUpperCase();
-      if ((no && seen.has(no)) || (rf && seen.has(rf))) continue; cnMine++;
+      if ((no && seen.has(no)) || (rf && seen.has(rf))) continue;
+      if (no && cnPaid.has(no)) { cnDone++; continue; } cnMine++;
       add({ source: 'xero ' + org, order_ref: cn.Reference || cn.CreditNoteNumber, invoice_ref: cn.CreditNoteNumber, customer: c.Name, xid: c.ContactID, org, channel: '', credit_note: true,
+        alloc: [...new Set((cn.Allocations || []).map(a => String(((a.Invoice || {}).InvoiceNumber) || '').toUpperCase()).filter(Boolean))],
         invoice_date: _cmXeroDate(cn.DateString || cn.Date), pay_date: _cmXeroDate(cn.DateString || cn.Date), amount_src: -((Number(cn.SubTotal) || 0) - _cmShipX(cn)), currency_src: String(cn.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() }); }
-    notes.push('Xero ' + org.toUpperCase() + ': ' + pays.length + ' payments, ' + mine.length + ' for agents\' customers' + (dup ? ', ' + dup + ' already in Fulfil' : '') + (cnMine ? ', ' + cnMine + ' credit notes' : ''));
+    notes.push('Xero ' + org.toUpperCase() + ': ' + pays.length + ' payments, ' + mine.length + ' for agents\' customers' + (dup ? ', ' + dup + ' already in Fulfil' : '') + (cnMine ? ', ' + cnMine + ' credit notes' : '') + (cnDone ? ' (' + cnDone + ' already deducted in paid history)' : ''));
   } catch (e) { notes.push('Xero ' + org.toUpperCase() + ' not read: ' + e.message); } }
   // order override commissionable amount: replaces the cash, spread over the order's rows in the month by cash
   const byOrder = {}; rows.forEach(r => { if (r.override && r.override.amount != null && r.override.amount !== '') (byOrder[r.order_ref] = byOrder[r.order_ref] || []).push(r); });
@@ -27602,6 +27626,46 @@ app.get('/api/client/commission/orders', async (req, res) => {
     const gid = req.query.group ? Number(req.query.group) : null;
     res.set('Cache-Control', 'no-store').json(gid ? Object.assign({}, v, { rows: v.rows.filter(r => r.agent_id === gid), agents: v.agents.filter(a => a.agent_id === gid) }) : v);
   } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
+// v28.333 (Ben 13-Oct-26): late payments are fine: commission earned in an earlier month that was never paid (not in the paid history, not in a
+// finalised / paid run) is listed here and can be added to a later run ("if we missed paying someone in March, surface it in October").
+// One engine pass per month (cached 15 min; Xero is skipped below the daily floor). Paid = the invoice is in the paid history for that agent,
+// or the same invoice + payment date is already in any run (paid, or pending in its own month's run, or already added as a catch-up).
+app.get('/api/client/commission/missed', async (req, res) => {
+  try { const from = String(req.query.from || ''), to = String(req.query.to || ''), gid = req.query.group ? Number(req.query.group) : null;
+    if (!/^\d{4}-\d{2}$/.test(from) || !/^\d{4}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: 'from and to months (YYYY-MM) required' });
+    const months = []; for (let d = new Date(Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, 1)); d.toISOString().slice(0, 7) <= to && months.length < 12; d.setUTCMonth(d.getUTCMonth() + 1)) months.push(d.toISOString().slice(0, 7));
+    const G = {}; (await pool.query(`SELECT id, name FROM planner.rep_groups`)).rows.forEach(g => { G[g.id] = g.name; });
+    const hist = new Set((await pool.query(`SELECT DISTINCT lower(trim(rep_group)) g, upper(trim(invoice_no)) i FROM planner.commission_paid_history WHERE coalesce(invoice_no,'')<>''`)).rows.map(r => r.g + '|' + r.i));
+    const histCn = new Set((await pool.query(`SELECT DISTINCT upper(trim(credit_note)) k FROM planner.commission_paid_history WHERE coalesce(credit_note,'')<>''`)).rows.map(r => r.k));
+    const inRuns = new Set((await pool.query(`SELECT x.rep_group_id, upper(coalesce(w.invoice_ref, w.order_ref,'')) i, to_char(w.paid_date,'YYYY-MM-DD') d FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id`)).rows.map(r => r.rep_group_id + '|' + r.i + '|' + r.d));
+    const out = [], notes = [];
+    for (const m of months) { const v = await cmEngine(m, { env: req.query.env });
+      if (!v.fulfil_read) notes.push(m + ': Fulfil not read'); (v.notes || []).filter(n => /skipped|not read/.test(n)).forEach(n => notes.push(m + ': ' + n));
+      v.rows.forEach(r => { if (gid && r.agent_id !== gid) return; if (!r.commission || r.rate_source === 'no commission') return;
+        const inv = String(r.invoice_ref || r.order_ref || '').toUpperCase(), gname = String(G[r.agent_id] || '').trim().toLowerCase();
+        if (hist.has(gname + '|' + inv) || hist.has(gname + '|' + String(r.order_ref || '').toUpperCase())) return;
+        if (r.note === 'credit note' && histCn.has(inv)) return;
+        if (inRuns.has(r.agent_id + '|' + inv + '|' + r.pay_date)) return;
+        out.push(Object.assign({ earned_month: m }, r)); }); }
+    res.set('Cache-Control', 'no-store').json({ ok: true, months, rows: out, notes, total_by_agent: Object.values(out.reduce((a, r) => { const k = r.agent_id; a[k] = a[k] || { agent_id: k, agent: r.agent, currency: r.currency, rows: 0, commission: 0 }; a[k].rows++; a[k].commission = Math.round((a[k].commission + r.commission) * 100) / 100; return a; }, {})) });
+  } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/runs/add-missed', async (req, res) => {   // add missed rows to the agent's OPEN run for a month (made if absent)
+  const b = req.body || {}, month = String(b.month || ''), gid = parseInt(b.rep_group_id, 10), rows = Array.isArray(b.rows) ? b.rows.slice(0, 500) : [];
+  if (!/^\d{4}-\d{2}$/.test(month) || !gid || !rows.length) return res.status(400).json({ error: 'month, rep_group_id and rows required' });
+  try { const g = (await pool.query(`SELECT * FROM planner.rep_groups WHERE id=$1`, [gid])).rows[0]; if (!g) return res.status(404).json({ error: 'agent not found' });
+    if (rows.some(r => Number(r.agent_id) !== gid)) return res.status(400).json({ error: 'rows belong to another agent' });
+    const run = (await pool.query(`INSERT INTO planner.commission_runs (month, rep_group_id) VALUES ($1,$2) ON CONFLICT (month, rep_group_id) DO UPDATE SET month=excluded.month RETURNING *`, [month, gid])).rows[0];
+    if (run.status !== 'open') return res.status(409).json({ error: 'the ' + month + ' run is ' + run.status + ': reopen it first' });
+    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = m => M[+String(m).slice(5, 7) - 1] + '-' + String(m).slice(2, 4); let added = 0;
+    for (const r of rows) { const dup = (await pool.query(`SELECT 1 FROM planner.commission_rows WHERE run_id=$1 AND upper(coalesce(invoice_ref,''))=upper($2) AND paid_date=$3::date`, [run.id, r.invoice_ref || r.order_ref || '', r.pay_date])).rowCount; if (dup) continue;
+      await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source, currency, currency_src, amount_src, fx_rate, invoice_date, earn_date, rate_source, agent_source)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,'pending',$10,'catch-up',$11,$12,$13,$14,$15,$16,$17,$18)`, [run.id, r.order_ref || null, r.invoice_ref || null, r.customer || null, r.pay_date || null, r.commissionable, r.rate, r.commission, month + ' ' + g.name,
+        'earned ' + ml(r.earned_month || r.earn_date || month) + ', not paid then', r.currency || null, r.currency_src || null, r.amount_src, r.fx_rate, r.invoice_date || null, r.earn_date || null, r.rate_source || null, r.agent_source || null]); added++; }
+    const sum = await cpRunSummary(run.id); await cpAudit(null, 'Missed commission added', month + ' · ' + g.name + ' · ' + added + ' rows', req.me && req.me.email);
+    res.json({ ok: true, run_id: run.id, added, ...sum });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/commission/runs/build', async (req, res) => {   // v28.332: from the stage 2 engine (cmEngine); one run per agent and month
   const b = req.body || {}; const month = String(b.month || '').trim(); const gid = parseInt(b.rep_group_id, 10);
@@ -27684,13 +27748,16 @@ app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
 });
 // v28.059 (Ben): create the commission bill directly in Xero (UK org) instead of the CSV. Admin + confirm; draft
 // by default, approved when {approved:true}. Contact = the rep group's Xero contact; single line coded to its account.
+const to_jsonb_safe = (row, k) => (row && row[k] != null && row[k] !== '') ? row[k] : null;   // a column added by a later migration reads as null before it
 app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
   // v28.301 (Ben 13-Oct-26): anyone with the CLIENT grant (or admin) may create the commission bill, not only admins.
   try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.client_access)) return res.status(403).json({ error: 'CLIENT access required to create a commission bill in Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
   if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required — this writes to live Xero' });
   try {
-    const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
+    const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
     if (!run) return res.status(404).json({ error: 'run not found' });
+    if (run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the bill is made from a finalised run.' });
+    if (to_jsonb_safe(run, 'xero_bill_id')) return res.status(409).json({ error: 'This run already has its Xero bill (' + (run.xero_bill_ref || '') + ').', url: run.xero_bill_url || null });
     if (!run.xero_contact) return res.status(400).json({ error: 'This rep group has no Xero contact set — add it on the agent’s account (CLIENT ▸ Clients & agents ▸ Commission).' });
     if (!run.xero_account_code) return res.status(400).json({ error: 'This rep group has no Xero account code set — add it on the agent’s account.' });
     const region = 'uk';   // commissions are billed from the UK org
@@ -27702,13 +27769,20 @@ app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
     // validate the account code exists in Xero UK
     try { const ac = await xeroFetch(region, '/api.xro/2.0/Accounts'); const valid = new Set(((ac && ac.Accounts) || []).map(a => String(a.Code || ''))); if (!valid.has(String(run.xero_account_code))) return res.status(400).json({ error: 'Account code ' + run.xero_account_code + ' is not in Xero UK — fix it on the agent’s account.' }); } catch (e) {}
     const billStatus = (req.body.approved === true || String(req.body.status || '').toUpperCase() === 'AUTHORISED') ? 'AUTHORISED' : 'DRAFT';
-    const body = { Type: 'ACCPAY', Contact: { Name: run.xero_contact }, Date: end, DueDate: end, InvoiceNumber: inv, Reference: inv, CurrencyCode: 'GBP', Status: billStatus, LineAmountTypes: 'NoTax',
-      LineItems: [{ Description: 'Commission ' + run.month + ' — ' + nRows + ' orders (see statement)', Quantity: 1, UnitAmount: total, AccountCode: String(run.xero_account_code), TaxType: 'NONE' }] };
-    const r = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
-    const binv = r && r.Invoices && r.Invoices[0];
-    await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2 WHERE id=$1`, [req.params.id, inv]);
-    res.json({ ok: true, status: binv && binv.Status, reference: inv, contact: run.xero_contact, total: total,
-      xero_id: binv && binv.InvoiceID, url: (binv && binv.InvoiceID) ? ('https://go.xero.com/AccountsPayable/' + (billStatus === 'AUTHORISED' ? 'View' : 'Edit') + '.aspx?InvoiceID=' + binv.InvoiceID) : null });
+    // v28.333: the agent's Xero contact by ContactID (never auto-created), the agent's currency, the statement PDF attached; never billed twice.
+    const xc = await xeroContactLookup(region, run.xero_contact, { fresh: true }); if (!xc.ok) return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: xc.error });
+    const ex = await xeroFetch(region, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + inv + '" AND Status!="DELETED" AND Status!="VOIDED"'));
+    let binv = ex && ex.Invoices && ex.Invoices[0], linked = !!binv;
+    const _ml = (m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4); })(run.month);
+    if (!binv) { const body = { Type: 'ACCPAY', Contact: { ContactID: xc.ContactID }, Date: end, DueDate: end, InvoiceNumber: inv, Reference: inv, CurrencyCode: String(run.ccy || 'USD').toUpperCase(), Status: billStatus, LineAmountTypes: 'NoTax',
+        LineItems: [{ Description: 'Commission ' + _ml + ' · ' + run.group_name + ' · ' + nRows + ' payments (see statement)', Quantity: 1, UnitAmount: total, AccountCode: String(run.xero_account_code), TaxType: 'NONE' }] };
+      const r = await xeroFetch(region, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } }); binv = r && r.Invoices && r.Invoices[0]; }
+    if (!binv || !binv.InvoiceID) throw new Error('Xero did not return the bill');
+    let attached = false; if (!linked) { try { const pdf = await cmStatementPdf(req.params.id); await xeroFetch(region, '/api.xro/2.0/Invoices/' + binv.InvoiceID + '/Attachments/' + encodeURIComponent(pdf.filename), { method: 'PUT', body: pdf.buf, headers: { 'Content-Type': 'application/pdf' }, timeoutMs: 45000 }); attached = true; } catch (e) { console.warn('[commission bill] statement not attached: ' + e.message); } }
+    const url = 'https://go.xero.com/AccountsPayable/' + (String(binv.Status) === 'DRAFT' ? 'Edit' : 'View') + '.aspx?InvoiceID=' + binv.InvoiceID;
+    await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2, xero_bill_id=$3, xero_bill_url=$4, xero_bill_status=$5 WHERE id=$1`, [req.params.id, inv, binv.InvoiceID, url, String(binv.Status || billStatus).toLowerCase()]);
+    await cpAudit(null, 'Commission bill ' + (linked ? 'linked' : 'created') + ' in Xero', inv + ' · ' + run.ccy + ' ' + total, req.me && req.me.email);
+    res.json({ ok: true, linked, attached, status: binv.Status, reference: inv, contact: xc.Name, total, currency: run.ccy, xero_id: binv.InvoiceID, url });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
@@ -27839,11 +27913,12 @@ app.get('/api/client/commission/history', async (req, res) => {
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], by_month: [], by_group: [], groups: [], years: [], total: { n: 0, paid: 0 }, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.021: nicely formatted PDF commission statement for a run (pdf-lib).
-app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
-  try {
-    const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.default_rate FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
-    if (!run) return res.status(404).send('not found');
-    const rows = (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'DD Mon YYYY') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [req.params.id])).rows;
+// v28.333: the statement PDF is built once here and used by the download, the statement email, the Xero bill attachment and the client portal.
+async function cmStatementPdf(runId) {
+  {
+    const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.default_rate, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [runId])).rows[0];
+    if (!run) return null;
+    const rows = (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [runId])).rows;
     const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
     const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
     const ink = rgb(0.09, 0.13, 0.18), mut = rgb(0.42, 0.46, 0.52), line = rgb(0.85, 0.87, 0.9), accent = rgb(1, 0.34, 0.19);
@@ -27855,8 +27930,9 @@ app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
     function header() {
       page = doc.addPage([W, H]); y = H - 46;
       draw('Dock & Bay', ML, y, B, 18, ink); draw('COMMISSION STATEMENT', W - MR - B.widthOfTextAtSize('COMMISSION STATEMENT', 10), y + 3, B, 10, accent);
-      y -= 22; draw(run.group_name + '  ·  ' + run.month, ML, y, F, 11, mut);
-      draw((run.status === 'paid' ? 'PAID' + (run.paid_at ? ' ' + String(run.paid_at).slice(0, 10) : '') : run.status === 'finalised' ? 'FINALISED' : 'OPEN'), W - MR - F.widthOfTextAtSize((run.status || '').toUpperCase(), 9), y, F, 9, mut);
+      y -= 22; const _ml = (m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4); })(run.month);
+      draw(run.group_name + '  ·  ' + _ml + '  ·  ' + run.ccy, ML, y, F, 11, mut);
+      draw((run.status === 'paid' ? 'PAID' + (run.paid_at ? ' ' + ddMonYy(new Date(run.paid_at).toISOString().slice(0, 10)) : '') : run.status === 'finalised' ? 'FINALISED' : 'OPEN'), W - MR - F.widthOfTextAtSize((run.status || '').toUpperCase(), 9), y, F, 9, mut);
       y -= 8; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 1, color: accent }); y -= 16;
       cols.forEach(c => draw(c.l, c.x, y, B, 7.5, mut, c.a, c.w)); y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 13;
     }
@@ -27867,7 +27943,7 @@ app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
       const ref = r.order_ref + (r.invoice_ref ? ' / ' + r.invoice_ref : '') + (r.credit_note_ref ? ' (CN ' + r.credit_note_ref + ')' : '');
       draw(ref.slice(0, 26), cols[0].x, y, F, 7.5, ink, 'l');
       draw(String(r.customer || '').slice(0, 26), cols[1].x, y, F, 7.5, ink, 'l');
-      draw(r.paid || '', cols[2].x, y, F, 7.5, ink, 'l');
+      draw(r.paid ? ddMonYy(r.paid) : '', cols[2].x, y, F, 7.5, ink, 'l');
       draw(money(r.commissionable), cols[3].x, y, F, 7.5, ink, 'r', cols[3].w);
       draw(r.rate + '%', cols[4].x, y, F, 7.5, ink, 'r', cols[4].w);
       draw(money(r.commission), cols[5].x, y, F, 7.5, ink, 'r', cols[5].w);
@@ -27875,12 +27951,37 @@ app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
       totC += Number(r.commission) || 0; totN += Number(r.net) || 0; y -= 14;
     }
     y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 15;
-    draw('Total commission owed', cols[3].x - 60, y, B, 9, ink, 'l');
+    draw('Total commission owed (' + run.ccy + ')', cols[3].x - 60, y, B, 9, ink, 'l');
     draw(money(totN), cols[6].x, y, B, 11, accent, 'r', cols[6].w);
-    y -= 26; draw('Commission is on invoices paid in the month, on the sales value ex tax and ex shipping. Credit notes are commissioned at the original order rate.', ML, y, F, 7, mut, 'l');
+    y -= 26; draw('Commission on cash received in the month for shipped orders, on product sales ex tax and ex shipping, in ' + run.ccy + '. A deposit counts when the order ships.', ML, y, F, 7, mut, 'l');
+    y -= 10; draw('Credit notes in the month reduce commission at the order rate.', ML, y, F, 7, mut, 'l');
     if (run.xero_contact) { y -= 12; draw('Xero contact: ' + run.xero_contact, ML, y, F, 7, mut, 'l'); }
     const bytes = await doc.save();
-    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.pdf"'); res.send(Buffer.from(bytes));
+    return { buf: Buffer.from(bytes), run, total: Math.round(totN * 100) / 100, rows: rows.length, filename: 'commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.pdf' };
+  }
+}
+// v28.333 (Ben): email the statement PDF to the agent's statement address (agent record ▸ Commission ▸ Statement to). Finalised / paid runs only.
+app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => {
+  try { const p = await cmStatementPdf(req.params.id); if (!p) return res.status(404).json({ error: 'run not found' });
+    if (p.run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the statement is sent from a finalised run.' });
+    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
+    const to = String((req.body && req.body.to) || g.email || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
+    if (!to.length) return res.status(400).json({ error: 'No statement email for ' + (g.name || 'this agent') + ': set "Statement to" on the agent (CLIENT ▸ Clients ▸ ' + (g.name || 'agent') + ' ▸ Commission).' });
+    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = M[+p.run.month.slice(5, 7) - 1] + '-' + p.run.month.slice(2, 4);
+    const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const html = '<p>Hello,</p><p>Please find attached your Dock &amp; Bay commission statement for <b>' + ml + '</b>: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p>'
+      + '<p>Commission is on cash received in the month for shipped orders, on product sales ex tax and ex shipping. Credit notes in the month reduce it.</p>'
+      + (p.run.xero_bill_ref ? '<p>Our reference: ' + p.run.xero_bill_ref + '</p>' : '') + '<p>Kind regards,<br>Dock &amp; Bay</p>';
+    const r = await sendResendEmail({ to, subject: 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', attachments: [{ filename: p.filename, content: p.buf.toString('base64') }] });
+    if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
+    await pool.query(`UPDATE planner.commission_runs SET statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3 WHERE id=$1`, [p.run.id, to.join(', '), req.me && req.me.email]);
+    await cpAudit(null, 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', '), req.me && req.me.email);
+    res.json({ ok: true, to });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
+  try { const p = await cmStatementPdf(req.params.id); if (!p) return res.status(404).send('not found');
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="' + p.filename + '"'); res.send(p.buf);
   } catch (e) { log500(e); res.status(500).send('statement error: ' + e.message); }
 });
 
@@ -28390,16 +28491,30 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
     res.json({ ok: true, id: o.id, status, fulfil, units, total, lines });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.333 (Ben): the client portal shows commission only to an AGENT client whose agent has "Portal view" on (agent record ▸ Commission).
+// A key account sitting under an agent never sees the agent's statement. Returns a note when blocked, null when allowed.
+async function cpCommPortalGate(c) {
+  if (c.type !== 'agent') return 'Commission statements are for agent accounts.';
+  const g = (await pool.query(`SELECT coalesce((to_jsonb(g)->>'portal_on')::boolean, false) on FROM planner.rep_groups g WHERE id=$1`, [c.rep_group_id])).rows[0];
+  return g && g.on ? null : 'Commission statements are not switched on for this account yet.'; }
+app.get('/api/cp/commission/statement.pdf', cpAuth, async (req, res) => {
+  try { const c = req.cp.client; if (!c.features.view_commission || !c.rep_group_id) return res.status(403).send('not enabled'); const g = await cpCommPortalGate(c); if (g) return res.status(403).send(g);
+    const run = (await pool.query(`SELECT id FROM planner.commission_runs WHERE rep_group_id=$1 AND month=$2 AND status IN ('finalised','paid')`, [c.rep_group_id, String(req.query.month || '')])).rows[0];
+    if (!run) return res.status(404).send('no finalised statement for that month');
+    const p = await cmStatementPdf(run.id); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="' + p.filename + '"'); res.send(p.buf);
+  } catch (e) { log500(e); res.status(500).send('statement error'); }
+});
 app.get('/api/cp/commission', cpAuth, async (req, res) => {
   try { const c = req.cp.client; if (!c.features.view_commission) return res.status(403).json({ error: 'commission report not enabled for this account' }); if (!c.rep_group_id) return res.json({ runs: [], rows: [], note: 'no rep group assigned to this account' });
+    const _pg = await cpCommPortalGate(c); if (_pg) return res.json({ runs: [], rows: [], note: _pg });
     // v28.175 (Ben): per rep group + month cache (finalised / paid runs only change through CLIENT-module admin writes → 'client').
     const qm = String(req.query.month || ''), gid = c.rep_group_id;
     const base = await _lcGet(_cpCache('cpu:comm:' + gid + ':' + _cpHash(qm), CP_TTL.comm, 10 * 60000, async () => {
-      const runs = (await pool.query(`SELECT id, month, status, total, to_char(finalised_at,'YYYY-MM-DD') finalised_at, to_char(paid_at,'YYYY-MM-DD') paid_at FROM planner.commission_runs WHERE rep_group_id=$1 AND status IN ('finalised','paid') ORDER BY month DESC LIMIT 24`, [gid])).rows;
+      const runs = (await pool.query(`SELECT r.id, r.month, r.status, r.total, to_char(r.finalised_at,'YYYY-MM-DD') finalised_at, to_char(r.paid_at,'YYYY-MM-DD') paid_at, coalesce(to_jsonb(r)->>'currency', to_jsonb(g)->>'currency') currency FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.rep_group_id=$1 AND r.status IN ('finalised','paid') ORDER BY r.month DESC LIMIT 24`, [gid])).rows;
       const month = qm || (runs[0] && runs[0].month); const run = runs.find(r => r.month === month);
       const rows = run ? (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, status FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [run.id])).rows : [];
       return { runs, month, run, rows }; }));
-    const v = _cpMemo(_cpSig('comm', gid, qm, c.rep_group_name || null, c.currency), [base], () => ({ group: c.rep_group_name, runs: base.runs, month: base.month, run: base.run, rows: base.rows, currency: c.currency }));
+    const v = _cpMemo(_cpSig('comm', gid, qm, c.rep_group_name || null, c.currency), [base], () => ({ group: c.rep_group_name, runs: base.runs, month: base.month, run: base.run, rows: base.rows, currency: (base.run && base.run.currency) || c.currency }));
     sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.200 (Ben): the portal's thread list. Internal (staff-only) messages are invisible here: not in the counts, the preview or the

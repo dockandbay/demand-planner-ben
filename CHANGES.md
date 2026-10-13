@@ -1,3 +1,28 @@
+## v28.333 (Ben, branch review-fixes-2026-10-05): commission payout: Xero bill, statement email, portal view, credit notes, missed commission
+
+**Files:** `server.mjs`, `supply/inject.html`, `supply/client-view.js`, `migrations/368_commission_payout.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+- **Statement PDF:** shared by the download, email, Xero attachment and portal (`cmStatementPdf`). It is in the agent's currency with dd-mmm-yy dates, and its notes describe the new rules.
+- **Xero bill** (run Finalised):
+  - goes to the agent's Xero bill contact **by ContactID**; it is never auto-created (was by name) and a missing contact is an error;
+  - in the **agent's currency** (was GBP), Approved by default, with the **statement PDF attached**;
+  - an existing bill with the same number is **linked, never duplicated**;
+  - the run keeps the bill id, link and status, and the run page shows "↗ Xero bill …" instead of the button.
+- **Statement email** (run Finalised): **✉ Email statement** sends to the agent's "Statement to" address with the PDF attached, using the client email channel. The run shows "sent dd-mmm-yy to …".
+- **Client portal:**
+  - commission only for an **Agent** client (a key account under an agent never sees the agent's statement) whose agent has **Portal view** on;
+  - in the run's currency, months as Mon-yy, with a **Statement PDF** download (GET /api/cp/commission/statement.pdf).
+- **Credit notes (Ben):** a credit note comes off unless the paid history already has it. It is only deducted when the invoice it credits was commissioned (paid history, any run, or paid in the same month); otherwise it is an exception and not deducted.
+- **Fulfil credit notes:** none are on live yet. A Fulfil credit note (a customer invoice with a negative total) is one negative row against the order in its own month. An amount applied from it to the original invoice is not counted as cash.
+- **Missed commission (Ben: late payments are fine):** Exceptions ▸ Missed commission scans a range of up to 12 months for payments that earned commission but were never paid (not in the paid history or any run). Tick rows and **Add to run** for a chosen month; the rows are marked "earned <Mon-yy>, not paid then".
+- **Migration 368 (additive):** commission_runs gets xero_bill_id, xero_bill_url, xero_bill_status, statement_sent_at, statement_sent_to, statement_sent_by.
+- **Tested (sandbox):**
+  - the statement PDF is correct (TJ Aug-26, EUR);
+  - email and bill refuse an open run;
+  - rebuilding TJ Aug-26 skipped CN-9545, which is already in the paid history;
+  - the Ideco Jul to Aug-26 scan finds no unpaid payments and 1 credit note (CN-9472 −7.12); 18 July credit notes against never-commissioned invoices became exceptions.
+- **Not tested:** a real Xero bill (live Xero), a real statement email (live Resend) and the portal page (needs a portal login).
+
 ## v28.332 (Ben, branch review-fixes-2026-10-05): commissions stage 2, the calculation
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/367_commission_engine.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
