@@ -1,3 +1,10 @@
+## v28.336 (Ben, branch review-fixes-2026-10-05): client type badges coloured
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md)
+
+- CLIENT ▸ Clients (cards, client record header): **Key account = green**, **Agent / rep group (sales reps) = blue**, Distributor = amber, Direct wholesale = grey. The colours are inline because CLIENT pages have no tool-badge colour classes, which is why these badges used to show as plain text.
+- Tested (sandbox, Chrome): Dillard's (TEST) shows green, agents blue, Nordic Living amber.
+
 ## v28.335 (Ben, branch review-fixes-2026-10-05): supplier charges billed (PO shipments + samples), charges on the PO
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
