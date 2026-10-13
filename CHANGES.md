@@ -1,3 +1,13 @@
+## v28.323 (Ben, branch review-fixes-2026-10-05): receipt amount + GST check fixes (Alfa, INV-0023); Review in Xero blue; Xero contact group readers
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "check these invoices ... they are repeatable spend: INV-0023 and Invoice 3177 from Alfa Embroidery". Both are in HORIZON (accounts@ with PDFs); neither has an open bank line (unpaid, or already reconciled in Xero) and Alfa has no payee rule, so neither shows in Reconcile.
+- Auto bill amount: Alfa's email shows one total (A$399.96) but its PDF lists line amounts too, so with no statement line yet the receipt waited ("several amounts"). One currency-marked total in the email body that the PDF also shows is now the bill amount.
+- GST check: "all GST" now also needs the subtotal (total - GST) on the receipt. INV-0023 (385.00 for 7.5 h + 3.5 h at $35) passed by chance (385 / 11 = 35.00, the hourly rate); it is now "GST not confirmed". Alfa 3177 (36.36 GST, subtotal 363.60), Mini Models and the Wink split unchanged.
+- Reconcile: the Review button is Xero blue (#13B5EA).
+- Commissions step 1 (read only): GET /api/client/commission/xero-groups?org=uk|au and /xero-group-members?org=&group= (members with emails, 10 min memo). Live Xero UK has every agent group (Schauben 1,365 members, Faire 970, No Agent 863, Harper 607, Patrickco 599, Ideco 357, ...); Xero AU has none. Email match of Fulfil wholesale customers since Jan-25: 192 of 303 matched to a group.
+
 ## v28.322 (Ben, branch review-fixes-2026-10-05): commission paid history table (Jan-22 onward) + paid runs recorded automatically
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/363_commission_paid_history.sql`, `scripts/import_commission_history.cjs` (+ package.json, CHANGES.md). **Migration 363.** No env vars.

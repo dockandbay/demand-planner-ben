@@ -4482,7 +4482,8 @@ function accGstCheck(org, total, amts, taxType) {
   const g = ACC_GST[org]; if (!g || String(taxType || '').toUpperCase() !== g.std) return { kind: 'skip' };
   const T = Math.round(Number(total) * 100) / 100, div = 1 + 1 / g.rate, nums = [...new Set((amts || []).map(Number).filter(v => v > 0))];
   const has = v => nums.some(a => Math.abs(a - v) <= 0.011);
-  if (has(T / div)) return { kind: 'full', gst: Math.round(T / div * 100) / 100 };
+  // v28.323: "all GST" also needs the subtotal (total - GST) on the receipt: INV-0023 (385.00 at $35/h) showed 35.00 = 385 / 11 by chance
+  if (has(T / div) && has(T - T / div)) return { kind: 'full', gst: Math.round(T / div * 100) / 100 };
   if (g.free) for (const a of nums.filter(a => a < T / div - 0.02).sort((x, y) => y - x)) {
     const free = Math.round((T - a * div) * 100) / 100;
     if (free > 0.009 && has(free)) return { kind: 'split', gst: a, taxable: Math.round(a / g.rate * 100) / 100, free, free_type: g.free };
@@ -4523,6 +4524,9 @@ async function accBillCandidates(rules, only) {
       if (!line && recon.some(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && real.includes(Math.abs(t.amount).toFixed(2)) && days(t.d, e.d) >= -5 && days(t.d, e.d) <= 25)) { if (only) { c.reason = 'Already reconciled in Xero'; out.push(c); } continue; }
       if (line) Object.assign(c, { amount: Math.abs(line.amount), date: line.d, stmt_line: line.id, bank: line.account_name });
       else if (real.length === 1) Object.assign(c, { amount: Number(real[0]), date: e.d });
+      // v28.323 (Ben 13-Oct-26, Alfa Embroidery): one currency-marked total in the email body (A$399.96) that the PDF also shows is the bill
+      // amount, even when the PDF lists its line amounts too (several amounts, no statement line yet)
+      else if ((() => { const bt = (e.amounts || []).filter(a => a[1] && ACC_CCY_SYM[r.org].includes(a[1])); return bt.length === 1 && (e.pdf_amounts || []).some(a => a[0] === bt[0][0]) && Object.assign(c, { amount: Number(bt[0][0]), date: e.d }); })()) {}
       else { c.reason = amts.length ? 'Several amounts in the email (' + real.slice(0, 4).join(', ') + ') and no open statement line to pick one: wait for the next statement upload, or create it by hand' : 'No amount found in the email'; out.push(c); continue; }
       const k = c.amount.toFixed(2);
       if (!ACC_CCY_SYM[r.org].includes(sym.get(k) || '')) { c.reason = 'Receipt is in ' + sym.get(k) + ', not ' + ACC_ORG_CCY[r.org]; out.push(c); continue; }
@@ -27223,6 +27227,29 @@ app.get('/api/client/commission/paid', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
+// v28.323 (Ben 13-Oct-26, commissions step 1): Xero contact groups ("Agent - Schauben" ...) are the agents' customer lists. Read only.
+// /xero-groups?org=uk|au lists the active groups; /xero-group-members?org=&group=<id> lists each member with its email (contacts read in
+// batches of 50). 10 minute memo per org / group; one Xero call per group and per 50 members.
+const _cmXg = new Map();
+app.get('/api/client/commission/xero-groups', async (req, res) => {
+  try { const org = String(req.query.org || 'uk').toLowerCase(); if (!['uk', 'au'].includes(org)) return res.status(400).json({ error: 'org uk|au' });
+    const k = 'g|' + org, m = _cmXg.get(k); if (m && Date.now() - m.at < 600000) return res.json({ groups: m.v, cached: true });
+    const j = await xeroFetch(org, '/api.xro/2.0/ContactGroups');
+    const v = ((j && j.ContactGroups) || []).filter(g => (g.Status || 'ACTIVE') === 'ACTIVE').map(g => ({ id: g.ContactGroupID, name: g.Name })).sort((a, b) => a.name.localeCompare(b.name));
+    _cmXg.set(k, { at: Date.now(), v }); res.json({ groups: v });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/commission/xero-group-members', async (req, res) => {
+  try { const org = String(req.query.org || 'uk').toLowerCase(), gid = String(req.query.group || ''); if (!['uk', 'au'].includes(org) || !/^[0-9a-f-]{36}$/i.test(gid)) return res.status(400).json({ error: 'org and group id required' });
+    const k = 'm|' + org + '|' + gid, m = _cmXg.get(k); if (m && Date.now() - m.at < 600000) return res.json(Object.assign({ cached: true }, m.v));
+    const j = await xeroFetch(org, '/api.xro/2.0/ContactGroups/' + gid); const g = ((j && j.ContactGroups) || [])[0] || {};
+    const ids = (g.Contacts || []).map(c => c.ContactID).filter(Boolean), members = [];
+    for (let i = 0; i < ids.length; i += 50) { const cj = await xeroFetch(org, '/api.xro/2.0/Contacts?summaryOnly=true&IDs=' + ids.slice(i, i + 50).join(','));
+      ((cj && cj.Contacts) || []).forEach(c => members.push({ id: c.ContactID, name: c.Name, email: String(c.EmailAddress || '').trim().toLowerCase() || null, status: c.ContactStatus })); }
+    const v = { group: { id: gid, name: g.Name }, members: members.sort((a, b) => String(a.name).localeCompare(String(b.name))) };
+    _cmXg.set(k, { at: Date.now(), v }); res.json(v);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // v28.322: paid commission history (migration 363): the imported sheet (Jan-22 onward) + every HORIZON run marked Paid. Filters: agent
 // (rep group text), year, free text (invoice / PO / customer). Rows newest first (max 1,000) and totals by month and by agent.
 app.get('/api/client/commission/history', async (req, res) => {
