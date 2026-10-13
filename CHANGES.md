@@ -1,3 +1,14 @@
+## v28.316 (Ben, branch review-fixes-2026-10-05): Auto bills remove / run after upload / one click; coding suggested from previous Xero bills
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "under auto bills there is no way to remove an automation". ACCOUNTS > Rules > Auto bills now lists the payees on Auto bill (org, payee, bills from, coding) with **Remove** (back to Bill (review)).
+- "can auto bills run daily on a cron and be triggered when a bank statement is uploaded. if anything matches, create bill in xero": they already run every 6 hours (health checks cron); now also right after every successful bank statement upload (background, single-flight).
+- "remove the double confirm of the xero bill creation": Auto bills Run now creates the Ready bills in one click (no Preview-first + Create confirm), and Push bill to Xero in Reconcile Review creates it in one click (no Confirm step).
+- "can this look at previous bills to the same company in xero and suggest contact, accounts/tax. same under payee treatments": with no reconciled Spend Money, the coding comes from the payee's last Xero bills (one read of its newest 10 bills, memoised 6 h). Payee treatments Edit pre-fills the suggestion with its source; Review notes it.
+- Fix: a multi-line spend's joined tax codes ("INPUT EXEMPTEXPENSES", e.g. Wink Models) were suggested as one invalid code; now counted one by one, GST on Expenses wins (the v28.315 split adds the GST-free line).
+- Sandbox (2 read-only Xero calls): Wink Models from Spend Money (1000.22, INPUT); Lease Lab from its last 10 bills (852, INPUT); Grumpy Baker from 4 bills (1000.22, INPUT).
+
 ## v28.315 (Ben, branch review-fixes-2026-10-05): GST split on receipt bills (superannuation / GST-free lines)
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

@@ -3668,6 +3668,7 @@ async function accStmtUploadUncoded(req, res, name, text) {
       }
       await c.query('COMMIT');
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
+    accAutoBillAfterUpload();   // v28.316
     res.json({ ok: true, format: 'uncoded', org: fileOrg, as_at: asAt, accounts: p.accounts.length, accounts_with_lines: p.accounts.filter(a => a.lines.length).length, unreconciled: lines, cleared, unmatched });
   } catch (e) { if (/Not a Xero/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 }
@@ -3703,6 +3704,7 @@ app.post('/api/accounts/bank-ageing/upload', async (req, res) => {
       await c.query('COMMIT');
     } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; } finally { c.release(); }
     const open = (await pool.query(`SELECT count(*)::int n FROM planner.accounts_stmt_lines WHERE org=$1 AND account_name=$2 AND NOT reconciled`, [p.org, p.account])).rows[0].n;
+    accAutoBillAfterUpload();   // v28.316
     res.json({ ok: true, org: p.org, account: p.account, matched_account: !!acct, as_at: asAt, period: p.period, unreconciled: unrec.size, lines: p.lines.length, cleared, open });
   } catch (e) { if (/Not a Xero|No statement lines/.test(e.message)) return res.status(400).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -4392,16 +4394,44 @@ app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person
 const ACC_BILL_STALE_DAYS = 10, ACC_RATE_AMTS = new Set(['20.00', '10.00', '5.00', '0.00', '12.50', '15.00']);   // VAT / GST rates printed next to the total
 const ACC_ORG_CCY = { uk: 'GBP', au: 'AUD' }, ACC_CCY_SYM = { uk: ['', '£', 'GBP'], au: ['', '$', 'A$', 'AUD'] };
 function accEmailRef(subject) { const m = /(?:account|acct|invoice|inv|receipt|order|statement)\b[^A-Z0-9]{0,12}(?:no\.?|number|#)?[^A-Z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i.exec(String(subject || '')); return m && /\d/.test(m[1]) ? m[1] : ''; }
-async function accPayeeCoding(org, key) {   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days)
+// v28.316 (Ben 13-Oct-26): "look at previous bills to the same company in xero and suggest contact, accounts/tax". When the payee has no
+// reconciled Spend Money, its coding comes from its recent Xero bills: the contact is the most billed contact in the bill cache whose name
+// matches the payee, then ONE read of its newest bills (with line items) gives the most used account and tax type, weighted by amount.
+// Memoised 6 hours per payee; skipped while the Xero daily allowance is low. Reverse charge kept as in v28.308 (UK).
+const _accBillCod = new Map();
+async function accBillCodingXero(org, key) {
+  const mk = org + '|' + key, m = _accBillCod.get(mk); if (m && Date.now() - m.at < 6 * 3600000) return m.v;
+  const q = xeroQuota(org); if (q && q.day != null && q.day < XERO_DAY_ALERT) return null;
+  const names = (await pool.query(`SELECT contact_name, count(*)::int n FROM planner.xero_bills WHERE lower(region)=$1 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED') AND invoice_date >= current_date - 730 GROUP BY 1`, [org])).rows
+    .filter(r => r.contact_name && accSameP(accPayeeKey(r.contact_name, ''), key)).sort((a, b) => b.n - a.n);
+  let v = null;
+  if (names.length) {
+    const nm = names[0].contact_name;
+    const j = await xeroFetch(org, '/api.xro/2.0/Invoices?page=1&order=' + encodeURIComponent('Date DESC') + '&where=' + encodeURIComponent('Type=="ACCPAY" AND Contact.Name=="' + String(nm).replace(/["\\]/g, '') + '" AND Status!="DELETED" AND Status!="VOIDED"'));
+    const inv = ((j && j.Invoices) || []).slice(0, 10), acc = new Map(), tax = new Map();
+    inv.forEach(i => (i.LineItems || []).forEach(l => { const w = Math.abs(Number(l.LineAmount) || 0) || 1; if (l.AccountCode) acc.set(l.AccountCode, (acc.get(l.AccountCode) || 0) + w); if (l.TaxType) tax.set(l.TaxType, (tax.get(l.TaxType) || 0) + w); }));
+    const top = mp => [...mp.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (inv.length) { const ta = top(acc), tt = top(tax);
+      const rc = org === 'uk' && tax.has('REVERSECHARGES');
+      v = { contact: nm, account_code: ta ? ta[0] : '', tax_type: rc ? 'REVERSECHARGES' : (tt ? tt[0] : ''), n: inv.length, source: 'bills' }; }
+  }
+  _accBillCod.set(mk, { at: Date.now(), v });
+  return v;
+}
+async function accPayeeCoding(org, key) {   // the payee's most used Xero contact, account and tax type over its reconciled Spend Money (last 400 days); else its Xero bills (v28.316)
   const rows = (await pool.query(`SELECT contact, account, tax, count(*)::int n FROM planner.accounts_recon_txns WHERE org=$1 AND kind='spend' AND recon AND txn_date >= current_date - 400 GROUP BY 1,2,3`, [org])).rows
     .filter(r => r.contact && accSameP(accPayeeKey(r.contact, ''), key));
-  if (!rows.length) return null;
-  const top = (f) => { const m = new Map(); rows.forEach(r => m.set(r[f], (m.get(r[f]) || 0) + r.n)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
+  if (!rows.length) { try { return await accBillCodingXero(org, key); } catch (e) { console.warn('[accounts] bill coding ' + key + ': ' + e.message); return null; } }
+  // v28.316: a multi-line spend stores its accounts / tax types space-joined ("INPUT EXEMPTEXPENSES"), which is not a Xero code: count each
+  // one. For tax, the standard GST / VAT type wins over a GST-free part (the v28.315 GST split adds the GST-free line from the receipt).
+  const top = (f) => { const m = new Map(); rows.forEach(r => (f === 'contact' ? [r[f]] : String(r[f] || '').split(/\s+/)).filter(Boolean).forEach(v => m.set(v, (m.get(v) || 0) + r.n)));
+    if (f === 'tax' && ACC_GST[org] && m.has(ACC_GST[org].std)) return ACC_GST[org].std;
+    const e = [...m.entries()].sort((a, b) => b[1] - a[1])[0]; return e ? e[0] : ''; };
   // v28.308 (Ben 13-Oct-26, from the accountants): "Web based services or SaaS products charged by foreign businesses to UK VAT registered
   // companies should always be coded to reverse charge VAT". When any of the payee's past UK transactions is Reverse Charge, keep using it,
   // even where older ones were coded otherwise before the accountants' adjustments.
   const rc = org === 'uk' && rows.some(r => /^REVERSECHARGES$/i.test(String(r.tax || '')));
-  return { contact: top('contact'), account_code: top('account'), tax_type: rc ? 'REVERSECHARGES' : top('tax'), n: rows.reduce((a, r) => a + r.n, 0) };
+  return { contact: top('contact'), account_code: top('account'), tax_type: rc ? 'REVERSECHARGES' : top('tax'), n: rows.reduce((a, r) => a + r.n, 0), source: 'spend' };
 }
 // v28.315 (Ben 13-Oct-26, Xero examples Wink Models 23-Sep-26 and Woolworths 28-Nov-25): GST check on every receipt bill, from the amounts
 // already read from the email / PDF (no labels needed). AU 10%: an amount equal to total / 11 = all GST (one line, as before). Otherwise an
@@ -4437,9 +4467,10 @@ async function accBillCandidates(rules, only) {
   const claimed = new Set();
   for (const r of rules) {
     const toks = r.payee_key.toLowerCase().split(' ').filter(t => t.length >= 3);
-    const coding = (r.account_code && r.tax_type && r.contact) ? null : await accPayeeCoding(r.org, r.payee_key);
-    const code = { contact: r.contact || (coding && coding.contact) || '', account_code: r.account_code || (coding && coding.account_code) || '', tax_type: r.tax_type || (coding && coding.tax_type) || '' };
     const mine = em.filter(e => only ? only.some(o => o.email_id === e.id && o.org === r.org && o.payee_key === r.payee_key) : (days(e.d, r.bill_from) >= -5 && toks.some(t => (e.from_addr + ' ' + e.subject).toLowerCase().includes(t))));
+    if (!mine.length) continue;   // v28.316: coding (which may read Xero bills) only for payees with a receipt to bill
+    const coding = (r.account_code && r.tax_type && r.contact) ? null : await accPayeeCoding(r.org, r.payee_key);
+    const code = { contact: r.contact || (coding && coding.contact) || '', account_code: r.account_code || (coding && coding.account_code) || '', tax_type: r.tax_type || (coding && coding.tax_type) || '', coding_source: (coding && coding.source) || (r.contact ? 'rule' : '') };
     for (const e of mine) {
       if (used.has(r.org + '|' + e.id) || claimed.has(e.id)) continue;
       const pairs = [...(e.amounts || []), ...(e.pdf_amounts || [])], amts = [...new Set(pairs.map(a => a[0]))];
@@ -4518,6 +4549,9 @@ async function accAutoBillRun(by, opts) {
   })().finally(() => { _accBillRun = null; });
   return _accBillRun;
 }
+// v28.316 (Ben 13-Oct-26): "be triggered when a bank statement is uploaded. if anything matches, create bill in xero". A successful statement
+// upload starts an Auto bill run in the background (kept alive with waitUntil); the run is single-flight and locked across instances.
+function accAutoBillAfterUpload() { try { hzWaitUntil(accAutoBillRun('statement upload').catch(e => console.warn('[autobill] after upload: ' + e.message))); } catch (_) {} }
 async function accAutoBillMaybe() {   // every 6 hours with the health checks, claimed across instances
   const r = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('acc_autobill_claim', now()::text, 'autobill', now()) ON CONFLICT (key) DO UPDATE SET value=now()::text, updated_at=now() WHERE planner.app_settings.updated_at < now() - interval '6 hours' RETURNING key`);
   if (!r.rowCount) return { skipped: true };

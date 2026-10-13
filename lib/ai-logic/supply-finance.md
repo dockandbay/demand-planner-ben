@@ -49,16 +49,16 @@ fingerprints:
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
   server.mjs::accountsGate: 075ab3085b07
   server.mjs::/api/accounts/payables: fdbef5a26279
-  server.mjs::accBillCandidates: 74c9a6b974f8
+  server.mjs::accBillCandidates: 960f5f2b064b
   server.mjs::accCreateBill: 668ed8dd514e
   server.mjs::accAutoBillRun: bec0282bea6a
   supply/inject.html::acRenderPayables: 6c5d671cece0
   supply/inject.html::accountsCan: c51271303351
-  supply/inject.html::acRenderConfig: 4f0417c6a3ba
+  supply/inject.html::acRenderConfig: ff44fe83f193
   supply/inject.html::acCfReload: 38efe35ae70b
   supply/inject.html::acInLinesHtml: c29e6b6eebb0
   supply/inject.html::acDrOpen: d2b68af1bd9f
-  supply/inject.html::acDrPaint: 2533a6de0d1e
+  supply/inject.html::acDrPaint: 618c55f6562d
   supply/inject.html::acRenderStmt: 24f541406c90
   supply/inject.html::acRenderAgeing: 12f7b1f017e1
   supply/inject.html::acComboWire: 27cf1762880e
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.315
+verified_version: v28.316
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -360,6 +360,8 @@ verified_version: v28.315
 - ACCOUNTS ▸ Rules (named Config until v28.279) has sub-tabs: Payee treatments, Auto bills, Receipt attachments, Built-in rules, Tax rules, Alerts and schedules; saving a change keeps the page as it is and reloads the data in the background (no Loading state). (source: supply/inject.html :: acRenderConfig, acCfReload)
 - Bills from receipts (v28.276, Ben 12-Oct-26: "1 process, we start to remove bank rules when the receipt can be added from accounts@"): HORIZON creates the Xero bill, status Awaiting payment (Ben: not Draft), dated the statement line (else the email), due the same day, reference '<payee> <account or invoice number from the subject> <date>', one tax-inclusive line coded with the payee's saved contact, account and tax type, else the most used ones on its reconciled Spend Money in the last 400 days; the contact is looked up by name and never created; the receipt PDF is attached. Auto bill payees are billed every 6 hours (and from Config ▸ Auto bills ▸ Run now after a preview), starting from the oldest open statement line of that payee when switched on (Ben: start from any unreconciled transactions). Bill (review) payees are billed from ticked Reconcile lines after a check and a confirm (admins and ACCOUNTS users). The amount is the statement line the receipt matches (same payee, exact amount, from 5 days before to 25 days after the email: Optus emails its bill about the 6th and debits about the 21st), else the only amount in the email (VAT or GST rates such as 20.00 ignored when another amount is present); several amounts and no line = wait for a person. A receipt is skipped when Xero already has it reconciled (same payee and amount in that window) or a bill for the same contact and amount within 5 days; a receipt in another currency waits for a person. One bill per email: the log row is written before the Xero call. Watchdog (Config ▸ Auto bills log): a bill not PAID after 10 days, or a Spend Money reconciled for the same payee and amount within 5 days (the old bank rule used: duplicate), is flagged; Voided marks a bill voided in Xero so the receipt is not billed again. Config lists Auto bill payees whose Xero bank rule must be deleted by hand (Xero's API cannot read or change bank rules), with Done. Payables tags these bills Auto bill (paid by card or direct debit, reconciled with Match). (source: server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun, accPayeeCoding, /api/accounts/bills/log)
 - GST check on receipt bills (v28.315, Ben 13-Oct-26, Xero examples Wink Models and Woolworths): from the amounts read from the email / PDF. AU: an amount equal to total / 11 = all GST, one line as before. Otherwise an amount G plus another amount equal to total - 11 x G = part GST-free (superannuation, GST-free groceries): two tax-exclusive lines on the payee's account, G x 10 at GST on Expenses (GST component) and the rest at GST Free Expenses (GST free component). Auto bill never creates a split bill (it waits for Review). UK: the all-VAT check (total / 6) only. Only applies when the payee's tax type is GST on Expenses / 20% VAT on Expenses. Review shows GST checked, the split, or GST not confirmed. (source: server.mjs :: accGstCheck)
+- Auto bills (v28.316, Ben 13-Oct-26): run every 6 hours (health checks), after every successful bank statement upload (background, single-flight) and from Run now, which is one click (no preview-then-confirm); Push bill to Xero in Reconcile Review is one click too. ACCOUNTS > Rules > Auto bills lists the payees on Auto bill, each with Remove (back to Bill (review)).
+- Coding suggestion (v28.316): the payee's most used contact, account and tax over its reconciled Spend Money; with none, its last Xero bills (contact = the most billed matching contact in the bill cache, then one read of its newest 10 bills with lines; most used account and tax by amount; memoised 6 h; skipped when the Xero daily allowance is low). Multi-line spends' joined codes are counted one by one and the standard GST / VAT type wins over a GST-free part. Payee treatments Edit pre-fills it ("Suggested from its last n Xero bills"); Review says where its coding came from. (source: server.mjs :: accPayeeCoding)
 - Receipts not reaching accounts@ (v28.272): HORIZON counts Spend Money on bank and card accounts per Xero contact per year from 2024 (bill payments excluded), and lists payees that repeat (3 or more in this year and last) whose treatment needs a receipt and whose receipt is usually not found in accounts@ (under half of the last 120 days). 3PLs and product suppliers are left out. Actioned = someone set up forwarding at the source; Ignore = no receipt needed: it also saves the payee as Ignore on the ACCOUNTS ignore list (Config, Reconcile), and Undo removes it again. Counts are rebuilt for the current year with the weekly learn job. (source: server.mjs :: accSpendHistory, /api/accounts/forwarding)
 - Banks, FX and transfer providers (Airwallex, Bank of America, TD Bank, Lloyds, World First and similar) default to Ignore: their lines are fees and transfers. (source: server.mjs :: accDefaultTreatment)
 - Reconcile (v28.248, step 1): one Gmail mailbox (accounts@) is connected by a user with ACCOUNTS access, read-only scope (gmail.readonly); HORIZON never sends, labels or deletes mail. The refresh token is stored sealed (AES-256-GCM) in planner.accounts_gmail. The tab shows the newest 25 emails for a Gmail search (default last 30 days) with their attachments, and flags Stripe emails without attachments (receipt link). Matching to unreconciled bank lines and bill creation are not built yet. (source: server.mjs :: /api/accounts/gmail/*; supply/inject.html :: acInRender)
