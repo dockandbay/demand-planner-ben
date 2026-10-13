@@ -12,7 +12,11 @@ function parseCsv(t) { const out = []; let row = [], f = '', q = false;
   if (f !== '' || row.length) { row.push(f); out.push(row); } return out; }
 const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const pad = n => String(n).padStart(2, '0'), s = v => { v = String(v == null ? '' : v).trim(); return v === '' ? null : v; };
-function period(v) { const m = /^([A-Za-z]{3})-(\d{2})$/.exec(String(v || '').trim()); return m && MON[m[1].toLowerCase()] ? '20' + m[2] + '-' + pad(MON[m[1].toLowerCase()]) + '-01' : null; }
+// Ben 13-Oct-26: CSV lines 7217-7251 are labelled "Dec-26" but are the December 2025 run (between Nov-25 and Jan-26, Dec-25 invoices) = Dec-25.
+// The label as written stays in raw.
+const LABEL_FIX = { 'Dec-26': 'Dec-25' };
+const fixLabel = v => { v = String(v || '').trim(); return LABEL_FIX[v] || v; };
+function period(v) { v = fixLabel(v); const m = /^([A-Za-z]{3})-(\d{2})$/.exec(String(v || '').trim()); return m && MON[m[1].toLowerCase()] ? '20' + m[2] + '-' + pad(MON[m[1].toLowerCase()]) + '-01' : null; }
 function ok(y, mo, d) { return mo >= 1 && mo <= 12 && d >= 1 && d <= new Date(Date.UTC(+y, mo, 0)).getUTCDate() ? y + '-' + pad(mo) + '-' + pad(d) : null; }
 function day(v, per) {   // every format seen in the sheet; per = the payment month (YYYY-MM-01) for dates written without a year
   v = String(v || '').trim().replace(/\s+/g, ' '); let m;
@@ -35,7 +39,7 @@ function status(v) { v = String(v || '').trim().toLowerCase(); if (!v) return nu
 (async () => {
   const rows = parseCsv(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); const head = rows.shift();
   const data = rows.filter(r => r.some(x => String(x).trim())).map(r => { const g = i => r[i] == null ? '' : r[i]; const raw = {}; head.forEach((h, i) => { if (String(g(i)).trim()) raw[h || ('col' + i)] = g(i); });
-    return [period(g(0)), s(g(0)), s(g(1)), s(g(2)), s(g(3)), s(g(4)), s(g(5)), s(g(6)), s(g(7)), day(g(8), period(g(0))), /€/.test(g(9) + g(11) + g(14)) ? 'EUR' : null, num(g(9)), rate(g(10)), num(g(11)), s(g(12)), status(g(13)), num(g(14)), s(g(15)), s(g(16)), s(g(17)), s(g(18)), s(g(21)), s(g(22)), s(g(23)), /^true$/i.test(String(g(24)).trim()) ? true : (/^false$/i.test(String(g(24)).trim()) ? false : null), 'sheet', JSON.stringify(raw)]; });
+    return [period(g(0)), s(fixLabel(g(0))), s(g(1)), s(g(2)), s(g(3)), s(g(4)), s(g(5)), s(g(6)), s(g(7)), day(g(8), period(g(0))), /€/.test(g(9) + g(11) + g(14)) ? 'EUR' : null, num(g(9)), rate(g(10)), num(g(11)), s(g(12)), status(g(13)), num(g(14)), s(g(15)), s(g(16)), s(g(17)), s(g(18)), s(g(21)), s(g(22)), s(g(23)), /^true$/i.test(String(g(24)).trim()) ? true : (/^false$/i.test(String(g(24)).trim()) ? false : null), 'sheet', JSON.stringify(raw)]; });
   const c = new Client({ connectionString: process.env[dbEnv], ssl: { rejectUnauthorized: false } }); await c.connect();
   try { const have = (await c.query(`SELECT count(*)::int n FROM planner.commission_paid_history WHERE source='sheet'`)).rows[0].n;
     if (have && !replace) { console.log('Already imported (' + have + ' sheet rows). Use --replace to reload.'); return; }
