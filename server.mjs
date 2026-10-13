@@ -23560,11 +23560,12 @@ app.post('/api/supply/sample-bills/create', async (req, res) => {
   const who = shortUser(authUser(req)) || null; const client = await pool.connect(); let billId;
   try { await client.query('BEGIN');
     billId = (await client.query(`INSERT INTO planner.sample_bills (ref_base, supplier_name, invoice_date, due_date, currency, fx_rate, source_file, sheet_total, total, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.ref_base, head.supplier, head.invoice_date || null, head.due_date || null, String(head.currency || 'USD').toUpperCase(), sbNum(head.fx_rate), head.source_file || null,
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.ref_base, head.supplier, head.invoice_date || null, head.due_date || new Date().toISOString().slice(0, 10), String(head.currency || 'USD').toUpperCase(), sbNum(head.fx_rate), head.source_file || null,
       sbNum(head.sheet_total), sbR2(lines.reduce((a, l) => a + l.amount, 0)), who])).rows[0].id;
     for (const d of docs) {
       const opId = (await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description, reference, date_due, country, xero_account_code, sample_bill_id, doc_system, doc_org)
-        VALUES (false,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.supplier, d.amount, sbDocDesc(d), d.reference, head.due_date || head.invoice_date || null, d.org.toUpperCase(),
+        VALUES (false,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.supplier, d.amount, sbDocDesc(d), d.reference, head.due_date || new Date().toISOString().slice(0, 10),   // v28.328 (Ben): due date defaults to today
+        d.org.toUpperCase(),
         d.system === 'xero' && new Set(d.lines.map(l => l.xero_account)).size === 1 ? d.lines[0].xero_account : null, billId, d.system, d.org])).rows[0].id;
       d.other_payment_id = opId;
       for (const l of d.lines) await client.query(`INSERT INTO planner.sample_bill_lines (bill_id, seq, ship_date, tracking, charge, description, ship_to, sample_type, requested_by, recipient, pcs, po, link_type, fulfil_po_id,
@@ -23597,7 +23598,7 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
   if (L0.link_type === 'xero') {
     const org = xeroRegion(L0.xero_org || 'uk');
     const body = { Type: 'ACCPAY', Date: (L0.invoice_date && String(L0.invoice_date instanceof Date ? L0.invoice_date.toISOString() : L0.invoice_date).slice(0, 10)) || new Date().toISOString().slice(0, 10),
-      DueDate: L0.due_date ? String(L0.due_date instanceof Date ? L0.due_date.toISOString() : L0.due_date).slice(0, 10) : undefined, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: 'NoTax',
+      DueDate: L0.due_date ? String(L0.due_date).slice(0, 10) : new Date().toISOString().slice(0, 10), InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'AUTHORISED', LineAmountTypes: 'NoTax',   // v28.328 (Ben): AUTHORISED, ready to pay
       LineItems: lines.map(l => ({ Description: [l.description, l.po ? 'PO ' + l.po : '', l.sample_ref ? 'Sample ' + l.sample_ref : ''].filter(Boolean).join(' · ').slice(0, 4000), Quantity: 1, UnitAmount: Number(l.amount) || 0, AccountCode: l.xero_account })) };
     if (opts.dry) return { dry: true, system: 'xero', org, contact_for: dep.supplier_name, body };
     const xc = await xeroContactFor(org, dep.supplier_name, { fresh: true }); if (!xc.ok) throw Object.assign(new Error(xc.error), { status: 400, code: 'XERO_CONTACT_MISSING' });

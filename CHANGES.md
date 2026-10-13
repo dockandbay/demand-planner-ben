@@ -1,3 +1,11 @@
+## v28.328 (Ben, branch review-fixes-2026-10-05): sample bills: Xero bills approved, due today
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+- Create sample bills (v28.327): Xero bills are now created **AUTHORISED** (approved, ready to pay through the Payments Report), not draft (Ben 13-Oct-26). Fulfil supplier invoices and landed costs stay DRAFT.
+- **Due date defaults to today** (Ben) when the file and the form give none: on the form, on the Other payment and on the Xero bill.
+- Tested (sandbox): created a test bill with no due date, so it was due 13-Oct-26; the dry-run Xero payload had Status AUTHORISED and DueDate 2026-10-13. Test row removed.
+
 ## v28.327 (Ben, branch review-fixes-2026-10-05): Create sample bills (Other payments)
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/365_sample_bills.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
