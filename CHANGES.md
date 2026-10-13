@@ -1,3 +1,13 @@
+## v28.315 (Ben, branch review-fixes-2026-10-05): GST split on receipt bills (superannuation / GST-free lines)
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "Sometimes model invoices have a line which is GST free for superannuation", with Rita's Xero codings of Wink Models (23-Sep-26: model fee, agency fee, travel at GST on Expenses + superannuation 496.80 at GST Free) and Woolworths (28-Nov-25: 164.70 GST + 85.25 GST free).
+- Every receipt bill now gets a GST check from the amounts HORIZON read from the email / PDF. AU: total / 11 present = all GST (one line, unchanged). Otherwise a GST amount G and a GST-free amount equal to total - 11 x G = two tax-exclusive lines on the payee's account: G x 10 at GST on Expenses "(GST component)" and the rest at GST Free Expenses "(GST free component)". Reproduces both of Rita's codings exactly (Wink 5,289.00 + 496.80; Woolworths 164.70 + 85.25); Mini Models INV-0248 checks as all GST (165.00).
+- Auto bill never creates a split bill: it is left for Review with the reason. Review in Reconcile shows "GST checked", the two-line split, or "GST not confirmed" (check the PDF).
+- Only when the payee's tax type is the standard one (GST on Expenses / 20% VAT on Expenses); reverse charge, zero rated, exempt and no VAT are untouched. UK: the all-VAT check only (no split).
+- ACCOUNTS > Rules > built-in rules text: the UK foreign-software rule now says Reverse Charge (v28.308), not the old Zero Rated rule.
+
 ## v28.314 (Ben, branch review-fixes-2026-10-05): slow first loads after an instance freeze (KV, Fulfil, background rebuilds)
 
 **Files:** `server.mjs` (+ package.json, CHANGES.md). No migration, no env vars.

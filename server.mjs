@@ -4140,9 +4140,9 @@ app.get('/api/accounts/config', async (req, res) => {
       matching: 'Receipt = an accounts@ email with the same amount, from 45 days before to 7 days after the bank line, with the payee in the sender or subject; without the payee only a short email (8 amounts or fewer) in the same currency within 5 days counts. 3PLs (Coghlans, ILG, I-Fulfilment, Geneva) are billed through 3PL invoicing.',
       tax: [
         { org: 'UK', rule: 'GBP expenses: 20% VAT on Expenses, or No VAT where no VAT is charged' },
-        { org: 'UK', rule: 'Non-GBP expenses (including foreign software): Zero Rated Expenses, never Reverse Charge (Ben 10-Oct-26)' },
+        { org: 'UK', rule: 'Foreign web services / SaaS: Reverse Charge, kept per contact (accountants via Ben 13-Oct-26, v28.308; replaces the 10-Oct-26 Zero Rated rule)' },
         { org: 'UK', rule: 'Bank fees: No VAT (Ben 10-Oct-26)' },
-        { org: 'AU', rule: 'Mixed GST invoices: two lines, "<description> (GST component)" = GST x 11 at GST on Expenses, and "<description> (GST free component)" = the rest at GST Free' }],
+        { org: 'AU', rule: 'Mixed GST invoices (applied from v28.315): when the receipt shows GST below total / 11 and a GST-free part (e.g. superannuation), two tax-exclusive lines on the payee\'s account: "(GST component)" = GST x 10 at GST on Expenses and "(GST free component)" = the rest at GST Free Expenses. Auto bill leaves these for review' }],
       alerts: { stale_days: ACC_STMT_MAX_DAYS, recipients: ACC_STMT_ALERT_TO, xero_day_alert: XERO_DAY_ALERT, coghlans_scan_hours: COG_SCAN_EVERY_MS / 3600000 },
       can_edit: !!(req.me && (req.me.is_admin || req.me.accounts_access || req.me.live === false)) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -4403,6 +4403,24 @@ async function accPayeeCoding(org, key) {   // the payee's most used Xero contac
   const rc = org === 'uk' && rows.some(r => /^REVERSECHARGES$/i.test(String(r.tax || '')));
   return { contact: top('contact'), account_code: top('account'), tax_type: rc ? 'REVERSECHARGES' : top('tax'), n: rows.reduce((a, r) => a + r.n, 0) };
 }
+// v28.315 (Ben 13-Oct-26, Xero examples Wink Models 23-Sep-26 and Woolworths 28-Nov-25): GST check on every receipt bill, from the amounts
+// already read from the email / PDF (no labels needed). AU 10%: an amount equal to total / 11 = all GST (one line, as before). Otherwise an
+// amount G with another amount equal to total - 11 x G = part GST-free (superannuation on model invoices, GST-free groceries): two lines,
+// tax exclusive, both on the payee's account: G x 10 at the payee's GST type and the rest at GST Free Expenses. Wink: G 528.90 -> 5,289.00 +
+// 496.80 super; Woolworths: G 16.47 -> 164.70 + 85.25, exactly as coded in Xero. UK 20%: the all-VAT check only (total / 6).
+// Only when the payee's tax type is the standard GST / VAT one; reverse charge, zero rated, exempt, no VAT are left as they are.
+const ACC_GST = { au: { rate: 0.10, std: 'INPUT', free: 'EXEMPTEXPENSES' }, uk: { rate: 0.20, std: 'INPUT2', free: null } };
+function accGstCheck(org, total, amts, taxType) {
+  const g = ACC_GST[org]; if (!g || String(taxType || '').toUpperCase() !== g.std) return { kind: 'skip' };
+  const T = Math.round(Number(total) * 100) / 100, div = 1 + 1 / g.rate, nums = [...new Set((amts || []).map(Number).filter(v => v > 0))];
+  const has = v => nums.some(a => Math.abs(a - v) <= 0.011);
+  if (has(T / div)) return { kind: 'full', gst: Math.round(T / div * 100) / 100 };
+  if (g.free) for (const a of nums.filter(a => a < T / div - 0.02).sort((x, y) => y - x)) {
+    const free = Math.round((T - a * div) * 100) / 100;
+    if (free > 0.009 && has(free)) return { kind: 'split', gst: a, taxable: Math.round(a / g.rate * 100) / 100, free, free_type: g.free };
+  }
+  return { kind: 'unknown' };
+}
 // Candidates. rules: [{org, payee_key, bill_from, contact, contact_id, account_code, tax_type}]; only (batch): [{org, payee_key, email_id}].
 async function accBillCandidates(rules, only) {
   const out = []; if (!rules.length) return out;
@@ -4441,6 +4459,11 @@ async function accBillCandidates(rules, only) {
       const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
       if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
       if (!c.contact || !c.account_code || !c.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
+      const gc = accGstCheck(r.org, c.amount, amts, c.tax_type); c.tax_check = gc.kind;   // v28.315
+      if (gc.kind === 'split') {
+        c.gst_split = { gst: gc.gst, taxable: gc.taxable, free: gc.free, free_type: gc.free_type };
+        if (!only) { c.reason = 'Part GST-free (GST ' + gc.gst.toFixed(2) + ', GST-free ' + gc.free.toFixed(2) + '): review it in Reconcile before it goes to Xero'; out.push(c); continue; }   // Auto bill never creates a split bill
+      }
       const ref = accEmailRef(e.subject);
       c.invoice_number = ((ov && String(ov.invoice_number || '').trim()) || (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date)).slice(0, 250);
       c.ok = true; claimed.add(e.id); if (line) usedLine.add(line.id); out.push(c);
@@ -4455,8 +4478,13 @@ async function accCreateBill(c, by, mode) {
     let cid = c.contact_id;
     if (!cid) { const k = await xeroContactLookup(c.org, c.contact); if (!k.ok) throw new Error(k.error.replace(/, or change the supplier's.*$/, '')); cid = k.ContactID;
       await pool.query(`UPDATE planner.accounts_payee_rules SET contact_id=$3, contact=coalesce(contact,$4) WHERE org=$1 AND payee_key=$2`, [c.org, c.payee_key, cid, c.contact]); }
-    const body = { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Inclusive',
-      LineItems: [{ Description: (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', Quantity: 1, UnitAmount: c.amount, AccountCode: c.account_code, TaxType: c.tax_type }] };
+    const _desc = (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', sp = c.gst_split;
+    // v28.315: part GST-free receipts go in as two tax-exclusive lines on the same account (GST component, GST-free component)
+    const body = sp ? { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Exclusive',
+        LineItems: [{ Description: _desc + ' (GST component)', Quantity: 1, UnitAmount: sp.taxable, AccountCode: c.account_code, TaxType: c.tax_type },
+          { Description: _desc + ' (GST free component)', Quantity: 1, UnitAmount: sp.free, AccountCode: c.account_code, TaxType: sp.free_type }] }
+      : { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Inclusive',
+        LineItems: [{ Description: _desc, Quantity: 1, UnitAmount: c.amount, AccountCode: c.account_code, TaxType: c.tax_type }] };
     const j = await xeroFetch(c.org, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
     const inv = (j && j.Invoices && j.Invoices[0]) || {}; if (!inv.InvoiceID) throw new Error('Xero returned no bill');
     let attErr = null;

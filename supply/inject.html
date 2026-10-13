@@ -19486,6 +19486,13 @@
         +fld('Tax (from Xero)','<select class="acdr-in" id="acdr-tax"'+dis+'>'+acTaxOpts(r.org,f.tax_type||'')+'</select>')
         +fld('Bill date and due date','<div style="padding:5px 0">'+esc(hzTrkDate((c&&c.date)||r.line_date))+'</div>')
         +fld('Amount (tax inclusive)','<div style="padding:5px 0;font-weight:700">'+esc(c&&c.amount!=null?acMoney(c.amount,c.currency):amt)+'</div>')+'</div>'
+        // v28.315: GST check from the receipt's amounts (all GST / part GST-free split into two lines / not confirmed)
+        +(function(){ if(!c||!c.tax_check||c.tax_check==='skip')return ''; var sp=c.gst_split, cur=c.currency;
+          if(c.tax_check==='full')return '<div class="tiny" style="margin:4px 0 8px;color:var(--pos)">✓ GST checked: the receipt shows the full GST on '+esc(acMoney(c.amount,cur))+'. One line.</div>';
+          if(c.tax_check==='split'&&sp)return '<div class="annot" style="margin:4px 0 8px"><b>Part GST-free</b> (GST '+esc(acMoney(sp.gst,cur))+' on the receipt). Goes to Xero as two tax-exclusive lines on the same account:'
+            +'<div style="margin-top:4px">'+esc(acMoney(sp.taxable,cur))+' at '+esc(AC_BD_TAX[(AC_DR.f&&AC_DR.f.tax_type)||c.tax_type]||c.tax_type)+' (GST component) + '+esc(acMoney(sp.free,cur))+' at GST Free (GST free component, e.g. superannuation)</div></div>';
+          if(c.tax_check==='unknown')return '<div class="annot" style="margin:4px 0 8px;border-color:var(--amber)">GST not confirmed from the receipt: check the PDF. If part of it is GST-free (superannuation, fresh food), create it by hand in Xero.</div>';
+          return ''; })()
         +(r.treatment==='autobill'?'<div class="tiny" style="margin-top:12px">'+esc(r.payee_key)+' is on Auto bill. <b>Push bill to Xero</b> creates this one now; the automatic run then skips it.</div>'
           :'<label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="acdr-auto"'+(AC_DR.auto?' checked':'')+'> Create a rule: Auto bill '+esc(r.payee_key)+' from now on (its receipts become bills automatically, with this coding)</label>')
         +(AC_DR.err?'<div class="count" style="color:var(--neg);margin-top:8px">'+esc(AC_DR.err)+'</div>':''); }
