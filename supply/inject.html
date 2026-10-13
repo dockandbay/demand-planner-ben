@@ -10207,8 +10207,12 @@
                 o.onmousedown=function(ev){ ev.preventDefault(); var id=o.dataset.id; var reg=(kind==='bank')?cfgBankSel(REG):cfgAcctSel(REG); var a=src.filter(function(x){return String(x.id)===String(id);})[0];
                   if(a){ reg[role]=(kind==='bank')?{account_id:a.id,code:a.code,name:a.name,currency:a.currency}:{id:a.id,code:a.code,name:a.name}; } else { delete reg[role]; }
                   list.hidden=true; save(function(){ draw(); }); }; }); }
-            input.onfocus=function(){ renderList(''); list.hidden=false; };
-            input.oninput=function(){ renderList(input.value); list.hidden=false; };
+            // v28.343 (Ben 14-Oct-26): the table wrapper scrolls (overflow:auto) and clipped the list below the last row, so it
+            // looked like nothing searched. The list now floats above the page (fixed, under the box).
+            function place(){ var r=input.getBoundingClientRect(); list.style.position='fixed'; list.style.left=r.left+'px'; list.style.top=(r.bottom+2)+'px'; list.style.width=Math.max(r.width,360)+'px'; list.style.zIndex='100004'; }
+            input.onfocus=function(){ renderList(''); place(); list.hidden=false; };
+            input.oninput=function(){ renderList(input.value); place(); list.hidden=false; };
+            window.addEventListener('scroll',function(){ if(!list.hidden)place(); },true);
             input.onkeydown=function(ev){ if(ev.key==='Escape'){ list.hidden=true; input.blur(); } };
             input.onblur=function(){ setTimeout(function(){ list.hidden=true; },160); };
           });

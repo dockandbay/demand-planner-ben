@@ -1,3 +1,7 @@
+## v28.343 (14-Oct-26) SUPPLY > CONFIG > Xero: account and bank pickers show their list
+- The search list under each account / bank box was cut off by the table (it scrolls), so typing 602 seemed to do nothing. The list now floats above the page under the box. Pick an account from it to save.
+- UI only. No migration, no env change.
+
 ## v28.342 (14-Oct-26) Messages point to SUPPLY > CONFIG > Xero
 - Payment run and Xero connection errors said "CONFIG > Payments", a menu that no longer exists. They now say SUPPLY > CONFIG > Xero (admin only), where the account mapping (Stock Deposits 602, Supplier Payments 602.1, loan 901) and bank registry live.
 - Text only. No migration, no env change.
