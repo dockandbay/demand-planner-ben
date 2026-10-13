@@ -23327,6 +23327,32 @@ app.post('/api/supply/charge/:id/unreject', async (req, res) => {   // put a rej
     if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `↺ Charge un-rejected (back to pending) — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
     res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.335 (Ben, spec 13-Oct-26): Accept + bill. A pending supplier charge (on a PO's shipment, or on a sample request) goes through the
+// same routing as Create sample bills: a PO in Fulfil -> Fulfil draft supplier invoice; a pre-Fulfil PO -> Xero 302 / 313; a sample -> Xero
+// by the sample's purpose (photography sample to AU -> Xero AU 1000.24). One Other payment per document, reference <source ref>-C<charge id>.
+// {push:true} also creates the Fulfil invoice / Xero bill straight away. The charge is then accepted and linked to the Other payment.
+app.post('/api/supply/charge/:id/bill', async (req, res) => {
+  try { const c = (await pool.query(`SELECT * FROM planner.supplier_charges WHERE id=$1::bigint`, [req.params.id])).rows[0];
+    if (!c) return res.status(404).json({ error: 'charge not found' }); if (c.status !== 'pending') return res.status(409).json({ error: 'charge is ' + c.status });
+    const fr = Number(c.freight_cost) || 0, pr = Number(c.product_cost) || 0; if (!(fr + pr > 0)) return res.status(400).json({ error: 'charge is zero' });
+    let po = '', shipTo = '', sampleRef = '', sampleType = '', pos = [];
+    if (c.source_type === 'shipment') { pos = (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1 ORDER BY (po=$1) DESC, po`, [c.source_ref])).rows;   // the charge's own PO first
+      if (pos[0]) { po = pos[0].po; shipTo = pos[0].cc; } }
+    else { const sr = (await pool.query(`SELECT ref, purpose, upper(coalesce(country,'')) country FROM planner.sample_requests WHERE ref=$1`, [c.source_ref])).rows[0] || {};
+      sampleRef = c.source_ref; sampleType = (Array.isArray(sr.purpose) ? sr.purpose.filter(Boolean)[0] : '') || ''; shipTo = sbCountry(sr.country); }
+    const note = (c.description ? c.description + ' · ' : '') + (c.source_type === 'shipment' ? 'shipment ' + c.source_ref + (pos.length > 1 ? ' (POs ' + pos.map(x => x.po).join(', ') + ')' : '') : 'sample ' + c.source_ref);
+    const raw = []; if (fr) raw.push({ charge: 'freight', amount: fr }); if (pr) raw.push({ charge: 'product', amount: pr });
+    const lines = await sbResolve(raw.map(r => ({ charge: r.charge, amount: r.amount, po, po_text: po, ship_to: shipTo, sample_ref: sampleRef, sample_type: sampleType, description: (r.charge === 'freight' ? 'Freight' : 'Product') + ': ' + note })));
+    const bad = lines.filter(l => !l.link_type || (l.link_type === 'xero' && !l.xero_account));
+    if (bad.length) return res.status(400).json({ error: 'Cannot route this charge: ' + bad.map(l => (l.checks || []).map(x => x.text).join('; ')).join(' | ') + '. Use Create sample bills to pick the account by hand.' });
+    const supplier = String(c.supplier_name || '').split(',')[0].trim();
+    const out = await sbCreate({ head: { supplier, ref_base: String(c.source_ref).toUpperCase() + '-C' + c.id, invoice_date: new Date().toISOString().slice(0, 10), currency: 'USD', source_file: 'supplier charge ' + c.id }, lines, push: !!(req.body && req.body.push) }, shortUser(authUser(req)) || null);
+    const opId = out.created[0] && out.created[0].other_payment_id;
+    await pool.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [opId || null, c.id]);
+    try { await chargeTimelineNote(pool, c.source_type, c.source_ref, `✅ Charge accepted and billed → ${out.created.map(d => d.reference + ' (' + (d.system === 'fulfil' ? 'Fulfil invoice' : 'Xero ' + String(d.org).toUpperCase() + ' bill') + ')').join(', ')} (${chargeLbl(c.freight_cost, c.product_cost, c.description)})`, shortUser(authUser(req)) || null); } catch (_) {}
+    invalidateSupplyCaches('deposit'); res.json(Object.assign({ charge_id: c.id }, out));
+  } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
 app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → Other Payment (deposits, is_deposit=false)
   const client = await pool.connect();
   try { await client.query('BEGIN');
@@ -23549,15 +23575,16 @@ app.get('/api/supply/sample-bills/sample-search', async (req, res) => {   // SR-
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create: one Other payment per document (same reference); optionally push each document straight away.
-app.post('/api/supply/sample-bills/create', async (req, res) => {
-  const b = req.body || {}, head = Object.assign({}, b.head || {}), lines0 = Array.isArray(b.lines) ? b.lines.slice(0, 300) : [];
+// v28.335: the create step is shared by Create sample bills and by billing a supplier charge (PO shipment / sample request).
+async function sbCreate(b, who) {
+  const head = Object.assign({}, b.head || {}), lines0 = Array.isArray(b.lines) ? b.lines.slice(0, 300) : [];
   head.ref_base = String(head.ref_base || '').trim().replace(/\s+/g, '-'); head.supplier = String(head.supplier || '').trim();
   const lines = lines0.map((l, i) => Object.assign({}, l, { seq: i + 1, amount: sbR2(l.amount), description: String(l.description || '').trim() || sbDescribe(l) }));
-  const problems = sbValidate(head, lines); if (problems.length) return res.status(400).json({ error: problems.join(' '), problems });
+  const problems = sbValidate(head, lines); if (problems.length) throw Object.assign(new Error(problems.join(' ')), { status: 400, problems });
   const docs = sbGroup(lines, head.ref_base);
   const clash = (await pool.query(`SELECT reference FROM planner.deposits WHERE upper(reference) = ANY($1::text[])`, [docs.map(d => d.reference.toUpperCase())])).rows;
-  if (clash.length) return res.status(409).json({ error: 'Reference already used in Other payments / deposits: ' + clash.map(r => r.reference).join(', ') + '. Change the supplier invoice number.' });
-  const who = shortUser(authUser(req)) || null; const client = await pool.connect(); let billId;
+  if (clash.length) throw Object.assign(new Error('Reference already used in Other payments / deposits: ' + clash.map(r => r.reference).join(', ') + '. Change the supplier invoice number.'), { status: 409 });
+  const client = await pool.connect(); let billId;
   try { await client.query('BEGIN');
     billId = (await client.query(`INSERT INTO planner.sample_bills (ref_base, supplier_name, invoice_date, due_date, currency, fx_rate, source_file, sheet_total, total, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.ref_base, head.supplier, head.invoice_date || null, head.due_date || new Date().toISOString().slice(0, 10), String(head.currency || 'USD').toUpperCase(), sbNum(head.fx_rate), head.source_file || null,
@@ -23576,12 +23603,16 @@ app.post('/api/supply/sample-bills/create', async (req, res) => {
          l.link_type === 'xero' ? String(l.xero_account) : null, l.sample_ref || null, sbNum(l.amount_src), l.amount, d.key, opId]);
     }
     await client.query('COMMIT');
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); client.release(); log500(e); return res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); client.release(); throw e; }
   client.release();
   invalidateSupplyCaches('deposit');
   const created = docs.map(d => ({ other_payment_id: d.other_payment_id, reference: d.reference, system: d.system, org: d.org, amount: d.amount, desc: sbDocDesc(d) }));
   if (b.push) { for (const c of created) { try { Object.assign(c, await sbPushDoc(c.other_payment_id, { who })); } catch (e) { c.push_error = e.message; } } }
-  res.json({ ok: true, sample_bill_id: billId, created });
+  return { ok: true, sample_bill_id: billId, created };
+}
+app.post('/api/supply/sample-bills/create', async (req, res) => {
+  try { res.json(await sbCreate(req.body || {}, shortUser(authUser(req)) || null)); }
+  catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message, problems: e.problems }); }
 });
 async function sbDocLines(opId) { return (await pool.query(`SELECT l.*, b.supplier_name, to_char(b.invoice_date,'YYYY-MM-DD') invoice_date, to_char(b.due_date,'YYYY-MM-DD') due_date, b.currency, b.ref_base FROM planner.sample_bill_lines l JOIN planner.sample_bills b ON b.id=l.bill_id WHERE l.other_payment_id=$1 ORDER BY l.seq`, [opId])).rows; }
 function sbFulfilInvoiceUrl(cfg, id) { return cfg && cfg.subdomain && id ? 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/account.invoice/' + id : null; }

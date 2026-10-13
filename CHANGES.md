@@ -1,3 +1,18 @@
+## v28.335 (Ben, branch review-fixes-2026-10-05): supplier charges billed (PO shipments + samples), charges on the PO
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+Open items 6 and 7 (spec SPEC_SAMPLE_AND_PO_CHARGES_TO_FULFIL_XERO_2026-10-13):
+- **Accept + bill** on every pending supplier charge, next to Accept → Other Payments only and Reject. It uses the same routing as Create sample bills:
+  - **PO / shipment charge:** the charge's own PO first. A PO in Fulfil gets a Fulfil draft supplier invoice; otherwise a Xero bill (302 freight, 1000.52 product), org by the PO's country.
+  - **Sample request charge:** Xero by the sample's purpose (photography sample to AU goes to Xero AU 1000.24).
+  - Freight and product are separate lines; one Other payment per document, reference `<PO or SR>-C<charge id>`.
+  - The document is created straight away. The charge is accepted and linked, and a timeline note records the references.
+- **Charges on the PO:** PO ▸ PLAN ▸ SHIPMENTS now shows the shipment's charges (supplier portal or admin), with the same actions and "Create charge". Before, they only showed on the shipment.
+- **Internal:** the create step of Create sample bills is now a shared function (`sbCreate`).
+- **Tested (sandbox, no push):** PO-57AUBL1's charge (5,000 freight) gave reference PO-57AUBL1-C32 on a Xero AU bill, 302 (that PO is not in Fulfil). The SR-6 charge (100 freight + 50 product) gave SR-6-C12 on a Xero UK bill, 1000.44 (purpose marketing). Both test charges were reset to pending afterwards.
+- **Fixed during the test:** the charge's own PO now wins over the first PO on its shipment.
+
 ## v28.334 (Ben, branch review-fixes-2026-10-05): Faire month-end decision, commission written to Fulfil, commission dates
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
