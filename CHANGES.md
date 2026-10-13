@@ -1,3 +1,14 @@
+## v28.329 (Ben, branch review-fixes-2026-10-05): sample bills: references in the current style, landed cost after posting
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+- **Reference style (Ben):** a file with no invoice number now gets PO-<carrier>-<supplier code>-<yyyy-mm>, like the existing Other payments (PO-FEDEX-XR-2026-02, PO-DHL-LX-2026-08); -A / -B / -C when there are several documents.
+- **Red lines don't block (Ben):** a flagged line (unknown PO) can still be created; no change.
+- **Landed cost moved to after posting:** Fulfil only accepts POSTED supplier-invoice lines of a landed-cost product on a landed cost (domain checked on live: invoice.state posted/paid, product.landed_cost). The push now creates the DRAFT invoice only. Once the team posts it in Fulfil, **Create landed cost** on the Other payment makes the DRAFT landed cost (by value, all moves of the Fulfil PO's supplier shipments). It is refused while the invoice is draft or the PO has no shipment. POST /api/supply/sample-bills/landed-cost/:id (`{dry:true}` = payload only).
+- **Line account checked before sending:** FULFIL_LANDED_ACCOUNT (default 9039 Inventory Landed Cost Accruals, on live for both companies). A missing account now fails before anything is sent. The Fulfil sandbox has no 9039: run the local server with FULFIL_LANDED_ACCOUNT=9007 to test there. Live: nothing to set.
+- **Push warnings** (e.g. "post it, then create the landed cost") show under the document link in amber.
+- **Tested on the Fulfil sandbox (Ben approved one push, 13-Oct-26):** created draft supplier invoice TEST-SB-FULFIL-1, Fulfil id 56379 (type in, UK company, party Lixin, USD 12.34, header 9001, one LANDED-FREIGHT line, PO-55EULX-AW26-1). The first attempt was rejected by Fulfil, with nothing created, because the sandbox lacks 9039, hence the check above. Create landed cost on it answers "The Fulfil invoice is draft: post it in Fulfil first". Not tested: a landed cost (the sandbox LANDED-FREIGHT is not flagged as a landed cost) and a real Xero push.
+
 ## v28.328 (Ben, branch review-fixes-2026-10-05): sample bills: Xero bills approved, due today
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)

@@ -10937,7 +10937,7 @@
       +'<input type="file" id="sb-file" accept=".xlsx" style="display:none">'+(SB.msg?'<div class="tiny" style="margin-top:4px;color:'+(/fail|could not|upload the/i.test(SB.msg)?'var(--neg)':'#4c1d95')+'">'+esc(SB.msg)+(H.sheet_total!=null&&!SB.busy?' · sheet total '+H.currency+' '+sbMoney(st)+(ties?' ✓ matches the lines':' ✗ lines add to '+sbMoney(total)):'')+'</div>':'')+'</label>';
     var grid='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px 12px;margin-bottom:12px">'
       +fld('Supplier',inp('supplier','text',' list="sb-sups"')+supOpts,H.supplier_text&&!H.supplier_found?'file says "'+esc(H.supplier_text)+'": pick the supplier':'')
-      +fld('Supplier invoice no.',inp('ref_base'),H.ref_built?'no number in the file: supplier + carrier + month':'')
+      +fld('Supplier invoice no.',inp('ref_base'),H.ref_built?'no number in the file: PO-carrier-supplier-month':'')
       +fld('Invoice date',dateField(H.invoice_date,{attrs:'data-k="invoice_date"',cls:'sb-h',width:'100%'}))+fld('Due date',dateField(H.due_date,{attrs:'data-k="due_date"',cls:'sb-h',width:'100%'}))
       +fld('Currency','<select class="fci sb-h" data-k="currency" style="width:100%">'+['USD','GBP','EUR','AUD','CAD','CNY'].map(function(c){return '<option'+(H.currency===c?' selected':'')+'>'+c+'</option>';}).join('')+'</select>','no tax · supplier currency')
       +(H.fx_rate?fld('Source rate (CNY per USD)','<div style="padding:4px 0">'+esc(H.fx_rate)+'</div>','USD = CNY ÷ rate'):'')+'</div>';
@@ -11021,7 +11021,7 @@
         var act = paid ? '' : '<button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:var(--neg)">delete</button>';
         return '<tr>'+cells+'<td class="l">'+othDoc(d)+'</td><td class="l">'+badge+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
       // v28.327: the sample bill's document. Pushed = link to the Fulfil supplier invoice / Xero bill; not yet = a push button.
-      function othDoc(d){ if(d.doc_url)return sbDocCell(d); if(!d.sample_bill_id||!d.doc_system)return '';
+      function othDoc(d){ if(d.doc_url)return sbDocCell(d)+(d.doc_system==='fulfil'&&!d.doc_landed_cost_id?' <button class="save-btn light oth-lc" data-id="'+d.id+'" style="padding:1px 7px;font-size:11px" title="after the invoice is posted in Fulfil: landed cost by value over the PO\'s supplier shipments (draft)">Create landed cost</button>':'')+(d.doc_error?'<div class="tiny" style="color:#b45309;max-width:280px">'+esc(d.doc_error)+'</div>':''); if(!d.sample_bill_id||!d.doc_system)return '';
         return '<button class="save-btn light oth-push" data-id="'+d.id+'" style="padding:2px 8px;font-size:11px'+(d.doc_system==='xero'?';background:#13B5EA;border-color:#13B5EA;color:#fff':'')+'">Push '+(d.doc_system==='xero'?'Xero '+String(d.doc_org||'uk').toUpperCase()+' bill':'Fulfil invoice')+'</button>'+(d.doc_error?'<div class="tiny" style="color:var(--neg);max-width:260px">'+esc(d.doc_error)+'</div>':''); }
       // mobile: same inline-editable fields, stacked into a card (bindings attach by class as on the table)
       function otherCard(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id); var paid=!!d.date_paid, stt=statusOf(d);
@@ -11055,6 +11055,10 @@
         document.querySelectorAll('#oth-wrap .oth-del').forEach(function(btn){btn.onclick=function(){ if(!confirm('Delete other payment "'+btn.dataset.ref+'"? This cannot be undone.'))return;
           shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };});
         var sbb=document.getElementById('oth-sb'); if(sbb)sbb.onclick=function(){ sbOpen(function(){ renderOtherPayments(b); }); };
+        document.querySelectorAll('#oth-wrap .oth-lc').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true; btn.textContent='Creating…';
+          fetch('/api/supply/sample-bills/landed-cost/'+btn.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){
+            if(j&&j.error){ btn.disabled=false; btn.textContent='Create landed cost'; var m=document.createElement('div'); m.className='tiny'; m.style.color='var(--neg)'; m.textContent=j.error; btn.parentNode.appendChild(m); return; }
+            renderOtherPayments(b); }).catch(function(e){ btn.disabled=false; btn.textContent='Create landed cost'; alert('Failed: '+(e.message||e)); }); }; });
         document.querySelectorAll('#oth-wrap .oth-push').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true; btn.textContent='Pushing…';
           fetch('/api/supply/sample-bills/push/'+btn.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){
             if(j&&j.error){ btn.disabled=false; btn.textContent='Retry push'; var m=document.createElement('div'); m.className='tiny'; m.style.color='var(--neg)'; m.textContent=j.error; btn.parentNode.appendChild(m); return; }

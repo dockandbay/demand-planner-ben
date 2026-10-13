@@ -11349,7 +11349,7 @@ supplySectionHandler = async (req, res, next) => {
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
             d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status,
-            to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365) to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+            to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id, to_jsonb(d)->>'doc_landed_cost_id' doc_landed_cost_id,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365) to_char(d.date_paid,'YYYY-MM-DD') date_paid,
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
             -- BLANK deposit (no entered amount, real row, not NO DEPOSIT) → its amount/remaining are the estimated total.
@@ -23515,7 +23515,7 @@ app.post('/api/supply/sample-bills/parse', async (req, res) => {
     const carrier = (String(b.filename || '').toUpperCase().match(/\b(FEDEX|DHL|UPS|TNT|SF ?EXPRESS|EMS|ARAMEX)\b/) || [])[1];
     const ym = (String(b.filename || '').match(/(20\d{2})[-_ ](\d{2})/) || []); const month = ym[1] ? ym[1] + '-' + ym[2] : (p.head.invoice_date || '').slice(0, 7);
     const code = sup ? (sup.code || sup.name.split(/\s+/)[0]).toUpperCase() : String(p.head.supplier || 'SUPPLIER').split(/\s+/)[0].toUpperCase();
-    const refBase = p.head.invoice_no || [code, carrier ? carrier.replace(/\s+/g, '') : 'SAMPLES', month].filter(Boolean).join('-');
+    const refBase = p.head.invoice_no || ['PO', carrier ? carrier.replace(/\s+/g, '') : 'SAMPLES', code, month].filter(Boolean).join('-');   // v28.329 (Ben): same style as existing Other payments, e.g. PO-DHL-LX-2026-08
     const lines = await sbResolve(p.lines);
     const total = sbR2(lines.reduce((a, l) => a + Number(l.amount || 0), 0));
     res.json({ ok: true, head: { supplier: sup ? sup.name : (p.head.supplier || ''), supplier_text: p.head.supplier || '', supplier_found: !!sup, ref_base: refBase, ref_built: !p.head.invoice_no,
@@ -23619,13 +23619,15 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
   const codes = Array.from(new Set(lines.map(l => l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to))));
   const prods = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', codes]], 0, codes.length + 5, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
   const pBy = {}; (prods || []).forEach(p => { pBy[p.code] = p; }); const miss = codes.filter(c => !pBy[c]); if (miss.length) throw Object.assign(new Error('Fulfil product missing: ' + miss.join(', ') + '. Nothing was pushed.'), { status: 400 });
-  const accs = await fulfilFetch('PUT', '/model/account.account/search_read', [[['code', 'in', ['9001', '9039']], ['company', '=', company]], 0, 10, null, ['id', 'code']]);
+  const LC_ACC = String(process.env.FULFIL_LANDED_ACCOUNT || '9039').trim();   // line account: 9039 Inventory Landed Cost Accruals on live (env override for a tenant without it, e.g. the Fulfil sandbox)
+  const accs = await fulfilFetch('PUT', '/model/account.account/search_read', [[['code', 'in', ['9001', LC_ACC]], ['company', '=', company]], 0, 10, null, ['id', 'code']]);
   const aBy = {}; (accs || []).forEach(a => { aBy[a.code] = a.id; }); if (!aBy['9001']) throw Object.assign(new Error('Fulfil account 9001 Fulfil - Payable not found for company ' + company + '. Nothing was pushed.'), { status: 400 });
+  if (!aBy[LC_ACC]) throw Object.assign(new Error('Fulfil account ' + LC_ACC + ' (landed cost accruals) not found for company ' + company + ' in Fulfil ' + cfg.env + '. Nothing was pushed.'), { status: 400 });
   const currency = await fulfilResolveCurrency(cur);
   const payload = { type: 'in', company, party: partyId, currency, account: aBy['9001'], reference: ref, description: lines.map(l => l.po).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') + ' · sample bill ' + ref,
     invoice_date: L0.invoice_date ? String(L0.invoice_date instanceof Date ? L0.invoice_date.toISOString() : L0.invoice_date).slice(0, 10) : null,
     lines: [['create', lines.map(l => { const p = pBy[l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to)]; return { type: 'line', product: p.id, unit: p.purchase_uom || p.default_uom, quantity: 1,
-      unit_price: String(Math.round(Number(l.amount) * 10000) / 10000), description: [l.description, l.po ? 'PO ' + l.po : ''].filter(Boolean).join(' · '), ...(aBy['9039'] ? { account: aBy['9039'] } : {}) }; })]] };
+      unit_price: String(Math.round(Number(l.amount) * 10000) / 10000), description: [l.description, l.po ? 'PO ' + l.po : ''].filter(Boolean).join(' · '), account: aBy[LC_ACC] }; })]] };
   if (opts.dry) return { dry: true, system: 'fulfil', env: cfg.env, fulfil_po_id: fpo, payload };
   if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw Object.assign(new Error('LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing was pushed.'), { status: 423 });
   const ex = await fulfilFetch('PUT', '/model/account.invoice/search_read', [[['type', '=', 'in'], ['reference', '=', ref], ['company', '=', company], ['state', '!=', 'cancel']], 0, 1, null, ['id', 'number', 'state']]);
@@ -23634,17 +23636,40 @@ async function sbPushDoc(opId, opts) { opts = opts || {};
   const made = await fulfilFetch('POST', '/model/account.invoice', [payload]);
   const invId = Array.isArray(made) ? (made[0] && (typeof made[0] === 'object' ? made[0].id : made[0])) : (made && made.id);
   if (!invId) throw new Error('Fulfil did not return the invoice id');
-  // landed cost (draft), by value, over the Fulfil PO's supplier shipments
-  let lcId = null, warning = null;
-  try { const po = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fpo]], 0, 1, null, ['id', 'shipments']]);
-    const ships = (Array.isArray(po) && po[0] && po[0].shipments) || [];
-    const il = await fulfilFetch('PUT', '/model/account.invoice.line/search_read', [[['invoice', '=', invId], ['type', '=', 'line']], 0, 200, null, ['id']]);
-    if (!ships.length) warning = 'Invoice created; no supplier shipment on the Fulfil PO yet, so no landed cost: allocate it in Fulfil once the shipment exists.';
-    else { const lc = await fulfilFetch('POST', '/model/account.landed_cost', [{ company, allocation_method: 'value', moves_selection_method: 'all', invoice_lines: [['add', (il || []).map(x => x.id)]], shipments: [['add', ships]] }]);
-      lcId = Array.isArray(lc) ? (lc[0] && (typeof lc[0] === 'object' ? lc[0].id : lc[0])) : (lc && lc.id); }
-  } catch (e) { warning = 'Invoice created; landed cost NOT created (' + e.message + '): allocate it in Fulfil.'; }
+  // Landed cost: Fulfil only accepts a POSTED supplier invoice's landed-cost lines, so it can't be made with the draft. Once the team posts
+  // the invoice in Fulfil, "Create landed cost" on the Other payment makes it (sbLandedCost). v28.329.
+  const lcId = null, warning = 'Draft invoice created. Post it in Fulfil, then use Create landed cost on the Other payment.';
   return save({ system: 'fulfil', doc_id: invId, doc_number: ref, doc_url: sbFulfilInvoiceUrl(cfg, invId), doc_status: 'draft · ' + (company === FULFIL_COMPANY_AU ? 'AU' : 'UK') + ' co.' + (cfg.env !== 'live' ? ' · ' + cfg.env : ''), landed_cost_id: lcId, warning });
 }
+// v28.329: landed cost for a pushed Fulfil sample bill, once the invoice is POSTED (Fulfil's rule: landed cost lines = posted supplier
+// invoice lines of a landed-cost product). Draft landed cost, allocation by value, all moves of the Fulfil PO's supplier shipments.
+async function sbLandedCost(opId, opts) { opts = opts || {};
+  const dep = (await pool.query(`SELECT id, reference, to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'doc_landed_cost_id' lc FROM planner.deposits d WHERE id=$1`, [opId])).rows[0];
+  if (!dep || dep.doc_system !== 'fulfil' || !/^\d+$/.test(String(dep.doc_id || ''))) throw Object.assign(new Error('No Fulfil supplier invoice on this Other payment yet: push it first.'), { status: 400 });
+  if (dep.lc) return { already: true, landed_cost_id: dep.lc };
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw Object.assign(new Error('LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing was created.'), { status: 423 });
+  const invId = Number(dep.doc_id), L0 = (await sbDocLines(opId))[0] || {};
+  const inv = await fulfilFetch('PUT', '/model/account.invoice/search_read', [[['id', '=', invId]], 0, 1, null, ['id', 'state', 'company']]);
+  const st = Array.isArray(inv) && inv[0] ? inv[0].state : null; if (!st) throw Object.assign(new Error('Fulfil invoice ' + invId + ' not found.'), { status: 404 });
+  if (!['posted', 'paid'].includes(st)) throw Object.assign(new Error('The Fulfil invoice is ' + st + ': post it in Fulfil first, then create the landed cost.'), { status: 409 });
+  const il = await fulfilFetch('PUT', '/model/account.invoice.line/search_read', [[['invoice', '=', invId], ['type', '=', 'line'], ['product.landed_cost', '=', true]], 0, 200, null, ['id']]);
+  if (!Array.isArray(il) || !il.length) throw Object.assign(new Error('No landed-cost product lines on the Fulfil invoice (LANDED-SUPPLIER is not a landed cost).'), { status: 400 });
+  const po = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', Number(L0.fulfil_po_id)]], 0, 1, null, ['id', 'shipments']]);
+  const ships = (Array.isArray(po) && po[0] && po[0].shipments) || [];
+  if (!ships.length) throw Object.assign(new Error('The Fulfil PO has no supplier shipment yet: create the landed cost once it has one.'), { status: 409 });
+  const body = { company: inv[0].company, allocation_method: 'value', moves_selection_method: 'all', invoice_lines: [['add', il.map(x => x.id)]], shipments: [['add', ships]] };
+  if (opts.dry) return { dry: true, body };
+  const lc = await fulfilFetch('POST', '/model/account.landed_cost', [body]);
+  const lcId = Array.isArray(lc) ? (lc[0] && (typeof lc[0] === 'object' ? lc[0].id : lc[0])) : (lc && lc.id);
+  await pool.query(`UPDATE planner.deposits SET doc_landed_cost_id=$2, doc_status=$3, doc_error=NULL, updated_at=now() WHERE id=$1`, [opId, String(lcId), st + ' · landed cost ' + lcId + ' (draft, by value)']);
+  invalidateSupplyCaches('deposit');
+  return { ok: true, landed_cost_id: lcId, landed_cost_url: cfg.subdomain ? 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/account.landed_cost/' + lcId : null };
+}
+app.post('/api/supply/sample-bills/landed-cost/:id', async (req, res) => {
+  try { res.json(Object.assign({ ok: true }, await sbLandedCost(Number(req.params.id), { dry: !!(req.body && req.body.dry) }))); }
+  catch (e) { if (!e.status || e.status >= 500) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
 app.post('/api/supply/sample-bills/push/:id', async (req, res) => {
   try { const r = await sbPushDoc(Number(req.params.id), { dry: !!(req.body && req.body.dry), who: shortUser(authUser(req)) || null }); res.json(Object.assign({ ok: true }, r)); }
   catch (e) { if (!e.status || e.status >= 500) log500(e);
