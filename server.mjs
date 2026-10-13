@@ -4046,17 +4046,24 @@ if (!process.env.VERCEL && process.env.HZ_ACCOUNTS_CRON === '1') {
 // planner.accounts_payee_rules, mig 354): bill (supplier invoice with terms), spend (card / direct-debit spend: Spend Money with the receipt),
 // rule (a Xero bank rule codes it, no receipt needed; Google Ads by default, Ben), ignore (transfers, loans, tax, money in). HORIZON pre-fills
 // the treatment; a person's choice wins. Nothing is written to Xero in this step.
-const ACC_PK_STOP = new Set(['DEBIT','CREDIT','DEPOSIT','POSDEBIT','POSCREDIT','FPI','FPO','DD','BGC','PAY','TFR','DEB','CR','DR','SO','CHQ','BP','PAYMENT','THANK','YOU','DES','ID','INDN','CO','LTD','LIMITED','PLC','INC','THE','UK','GB','CC','COM','WWW','GO','CARD','TRANSACTION','PENDING','REFERENCE']);
+const ACC_PK_STOP = new Set(['DEBIT','CREDIT','DEPOSIT','POSDEBIT','POSCREDIT','FPI','FPO','DD','BGC','PAY','TFR','DEB','CR','DR','SO','CHQ','BP','PAYMENT','THANK','YOU','DES','ID','INDN','CO','LTD','LIMITED','PLC','INC','THE','UK','GB','CC','COM','WWW','GO','CARD','TRANSACTION','PENDING','REFERENCE',
+  // v28.324 (Ben 13-Oct-26 matching deep dive): AU bank wording before the payee ("PAYBILL PAYMENT | ANZ INTERNET BANKING BPAY ASIC" gave PAYBILL)
+  'PAYBILL','BPAY','VISA','PURCHASE','INTERNET','BANKING','EFTPOS']);
 const ACC_PK_PREFIX = new Set(['SQ','SP','PP','MR','MRS','MS','ZPS','ACH','NEW','WITH','TEAM','ORDER','WIRE','INVOICE']);
 function accPayeeKey(ref, desc) {
   const s = String((desc && String(desc).length > 2 ? desc : '') || ref || '').toUpperCase();
   let parts = s.split('|').map(x => x.trim()).filter(Boolean);
   while (parts.length > 1 && (/^[A-Z]{2,8}$/.test(parts[0]) || /^[A-Z]{0,4}\d{6,}$/.test(parts[0]))) parts = parts.slice(1);   // v28.274: a leading type code (DEBIT, FPO) or transaction id (AU Amex "AT2624...") is not the payee
-  const body = parts.join(' ').replace(/\(\d{3,}\)/g, ' ');   // and drop a card suffix like "(1008)"
+  const body = parts.join(' ').replace(/\(\d{3,}\)/g, ' ').replace(/\bANZ INTERNET BANKING (BPAY|PAYMENT)\b/g, ' ');   // and drop a card suffix like "(1008)"; v28.324: and the ANZ BPAY / payment wording before the payee (ANZ transfers keep their ANZ key)
   const w = body.split(/[^A-Z]+/).filter(t => t.length >= 2 && !ACC_PK_STOP.has(t));
   if (!w.length) return '(blank)';
   return (ACC_PK_PREFIX.has(w[0]) || w[0].length <= 2) && w[1] ? w[0] + ' ' + w[1] : w[0];
 }
+// v28.324: does an email's sender / subject name the payee? Plain "contains" missed FASTCOURIER vs "Fast Courier" (spacing) and FONZIRELLIS vs
+// "Fonzirelli Pizza" (plural / suffix). Also true when the text without spaces contains the key word, or a word of the text (5+ letters) is the
+// start of the key word and covers most of it.
+function accNameHit(toks, hay) { hay = String(hay || '').toLowerCase(); const flat = hay.replace(/[^a-z0-9]/g, ''), words = hay.split(/[^a-z0-9]+/).filter(w => w.length >= 5);
+  return toks.some(t => hay.includes(t) || flat.includes(t) || words.some(w => t.startsWith(w) && w.length >= t.length - 2)); }
 const accSameP = (ck, rk) => ck === rk || (rk.length >= 4 && ck.length >= 4 && (ck.startsWith(rk) || rk.startsWith(ck)));
 // v28.319 (Ben 13-Oct-26: "longer keys if needed will help"): a payee key shared by DIFFERENT Xero contacts of the same org (MINI = Mini Models
 // Talent Agency and 24 Mini Cab Services) gets its next word when the text has one of them: MINI MODELS / MINI CAB. Built from Xero contact
@@ -4104,9 +4111,12 @@ async function accInboxProposals() {
   const out = lines.map(l => {
     const key = accPayeeKeyX(l.org, l.reference, l.description, _amb), k = Math.abs(l.amount).toFixed(2), td = new Date(l.line_date), toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
     const c = l.amount < 0 ? (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 45) return null;
-        const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = toks.some(t => hay.includes(t)), cs = e.am.get(k) || e.pam.get(k) || '';
-        const ccyOk = !cs || cs === l.currency || cs === sym[l.currency], nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
-        if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 5)) return null;
+        const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = accNameHit(toks, hay), cs = e.am.get(k) || e.pam.get(k) || '';
+        const ccyOk = !cs || cs === l.currency || cs === sym[l.currency] || (cs === '$' && ['AUD', 'USD', 'CAD', 'NZD'].includes(l.currency)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
+        // v28.324: a receipt a colleague forwards with the amount in the subject ("ICON Management Pty Ltd $3082.80") is a deliberate match even
+        // when the bank shows a trading name (BELLA MAGEMENT); allowed up to 30 days before the bank line
+        const staff = /@dockandbay\.com\b/i.test(e.from_addr) && !/supplier\.dockandbay|portal@/i.test(e.from_addr) && new RegExp('(^|[^0-9.,])\\$?(' + k.replace('.', '\\.') + (k.endsWith('.00') ? '|' + k.slice(0, -3) + '(?![.0-9])' : '') + ')\\b').test(e.subject.replace(/,/g, ''));   // "$342" = 342.00
+        if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 5) && !(staff && ccyOk && lag >= -7 && lag <= 30)) return null;
         return { e, lag, name, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; })
       .filter(Boolean).sort((a, b) => b.score - a.score) : [];
     const best = c[0] && c[0].score >= 40 ? c[0] : null;
@@ -4491,6 +4501,7 @@ function accGstCheck(org, total, amts, taxType) {
   return { kind: 'unknown' };
 }
 // Candidates. rules: [{org, payee_key, bill_from, contact, contact_id, account_code, tax_type}]; only (batch): [{org, payee_key, email_id}].
+const ACC_REMINDER_RE = /^\s*(re:\s*|fwd?:\s*)*(reminder|gentle reminder|payment reminder|overdue|final reminder)\b|\bis due( soon)?\b|\bis overdue\b|renewal reminder/i;
 async function accBillCandidates(rules, only) {
   const out = []; if (!rules.length) return out;
   const minFrom = rules.reduce((m, r) => (r.bill_from || '2000-01-01') < m ? (r.bill_from || '2000-01-01') : m, '9999-12-31');
@@ -4506,7 +4517,9 @@ async function accBillCandidates(rules, only) {
   const claimed = new Set();
   for (const r of rules) {
     const toks = r.payee_key.toLowerCase().split(' ').filter(t => t.length >= 3);
-    const mine = em.filter(e => only ? only.some(o => o.email_id === e.id && o.org === r.org && o.payee_key === r.payee_key) : (days(e.d, r.bill_from) >= -5 && toks.some(t => (e.from_addr + ' ' + e.subject).toLowerCase().includes(t))));
+    // v28.324: reminders and "is due" notices repeat an invoice already received ("Reminder: Invoice 3120" x3, Xero "Bill INV-# ... is due soon"):
+    // never a new bill on their own (the original email is billed); a person can still pick one in Reconcile
+    const mine = em.filter(e => only ? only.some(o => o.email_id === e.id && o.org === r.org && o.payee_key === r.payee_key) : (days(e.d, r.bill_from) >= -5 && accNameHit(toks, e.from_addr + ' ' + e.subject) && !ACC_REMINDER_RE.test(e.subject)));
     if (!mine.length) continue;   // v28.316: coding (which may read Xero bills) only for payees with a receipt to bill
     const _hint = mine.map(e => e.subject + ' ' + e.from_addr).concat(lines.filter(l => l.org === r.org && accSameP(l.key, r.payee_key)).slice(0, 5).map(l => l.reference + ' ' + (l.description || ''))).join(' ');   // v28.318
     const coding = (r.account_code && r.tax_type && r.contact) ? null : await accPayeeCoding(r.org, r.payee_key, _hint);

@@ -1,3 +1,15 @@
+## v28.324 (Ben, branch review-fixes-2026-10-05): ACCOUNTS matching deep dive fixes
+
+**Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+Ben: "any other invoices and emails in accounts@ that come repeatedly but could have a technical glitch preventing automated rule matching? do a deep dive". Read only on live: 796 accounts@ emails (Jun to Oct), 184 open money-out lines (live: 11 matched, 103 needing a receipt); every open line checked against same-amount emails.
+- **Spacing / plural:** FASTCOURIER vs "Fast Courier", FONZIRELLIS vs "Fonzirelli Pizza" now match (name found with spaces removed, or an email word of 5+ letters that starts the key).
+- **AU bank wording:** "PAYBILL PAYMENT | ANZ INTERNET BANKING BPAY ASIC" gave payee PAYBILL; PAYBILL, BPAY, VISA, PURCHASE, INTERNET, BANKING, EFTPOS and the phrase "ANZ INTERNET BANKING BPAY / PAYMENT" are skipped, so it is ASIC. ANZ transfers keep their ANZ (ignored) key.
+- **Staff-forwarded receipts:** a colleague's email with the amount in the subject ("ICON Management Pty Ltd $3082.80") matches by amount from 30 days before the bank line, even when the bank shows a trading name (BELLA MAGEMENT). Whole-dollar subjects ("$342") count.
+- **Plain $:** on an AUD / USD / CAD / NZD account a "$" amount is that currency (was a currency mismatch for A$ accounts).
+- **Reminders never make a second bill:** "Reminder: Invoice ...", "Gentle / Payment reminder", "... is due (soon)", "overdue", "renewal reminder" emails are not Auto-billed (Alfa sent invoice 3120 four times).
+- Sandbox before / after over all 226 open lines: 4 new correct matches (ASIC 342, Fonzirelli 22, ICON 3,082.80, Fast Courier 10.89), 11 to 15 matched, no other key, treatment or match changed.
+
 ## v28.323 (Ben, branch review-fixes-2026-10-05): receipt amount + GST check fixes (Alfa, INV-0023); Review in Xero blue; Xero contact group readers
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
