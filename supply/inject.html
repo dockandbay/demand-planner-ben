@@ -11824,7 +11824,9 @@
       Promise.all(jobs).then(function(res){ var err=res.filter(function(x){return x&&x.error;})[0]; if(err){ sb.disabled=false;sb.textContent='Save'; alert(err.error); return; } ov.remove(); if(pt)PL_ST.open[pt]=true; renderPriceListsSilent(b); }).catch(function(e){ sb.disabled=false;sb.textContent='Save'; alert('Save failed: '+(e.message||e)); }); }
     document.body.appendChild(ov); paint();
   }
-  function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
+  function renderPaymentsReport(b){   // v28.344: also mirrored in ACCOUNTS; one copy at a time (its controls use fixed ids), so empty the other
+    document.querySelectorAll('#pay-rep').forEach(function(e){ var p=e.parentElement; if(p&&p!==b&&!b.contains(e))p.innerHTML=''; });
+    b.innerHTML='<div class="count">Loading…</div>';
     Promise.all([
       fetch('/api/supply/payments-report').then(function(r){return r.json();}),
       fetch('/api/supply/remittances').then(function(r){return r.json();}).catch(function(){return [];}),
@@ -19164,8 +19166,8 @@
   // the server gates every /api/accounts/* call, reads included. L2: Payables · 3PL invoicing (moved from REPORTS).
   // Bank ageing, Reconcile and Auto rules follow (mockups/accounts_mockup.html).
   // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-  var AC_SLUG={bank:'bank-statement',inbox:'reconcile',config:'rules'}, AC_SLUG_IN={'bank-statement':'bank',reconcile:'inbox',rules:'config',backdate:'bank'};   // v28.282 (Ben): deep links match the menu names; old links (bank, inbox, config, backdate) still work
-  var ACCOUNTS_TABS=[['bank','Bank statement'],['ageing','Ageing'],['inbox','Reconcile'],['payables','Payables'],['3pl-invoicing','3PL invoicing'],['config','Rules']], ACCOUNTS_SUB='bank';   // v28.280 (Ben): statement, ageing, reconcile first; Back-date removed
+  var AC_SLUG={bank:'bank-statement',inbox:'reconcile',config:'rules',payreport:'payments-report'}, AC_SLUG_IN={'bank-statement':'bank',reconcile:'inbox',rules:'config',backdate:'bank','payments-report':'payreport'};   // v28.282 (Ben): deep links match the menu names; old links (bank, inbox, config, backdate) still work
+  var ACCOUNTS_TABS=[['bank','Bank statement'],['ageing','Ageing'],['inbox','Reconcile'],['payables','Payables'],['payreport','Payments report'],['3pl-invoicing','3PL invoicing'],['config','Rules']], ACCOUNTS_SUB='bank';   // v28.344 (Ben 14-Oct-26): Payments report mirrored here (same report as SUPPLY > Payments)   // v28.280 (Ben): statement, ageing, reconcile first; Back-date removed
   var AC_PAY={org:'all',scope:'sup',due:'all',q:'',open:{},d:null,busy:false};
   function accountsCan(){ var m=ME||null; return !!m && !!(m.is_admin || m.accounts_access || m.live===false); }
   function ensureAccountsRoot(){ if(document.getElementById('accounts-root'))return; var app=document.getElementById('app')||document.body; if(!app)return;
@@ -19182,6 +19184,7 @@
     if(!fromRoute){ try{ writeHash(['accounts',AC_SLUG[k]||k]); }catch(e){} }
     var b=document.getElementById('accounts-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     if(k==='3pl-invoicing'){ if(typeof window.render3plInvoice==='function')window.render3plInvoice(b); else b.innerHTML='<div class="count">3PL invoicing is still loading, try again in a moment.</div>'; return; }
+    if(k==='payreport'){ renderPaymentsReport(b); return; }   // v28.344: the SUPPLY > Payments > Payments Report, same code and data
     if(k==='inbox'){ acInRender(); return; }
     if(k==='bank'){ acRenderStmt(b); return; }
     if(k==='ageing'){ acRenderAgeing(b); return; }

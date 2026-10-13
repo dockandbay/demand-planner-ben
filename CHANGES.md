@@ -1,3 +1,7 @@
+## v28.344 (14-Oct-26) Payments report also under ACCOUNTS
+- ACCOUNTS > Payments report (#/accounts/payments-report) shows the same Payments Report as SUPPLY > Payments > Payments Report (same code, data and buttons). It stays in SUPPLY too. One copy is on screen at a time.
+- UI only. No migration, no env change.
+
 ## v28.343 (14-Oct-26) SUPPLY > CONFIG > Xero: account and bank pickers show their list
 - The search list under each account / bank box was cut off by the table (it scrolls), so typing 602 seemed to do nothing. The list now floats above the page under the box. Pick an account from it to save.
 - UI only. No migration, no env change.
