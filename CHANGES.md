@@ -1,3 +1,7 @@
+## v28.349 (14-Oct-26) SUPPLY > CONFIG > Xero: Production category box left-aligned
+- The "Sync the Production category" box (name, options) was right-aligned by the SUPPLY input style; now left-aligned.
+- UI only.
+
 ## v28.348 (14-Oct-26) Paid > Xero: PO numbers open the PO drawer
 - Steps 2 and 3: each PO number is a link that opens that PO in the drawer, stacked above the popup (the popup stays open underneath).
 - UI only. No migration, no env change.
