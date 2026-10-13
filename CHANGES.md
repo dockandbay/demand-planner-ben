@@ -1,3 +1,7 @@
+## v28.338 (14-Oct-26) ILG Xero bill uses the configured account codes
+- 3PL invoicing: the ILG bill took Storage Fees from a built-in map as 308.00, which is not in Xero UK (create failed). Storage Fees and Other Fees now use ILG's codes in Config / Accounts, kept as text (308 is not 308.00). Built-in fallback corrected to 308.
+- No migration, no env change.
+
 ## v28.337 (Ben, branch review-fixes-2026-10-05): migration 366 links the existing agent client; commission seed CSV in the repo
 
 **Files:** `migrations/366_agent_clients.sql`, `Claude Analyses/COMMISSION_SEED_2026-10-13.csv` (+ package.json, CHANGES.md). No server or UI change.

@@ -17020,7 +17020,7 @@ async function _tplGenevaAllocate(period) {
 // the DI's channel Freight/Fulfilment; VAT split by whether the line carries 20% VAT. Cin7-independent — the DI
 // invoices already carry the channel + charge codes. FREIGHT DETAIL (the big Ecom/Shopify shipping) comes from a
 // separate "invoice_00" per-order spreadsheet that's usually supplied on top of the DI summary invoices.
-const ILG_CODE = { 'Other Fees': '303.33', 'Storage Fees': '308.00', 'Fulfilment - UK - Amazon': '1000.80', 'Fulfilment - UK - Co-Brand/Custom': '303.37', 'Fulfilment - UK - Dropship': '303.32', 'Fulfilment - UK - Faire': '303.31', 'Fulfilment - UK - Marketplace': '303.38', 'Fulfilment - UK - Shopify': '303.35', 'Fulfilment - UK - Wholesale': '303.34', 'Fulfilment - EU - Wholesale (excl. DE, FR, Dist)': '1000.76' };
+const ILG_CODE = { 'Other Fees': '303.33', 'Storage Fees': '308', 'Fulfilment - UK - Amazon': '1000.80', 'Fulfilment - UK - Co-Brand/Custom': '303.37', 'Fulfilment - UK - Dropship': '303.32', 'Fulfilment - UK - Faire': '303.31', 'Fulfilment - UK - Marketplace': '303.38', 'Fulfilment - UK - Shopify': '303.35', 'Fulfilment - UK - Wholesale': '303.34', 'Fulfilment - EU - Wholesale (excl. DE, FR, Dist)': '1000.76' };
 const ILG_FEEMAP = { 'GOODS-IN': 'Other Fees', 'MANAGEMENT-FEE': 'Other Fees', 'MANAGEMENT FEE': 'Other Fees', 'REWORK': 'Other Fees', 'PACKAGING': 'Other Fees', 'PERSONALISATION FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION-FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION': 'Fulfilment - UK - Shopify', 'RETURN-CHARGES': 'Fulfilment - UK - Shopify', 'LABOUR-CHARGE': 'Fulfilment - UK - Shopify', 'TICKETING': 'Fulfilment - UK - Shopify', 'FUSION INTEGRATION': 'Fulfilment - UK - Shopify' };
 const ILG_CHAN = { WHOLESALE: 'Wholesale', FBA: 'Amazon', AMAZON: 'Amazon', ECOM: 'Shopify', RETAIL: 'Shopify' };
 async function _tplIlgDiItems(buf) {
@@ -18712,7 +18712,8 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       // ILG books by charge-code from the DI invoices (Cin7-independent); per-line VAT (20% amount = total/6) or No VAT.
       const gi = await _tplIlgAllocate(period);
       if (!gi.ok) return res.status(400).json({ error: gi.error || 'ILG allocation failed' });
-      (gi.lines || []).forEach(l => { const desc = l.kind === 'freight' ? ('Freight - ' + l.account) : (l.kind === 'fulfilment' ? ('Fulfilment - ' + l.account) : l.account); blines.push({ desc, amount: l.amount, code: l.code || '', taxType: l.vat ? '20% (VAT on Expenses)' : 'No VAT', taxAmount: l.vat ? l.tax : 0, currency: cur, group: l.kind }); });
+      const ilgCfg = { 'Storage Fees': cacc['storage'], 'Other Fees': cacc['other'] };   // v28.338: ILG's 3PL Config / Accounts codes win (kept as TEXT: 308 and 308.00 are different Xero accounts)
+      (gi.lines || []).forEach(l => { const desc = l.kind === 'freight' ? ('Freight - ' + l.account) : (l.kind === 'fulfilment' ? ('Fulfilment - ' + l.account) : l.account); blines.push({ desc, amount: l.amount, code: String(ilgCfg[l.account] || '').trim() || l.code || '', taxType: l.vat ? '20% (VAT on Expenses)' : 'No VAT', taxAmount: l.vat ? l.tax : 0, currency: cur, group: l.kind }); });
       _ilgStated = { total: gi.statedTotal, tax: gi.statedTax };
     } else {
     sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });
