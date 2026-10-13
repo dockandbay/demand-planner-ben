@@ -1,3 +1,17 @@
+## v28.326 (Ben, branch review-fixes-2026-10-05): commissions stage 1, agent set-up
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/364_commission_setup.sql`, `scripts/seed_commission_setup.cjs` (+ package.json, CHANGES.md). **Migration 364.** No env vars.
+
+Agreed model (Ben 13-Oct-26): commission on cash received (ex GST) for shipped orders (part payments count once shipped; a deposit earns in the month the order ships); one run per agent per month; each agent has a settings currency (payments converted into it); precedence order override > customer rate > agency rate; Faire never paid and an order placed through Faire earns the customer's agent nothing; Ideco12 ignored; Les Raffineurs left out.
+- **Agents** (rep_groups): currency (+ "check" until confirmed), Fulfil agent codes, Xero contact group (UK / AU), statement email, portal on, no-commission marker, notes. CLIENT > Commissions > **Agents** edits them all (save on change; Xero group picked from the live list).
+- **Customers**: commission_customers = each agent's Xero contact group members (Sync from Xero contact groups; groups linked by name automatically), manual assignment wins on the next sync; **Fulfil wholesale customers with no agent** (matched by email, orders since 01-Jan-25) listed for assignment.
+- **Customer rates** (new table) and **Order overrides** (credited agent, % blank = agent rate, optional fixed commissionable amount; the effect is shown per order).
+- **Seed** (`node scripts/seed_commission_setup.cjs`): 18 agents with rates, currencies from the order history (USD Schauben / Harper / Patrickco / Roadrunner / Pablo, EUR Ideco / TJ, CAD Spruce, GBP TR Partners; others USD "check") and Fulfil codes (appelman, harpergroup + harpers, ideco, TJ, patrick, roadrunners); 6 customer rates; 32 order overrides. Renames the live group "Shauben" to "Agent - Schauben".
+- Read-only Xero readers: /xero-groups, /xero-group-members (v28.323); sync writes HORIZON tables only.
+- Sandbox: migration + seed applied; sync linked all 15 agent groups and loaded 5,401 customers (about 110 Xero UK calls, 724 left of the day); tabs checked in the browser.
+- Live: Diviyaj applies migration 364 and runs the seed once; then Sync from Xero contact groups.
+- Next (stage 2): the monthly run per agent (Xero + Fulfil payments, shipped-only rule, currency conversion, exceptions).
+
 ## v28.325 (Ben, branch review-fixes-2026-10-05): Auto bill only once the payment is on an uploaded statement
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

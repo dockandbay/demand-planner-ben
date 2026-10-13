@@ -27067,12 +27067,21 @@ app.post('/api/client/portal-orders/:id/cancel', async (req, res) => {
 app.get('/api/client/commission/groups', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ groups: (await pool.query(`SELECT g.*, (SELECT count(*)::int FROM planner.commission_overrides o WHERE o.rep_group_id=g.id) overrides, (SELECT string_agg(c.name, ', ') FROM planner.clients c WHERE c.rep_group_id=g.id) clients,
       (SELECT r.month FROM planner.commission_runs r WHERE r.rep_group_id=g.id ORDER BY r.month DESC LIMIT 1) last_month, (SELECT r.status FROM planner.commission_runs r WHERE r.rep_group_id=g.id ORDER BY r.month DESC LIMIT 1) last_status, (SELECT r.total FROM planner.commission_runs r WHERE r.rep_group_id=g.id ORDER BY r.month DESC LIMIT 1) last_total
-      FROM planner.rep_groups g ORDER BY g.active DESC, g.name`)).rows, overrides: (await pool.query(`SELECT o.*, g.name group_name FROM planner.commission_overrides o LEFT JOIN planner.rep_groups g ON g.id=o.rep_group_id ORDER BY o.created_at DESC LIMIT 200`)).rows }); }
+      FROM planner.rep_groups g ORDER BY g.active DESC, g.no_commission, g.name`)).rows, overrides: (await pool.query(`SELECT o.*, g.name group_name, g.default_rate group_rate FROM planner.commission_overrides o LEFT JOIN planner.rep_groups g ON g.id=o.rep_group_id ORDER BY o.created_at DESC LIMIT 500`)).rows,
+      customer_rates: (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_customer_rates r LEFT JOIN planner.rep_groups g ON g.id=r.rep_group_id ORDER BY lower(r.customer_name)`).catch(() => ({ rows: [] }))).rows,
+      customer_counts: (await pool.query(`SELECT rep_group_id, count(*)::int n FROM planner.commission_customers GROUP BY 1`).catch(() => ({ rows: [] }))).rows }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/commission/groups', async (req, res) => {
   const b = req.body || {};
   try {
+    // v28.326: commissions stage 1 settings (each only when sent)
+    if (b.id) { const set = [], v = [b.id], add = (col, val) => { v.push(val); set.push(col + '=$' + v.length); };
+      if ('currency' in b) { add('currency', String(b.currency || 'USD').toUpperCase().slice(0, 3)); add('currency_checked', true); }
+      if ('fulfil_codes' in b) add('fulfil_codes', (Array.isArray(b.fulfil_codes) ? b.fulfil_codes : String(b.fulfil_codes || '').split(/[,\s]+/)).map(x => String(x).trim()).filter(Boolean));
+      ['xero_group_uk_id', 'xero_group_uk_name', 'xero_group_au_id', 'xero_group_au_name', 'statement_email', 'notes'].forEach(k => { if (k in b) add(k, b[k] === '' ? null : String(b[k]).slice(0, 300)); });
+      ['portal_on', 'no_commission'].forEach(k => { if (k in b) add(k, !!b[k]); });
+      if (set.length) await pool.query(`UPDATE planner.rep_groups SET ${set.join(', ')} WHERE id=$1`, v); }
     if (b.id) { await pool.query(`UPDATE planner.rep_groups SET name=coalesce($2,name), default_rate=coalesce($3,default_rate), xero_contact=coalesce($4,xero_contact), xero_account_code=coalesce($5,xero_account_code), active=coalesce($6,active) WHERE id=$1`, [b.id, b.name || null, b.default_rate == null || b.default_rate === '' ? null : Number(b.default_rate), b.xero_contact ?? null, b.xero_account_code ?? null, typeof b.active === 'boolean' ? b.active : null]); await cpAudit(null, 'Rep group updated', String(b.name || b.id), req.me.email); return res.json({ ok: true, id: b.id }); }
     const name = String(b.name || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query(`INSERT INTO planner.rep_groups (name, default_rate, xero_contact, xero_account_code) VALUES ($1,$2,$3,$4) RETURNING id`, [name, Number(b.default_rate) || 0, b.xero_contact || null, b.xero_account_code || null]);
@@ -27081,8 +27090,11 @@ app.post('/api/client/commission/groups', async (req, res) => {
 });
 app.post('/api/client/commission/overrides', async (req, res) => {
   const b = req.body || {}; const ref = String(b.order_ref || '').trim(); if (!ref || !b.rep_group_id) return res.status(400).json({ error: 'order_ref and rep_group_id required' });
-  try { await pool.query(`INSERT INTO planner.commission_overrides (order_ref, rep_group_id, rate, reason, created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (order_ref, rep_group_id) DO UPDATE SET rate=excluded.rate, reason=excluded.reason, created_by=excluded.created_by, created_at=now()`, [ref, b.rep_group_id, Number(b.rate) || 0, b.reason || null, req.me.email || null]);
-    await cpAudit(null, 'Commission override', ref + ' @ ' + (Number(b.rate) || 0) + '%', req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  // v28.326: one override per order (credited agent, % blank = the agent's rate, optional fixed commissionable amount)
+  const _num = v => (v === '' || v == null) ? null : Number(String(v).replace(/[^0-9.\-]/g, ''));
+  try { await pool.query(`DELETE FROM planner.commission_overrides WHERE order_ref=$1 AND rep_group_id<>$2`, [ref, b.rep_group_id]);
+    await pool.query(`INSERT INTO planner.commission_overrides (order_ref, rep_group_id, rate, commissionable_amount, reason, created_by) VALUES ($1,$2,$3,$6,$4,$5) ON CONFLICT (order_ref, rep_group_id) DO UPDATE SET rate=excluded.rate, commissionable_amount=excluded.commissionable_amount, reason=excluded.reason, created_by=excluded.created_by, created_at=now()`, [ref, b.rep_group_id, _num(b.rate), b.reason || null, req.me.email, _num(b.commissionable_amount)]);
+    await cpAudit(null, 'Commission override', ref + ' @ ' + (_num(b.rate) == null ? 'agent rate' : _num(b.rate) + '%'), req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/commission/overrides/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_overrides WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 async function cpRunSummary(runId) {
@@ -27264,6 +27276,65 @@ app.get('/api/client/commission/xero-group-members', async (req, res) => {
       ((cj && cj.Contacts) || []).forEach(c => members.push({ id: c.ContactID, name: c.Name, email: String(c.EmailAddress || '').trim().toLowerCase() || null, status: c.ContactStatus })); }
     const v = { group: { id: gid, name: g.Name }, members: members.sort((a, b) => String(a.name).localeCompare(String(b.name))) };
     _cmXg.set(k, { at: Date.now(), v }); res.json(v);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.326 (Ben 13-Oct-26, commissions stage 1): customer rates, the customer -> agent list (synced from each agent's Xero contact group,
+// manual assignment wins) and Fulfil wholesale customers with no agent (matched by email). Read only on Xero / Fulfil.
+app.post('/api/client/commission/customer-rates', async (req, res) => {
+  const b = req.body || {}, name = String(b.customer_name || '').trim(), rate = Number(String(b.rate == null ? '' : b.rate).replace(/[^0-9.]/g, ''));
+  if (!name || !(rate >= 0) || String(b.rate || '') === '') return res.status(400).json({ error: 'customer name and rate required' });
+  try { await pool.query(`INSERT INTO planner.commission_customer_rates (customer_name, rep_group_id, rate, note, created_by) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (lower(customer_name)) DO UPDATE SET rep_group_id=EXCLUDED.rep_group_id, rate=EXCLUDED.rate, note=EXCLUDED.note`, [name, b.rep_group_id || null, rate, b.note || null, req.me.email]);
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/customer-rates/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_customer_rates WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// Sync: every agent with a Xero contact group (by id, or resolved by its name) -> its members into commission_customers (manual rows kept)
+app.post('/api/client/commission/customers/sync', async (req, res) => {
+  try { const out = { agents: 0, customers: 0, resolved: 0, errors: [] };
+    const gj = await xeroFetch('uk', '/api.xro/2.0/ContactGroups'); const xg = ((gj && gj.ContactGroups) || []).filter(g => (g.Status || 'ACTIVE') === 'ACTIVE');
+    const groups = (await pool.query(`SELECT id, name, xero_group_uk_id, xero_group_uk_name FROM planner.rep_groups WHERE active`)).rows;
+    for (const g of groups) {
+      let gid = g.xero_group_uk_id; if (!gid) { const hit = xg.find(x => String(x.Name).trim().toLowerCase() === String(g.xero_group_uk_name || g.name).trim().toLowerCase()); if (hit) { gid = hit.ContactGroupID; await pool.query(`UPDATE planner.rep_groups SET xero_group_uk_id=$2, xero_group_uk_name=$3 WHERE id=$1`, [g.id, gid, hit.Name.trim()]); out.resolved++; } }
+      if (!gid) continue;
+      try { const j = await xeroFetch('uk', '/api.xro/2.0/ContactGroups/' + gid); const ids = (((j && j.ContactGroups) || [])[0] || {}).Contacts || []; const rows = [];
+        for (let i = 0; i < ids.length; i += 50) { const cj = await xeroFetch('uk', '/api.xro/2.0/Contacts?summaryOnly=true&IDs=' + ids.slice(i, i + 50).map(x => x.ContactID).join(','));
+          ((cj && cj.Contacts) || []).forEach(c => rows.push([c.ContactID, c.Name, String(c.EmailAddress || '').trim().toLowerCase() || null])); }
+        for (let i = 0; i < rows.length; i += 300) { const ch = rows.slice(i, i + 300);
+          await pool.query(`INSERT INTO planner.commission_customers (org, xero_contact_id, customer_name, email, rep_group_id, source, synced_at) SELECT 'uk', u.id, u.nm, u.em, $1, 'xero_group', now()
+              FROM unnest($2::text[], $3::text[], $4::text[]) u(id, nm, em)
+            ON CONFLICT (org, xero_contact_id) WHERE xero_contact_id IS NOT NULL DO UPDATE SET customer_name=EXCLUDED.customer_name, email=EXCLUDED.email, synced_at=now(),
+              rep_group_id=CASE WHEN planner.commission_customers.source='manual' THEN planner.commission_customers.rep_group_id ELSE EXCLUDED.rep_group_id END`, [g.id, ch.map(r => r[0]), ch.map(r => r[1]), ch.map(r => r[2])]); }
+        out.agents++; out.customers += rows.length; }
+      catch (e) { out.errors.push(g.name + ': ' + e.message); }
+    }
+    await cpAudit(null, 'Commission customers synced from Xero', out.agents + ' agents, ' + out.customers + ' customers', req.me.email); res.json(Object.assign({ ok: !out.errors.length }, out));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/client/commission/customers', async (req, res) => {
+  try { const w = [], p = []; if (req.query.group) { p.push(Number(req.query.group)); w.push('c.rep_group_id=$' + p.length); }
+    if (req.query.q) { p.push('%' + String(req.query.q).toLowerCase() + '%'); w.push(`(lower(c.customer_name) LIKE $${p.length} OR lower(coalesce(c.email,'')) LIKE $${p.length})`); }
+    const rows = (await pool.query(`SELECT c.id, c.customer_name, c.email, c.source, c.rep_group_id, g.name group_name, to_char(c.synced_at,'YYYY-MM-DD') synced FROM planner.commission_customers c LEFT JOIN planner.rep_groups g ON g.id=c.rep_group_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY lower(c.customer_name) LIMIT 1000`, p)).rows;
+    const total = (await pool.query(`SELECT count(*)::int n, max(synced_at) at FROM planner.commission_customers`)).rows[0];
+    res.set('Cache-Control', 'no-store').json({ rows, total });
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], total: { n: 0 }, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/customers/assign', async (req, res) => {
+  const b = req.body || {}, name = String(b.customer_name || '').trim(), email = String(b.email || '').trim().toLowerCase() || null;
+  if (!b.id && !name) return res.status(400).json({ error: 'customer required' });
+  try { if (b.id) await pool.query(`UPDATE planner.commission_customers SET rep_group_id=$2, source='manual', updated_by=$3, updated_at=now() WHERE id=$1`, [b.id, b.rep_group_id || null, req.me.email]);
+    else await pool.query(`INSERT INTO planner.commission_customers (org, customer_name, email, rep_group_id, source, updated_by) VALUES ('fulfil',$1,$2,$3,'manual',$4)`, [name, email, b.rep_group_id || null, req.me.email]);
+    _cmFu = null; res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Fulfil wholesale customers (orders with WS in the reference since a date) whose email is on no agent's list: assign them by hand.
+let _cmFu = null;
+app.get('/api/client/commission/customers/fulfil-unmatched', async (req, res) => {
+  try { if (_cmFu && Date.now() - _cmFu.at < 600000 && !req.query.refresh) return res.json(_cmFu.v);
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || '')) ? req.query.since : '2025-01-01'; let sales = [];
+    for (let o = 0; o < 20000; o += 500) { const r = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['sale_date', '>=', since], ['reference', 'ilike', '%WS-%']], o, 500, null, ['id', 'reference', 'party.name', 'party.email', 'sale_date', 'untaxed_amount']]); sales = sales.concat(r || []); if (!r || r.length < 500) break; }
+    const known = new Set((await pool.query(`SELECT lower(email) e FROM planner.commission_customers WHERE email IS NOT NULL`)).rows.map(r => r.e));
+    const by = new Map(); sales.forEach(s => { const e = String(s['party.email'] || '').toLowerCase().trim(); const k = e || ('#' + s['party.name']); if (e && known.has(e)) return; if (/dock and bay|dock & bay/i.test(s['party.name'] || '')) return;
+      const x = by.get(k) || { name: s['party.name'], email: e || null, orders: 0, last: null, value: 0 }; x.orders++; const d = s.sale_date && (s.sale_date.iso_string || s.sale_date); if (!x.last || d > x.last) x.last = d; x.value += Number((s.untaxed_amount && s.untaxed_amount.decimal) || s.untaxed_amount || 0); by.set(k, x); });
+    const v = { since, orders: sales.length, unmatched: [...by.values()].sort((a, b) => String(b.last).localeCompare(String(a.last))) }; _cmFu = { at: Date.now(), v }; res.json(v);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.322: paid commission history (migration 363): the imported sheet (Jan-22 onward) + every HORIZON run marked Paid. Filters: agent
