@@ -1,3 +1,14 @@
+## v28.330 (Ben, branch review-fixes-2026-10-05): CLIENT ▸ Clients as cards
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md)
+
+- CLIENT ▸ Clients & agents shows one **card** per client instead of a table row (Ben 13-Oct-26; mockup mockups/client_cards_v1.html). Each card shows the same fields as the old row:
+  - name, unread messages, market · currency · price list · rep group, and the type badge;
+  - Orders ON/OFF (+ samples), Stock view, who it Sees (visibility), Features as chips;
+  - users (invited) and owner.
+- Clicking anywhere on a card, or pressing Enter on it, opens the client, as Edit did. Inactive clients are faded. KPI tiles, search and type pills are unchanged. The grid is one column on a phone.
+- Tested (sandbox, Chrome): 4 cards render with the right data; clicking the Dillard's card opened #/client/clients/3.
+
 ## v28.329 (Ben, branch review-fixes-2026-10-05): sample bills: references in the current style, landed cost after posting
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
