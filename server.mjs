@@ -23393,8 +23393,14 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
 //   - a sample line (no PO) -> Xero UK by purpose (sample_purpose_accounts); only a Photography sample shipped to AU -> Xero AU 1000.24.
 // All Xero lines for one org go on one bill. A line with the same tracking number as a PO line follows that PO. US has no import
 // taxes: a "Taxes" charge on a US shipment is Duty. No tax on any line, supplier's currency. SUPPLY edit may create and push.
-const SB_AU_PHOTO = '1000.24', SB_FREIGHT = '302', SB_DUTY = '313';
-const SB_ACCOUNT_NAMES = { '1000.52': 'Spend - Product', '1000.47': 'Spend - Wholesale (consulting / other)', '1000.44': 'Spend - Marketing (other)', '1000.61': 'Spend - Photo, video & media (shoots)', '1000.24': 'Spend - Photo, video & media (other costs)', '302': 'Shipping Freight Fees (Import Only)', '313': 'Import Duty' };
+// v28.339 (Ben 14-Oct-26): every Xero account comes from planner.sample_purpose_accounts (mig 369), none written here.
+// Keys: product / marketing / sales / photography (UK purposes), au_photography, freight / duty (UK), au_freight / au_duty.
+async function sbAccounts() {
+  const rows = (await pool.query(`SELECT a.purpose, a.account_code, to_jsonb(a) j FROM planner.sample_purpose_accounts a ORDER BY (to_jsonb(a)->>'org') = 'au', (to_jsonb(a)->>'kind') = 'charge', a.purpose`)).rows;
+  const list = rows.map(r => ({ key: r.purpose, code: String(r.account_code || '').trim(), org: (r.j && r.j.org) || 'uk', name: (r.j && r.j.account_name) || '', kind: (r.j && r.j.kind) || 'purpose' })).filter(a => a.code);
+  const byKey = {}; list.forEach(a => { byKey[a.key] = a.code; });
+  return { list, byKey };
+}
 function sbCountry(v) { const s = String(v || '').trim().toUpperCase().replace(/\./g, ''); if (!s) return '';
   if (/^(US|USA|AMERICA|UNITED STATES( OF AMERICA)?)$/.test(s)) return 'US'; if (/^(UK|GB|GBR|UNITED KINGDOM|ENGLAND|GREAT BRITAIN|SCOTLAND|WALES)$/.test(s)) return 'UK';
   if (/^(AU|AUS|AUSTRALIA)$/.test(s)) return 'AU'; if (/^(CA|CAN|CANADA)$/.test(s)) return 'CA'; if (/^(NZ|NEW ZEALAND)$/.test(s)) return 'NZ';
@@ -23490,17 +23496,18 @@ async function sbResolve(lines) {
   // sample purposes from SR refs
   const srs = Array.from(new Set(out.map(l => l.sample_ref).filter(x => /^SR-\d+$/i.test(String(x || '')))));
   const srPurpose = {}; if (srs.length) (await pool.query(`SELECT upper(ref) ref, purpose FROM planner.sample_requests WHERE upper(ref) = ANY($1::text[])`, [srs.map(s => s.toUpperCase())])).rows.forEach(r => { srPurpose[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean)[0] : null; });
-  const acc = {}; (await pool.query(`SELECT purpose, account_code FROM planner.sample_purpose_accounts`)).rows.forEach(r => { acc[r.purpose] = r.account_code; });
+  const acc = (await sbAccounts()).byKey;
   for (const l of out) {
     if (l.link_locked) { if (!l.checks.length) l.checks = []; continue; }   // the user picked the route by hand: keep it
     if (l.po_found || l.po_unknown) {
       if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null; }
-      else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; l.xero_account = (l.charge === 'duty' || l.charge === 'tax') ? SB_DUTY : l.charge === 'freight' ? SB_FREIGHT : (acc.product || '1000.52');
-        if (l.po_found) l.checks.push({ level: 'info', text: l.po + ' is not in Fulfil: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account }); }
+      else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; const pre = l.xero_org === 'au' ? 'au_' : ''; l.xero_account = ((l.charge === 'duty' || l.charge === 'tax') ? acc[pre + 'duty'] : l.charge === 'freight' ? acc[pre + 'freight'] : acc.product) || null;
+        if (!l.xero_account) l.checks.push({ level: 'bad', text: 'no Xero ' + l.xero_org.toUpperCase() + ' ' + l.charge + ' account in the sample accounts mapping: pick the account' });
+        if (l.po_found && l.xero_account) l.checks.push({ level: 'info', text: l.po + ' is not in Fulfil: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account }); }
       continue; }
     const purpose = sbPurpose(l.sample_type) || (l.sample_ref && srPurpose[String(l.sample_ref).toUpperCase()]) || null;
     l.purpose = purpose; l.link_type = 'xero';
-    if (purpose === 'photography' && l.ship_to === 'AU') { l.xero_org = 'au'; l.xero_account = SB_AU_PHOTO; }
+    if (purpose === 'photography' && l.ship_to === 'AU' && acc.au_photography) { l.xero_org = 'au'; l.xero_account = acc.au_photography; }
     else { l.xero_org = 'uk'; l.xero_account = purpose ? (acc[purpose] || null) : null;
       if (l.ship_to === 'AU') l.checks.push({ level: 'ok', text: 'AU ship-to, not photography: Xero UK' });
       if (!l.xero_account) l.checks.push({ level: 'bad', text: 'pick the account (sample type "' + (l.sample_type || 'blank') + '" not recognised)' }); }
@@ -23521,14 +23528,14 @@ function sbGroup(lines, refBase) {
 function sbDocDesc(d) { const pos = Array.from(new Set(d.lines.map(l => l.po).filter(Boolean)));
   const ch = Array.from(new Set(d.lines.map(l => ({ freight: 'Freight', duty: 'Duty', tax: 'Taxes', product: 'Product', other: 'Charges' }[l.charge] || 'Charges'))));
   return (d.system === 'fulfil' ? 'Fulfil supplier invoice' : 'Xero ' + d.org.toUpperCase() + ' bill') + ': ' + ch.join(' + ') + (pos.length ? ' (' + pos.join(', ') + ')' : '') + ' · ' + d.lines.length + ' line' + (d.lines.length === 1 ? '' : 's'); }
-function sbValidate(head, lines) { const p = [];
+function sbValidate(head, lines, auCodes) { const p = []; auCodes = auCodes || [];
   if (!String(head.supplier || '').trim()) p.push('Supplier is required.'); if (!String(head.ref_base || '').trim()) p.push('Supplier invoice number is required.');
   if (!lines.length) p.push('Add at least one line.');
   lines.forEach((l, i) => { const n = 'Line ' + (i + 1) + ': ';
     if (!(Number(l.amount) > 0)) p.push(n + 'amount must be above 0.');
     if (l.link_type === 'fulfil') { if (!l.fulfil_po_id) p.push(n + 'pick a Fulfil PO.'); }
     else if (l.link_type === 'xero') { if (!/^(uk|au)$/.test(String(l.xero_org || ''))) p.push(n + 'pick the Xero org.'); if (!String(l.xero_account || '').trim()) p.push(n + 'pick the Xero account.');
-      if (l.xero_org === 'au' && ![SB_AU_PHOTO, SB_FREIGHT, SB_DUTY].includes(String(l.xero_account))) p.push(n + 'Xero AU takes only 1000.24 (photography samples) or 302 / 313 (an AU PO).'); }
+      if (l.xero_org === 'au' && !auCodes.includes(String(l.xero_account).trim())) p.push(n + 'Xero AU takes only ' + (auCodes.join(' / ') || 'the AU accounts in the sample accounts mapping') + '.'); }
     else p.push(n + 'link it to a Fulfil PO or a Xero account.'); });
   return p; }
 
@@ -23545,6 +23552,9 @@ app.post('/api/supply/sample-bills/parse', async (req, res) => {
     const refBase = p.head.invoice_no || ['PO', carrier ? carrier.replace(/\s+/g, '') : 'SAMPLES', code, month].filter(Boolean).join('-');   // v28.329 (Ben): same style as existing Other payments, e.g. PO-DHL-LX-2026-08
     const lines = await sbResolve(p.lines);
     const total = sbR2(lines.reduce((a, l) => a + Number(l.amount || 0), 0));
+app.get('/api/supply/sample-bills/accounts', async (req, res) => {   // v28.339: the form's Xero account list (mapping table)
+  try { const a = await sbAccounts(); const seen = new Set(); res.json({ ok: true, accounts: a.list.filter(x => { const k = x.org + '|' + x.code; if (seen.has(k)) return false; seen.add(k); return true; }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
     res.json({ ok: true, head: { supplier: sup ? sup.name : (p.head.supplier || ''), supplier_text: p.head.supplier || '', supplier_found: !!sup, ref_base: refBase, ref_built: !p.head.invoice_no,
       invoice_date: p.head.invoice_date || null, due_date: p.head.due_date || null, currency: (sup && sup.currency) || 'USD', fx_rate: p.head.fx_rate || null, sheet_total: p.head.sheet_total != null ? p.head.sheet_total : null, source_file: b.filename || null },
       lines, total, ties: p.head.sheet_total == null ? null : Math.abs(total - p.head.sheet_total) < 0.05 });
@@ -23581,7 +23591,7 @@ async function sbCreate(b, who) {
   const head = Object.assign({}, b.head || {}), lines0 = Array.isArray(b.lines) ? b.lines.slice(0, 300) : [];
   head.ref_base = String(head.ref_base || '').trim().replace(/\s+/g, '-'); head.supplier = String(head.supplier || '').trim();
   const lines = lines0.map((l, i) => Object.assign({}, l, { seq: i + 1, amount: sbR2(l.amount), description: String(l.description || '').trim() || sbDescribe(l) }));
-  const problems = sbValidate(head, lines); if (problems.length) throw Object.assign(new Error(problems.join(' ')), { status: 400, problems });
+  const problems = sbValidate(head, lines, (await sbAccounts()).list.filter(a => a.org === 'au').map(a => a.code)); if (problems.length) throw Object.assign(new Error(problems.join(' ')), { status: 400, problems });
   const docs = sbGroup(lines, head.ref_base);
   const clash = (await pool.query(`SELECT reference FROM planner.deposits WHERE upper(reference) = ANY($1::text[])`, [docs.map(d => d.reference.toUpperCase())])).rows;
   if (clash.length) throw Object.assign(new Error('Reference already used in Other payments / deposits: ' + clash.map(r => r.reference).join(', ') + '. Change the supplier invoice number.'), { status: 409 });

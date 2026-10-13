@@ -10894,8 +10894,7 @@
   // value, draft), one Xero bill per org for the rest (samples by purpose, pre-Fulfil PO charges on 302 freight / 313 duty). Server does
   // the routing (/api/supply/sample-bills/resolve); the form shows it and lets every line be changed.
   var SB=null;
-  var SB_XERO=[['uk','1000.52','Spend - Product (product team)'],['uk','1000.47','Spend - Wholesale (sales samples)'],['uk','1000.44','Spend - Marketing (other)'],['uk','1000.61','Spend - Photo, video & media (shoots)'],
-    ['uk','302','Shipping Freight Fees (Import Only)'],['uk','313','Import Duty'],['au','1000.24','Spend - Photo, video & media (other costs)'],['au','302','Shipping Freight Fees (Import Only)'],['au','313','Import Duty']];
+  var SB_XERO=[];   // v28.339: [org, code, name] from the sample accounts mapping (GET /api/supply/sample-bills/accounts), none written here
   var SB_CHARGES=[['freight','Freight'],['duty','Duty'],['tax','Taxes'],['product','Product'],['other','Other']], SB_CC=['US','UK','AU','EU','CA','NZ'];
   function sbMoney(n){ return (Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function sbBlank(){ return {seq:0,ship_date:'',tracking:'',charge:'freight',description:'',ship_to:'',po:'',sample_type:'',sample_ref:'',amount:'',link_type:'xero',xero_org:'uk',xero_account:'',checks:[]}; }
@@ -10905,6 +10904,7 @@
       by[k].seqs.push(l.seq); by[k].amount+=Number(l.amount)||0; if(l.link_type==='xero')by[k].accts[l.xero_account||'?']=1; });
     var base=String(SB.head.ref_base||'').trim()||'REF'; docs.forEach(function(d,i){ d.reference=docs.length>1?base+'-'+String.fromCharCode(65+(i%26)):base; }); return docs; }
   function sbOpen(onDone){
+    fetch('/api/supply/sample-bills/accounts').then(function(r){return r.json();}).then(function(j){ if(j&&j.accounts){ SB_XERO=j.accounts.map(function(x){return [x.org,x.code,x.name||'']; }); if(SB)sbDraw(); } }).catch(function(){});
     SB={head:{supplier:'',ref_base:'',invoice_date:new Date().toISOString().slice(0,10),due_date:new Date().toISOString().slice(0,10),currency:'USD',fx_rate:null,sheet_total:null,source_file:''},lines:[Object.assign(sbBlank(),{seq:1})],busy:false,msg:'',result:null,onDone:onDone};
     var ov=document.getElementById('sb-ov'); if(ov)ov.remove();
     ov=document.createElement('div'); ov.id='sb-ov'; ov.style.cssText='position:fixed;inset:0;z-index:100003;background:rgba(15,23,42,.38);overflow:auto;padding:28px 16px;text-align:left';

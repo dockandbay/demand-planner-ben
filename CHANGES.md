@@ -1,3 +1,8 @@
+## v28.339 (14-Oct-26) Sample bill Xero accounts from the mapping table (migration 369)
+- Create sample bills: freight 302, duty 313 and AU photography 1000.24 were written in the server, and the form's account list in the page. All now come from planner.sample_purpose_accounts (org, account name and kind added; seeded with today's codes, so no change in behaviour). New GET /api/supply/sample-bills/accounts feeds the form.
+- A missing mapping leaves the line to be picked by hand instead of using an old code. Xero AU accepts only the AU codes in the table.
+- **Migration:** 369_sample_bill_accounts.sql (additive, idempotent). No env change.
+
 ## v28.338 (14-Oct-26) ILG Xero bill uses the configured account codes
 - 3PL invoicing: the ILG bill took Storage Fees from a built-in map as 308.00, which is not in Xero UK (create failed). Storage Fees and Other Fees now use ILG's codes in Config / Accounts, kept as text (308 is not 308.00). Built-in fallback corrected to 308.
 - No migration, no env change.
