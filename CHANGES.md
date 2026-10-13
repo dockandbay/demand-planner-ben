@@ -1,3 +1,10 @@
+## v28.325 (Ben, branch review-fixes-2026-10-05): Auto bill only once the payment is on an uploaded statement
+
+**Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben (standing rule): "never create a bill until an unreconciled transaction is uploaded from the uncoded report. upon upload the process is triggered to automatically create bills."
+- Auto bill no longer creates a bill from a receipt alone (the single-amount and v28.323 currency-marked-total fallbacks are off for Auto bill): it needs the open bank line for that payee and amount; otherwise the receipt waits with "Waiting for the bank line". The statement upload starts the run (v28.316); the 6-hourly run and Run now follow the same rule. Review / batch from Reconcile always start from a bank line, unchanged.
+
 ## v28.324 (Ben, branch review-fixes-2026-10-05): ACCOUNTS matching deep dive fixes
 
 **Files:** `server.mjs`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.

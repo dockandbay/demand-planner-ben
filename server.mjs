@@ -4536,6 +4536,9 @@ async function accBillCandidates(rules, only) {
       // the charge can follow the email by up to 25 days (Optus: bill emailed ~6th, debited ~21st): a receipt already reconciled in Xero needs nothing
       if (!line && recon.some(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && real.includes(Math.abs(t.amount).toFixed(2)) && days(t.d, e.d) >= -5 && days(t.d, e.d) <= 25)) { if (only) { c.reason = 'Already reconciled in Xero'; out.push(c); } continue; }
       if (line) Object.assign(c, { amount: Math.abs(line.amount), date: line.d, stmt_line: line.id, bank: line.account_name });
+      // v28.325 (Ben 13-Oct-26, HARD): "never create a bill until an unreconciled transaction is uploaded from the uncoded report". Auto bill needs
+      // the open bank line; the statement upload triggers the run. (Review / batch from Reconcile always starts from a bank line.)
+      else if (!only) { c.reason = 'Waiting for the bank line: a bill is created only once this payment is on an uploaded statement (Uncoded statement lines)'; out.push(c); continue; }
       else if (real.length === 1) Object.assign(c, { amount: Number(real[0]), date: e.d });
       // v28.323 (Ben 13-Oct-26, Alfa Embroidery): one currency-marked total in the email body (A$399.96) that the PDF also shows is the bill
       // amount, even when the PDF lists its line amounts too (several amounts, no statement line yet)
