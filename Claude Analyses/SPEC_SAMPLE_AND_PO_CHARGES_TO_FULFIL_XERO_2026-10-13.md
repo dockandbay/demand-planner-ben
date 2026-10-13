@@ -31,6 +31,9 @@ Create the **supplier bill in Xero** (supplier = who is charging us, e.g. Lixin,
 
 Xero AU has only **1000.24 - SPEND - PHOTO, VIDEO & MEDIA CREATION (OTHER COSTS)**.
 
+## Other payments link (Ben 13-Oct-26)
+Creating the Xero bill or the Fulfil supplier invoice also creates (or updates) the matching **Other payment** in HORIZON with the **same reference**: they are the same payment, and the same reference is required on both so the payment run, the bill and the bank line tie together.
+
 ## Open questions (to settle before building)
 1. ~~AU samples~~ ANSWERED (Ben 13-Oct-26): the only reason to send a sample to AU is 1000.24 (Photo, video & media creation, other costs). Any other AU charge belongs to an AU order (Path A, Fulfil).
 2. Org for a sample charge with no PO: decided by the supplier's currency / the sample's market, or picked each time?
