@@ -11348,7 +11348,8 @@ supplySectionHandler = async (req, res, next) => {
             WHERE coalesce(deposit_ref,'')<>'' AND coalesce(status,'') NOT ILIKE '%complete%' GROUP BY deposit_ref
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
-            d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+            d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status,
+            to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365) to_char(d.date_paid,'YYYY-MM-DD') date_paid,
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
             -- BLANK deposit (no entered amount, real row, not NO DEPOSIT) → its amount/remaining are the estimated total.
@@ -23355,6 +23356,299 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
+});
+// ===================== v28.327 (Ben 13-Oct-26): Create sample bills (SUPPLY ▸ PAYMENTS ▸ Other Payments) =====================
+// A supplier's courier / sample invoice (typed in, or seeded from the FedEx / DHL "SUPPLIER SAMPLE INVOICE TEMPLATE" .xlsx) becomes
+// ONE Other payment per document, each carrying the document's reference:
+//   - a line whose HORIZON PO has a Fulfil PO -> one Fulfil DRAFT supplier invoice per Fulfil PO (a line per charge, LANDED-* product,
+//     header account 9001 Fulfil - Payable, landed cost by VALUE over the PO's supplier shipments, also left in draft);
+//   - a pre-Fulfil PO line -> Xero bill, 302 Shipping Freight Fees (freight) / 313 Import Duty (duty, taxes), org by the PO's country;
+//   - a sample line (no PO) -> Xero UK by purpose (sample_purpose_accounts); only a Photography sample shipped to AU -> Xero AU 1000.24.
+// All Xero lines for one org go on one bill. A line with the same tracking number as a PO line follows that PO. US has no import
+// taxes: a "Taxes" charge on a US shipment is Duty. No tax on any line, supplier's currency. SUPPLY edit may create and push.
+const SB_AU_PHOTO = '1000.24', SB_FREIGHT = '302', SB_DUTY = '313';
+const SB_ACCOUNT_NAMES = { '1000.52': 'Spend - Product', '1000.47': 'Spend - Wholesale (consulting / other)', '1000.44': 'Spend - Marketing (other)', '1000.61': 'Spend - Photo, video & media (shoots)', '1000.24': 'Spend - Photo, video & media (other costs)', '302': 'Shipping Freight Fees (Import Only)', '313': 'Import Duty' };
+function sbCountry(v) { const s = String(v || '').trim().toUpperCase().replace(/\./g, ''); if (!s) return '';
+  if (/^(US|USA|AMERICA|UNITED STATES( OF AMERICA)?)$/.test(s)) return 'US'; if (/^(UK|GB|GBR|UNITED KINGDOM|ENGLAND|GREAT BRITAIN|SCOTLAND|WALES)$/.test(s)) return 'UK';
+  if (/^(AU|AUS|AUSTRALIA)$/.test(s)) return 'AU'; if (/^(CA|CAN|CANADA)$/.test(s)) return 'CA'; if (/^(NZ|NEW ZEALAND)$/.test(s)) return 'NZ';
+  if (/^(EU|EUROPE|DE|GERMANY|FR|FRANCE|NL|NETHERLANDS|IE|IRELAND|ES|SPAIN|IT|ITALY|BE|BELGIUM)$/.test(s)) return 'EU'; return s.slice(0, 3); }
+function sbCharge(v, shipTo) { const s = String(v || '').toLowerCase(); let c = /duty|duties/.test(s) ? 'duty' : /tax|vat|gst/.test(s) ? 'tax' : /product|goods/.test(s) ? 'product' : /freight|ship|courier|postage|deliver/.test(s) || !s ? 'freight' : 'other';
+  if (c === 'tax' && sbCountry(shipTo) === 'US') c = 'duty';   // Ben 13-Oct-26: no import taxes in the US, a courier "Taxes" charge there is duty
+  return c; }
+function sbPurpose(t) { const s = String(t || '').toLowerCase(); if (!s) return null; if (/photo|shoot|media/.test(s)) return 'photography'; if (/market|influenc|pr\b/.test(s)) return 'marketing';
+  if (/sales|custom|white ?label|wholesale|client|customer/.test(s)) return 'sales'; if (/product|develop|dev\b|design|proto/.test(s)) return 'product'; return null; }
+function sbFulfilProduct(charge, cc) { if (charge === 'freight') return 'LANDED-FREIGHT'; if (charge === 'duty') return 'LANDED-IMPORT-DUTY';
+  if (charge === 'tax') return ['UK', 'AU', 'EU'].includes(cc) ? 'LANDED-IMPORT-TAX-' + cc : 'LANDED-IMPORT-DUTY'; return 'LANDED-SUPPLIER'; }
+const sbR2 = n => Math.round((Number(n) || 0) * 100) / 100;
+const sbIsPoText = t => /^\s*(PO[-\s]|\d{5,})/i.test(String(t || ''));
+// Excel cell -> plain value (formula results, rich text, hyperlinks, dates)
+function sbCell(v) { if (v == null) return null; if (v instanceof Date) return v; if (typeof v === 'object') { if ('result' in v) return sbCell(v.result); if (Array.isArray(v.richText)) return v.richText.map(x => x.text).join(''); if ('text' in v) return v.text; if ('error' in v) return null; } return v; }
+function sbDate(v) { v = sbCell(v); if (v == null || v === '') return null;
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString().slice(0, 10);
+  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10);
+  const s = String(v).trim(); let m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  if ((m = s.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/))) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; let d = +m[1], mo = +m[2]; if (mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }   // supplier files are day/month
+    return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+  const t = Date.parse(s); return isNaN(t) ? null : new Date(t).toISOString().slice(0, 10); }
+const sbNum = v => { v = sbCell(v); if (v == null || v === '') return null; if (typeof v === 'number') return v; const n = Number(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) && String(v).match(/\d/) ? n : null; };
+// Parse the courier / sample invoice template: header block (SUPPLIER, DATE, Exchange rate, TOTAL DUE) + a table with
+// Shipment Date | Carrier | Tracking | FREIGHT / TAXES / DUTY | PO#/Sample | PCs | Sample Type | Description | Requested By | Recipient | Country | RMB | USD.
+async function sbParseXlsx(buf, filename) {
+  const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const COLS = [['date', /shipment date|ship date|date shipped/], ['carrier', /carrier.*supplier|source supplier|^carrier/], ['tracking', /tracking|awb|waybill/], ['charge', /freight.*(tax|duty)|tax.*duty|charge type|^charge/],
+    ['po', /po ?#|po\/sample|po number|^po\b|order ref/], ['pcs', /pcs|pieces|qty|quantity/], ['type', /sample type|purpose/], ['desc', /description|product type/], ['req', /requested/], ['rec', /recipient|receiver|consignee/],
+    ['country', /country/], ['cny', /rmb|cny/], ['usd', /usd|amount/]];
+  for (const ws of wb.worksheets) {
+    const rows = []; ws.eachRow({ includeEmpty: true }, (row, n) => { const a = []; row.eachCell({ includeEmpty: true }, (c, i) => { a[i - 1] = sbCell(c.value); }); rows[n - 1] = a; });
+    let hi = -1, map = null;
+    for (let i = 0; i < Math.min(rows.length, 60); i++) { const r = rows[i] || []; const txt = r.map(x => String(x == null ? '' : x).toLowerCase().replace(/\s+/g, ' ').trim());
+      if (txt.some(t => /tracking/.test(t)) && txt.some(t => /freight|tax|duty|po ?#|po\/sample/.test(t))) { hi = i; map = {};
+        txt.forEach((t, j) => { if (!t) return; for (const [k, re] of COLS) { if (map[k] == null && re.test(t)) { map[k] = j; break; } } }); break; } }
+    if (hi < 0) continue;
+    const head = {};
+    for (let i = 0; i < hi; i++) { const r = (rows[i] || []).filter(x => x != null && String(x).trim() !== ''); if (r.length < 2) continue; const k = String(r[0]).toLowerCase();
+      if (/^supplier/.test(k)) head.supplier = String(r[1]).replace(/[<>]/g, '').trim(); else if (/invoice ?(no|number|#)/.test(k)) head.invoice_no = String(r[1]).trim();
+      else if (/exchange/.test(k)) head.fx_rate = sbNum(r[1]); else if (/total/.test(k)) head.sheet_total = sbR2(sbNum(r[1])); else if (/^date/.test(k)) head.invoice_date = sbDate(r[1]); else if (/due/.test(k)) head.due_date = sbDate(r[1]); }
+    const lines = []; const g = (r, k) => map[k] == null ? null : r[map[k]];
+    for (let i = hi + 1; i < rows.length; i++) { const r = rows[i] || [];
+      const tracking = g(r, 'tracking'), po = g(r, 'po'), usd = sbNum(g(r, 'usd')), cny = sbNum(g(r, 'cny')), date = g(r, 'date');
+      if ((tracking == null || tracking === '') && (po == null || po === '') && (date == null || date === '')) continue;   // blank / totals row
+      let amount = usd != null ? usd : (cny != null && head.fx_rate ? cny / head.fx_rate : null);
+      if (amount == null) continue;
+      const shipTo = sbCountry(g(r, 'country')), typ = g(r, 'type') != null ? String(g(r, 'type')).trim() : '';
+      const descType = g(r, 'desc') != null ? String(g(r, 'desc')).trim() : '', pcs = g(r, 'pcs') != null ? String(g(r, 'pcs')).trim() : '';
+      // a misaligned row (pcs blank, values shifted one column left) still reads: the sample-type cell then holds the product description
+      lines.push({ ship_date: sbDate(date), tracking: tracking == null ? '' : String(tracking).trim(), charge: sbCharge(g(r, 'charge'), shipTo), charge_raw: g(r, 'charge') == null ? '' : String(g(r, 'charge')),
+        po_text: po == null ? '' : String(po).trim(), pcs, sample_type: typ, product_type: descType, requested_by: g(r, 'req') == null ? '' : String(g(r, 'req')).trim(), recipient: g(r, 'rec') == null ? '' : String(g(r, 'rec')).trim(),
+        ship_to: shipTo, amount_src: cny != null ? sbR2(cny) : null, amount: sbR2(amount) }); }
+    return { head, lines, sheet: ws.name, filename: filename || null };
+  }
+  return { head: {}, lines: [], filename: filename || null };
+}
+function sbDescribe(l) { const c = { freight: 'Freight', duty: 'Duty', tax: 'Taxes', product: 'Product', other: 'Charge' }[l.charge] || 'Charge';
+  const what = [l.product_type, l.sample_type && !/^sample$/i.test(l.sample_type) ? l.sample_type : '', l.pcs ? (/pcs/i.test(l.pcs) ? l.pcs : l.pcs + ' pcs') : ''].filter(Boolean).join(' · ');
+  const who = [l.requested_by ? 'req ' + l.requested_by : '', l.recipient ? 'to ' + l.recipient : ''].filter(Boolean).join(' · ');
+  return [c + (what ? ': ' + what : ''), who, l.tracking ? 'AWB ' + l.tracking : ''].filter(Boolean).join(' · '); }
+// Supplier match: code (XR), exact name, or the file name starting with a supplier name ("Lixin Group" -> Lixin).
+async function sbSupplier(text) { const t = String(text || '').replace(/[<>]/g, '').trim(); if (!t) return null;
+  const rows = (await pool.query(`SELECT name, coalesce(code,'') code, coalesce(default_currency,'USD') currency FROM planner.suppliers`)).rows;
+  const T = t.toUpperCase(); let hit = rows.find(s => s.code && s.code.toUpperCase() === T) || rows.find(s => s.name.toUpperCase() === T);
+  if (!hit) hit = rows.filter(s => s.name.length >= 3 && (T.startsWith(s.name.toUpperCase() + ' ') || s.name.toUpperCase().startsWith(T + ' '))).sort((a, b) => b.name.length - a.name.length)[0];
+  return hit || null; }
+// Route every line: HORIZON PO -> Fulfil PO (po_links / mirror) or Xero 302/313; samples -> Xero by purpose. Returns lines + checks.
+async function sbResolve(lines) {
+  const out = lines.map((l, i) => Object.assign({ seq: i + 1 }, l, { checks: [] }));
+  const texts = Array.from(new Set(out.map(l => String(l.po || l.po_text || '').trim().toUpperCase()).filter(sbIsPoText)));
+  const poRows = texts.length ? (await pool.query(`SELECT p.po, upper(p.po) up, upper(coalesce(p.country_code,'')) cc, p.supplier_name,
+      coalesce((SELECT l.external_id FROM planner.po_links l WHERE l.po=p.po AND l.system='fulfil' AND l.status='linked' AND coalesce(l.external_id,'') ~ '^[0-9]+$' LIMIT 1),
+               (SELECT m.fulfil_id::text FROM planner.fulfil_purchase_orders m WHERE m.po=p.po AND m.fulfil_id IS NOT NULL LIMIT 1)) fulfil_id
+    FROM planner.purchase_orders p WHERE upper(p.po) = ANY($1::text[])
+       OR EXISTS (SELECT 1 FROM unnest($1::text[]) t(x) WHERE t.x LIKE upper(p.po) || '-%' OR upper(p.po) LIKE t.x || '%')`, [texts])).rows : [];
+  const byUp = {}; poRows.forEach(r => { byUp[r.up] = r; });
+  const closest = t => { if (byUp[t]) return { row: byUp[t], exact: true };
+    const pre = poRows.filter(r => t.startsWith(r.up + '-')).sort((a, b) => b.up.length - a.up.length)[0]; if (pre) return { row: pre, exact: false };
+    const ext = poRows.filter(r => r.up.startsWith(t)).sort((a, b) => a.up.length - b.up.length)[0]; return ext ? { row: ext, exact: false } : null; };
+  // pass 1: PO lines
+  const trackPo = {};
+  for (const l of out) { const t = String(l.po || l.po_text || '').trim().toUpperCase(); if (!sbIsPoText(t)) continue;
+    const c = closest(t); if (!c) { l.po = String(l.po || l.po_text).trim(); l.po_found = false; l.po_unknown = true; l.po_cc = l.ship_to || '';   // not in HORIZON: still a PO charge (302 / 313), flagged
+      l.checks.push({ level: 'bad', text: l.po + ' is not a HORIZON PO: check the number, or pick the PO' }); if (l.tracking) trackPo[l.tracking] = trackPo[l.tracking] || l; continue; }
+    l.po = c.row.po; l.po_found = true; l.po_cc = c.row.cc;
+    if (!c.exact) l.checks.push({ level: 'warn', text: 'file says ' + (l.po_text || t) + ': no such PO, closest is ' + c.row.po });
+    l.fulfil_po_id = c.row.fulfil_id ? Number(c.row.fulfil_id) : null; if (l.tracking) trackPo[l.tracking] = trackPo[l.tracking] || l; }
+  // pass 2: same tracking number as a PO line -> follows that PO (Ben 13-Oct-26)
+  for (const l of out) { if (l.po_found || l.po_unknown || (l.po && sbIsPoText(l.po)) || !l.tracking || !trackPo[l.tracking]) continue; const p = trackPo[l.tracking];
+    l.po = p.po; l.po_found = !!p.po_found; l.po_unknown = !!p.po_unknown; l.po_cc = p.po_cc; l.fulfil_po_id = p.fulfil_po_id; l.inherited = true; l.checks.push({ level: 'ok', text: 'same tracking as ' + p.po + ': follows that PO' }); }
+  // sample purposes from SR refs
+  const srs = Array.from(new Set(out.map(l => l.sample_ref).filter(x => /^SR-\d+$/i.test(String(x || '')))));
+  const srPurpose = {}; if (srs.length) (await pool.query(`SELECT upper(ref) ref, purpose FROM planner.sample_requests WHERE upper(ref) = ANY($1::text[])`, [srs.map(s => s.toUpperCase())])).rows.forEach(r => { srPurpose[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean)[0] : null; });
+  const acc = {}; (await pool.query(`SELECT purpose, account_code FROM planner.sample_purpose_accounts`)).rows.forEach(r => { acc[r.purpose] = r.account_code; });
+  for (const l of out) {
+    if (l.link_locked) { if (!l.checks.length) l.checks = []; continue; }   // the user picked the route by hand: keep it
+    if (l.po_found || l.po_unknown) {
+      if (l.fulfil_po_id) { l.link_type = 'fulfil'; l.fulfil_company = fulfilCompanyForCountry(l.po_cc); l.fulfil_product = sbFulfilProduct(l.charge, l.po_cc === 'AU' ? 'AU' : (l.ship_to || l.po_cc)); l.xero_org = null; l.xero_account = null; }
+      else { l.link_type = 'xero'; l.xero_org = l.po_cc === 'AU' ? 'au' : 'uk'; l.xero_account = (l.charge === 'duty' || l.charge === 'tax') ? SB_DUTY : l.charge === 'freight' ? SB_FREIGHT : (acc.product || '1000.52');
+        if (l.po_found) l.checks.push({ level: 'info', text: l.po + ' is not in Fulfil: Xero ' + l.xero_org.toUpperCase() + ' ' + l.xero_account }); }
+      continue; }
+    const purpose = sbPurpose(l.sample_type) || (l.sample_ref && srPurpose[String(l.sample_ref).toUpperCase()]) || null;
+    l.purpose = purpose; l.link_type = 'xero';
+    if (purpose === 'photography' && l.ship_to === 'AU') { l.xero_org = 'au'; l.xero_account = SB_AU_PHOTO; }
+    else { l.xero_org = 'uk'; l.xero_account = purpose ? (acc[purpose] || null) : null;
+      if (l.ship_to === 'AU') l.checks.push({ level: 'ok', text: 'AU ship-to, not photography: Xero UK' });
+      if (!l.xero_account) l.checks.push({ level: 'bad', text: 'pick the account (sample type "' + (l.sample_type || 'blank') + '" not recognised)' }); }
+  }
+  out.forEach(l => { if (!l.description) l.description = sbDescribe(l); });
+  return out;
+}
+// Group lines into documents (one per Fulfil PO, one per Xero org), in file order, and give each its reference.
+function sbGroup(lines, refBase) {
+  const docs = [], by = {};
+  lines.forEach(l => { const key = l.link_type === 'fulfil' ? 'fulfil:' + l.fulfil_po_id : 'xero:' + (l.xero_org || 'uk'); l.doc_key = key;
+    if (!by[key]) { by[key] = { key, system: l.link_type === 'fulfil' ? 'fulfil' : 'xero', org: l.link_type === 'fulfil' ? (Number(l.fulfil_company) === FULFIL_COMPANY_AU ? 'au' : 'uk') : (l.xero_org || 'uk'),
+      fulfil_po_id: l.fulfil_po_id || null, po: l.link_type === 'fulfil' ? l.po : null, company: l.fulfil_company || null, lines: [], amount: 0 }; docs.push(by[key]); }
+    by[key].lines.push(l); by[key].amount = sbR2(by[key].amount + Number(l.amount || 0)); });
+  docs.forEach((d, i) => { d.reference = docs.length > 1 ? refBase + '-' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? String(Math.floor(i / 26)) : '') : refBase; });
+  return docs;
+}
+function sbDocDesc(d) { const pos = Array.from(new Set(d.lines.map(l => l.po).filter(Boolean)));
+  const ch = Array.from(new Set(d.lines.map(l => ({ freight: 'Freight', duty: 'Duty', tax: 'Taxes', product: 'Product', other: 'Charges' }[l.charge] || 'Charges'))));
+  return (d.system === 'fulfil' ? 'Fulfil supplier invoice' : 'Xero ' + d.org.toUpperCase() + ' bill') + ': ' + ch.join(' + ') + (pos.length ? ' (' + pos.join(', ') + ')' : '') + ' · ' + d.lines.length + ' line' + (d.lines.length === 1 ? '' : 's'); }
+function sbValidate(head, lines) { const p = [];
+  if (!String(head.supplier || '').trim()) p.push('Supplier is required.'); if (!String(head.ref_base || '').trim()) p.push('Supplier invoice number is required.');
+  if (!lines.length) p.push('Add at least one line.');
+  lines.forEach((l, i) => { const n = 'Line ' + (i + 1) + ': ';
+    if (!(Number(l.amount) > 0)) p.push(n + 'amount must be above 0.');
+    if (l.link_type === 'fulfil') { if (!l.fulfil_po_id) p.push(n + 'pick a Fulfil PO.'); }
+    else if (l.link_type === 'xero') { if (!/^(uk|au)$/.test(String(l.xero_org || ''))) p.push(n + 'pick the Xero org.'); if (!String(l.xero_account || '').trim()) p.push(n + 'pick the Xero account.');
+      if (l.xero_org === 'au' && ![SB_AU_PHOTO, SB_FREIGHT, SB_DUTY].includes(String(l.xero_account))) p.push(n + 'Xero AU takes only 1000.24 (photography samples) or 302 / 313 (an AU PO).'); }
+    else p.push(n + 'link it to a Fulfil PO or a Xero account.'); });
+  return p; }
+
+app.post('/api/supply/sample-bills/parse', async (req, res) => {
+  try { const b = req.body || {};
+    const buf = await resolveUploadBytes(b, { maxInline: 20 * 1024 * 1024 });
+    if (!/\.xlsx$/i.test(String(b.filename || '')) && buf.slice(0, 2).toString() !== 'PK') return res.json({ ok: false, error: 'Upload the supplier invoice as .xlsx (the courier / sample invoice template).' });
+    const p = await sbParseXlsx(buf, b.filename);
+    if (!p.lines.length) return res.json({ ok: false, error: 'No lines found: the file needs a table with Carrier Tracking Number, FREIGHT / TAXES / DUTY and USD (or RMB) columns.' });
+    const sup = await sbSupplier(p.head.supplier) || await sbSupplier(String(b.filename || '').replace(/[-_]/g, ' ').split(/\s+/).find(w => w && !/^\d/.test(w)));
+    const carrier = (String(b.filename || '').toUpperCase().match(/\b(FEDEX|DHL|UPS|TNT|SF ?EXPRESS|EMS|ARAMEX)\b/) || [])[1];
+    const ym = (String(b.filename || '').match(/(20\d{2})[-_ ](\d{2})/) || []); const month = ym[1] ? ym[1] + '-' + ym[2] : (p.head.invoice_date || '').slice(0, 7);
+    const code = sup ? (sup.code || sup.name.split(/\s+/)[0]).toUpperCase() : String(p.head.supplier || 'SUPPLIER').split(/\s+/)[0].toUpperCase();
+    const refBase = p.head.invoice_no || [code, carrier ? carrier.replace(/\s+/g, '') : 'SAMPLES', month].filter(Boolean).join('-');
+    const lines = await sbResolve(p.lines);
+    const total = sbR2(lines.reduce((a, l) => a + Number(l.amount || 0), 0));
+    res.json({ ok: true, head: { supplier: sup ? sup.name : (p.head.supplier || ''), supplier_text: p.head.supplier || '', supplier_found: !!sup, ref_base: refBase, ref_built: !p.head.invoice_no,
+      invoice_date: p.head.invoice_date || null, due_date: p.head.due_date || null, currency: (sup && sup.currency) || 'USD', fx_rate: p.head.fx_rate || null, sheet_total: p.head.sheet_total != null ? p.head.sheet_total : null, source_file: b.filename || null },
+      lines, total, ties: p.head.sheet_total == null ? null : Math.abs(total - p.head.sheet_total) < 0.05 });
+  } catch (e) { log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
+app.post('/api/supply/sample-bills/resolve', async (req, res) => {   // re-route after the user edits PO / sample type / ship-to on a line
+  try { const lines = Array.isArray(req.body && req.body.lines) ? req.body.lines.slice(0, 300) : [];
+    const SB_DERIVED = ['po_found', 'po_unknown', 'po_cc', 'inherited', 'purpose', 'checks', 'doc_key'];
+    const out = await sbResolve(lines.map(l => { const o = Object.assign({}, l, { description: l.description_locked ? l.description : '' });
+      if (!o.link_locked) { SB_DERIVED.forEach(k => { delete o[k]; }); delete o.fulfil_po_id; delete o.link_type; delete o.xero_org; delete o.xero_account; delete o.fulfil_company; delete o.fulfil_product; }
+      return o; }));
+    res.json({ ok: true, lines: out, docs: sbGroup(out.filter(l => l.link_type), String((req.body && req.body.ref_base) || 'REF')).map(d => ({ reference: d.reference, system: d.system, org: d.org, po: d.po, amount: d.amount, seqs: d.lines.map(l => l.seq), desc: sbDocDesc(d) })) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/sample-bills/po-search', async (req, res) => {   // HORIZON POs (with their Fulfil link) for the line picker
+  try { const q = String(req.query.q || '').trim(); if (q.length < 2) return res.json({ rows: [] });
+    const rows = (await pool.query(`SELECT p.po, upper(coalesce(p.country_code,'')) cc, coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status,
+        coalesce((SELECT l.external_id FROM planner.po_links l WHERE l.po=p.po AND l.system='fulfil' AND l.status='linked' AND coalesce(l.external_id,'') ~ '^[0-9]+$' LIMIT 1),
+                 (SELECT m.fulfil_id::text FROM planner.fulfil_purchase_orders m WHERE m.po=p.po AND m.fulfil_id IS NOT NULL LIMIT 1)) fulfil_id
+      FROM planner.purchase_orders p WHERE p.po ILIKE $1 ORDER BY (p.po ILIKE $2) DESC, p.po DESC LIMIT 25`, ['%' + q.replace(/[%_\\]/g, '\\$&') + '%', q.replace(/[%_\\]/g, '\\$&') + '%'])).rows;
+    res.json({ rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/sample-bills/sample-search', async (req, res) => {   // SR-n sample requests + product samples, for the optional sample reference
+  try { const q = String(req.query.q || '').trim(); if (q.length < 1) return res.json({ rows: [] }); const pat = '%' + q.replace(/[%_\\]/g, '\\$&') + '%';
+    const sr = (await pool.query(`SELECT ref, coalesce(array_to_string(purpose, ', '),'') purpose, coalesce(supplier_name,'') supplier FROM planner.sample_requests WHERE ref ILIKE $1 OR coalesce(supplier_name,'') ILIKE $1 ORDER BY id DESC LIMIT 15`, [pat]).catch(() => ({ rows: [] }))).rows.map(r => ({ ref: r.ref, kind: 'Sample request', note: [r.purpose, r.supplier].filter(Boolean).join(' · ') }));
+    const ps = (await pool.query(`SELECT item_ref || ' v' || version ref, coalesce(short_code,'') code FROM planner.product_dev_samples WHERE item_ref ILIKE $1 OR coalesce(short_code,'') ILIKE $1 ORDER BY id DESC LIMIT 15`, [pat]).catch(() => ({ rows: [] }))).rows.map(r => ({ ref: r.ref, kind: 'Product sample', note: r.code }));
+    res.json({ rows: sr.concat(ps) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Create: one Other payment per document (same reference); optionally push each document straight away.
+app.post('/api/supply/sample-bills/create', async (req, res) => {
+  const b = req.body || {}, head = Object.assign({}, b.head || {}), lines0 = Array.isArray(b.lines) ? b.lines.slice(0, 300) : [];
+  head.ref_base = String(head.ref_base || '').trim().replace(/\s+/g, '-'); head.supplier = String(head.supplier || '').trim();
+  const lines = lines0.map((l, i) => Object.assign({}, l, { seq: i + 1, amount: sbR2(l.amount), description: String(l.description || '').trim() || sbDescribe(l) }));
+  const problems = sbValidate(head, lines); if (problems.length) return res.status(400).json({ error: problems.join(' '), problems });
+  const docs = sbGroup(lines, head.ref_base);
+  const clash = (await pool.query(`SELECT reference FROM planner.deposits WHERE upper(reference) = ANY($1::text[])`, [docs.map(d => d.reference.toUpperCase())])).rows;
+  if (clash.length) return res.status(409).json({ error: 'Reference already used in Other payments / deposits: ' + clash.map(r => r.reference).join(', ') + '. Change the supplier invoice number.' });
+  const who = shortUser(authUser(req)) || null; const client = await pool.connect(); let billId;
+  try { await client.query('BEGIN');
+    billId = (await client.query(`INSERT INTO planner.sample_bills (ref_base, supplier_name, invoice_date, due_date, currency, fx_rate, source_file, sheet_total, total, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.ref_base, head.supplier, head.invoice_date || null, head.due_date || null, String(head.currency || 'USD').toUpperCase(), sbNum(head.fx_rate), head.source_file || null,
+      sbNum(head.sheet_total), sbR2(lines.reduce((a, l) => a + l.amount, 0)), who])).rows[0].id;
+    for (const d of docs) {
+      const opId = (await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description, reference, date_due, country, xero_account_code, sample_bill_id, doc_system, doc_org)
+        VALUES (false,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [head.supplier, d.amount, sbDocDesc(d), d.reference, head.due_date || head.invoice_date || null, d.org.toUpperCase(),
+        d.system === 'xero' && new Set(d.lines.map(l => l.xero_account)).size === 1 ? d.lines[0].xero_account : null, billId, d.system, d.org])).rows[0].id;
+      d.other_payment_id = opId;
+      for (const l of d.lines) await client.query(`INSERT INTO planner.sample_bill_lines (bill_id, seq, ship_date, tracking, charge, description, ship_to, sample_type, requested_by, recipient, pcs, po, link_type, fulfil_po_id,
+          fulfil_po_number, fulfil_company, fulfil_product, xero_org, xero_account, sample_ref, amount_src, amount, doc_key, other_payment_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+        [billId, l.seq, l.ship_date || null, l.tracking || null, l.charge || 'freight', l.description, l.ship_to || null, l.sample_type || null, l.requested_by || null, l.recipient || null, l.pcs || null, l.po || null, l.link_type,
+         l.fulfil_po_id || null, l.fulfil_po_number || null, l.fulfil_company || null, l.link_type === 'fulfil' ? (l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to)) : null, l.link_type === 'xero' ? l.xero_org : null,
+         l.link_type === 'xero' ? String(l.xero_account) : null, l.sample_ref || null, sbNum(l.amount_src), l.amount, d.key, opId]);
+    }
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); client.release(); log500(e); return res.status(500).json({ error: e.message }); }
+  client.release();
+  invalidateSupplyCaches('deposit');
+  const created = docs.map(d => ({ other_payment_id: d.other_payment_id, reference: d.reference, system: d.system, org: d.org, amount: d.amount, desc: sbDocDesc(d) }));
+  if (b.push) { for (const c of created) { try { Object.assign(c, await sbPushDoc(c.other_payment_id, { who })); } catch (e) { c.push_error = e.message; } } }
+  res.json({ ok: true, sample_bill_id: billId, created });
+});
+async function sbDocLines(opId) { return (await pool.query(`SELECT l.*, b.supplier_name, to_char(b.invoice_date,'YYYY-MM-DD') invoice_date, to_char(b.due_date,'YYYY-MM-DD') due_date, b.currency, b.ref_base FROM planner.sample_bill_lines l JOIN planner.sample_bills b ON b.id=l.bill_id WHERE l.other_payment_id=$1 ORDER BY l.seq`, [opId])).rows; }
+function sbFulfilInvoiceUrl(cfg, id) { return cfg && cfg.subdomain && id ? 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/account.invoice/' + id : null; }
+// Push one Other payment's document (Fulfil draft supplier invoice + draft landed cost, or Xero bill). Never creates twice: an existing
+// document with the same reference is linked instead. opts.dry -> returns the payload, writes nothing.
+async function sbPushDoc(opId, opts) { opts = opts || {};
+  const dep = (await pool.query(`SELECT id, reference, supplier_name, amount, to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'doc_org' doc_org FROM planner.deposits d WHERE id=$1`, [opId])).rows[0];
+  if (!dep) throw Object.assign(new Error('Other payment not found'), { status: 404 });
+  if (dep.doc_id) return { already: true, doc_id: dep.doc_id };
+  const lines = await sbDocLines(opId); if (!lines.length) throw Object.assign(new Error('This Other payment was not made by Create sample bills: nothing to push.'), { status: 400 });
+  const L0 = lines[0], ref = dep.reference, cur = String(L0.currency || 'USD').toUpperCase();
+  const save = async (o) => { await pool.query(`UPDATE planner.deposits SET doc_id=$2, doc_number=$3, doc_url=$4, doc_status=$5, doc_landed_cost_id=$6, doc_error=$7, doc_pushed_at=now(), doc_pushed_by=$8, updated_at=now() WHERE id=$1`,
+    [opId, o.doc_id == null ? null : String(o.doc_id), o.doc_number || null, o.doc_url || null, o.doc_status || null, o.landed_cost_id == null ? null : String(o.landed_cost_id), o.warning || null, opts.who || null]); invalidateSupplyCaches('deposit'); return o; };
+  if (L0.link_type === 'xero') {
+    const org = xeroRegion(L0.xero_org || 'uk');
+    const body = { Type: 'ACCPAY', Date: (L0.invoice_date && String(L0.invoice_date instanceof Date ? L0.invoice_date.toISOString() : L0.invoice_date).slice(0, 10)) || new Date().toISOString().slice(0, 10),
+      DueDate: L0.due_date ? String(L0.due_date instanceof Date ? L0.due_date.toISOString() : L0.due_date).slice(0, 10) : undefined, InvoiceNumber: ref, Reference: ref, CurrencyCode: cur, Status: 'DRAFT', LineAmountTypes: 'NoTax',
+      LineItems: lines.map(l => ({ Description: [l.description, l.po ? 'PO ' + l.po : '', l.sample_ref ? 'Sample ' + l.sample_ref : ''].filter(Boolean).join(' · ').slice(0, 4000), Quantity: 1, UnitAmount: Number(l.amount) || 0, AccountCode: l.xero_account })) };
+    if (opts.dry) return { dry: true, system: 'xero', org, contact_for: dep.supplier_name, body };
+    const xc = await xeroContactFor(org, dep.supplier_name, { fresh: true }); if (!xc.ok) throw Object.assign(new Error(xc.error), { status: 400, code: 'XERO_CONTACT_MISSING' });
+    body.Contact = { ContactID: xc.ContactID };
+    const ex = await xeroFetch(org, '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + ref.replace(/"/g, '') + '" AND Contact.ContactID==guid("' + xc.ContactID + '") AND Status!="DELETED" AND Status!="VOIDED"'));
+    let inv = ex && ex.Invoices && ex.Invoices[0], linked = !!inv;
+    if (!inv) { const r = await xeroFetch(org, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } }); inv = r && r.Invoices && r.Invoices[0]; }
+    if (!inv || !inv.InvoiceID) throw new Error('Xero did not return the bill');
+    return save({ system: 'xero', doc_id: inv.InvoiceID, doc_number: inv.InvoiceNumber || ref, doc_url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + inv.InvoiceID, doc_status: (linked ? 'existing · ' : '') + String(inv.Status || 'DRAFT').toLowerCase() + ' · ' + org.toUpperCase() });
+  }
+  // Fulfil: draft supplier invoice on the PO's company, LANDED-* product per charge, header 9001 Fulfil - Payable, lines on the product's account
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) throw Object.assign(new Error('Fulfil ' + cfg.env + ' API not configured: nothing was pushed.'), { status: 501 });
+  const company = Number(L0.fulfil_company) || FULFIL_COMPANY_UK, fpo = Number(L0.fulfil_po_id);
+  const sup = (await pool.query(`SELECT name, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id, coalesce(address_1,'') address_1, coalesce(address_2,'') address_2, coalesce(city,'') city, coalesce(country,'') country, coalesce(postcode,'') postcode FROM planner.suppliers WHERE name=$1`, [dep.supplier_name])).rows[0] || { name: dep.supplier_name };
+  const partyId = (/^\d+$/.test(String(sup.fulfil_id || '')) ? Number(sup.fulfil_id) : null) || await fulfilResolveParty(dep.supplier_name);
+  if (!partyId) throw Object.assign(new Error('Supplier ' + dep.supplier_name + ' has no Fulfil party: set its Fulfil id in SUPPLY ▸ CONFIG ▸ Suppliers. Nothing was pushed.'), { status: 400 });
+  const codes = Array.from(new Set(lines.map(l => l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to))));
+  const prods = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', codes]], 0, codes.length + 5, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
+  const pBy = {}; (prods || []).forEach(p => { pBy[p.code] = p; }); const miss = codes.filter(c => !pBy[c]); if (miss.length) throw Object.assign(new Error('Fulfil product missing: ' + miss.join(', ') + '. Nothing was pushed.'), { status: 400 });
+  const accs = await fulfilFetch('PUT', '/model/account.account/search_read', [[['code', 'in', ['9001', '9039']], ['company', '=', company]], 0, 10, null, ['id', 'code']]);
+  const aBy = {}; (accs || []).forEach(a => { aBy[a.code] = a.id; }); if (!aBy['9001']) throw Object.assign(new Error('Fulfil account 9001 Fulfil - Payable not found for company ' + company + '. Nothing was pushed.'), { status: 400 });
+  const currency = await fulfilResolveCurrency(cur);
+  const payload = { type: 'in', company, party: partyId, currency, account: aBy['9001'], reference: ref, description: lines.map(l => l.po).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') + ' · sample bill ' + ref,
+    invoice_date: L0.invoice_date ? String(L0.invoice_date instanceof Date ? L0.invoice_date.toISOString() : L0.invoice_date).slice(0, 10) : null,
+    lines: [['create', lines.map(l => { const p = pBy[l.fulfil_product || sbFulfilProduct(l.charge, l.ship_to)]; return { type: 'line', product: p.id, unit: p.purchase_uom || p.default_uom, quantity: 1,
+      unit_price: String(Math.round(Number(l.amount) * 10000) / 10000), description: [l.description, l.po ? 'PO ' + l.po : ''].filter(Boolean).join(' · '), ...(aBy['9039'] ? { account: aBy['9039'] } : {}) }; })]] };
+  if (opts.dry) return { dry: true, system: 'fulfil', env: cfg.env, fulfil_po_id: fpo, payload };
+  if (cfg.env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') throw Object.assign(new Error('LIVE Fulfil writes are DISABLED (FULFIL_LIVE_WRITES gate). Nothing was pushed.'), { status: 423 });
+  const ex = await fulfilFetch('PUT', '/model/account.invoice/search_read', [[['type', '=', 'in'], ['reference', '=', ref], ['company', '=', company], ['state', '!=', 'cancel']], 0, 1, null, ['id', 'number', 'state']]);
+  if (Array.isArray(ex) && ex[0]) return save({ system: 'fulfil', doc_id: ex[0].id, doc_number: ex[0].number || ref, doc_url: sbFulfilInvoiceUrl(cfg, ex[0].id), doc_status: 'existing · ' + (ex[0].state || 'draft') });
+  payload.invoice_address = await fulfilFindPartyAddress(partyId) || await fulfilCreatePartyAddress(partyId, sup);
+  const made = await fulfilFetch('POST', '/model/account.invoice', [payload]);
+  const invId = Array.isArray(made) ? (made[0] && (typeof made[0] === 'object' ? made[0].id : made[0])) : (made && made.id);
+  if (!invId) throw new Error('Fulfil did not return the invoice id');
+  // landed cost (draft), by value, over the Fulfil PO's supplier shipments
+  let lcId = null, warning = null;
+  try { const po = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fpo]], 0, 1, null, ['id', 'shipments']]);
+    const ships = (Array.isArray(po) && po[0] && po[0].shipments) || [];
+    const il = await fulfilFetch('PUT', '/model/account.invoice.line/search_read', [[['invoice', '=', invId], ['type', '=', 'line']], 0, 200, null, ['id']]);
+    if (!ships.length) warning = 'Invoice created; no supplier shipment on the Fulfil PO yet, so no landed cost: allocate it in Fulfil once the shipment exists.';
+    else { const lc = await fulfilFetch('POST', '/model/account.landed_cost', [{ company, allocation_method: 'value', moves_selection_method: 'all', invoice_lines: [['add', (il || []).map(x => x.id)]], shipments: [['add', ships]] }]);
+      lcId = Array.isArray(lc) ? (lc[0] && (typeof lc[0] === 'object' ? lc[0].id : lc[0])) : (lc && lc.id); }
+  } catch (e) { warning = 'Invoice created; landed cost NOT created (' + e.message + '): allocate it in Fulfil.'; }
+  return save({ system: 'fulfil', doc_id: invId, doc_number: ref, doc_url: sbFulfilInvoiceUrl(cfg, invId), doc_status: 'draft · ' + (company === FULFIL_COMPANY_AU ? 'AU' : 'UK') + ' co.' + (cfg.env !== 'live' ? ' · ' + cfg.env : ''), landed_cost_id: lcId, warning });
+}
+app.post('/api/supply/sample-bills/push/:id', async (req, res) => {
+  try { const r = await sbPushDoc(Number(req.params.id), { dry: !!(req.body && req.body.dry), who: shortUser(authUser(req)) || null }); res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { if (!e.status || e.status >= 500) log500(e);
+    try { await pool.query(`UPDATE planner.deposits SET doc_error=$2 WHERE id=$1`, [Number(req.params.id), String(e.message).slice(0, 400)]); } catch (_) {}
+    res.status(e.status || 500).json({ error: e.message, code: e.code }); }
 });
 
 // AI proxy — the artefact's Claude calls hit api.anthropic.com keyless (only works inside

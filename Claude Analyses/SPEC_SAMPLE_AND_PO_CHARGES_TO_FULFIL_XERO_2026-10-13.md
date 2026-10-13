@@ -36,14 +36,23 @@ Creating the Xero bill or the Fulfil supplier invoice also creates (or updates) 
 
 ## Open questions (to settle before building)
 1. ~~AU samples~~ ANSWERED (Ben 13-Oct-26): the only reason to send a sample to AU is 1000.24 (Photo, video & media creation, other costs). Any other AU charge belongs to an AU order (Path A, Fulfil).
-2. Org for a sample charge with no PO: decided by the supplier's currency / the sample's market, or picked each time?
-3. Tax on these bills (supplier abroad, usually no GST / VAT; zero rated?).
-4. Fulfil supplier invoice: draft, or posted? Payment then via Payments Report as today?
-5. Landed cost: allocation method (by value / quantity / weight) and which cost to allocate when an SS and an IS both exist.
-6. Approval: who may push (ACCOUNTS / admin, as v28.305)?
-7. Currency: the supplier's currency (USD) on both Fulfil and Xero, converted by the system rate?
+2. ~~Org~~ ANSWERED (Ben 13-Oct-26): no-PO sample charges go to Xero UK by purpose (Product Development -> 1000.52 product team), even when shipped to AU. Only a Photography sample goes to Xero AU 1000.24.
+2b. ANSWERED (Ben 13-Oct-26): ONE Other payment per Fulfil supplier invoice and per Xero bill; all Xero lines for one org combine into one bill (a line per account). Multiple documents from one supplier invoice get suffixes -A, -B, -C.
+2c. ANSWERED (Ben 13-Oct-26): a line sharing a carrier tracking number with a PO-linked line follows that PO automatically.
+2d. ANSWERED (Ben 13-Oct-26): no invoice number in the file -> reference built from supplier + carrier + month (e.g. XR-FEDEX-2026-02).
+3. ~~Tax~~ ANSWERED (Ben 13-Oct-26): no tax on these bills / invoices.
+4. ~~Draft or posted~~ ANSWERED (Ben 13-Oct-26): Fulfil supplier invoice is created as DRAFT.
+5. ~~Landed cost~~ ANSWERED (Ben 13-Oct-26): spread BY VALUE across the PO shipment.
+6. ~~Approval~~ ANSWERED (Ben 13-Oct-26): anyone with SUPPLY edit may create and push (Xero bill or Fulfil supplier invoice) straight away. The "bill only after an unreconciled bank line" rule applies to ACCOUNTS > Reconcile only.
+7. ~~Currency~~ ANSWERED (Ben 13-Oct-26): the supplier's currency (USD for XR / Lixin), on both Fulfil and Xero.
 
 ## Build notes (from what exists)
 - Fulfil writes go through `fulfilFetch` (live writes need FULFIL_LIVE_WRITES + Ben's go); PO picker = `/api/supply/fulfil/po-search`.
 - Xero bills: `xeroFetch(org, '/api.xro/2.0/Invoices', POST)`, contact by `xeroContactLookup` (never auto-create), as ACCOUNTS bills.
 - Supplier portal charges: `planner.additional_costs` (PO / shipment), sample charges on sample requests.
+
+## Build findings (13-Oct-26, live reads)
+- The example POs (PO-53USXR9-FEB, PO-54UKXR1-AIR, PO-54AUXR2-AIR, PO-1761191, PO-56USLX3-AIR, PO-DILLARDS-332-LX-HW) are COMPLETE pre-Fulfil POs with no Fulfil link. HORIZON PO -> Fulfil PO is resolved via po_links / fulfil_purchase_orders; none found -> line flagged "not in Fulfil".
+- Ben (13-Oct-26, "maybe these 2 accounts"): a PO charge whose PO is not in Fulfil goes to a Xero bill on **302 Shipping Freight Fees (Import Only)** (freight) or **313 Import Duty** (duty / taxes). Both codes exist and are ACTIVE in Xero UK and AU; org follows the PO country (AU -> AU, else UK).
+- Live Fulfil supplier invoices: header account 9001 Fulfil - Payable (UK id 1003 / AU id 1004), lines on 9039 Inventory Landed Cost Accruals; products LANDED-FREIGHT, LANDED-IMPORT-DUTY, LANDED-IMPORT-TAX-UK/AU/EU; account.landed_cost allocation_method 'value', moves_selection_method 'all', shipments (stock.shipment.in) / internal_shipments.
+- Same Fulfil PO -> ONE invoice with a line per charge (Ben, Dillard's HW-A/B/C).

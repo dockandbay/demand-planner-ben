@@ -1,3 +1,19 @@
+## v28.327 (Ben, branch review-fixes-2026-10-05): Create sample bills (Other payments)
+
+**Files:** `server.mjs`, `supply/inject.html`, `migrations/365_sample_bills.sql`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md)
+
+SUPPLY ▸ PAYMENTS ▸ Other Payments ▸ **+ Create sample bills** (Ben 13-Oct-26). A supplier's courier / sample invoice (typed in, or dropped as the FedEx / DHL "SUPPLIER SAMPLE INVOICE TEMPLATE" .xlsx) becomes one Other payment per document, each with the document's reference.
+
+- **Upload:** reads the template header (supplier, date, exchange rate, total due) and table; USD column, else RMB ÷ rate; checks the lines tie to the sheet total. Supplier matched by code / name ("<LIXIN GROUP>" -> Lixin). No invoice number in the file -> reference = supplier code + carrier + month (XR-FEDEX-2026-02).
+- **Routing per line (all editable):** HORIZON PO linked to Fulfil -> Fulfil; PO not in Fulfil (or unknown number, flagged; "PO-X-A" suggests PO-X) -> Xero 302 freight / 313 duty and taxes, org by the PO's country; sample (no PO) -> Xero UK by purpose (1000.52 / 1000.47 / 1000.44 / 1000.61); photography sample to AU -> Xero AU 1000.24. Same tracking number as a PO line -> follows that PO. US "Taxes" = duty.
+- **Documents:** one Fulfil supplier invoice per Fulfil PO (DRAFT; header 9001 Fulfil - Payable; LANDED-FREIGHT / LANDED-IMPORT-DUTY / LANDED-IMPORT-TAX-UK|AU|EU lines on 9039; then a DRAFT landed cost by value over the PO's supplier shipments) and one Xero DRAFT bill per org. -A / -B / -C when one invoice makes several. No tax, supplier currency. An existing invoice / bill with the same reference is linked, never duplicated.
+- **Create:** "Other payments only (push later)" or "Other payments + Fulfil supplier invoices / Xero bills". SUPPLY edit may do both (Ben: the ACCOUNTS bank-line rule is for ACCOUNTS ▸ Reconcile only).
+- **Other payments:** new Document column: a link to the Fulfil invoice / Xero bill with its status once pushed, else a Push button (and the last push error).
+- **Endpoints:** POST /api/supply/sample-bills/parse, /resolve, /create, /push/:id (`{dry:true}` returns the payload, writes nothing); GET /api/supply/sample-bills/po-search, /sample-search.
+- **Migration 365 (additive):** planner.sample_bills, planner.sample_bill_lines; planner.deposits gets sample_bill_id, doc_system, doc_org, doc_id, doc_number, doc_url, doc_status, doc_landed_cost_id, doc_error, doc_pushed_at, doc_pushed_by. The Other payments list reads the new columns through to_jsonb, so it works before the migration.
+- **Live needs:** Fulfil writes stay behind FULFIL_LIVE_WRITES. Live Fulfil has LANDED-FREIGHT, LANDED-IMPORT-DUTY and LANDED-IMPORT-TAX-UK/AU/EU (checked 13-Oct-26); the Fulfil sandbox has only LANDED-FREIGHT. Suppliers need their Fulfil party id (suppliers.fulfil_id) and Xero contact.
+- **Tested (sandbox):** the three example files parse and tie (FedEx Feb-26 1,516.57; DHL Jul-26 563.87; Lixin DHL Aug-26 21,082.29); routing, grouping, create, list and dry-run pushes. Not tested: a real Fulfil or Xero push (sandbox Xero is live Xero; the Fulfil sandbox write was not run).
+
 ## v28.326 (Ben, branch review-fixes-2026-10-05): commissions stage 1, agent set-up
 
 **Files:** `server.mjs`, `supply/inject.html`, `migrations/364_commission_setup.sql`, `scripts/seed_commission_setup.cjs` (+ package.json, CHANGES.md). **Migration 364.** No env vars.
