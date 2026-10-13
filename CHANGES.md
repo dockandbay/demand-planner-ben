@@ -1,3 +1,15 @@
+## v28.337 (Ben, branch review-fixes-2026-10-05): migration 366 links the existing agent client; commission seed CSV in the repo
+
+**Files:** `migrations/366_agent_clients.sql`, `Claude Analyses/COMMISSION_SEED_2026-10-13.csv` (+ package.json, CHANGES.md). No server or UI change.
+
+From Diviyaj's v28.336 deploy (14-Oct-26):
+- **Migration 366 (held on live):** live has the agent client "SHAUBEN" (users, portal features on) with `rep_group_id` NULL, and the rep group "Shauben", which `seed_commission_setup.cjs` renames "Agent - Schauben". The old 366 would have added a second Schauben client next to it.
+  - **Step 1 (new):** an existing agent client with no rep group is linked to its agent's rep group by name. Names are compared without an "Agent -" prefix and without non-letters, and Shauben / Schauben / Appelman count as the same agent. A rep group already linked to a client is never taken.
+  - **Step 2 (unchanged):** a client of type Agent for every rep group still without one.
+  - **Tested on the sandbox in a rolled-back transaction:** an unlinked "SHAUBEN" agent client was linked to "Agent - Schauben" with no duplicate, and a re-run changed nothing.
+- **Order on live:** `node scripts/seed_commission_setup.cjs` first, then migration 366, then the paid-history import (Ben's PAID_HISTORY CSV), then Sync all agents from Xero.
+- **`Claude Analyses/COMMISSION_SEED_2026-10-13.csv`** is now in the repo; `seed_commission_setup.cjs` reads it from that path. It was left untracked at c3ea56a5.
+
 ## v28.336 (Ben, branch review-fixes-2026-10-05): client type badges coloured
 
 **Files:** `supply/inject.html` (+ package.json, CHANGES.md)
