@@ -1,3 +1,9 @@
+## v28.317 (Ben, branch review-fixes-2026-10-05): Bank statement upload box in light purple
+
+**Files:** `supply/inject.html` (+ package.json, CHANGES.md). No migration, no env vars.
+
+- Ben: "make Upload Uncoded statement lines (.csv) or drag the Xero export here clearer colour maybe light purple shading". The upload box on ACCOUNTS > Bank statement is light purple (purple dashed border), the Upload button purple, "⤓ or drag the Xero export here" in purple; the box deepens while a file is dragged over it. Works in dark mode (transparent purple).
+
 ## v28.316 (Ben, branch review-fixes-2026-10-05): Auto bills remove / run after upload / one click; coding suggested from previous Xero bills
 
 **Files:** `server.mjs`, `supply/inject.html`, `lib/ai-logic/supply-finance.md` (+ package.json, CHANGES.md). No migration, no env vars.
