@@ -17020,7 +17020,15 @@ async function _tplGenevaAllocate(period) {
 // the DI's channel Freight/Fulfilment; VAT split by whether the line carries 20% VAT. Cin7-independent — the DI
 // invoices already carry the channel + charge codes. FREIGHT DETAIL (the big Ecom/Shopify shipping) comes from a
 // separate "invoice_00" per-order spreadsheet that's usually supplied on top of the DI summary invoices.
-const ILG_CODE = { 'Other Fees': '303.33', 'Storage Fees': '308', 'Fulfilment - UK - Amazon': '1000.80', 'Fulfilment - UK - Co-Brand/Custom': '303.37', 'Fulfilment - UK - Dropship': '303.32', 'Fulfilment - UK - Faire': '303.31', 'Fulfilment - UK - Marketplace': '303.38', 'Fulfilment - UK - Shopify': '303.35', 'Fulfilment - UK - Wholesale': '303.34', 'Fulfilment - EU - Wholesale (excl. DE, FR, Dist)': '1000.76' };
+// v28.340 (Ben 14-Oct-26: all Xero account config from the mapping tables): ILG / Geneva bill codes come from
+// planner.tpl_account_map (fulfilment_account per channel label, e.g. "UK - Amazon") and planner.tpl_cost_accounts
+// (storage / other per 3PL), kept as TEXT. Nothing is written here; a missing mapping leaves the line uncoded.
+async function tplXeroCodes(tpl) {
+  const chan = {}; (await pool.query(`SELECT label, fulfilment_account FROM planner.tpl_account_map`)).rows.forEach(r => { const c = String(r.fulfilment_account || '').trim(); if (c) chan[String(r.label || '').trim().toLowerCase()] = c; });
+  const cost = {}; (await pool.query(`SELECT cost_type, account_code FROM planner.tpl_cost_accounts WHERE tpl=$1`, [tpl])).rows.forEach(r => { const c = String(r.account_code || '').trim(); if (c) cost[r.cost_type] = c; });
+  return { chan, cost, forChannel: label => chan[String(label || '').replace(/^(COGS|Fulfilment)\s*-\s*/i, '').trim().toLowerCase()] || '' };
+}
+function ilgCode(x, account) { return account === 'Storage Fees' ? (x.cost.storage || '') : account === 'Other Fees' ? (x.cost.other || '') : x.forChannel(account); }
 const ILG_FEEMAP = { 'GOODS-IN': 'Other Fees', 'MANAGEMENT-FEE': 'Other Fees', 'MANAGEMENT FEE': 'Other Fees', 'REWORK': 'Other Fees', 'PACKAGING': 'Other Fees', 'PERSONALISATION FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION-FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION': 'Fulfilment - UK - Shopify', 'RETURN-CHARGES': 'Fulfilment - UK - Shopify', 'LABOUR-CHARGE': 'Fulfilment - UK - Shopify', 'TICKETING': 'Fulfilment - UK - Shopify', 'FUSION INTEGRATION': 'Fulfilment - UK - Shopify' };
 const ILG_CHAN = { WHOLESALE: 'Wholesale', FBA: 'Amazon', AMAZON: 'Amazon', ECOM: 'Shopify', RETAIL: 'Shopify' };
 async function _tplIlgDiItems(buf) {
@@ -17114,6 +17122,7 @@ async function _tplIlgAllocate(period) {
     if (di.invRef && inva.length && !invaUsed) {   // v28.296: the detail report carries this invoice's lines, by order
       invaUsed = true;
       const tot = inva.reduce((s, x) => s + x.gross, 0), tax = inva.reduce((s, x) => s + x.vat, 0);
+  const _xc = await tplXeroCodes('uk_ilg');   // v28.340: codes from the mapping tables
       seen.push({ di: di.invRef, si: di.siRef, channel: di.channel || 'Ecom', total: r2(tot), tax: r2(tax), detail: true });
       if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
       checkPrinted(di.invRef, tot, di.printed);
@@ -17153,7 +17162,7 @@ async function _tplIlgAllocate(period) {
     if (!cc && w.base) { try { const pre = (await pool.query(`SELECT DISTINCT coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference ILIKE $1`, [w.base.replace(/[%_]/g, '') + '%'])).rows.map(r => String(r.cc || '').trim()).filter(Boolean); if (pre.length === 1) cc = pre[0]; } catch (e) {} }
     add(cc ? ccAcct(cc) : 'Other Fees', cc ? 'fulfilment' : 'overhead', w.vat > 0.005, w.total, w.vat);
     reworkOut.push({ order: w.ref || w.key || '', account: cc ? ccAcct(cc) : 'Other Fees', amount: r2(w.total), text: String(w.text || '').slice(0, 120) }); }
-  const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ILG_CODE[b.account] || '' }));
+  const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ilgCode(_xc, b.account) }));
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
   const missing = [];
@@ -18698,7 +18707,10 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     if (tpl0 === 'us_geneva') {
       // Geneva books by FEE TYPE (not the generic per-order aggregation): freight per-order→CostCentre, fulfilment by
       // fee-type, B2B split Wholesale/Faire by units, overhead→Geneva accounts, unmapped freight residual→Manual Other Fees.
-      const GENEVA_XERO = { 'COGS - US - Amazon': { code: '303.27', desc: 'Fulfilment - US - Amazon', cc: true }, 'COGS - US - Co-Brand/Custom': { code: '303.22', desc: 'Fulfilment - US - Co-Brand/Custom', cc: true }, 'COGS - US - Faire': { code: '303.21', desc: 'Fulfilment - US - Faire', cc: true }, 'COGS - US - Shopify': { code: '303.25', desc: 'Fulfilment - US - Shopify', cc: true }, 'COGS - US - Wholesale': { code: '303.24', desc: 'Fulfilment - US - Wholesale', cc: true }, 'Geneva USA - Other fees': { code: '303.26', desc: 'Geneva USA - Other fees', cc: false }, 'Geneva USA - Storage Fees - Other': { code: '309', desc: 'Geneva USA - Storage Fees - Other', cc: false } };
+      const _gx = await tplXeroCodes('us_geneva');   // v28.340: channel codes from tpl_account_map, storage / other from Config / Accounts
+      const GENEVA_XERO = {}; ['COGS - US - Amazon', 'COGS - US - Co-Brand/Custom', 'COGS - US - Faire', 'COGS - US - Shopify', 'COGS - US - Wholesale'].forEach(n => { GENEVA_XERO[n] = { code: _gx.forChannel(n), desc: n.replace(/^COGS\s*-\s*/, 'Fulfilment - '), cc: true }; });
+      GENEVA_XERO['Geneva USA - Other fees'] = { code: _gx.cost.other || '', desc: 'Geneva USA - Other fees', cc: false };
+      GENEVA_XERO['Geneva USA - Storage Fees - Other'] = { code: _gx.cost.storage || '', desc: 'Geneva USA - Storage Fees - Other', cc: false };
       const g = await _tplGenevaAllocate(period);
       if (!g.ok) return res.status(400).json({ error: g.error || 'Geneva allocation failed' });
       const gm = {}; (g.costCenters || []).forEach(c => { gm[c.costCenter] = c; });
@@ -18706,14 +18718,13 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       CCS.forEach(n => { const c = gm[n]; if (c && Math.abs(c.freight) > 0.005) push('Freight - ' + GENEVA_XERO[n].desc, c.freight, GENEVA_XERO[n].code, null, 'cost-centre'); });   // all FREIGHT lines first
       CCS.forEach(n => { const c = gm[n]; if (c && Math.abs(c.fulfilment) > 0.005) push('Fulfilment - ' + GENEVA_XERO[n].desc, c.fulfilment, GENEVA_XERO[n].code, null, 'cost-centre'); });   // then all FULFILMENT lines
       ['Geneva USA - Storage Fees - Other', 'Geneva USA - Other fees'].forEach(n => { const c = gm[n]; if (!c) return; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(GENEVA_XERO[n].desc, amt, GENEVA_XERO[n].code, null, 'overhead'); });   // overhead accounts (single line each)
-      (g.costCenters || []).forEach(c => { if (CCS.indexOf(c.costCenter) >= 0 || /Geneva USA/.test(c.costCenter)) return; const x = GENEVA_XERO[c.costCenter] || { code: '', desc: c.costCenter }; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(x.desc, amt, x.code, null, 'other'); });   // any unexpected account (safety)
-      if (g.unmapped && g.unmapped.freight > 0.005) push('Manual Other Fees', g.unmapped.freight, '303.26', null, 'unmapped');   // freight of orders with no resolved CostCentre → manual plug (matches Ben's sheet)
+      (g.costCenters || []).forEach(c => { if (CCS.indexOf(c.costCenter) >= 0 || /Geneva USA/.test(c.costCenter)) return; const x = GENEVA_XERO[c.costCenter] || { code: _gx.forChannel(c.costCenter), desc: c.costCenter }; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(x.desc, amt, x.code, null, 'other'); });   // any unexpected account (safety)
+      if (g.unmapped && g.unmapped.freight > 0.005) push('Manual Other Fees', g.unmapped.freight, _gx.cost.other || '', null, 'unmapped');   // freight of orders with no resolved CostCentre → manual plug (matches Ben's sheet)
     } else if (tpl0 === 'uk_ilg') {
       // ILG books by charge-code from the DI invoices (Cin7-independent); per-line VAT (20% amount = total/6) or No VAT.
       const gi = await _tplIlgAllocate(period);
       if (!gi.ok) return res.status(400).json({ error: gi.error || 'ILG allocation failed' });
-      const ilgCfg = { 'Storage Fees': cacc['storage'], 'Other Fees': cacc['other'] };   // v28.338: ILG's 3PL Config / Accounts codes win (kept as TEXT: 308 and 308.00 are different Xero accounts)
-      (gi.lines || []).forEach(l => { const desc = l.kind === 'freight' ? ('Freight - ' + l.account) : (l.kind === 'fulfilment' ? ('Fulfilment - ' + l.account) : l.account); blines.push({ desc, amount: l.amount, code: String(ilgCfg[l.account] || '').trim() || l.code || '', taxType: l.vat ? '20% (VAT on Expenses)' : 'No VAT', taxAmount: l.vat ? l.tax : 0, currency: cur, group: l.kind }); });
+      (gi.lines || []).forEach(l => { const desc = l.kind === 'freight' ? ('Freight - ' + l.account) : (l.kind === 'fulfilment' ? ('Fulfilment - ' + l.account) : l.account); blines.push({ desc, amount: l.amount, code: l.code || '', taxType: l.vat ? '20% (VAT on Expenses)' : 'No VAT', taxAmount: l.vat ? l.tax : 0, currency: cur, group: l.kind }); });
       _ilgStated = { total: gi.statedTotal, tax: gi.statedTax };
     } else {
     sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });

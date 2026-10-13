@@ -1,3 +1,9 @@
+## v28.340 (14-Oct-26) ILG and Geneva 3PL bills take every Xero code from the mapping tables
+- The ILG channel codes and the whole Geneva list (303.21 to 303.27, 303.26, 309) were written in the server. Channel lines now use the 3PL account map (fulfilment account per channel), and storage / other fees use 3PL invoicing > Config / Accounts. Codes are text.
+- Checked on the sandbox: ILG Jul-26 and Geneva Jul-26 bill previews are identical before and after (codes and amounts); live mapping holds the same codes.
+- A Geneva cost centre outside the usual five now also finds its channel code (was uncoded).
+- No migration, no env change.
+
 ## v28.339 (14-Oct-26) Sample bill Xero accounts from the mapping table (migration 369)
 - Create sample bills: freight 302, duty 313 and AU photography 1000.24 were written in the server, and the form's account list in the page. All now come from planner.sample_purpose_accounts (org, account name and kind added; seeded with today's codes, so no change in behaviour). New GET /api/supply/sample-bills/accounts feeds the form.
 - A missing mapping leaves the line to be picked by hand instead of using an old code. Xero AU accepts only the AU codes in the table.
