@@ -5613,7 +5613,7 @@ async function _fulfilMirrorUpsert(p, lines, source) {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::date,$12::date,now(),$11,now())
       ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,
         warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,requested_delivery_date=excluded.requested_delivery_date,delivery_date=excluded.delivery_date,last_synced_at=now(),source=excluded.source,updated_at=now()`,
-    [p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), reqDeliv, source || 'cron', hdrDeliv]);
+    [p._po || p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), reqDeliv, source || 'cron', hdrDeliv]);
 }
 // Mirror ONE Fulfil PO by id (used after a push so the drift table is fresh without waiting for the next import).
 async function fulfilMirrorOne(fulfilId, source) {
@@ -5634,7 +5634,18 @@ async function fulfilImportPOs() { if (_fulfilImportBusy) return _fulfilImportBu
 async function _fulfilImportPOsRun() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date']);
+  const _flds = ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date'];
+  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], _flds);
+  // v28.362 (Ben 14-Oct-26): map each Fulfil PO to its HORIZON PO. The reference is the HORIZON PO normally; dropship / backorder POs
+  // made from a sales order carry "SO/client PO/PO-1895877", and some POs are only joined by a manual PO link (po_links, system fulfil,
+  // external_id = the Fulfil PO id; old Cin7 numbers are kept during the transition so suppliers are not confused). Order: reference =
+  // a HORIZON PO, else the PO link, else a HORIZON PO number at the end of the reference. Linked POs missing from the pull are fetched too.
+  const _hz = new Set((await pool.query(`SELECT po FROM planner.purchase_orders`)).rows.map(r => r.po));
+  const _link = new Map((await pool.query(`SELECT po, external_id FROM planner.po_links WHERE system='fulfil' AND coalesce(status,'linked')='linked' AND external_id ~ '^[0-9]+$'`).catch(() => ({ rows: [] }))).rows.map(r => [Number(r.external_id), r.po]));
+  const _have = new Set(list.map(p => Number(p.id))), _missing = [..._link.keys()].filter(id => !_have.has(id));
+  for (let i = 0; i < _missing.length; i += 200) { try { (await fulfilSearchAll(FULFIL_MAP.poModel, [['id', 'in', _missing.slice(i, i + 200)]], _flds)).forEach(p => list.push(p)); } catch (_) {} }
+  list.forEach(p => { const ref = String(p.reference || '').trim(), tail = (ref.split(/[\/|]/).pop() || '').trim();
+    p._po = _hz.has(ref) ? ref : (_link.get(Number(p.id)) || (_hz.has(tail) ? tail : ref || null)); });
   const ids = list.map(p => p.id);
   const byPo = {};
   for (let i = 0; i < ids.length; i += 200) {   // lines in batches of 200 POs (each batch paginated at 500 rows)
@@ -5642,12 +5653,25 @@ async function _fulfilImportPOsRun() {
     const lr = await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', 'in', batch]], ['purchase', 'product.code', 'quantity', 'unit_price']);
     lr.forEach(l => { (byPo[l.purchase] = byPo[l.purchase] || []).push(_fulfilLineMap(l)); });
   }
-  let n = 0; for (const p of list) { if (!p.reference) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
+  let n = 0; for (const p of list) { if (!p._po) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
   // v27.902 (Ben): a full refresh also PRUNES rows the source no longer has (cancelled-and-purged POs, or rows imported from
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
   // v28.151 (review D8): never prune off a truncated pull (the 50k cap would delete every PO past the cap).
-  let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p.reference).map(p => String(p.reference)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
-  return { ok: true, imported: n, pruned, env: cfg.env, truncated: !!list.truncated };
+  let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p._po).map(p => String(p._po)); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
+  let erp = null; if (!list.truncated) { try { erp = await fulfilErpQtyFromMirror(); } catch (e) { erp = { ok: false, error: e.message }; } }
+  return { ok: true, imported: n, pruned, env: cfg.env, truncated: !!list.truncated, erp_qty: erp };
+}
+// v28.362 (Ben 14-Oct-26): HORIZON's copy of the ERP qty (purchase_order_lines.erp_qty) follows FULFIL after every mirror run, so an
+// "ERP deviation" means the plan differs from Fulfil right now (dropship POs are changed in Fulfil and can't be pushed from HORIZON).
+// Per PO in the mirror (not cancelled): erp_qty = the Fulfil qty for that SKU (sum of its lines), 0 when Fulfil has no such line.
+async function fulfilErpQtyFromMirror() {
+  const fix = await pool.query(`UPDATE planner.purchase_order_lines l SET erp_qty = sub.q FROM (
+      SELECT l2.po_sku, coalesce((SELECT round(sum(coalesce((x->>'qty')::numeric,0)))::int FROM planner.fulfil_purchase_orders fp CROSS JOIN LATERAL jsonb_array_elements(coalesce(fp.lines,'[]'::jsonb)) x
+        WHERE fp.po = l2.po AND upper(trim(x->>'sku')) = upper(trim(l2.sku))), 0) q
+      FROM planner.purchase_order_lines l2 JOIN planner.fulfil_purchase_orders fp2 ON fp2.po = l2.po AND coalesce(fp2.state,'') NOT IN ('cancelled','cancel')) sub
+    WHERE l.po_sku = sub.po_sku AND l.erp_qty IS DISTINCT FROM sub.q`);
+  try { invalidateSupplyCaches('po'); } catch (_) {}
+  return { ok: true, lines_updated: fix.rowCount };
 }
 // v27.901 (Ben): mirror of Fulfil INTERNAL SHIPMENTS (mig 302) — sister of the PO mirror, refreshed by the same cron.
 // Lines come from the INCOMING moves only (an IS has 4 legs of moves per SKU; summing all of them quadruples qty).
@@ -20050,6 +20074,16 @@ app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
   if (!col) return res.status(400).json({ error: 'unknown approve field' });
   const val = req.body && req.body.approved;
   return patch(res, 'planner.purchase_order_lines', 'po_sku', req.params.po_sku, { [col]: 'boolean' }, { [col]: val });
+});
+// v28.362 (Ben 14-Oct-26): "Use Fulfil qty" for a PO: the plan takes the ERP (Fulfil) qty on every line that differs (dropship POs are
+// changed in Fulfil). Lines with no ERP qty are left alone. Logged in the PO record of change.
+app.post('/api/supply/po/:po/use-erp-qty', async (req, res) => {
+  try { const po = req.params.po, by = authUser(req) || 'user';
+    const r = await pool.query(`UPDATE planner.purchase_order_lines SET qty = erp_qty, proposed_at = NULL, proposed_by = NULL WHERE po=$1 AND erp_qty IS NOT NULL AND qty IS DISTINCT FROM erp_qty RETURNING sku, erp_qty`, [po]);
+    if (r.rowCount) try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,'Order plan: use Fulfil qty',$2,$3)`, [po, r.rows.map(x => x.sku + ' = ' + x.erp_qty).join(', ').slice(0, 1000), by]); } catch (_) {}
+    try { invalidateSupplyCaches('po'); } catch (_) {}
+    res.json({ ok: true, lines: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // "Upload changes" — push a PO's planned qtys to the ERP (Cin7/Fulfil). The actual ERP API write
 // is a gated Diviyaj integration; here we record the push (erp_qty := qty) and log it, clearing the

@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.361
+verified_version: v28.362
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -500,3 +500,10 @@ verified_version: v28.361
 - Never twice: refused when the invoice number is already an AU bill (HORIZON's Xero bills copy, a live Xero AU check, or planner.dhl_invoice_docs, migration 370, written before the Xero call).
 - UK side (UK / USA shipments): opens Create sample bills pre-filled (supplier DHL, the DHL invoice number, AUD, one line per shipment with its air waybill and PO when the air waybill is on a HORIZON shipment): a Fulfil supplier invoice + landed cost when it traces to a PO, else a Xero UK bill. An invoice already billed in Xero UK is shown and never recreated.
 - Ignore marks an invoice as needing nothing (Un-ignore reverses). (source: server.mjs :: dhlParseInvoice, dhlImportPlan, dhl/import, dhl/au-bill, dhl/ignore, accounts inbox proposals; inject.html :: acDhlRender, sbOpen pre)
+
+## ERP deviations follow Fulfil (v28.362)
+- Ben 14-Oct-26: dropship / backorder (Direct to Client) POs are changed in Fulfil (the sales order is linked to the PO) and cannot be pushed from HORIZON, so HORIZON must take Fulfil's quantities. Example PO-1895877 = Fulfil PO388: Fulfil and the plan both 600 for COOL-CAB-LTGRY-R, but HORIZON's ERP copy (erp_qty) still held the Cin7-era 420, so it showed an ERP deviation.
+- Fulfil PO mirror (import-pos, n8n): each Fulfil PO is matched to its HORIZON PO by: reference = a HORIZON PO (normal), else the manual PO link (po_links, system fulfil, external_id = the Fulfil PO id; old Cin7 numbers are kept during the transition so suppliers are not confused), else a HORIZON PO number at the end of the reference ("TAG10793-57/7484/PO-1895877"). Linked POs missing from the pull are fetched by id.
+- After every full mirror run, erp_qty on each HORIZON line of a mirrored (not cancelled) PO = the Fulfil qty for that SKU (sum of its lines), 0 when Fulfil has no such line. An ERP deviation therefore means "the plan differs from Fulfil now" (quantity only; price never). Live check 14-Oct-26: open-PO deviations would go from 1,591 (mostly ERP copy never filled) to 137.
+- "Use Fulfil qty" (ERP deviations box on a PO): the plan takes the Fulfil qty on every line that differs (a SKU missing in Fulfil becomes 0); logged in the PO change log. The other choice is to change Fulfil to match the plan (normal POs: push).
+- Schedule: Diviyaj runs POST /api/supply/fulfil/import-pos (x-webhook-secret) every 3 hours. (source: server.mjs :: _fulfilImportPOsRun, fulfilErpQtyFromMirror, po/:po/use-erp-qty; inject.html :: op-use-erp)

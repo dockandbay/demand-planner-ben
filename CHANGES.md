@@ -1,3 +1,8 @@
+## v28.362 (14-Oct-26) ERP deviations follow Fulfil; dropship POs mirrored; Use Fulfil qty
+- Fulfil PO mirror matches each Fulfil PO to its HORIZON PO by reference, else the manual PO link (e.g. PO-1895877 -> PO388), else the HORIZON PO number at the end of a sales-order reference ("TAG10793-57/7484/PO-1895877"). After each full mirror run, every mirrored line's ERP qty = the Fulfil qty (0 if Fulfil has no such SKU), so ERP deviations mean "differs from Fulfil now". Live (read only): open-PO deviations 1,591 -> 137.
+- PO ERP deviations box: "Use Fulfil qty" sets the plan to the Fulfil qty on the differing lines (logged).
+- **Diviyaj:** schedule n8n POST /api/supply/fulfil/import-pos every 3 hours (x-webhook-secret = N8N_WEBHOOK_SECRET). No migration.
+
 ## v28.361 (14-Oct-26) Fulfil PO push = the Order plan price
 - The push sends exactly what the PO Order plan shows: supplier confirmed / the line's own cost (user or supplier override) > supplier price list > products table > 0.02 for a polybag. The "last PO price" fallback added in v28.360 is removed (it mixed currencies). Polybags now show 0.02 in the Order plan too (po-detail and the order plan cache), so screen and push match.
 - No migration, no env change.
