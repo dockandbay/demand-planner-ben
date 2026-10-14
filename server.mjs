@@ -4543,6 +4543,9 @@ app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person
 // duplicate), is flagged in Config > Auto bills.
 const ACC_BILL_STALE_DAYS = 10, ACC_RATE_AMTS = new Set(['20.00', '10.00', '5.00', '0.00', '12.50', '15.00']);   // VAT / GST rates printed next to the total
 const ACC_ORG_CCY = { uk: 'GBP', au: 'AUD' }, ACC_CCY_SYM = { uk: ['', '£', 'GBP'], au: ['', '$', 'A$', 'AUD'] };
+function accFileRef(files) {   // v28.353: invoice number from the first PDF's name: a run of 5+ digits, else a name that says invoice / receipt
+  const f = (files || []).map(x => String((x && x.name) || x || '')).find(n => /\.pdf$/i.test(n)); if (!f) return null; const base = f.replace(/\.pdf$/i, '').trim();
+  const d = base.match(/\d{5,}/); if (d) return d[0]; return /(inv|invoice|receipt|bill)/i.test(base) ? base.slice(0, 60) : null; }
 function accEmailRef(subject) { const m = /(?:account|acct|invoice|inv|receipt|order|statement)\b[^A-Z0-9]{0,12}(?:no\.?|number|#)?[^A-Z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i.exec(String(subject || '')); return m && /\d/.test(m[1]) ? m[1] : ''; }
 // v28.316 (Ben 13-Oct-26): "look at previous bills to the same company in xero and suggest contact, accounts/tax". When the payee has no
 // reconciled Spend Money, its coding comes from its recent Xero bills: the contact is the most billed contact in the bill cache whose name
@@ -4606,16 +4609,20 @@ async function accPayeeCoding(org, key, hint) { const _ambP = await accAmbig(); 
 // 496.80 super; Woolworths: G 16.47 -> 164.70 + 85.25, exactly as coded in Xero. UK 20%: the all-VAT check only (total / 6).
 // Only when the payee's tax type is the standard GST / VAT one; reverse charge, zero rated, exempt, no VAT are left as they are.
 const ACC_GST = { au: { rate: 0.10, std: 'INPUT', free: 'EXEMPTEXPENSES' }, uk: { rate: 0.20, std: 'INPUT2', free: null } };
-function accGstCheck(org, total, amts, taxType) {
-  const g = ACC_GST[org]; if (!g || String(taxType || '').toUpperCase() !== g.std) return { kind: 'skip' };
+// v28.353 (Ben 14-Oct-26): also part GST-free when the receipt shows the GST G and its base G x 10 (Icon Management: GST 22.40 on the
+// 224.00 agency fee, total 1,716.40 -> 224.00 + GST and 1,470.00 GST free), and 'none' when a PDF invoice shows no GST at all ("if they
+// didn't charge GST, create the bill as per the invoice": one GST-free line). taxType null = derive (no coding yet).
+function accGstCheck(org, total, amts, taxType, hasPdf) {
+  const g = ACC_GST[org]; if (!g || (taxType && String(taxType).toUpperCase() !== g.std)) return { kind: 'skip' };
   const T = Math.round(Number(total) * 100) / 100, div = 1 + 1 / g.rate, nums = [...new Set((amts || []).map(Number).filter(v => v > 0))];
   const has = v => nums.some(a => Math.abs(a - v) <= 0.011);
   // v28.323: "all GST" also needs the subtotal (total - GST) on the receipt: INV-0023 (385.00 at $35/h) showed 35.00 = 385 / 11 by chance
   if (has(T / div) && has(T - T / div)) return { kind: 'full', gst: Math.round(T / div * 100) / 100 };
   if (g.free) for (const a of nums.filter(a => a < T / div - 0.02).sort((x, y) => y - x)) {
     const free = Math.round((T - a * div) * 100) / 100;
-    if (free > 0.009 && has(free)) return { kind: 'split', gst: a, taxable: Math.round(a / g.rate * 100) / 100, free, free_type: g.free };
+    if (free > 0.009 && (has(free) || has(a / g.rate))) return { kind: 'split', gst: a, taxable: Math.round(a / g.rate * 100) / 100, free, free_type: g.free };
   }
+  if (hasPdf && g.free && !has(T / div)) return { kind: 'none', free_type: g.free };
   return { kind: 'unknown' };
 }
 // Candidates. rules: [{org, payee_key, bill_from, contact, contact_id, account_code, tax_type}]; only (batch): [{org, payee_key, email_id}].
@@ -4666,14 +4673,14 @@ async function accBillCandidates(rules, only) {
       if (!ACC_CCY_SYM[r.org].includes(sym.get(k) || '')) { c.reason = 'Receipt is in ' + sym.get(k) + ', not ' + ACC_ORG_CCY[r.org]; out.push(c); continue; }
       const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
       if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
+      const hasPdf = (e.pdf_amounts || []).length > 0, ovTax = ov && String(ov.tax_type || '').trim();
+      const gc = accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
+      if (!c.tax_type && ACC_GST[r.org] && ['full', 'split'].includes(gc.kind)) c.tax_type = ACC_GST[r.org].std;   // v28.353: tax type from the invoice when not coded yet
+      if (gc.kind === 'none' && !ovTax) c.tax_type = gc.free_type;   // v28.353: no GST on the invoice = one GST-free line
       if (!c.contact || !c.account_code || !c.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
-      const gc = accGstCheck(r.org, c.amount, amts, c.tax_type); c.tax_check = gc.kind;   // v28.315
-      if (gc.kind === 'split') {
-        c.gst_split = { gst: gc.gst, taxable: gc.taxable, free: gc.free, free_type: gc.free_type };
-        if (!only) { c.reason = 'Part GST-free (GST ' + gc.gst.toFixed(2) + ', GST-free ' + gc.free.toFixed(2) + '): review it in Reconcile before it goes to Xero'; out.push(c); continue; }   // Auto bill never creates a split bill
-      }
-      const ref = accEmailRef(e.subject);
-      c.invoice_number = ((ov && String(ov.invoice_number || '').trim()) || (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date)).slice(0, 250);
+      if (gc.kind === 'split') c.gst_split = { gst: gc.gst, taxable: gc.taxable, free: gc.free, free_type: gc.free_type };   // v28.353 (Ben): Auto bill splits too
+      const ref = accEmailRef(e.subject), fref = accFileRef(e.files);   // v28.353: the invoice number from the PDF name (00371863, LBINVOICE 10-13)
+      c.invoice_number = ((ov && String(ov.invoice_number || '').trim()) || fref || (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date)).slice(0, 250);
       c.ok = true; claimed.add(e.id); if (line) usedLine.add(line.id); out.push(c);
     }
   }

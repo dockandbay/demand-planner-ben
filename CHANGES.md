@@ -1,3 +1,8 @@
+## v28.353 (14-Oct-26) Reconcile: bill lines from the invoice PDF (GST / GST-free split, no-GST invoices, invoice number)
+- The PDF analysis sets the lines: all GST = one GST line; GST on part = two lines (GST component + GST-free component), now also when the PDF shows the GST and its base (Icon Management 1,716.40 = 224.00 + GST 22.40 and 1,470.00 GST free); no GST on the PDF = one GST-free line (Sana Haus 1,372.46). Not coded yet: the PDF picks the tax type. Auto bill splits too (was review only).
+- Reference = invoice number from the PDF name (00371863, LBINVOICE 10-13), else payee + date as before. A tax type typed in the review drawer wins.
+- Tested on the real PDF amounts (Icon, Sana Haus) and earlier cases (Wink super split, all-GST receipt, email without PDF): unchanged where they should be. Auto bill dry run OK. No migration, no env change.
+
 ## v28.352 (14-Oct-26) ACCOUNTS > Reconcile > DHL import (migration 370)
 - Reconcile has Bank lines | DHL import. DHL import reads the "Your latest DHL invoice" emails (AU account 51214671, paid by ANZ direct debit), matches each to its ANZ statement line, and per invoice: Create in Xero AU (one AUTHORISED bill, contact DHL AU; AU shipments = 302 / 405.2 / 313, UK and USA shipments = 901 loan), UK side = Create sample bills pre-filled (Fulfil invoice + landed cost via the PO, else Xero UK bill), Ignore. Already in Xero AU or UK = never recreated (migration 370 log + live Xero check). AU DHL debits are ignore in Bank lines.
 - Created on live Xero AU with Ben's OK (14-Oct-26): SYDIR02851742 AUD 908.53 and SYDIR02881883 AUD 115.57, both 901; match them to the ANZ lines in Xero.

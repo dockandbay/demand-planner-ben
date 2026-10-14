@@ -19799,6 +19799,7 @@
           if(c.tax_check==='full')return '<div class="tiny" style="margin:4px 0 8px;color:var(--pos)">✓ GST checked: the receipt shows the full GST on '+esc(acMoney(c.amount,cur))+'. One line.</div>';
           if(c.tax_check==='split'&&sp)return '<div class="annot" style="margin:4px 0 8px"><b>Part GST-free</b> (GST '+esc(acMoney(sp.gst,cur))+' on the receipt). Goes to Xero as two tax-exclusive lines on the same account:'
             +'<div style="margin-top:4px">'+esc(acMoney(sp.taxable,cur))+' at '+esc(AC_BD_TAX[(AC_DR.f&&AC_DR.f.tax_type)||c.tax_type]||c.tax_type)+' (GST component) + '+esc(acMoney(sp.free,cur))+' at GST Free (GST free component, e.g. superannuation)</div></div>';
+          if(c.tax_check==='none')return '<div class="tiny" style="margin:4px 0 8px;color:var(--pos)">✓ No GST on the invoice: one GST-free line ('+esc(acMoney(c.amount,cur))+'), as invoiced.</div>';   // v28.353
           if(c.tax_check==='unknown')return '<div class="annot" style="margin:4px 0 8px;border-color:var(--amber)">GST not confirmed from the receipt: check the PDF. If part of it is GST-free (superannuation, fresh food), create it by hand in Xero.</div>';
           return ''; })()
         +(r.treatment==='autobill'?'<div class="tiny" style="margin-top:12px">'+esc(r.payee_key)+' is on Auto bill. <b>Push bill to Xero</b> creates this one now; the automatic run then skips it.</div>'
