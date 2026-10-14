@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.369
+verified_version: v28.374
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -336,4 +336,5 @@ verified_version: v28.369
 - Issues: "no Fulfil PO", "Fulfil +/-n" (Fulfil PO vs SO), "not in HORIZON", "HORIZON +/-n" (vs Fulfil PO, or SO when no Fulfil PO), "HORIZON only" (on a matched HORIZON PO but not on the SO / Fulfil POs), "not on SO". Stock lines compare the two POs only.
 - Accept / note per SO in planner.dtc2_review; accepted orders drop out of the Issues count.
 - v28.367 (Ben 14-Oct-26): **Dropship without a PO.** Each dropship / backorder SO line still to ship with no live Fulfil PO for its SKU on the SO is labelled: "not sent to purchasing" (no purchase request), "requested, no Fulfil PO yet" (request raised, no PO), or "Fulfil PO cancelled" (its PO cancelled and no other PO on the SO carries the SKU). A cancelled PO replaced by another PO on the same SO with the SKU is covered (not flagged). Summary pill "Without a PO" (orders) + filter "Dropship without a PO only" + a badge per order (lines and units).
+- v28.374 (Ben 15-Oct-26, Dillard's): CLIENT PO GROUPS. One HORIZON client PO (Direct to Client / B2B JLEW / B2B NEXT / key account, same set as the push guard) can stand for many Fulfil client POs (Fulfil makes one PO per client order and per supplier: each Dillard's order is split XR Textile / Lixin / Weierken). Linked on the PO drawer > Master & Docs > Linked records > Client POs in Fulfil: paste Fulfil PO numbers, client references or SO numbers, Check (live Fulfil, read only; other suppliers, cancelled POs and POs already in this group are skipped; a PO in another group moves only on confirm), Link. Stored in planner.po_fulfil_group (mig 373). On each DTC 2.0 SO card the group PO counts only that card's member Fulfil POs; a Client PO groups panel reconciles the whole group (HORIZON qty vs the sum of all its client POs). The Fulfil mirror row of a grouped PO is the group sum, so ERP qty compares the plan with all its client POs; a grouped PO no longer shows the Link Fulfil PO action. The Fulfil PO import refreshes member lines every run. (source: server.mjs :: _fgResolve, _fgCurrent, _fgMirrorRow, /api/supply/po/:po/fulfil-group*, dtc2Build, _fulfilImportPOsRun, FULFIL_LINK_NEEDED_SQL; supply/inject.html :: fgRender, renderDtc2)
 - v28.368: scheduled refresh POST /api/cron/dtc2-sync (x-webhook-secret = N8N_WEBHOOK_SECRET; optional n8n daily), same read as Refresh from Fulfil.
