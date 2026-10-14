@@ -4122,9 +4122,10 @@ async function accInboxProposals() {
     const best = c[0] && c[0].score >= 40 ? c[0] : null;
     const match = best ? { id: best.e.id, date: best.e.d, from: best.e.from_addr, subject: best.e.subject, files: best.e.files || [], stripe: best.e.stripe_link, lag: best.lag, name: best.name, ambiguous: !!(c[1] && c[1].score >= best.score - 5),
       url: 'https://mail.google.com/mail/u/?authuser=' + encodeURIComponent(GMAIL_MAILBOX_HINT) + '#all/' + best.e.id } : null;
-    const rule = accRuleFor(rules, l.org, key), treatment = rule ? rule.treatment : accDefaultTreatment(key, l.amount, match, supKeys);
+    const _dhl = l.org === 'au' && l.amount < 0 && DHL_STMT_RE.test((l.description || '') + ' ' + (l.reference || ''));   // v28.352 (Ben): handled in Reconcile > DHL import
+    const rule = _dhl ? null : accRuleFor(rules, l.org, key), treatment = _dhl ? 'ignore' : rule ? rule.treatment : accDefaultTreatment(key, l.amount, match, supKeys);
     const status = (treatment === 'rule' || treatment === 'ignore') ? 'not_needed' : match ? 'matched' : 'needs_receipt';
-    return Object.assign(l, { payee_key: key, treatment, treatment_source: rule ? rule.source : 'auto', status, match });
+    return Object.assign(l, { payee_key: key, treatment, treatment_source: _dhl ? 'DHL import' : rule ? rule.source : 'auto', status, match });
   });
   try { const ids = [...new Set(out.filter(l => l.match).map(l => l.match.id))];   // v28.280: a bill HORIZON already created from this receipt (match it in Xero)
     if (ids.length) { const bl = new Map((await pool.query(`SELECT email_id, invoice_id, invoice_number, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_bill_log WHERE status='created' AND email_id = ANY($1)`, [ids])).rows.map(x => [x.email_id, x]));
@@ -4168,6 +4169,7 @@ app.get('/api/accounts/config', async (req, res) => {
       builtin: [
         { rule: 'Money in (receipts, payouts, refunds)', treatment: 'ignore', note: 'Reconciled against sales in Xero, not from a receipt' },
         { rule: 'Flexport and HORIZON product suppliers', treatment: 'ignore', note: 'Paid against POs and supplier bills (Ben 12-Oct-26)' },
+        { rule: 'AU: DHL EXPRESS direct debits (ANZ)', treatment: 'ignore', note: 'Handled in Reconcile > DHL import: Xero AU bill per DHL invoice (Ben 14-Oct-26)' },
         { rule: 'Payee is one of: ' + String(ACC_IGNORE_KEYS.source).replace(/^\^\(|\)\$$/g, '').split('|').join(', '), treatment: 'ignore', note: 'Transfers, loans, tax, card repayments' },
         { rule: 'Payee is one of: ' + String(ACC_RULE_KEYS.source).replace(/^\^\(|\)\$$/g, '').split('|').join(', '), treatment: 'rule', note: 'Platforms Xero codes with a bank rule (Google Ads: Ben 12-Oct-26)' },
         { rule: 'Anything else that is money out', treatment: 'bill', note: 'A bill with the receipt attached, created from a ticked batch; switch a regular payee to Auto bill (Ben 12-Oct-26: one process, bank rules retired where accounts@ has the receipt)' }],
@@ -4264,6 +4266,122 @@ app.post('/api/accounts/forwarding/action', async (req, res) => {
 // (payee named in the sender or subject, exact amount, email 2 days before to 3 days after) gets that receipt attached: the email's own PDF,
 // else the email rendered to a PDF. One attachment per transaction (unique log row). Xero's API cannot delete attachments: the log links each
 // transaction so a person can remove a wrong one in Xero and mark it removed. Runs daily with the health checks and from "Run now".
+// v28.352 (SUG-0046): an email's attachment by file-name pattern (the DHL invoice CSV for ACCOUNTS > Reconcile > DHL import). Read only.
+async function accEmailAttachment(msgId, re) {
+  const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');
+  const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); const hits = [];
+  const walk = p => { if (!p) return; if (p.filename && re.test(p.filename) && p.body && (p.body.attachmentId || p.body.data)) hits.push(p); (p.parts || []).forEach(walk); }; walk(m.payload);
+  if (!hits.length) return null; const p = hits[0]; const data = p.body.data || (await gmailGetPaced('messages/' + msgId + '/attachments/' + p.body.attachmentId)).data;
+  return { buf: b64(data), filename: p.filename };
+}
+// ═══ v28.352 (Ben 14-Oct-26): ACCOUNTS > Reconcile > DHL import. DHL AU (account 51214671) invoices arrive in accounts@ as "Your latest
+// DHL invoice" with a CSV, and are paid by direct debit from ANZ (Xero AU). Per invoice: a Xero AU bill (contact DHL AU), one line per
+// shipment: to Australia = an AU account (302 freight by default; 405.2 Cost of Sales - AU - Wholesale when it belongs to an AU wholesale
+// order), to the UK / USA = 901 Loan - D&B Ltd (UK). The bill is matched to the ANZ line in Xero. The UK side (Fulfil supplier invoice +
+// landed cost when the air waybill traces to a PO, else a Xero UK bill) goes through Create sample bills. Already in Xero = never again.
+const DHL_STMT_RE = /\bDHL\b/i, DHL_SUBJ = 'subject:"Your latest DHL invoice"', DHL_AU_ACCT_DEFAULT = '302', DHL_LOAN_AU = '901';
+const DHL_AU_ACCOUNTS = [['302', 'Shipping Freight Fees (Import Only)'], ['405.2', 'Cost of Sales - AU - Wholesale'], ['313', 'Import Duty']];
+function dhlCsvRows(t) { const out = []; let row = [], f = '', q = false;
+  for (let i = 0; i < t.length; i++) { const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true; else if (c === ',') { row.push(f); f = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(f); out.push(row); row = []; f = ''; } else f += c; }
+  if (f !== '' || row.length) { row.push(f); out.push(row); } return out.filter(r => r.length > 5); }
+const _dhlD = v => /^\d{8}$/.test(String(v || '')) ? v.slice(0, 4) + '-' + v.slice(4, 6) + '-' + v.slice(6, 8) : null;
+function dhlParseInvoice(text) {
+  const rows = dhlCsvRows(String(text || '').replace(/^﻿/, '')); if (rows.length < 2) return null; const H = rows[0];
+  const obj = r => { const o = {}; H.forEach((h, i) => { o[h] = r[i]; }); return o; };
+  const inv = rows.slice(1).map(obj).find(o => o['Line Type'] === 'I'); if (!inv) return null;
+  const ships = rows.slice(1).map(obj).filter(o => o['Line Type'] === 'S').map(o => {
+    const xc = []; for (let k = 1; k <= 12; k++) { const n = o['XC' + k + ' Name'], a = Number(o['XC' + k + ' Total'] || o['XC' + k + ' Charge'] || 0); if (n && a) xc.push({ name: n, amount: a }); }
+    const dest = String(o['Dest Country Code'] || '').toUpperCase();
+    return { awb: String(o['Shipment Number'] || '').trim(), ship_date: _dhlD(o['Shipment Date']), orig: o['Orig Country Code'] || '', dest, sender: o['Senders Name'] || '', receiver: o['Receivers Name'] || '',
+      pieces: Number(o['Pieces'] || 0) || null, kg: Number(o['Weight (kg)'] || 0) || null, amount: Math.round(Number(o['Total amount (incl. VAT)'] || o['Total amount (excl. VAT)'] || 0) * 100) / 100,
+      weight_charge: Number(o['Weight Charge'] || 0), extras: xc, business: dest === 'AU' ? 'au' : 'uk' }; });
+  return { number: String(inv['Invoice Number'] || '').trim(), date: _dhlD(inv['Invoice Date']), due: _dhlD(inv['Due Date']), account: inv['Billing Account'] || '', currency: inv['Currency'] || 'AUD',
+    total: Math.round(Number(inv['Total amount (incl. VAT)'] || 0) * 100) / 100, shipments: ships }; }
+let _dhlCache = { at: 0, list: null };
+async function dhlInvoices(fresh) {
+  if (!fresh && _dhlCache.list && Date.now() - _dhlCache.at < 10 * 60 * 1000) return _dhlCache.list;
+  const ids = []; let tok = null;
+  do { const j = await gmailGetPaced('messages?' + new URLSearchParams(Object.assign({ q: DHL_SUBJ + ' newer_than:400d', maxResults: '100' }, tok ? { pageToken: tok } : {})).toString());
+    (j.messages || []).forEach(m => ids.push(m.id)); tok = j.nextPageToken; } while (tok && ids.length < 300);
+  const out = [];
+  for (const id of ids) { try { const a = await accEmailAttachment(id, /\.csv$/i); if (!a) continue; const p = dhlParseInvoice(a.buf.toString('utf8')); if (p && p.number) out.push(Object.assign(p, { email_id: id })); } catch (e) { out.push({ email_id: id, error: e.message }); } }
+  const seen = new Set(); const list = out.filter(x => { if (!x.number) return true; if (seen.has(x.number)) return false; seen.add(x.number); return true; }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  _dhlCache = { at: Date.now(), list }; return list; }
+// AWB -> HORIZON PO shipment (shipments.carrier_ref, po_links dhl, carrier_tracking)
+async function dhlAwbMatches(awbs) {
+  const m = {}; if (!awbs.length) return m; const re = '(' + awbs.map(a => a.replace(/\D/g, '')).filter(Boolean).join('|') + ')';
+  const rows = (await pool.query(`SELECT carrier_ref awb, to_jsonb(s)->>'shipment_ref' ref, to_jsonb(s)->>'branch' branch FROM planner.shipments s WHERE carrier_ref ~ $1`, [re]).catch(() => ({ rows: [] }))).rows;
+  rows.forEach(r => { const k = String(r.awb).replace(/\D/g, ''); awbs.forEach(a => { if (k.indexOf(a) >= 0 && !m[a]) m[a] = { po: r.ref, branch: r.branch }; }); });
+  return m; }
+async function dhlImportPlan(fresh) {
+  const invs = await dhlInvoices(fresh);
+  const awbs = [...new Set(invs.flatMap(i => (i.shipments || []).map(s => s.awb)).filter(Boolean))], po = await dhlAwbMatches(awbs);
+  const nums = invs.map(i => i.number).filter(Boolean);
+  const xb = nums.length ? (await pool.query(`SELECT region, invoice_id, invoice_number, total::float8 total, status FROM planner.xero_bills WHERE invoice_number ~* $1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, ['(' + nums.join('|') + ')'])).rows : [];
+  const docs = nums.length ? (await pool.query(`SELECT DISTINCT ON (invoice_number, part) invoice_number, part, status, xero_invoice_id, xero_url, error, created_by, to_char(created_at,'YYYY-MM-DD') at FROM planner.dhl_invoice_docs WHERE invoice_number = ANY($1) ORDER BY invoice_number, part, id DESC`, [nums]).catch(() => ({ rows: [] }))).rows : [];
+  const stmt = (await pool.query(`SELECT l.id, to_char(l.line_date,'YYYY-MM-DD') d, l.amount::float8 amount, l.reference, l.description, l.account_name FROM planner.accounts_stmt_lines l WHERE l.org='au' AND l.amount < 0 AND (coalesce(l.description,'') || ' ' || coalesce(l.reference,'')) ~* '\\mDHL\\M' ORDER BY l.line_date`).catch(() => ({ rows: [] }))).rows;
+  const used = new Set();
+  return invs.map(i => { if (!i.number) return i;
+    const xau = xb.filter(b => b.region === 'au' && new RegExp(i.number, 'i').test(b.invoice_number)), xuk = xb.filter(b => b.region === 'uk' && new RegExp(i.number, 'i').test(b.invoice_number));
+    const d = k => docs.find(x => x.invoice_number === i.number && x.part === k) || null;
+    // the ANZ line: exact amount first, else up to 1.5% more (card surcharge), on or after the invoice date - 3 days
+    const cand = stmt.filter(l => !used.has(l.id) && (!i.date || l.d >= new Date(new Date(i.date) - 3 * 864e5).toISOString().slice(0, 10)));
+    let line = cand.find(l => Math.abs(-l.amount - i.total) < 0.005) || cand.find(l => -l.amount > i.total && -l.amount <= i.total * 1.015 + 0.01) || null;
+    if (line) used.add(line.id);
+    const ships = (i.shipments || []).map(s => Object.assign({}, s, { po: (po[s.awb] || {}).po || null, au_account: s.business === 'au' ? DHL_AU_ACCT_DEFAULT : DHL_LOAN_AU }));
+    const bill = d('au_bill'), ign = d('ignore');
+    const status = ign && ign.status === 'ignored' ? 'ignored' : (bill && bill.status === 'created') || xau.length ? 'done' : line ? 'todo' : 'waiting';
+    return Object.assign({}, i, { shipments: ships, stmt_line: line ? { id: line.id, date: line.d, amount: -line.amount, description: line.description, fee: Math.round((-line.amount - i.total) * 100) / 100 } : null,
+      xero_au: xau.map(b => ({ number: b.invoice_number, status: b.status, url: xbUrl(b.invoice_id) })).concat(bill && bill.status === 'created' ? [{ number: i.number, status: 'created by HORIZON ' + bill.at, url: bill.xero_url }] : []),
+      xero_uk: xuk.map(b => ({ number: b.invoice_number, status: b.status, url: xbUrl(b.invoice_id) })), doc: bill, ignored: !!(ign && ign.status === 'ignored'), status,
+      uk_total: Math.round(ships.filter(s => s.business === 'uk').reduce((a, s) => a + s.amount, 0) * 100) / 100, au_total: Math.round(ships.filter(s => s.business === 'au').reduce((a, s) => a + s.amount, 0) * 100) / 100 }); }); }
+async function dhlAccountsGate(req, res) { try { const me = await permsFor(req); if (me.lookupFailed) { res.status(503).json({ error: 'permission check failed, try again' }); return false; }
+  if (me.live && !(me.is_admin || me.accounts_access)) { res.status(403).json({ error: 'ACCOUNTS access required' }); return false; } return true; } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return false; } }
+app.get('/api/accounts/dhl/import', async (req, res) => {
+  if (!(await dhlAccountsGate(req, res))) return;
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, invoices: await dhlImportPlan(String(req.query.fresh || '') === '1'), au_accounts: DHL_AU_ACCOUNTS.map(([code, name]) => ({ code, name })), loan: DHL_LOAN_AU }); }
+  catch (e) { if (!/not connected|client not set/.test(e.message)) log500(e); res.status(/not connected|client not set/.test(e.message) ? 409 : 500).json({ error: e.message }); }
+});
+app.post('/api/accounts/dhl/ignore', async (req, res) => {
+  if (!(await dhlAccountsGate(req, res))) return;
+  try { const n = String((req.body && req.body.invoice_number) || '').trim(), on = (req.body && req.body.ignored) !== false; if (!/^[A-Z]{3}IR\d+$/i.test(n)) return res.status(400).json({ error: 'invoice_number required' });
+    if (on) await pool.query(`INSERT INTO planner.dhl_invoice_docs (invoice_number, part, status, created_by) VALUES ($1,'ignore','ignored',$2) ON CONFLICT DO NOTHING`, [n, authUser(req) || 'system']);
+    else await pool.query(`UPDATE planner.dhl_invoice_docs SET status='unignored' WHERE invoice_number=$1 AND part='ignore' AND status='ignored'`, [n]);
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Create the Xero AU bill for one DHL invoice. Body: { invoice_number, accounts: { <awb>: '<code>' } (AU-bound shipments only), confirm:true }.
+app.post('/api/accounts/dhl/au-bill', async (req, res) => {
+  if (!(await dhlAccountsGate(req, res))) return;
+  if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Xero AU' });
+  const n = String((req.body && req.body.invoice_number) || '').trim(); let lg = null;
+  try {
+    const inv = (await dhlImportPlan(true)).find(x => x.number === n); if (!inv) return res.status(404).json({ error: 'DHL invoice ' + n + ' not found in accounts@' });
+    if (inv.ignored) return res.status(409).json({ error: n + ' is marked Ignore' });
+    if (inv.xero_au.length) return res.status(409).json({ error: n + ' is already in Xero AU', xero_au: inv.xero_au });
+    // live check in Xero AU by invoice number (the bills cache can lag)
+    const chk = await xeroFetch('au', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + n + '"'));
+    if (((chk && chk.Invoices) || []).some(x => !['VOIDED', 'DELETED'].includes(x.Status))) return res.status(409).json({ error: n + ' is already in Xero AU' });
+    const pick = (req.body && req.body.accounts) || {}, okCodes = DHL_AU_ACCOUNTS.map(a => a[0]);
+    const lines = inv.shipments.map(s => { const code = s.business === 'au' ? (okCodes.includes(String(pick[s.awb] || '')) ? String(pick[s.awb]) : DHL_AU_ACCT_DEFAULT) : DHL_LOAN_AU;
+      return { awb: s.awb, account: code, amount: s.amount, Description: ('AWB ' + s.awb + ' · ' + s.orig + '→' + s.dest + ' · ' + s.sender + ' → ' + s.receiver + (s.po ? ' · ' + s.po : '') + (s.business === 'uk' ? ' (UK business, intercompany)' : '')).slice(0, 3900),
+        Quantity: 1, UnitAmount: s.amount, AccountCode: code, TaxType: code === DHL_LOAN_AU ? 'BASEXCLUDED' : 'EXEMPTEXPENSES' }; });
+    const sum = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
+    if (Math.abs(sum - inv.total) > 0.01) return res.status(400).json({ error: 'Shipment lines add up to ' + sum + ', invoice total is ' + inv.total + ': nothing created' });
+    const xc = await xeroContactLookup('au', 'DHL AU', { fresh: true }); const xc2 = xc.ok ? xc : await xeroContactLookup('au', 'DHL', { fresh: true });
+    if (!xc2.ok) return res.status(400).json({ error: (xc2.lookup_failed ? xc2.error : "No Xero AU contact 'DHL AU' or 'DHL'") + ': nothing created' });
+    try { lg = (await pool.query(`INSERT INTO planner.dhl_invoice_docs (invoice_number, part, status, amount, lines, created_by) VALUES ($1,'au_bill','creating',$2,$3::jsonb,$4) RETURNING id`, [n, inv.total, JSON.stringify(lines.map(l => ({ awb: l.awb, account: l.account, amount: l.amount }))), authUser(req) || 'system'])).rows[0].id; }
+    catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: n + ' is already being created or was created' }); throw e; }
+    const body = { Type: 'ACCPAY', Contact: { ContactID: xc2.ContactID }, Date: inv.date, DueDate: inv.due || inv.date, InvoiceNumber: n, Reference: 'DHL ' + inv.shipments.map(s => s.awb).join(' '), CurrencyCode: inv.currency || 'AUD', Status: 'AUTHORISED', LineAmountTypes: 'Exclusive',
+      LineItems: lines.map(l => ({ Description: l.Description, Quantity: 1, UnitAmount: l.UnitAmount, AccountCode: l.AccountCode, TaxType: l.TaxType })) };
+    const r = await xeroFetch('au', '/api.xro/2.0/Invoices', { method: 'PUT', body: { Invoices: [body] } });
+    const b = r && r.Invoices && r.Invoices[0]; if (!b || !b.InvoiceID) throw new Error('Xero did not return the bill');
+    const url = 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + b.InvoiceID;
+    await pool.query(`UPDATE planner.dhl_invoice_docs SET status='created', xero_invoice_id=$2, xero_url=$3 WHERE id=$1`, [lg, b.InvoiceID, url]);
+    res.json({ ok: true, invoice_number: n, bill: { id: b.InvoiceID, number: b.InvoiceNumber, total: b.Total, status: b.Status, url }, contact: xc2.Name, lines: lines.map(l => ({ awb: l.awb, account: l.account, amount: l.amount })) });
+  } catch (e) { if (lg) await pool.query(`UPDATE planner.dhl_invoice_docs SET status='error', error=$2 WHERE id=$1`, [lg, String(e.message).slice(0, 400)]).catch(() => {}); log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
 async function accEmailPdf(msgId) {
   const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');
   const H = n => ((m.payload.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';

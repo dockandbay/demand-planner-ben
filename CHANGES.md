@@ -1,3 +1,8 @@
+## v28.352 (14-Oct-26) ACCOUNTS > Reconcile > DHL import (migration 370)
+- Reconcile has Bank lines | DHL import. DHL import reads the "Your latest DHL invoice" emails (AU account 51214671, paid by ANZ direct debit), matches each to its ANZ statement line, and per invoice: Create in Xero AU (one AUTHORISED bill, contact DHL AU; AU shipments = 302 / 405.2 / 313, UK and USA shipments = 901 loan), UK side = Create sample bills pre-filled (Fulfil invoice + landed cost via the PO, else Xero UK bill), Ignore. Already in Xero AU or UK = never recreated (migration 370 log + live Xero check). AU DHL debits are ignore in Bank lines.
+- Created on live Xero AU with Ben's OK (14-Oct-26): SYDIR02851742 AUD 908.53 and SYDIR02881883 AUD 115.57, both 901; match them to the ANZ lines in Xero.
+- **Migration:** 370_dhl_invoice_docs.sql. No env change. Uses the accounts@ Gmail connection.
+
 ## v28.351 (14-Oct-26) FIX: server.mjs as tested (v28.339 to v28.350 commits had code blocks in the wrong place)
 - **Diviyaj: deploy from this commit or later, not from v28.339 to v28.350.** Those commits were staged hunk by hunk (to keep an uncommitted DHL dev endpoint out) and 7 blocks (28 lines) landed in the wrong spot in server.mjs: the sample bill accounts endpoint (v28.339), the ILG code loader (v28.340), the Wise refusal (v28.341), the Paid > Xero resume / per-PO payment guard / run key (v28.347) and the contact create (v28.350). Earlier ones parsed (wrong behaviour); the v28.350 commit did not even pass a syntax check (the server would not start).
 - This commit is exactly the server.mjs that was tested on the sandbox, minus only the uncommitted DHL dev endpoint (13 lines). No behaviour change from what was tested.

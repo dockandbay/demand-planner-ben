@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.350
+verified_version: v28.352
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -488,3 +488,11 @@ verified_version: v28.350
 - Sets / bundles (v28.236): every build-on-the-fly set in planner.set_bom (one level, 311 sets) is costed per column as the sum of its components' values in that column × quantity, using each component's own resolved value (Fulfil, kept or supplier cost). Components are worked out first. If any component has no value in that column, the set falls back to the normal rules (kept, else supplier cost) and the cell lists the missing components. Set values are stored with source set_bom when sent. Set component SKUs are included even if nothing was stored for them. (source: cogsBuild)
 - Filters (v28.236): category (products.category_name_final, else category), status (products.status), search on SKU or product name, and quick filters All / Changed / Big moves / Sets / Supplier cost / Has blanks. History opens in its own modal.
 - Persistence (v28.238): every Analyse saves its full result (planner.cogs_analysis, newest row only, migration 345). Opening the tab shows that saved result with "Analysed <date time> by <user>" until the next Analyse. Times are London time. (source: /api/supply/cogs/last, /api/supply/cogs/analyse)
+
+## DHL import (ACCOUNTS > Reconcile > DHL import, from v28.352)
+- Ben 14-Oct-26: DHL AU (account 51214671) invoices arrive in accounts@ as "Your latest DHL invoice" with a CSV and are paid by direct debit from ANZ (Xero AU), so they belong in Reconcile, not Payables. AU "DHL" debits are set to ignore in Bank lines (built-in rule) because this view handles them.
+- Each invoice is read from its CSV (one line per shipment: air waybill, route, sender, receiver, amount) and matched to the DHL line on the uploaded ANZ statement (same amount, or up to 1.5% more for a card fee, on or after the invoice date minus 3 days). Status: to do (on the statement, not in Xero AU), in Xero AU, not on the ANZ statement (not debited yet, or already reconciled e.g. as Spend Money), ignored.
+- Create in Xero AU: one AUTHORISED bill, contact "DHL AU" (else "DHL"), invoice number = the DHL invoice number, dated the invoice date. Shipments to Australia: an AU account (302 by default; 405.2 Cost of Sales - AU - Wholesale for an AU wholesale order, e.g. TBAY27776-2; 313); GST free (EXEMPTEXPENSES). Shipments to the UK or USA: 901 Loan - D&B Ltd (UK), BAS excluded (UK business, intercompany). Lines must add up to the invoice total. Then the bill is matched to the ANZ line in Xero (Reconcile rule: bill only against an uploaded statement line).
+- Never twice: refused when the invoice number is already an AU bill (HORIZON's Xero bills copy, a live Xero AU check, or planner.dhl_invoice_docs, migration 370, written before the Xero call).
+- UK side (UK / USA shipments): opens Create sample bills pre-filled (supplier DHL, the DHL invoice number, AUD, one line per shipment with its air waybill and PO when the air waybill is on a HORIZON shipment): a Fulfil supplier invoice + landed cost when it traces to a PO, else a Xero UK bill. An invoice already billed in Xero UK is shown and never recreated.
+- Ignore marks an invoice as needing nothing (Un-ignore reverses). (source: server.mjs :: dhlParseInvoice, dhlImportPlan, dhl/import, dhl/au-bill, dhl/ignore, accounts inbox proposals; inject.html :: acDhlRender, sbOpen pre)
