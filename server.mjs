@@ -3874,11 +3874,12 @@ async function accGmailCache(days, budget) {
     walk(m.payload);
     const stripe = /https:\/\/(?:pay|invoice)\.stripe\.com\//.test(html + ' ' + text);
     const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€')).replace(/\s+/g, ' ');
-    const pdfAm = new Map();
+    const pdfAm = new Map(), gstLab = new Set();   // v28.354: GST-labelled amounts kept apart (an amount keeps its currency mark)
     if (PDFParse) for (const a of atts.filter(a => /pdf/i.test(a.type) || /\.pdf$/i.test(a.name)).slice(0, 2)) { if (!a.aid || a.size > 3e6) continue;
-      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v)); }
+      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v));
+        accGstLabelled(t).forEach(k => gstLab.add(k)); }   // v28.354: "Invoice total includes GST of: $6.96" -> 6.96 is the GST
       catch (e) { if (e && e.code === 'budget') throw e; } }
-    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...pdfAm])]; };
+    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm]))]; };   // GST pairs first: the amount's own currency mark wins in the maps
   const flush = async buf => { if (!buf.length) return;
     await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 8 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
   let parsed = 0, i = 0, buf = [];
@@ -4110,13 +4111,14 @@ async function accInboxProposals() {
   const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$', CAD: '$' };
   const out = lines.map(l => {
     const key = accPayeeKeyX(l.org, l.reference, l.description, _amb), k = Math.abs(l.amount).toFixed(2), td = new Date(l.line_date), toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
-    const c = l.amount < 0 ? (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -7 || lag > 45) return null;
+    const c = l.amount < 0 ? (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -60 || lag > 45) return null;   // v28.354: late receipts (up to 60 days after the bank line) only with the payee named, below
         const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = accNameHit(toks, hay), cs = e.am.get(k) || e.pam.get(k) || '';
         const ccyOk = !cs || cs === l.currency || cs === sym[l.currency] || (cs === '$' && ['AUD', 'USD', 'CAD', 'NZD'].includes(l.currency)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
         // v28.324: a receipt a colleague forwards with the amount in the subject ("ICON Management Pty Ltd $3082.80") is a deliberate match even
         // when the bank shows a trading name (BELLA MAGEMENT); allowed up to 30 days before the bank line
         const staff = /@dockandbay\.com\b/i.test(e.from_addr) && !/supplier\.dockandbay|portal@/i.test(e.from_addr) && new RegExp('(^|[^0-9.,])\\$?(' + k.replace('.', '\\.') + (k.endsWith('.00') ? '|' + k.slice(0, -3) + '(?![.0-9])' : '') + ')\\b').test(e.subject.replace(/,/g, ''));   // "$342" = 342.00
         if (!name && !(nAm <= 8 && cs && ccyOk && lag >= -2 && lag <= 5) && !(staff && ccyOk && lag >= -7 && lag <= 30)) return null;
+        if (lag < -7 && !(name && ccyOk)) return null;   // v28.354 (Ben, Woolworths 04-Sep paid, receipt emailed 14-Oct): a receipt sent after the payment matches up to 60 days later when the payee is named and the exact amount is on it
         return { e, lag, name, score: (name ? 50 : 20) + (ccyOk ? 15 : -30) + Math.max(0, 30 - Math.abs(lag)) + (e.pam.has(k) ? 5 : 0) - Math.min(20, Math.max(0, nAm - 10)) }; })
       .filter(Boolean).sort((a, b) => b.score - a.score) : [];
     const best = c[0] && c[0].score >= 40 ? c[0] : null;
@@ -4608,14 +4610,33 @@ async function accPayeeCoding(org, key, hint) { const _ambP = await accAmbig(); 
 // tax exclusive, both on the payee's account: G x 10 at the payee's GST type and the rest at GST Free Expenses. Wink: G 528.90 -> 5,289.00 +
 // 496.80 super; Woolworths: G 16.47 -> 164.70 + 85.25, exactly as coded in Xero. UK 20%: the all-VAT check only (total / 6).
 // Only when the payee's tax type is the standard GST / VAT one; reverse charge, zero rated, exempt, no VAT are left as they are.
+// v28.354 (Ben 14-Oct-26): payees whose bills get an extra BAS-excluded line on a loan account (personal items bought on the company card).
+// The amount (0 by default, set in review or later in Xero) comes off the GST-free line (or the single line).
+const ACC_LOAN_LINE = { au: [{ payee: /^WOOLWORTHS/, code: '972', name: 'Directors Current Account - Ben' }] };
 const ACC_GST = { au: { rate: 0.10, std: 'INPUT', free: 'EXEMPTEXPENSES' }, uk: { rate: 0.20, std: 'INPUT2', free: null } };
 // v28.353 (Ben 14-Oct-26): also part GST-free when the receipt shows the GST G and its base G x 10 (Icon Management: GST 22.40 on the
 // 224.00 agency fee, total 1,716.40 -> 224.00 + GST and 1,470.00 GST free), and 'none' when a PDF invoice shows no GST at all ("if they
 // didn't charge GST, create the bill as per the invoice": one GST-free line). taxType null = derive (no coding yet).
-function accGstCheck(org, total, amts, taxType, hasPdf) {
+function accGstLabelled(t) {   // v28.354: amounts the PDF labels as GST / VAT (the caller ignores any that is too big to be the tax)
+  const out = new Set(), re = /\b(?:GST|VAT)\b[^0-9:\n]{0,30}?(?::[ \t]*\n?[ \t]*|[ \t]+)(?:[0-9]{1,2}(?:\.[0-9]+)?\s*%[^0-9\n]{0,20}?)?(?:A\$|AU\$|\$|£|€)?\s?([0-9]{1,3}(?:,[0-9]{3})*\.[0-9]{2}|[0-9]+\.[0-9]{2})\b/gi; let m;
+  while ((m = re.exec(String(t || '')))) out.add(Number(m[1].replace(/,/g, '')).toFixed(2));
+  // Labels and amounts in separate blocks (Woolworths: "Invoice Total: / Invoice total includes GST of: / Paid Amount:" then "$160.95 $6.96
+  // $160.95"): with a GST label in the text, the amount right after the largest amount (the total) is the GST when it is at most total / 11.
+  if (/includes\s+GST|GST\s+of\b|total\s+GST|GST\s*(?:amount|total|included)/i.test(String(t || ''))) {
+    const seq = [...String(t || '').matchAll(/(?:A\$|AU\$|\$)\s?([0-9]{1,3}(?:,[0-9]{3})*\.[0-9]{2}|[0-9]+\.[0-9]{2})\b/g)].map(x => Number(x[1].replace(/,/g, '')));
+    const M = seq.length ? Math.max(...seq) : 0;
+    seq.forEach((v, i) => { if (v === M && i + 1 < seq.length && seq[i + 1] > 0 && seq[i + 1] <= M / 11 + 0.011) out.add(seq[i + 1].toFixed(2)); }); }
+  return [...out]; }
+function accGstCheck(org, total, amts, taxType, hasPdf, gstLab) {
   const g = ACC_GST[org]; if (!g || (taxType && String(taxType).toUpperCase() !== g.std)) return { kind: 'skip' };
   const T = Math.round(Number(total) * 100) / 100, div = 1 + 1 / g.rate, nums = [...new Set((amts || []).map(Number).filter(v => v > 0))];
   const has = v => nums.some(a => Math.abs(a - v) <= 0.011);
+  // v28.354 (Ben, Woolworths 160.95 "includes GST of $6.96"): an amount the PDF labels GST wins over the guesses below
+  for (const G of [...new Set((gstLab || []).map(Number))].filter(v => v > 0 && v <= T / div + 0.011).sort((x, y) => y - x)) {
+    if (Math.abs(G - T / div) <= 0.011) return { kind: 'full', gst: Math.round(G * 100) / 100, labelled: true };
+    const free = Math.round((T - G * div) * 100) / 100;
+    if (g.free && free > 0.009) return { kind: 'split', gst: G, taxable: Math.round(G / g.rate * 100) / 100, free, free_type: g.free, labelled: true };
+  }
   // v28.323: "all GST" also needs the subtotal (total - GST) on the receipt: INV-0023 (385.00 at $35/h) showed 35.00 = 385 / 11 by chance
   if (has(T / div) && has(T - T / div)) return { kind: 'full', gst: Math.round(T / div * 100) / 100 };
   if (g.free) for (const a of nums.filter(a => a < T / div - 0.02).sort((x, y) => y - x)) {
@@ -4656,10 +4677,10 @@ async function accBillCandidates(rules, only) {
       const ov = (only && (only.find(o => o.email_id === e.id) || {}).override) || null;   // v28.280: the person's edits in the Reconcile drawer
       const c = { org: r.org, payee_key: r.payee_key, email_id: e.id, email_date: e.d, subject: e.subject, from: e.from_addr, currency: ACC_ORG_CCY[r.org], ...code, contact_id: r.contact_id || null, ok: false };
       if (ov) { ['contact', 'account_code', 'tax_type'].forEach(f => { const v = String(ov[f] == null ? '' : ov[f]).trim().slice(0, 120); if (v) c[f] = v; }); if (c.contact !== (r.contact || code.contact)) c.contact_id = null; }
-      const line = lines.filter(l => l.org === r.org && !usedLine.has(l.id) && accSameP(l.key, r.payee_key) && amts.includes(Math.abs(l.amount).toFixed(2)) && days(l.d, e.d) >= -5 && days(l.d, e.d) <= 25)
+      const line = lines.filter(l => l.org === r.org && !usedLine.has(l.id) && accSameP(l.key, r.payee_key) && amts.includes(Math.abs(l.amount).toFixed(2)) && days(l.d, e.d) >= -60 && days(l.d, e.d) <= 25)   // v28.354: late receipts (payee already matched by accSameP)
         .sort((a, b) => Math.abs(days(a.d, e.d)) - Math.abs(days(b.d, e.d)))[0];
       // the charge can follow the email by up to 25 days (Optus: bill emailed ~6th, debited ~21st): a receipt already reconciled in Xero needs nothing
-      if (!line && recon.some(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && real.includes(Math.abs(t.amount).toFixed(2)) && days(t.d, e.d) >= -5 && days(t.d, e.d) <= 25)) { if (only) { c.reason = 'Already reconciled in Xero'; out.push(c); } continue; }
+      if (!line && recon.some(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && real.includes(Math.abs(t.amount).toFixed(2)) && days(t.d, e.d) >= -60 && days(t.d, e.d) <= 25)) { if (only) { c.reason = 'Already reconciled in Xero'; out.push(c); } continue; }
       if (line) Object.assign(c, { amount: Math.abs(line.amount), date: line.d, stmt_line: line.id, bank: line.account_name });
       // v28.325 (Ben 13-Oct-26, HARD): "never create a bill until an unreconciled transaction is uploaded from the uncoded report". Auto bill needs
       // the open bank line; the statement upload triggers the run. (Review / batch from Reconcile always starts from a bank line.)
@@ -4674,11 +4695,15 @@ async function accBillCandidates(rules, only) {
       const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
       if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
       const hasPdf = (e.pdf_amounts || []).length > 0, ovTax = ov && String(ov.tax_type || '').trim();
-      const gc = accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
+      const gc = accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
       if (!c.tax_type && ACC_GST[r.org] && ['full', 'split'].includes(gc.kind)) c.tax_type = ACC_GST[r.org].std;   // v28.353: tax type from the invoice when not coded yet
       if (gc.kind === 'none' && !ovTax) c.tax_type = gc.free_type;   // v28.353: no GST on the invoice = one GST-free line
       if (!c.contact || !c.account_code || !c.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
       if (gc.kind === 'split') c.gst_split = { gst: gc.gst, taxable: gc.taxable, free: gc.free, free_type: gc.free_type };   // v28.353 (Ben): Auto bill splits too
+      const LL = (ACC_LOAN_LINE[r.org] || []).find(x => x.payee.test(r.payee_key));   // v28.354 (Ben): Woolworths bills carry a loan line (personal items)
+      if (LL) { const la = Math.round((Number(ov && ov.loan_amount) || 0) * 100) / 100, room = c.gst_split ? c.gst_split.free : c.amount;
+        if (la < 0 || la > room + 0.001) { c.reason = 'Loan amount ' + la.toFixed(2) + ' is more than the ' + (c.gst_split ? 'GST-free part ' : 'bill ') + room.toFixed(2); out.push(c); continue; }
+        c.loan_line = { code: LL.code, name: LL.name, amount: la }; }
       const ref = accEmailRef(e.subject), fref = accFileRef(e.files);   // v28.353: the invoice number from the PDF name (00371863, LBINVOICE 10-13)
       c.invoice_number = ((ov && String(ov.invoice_number || '').trim()) || fref || (r.payee_key + ' ' + (ref ? ref + ' ' : '') + c.date)).slice(0, 250);
       c.ok = true; claimed.add(e.id); if (line) usedLine.add(line.id); out.push(c);
@@ -4695,11 +4720,12 @@ async function accCreateBill(c, by, mode) {
       await pool.query(`UPDATE planner.accounts_payee_rules SET contact_id=$3, contact=coalesce(contact,$4) WHERE org=$1 AND payee_key=$2`, [c.org, c.payee_key, cid, c.contact]); }
     const _desc = (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', sp = c.gst_split;
     // v28.315: part GST-free receipts go in as two tax-exclusive lines on the same account (GST component, GST-free component)
+    const ll = c.loan_line, la = ll ? ll.amount : 0, loanItem = ll ? [{ Description: _desc + ' (personal: ' + ll.name + ')', Quantity: 1, UnitAmount: la, AccountCode: ll.code, TaxType: 'BASEXCLUDED' }] : [];   // v28.354
     const body = sp ? { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Exclusive',
         LineItems: [{ Description: _desc + ' (GST component)', Quantity: 1, UnitAmount: sp.taxable, AccountCode: c.account_code, TaxType: c.tax_type },
-          { Description: _desc + ' (GST free component)', Quantity: 1, UnitAmount: sp.free, AccountCode: c.account_code, TaxType: sp.free_type }] }
+          { Description: _desc + ' (GST free component)', Quantity: 1, UnitAmount: Math.round((sp.free - la) * 100) / 100, AccountCode: c.account_code, TaxType: sp.free_type }].concat(loanItem) }
       : { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Inclusive',
-        LineItems: [{ Description: _desc, Quantity: 1, UnitAmount: c.amount, AccountCode: c.account_code, TaxType: c.tax_type }] };
+        LineItems: [{ Description: _desc, Quantity: 1, UnitAmount: Math.round((c.amount - la) * 100) / 100, AccountCode: c.account_code, TaxType: c.tax_type }].concat(loanItem) };
     const j = await xeroFetch(c.org, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
     const inv = (j && j.Invoices && j.Invoices[0]) || {}; if (!inv.InvoiceID) throw new Error('Xero returned no bill');
     let attErr = null;

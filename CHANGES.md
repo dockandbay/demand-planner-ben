@@ -1,3 +1,9 @@
+## v28.354 (14-Oct-26) Reconcile: labelled GST, late receipts, Woolworths loan line
+- GST: an amount the PDF labels GST / VAT wins (next to the label, or after the total when labels and amounts are in separate blocks). Woolworths 160.95: 69.60 + GST 6.96 and 84.39 GST free (was 14.00 GST by coincidence). Labelled amounts are stored apart, so each amount keeps its currency mark (new mail only).
+- Late receipts: a receipt emailed up to 60 days after the bank line matches when the payee is named and the exact amount is on it (was 7). Woolworths 04-Sep AMEX line now matches the 14-Oct email.
+- Woolworths (AU) bills: extra line on 972 Directors Current Account - Ben, BAS excluded, 0.00 by default or the amount entered in review; it comes off the GST-free line. Review drawer has the Loan field.
+- Tested on the sandbox with the real Woolworths, Icon and Sana Haus PDFs (dry runs, no Xero writes). No migration, no env change.
+
 ## v28.353 (14-Oct-26) Reconcile: bill lines from the invoice PDF (GST / GST-free split, no-GST invoices, invoice number)
 - The PDF analysis sets the lines: all GST = one GST line; GST on part = two lines (GST component + GST-free component), now also when the PDF shows the GST and its base (Icon Management 1,716.40 = 224.00 + GST 22.40 and 1,470.00 GST free); no GST on the PDF = one GST-free line (Sana Haus 1,372.46). Not coded yet: the PDF picks the tax type. Auto bill splits too (was review only).
 - Reference = invoice number from the PDF name (00371863, LBINVOICE 10-13), else payee + date as before. A tax type typed in the review drawer wins.
