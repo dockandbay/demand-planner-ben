@@ -5449,21 +5449,19 @@ async function fulfilPushLines(po, completion) {
     LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
     WHERE po.po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
-  // Price order (v27.764 / v28.359 / v28.360): supplier confirmed ▸ PO line cost ▸ supplier price list ▸ products table (cost_<supplier code>, then cost) ▸ last PO price ▸ 0.02 for a POLYBAG line
+  // Price = the Order plan's price (v28.361): supplier confirmed ▸ PO line cost ▸ supplier price list ▸ products table (cost_<supplier code>, then cost) ▸ 0.02 for a POLYBAG line
   // (same supplier first, then any supplier). Lets a blank line still push the last agreed cost instead of 0.
-  // v28.360 (Ben 14-Oct-26: "supplier specific costs should come from price lists, but fallback is the products table"): each source is
-  // read on its own and taken in order; price_src says which one priced the line.
+  // v28.361 (Ben 14-Oct-26): the push sends what the ORDER PLAN shows: supplier confirmed / the line's own cost (user or supplier
+  // override) ▸ the supplier price list ▸ the products table ▸ 0.02 for a POLYBAG line. No "last PO price" (it mixed currencies).
   const lines = (await pool.query(`SELECT l.sku, l.qty,
       coalesce((SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL), nullif(l.cost_price, 0)) p_direct,
       (SELECT CASE WHEN (SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL) IS NOT NULL THEN 'supplier confirmed' ELSE 'PO line' END) p_direct_src,
       (SELECT coalesce(nullif((to_jsonb(p)->>('cost_' || lower(coalesce((SELECT su.code FROM planner.suppliers su WHERE su.name=$2 LIMIT 1), ''))))::numeric, 0), nullif(p.cost, 0)) FROM planner.products p WHERE p.sku=l.sku LIMIT 1) p_product,
-      coalesce(
-        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 AND xo.supplier_name=$2 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1),
-        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1)) p_last
+      NULL::numeric p_last
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po, supName])).rows;
   { let _pl = null, _pn = null; try { _pl = await priceListEstIndex(); _pn = plProdNum(((await pool.query(`SELECT prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {}).prod_no); } catch (_) {}
     lines.forEach(l => { const pl = _pl ? plEstimate(_pl, supName, l.sku, l.qty, _pn) : null; const num = v => (v == null || v === '' ? null : Number(v));
-      const cands = [[num(l.p_direct), l.p_direct_src], [pl, 'price list'], [num(l.p_product), 'products table'], [num(l.p_last), 'last PO price'], [/^POLYBAG/i.test(String(l.sku || '')) ? PO_POLYBAG_DEFAULT_PRICE : null, 'polybag default']];
+      const cands = [[num(l.p_direct), l.p_direct_src], [pl, 'price list'], [num(l.p_product), 'products table'], [/^POLYBAG/i.test(String(l.sku || '')) ? PO_POLYBAG_DEFAULT_PRICE : null, 'polybag default']];
       const hit = cands.find(c => c[0] != null && c[0] > 0); l.price = hit ? hit[0] : null; l.price_src = hit ? hit[1] : null; }); }
   const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id,
       credit_days,
@@ -21453,7 +21451,7 @@ app.get("/api/supply/po-detail/:po", async (req, res) => {
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
     const dtc = _dtcR.rows[0] || null;
     // Price-list estimate → override each line's Est. cost (sku_cost) for this PO's supplier / production / qty
-    try { if (_plR) { const _pm = _pmR.rows[0] || {}; const _pn = plProdNum(_pm.prod_no); lines.rows.forEach((l) => { const est = plEstimate(_plR, _pm.supplier_name, l.sku, l.qty, _pn); if (est != null) l.sku_cost = est; }); } } catch (e) { /* price list optional */ }
+    try { if (_plR) { const _pm = _pmR.rows[0] || {}; const _pn = plProdNum(_pm.prod_no); lines.rows.forEach((l) => { const est = plEstimate(_plR, _pm.supplier_name, l.sku, l.qty, _pn); if (est != null) l.sku_cost = est; }); } if (lines && lines.rows) lines.rows.forEach((l) => { if ((l.sku_cost == null || Number(l.sku_cost) <= 0) && /^POLYBAG/i.test(String(l.sku || ''))) l.sku_cost = PO_POLYBAG_DEFAULT_PRICE; }); } catch (e) { /* price list optional */ }   // v28.361: polybags 0.02 (same as the Fulfil push)
     const bcProjs = _bcR.rows;
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, barcode_projects: bcProjs, payments: payments.rows, flexport: flexport.rows, dtc,
       children: children.rows,
@@ -25747,6 +25745,7 @@ const orderPlanCache = makeCache('order-plan', async () => {
   const w = cut ? ` WHERE NOT (${archivedSql('p', '$1')})` : '';
   const rows = (await queryCapped(ORDER_PLAN_SELECT + w + ' ORDER BY l.po, l.sku', cut ? [cut] : [])).rows;
   try { const pl = await priceListEstIndex(); rows.forEach((r) => { const est = plEstimate(pl, r.supplier_name, r.sku, r.qty, plProdNum(r.prod_no)); if (est != null) r.sku_cost = est; }); } catch (e) { /* price list optional */ }
+  rows.forEach((r) => { if ((r.sku_cost == null || Number(r.sku_cost) <= 0) && /^POLYBAG/i.test(String(r.sku || ''))) r.sku_cost = PO_POLYBAG_DEFAULT_PRICE; });   // v28.361: polybags 0.02 (same as the Fulfil push)
   return rows;
 }, SUPPLY_CACHE_TTL_MS, { proactive: false });   // 6.6s build — lazy SWR (no idle 10-min re-warm) + statement cap; this was the outage's biggest connection hog
 // Dropdown sources for PO editing — hit by fetchLookups on nearly every SUPPLY render.

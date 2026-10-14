@@ -1,3 +1,7 @@
+## v28.361 (14-Oct-26) Fulfil PO push = the Order plan price
+- The push sends exactly what the PO Order plan shows: supplier confirmed / the line's own cost (user or supplier override) > supplier price list > products table > 0.02 for a polybag. The "last PO price" fallback added in v28.360 is removed (it mixed currencies). Polybags now show 0.02 in the Order plan too (po-detail and the order plan cache), so screen and push match.
+- No migration, no env change.
+
 ## v28.360 (14-Oct-26) Fulfil PO push price: supplier price list, then products table
 - Order: supplier confirmed (portal) > PO line cost > supplier price list > products table (cost_<supplier code>, then cost) > last PO price > polybag 0.02. Ben: supplier-specific costs come from price lists, the products table is the fallback.
 - Why: the old fallback (last PO price) mixed currencies: PO-1895873 holds GBP prices (3.84 / 4.54 = 0.756 x the USD price list 5.08 / 6.01), PO363 has bags at 18.00, tea towels came from a samples PO. PO-58UKLX4 (live, read only): 50 lines now from the Lixin price list, 5 from products, 4 polybags at 0.02, none unpriced; the two BRNCLB picnics still need the Fulfil catalog import.

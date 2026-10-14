@@ -106,7 +106,7 @@ fingerprints:
   server.mjs::/api/supply/tpl/goods-in: 015c39460dba
   server.mjs::_tplGridSummary: 0e93f4ce0c66
   server.mjs::_tplConsumablesInside: e11316018639
-  server.mjs::fulfilPushLines: 354e46e28204
+  server.mjs::fulfilPushLines: c9adbe8a0bc6
   server.mjs::FULFIL_MAP: a6c47c881a14
   server.mjs::fulfilCompletionMap: df8ad2805725
   server.mjs::/api/supply/fulfil/drift: 5d0b453f9536
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.360
+verified_version: v28.361
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -392,7 +392,7 @@ verified_version: v28.360
 - Company is fixed at create: AU ship-to country (PO, else branch) = company 3 (Dock & Bay Pty Ltd), anything else = company 1 (Dock & Bay Ltd). Currency = the supplier's default_currency. Payment term: credit days 90/60/30 give Net 90/60/30; anything else gives Immediate. (source: server.mjs :: fulfilCompanyForCountry, fulfilPaymentTermName)
 - Line price: the confirmed portal cost, else the line cost, else the SKU's latest priced line from the same supplier, else from any supplier. Rounded to 4 decimal places. (source: server.mjs :: fulfilPushLines)
 - Preflight blocks the push when: the supplier party, currency, payment term, China Port, metafield or branch is missing; a SKU is not in Fulfil; a line has no price; or a product has no purchase UOM. Writes to live Fulfil need FULFIL_LIVE_WRITES=true. (source: server.mjs :: fulfilPushLines)
-- Push line price (v27.764, v28.359, v28.360 Ben 14-Oct-26: "supplier specific costs should come from price lists, but fallback is the products table"): the supplier's confirmed cost in the portal, else the line's own cost, else the supplier's PRICE LIST (plEstimate: SKU entry over price-type entry, production version, quantity tier), else the PRODUCTS table (cost_<supplier code>, then cost), else the SKU's most recent priced PO line (same supplier first, then any; can be in another currency, e.g. PO-1895873 in GBP), else 0.02 for a POLYBAG line (Ben 14-Oct-26: polybags are charged at 0.02 each; PO_POLYBAG_DEFAULT_PRICE). A line with none of these blocks the push ("no price"). (source: server.mjs :: Fulfil PO push lines query)
+- Push line price = the ORDER PLAN price (v28.361, Ben 14-Oct-26: "the Fulfil PO push prices lines from the purchase order ORDER PLAN; the order plan shows the prices as per the price list, which can be overwritten from the supplier or user in admin"): the supplier's confirmed cost (portal) or the line's own cost (user or supplier override), else the supplier's PRICE LIST (plEstimate: SKU over price type, production version, quantity tier), else the PRODUCTS table (cost_<supplier code>, then cost), else 0.02 for a POLYBAG line (also shown in the Order plan). No "last PO price" fallback any more (it mixed currencies: PO-1895873 held GBP). A line with no price blocks the push. (source: server.mjs :: Fulfil PO push lines, po-detail sku_cost, orderPlanCache sku_cost)
 - Create guard (v28.199, URGENT after the PO373 / PO385 duplicate): HORIZON never creates a Fulfil PO for a CLIENT PO = branch country DIRECT, a Direct to Client / UK B2B JLEW / UK B2B NEXT branch, or a key-account PO (a plain "client" text or a sales_order_ref alone is not enough: stock POs use client for samples and sales_order_ref for FBA shipment ids; the duplicate check below still uses any PO's refs). A client PO must be linked to its existing Fulfil PO instead. (source: server.mjs :: FULFIL_CLIENT_PO_SQL, fulfilPushTarget)
 - Push target order: (1) the PO's manual Fulfil link (po_links system fulfil, found_by manual), (2) the Fulfil PO whose reference = the HORIZON PO. A manual link is never overwritten by the automatic link refresh. (source: server.mjs :: fulfilPushTarget, resolvePoLinks)
 - No create for ANY PO when Fulfil already has a non-cancelled PO whose number = the HORIZON PO or its erp_po, whose reference = one of its refs (sales_order_ref and client_po_ref, split on , ; /), or which is sale-linked (purchase.request chain) to a sales order whose number or reference is one of those refs. The push returns 409 "This PO looks like it already exists in Fulfil (from sales order X). Link it instead of creating a new one." (source: server.mjs :: fulfilExistingCandidates, fulfilPushTarget)
