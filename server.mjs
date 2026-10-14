@@ -5449,17 +5449,22 @@ async function fulfilPushLines(po, completion) {
     LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
     WHERE po.po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
-  // v27.764 (Ben): price fallback — confirmed supplier cost ▸ the line's own cost ▸ the SKU's most recent priced line ▸ v28.359: 0.02 for a POLYBAG line (PO_POLYBAG_DEFAULT_PRICE)
+  // Price order (v27.764 / v28.359 / v28.360): supplier confirmed ▸ PO line cost ▸ supplier price list ▸ products table (cost_<supplier code>, then cost) ▸ last PO price ▸ 0.02 for a POLYBAG line
   // (same supplier first, then any supplier). Lets a blank line still push the last agreed cost instead of 0.
+  // v28.360 (Ben 14-Oct-26: "supplier specific costs should come from price lists, but fallback is the products table"): each source is
+  // read on its own and taken in order; price_src says which one priced the line.
   const lines = (await pool.query(`SELECT l.sku, l.qty,
+      coalesce((SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL), nullif(l.cost_price, 0)) p_direct,
+      (SELECT CASE WHEN (SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL) IS NOT NULL THEN 'supplier confirmed' ELSE 'PO line' END) p_direct_src,
+      (SELECT coalesce(nullif((to_jsonb(p)->>('cost_' || lower(coalesce((SELECT su.code FROM planner.suppliers su WHERE su.name=$2 LIMIT 1), ''))))::numeric, 0), nullif(p.cost, 0)) FROM planner.products p WHERE p.sku=l.sku LIMIT 1) p_product,
       coalesce(
-        (SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL),
-        l.cost_price,
         (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 AND xo.supplier_name=$2 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1),
-        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1),
-        CASE WHEN upper(l.sku) LIKE 'POLYBAG%' THEN ${PO_POLYBAG_DEFAULT_PRICE} END
-      ) price
+        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1)) p_last
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po, supName])).rows;
+  { let _pl = null, _pn = null; try { _pl = await priceListEstIndex(); _pn = plProdNum(((await pool.query(`SELECT prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {}).prod_no); } catch (_) {}
+    lines.forEach(l => { const pl = _pl ? plEstimate(_pl, supName, l.sku, l.qty, _pn) : null; const num = v => (v == null || v === '' ? null : Number(v));
+      const cands = [[num(l.p_direct), l.p_direct_src], [pl, 'price list'], [num(l.p_product), 'products table'], [num(l.p_last), 'last PO price'], [/^POLYBAG/i.test(String(l.sku || '')) ? PO_POLYBAG_DEFAULT_PRICE : null, 'polybag default']];
+      const hit = cands.find(c => c[0] != null && c[0] > 0); l.price = hit ? hit[0] : null; l.price_src = hit ? hit[1] : null; }); }
   const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id,
       credit_days,
       coalesce(address_1,'') address_1, coalesce(address_2,'') address_2, coalesce(city,'') city, coalesce(state,'') state, coalesce(country,'') country, coalesce(postcode,'') postcode
