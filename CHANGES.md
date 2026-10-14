@@ -1,3 +1,7 @@
+## v28.351 (14-Oct-26) FIX: server.mjs as tested (v28.339 to v28.350 commits had code blocks in the wrong place)
+- **Diviyaj: deploy from this commit or later, not from v28.339 to v28.350.** Those commits were staged hunk by hunk (to keep an uncommitted DHL dev endpoint out) and 7 blocks (28 lines) landed in the wrong spot in server.mjs: the sample bill accounts endpoint (v28.339), the ILG code loader (v28.340), the Wise refusal (v28.341), the Paid > Xero resume / per-PO payment guard / run key (v28.347) and the contact create (v28.350). The file still parsed, so it would have deployed with wrong behaviour.
+- This commit is exactly the server.mjs that was tested on the sandbox, minus only the uncommitted DHL dev endpoint (13 lines). No behaviour change from what was tested.
+
 ## v28.350 (14-Oct-26) Paid > Xero creates a missing supplier contact
 - A supplier Xero contact that does not exist (e.g. "ACME Ltd - BL" in UK) is no longer an error: the popup shows it in amber ("created when you push") and the push creates it (fresh exact-name lookup, then PUT Contacts), then posts by ContactID. Same for the bank-org contact on a cross-org payment. A failed lookup (Xero down / daily limit) still blocks. Other posts (credit note, push queue, AU migration) unchanged.
 - No migration, no env change. Checked on the sandbox up to the push (not pushed: the sandbox uses the real Xero orgs).

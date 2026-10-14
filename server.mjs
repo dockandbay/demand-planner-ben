@@ -7375,6 +7375,16 @@ async function xeroContactLookup(region, name, opts) {
   _xcCache.set(key, { at: Date.now(), hit: hit ? { ContactID: hit.ContactID, Name: hit.Name } : null });
   return hit ? { ok: true, region, target: name, ContactID: hit.ContactID, Name: hit.Name } : miss;
 }
+// v28.350: find the supplier's contact (fresh) or create it with the target name. Never creates on a failed lookup.
+async function xeroContactEnsure(region, supplierNameOrRow) {
+  const c = await xeroContactFor(region, supplierNameOrRow, { fresh: true });
+  if (c.ok || c.lookup_failed || !c.target) return c;
+  try { const r = await xeroFetch(xeroRegion(region), '/api.xro/2.0/Contacts', { method: 'PUT', body: { Contacts: [{ Name: c.target }] } });
+    const n = r && r.Contacts && r.Contacts[0]; xeroContactBust();
+    if (n && n.ContactID) return Object.assign({}, c, { ok: true, ContactID: n.ContactID, Name: n.Name || c.target, created: true, error: null });
+    return Object.assign({}, c, { error: "Could not create Xero contact '" + c.target + "' in " + xeroRegion(region).toUpperCase() }); }
+  catch (e) { return Object.assign({}, c, { error: "Could not create Xero contact '" + c.target + "' in " + xeroRegion(region).toUpperCase() + ': ' + e.message }); }
+}
 // The resolver: supplier (name or row) -> { ok, ContactID, Name, target, supplier, region } or { ok:false, error }.
 async function xeroContactFor(region, supplierNameOrRow, opts) {
   region = xeroRegion(region);
@@ -7388,16 +7398,6 @@ async function xeroContactFor(region, supplierNameOrRow, opts) {
 // a "(contact)" suffix and the one historic AU alias). Used wherever Xero bills are matched to suppliers by contact name.
 async function supplierByXeroContactIndex() {
   const _k = v => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
-// v28.350: find the supplier's contact (fresh) or create it with the target name. Never creates on a failed lookup.
-async function xeroContactEnsure(region, supplierNameOrRow) {
-  const c = await xeroContactFor(region, supplierNameOrRow, { fresh: true });
-  if (c.ok || c.lookup_failed || !c.target) return c;
-  try { const r = await xeroFetch(xeroRegion(region), '/api.xro/2.0/Contacts', { method: 'PUT', body: { Contacts: [{ Name: c.target }] } });
-    const n = r && r.Contacts && r.Contacts[0]; xeroContactBust();
-    if (n && n.ContactID) return Object.assign({}, c, { ok: true, ContactID: n.ContactID, Name: n.Name || c.target, created: true, error: null });
-    return Object.assign({}, c, { error: "Could not create Xero contact '" + c.target + "' in " + xeroRegion(region).toUpperCase() }); }
-  catch (e) { return Object.assign({}, c, { error: "Could not create Xero contact '" + c.target + "' in " + xeroRegion(region).toUpperCase() + ': ' + e.message }); }
-}
   const _base = n => _k(String(n || '').replace(/\s*\(.*\)\s*$/, ''));
   const exact = {}, base = {};
   const cols = await _supXeroColsOk();
@@ -7515,6 +7515,7 @@ async function upfxSetting(key) { try { const r = (await pool.query(`SELECT valu
 const UPFX_ACCTS = { up: { org: 'uk', label: 'UP FX', name: 'Universal Partners FX USD', setting: 'up_fx_bank_account_id', emailed: UPFX_EMAILED_KEY, job: 'up_fx_statement' } };
 const _upfxAcctMemo = {};
 async function upfxConfig(key) {
+  if (key === 'wise') throw Object.assign(new Error('Wise FX USD is linked to Xero (bank feed) since 14-Oct-26: no statement file needed.'), { code: 410 });
   const A = UPFX_ACCTS[key] || UPFX_ACCTS.up;
   let acc = String((await upfxSetting(A.setting)) || '').replace(/"/g, '').trim();
   if (A !== UPFX_ACCTS.up && !/^[0-9a-f-]{36}$/i.test(acc)) {   // Wise: found by name in Xero AU (memoised 6 h); a saved id wins
@@ -7528,7 +7529,6 @@ async function upfxConfig(key) {
   to = hzEmailList(to); if (!to.length) to = UPFX_DEFAULT_RECIPIENTS.slice();
   return { key: UPFX_ACCTS[key] ? key : 'up', org: A.org, label: A.label, default_name: A.name, emailed_key: A.emailed, job: A.job, account_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(acc) ? acc.toLowerCase() : UPFX_DEFAULT_ACCOUNT, recipients: to };
 }
-  if (key === 'wise') throw Object.assign(new Error('Wise FX USD is linked to Xero (bank feed) since 14-Oct-26: no statement file needed.'), { code: 410 });
 // Xero dates: "/Date(1790294400000+0000)/" or "2026-09-29T00:00:00" -> YYYY-MM-DD (UTC; Xero stores the date at 00:00 UTC)
 function upfxXd(v) { const m = /\/Date\((-?\d+)/.exec(String(v || '')); if (m) return new Date(Number(m[1])).toISOString().slice(0, 10); const s = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; }
 function upfxLondonToday() { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const g = t => (p.find(x => x.type === t) || {}).value; return g('year') + '-' + g('month') + '-' + g('day'); }
@@ -8259,6 +8259,7 @@ app.post('/api/supply/payments/xero-preview', async (req, res) => {
     res.json(plan); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+function _xeroRunKey(rr) { return rr.run_key || ((rr.dt || '') + '|' + (rr.supplier || '') + (String(rr.region || '').toUpperCase() === 'AU' && String(rr.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : '')); }
 // v28.173 (Ben): XERO PREFLIGHT for the Payments Report badges. Same plan + checks as the preview, for a batch of unposted
 // runs, READ ONLY (GETs only; nothing is written to Xero). Per run: block[] = what stops the post (the popup's disabled
 // button: overpay / blocked deposit / settle account unresolved, plus what xero-post refuses: unmapped account, missing
@@ -8272,7 +8273,6 @@ function _xeroPlanIssues(plan) {
   (plan.voided_links || []).forEach(v => add(block, v.po + ': linked Xero bill ' + (v.bill_ref || '') + ' was voided, choose the right bill (PO drawer > Linked records)'));   // v28.183 (Ben)
   (plan.lines || []).forEach(l => {
     const po = l.reference || '(no ref)', isDep = /deposit/i.test(String(l.type || ''));
-function _xeroRunKey(rr) { return rr.run_key || ((rr.dt || '') + '|' + (rr.supplier || '') + (String(rr.region || '').toUpperCase() === 'AU' && String(rr.dt || '') >= PAY_REGION_SPLIT_FROM ? '|AU' : '')); }
     if (l.blocked) add(block, po + ': ' + l.blocked);
     if (l.pay_ok === false) add(block, po + ': payment ' + _n(l.amount) + ' exceeds bill amount due ' + _n(l.bill_due));
     if (l.will_pay && !l.settle_account_id) add(block, po + ': ' + (l.settle_from === 'loan' ? 'no intercompany loan (901) account in Xero ' + String(l.settle_org || '').toUpperCase() : 'cannot settle, ' + (l.settle_problem || 'no settle account')));
@@ -8381,6 +8381,8 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const region = plan.region, today = new Date().toISOString().slice(0, 10), _reqDate = String((req.body && req.body.date) || ''), date = (/^\d{4}-\d{2}-\d{2}$/.test(_reqDate) ? _reqDate : null) || plan.date || today;   // v28.347: the paid date from Paid > Xero
     // v28.176 (Ben): the bill references the supplier's Xero contact by ContactID (fresh lookup). Not found = nothing posted
     // (posting by Name would make Xero create a duplicate contact and undo Ben's merges).
+    if (plan.contact && !plan.contact.ok && plan.contact.will_create) { const ce = await xeroContactEnsure(region, plan.supplier);   // v28.350 (Ben): create the missing contact
+      if (ce.ok) { plan.contact = { ok: true, id: ce.ContactID, name: ce.Name, target: ce.target, created: !!ce.created }; } else return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: ce.error || 'Xero contact could not be created: nothing posted' }); }
     if (!plan.contact || !plan.contact.ok || !plan.contact.id) return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: (plan.contact && plan.contact.error) || 'Xero contact not resolved: nothing posted' });
     // v28.183 (Ben): a PO whose linked bill was voided and has no single replacement: nothing posted until a bill is chosen.
     if ((plan.voided_links || []).length) return res.status(400).json({ code: 'XERO_BILL_VOIDED', error: 'Linked Xero bill voided, nothing posted: choose the right bill for ' + plan.voided_links.map(v => v.po).join(', ') + ' (PO drawer > Linked records > change bill)' });
@@ -8394,8 +8396,6 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const badAcct = plan.lines.filter(l => Math.abs(l.amount) > 0.005 && !(l.account && l.account.code));
     if (badAcct.length) return res.status(400).json({ error: 'No account code mapped for: ' + [...new Set(badAcct.map(l => l.account_role === 'loan' ? 'intercompany loan (901)' : l.account_role))].join(', ') + ' — set it in SUPPLY ▸ CONFIG ▸ Xero (admin)' });
     // Cross-org completions need the home org's loan account for the settlement payment.
-    if (plan.contact && !plan.contact.ok && plan.contact.will_create) { const ce = await xeroContactEnsure(region, plan.supplier);   // v28.350 (Ben): create the missing contact
-      if (ce.ok) { plan.contact = { ok: true, id: ce.ContactID, name: ce.Name, target: ce.target, created: !!ce.created }; } else return res.status(400).json({ code: 'XERO_CONTACT_MISSING', error: ce.error || 'Xero contact could not be created: nothing posted' }); }
     const missLoan = plan.lines.filter(l => l.will_pay && l.settle_from === 'loan' && !l.settle_account_id);
     if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in SUPPLY ▸ CONFIG ▸ Xero (admin)' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
@@ -8412,6 +8412,10 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const out = { region, paying_org: plan.paying_org, supplier: plan.supplier, xero_contact: plan.contact.name, contact_created: !!plan.contact.created, reference: plan.reference, bill: null, payments: [], skipped: [] };
     // 1) the supplier-payment bill (DRAFT) in the PAYING org. Same-org lines → 602 / 602.1 (Production tracking on
     //    deposits); cross-org completion lines → the paying org's intercompany loan (901), no tracking.
+    let binv = null;
+    if (_resume) { const pb = _prior[0]; let inv = null; try { const g = await xeroFetch(region, '/api.xro/2.0/Invoices/' + encodeURIComponent(pb.bill_id)); inv = g && g.Invoices && g.Invoices[0]; } catch (_) {}
+      binv = inv || { InvoiceID: pb.bill_id, InvoiceNumber: pb.bill_number }; out.resumed = true; }
+    else {
     for (const l of plan.lines) { if (l.tracking && l.tracking.option && !l.tracking.exists) await _ensureProductionOption(region, l.tracking.option); }
     const billLines = plan.lines.filter(l => Math.abs(l.amount) > 0.005).map(l => ({ Description: (l.type || 'Payment') + ' ' + l.reference + (l.cross ? ' (cross-org via loan, USD ' + (Math.round(l.amount * 100) / 100) + ')' : ''), Quantity: 1, UnitAmount: Math.round(l.amount * 100) / 100, AccountCode: l.account.code, Tracking: (l.tracking && l.tracking.option) ? [{ Name: 'Production', Option: l.tracking.option }] : [] }));
     const billBody = { Type: 'ACCPAY', Contact: { ContactID: plan.contact.id }, Date: date, DueDate: date, InvoiceNumber: plan.reference, Reference: plan.reference, CurrencyCode: plan.currency || 'USD', Status: 'DRAFT', LineAmountTypes: 'NoTax', LineItems: (plan.key_lines || []).concat(billLines) };   // v28.285: $0 key lines first when the bank payment is split across several bills
@@ -8425,10 +8429,6 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
       await pool.query(`INSERT INTO planner.payment_xero_bills (bill_id, run_key, run_date, supplier, region, bill_number, bill_url, status, source, created_by)
         VALUES ($1,$2,$3::date,$4,$5,$6,$7,'DRAFT','post',$8) ON CONFLICT (bill_id) DO UPDATE SET run_key=excluded.run_key, status=excluded.status, updated_at=now()`,
         [out.bill.id, rk, rr.dt || null, rr.supplier || null, region === 'au' ? 'AU' : 'UK', out.bill.number || plan.reference, out.bill.url, authUser(req) || 'system']);
-    let binv = null;
-    if (_resume) { const pb = _prior[0]; let inv = null; try { const g = await xeroFetch(region, '/api.xro/2.0/Invoices/' + encodeURIComponent(pb.bill_id)); inv = g && g.Invoices && g.Invoices[0]; } catch (_) {}
-      binv = inv || { InvoiceID: pb.bill_id, InvoiceNumber: pb.bill_number }; out.resumed = true; }
-    else {
       try { invalidateSupplyCaches('payment'); } catch (_) {}
     } catch (e) { console.error('[payment_xero_bills] record failed (migration 324 applied?):', e.message); out.record_warning = 'bill posted but its reference was not recorded: ' + e.message; } }
     // Same-org payments post at the SUPPLIER-PAYMENT bill's rate (the paying org's daily USD rate) — one consistent run.
@@ -8444,6 +8444,12 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
       if (!l.settle_account_id) { out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'payment') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
       const rate = l.cross ? null : ((isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate);
+      // v28.347: one log row per PO bill per run, written BEFORE the Xero call (unique run_key + invoice_id while creating /
+      // created, migration 360): a retry or a second click never pays the same PO bill twice for this run.
+      let lgp = null;
+      try { lgp = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, currency_rate, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
+          [_rk, l.settle_org, l.linked_bill.id, l.linked_bill.number || null, l.settle_account_id, 'PO bill from ' + (l.settle_from === 'loan' ? 'loan 901' : 'account'), Math.round(l.amount * 100) / 100, plan.currency || 'USD', rate, date, authUser(req) || 'system'])).rows[0].id; }
+      catch (le) { if (/duplicate key/.test(le.message)) { out.skipped.push({ po: l.reference, reason: 'already paid by this run' }); continue; } throw le; }
       try {
         const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: l.settle_account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
         if (rate != null && rate > 0) payObj.CurrencyRate = rate;
@@ -8457,12 +8463,6 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const _failed = out.skipped.filter(x => x.error).length;
     res.json(Object.assign({ ok: _failed === 0, failed_payments: _failed }, out));
     });
-      // v28.347: one log row per PO bill per run, written BEFORE the Xero call (unique run_key + invoice_id while creating /
-      // created, migration 360): a retry or a second click never pays the same PO bill twice for this run.
-      let lgp = null;
-      try { lgp = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, currency_rate, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
-          [_rk, l.settle_org, l.linked_bill.id, l.linked_bill.number || null, l.settle_account_id, 'PO bill from ' + (l.settle_from === 'loan' ? 'loan 901' : 'account'), Math.round(l.amount * 100) / 100, plan.currency || 'USD', rate, date, authUser(req) || 'system'])).rows[0].id; }
-      catch (le) { if (/duplicate key/.test(le.message)) { out.skipped.push({ po: l.reference, reason: 'already paid by this run' }); continue; } throw le; }
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : e.code === 'XERO_POST_BUSY' ? 409 : 500).json({ error: e.message, code: e.code === 'XERO_POST_BUSY' ? e.code : undefined }); }
 });
 // ═══ v28.288 (Ben 12-Oct-26): Payments Report "Paid" with a BANK ACCOUNT. "when selecting PAID in payments report i think we need a bank
@@ -17146,6 +17146,7 @@ function _ilgReworkRef(text) {   // "Rework SA17380500 - barcode relabelling" ->
   return m ? { ref: m[1].toUpperCase() + (m[2] ? '-' + m[2].toUpperCase() : ''), base: m[1].toUpperCase() } : null;
 }
 async function _tplIlgAllocate(period) {
+  const _xc = await tplXeroCodes('uk_ilg');   // v28.340: codes from the mapping tables
   const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
   const pdfs = files.filter(f => /\.pdf$/i.test(f.filename || '') || /pdf/i.test(f.content_type || ''));
   if (!pdfs.length) return { ok: false, error: 'Upload the ILG DI invoice PDFs for this period first.' };
@@ -17159,7 +17160,6 @@ async function _tplIlgAllocate(period) {
     if (di.invRef && inva.length && !invaUsed) {   // v28.296: the detail report carries this invoice's lines, by order
       invaUsed = true;
       const tot = inva.reduce((s, x) => s + x.gross, 0), tax = inva.reduce((s, x) => s + x.vat, 0);
-  const _xc = await tplXeroCodes('uk_ilg');   // v28.340: codes from the mapping tables
       seen.push({ di: di.invRef, si: di.siRef, channel: di.channel || 'Ecom', total: r2(tot), tax: r2(tax), detail: true });
       if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
       checkPrinted(di.invRef, tot, di.printed);
@@ -23587,6 +23587,9 @@ function sbValidate(head, lines, auCodes) { const p = []; auCodes = auCodes || [
     else p.push(n + 'link it to a Fulfil PO or a Xero account.'); });
   return p; }
 
+app.get('/api/supply/sample-bills/accounts', async (req, res) => {   // v28.339: the form's Xero account list (mapping table)
+  try { const a = await sbAccounts(); const seen = new Set(); res.json({ ok: true, accounts: a.list.filter(x => { const k = x.org + '|' + x.code; if (seen.has(k)) return false; seen.add(k); return true; }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/sample-bills/parse', async (req, res) => {
   try { const b = req.body || {};
     const buf = await resolveUploadBytes(b, { maxInline: 20 * 1024 * 1024 });
@@ -23600,9 +23603,6 @@ app.post('/api/supply/sample-bills/parse', async (req, res) => {
     const refBase = p.head.invoice_no || ['PO', carrier ? carrier.replace(/\s+/g, '') : 'SAMPLES', code, month].filter(Boolean).join('-');   // v28.329 (Ben): same style as existing Other payments, e.g. PO-DHL-LX-2026-08
     const lines = await sbResolve(p.lines);
     const total = sbR2(lines.reduce((a, l) => a + Number(l.amount || 0), 0));
-app.get('/api/supply/sample-bills/accounts', async (req, res) => {   // v28.339: the form's Xero account list (mapping table)
-  try { const a = await sbAccounts(); const seen = new Set(); res.json({ ok: true, accounts: a.list.filter(x => { const k = x.org + '|' + x.code; if (seen.has(k)) return false; seen.add(k); return true; }) }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
     res.json({ ok: true, head: { supplier: sup ? sup.name : (p.head.supplier || ''), supplier_text: p.head.supplier || '', supplier_found: !!sup, ref_base: refBase, ref_built: !p.head.invoice_no,
       invoice_date: p.head.invoice_date || null, due_date: p.head.due_date || null, currency: (sup && sup.currency) || 'USD', fx_rate: p.head.fx_rate || null, sheet_total: p.head.sheet_total != null ? p.head.sheet_total : null, source_file: b.filename || null },
       lines, total, ties: p.head.sheet_total == null ? null : Math.abs(total - p.head.sheet_total) < 0.05 });
