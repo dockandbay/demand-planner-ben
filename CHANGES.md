@@ -1,3 +1,6 @@
+## v28.359 (14-Oct-26) Fulfil PO push: polybags default to 0.02
+- A POLYBAG line with no confirmed, line or previous price now pushes at 0.02 each (supplier currency), so it no longer blocks the push. Checked on live PO-58UKLX4 (read only): the 5 polybags price at 0.02; still without a price: PONCHK-CAB-MD-YELL, PONCHK-CAB-SM-YELL, PICNIC-DES-LG/XL-BRNCLB (the picnic ones are also not in Fulfil).
+
 ## v28.358 (14-Oct-26) Reconcile: a payee contact not in Xero is created on push
 - The review drawer contact box accepted only a contact picked from Xero ("never created"), so a new payee (FASTCOURIER 10.89) could not be billed. Now a typed name is accepted ("Not in Xero: this name will be created"), and on push HORIZON creates the contact (fresh exact-name lookup first) and then the bill. A failed Xero lookup still stops it.
 - No migration, no env change.

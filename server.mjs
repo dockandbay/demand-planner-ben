@@ -4611,6 +4611,7 @@ async function accPayeeCoding(org, key, hint) { const _ambP = await accAmbig(); 
 // tax exclusive, both on the payee's account: G x 10 at the payee's GST type and the rest at GST Free Expenses. Wink: G 528.90 -> 5,289.00 +
 // 496.80 super; Woolworths: G 16.47 -> 164.70 + 85.25, exactly as coded in Xero. UK 20%: the all-VAT check only (total / 6).
 // Only when the payee's tax type is the standard GST / VAT one; reverse charge, zero rated, exempt, no VAT are left as they are.
+const PO_POLYBAG_DEFAULT_PRICE = 0.02;   // v28.359 (Ben 14-Oct-26): polybags are charged at 0.02 each; used when a PO line has no other price (supplier currency)
 // v28.354 (Ben 14-Oct-26): payees whose bills get an extra BAS-excluded line on a loan account (personal items bought on the company card).
 // The amount (0 by default, set in review or later in Xero) comes off the GST-free line (or the single line).
 const ACC_LOAN_LINE = { au: [{ payee: /^WOOLWORTHS/, code: '972', name: 'Directors Current Account - Ben' }] };
@@ -5448,14 +5449,15 @@ async function fulfilPushLines(po, completion) {
     LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
     WHERE po.po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
-  // v27.764 (Ben): price fallback — confirmed supplier cost ▸ the line's own cost ▸ the SKU's most recent priced line
+  // v27.764 (Ben): price fallback — confirmed supplier cost ▸ the line's own cost ▸ the SKU's most recent priced line ▸ v28.359: 0.02 for a POLYBAG line (PO_POLYBAG_DEFAULT_PRICE)
   // (same supplier first, then any supplier). Lets a blank line still push the last agreed cost instead of 0.
   const lines = (await pool.query(`SELECT l.sku, l.qty,
       coalesce(
         (SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL),
         l.cost_price,
         (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 AND xo.supplier_name=$2 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1),
-        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1)
+        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1),
+        CASE WHEN upper(l.sku) LIKE 'POLYBAG%' THEN ${PO_POLYBAG_DEFAULT_PRICE} END
       ) price
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po, supName])).rows;
   const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id,
