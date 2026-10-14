@@ -1,3 +1,6 @@
+## v28.355 (14-Oct-26) ACCOUNTS > Bank statement: Download UP FX statement button is blue
+- Easier to see (was a light button). UI only.
+
 ## v28.354 (14-Oct-26) Reconcile: labelled GST, late receipts, Woolworths loan line
 - GST: an amount the PDF labels GST / VAT wins (next to the label, or after the total when labels and amounts are in separate blocks). Woolworths 160.95: 69.60 + GST 6.96 and 84.39 GST free (was 14.00 GST by coincidence). Labelled amounts are stored apart, so each amount keeps its currency mark (new mail only).
 - Late receipts: a receipt emailed up to 60 days after the bank line matches when the payee is named and the exact amount is on it (was 7). Woolworths 04-Sep AMEX line now matches the 14-Oct email.
