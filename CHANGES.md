@@ -1,3 +1,7 @@
+## v28.363 (14-Oct-26) PO grid: Export XLSX
+- PURCHASE ORDERS > Import/Export > "Export XLSX": pick statuses in a popup, downloads one formatted workbook: About, POs (details, supplier, branch, shipment, Fulfil / Xero / Flexport / DHL links, units, cartons, CBM, kg, value) and Order plan lines (SKU, qty, Fulfil qty, Order plan price + source, value, carton dims and weights).
+- New read-only GET /api/supply/po-export.xlsx?status=... No migration, no env change.
+
 ## v28.362 (14-Oct-26) ERP deviations follow Fulfil; dropship POs mirrored; Use Fulfil qty
 - Fulfil PO mirror matches each Fulfil PO to its HORIZON PO by reference, else the manual PO link (e.g. PO-1895877 -> PO388), else the HORIZON PO number at the end of a sales-order reference ("TAG10793-57/7484/PO-1895877"). After each full mirror run, every mirrored line's ERP qty = the Fulfil qty (0 if Fulfil has no such SKU), so ERP deviations mean "differs from Fulfil now". Live (read only): open-PO deviations 1,591 -> 137.
 - PO ERP deviations box: "Use Fulfil qty" sets the plan to the Fulfil qty on the differing lines (logged).

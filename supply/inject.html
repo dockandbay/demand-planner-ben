@@ -3149,6 +3149,7 @@
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
+          +'<button class="save-btn" id="po-xlsx" style="'+lb+'" title="download every PO in the chosen statuses as a formatted Excel file: PO details, supplier, branch, shipment, links (Fulfil / Xero / Flexport / DHL), weights, and every order plan line with qty and price">⬇ Export XLSX</button>'   // v28.363
           +'<button class="save-btn" id="po-fulfil-dates" style="'+lb+'" title="push the planner delivery-to-warehouse date to the Fulfil requested delivery date for every ACTIVE PO whose date differs from Fulfil — complete POs are skipped (live write)">📅 Sync Fulfil Dates</button>'   /* v28.095 (Ben): Cin7 decommissioned — "Sync Cin7 Dates" removed */
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
@@ -3390,6 +3391,35 @@
     if(String(state.sku||'').trim())runSku();   // re-hydrate the match set after a full re-render
     var _ft=document.getElementById('po-filt-toggle'); if(_ft)_ft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     var _ie=document.getElementById('po-impexp-toggle'); if(_ie)_ie.onclick=function(){ var pb=document.getElementById('po-impexp-bar'); if(!pb)return; var on=(pb.style.display==='none'||!pb.style.display); pb.style.display=on?'flex':'none'; this.textContent=on?'⇅ Import/Export ▴':'⇅ Import/Export'; };
+    // v28.363 (Ben 14-Oct-26): Export XLSX: pick statuses, download the lot (server builds the workbook).
+    document.getElementById('po-xlsx').onclick=function(){
+      var cnt={}; try{(rows||[]).forEach(function(p){var k=String(p.status||'').toUpperCase(); cnt[k]=(cnt[k]||0)+1;});}catch(_){}
+      var def={'FUTURE':1,'PRODUCTION':1,'READY TO SHIP':1,'SHIPPED TO MASTER':1,'SHIPPING':1};
+      var bd=document.createElement('div'); bd.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
+      bd.innerHTML='<div style="background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);width:100%;max-width:400px;padding:16px 18px;text-align:left">'
+        +'<div style="font-weight:800;font-size:15px;margin-bottom:4px">Export POs to Excel</div>'
+        +'<div style="color:var(--mut);font-size:12px;margin-bottom:10px">Every PO in the ticked statuses: details, shipment, links and weights, plus every order plan line (SKU, qty, price).</div>'
+        +'<div id="pox-list">'+PO_STATUSES.map(function(st){return '<label style="display:flex;gap:8px;align-items:center;padding:5px 2px;cursor:pointer"><input type="checkbox" value="'+esc(st)+'"'+(def[st]?' checked':'')+'><span style="flex:1">'+esc(st)+'</span><span style="color:var(--mut);font-size:12px">'+(cnt[st]||0)+'</span></label>';}).join('')+'</div>'
+        +'<div style="display:flex;gap:8px;margin:8px 0 12px;font-size:12px"><a href="#" id="pox-all" style="color:var(--blue)">All</a><a href="#" id="pox-none" style="color:var(--blue)">None</a><a href="#" id="pox-open" style="color:var(--blue)">Open only</a></div>'
+        +'<div id="pox-msg" style="font-size:12px;color:var(--mut);min-height:16px;margin-bottom:8px"></div>'
+        +'<div style="display:flex;gap:8px;justify-content:flex-end"><button class="save-btn" id="pox-cancel">Cancel</button><button class="save-btn primary" id="pox-go">⬇ Download XLSX</button></div></div>';
+      document.body.appendChild(bd);
+      var close=function(){bd.remove();}; bd.onclick=function(e){if(e.target===bd)close();}; bd.querySelector('#pox-cancel').onclick=close;
+      var boxes=function(){return [].slice.call(bd.querySelectorAll('#pox-list input'));};
+      bd.querySelector('#pox-all').onclick=function(e){e.preventDefault();boxes().forEach(function(c){c.checked=true;});};
+      bd.querySelector('#pox-none').onclick=function(e){e.preventDefault();boxes().forEach(function(c){c.checked=false;});};
+      bd.querySelector('#pox-open').onclick=function(e){e.preventDefault();boxes().forEach(function(c){c.checked=!!def[c.value];});};
+      bd.querySelector('#pox-go').onclick=function(){
+        var sel=boxes().filter(function(c){return c.checked;}).map(function(c){return c.value;}), msg=bd.querySelector('#pox-msg'), btn=this;
+        if(!sel.length){msg.textContent='Tick at least one status.';msg.style.color='var(--neg)';return;}
+        btn.disabled=true; msg.style.color='var(--mut)'; msg.textContent='Building the workbook…';
+        fetch('/api/supply/po-export.xlsx?status='+encodeURIComponent(sel.join(',')),{credentials:'same-origin'}).then(function(r){
+          if(!r.ok) return r.json().catch(function(){return {};}).then(function(j){throw new Error(j.error||('HTTP '+r.status));});
+          var cd=r.headers.get('Content-Disposition')||'', m=/filename="([^"]+)"/.exec(cd), fn=m?m[1]:'HORIZON POs.xlsx';
+          return r.blob().then(function(b){var u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},4000);close();});
+        }).catch(function(e){btn.disabled=false;msg.style.color='var(--neg)';msg.textContent='Export failed: '+e.message;});
+      };
+    };
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(poSearchBase(),q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};   // v28.165 (Ben): export follows the tick box
     document.getElementById('po-new').onclick=openPoCreate;
     document.getElementById('po-upload').onclick=openPoUpload;

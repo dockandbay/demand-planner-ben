@@ -12063,6 +12063,83 @@ supplySectionHandler = async (req, res, next) => {
     }
   } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
 };
+// v28.363 (Ben 14-Oct-26): PURCHASE ORDERS > Import/Export > Export XLSX. Every PO in the chosen statuses with its supplier, branch,
+// dates, shipment (carrier, mode, tracking, dates), links (Fulfil, Xero, Flexport, DHL), units / cartons / CBM / weight and order value,
+// (above the :section catch-all) plus every order plan line (SKU, product, qty, Fulfil qty, the Order plan price and its source, value, carton dims and weights).
+// Read only. Prices = the Order plan price (line cost > supplier price list > products table > polybag 0.02).
+app.get('/api/supply/po-export.xlsx', async (req, res) => {
+  try {
+    const want = String(req.query.status || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    const pos = (await pool.query(`SELECT p.po, upper(coalesce(p.status,'')) status, p.supplier_name, su.code supplier_code, coalesce(su.default_currency,'USD') currency, p.branch,
+        upper(coalesce(nullif(trim(p.country_code),''), nullif(trim(b.country_code),''), '')) country, p.prod_no, p.batch_id, p.client, p.client_po_ref, p.sales_order_ref,
+        to_char(p.start_production,'YYYY-MM-DD') start_production,
+        to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(su.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') end_production,
+        p.shipment_ref, s.carrier, s.mode, s.carrier_ref, s.status ship_status, s.export_port,
+        to_char(s.departure_date,'YYYY-MM-DD') departure, to_char(s.landing_date,'YYYY-MM-DD') landing, to_char(s.arrival_date,'YYYY-MM-DD') arrival,
+        to_char(coalesce(s.delivery_date, p.delivery_date_overide),'YYYY-MM-DD') delivery, p.flexport_reference, p.deposit_ref, p.final_delivery_address, p.dtc_key_account,
+        (SELECT json_agg(json_build_object('system', l.system, 'ref', coalesce(l.external_ref, l.external_id), 'url', l.url)) FROM planner.po_links l WHERE l.po=p.po AND coalesce(l.status,'linked') <> 'removed') links,
+        (SELECT json_build_object('cartons', d.cartons, 'cbm', d.cbm, 'kg', d.gross_weight_kg) FROM planner.dtc_shipment_details d WHERE d.po=p.po LIMIT 1) dtc
+      FROM planner.purchase_orders p LEFT JOIN planner.suppliers su ON su.name=p.supplier_name LEFT JOIN planner.branches b ON b.name=p.branch
+      LEFT JOIN planner.shipments s ON s.shipment_ref=p.shipment_ref
+      WHERE ($1::text[] IS NULL OR upper(coalesce(p.status,'')) = ANY($1::text[])) ORDER BY p.status, p.supplier_name, p.po`, [want.length ? want : null])).rows;
+    const poList = pos.map(p => p.po);
+    const lines = poList.length ? (await pool.query(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, nullif(l.carton_qty,0) line_carton_qty,
+        pr.product_name, pr.size_long, pr.colour_long, pr.product_ean, pr.carton_qty prod_carton_qty, pr.cost, to_jsonb(pr) pj,
+        pr.uk_carton_length, pr.uk_carton_width, pr.uk_carton_height, pr.uk_carton_weight, pr.us_carton_length, pr.us_carton_width, pr.us_carton_height, pr.us_carton_weight
+      FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po = ANY($1::text[]) AND coalesce(l.qty,0) <> 0 ORDER BY l.po, l.sku`, [poList])).rows : [];
+    let pl = null; try { pl = await priceListEstIndex(); } catch (_) {}
+    const byPo = new Map(pos.map(p => [p.po, Object.assign(p, { _lines: [] })]));
+    const n = v => (v == null || v === '' || isNaN(Number(v)) ? null : Number(v));
+    lines.forEach(l => { const p = byPo.get(l.po); if (!p) return;
+      const usDims = p.country === 'US';
+      const cq = n(l.line_carton_qty) || n(l.prod_carton_qty), L = n(usDims ? l.us_carton_length : l.uk_carton_length), W = n(usDims ? l.us_carton_width : l.uk_carton_width), H = n(usDims ? l.us_carton_height : l.uk_carton_height), kg = n(usDims ? l.us_carton_weight : l.uk_carton_weight);
+      const est = pl ? plEstimate(pl, p.supplier_name, l.sku, l.qty, plProdNum(p.prod_no)) : null;
+      const prodCost = n(l.pj && p.supplier_code ? l.pj['cost_' + String(p.supplier_code).toLowerCase()] : null) || n(l.cost);
+      const cands = [[n(l.cost_price), 'PO line / supplier'], [est, 'price list'], [prodCost, 'products table'], [/^POLYBAG/i.test(l.sku) ? PO_POLYBAG_DEFAULT_PRICE : null, 'polybag default']];
+      const hit = cands.find(c => c[0] != null && c[0] > 0) || [null, ''];
+      const qty = n(l.qty) || 0, cartons = cq ? qty / cq : null, cbm = (cartons != null && L && W && H) ? cartons * L * W * H / 1e6 : null, wt = (cartons != null && kg) ? cartons * kg : null;
+      p._lines.push({ sku: l.sku, name: l.product_name || '', size: l.size_long || '', colour: l.colour_long || '', ean: l.product_ean || '', qty, erp_qty: n(l.erp_qty), price: hit[0], price_src: hit[1], value: hit[0] != null ? qty * hit[0] : null,
+        carton_qty: cq, cartons, L, W, H, kg, cbm, wt, dims: usDims ? 'US' : 'UK' }); });
+    const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON'; wb.created = new Date();
+    const NAVY = 'FF1D3557', HEAD = { font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }, alignment: { vertical: 'middle', wrapText: true } };
+    const d8 = v => v ? new Date(v + 'T00:00:00Z') : null;
+    const sheet = (name, cols) => { const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }] }); ws.columns = cols.map(c => ({ header: c[0], key: c[1], width: c[2] || 14, style: c[3] ? { numFmt: c[3] } : {} }));
+      ws.getRow(1).height = 30; ws.getRow(1).eachCell(c => Object.assign(c, HEAD)); ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } }; return ws; };
+    const DF = 'dd-mmm-yy', MF = '#,##0.00', IF = '#,##0', PF = '#,##0.0000';
+    // About
+    const ab = wb.addWorksheet('About'); ab.columns = [{ width: 28 }, { width: 90 }];
+    [['HORIZON purchase order export', ''], ['Created', new Date()], ['Statuses', want.length ? want.join(', ') : 'all'], ['Purchase orders', pos.length], ['Order plan lines', lines.length],
+     ['Prices', 'The Order plan price: PO line cost (user or supplier) > supplier price list > products table > 0.02 for polybags; the source is on each line.'],
+     ['Carton dims / weights', 'From the products table (US carton for US branches, else UK), cm and kg. Cartons = qty / carton qty.'],
+     ['Fulfil qty', 'The ERP (Fulfil) quantity HORIZON last read; blank = not in Fulfil.']].forEach((r, i) => { const row = ab.addRow(r); if (i === 0) row.font = { bold: true, size: 14 }; else row.getCell(1).font = { bold: true }; if (r[1] instanceof Date) row.getCell(2).numFmt = 'dd-mmm-yy hh:mm'; });
+    // POs
+    const ws1 = sheet('POs', [['PO','po',18],['Status','status',14],['Supplier','supplier',22],['Supplier code','scode',9],['Currency','ccy',8],['Branch','branch',18],['Country','country',8],['Production','prod',9],['Batch','batch',10],
+      ['Client','client',20],['Client PO','client_po',14],['Sales order','so',16],['Start production','start',12,DF],['End production','end',12,DF],
+      ['Shipment','ship',18],['Carrier','carrier',12],['Mode','mode',8],['Tracking / container','tracking',20],['Shipment status','sstatus',13],['Export port','port',12],['Departure','dep',12,DF],['Landing','land',12,DF],['Arrival','arr',12,DF],['Delivery','del',12,DF],
+      ['Lines','nlines',7,IF],['Units','units',10,IF],['Cartons','cartons',9,'#,##0.0'],['CBM','cbm',8,'#,##0.00'],['Gross kg','kg',10,'#,##0.0'],['Order value','value',13,MF],
+      ['Fulfil PO','fulfil',14],['Xero','xero',16],['Flexport','flexport',14],['DHL','dhl',14],['Deposit ref','deposit',14],['Delivery address','addr',36]]);
+    pos.forEach(p => { const L = p._lines, sum = k => L.reduce((a, x) => a + (x[k] || 0), 0), links = p.links || [], lk = sys => links.filter(x => x.system === sys);
+      const dtc = p.dtc || null;
+      const row = ws1.addRow({ po: p.po, status: p.status, supplier: p.supplier_name, scode: p.supplier_code, ccy: p.currency, branch: p.branch, country: p.country, prod: p.prod_no, batch: p.batch_id, client: p.client, client_po: p.client_po_ref, so: p.sales_order_ref,
+        start: d8(p.start_production), end: d8(p.end_production), ship: p.shipment_ref, carrier: p.carrier, mode: p.mode, tracking: p.carrier_ref, sstatus: p.ship_status, port: p.export_port, dep: d8(p.departure), land: d8(p.landing), arr: d8(p.arrival), del: d8(p.delivery),
+        nlines: L.length, units: sum('qty'), cartons: dtc && dtc.cartons != null ? Number(dtc.cartons) : sum('cartons'), cbm: dtc && dtc.cbm != null ? Number(dtc.cbm) : sum('cbm'), kg: dtc && dtc.kg != null ? Number(dtc.kg) : sum('wt'), value: sum('value'),
+        fulfil: lk('fulfil').map(x => x.ref).join(', '), xero: lk('xero').map(x => x.ref).join(', '), flexport: p.flexport_reference || lk('flexport').map(x => x.ref).join(', '), dhl: lk('dhl').map(x => x.ref).join(', '), deposit: p.deposit_ref, addr: p.final_delivery_address });
+      const f = lk('fulfil')[0]; if (f && f.url) row.getCell('fulfil').value = { text: String(f.ref || 'Fulfil'), hyperlink: f.url };
+      const x = lk('xero')[0]; if (x && x.url) row.getCell('xero').value = { text: String(x.ref || 'Xero'), hyperlink: x.url };
+      ['fulfil', 'xero'].forEach(k => { const c = row.getCell(k); if (c.value && c.value.hyperlink) c.font = { color: { argb: 'FF2563EB' }, underline: true }; }); });
+    // Lines
+    const ws2 = sheet('Order plan lines', [['PO','po',18],['Status','status',13],['Supplier','supplier',20],['Branch','branch',16],['SKU','sku',26],['Product','name',36],['Size','size',18],['Colour','colour',16],['EAN','ean',15],
+      ['Qty','qty',9,IF],['Fulfil qty','erp',9,IF],['Unit price','price',10,PF],['Currency','ccy',8],['Price source','src',16],['Line value','value',12,MF],
+      ['Carton qty','cq',9,IF],['Cartons','cartons',9,'#,##0.0'],['Carton L cm','L',9,'0.0'],['Carton W cm','W',9,'0.0'],['Carton H cm','H',9,'0.0'],['Carton kg','kg',9,'0.00'],['Dims','dims',6],['Line CBM','cbm',9,'0.000'],['Line kg','wt',10,'#,##0.0']]);
+    pos.forEach(p => p._lines.forEach(l => { const row = ws2.addRow({ po: p.po, status: p.status, supplier: p.supplier_name, branch: p.branch, sku: l.sku, name: l.name, size: l.size, colour: l.colour, ean: l.ean, qty: l.qty, erp: l.erp_qty, price: l.price, ccy: p.currency, src: l.price_src, value: l.value,
+      cq: l.carton_qty, cartons: l.cartons, L: l.L, W: l.W, H: l.H, kg: l.kg, dims: l.dims, cbm: l.cbm, wt: l.wt });
+      if (l.erp_qty != null && l.erp_qty !== l.qty) row.getCell('erp').font = { color: { argb: 'FFC0362C' }, bold: true };
+      if (l.price == null) row.getCell('price').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDECEA' } }; }));
+    [ws1, ws2].forEach(ws => ws.eachRow((r, i) => { if (i > 1 && i % 2 === 0) r.eachCell({ includeEmpty: true }, c => { if (!c.fill || !c.fill.fgColor) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF6F8FB' } }; }); }));
+    const buf = await wb.xlsx.writeBuffer(); const stamp = new Date().toISOString().slice(0, 10);
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="HORIZON POs ' + (want.length ? want.join('+') : 'all') + ' ' + stamp + '.xlsx"', 'Cache-Control': 'no-store' }).send(Buffer.from(buf));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // v28.148: moved above the :section catch-all, which swallowed it as "unknown section" (404 on CONFIG ▸ Portal users).
 app.get('/api/supply/portal-signals', async (req, res) => {
   try {

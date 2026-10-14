@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.362
+verified_version: v28.363
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -507,3 +507,10 @@ verified_version: v28.362
 - After every full mirror run, erp_qty on each HORIZON line of a mirrored (not cancelled) PO = the Fulfil qty for that SKU (sum of its lines), 0 when Fulfil has no such line. An ERP deviation therefore means "the plan differs from Fulfil now" (quantity only; price never). Live check 14-Oct-26: open-PO deviations would go from 1,591 (mostly ERP copy never filled) to 137.
 - "Use Fulfil qty" (ERP deviations box on a PO): the plan takes the Fulfil qty on every line that differs (a SKU missing in Fulfil becomes 0); logged in the PO change log. The other choice is to change Fulfil to match the plan (normal POs: push).
 - Schedule: Diviyaj runs POST /api/supply/fulfil/import-pos (x-webhook-secret) every 3 hours. (source: server.mjs :: _fulfilImportPOsRun, fulfilErpQtyFromMirror, po/:po/use-erp-qty; inject.html :: op-use-erp)
+
+## PO Export XLSX (v28.363)
+- PURCHASE ORDERS > Import/Export > Export XLSX. Tick statuses (default = the open ones: FUTURE to SHIPPING), the server builds one workbook (GET /api/supply/po-export.xlsx?status=A,B). Read only.
+- Sheet "POs": one row per PO: status, supplier (code, currency), branch, country, production / batch, client / client PO / sales order, start / end production, shipment (carrier, mode, tracking, export port, departure, landing, arrival, delivery), lines, units, cartons, CBM, gross kg, order value, Fulfil PO (hyperlink), Xero, Flexport, DHL, deposit ref, delivery address.
+- Sheet "Order plan lines": SKU, product, size, colour, EAN, qty, Fulfil qty (red when it differs), unit price + price source, line value, carton qty, cartons, carton L/W/H/kg, line CBM and kg.
+- Price = the Order plan price chain (PO line cost > supplier price list > products cost_<supplier code> / cost > 0.02 polybag); no price = pink cell.
+- Carton dims / weights from products: US carton for a US branch, else UK. Cartons = qty / carton qty (line carton qty first). DTC POs use the entered shipment details (cartons, CBM, kg) on the POs sheet when present.
