@@ -4545,9 +4545,10 @@ app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person
 // duplicate), is flagged in Config > Auto bills.
 const ACC_BILL_STALE_DAYS = 10, ACC_RATE_AMTS = new Set(['20.00', '10.00', '5.00', '0.00', '12.50', '15.00']);   // VAT / GST rates printed next to the total
 const ACC_ORG_CCY = { uk: 'GBP', au: 'AUD' }, ACC_CCY_SYM = { uk: ['', '£', 'GBP'], au: ['', '$', 'A$', 'AUD'] };
-function accFileRef(files) {   // v28.353: invoice number from the first PDF's name: a run of 5+ digits, else a name that says invoice / receipt
+function accFileRef(files) {   // v28.353/357: invoice number from the first PDF's name: an INV-style number (INV-0248), else a run of 5+ digits, else a name that says invoice / receipt
   const f = (files || []).map(x => String((x && x.name) || x || '')).find(n => /\.pdf$/i.test(n)); if (!f) return null; const base = f.replace(/\.pdf$/i, '').trim();
-  const d = base.match(/\d{5,}/); if (d) return d[0]; return /(inv|invoice|receipt|bill)/i.test(base) ? base.slice(0, 60) : null; }
+  const inv = base.match(/(?:^|[^A-Za-z])((?:INV|INVOICE|BILL|RCPT|REC)[-_ #]*[0-9][0-9A-Za-z-]*)/i); if (inv) return inv[1].toUpperCase().replace(/_/g, '-');
+  const d = base.match(/\d{5,}/); if (d) return d[0]; return /(inv|invoice|receipt|bill)/i.test(base) && /\d/.test(base) ? base.slice(0, 60) : null; }
 function accEmailRef(subject) { const m = /(?:account|acct|invoice|inv|receipt|order|statement)\b[^A-Z0-9]{0,12}(?:no\.?|number|#)?[^A-Z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i.exec(String(subject || '')); return m && /\d/.test(m[1]) ? m[1] : ''; }
 // v28.316 (Ben 13-Oct-26): "look at previous bills to the same company in xero and suggest contact, accounts/tax". When the payee has no
 // reconciled Spend Money, its coding comes from its recent Xero bills: the contact is the most billed contact in the bill cache whose name
