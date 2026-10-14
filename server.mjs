@@ -25310,16 +25310,21 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
 let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
 // v28.149 perf: Fulfil's API takes ~3 s, so the compare is served from cache for up to 10 min; past 2 min it is refreshed in the
 // background (single-flight) so the NEXT open is fresh without waiting. ?refresh=1 ("Refresh from Fulfil") always waits for a fresh pull.
-let _fulfilCmpInflight = null;
+let _fulfilCmpInflight = null, _fulfilCmpInflightAt = 0;
 async function fulfilCompareApiData(force, cachedOnly) {
   const env = await activeFulfilEnv();
   const have = _fulfilCmpCache.pos && _fulfilCmpCache.env === env, age = Date.now() - _fulfilCmpCache.at;
   if (!force && have && age < 120000) return _fulfilCmpCache;
   // v28.150: every Fulfil pull goes through ONE in-flight promise (cold, stale and background alike), so concurrent
   // callers (badge + drawer + Actions) share a single ~3 s pull. Background starts swallow errors; awaited ones surface them.
-  const start = () => { if (!_fulfilCmpInflight) _fulfilCmpInflight = _fulfilCompareFetch(env).finally(() => { _fulfilCmpInflight = null; }); return _fulfilCmpInflight; };
-  if (cachedOnly) { if (!have || age >= 120000) start().catch(e => log500(e)); return have ? _fulfilCmpCache : null; }   // v28.144: never waits on Fulfil; v28.150: warms it in the background. v28.179 (Ben): from 2 min (was 10), so the menu badge keeps it warm and opening ERP Compare does not wait ~3 s on Fulfil
-  if (!force && have && age < 600000) { start().catch(e => log500(e)); return _fulfilCmpCache; }
+  // v28.369 (Diviyaj 14-Oct-26, Fulfil "30s timeouts"): a pull older than 45 s is from an instance Vercel froze mid-pull (a live pull takes ~3 s),
+  // so it is dropped and a fresh one starts instead of a user joining a dead promise. Background starts go through hzWaitUntil so Vercel keeps
+  // the instance running until the pull finishes, instead of freezing it once the response is sent.
+  if (_fulfilCmpInflight && Date.now() - _fulfilCmpInflightAt > 45000) _fulfilCmpInflight = null;
+  const start = () => { if (!_fulfilCmpInflight) { const p = _fulfilCompareFetch(env).finally(() => { if (_fulfilCmpInflight === p) _fulfilCmpInflight = null; }); _fulfilCmpInflight = p; _fulfilCmpInflightAt = Date.now(); } return _fulfilCmpInflight; };
+  const bg = () => { hzWaitUntil(start().catch(e => log500(e))); };
+  if (cachedOnly) { if (!have || age >= 120000) bg(); return have ? _fulfilCmpCache : null; }   // v28.144: never waits on Fulfil; v28.150: warms it in the background. v28.179 (Ben): from 2 min (was 10), so the menu badge keeps it warm and opening ERP Compare does not wait ~3 s on Fulfil
+  if (!force && have && age < 600000) { bg(); return _fulfilCmpCache; }
   return start();
 }
 async function _fulfilCompareFetch(env) {

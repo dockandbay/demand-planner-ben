@@ -1,3 +1,7 @@
+## v28.369 (15-Oct-26) ERP Compare: background Fulfil pull no longer frozen by Vercel
+- Diviyaj's "Fulfil 30s timeouts" on Actions: Actions answers in about 1 s from cache, but the background Fulfil refresh it starts (ERP Compare data) was not registered with Vercel, so the instance was frozen mid-pull and the fetch reported a 30 s timeout on thaw (all 47 live timeouts since v28.231 carry thaw_gap_ms about equal to their duration). The refresh now goes through hzWaitUntil, and an in-flight pull older than 45 s is dropped so a user never joins a frozen one.
+- Effect: the "ERP POs not in planner" action shows reliably; no frozen-pull timeouts. No migration, no env change, no new routes.
+
 ## v28.368 (14-Oct-26) DTC mismatch 2.0: scheduled refresh endpoint
 - POST /api/cron/dtc2-sync (header x-webhook-secret = N8N_WEBHOOK_SECRET) runs the same live Fulfil read as "Refresh from Fulfil". The v28.364 sync route needs a signed-in user, so it could not be scheduled. Optional n8n daily. No migration, no env change.
 

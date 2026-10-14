@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.368
+verified_version: v28.369
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -278,6 +278,7 @@ verified_version: v28.368
 - Totals are in the Fulfil PO currency.
 - Cache: 2 minutes fresh, stale up to 10 minutes. The Fulfil data only: the planner side (POs, suppliers, ignored list, Fulfil links) is read live on every open, in one query (v28.179).
 - The menu badge reads the cached copy only and refreshes it in the background once it is older than 2 minutes (v28.179; was 10), so opening ERP Compare rarely waits on Fulfil.
+- v28.369: the background refresh is registered with Vercel (waitUntil), so the instance stays awake until the Fulfil pull finishes (about 3 s) instead of being frozen mid-pull once the response is sent (those frozen pulls showed in the health log as Fulfil "30s timeouts" and left the ERP POs not in planner action missing). A pull still in flight after 45 s is treated as dead and a fresh one starts, so nobody waits on a frozen pull.
 - Rows can be ignored, or imported via po-import-fulfil.
 (source: server.mjs :: fulfilCompareRows)
 
