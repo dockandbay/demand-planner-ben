@@ -1,3 +1,8 @@
+## v28.364 (14-Oct-26) DTC mismatch 2.0 (from Fulfil)
+- SUPPLY > Reports > DTC MISMATCH 2.0: one card per open Fulfil sales order with a dropship or backorder line. Per SKU: SO qty, the Fulfil POs linked to the SO with their qty, and the matching HORIZON POs with their qty, plus the issue. Filters (search, channel, issue rows only, hide accepted), Accept + note per SO, PO numbers open the PO drawer, SO / Fulfil PO numbers open Fulfil.
+- "Refresh from Fulfil" = read-only read of LIVE Fulfil (about 8 s, 42 orders / 96 POs today).
+- **Diviyaj:** apply migrations/371_dtc2_mismatch.sql (2 new tables, additive). Optional: schedule POST /api/supply/dtc2/sync daily. No env change.
+
 ## v28.363 (14-Oct-26) PO grid: Export XLSX
 - PURCHASE ORDERS > Import/Export > "Export XLSX": pick statuses in a popup, downloads one formatted workbook: About, POs (details, supplier, branch, shipment, Fulfil / Xero / Flexport / DHL links, units, cartons, CBM, kg, value) and Order plan lines (SKU, qty, Fulfil qty, Order plan price + source, value, carton dims and weights).
 - New read-only GET /api/supply/po-export.xlsx?status=... No migration, no env change.

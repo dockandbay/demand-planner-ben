@@ -18609,6 +18609,95 @@ function _dtcParseRefs(s) { return String(s == null ? '' : s).split(/\s*[,;\/]\s
 // the PO's (possibly packed) sales_order_ref PLUS the in-app planner.dtc_po_so_map (mig 254). Because a PO can serve
 // several SOs and an SO several POs, we build the SO<->PO graph and reconcile by CONNECTED COMPONENT (group): grouped
 // SO SKU/qty vs grouped PO SKU/qty. Issue 1 = a group with SOs but no PO; Issue 2 = grouped SKU/qty mismatch.
+// v28.364 (Ben 14-Oct-26): DTC MISMATCH 2.0 (from Fulfil). Every OPEN Fulfil sales order with any dropship or backorder line, the Fulfil
+// purchase orders linked to it (sale line > purchase request > PO; purchase.sales read back), their lines, and the matching HORIZON POs, compared
+// per SKU: SO qty vs Fulfil PO qty vs HORIZON PO qty. Fulfil reads only (always LIVE Fulfil, like the COGS feed); snapshot in planner.dtc2_snapshot (mig 371).
+// HORIZON PO match: PO number = Fulfil PO number, a fulfil po_link (ref or id), the PO mirror (fulfil_id), the HORIZON PO at the end of the Fulfil
+// PO reference (".../PO-1895877"), or the PO's sales_order_ref naming the SO number or a part of the SO reference (min 5 chars, spaces ignored).
+async function _dtc2Read(cfg, model, domain, fields) { let out = [];
+  for (let off = 0; off < 20000; off += 500) { const j = await fulfilFetchCfg(cfg, 'PUT', '/model/' + model + '/search_read', [domain, off, 500, null, fields]);
+    if (!Array.isArray(j)) break; out = out.concat(j); if (j.length < 500) break; }
+  return out; }
+async function dtc2Sync(user) {
+  const cfg = fulfilConfigFor('live'); if (!cfg.configured) throw new Error('Fulfil live API not configured (FULFIL_LIVE_SUBDOMAIN / FULFIL_LIVE_API_KEY).');
+  const open = [['sale.state', 'in', ['confirmed', 'processing']], ['sale.shipment_state', '!=', 'sent']];
+  const ds = await _dtc2Read(cfg, 'sale.line', open.concat([['delivery_mode', 'in', ['dropship', 'backorder']]]), ['sale', 'id']);
+  const saleIds = [...new Set(ds.map(l => l.sale).filter(Boolean))];
+  if (!saleIds.length) { const data = { sales: [], purchases: [] }; await pool.query(`INSERT INTO planner.dtc2_snapshot (key,data,synced_at,synced_by) VALUES ('fulfil',$1,now(),$2) ON CONFLICT (key) DO UPDATE SET data=excluded.data, synced_at=now(), synced_by=excluded.synced_by`, [JSON.stringify(data), user || null]); return { sales: 0, purchases: 0 }; }
+  const sales = await _dtc2Read(cfg, 'sale.sale', [['id', 'in', saleIds]], ['id', 'number', 'reference', 'state', 'shipment_state', 'sale_date', 'party.name', 'channel.name', 'warehouse.name']);
+  const lines = await _dtc2Read(cfg, 'sale.line', [['sale', 'in', saleIds], ['type', '=', 'line']], ['id', 'sale', 'product.code', 'product.rec_name', 'quantity', 'quantity_shipped', 'quantity_canceled', 'delivery_mode', 'purchase_request_state', 'purchase_request.purchase', 'purchase_request.purchase.number']);
+  const purIds = [...new Set(lines.map(l => l['purchase_request.purchase']).filter(Boolean))];   // purchase.sales is not searchable in Fulfil; read it back on the POs below
+  const purchases = purIds.length ? await _dtc2Read(cfg, 'purchase.purchase', [['id', 'in', purIds]], ['id', 'number', 'reference', 'state', 'sales', 'party.name', 'warehouse.name', 'delivery_date']) : [];
+  const plines = purIds.length ? await _dtc2Read(cfg, 'purchase.line', [['purchase', 'in', purIds], ['type', '=', 'line']], ['purchase', 'product.code', 'quantity']) : [];
+  const pm = new Map(purchases.map(p => [p.id, Object.assign(p, { lines: [] })])); plines.forEach(l => { const p = pm.get(l.purchase); if (p) p.lines.push({ sku: l['product.code'], qty: Number(l.quantity) || 0 }); });
+  const sm = new Map(sales.map(s => [s.id, Object.assign(s, { lines: [], purchases: [] })]));
+  lines.forEach(l => { const s = sm.get(l.sale); if (!s) return; s.lines.push({ sku: l['product.code'], name: l['product.rec_name'], qty: (Number(l.quantity) || 0) - (Number(l.quantity_canceled) || 0), shipped: Number(l.quantity_shipped) || 0, mode: l.delivery_mode, req: l.purchase_request_state || null, po: l['purchase_request.purchase.number'] || null });
+    const pid = l['purchase_request.purchase']; if (pid && !s.purchases.includes(pid)) s.purchases.push(pid); });
+  purchases.forEach(p => (p.sales || []).forEach(sid => { const s = sm.get(sid); if (s && !s.purchases.includes(p.id)) s.purchases.push(p.id); }));
+  const data = { sales: [...sm.values()], purchases: [...pm.values()] };
+  await pool.query(`INSERT INTO planner.dtc2_snapshot (key,data,synced_at,synced_by) VALUES ('fulfil',$1,now(),$2) ON CONFLICT (key) DO UPDATE SET data=excluded.data, synced_at=now(), synced_by=excluded.synced_by`, [JSON.stringify(data), user || null]);
+  return { sales: data.sales.length, purchases: data.purchases.length, lines: lines.length };
+}
+app.post('/api/supply/dtc2/sync', async (req, res) => {
+  try { res.json(Object.assign({ ok: true }, await dtc2Sync(authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/dtc2/review', async (req, res) => {
+  try { const b = req.body || {}; const so = String(b.so || '').trim(); if (!so) return res.status(400).json({ error: 'so required' });
+    await pool.query(`INSERT INTO planner.dtc2_review (so_number,note,accepted,accepted_by,updated_at) VALUES ($1,$2,$3,$4,now())
+      ON CONFLICT (so_number) DO UPDATE SET note=coalesce(excluded.note,planner.dtc2_review.note), accepted=excluded.accepted, accepted_by=excluded.accepted_by, updated_at=now()`,
+      [so, b.note == null ? null : String(b.note), !!b.accepted, b.accepted ? authUser(req) : null]);
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+function _dtc2Key(s) { return String(s == null ? '' : s).toUpperCase().replace(/\s+/g, ''); }
+// dtc2Build(db): db = pool or any client with .query (a read-only live client in tests). Returns the report JSON.
+async function dtc2Build(db) {
+  {
+    const snap = (await db.query(`SELECT data, synced_at, synced_by FROM planner.dtc2_snapshot WHERE key='fulfil'`)).rows[0];
+    if (!snap) return { synced_at: null, orders: [], counts: { issues: 0, accepted: 0, ok: 0 } };
+    const data = snap.data || {}, pById = new Map((data.purchases || []).map(p => [p.id, p]));
+    const hz = (await db.query(`SELECT p.po, upper(coalesce(p.status,'')) status, p.supplier_name, p.branch, p.sales_order_ref,
+        (SELECT json_agg(json_build_object('ref', l.external_ref, 'id', l.external_id)) FROM planner.po_links l WHERE l.po=p.po AND l.system='fulfil' AND coalesce(l.status,'linked') <> 'removed') links,
+        (SELECT fp.fulfil_id FROM planner.fulfil_purchase_orders fp WHERE fp.po=p.po LIMIT 1) fulfil_id
+      FROM planner.purchase_orders p`)).rows;
+    const hzLines = new Map(); (await db.query(`SELECT po, sku, sum(qty)::numeric qty FROM planner.purchase_order_lines WHERE coalesce(qty,0)<>0 GROUP BY po, sku`)).rows.forEach(r => { if (!hzLines.has(r.po)) hzLines.set(r.po, []); hzLines.get(r.po).push({ sku: r.sku, qty: Number(r.qty) }); });
+    const byPo = new Map(hz.map(p => [_dtc2Key(p.po), p])), byFulfilRef = new Map(), byFulfilId = new Map(), bySoTok = new Map();
+    const add = (m, k, p) => { if (!k) return; if (!m.has(k)) m.set(k, new Set()); m.get(k).add(p.po); };
+    hz.forEach(p => { (p.links || []).forEach(l => { add(byFulfilRef, _dtc2Key(l.ref), p); add(byFulfilId, String(l.id || ''), p); }); if (p.fulfil_id) add(byFulfilId, String(p.fulfil_id), p);
+      String(p.sales_order_ref || '').split(/[,;\/()]|\s+and\s+|\s{2,}/i).map(_dtc2Key).filter(t => t.length >= 5).forEach(t => add(bySoTok, t, p)); });
+    const hzByPo = new Map(hz.map(p => [p.po, p]));
+    const rv = new Map((await db.query(`SELECT so_number, note, accepted, accepted_by FROM planner.dtc2_review`)).rows.map(r => [r.so_number, r]));
+    const orders = (data.sales || []).map(s => {
+      const fps = (s.purchases || []).map(id => pById.get(id)).filter(p => p && p.state !== 'cancelled' && p.state !== 'cancel');
+      const hzSet = new Set(), why = {};
+      const hit = (pos, reason) => (pos ? [...pos] : []).forEach(po => { hzSet.add(po); (why[po] = why[po] || new Set()).add(reason); });
+      fps.forEach(fp => { const n = _dtc2Key(fp.number); if (byPo.has(n)) hit([byPo.get(n).po], 'same number'); hit(byFulfilRef.get(n), 'PO link'); hit(byFulfilId.get(String(fp.id)), 'PO link');
+        const tail = _dtc2Key(String(fp.reference || '').split('/').pop()); if (tail && byPo.has(tail) && tail !== n) hit([byPo.get(tail).po], 'Fulfil reference'); });
+      [s.number].concat(String(s.reference || '').split(/[,;\/]/)).map(_dtc2Key).filter(t => t.length >= 5).forEach(t => hit(bySoTok.get(t), 'sales order ref'));
+      const skus = new Map(), row = sku => { if (!skus.has(sku)) skus.set(sku, { sku, name: '', so: 0, shipped: 0, mode: '', fulfil: {}, hz: {} }); return skus.get(sku); };
+      (s.lines || []).filter(l => l.mode === 'dropship' || l.mode === 'backorder').forEach(l => { const r = row(l.sku); r.so += l.qty; r.shipped += l.shipped; r.mode = r.mode && r.mode !== l.mode ? 'mixed' : l.mode; r.name = r.name || l.name || ''; });
+      fps.forEach(fp => (fp.lines || []).forEach(l => { const r = row(l.sku); r.fulfil[fp.number] = (r.fulfil[fp.number] || 0) + l.qty; }));
+      [...hzSet].forEach(po => (hzLines.get(po) || []).forEach(l => { const r = row(l.sku); r.hz[po] = (r.hz[po] || 0) + l.qty; }));
+      (s.lines || []).filter(l => l.mode !== 'dropship' && l.mode !== 'backorder').forEach(l => { const r = skus.get(l.sku); if (!r || (r.mode && r.mode !== 'stock')) return; r.so += l.qty; r.shipped += l.shipped; r.mode = 'stock'; r.name = r.name || l.name || ''; });   // a PO SKU that is a from-stock line on the SO
+      const sum = o => Object.values(o).reduce((a, b) => a + b, 0), sg = n => (n > 0 ? '+' : '') + n;
+      const rows = [...skus.values()].map(r => { const f = sum(r.fulfil), h = sum(r.hz), fn = Object.keys(r.fulfil).length, hn = Object.keys(r.hz).length; let issue = 'ok';
+        if (r.mode === 'stock') { issue = f === h ? 'ok' : !fn ? 'HORIZON PO only' : !hn ? 'not in HORIZON' : 'HORIZON ' + sg(h - f); return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }   // from stock on the SO: compare the two POs only
+        if (!r.so && !fn && hn) return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue: 'HORIZON only' });   // on a matched HORIZON PO, but not on the SO or its Fulfil POs
+        if (r.so && !fn) issue = 'no Fulfil PO'; else if (!r.so && fn) issue = 'not on SO'; else if (r.so !== f) issue = 'Fulfil ' + (f - r.so > 0 ? '+' : '') + (f - r.so);
+        if (issue === 'ok' || /^Fulfil|not on SO/.test(issue)) { const base = fn ? f : r.so; if (!hn) issue = issue === 'ok' ? 'not in HORIZON' : issue + ' · not in HORIZON'; else if (h !== base) issue = (issue === 'ok' ? '' : issue + ' · ') + 'HORIZON ' + (h - base > 0 ? '+' : '') + (h - base); }
+        return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }).sort((a, b) => (a.issue === 'ok') - (b.issue === 'ok') || a.sku.localeCompare(b.sku));
+      const issues = rows.filter(r => r.issue !== 'ok').length, rvw = rv.get(s.number) || {};
+      return { so: s.number, fulfil_id: s.id, reference: s.reference, customer: s['party.name'], channel: s['channel.name'], warehouse: s['warehouse.name'], sale_date: s.sale_date, state: s.state, shipment_state: s.shipment_state,
+        fulfil_pos: fps.map(p => ({ number: p.number, id: p.id, state: p.state, supplier: p['party.name'], reference: p.reference })),
+        hz_pos: [...hzSet].map(po => { const p = hzByPo.get(po) || {}; return { po, status: p.status, supplier: p.supplier_name, branch: p.branch, why: [...(why[po] || [])] }; }),
+        rows, issues, note: rvw.note || '', accepted: !!rvw.accepted, accepted_by: rvw.accepted_by || null };
+    }).sort((a, b) => (b.issues > 0) - (a.issues > 0) || String(a.so).localeCompare(String(b.so)));
+    const counts = { issues: orders.filter(o => o.issues && !o.accepted).length, accepted: orders.filter(o => o.issues && o.accepted).length, ok: orders.filter(o => !o.issues).length };
+    return { synced_at: snap.synced_at, synced_by: snap.synced_by, fulfil_base: 'https://' + (fulfilConfigFor('live').subdomain || 'dockandbay') + '.fulfil.io', orders, counts };
+  }
+}
+app.get('/api/supply/dtc2/report', async (req, res) => {
+  try { res.json(await dtc2Build(pool)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/dtc/mismatch', async (req, res) => {
   const countOnly = !!(req.query && req.query.count);
   // v28.081: the badge (?count=1) is served from a 10-min SWR memo (was a full 9s reconciliation on every page load); the

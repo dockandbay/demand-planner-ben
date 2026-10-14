@@ -66,7 +66,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.307
+verified_version: v28.364
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -327,3 +327,10 @@ verified_version: v28.307
 **Q:** Is the £ impact on an action exact? **A:** No. Impacts use average PO cost or ASP without FX conversion, so treat them as a ranking signal.
 **Q:** Why does Urgent Buy differ from the buy plan? **A:** Urgent Buy counts all open PO qty as inbound regardless of timing and uses a flat 12-month average demand. The buy plan phases supply and demand by month.
 **Q:** What counts as "ERP POs not in planner"? **A:** Open Fulfil POs for planner suppliers that are not matched to any planner PO and not ignored, as listed on ERP Compare.
+
+## DTC mismatch 2.0 (from Fulfil, v28.364)
+- SUPPLY > Reports > DTC MISMATCH 2.0. "Refresh from Fulfil" reads LIVE Fulfil (read only): every open sales order (state confirmed / processing, shipment not sent) with any dropship or backorder line, all its lines, and the Fulfil POs linked through each line's purchase request, with their lines. Stored in planner.dtc2_snapshot (mig 371).
+- HORIZON POs for an SO: PO number = Fulfil PO number; a Fulfil po_link (ref or id); the PO mirror fulfil_id; the HORIZON PO at the end of the Fulfil PO reference (".../PO-1895877"); or the PO's sales_order_ref naming the SO number or a part of the SO reference (5+ chars, spaces ignored). The card shows why each matched.
+- Per SKU: SO qty (ordered minus cancelled; dropship / backorder lines, plus from-stock lines for SKUs on a matched PO) vs Fulfil PO qty vs HORIZON PO qty.
+- Issues: "no Fulfil PO", "Fulfil +/-n" (Fulfil PO vs SO), "not in HORIZON", "HORIZON +/-n" (vs Fulfil PO, or SO when no Fulfil PO), "HORIZON only" (on a matched HORIZON PO but not on the SO / Fulfil POs), "not on SO". Stock lines compare the two POs only.
+- Accept / note per SO in planner.dtc2_review; accepted orders drop out of the Issues count.

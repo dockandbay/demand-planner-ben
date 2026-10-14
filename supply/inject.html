@@ -1081,10 +1081,10 @@
   var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['reports','BI & REPORTS'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // Ben: Actions/Recommendations/ERP Compare folded into BI & REPORTS (first 3 L3 tabs) — no standalone ACTIONS section   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
+  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['dtc2','DTC MISMATCH 2.0'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Actions/Recommendations/ERP Compare folded in as the first 3 (Ben). Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs.
-  var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','reallocate','urgent-buy','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];   // 'metrics' moved to top-level REPORTS ▸ Performance ▸ Supply metrics
-  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/fulfil-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
+  var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','dtc2','reallocate','urgent-buy','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];   // 'metrics' moved to top-level REPORTS ▸ Performance ▸ Supply metrics
+  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/fulfil-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch','dtc2':'/api/supply/dtc2/report'};   // fluid: always re-fetch
   var reportTab='actions';   // BI & REPORTS opens on ACTIONS by default (Ben)
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -13840,6 +13840,7 @@
       if(rk==='cashflow')return renderCashflow(d);
       if(rk==='directclient')return renderDirectClient(d);
       if(rk==='dtc-mismatch')return renderDtcMismatch(d);
+      if(rk==='dtc2')return renderDtc2(d);
       if(rk==='customorders')return renderCustomOrders(d);
       if(rk==='flexport')return renderFlexport(d); };
     if(!BI_TABS[rk] && cache[rk])return done(cache[rk]);
@@ -13871,6 +13872,56 @@
     var MON={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11}; var mo=MON[m[2]]; if(mo==null)return false;
     var dt=new Date(2000+parseInt(m[3],10),mo,parseInt(m[1],10),m[4]?+m[4]:0,m[5]?+m[5]:0);
     return (Date.now()-dt.getTime())>4*24*3600*1000; }catch(e){ return false; } }
+  // v28.364 (Ben 14-Oct-26): DTC MISMATCH 2.0 (from Fulfil). One card per open Fulfil SO with a dropship / backorder line: per SKU, SO qty vs
+  // the Fulfil POs linked to the SO vs the matching HORIZON POs. Refresh = read-only Fulfil read; Accept / note per SO.
+  var _dtc2F={issues:true,hideAcc:true,q:'',ch:''};
+  function renderDtc2(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var c=d.counts||{}, FB=d.fulfil_base||'https://dockandbay.fulfil.io';
+    var fmtD=function(iso){ if(!iso)return 'never'; var x=new Date(iso); return isNaN(x)?String(iso):(x.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-')+' '+x.toTimeString().slice(0,5)); };
+    var chans={}; (d.orders||[]).forEach(function(o){ if(o.channel)chans[o.channel]=1; });
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--nav)">DTC mismatch 2.0 <span class="mut tiny" style="font-weight:400">(from Fulfil)</span></div>'
+      +'<div class="mut tiny" style="margin-bottom:10px;max-width:900px">Every <b>open Fulfil sales order</b> with a <b>dropship or backorder</b> line, the Fulfil purchase orders linked to it, and the matching HORIZON POs (same number, PO link, Fulfil reference, or the PO&rsquo;s sales order ref). Per SKU: SO qty vs Fulfil PO qty vs HORIZON PO qty. Accept or note an order to clear it from the count.</div>'
+      +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc2-sync" style="background:var(--blue);color:#fff;border:0;font-weight:800">&#8635; Refresh from Fulfil</button><span id="dtc2-msg" class="mut tiny">Last read '+esc(fmtD(d.synced_at))+(d.synced_by?' by '+esc(String(d.synced_by).replace(/@.*/,'@')):'')+'</span>'
+        +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',c.issues||0,'var(--neg)')+_dtcPill('Accepted',c.accepted||0,'var(--muted)')+_dtcPill('OK',c.ok||0,'var(--pos)')+'</span></div>'
+      +'<div class="bar" style="gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><input id="dtc2-q" placeholder="Filter: SO, reference, customer, PO or SKU…" value="'+esc(_dtc2F.q)+'" style="width:100%;max-width:360px;box-sizing:border-box;font-size:12px;padding:6px 9px;border:1px solid var(--line);border-radius:6px">'
+        +'<select id="dtc2-ch" class="flt" style="max-width:220px"><option value="">All channels</option>'+Object.keys(chans).sort().map(function(k){return '<option'+(k===_dtc2F.ch?' selected':'')+'>'+esc(k)+'</option>';}).join('')+'</select>'
+        +'<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="dtc2-iss"'+(_dtc2F.issues?' checked':'')+'> Issue rows only</label>'
+        +'<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="dtc2-acc"'+(_dtc2F.hideAcc?' checked':'')+'> Hide accepted</label><span id="dtc2-n" class="mut tiny"></span></div>'
+      +'<div id="dtc2-list"></div>';
+    var issCol=function(t){ return t==='ok'?'var(--pos)':/^HORIZON only|^not on SO/.test(t)?'var(--amber)':'var(--neg)'; };
+    var poCell=function(o,kind){ var ks=Object.keys(o||{}); if(!ks.length)return '<span class="mut">none</span>'; return ks.map(function(k){ return (kind==='hz'?'<a href="#" class="dtc2-po" data-po="'+esc(k)+'">'+esc(k)+'</a>':esc(k))+' <b>'+Number(o[k]).toLocaleString()+'</b>'; }).join('<br>'); };
+    function draw(){ var q=_dtc2F.q.trim().toLowerCase(), list=(d.orders||[]).filter(function(o){
+        if(_dtc2F.hideAcc&&o.accepted&&o.issues)return false; if(_dtc2F.ch&&o.channel!==_dtc2F.ch)return false;
+        if(!q)return true; var hay=[o.so,o.reference,o.customer,o.channel].concat(o.fulfil_pos.map(function(p){return p.number;}),o.hz_pos.map(function(p){return p.po;}),o.rows.map(function(r){return r.sku;})).join(' ').toLowerCase(); return q.split(',').some(function(t){t=t.trim();return t&&hay.indexOf(t)>=0;}); });
+      document.getElementById('dtc2-n').textContent=list.length+' of '+(d.orders||[]).length+' orders';
+      document.getElementById('dtc2-list').innerHTML=list.length?list.map(function(o){
+        var rows=_dtc2F.issues&&o.issues?o.rows.filter(function(r){return r.issue!=='ok';}):o.rows;
+        return '<div class="card" style="border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--card)">'
+          +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--bg-soft,rgba(0,0,0,.02))">'
+            +'<a href="'+FB+'/v2/erp/model/sales_order/'+o.fulfil_id+'" target="_blank" rel="noopener" style="font-weight:800">'+esc(o.so)+' &#8599;</a><span>'+esc(o.reference||'')+'</span><span class="mut">'+esc(o.customer||'')+'</span><span class="mut tiny">'+esc(o.channel||'')+' &middot; '+esc(o.warehouse||'')+' &middot; '+esc(o.shipment_state||'')+'</span>'
+            +'<span style="margin-left:auto" class="pill" title="'+(o.accepted?'accepted by '+esc(o.accepted_by||''):'')+'">'+(o.issues?'<b style="color:'+(o.accepted?'var(--muted)':'var(--neg)')+'">'+o.issues+' issue'+(o.issues>1?'s':'')+(o.accepted?' (accepted)':'')+'</b>':'<b style="color:var(--pos)">OK</b>')+'</span></div>'
+          +'<div class="tiny" style="padding:6px 12px;display:flex;gap:16px;flex-wrap:wrap"><span><span class="mut">Fulfil POs:</span> '+(o.fulfil_pos.length?o.fulfil_pos.map(function(p){return '<a href="'+FB+'/v2/erp/model/purchase_order/'+p.id+'" target="_blank" rel="noopener" title="'+esc((p.supplier||'')+' · '+(p.state||'')+(p.reference?' · '+p.reference:''))+'">'+esc(p.number)+'</a>';}).join(' '):'<span style="color:var(--neg)">none</span>')+'</span>'
+            +'<span><span class="mut">HORIZON:</span> '+(o.hz_pos.length?o.hz_pos.map(function(p){return '<a href="#" class="dtc2-po" data-po="'+esc(p.po)+'" title="'+esc((p.supplier||'')+' · '+(p.status||'')+' · '+(p.branch||'')+' · matched by '+p.why.join(', '))+'">'+esc(p.po)+'</a>';}).join(' '):'<span style="color:var(--neg)">none</span>')+'</span></div>'
+          +(rows.length?'<div style="overflow-x:auto"><table class="grid" style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">SKU</th><th style="text-align:left">Mode</th><th style="text-align:right">SO qty</th><th style="text-align:left">Fulfil PO</th><th style="text-align:left">HORIZON PO</th><th style="text-align:left">Issue</th></tr></thead><tbody>'
+            +rows.map(function(r){ return '<tr><td title="'+esc(r.name||'')+'" style="font-family:ui-monospace,Menlo,monospace">'+esc(r.sku)+'</td><td class="mut">'+esc(r.mode||'')+'</td><td style="text-align:right">'+(r.so?Number(r.so).toLocaleString():'<span class="mut">0</span>')+(r.shipped?'<div class="mut tiny">'+Number(r.shipped).toLocaleString()+' shipped</div>':'')+'</td><td>'+poCell(r.fulfil,'ff')+'</td><td>'+poCell(r.hz,'hz')+'</td><td style="color:'+issCol(r.issue)+';font-weight:700">'+esc(r.issue)+'</td></tr>'; }).join('')+'</tbody></table></div>':'<div class="mut tiny" style="padding:6px 12px">All '+o.rows.length+' SKUs match.</div>')
+          +'<div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--line)"><input class="dtc2-note" data-so="'+esc(o.so)+'" value="'+esc(o.note||'')+'" placeholder="Note…" style="flex:1;min-width:120px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">'
+            +(o.issues?'<button class="save-btn dtc2-acc" data-so="'+esc(o.so)+'" data-acc="'+(o.accepted?0:1)+'">'+(o.accepted?'Un-accept':'Accept')+'</button>':'')+'</div></div>';
+      }).join(''):'<div class="mut" style="padding:20px 0">'+(d.synced_at?'No orders match.':'Not read yet: click Refresh from Fulfil.')+'</div>';
+      var L=document.getElementById('dtc2-list');
+      L.querySelectorAll('.dtc2-po').forEach(function(a){a.onclick=function(e){e.preventDefault(); if(typeof openPODrawer==='function')openPODrawer(a.dataset.po); else gotoPO(a.dataset.po);};});
+      var save=function(so,acc,note){ return fetch('/api/supply/dtc2/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so:so,accepted:acc,note:note})}).then(function(r){return r.json();}); };
+      L.querySelectorAll('.dtc2-acc').forEach(function(bt){bt.onclick=function(){ var o=d.orders.find(function(x){return x.so===bt.dataset.so;}), n=L.querySelector('.dtc2-note[data-so="'+bt.dataset.so+'"]'); bt.disabled=true;
+        save(bt.dataset.so,bt.dataset.acc==='1',n?n.value:null).then(function(){ selectReport('dtc2'); }).catch(function(){bt.disabled=false;}); };});
+      L.querySelectorAll('.dtc2-note').forEach(function(inp){inp.onchange=function(){ var o=d.orders.find(function(x){return x.so===inp.dataset.so;}); if(o)o.note=inp.value; save(inp.dataset.so,!!(o&&o.accepted),inp.value); };});
+    }
+    draw();
+    document.getElementById('dtc2-q').oninput=function(){_dtc2F.q=this.value;draw();};
+    document.getElementById('dtc2-ch').onchange=function(){_dtc2F.ch=this.value;draw();};
+    document.getElementById('dtc2-iss').onchange=function(){_dtc2F.issues=this.checked;draw();};
+    document.getElementById('dtc2-acc').onchange=function(){_dtc2F.hideAcc=this.checked;draw();};
+    document.getElementById('dtc2-sync').onclick=function(){ var bt=this,m=document.getElementById('dtc2-msg'); bt.disabled=true; m.textContent='Reading open sales orders and POs from Fulfil…';
+      fetch('/api/supply/dtc2/sync',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error); m.textContent='Read '+j.sales+' orders, '+j.purchases+' Fulfil POs.'; selectReport('dtc2'); })
+        .catch(function(e){ bt.disabled=false; m.style.color='var(--neg)'; m.textContent='Fulfil read failed: '+e.message; }); };
+  }
   function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
     b.innerHTML='<div id="dtc-fulfil-align"></div>'
       +'<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--nav)">DTC mismatch</div>'
