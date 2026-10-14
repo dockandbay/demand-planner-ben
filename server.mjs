@@ -7492,7 +7492,8 @@ async function _xeroFetch0(region, path, opts) { const token = await xeroToken(r
     xeroQuotaNote(region, r);
     if (r.status === 429 && r.headers.get('x-rate-limit-problem') === 'day') { try { await r.text(); } catch (_) {} const q = _xeroQuota[region];
       const e = new Error('Xero ' + region.toUpperCase() + ' daily API allowance used up' + (q && q.reset_at ? ', resets ' + q.reset_at.slice(11, 16) + ' UTC' : '')); e.code = 429; e.xero_daily = true; throw e; }
-    const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET');   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
+    const _retryable = r.status === 429 || (r.status === 503 && (opts.method || 'GET') === 'GET')
+      || ([500, 502, 504].includes(r.status) && (opts.method || 'GET') === 'GET' && attempt < 2);   // v28.365 (Ben 14-Oct-26): a GET hitting a passing Xero 500 ("An error occurred in Xero", e.g. the AU contact lookup for MICROSOFT) is retried twice; writes never   // v28.121 (Diviyaj): 429 is safe to retry on any method; a 503 on a POST/PUT (bill/payment/credit note) may have processed, so only retry idempotent GETs
     if (_retryable && attempt < 5) { const ra = Number(r.headers.get('Retry-After')) || 0; const wait = Math.min((ra > 0 ? ra : Math.pow(2, attempt)) * 1000, 60000); try { await r.text(); } catch (e) {} await new Promise(res => setTimeout(res, wait)); continue; }
     break;
   }

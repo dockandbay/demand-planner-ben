@@ -1,3 +1,6 @@
+## v28.365 (14-Oct-26) Xero reads retry a passing Xero 500
+- Live: Reconcile bill for MICROSOFT failed with "Could not look up Xero contact 'Microsoft' in AU: An error occurred in Xero" (a Xero-side 500; the same lookup succeeds now). Xero GETs now retry twice on 500 / 502 / 504; writes unchanged. No migration, no env change.
+
 ## v28.364 (14-Oct-26) DTC mismatch 2.0 (from Fulfil)
 - SUPPLY > Reports > DTC MISMATCH 2.0: one card per open Fulfil sales order with a dropship or backorder line. Per SKU: SO qty, the Fulfil POs linked to the SO with their qty, and the matching HORIZON POs with their qty, plus the issue. Filters (search, channel, issue rows only, hide accepted), Accept + note per SO, PO numbers open the PO drawer, SO / Fulfil PO numbers open Fulfil.
 - "Refresh from Fulfil" = read-only read of LIVE Fulfil (about 8 s, 42 orders / 96 POs today).

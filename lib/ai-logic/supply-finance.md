@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.364
+verified_version: v28.365
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -514,3 +514,6 @@ verified_version: v28.364
 - Sheet "Order plan lines": SKU, product, size, colour, EAN, qty, Fulfil qty (red when it differs), unit price + price source, line value, carton qty, cartons, carton L/W/H/kg, line CBM and kg.
 - Price = the Order plan price chain (PO line cost > supplier price list > products cost_<supplier code> / cost > 0.02 polybag); no price = pink cell.
 - Carton dims / weights from products: US carton for a US branch, else UK. Cartons = qty / carton qty (line carton qty first). DTC POs use the entered shipment details (cartons, CBM, kg) on the POs sheet when present.
+
+## Xero read retries (v28.365)
+- Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
