@@ -1,3 +1,6 @@
+## v28.366 (14-Oct-26) Reconcile: no PDF reload after a bill push
+- ACCOUNTS > Reconcile drawer: once "Push bill to Xero" succeeds the email / PDF pane is hidden (the PDF is no longer re-rendered); the drawer shows the confirmation and a blue "Open bill in Xero" button next to Close. No server change.
+
 ## v28.365 (14-Oct-26) Xero reads retry a passing Xero 500
 - Live: Reconcile bill for MICROSOFT failed with "Could not look up Xero contact 'Microsoft' in AU: An error occurred in Xero" (a Xero-side 500; the same lookup succeeds now). Xero GETs now retry twice on 500 / 502 / 504; writes unchanged. No migration, no env change.
 
