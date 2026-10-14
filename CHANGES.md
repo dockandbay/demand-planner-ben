@@ -1,3 +1,8 @@
+## v28.370 (15-Oct-26) App health log: freeze time kept apart from real slowness; API errors name the route and user
+- CONFIG > App health log and the weekly health email: a slow statement whose time spans a Vercel instance freeze (meta.thaw_gap_ms) is no longer listed under Database slow queries, its p95 or the DB count. It is summarised on one line instead ("spans a freeze, not DB time"). Live check 15-Oct: every slow statement over 30s since v28.231 was freeze time (statement_timeout is 30s on the postgres role), including the "240s" rows Diviyaj asked about.
+- Integration errors now record the route (or "background") and the staff user that made the call (meta.example, meta.user), shown as Route and User columns; the Timeouts column says how many spanned a freeze.
+- No migration, no env change, no new routes.
+
 ## v28.369 (15-Oct-26) ERP Compare: background Fulfil pull no longer frozen by Vercel
 - Diviyaj's "Fulfil 30s timeouts" on Actions: Actions answers in about 1 s from cache, but the background Fulfil refresh it starts (ERP Compare data) was not registered with Vercel, so the instance was frozen mid-pull and the fetch reported a 30 s timeout on thaw (all 47 live timeouts since v28.231 carry thaw_gap_ms about equal to their duration). The refresh now goes through hzWaitUntil, and an in-flight pull older than 45 s is dropped so a user never joins a frozen one.
 - Effect: the "ERP POs not in planner" action shows reliably; no frozen-pull timeouts. No migration, no env change, no new routes.

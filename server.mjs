@@ -148,8 +148,10 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
     if (svc === 'kv') { try { const c = JSON.parse(String(o.body || '')); if (Array.isArray(c) && typeof c[0] === 'string') op = c[0].slice(0, 20); } catch (_) {} }
     const message = msg ? String(msg).replace(/\?[^\s]*/g, '').slice(0, 300) : (svc + ' HTTP ' + status);
     const tg = hzThawGap();   // v28.231 (gap G1): a "timeout" that spanned an instance freeze
+    // v28.370 (Diviyaj 14-Oct-26): which route (or 'background') and staff user made the call, so an API error can be tied to a page
+    let ex = 'background', who = null; try { const st = _reqStore.getStore(), r = st && st.req; if (r) { ex = (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200); who = hzReqUser(r) || null; } } catch (_) {}
     hzHealthEvt('integration_error', svc + '|' + method + '|' + op + '|' + status + '|' + (timeout ? 1 : 0) + (tg ? '|thaw' : ''), { path: svc + ' ' + method + ' ' + op, method, status: status || null, ms, message,
-      meta: Object.assign({ service: svc, op, status: status || 0, timeout: !!timeout }, tg ? { thaw_gap_ms: tg } : null) });
+      meta: Object.assign({ service: svc, op, status: status || 0, timeout: !!timeout, example: ex }, who ? { user: who } : null, tg ? { thaw_gap_ms: tg } : null) });
   } catch (_) { /* measurement must never throw */ }
 }
 // v27.886 (perf measurement): count DB queries per request. The per-request store (_reqStore, defined further down —
@@ -27006,7 +27008,7 @@ async function hzHealthReportExtra(days) {
     SELECT json_build_object(
       'kpis2', (SELECT json_build_object('freezes', coalesce(sum(count) FILTER (WHERE kind = 'long_task'), 0), 'dead_clicks', coalesce(sum(count) FILTER (WHERE kind = 'dead_click'), 0), 'api_failures', coalesce(sum(count) FILTER (WHERE kind = 'api_failure'), 0),
         'integration_errors', coalesce(sum(count) FILTER (WHERE kind = 'integration_error'), 0), 'data_findings', count(DISTINCT kind || path) FILTER (WHERE kind IN ('etl_stale', 'etl_flat', 'etl_drop', 'data_lag')),
-        'sanity', count(DISTINCT path) FILTER (WHERE kind = 'sanity'), 'db', coalesce(sum(count) FILTER (WHERE kind IN ('db_pool', 'slow_query')), 0), 'red_alerts', count(*) FILTER (WHERE kind = 'red_alert')) FROM ev),
+        'sanity', count(DISTINCT path) FILTER (WHERE kind = 'sanity'), 'db', coalesce(sum(count) FILTER (WHERE kind = 'db_pool' OR (kind = 'slow_query' AND NOT (meta ? 'thaw_gap_ms'))), 0), 'red_alerts', count(*) FILTER (WHERE kind = 'red_alert')) FROM ev),
       'freezes', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, max(ms) max_ms, sum(coalesce((meta->>'sum_ms')::numeric, ms))::bigint sum_ms, count(DISTINCT user_email)::int users, array_agg(DISTINCT source) sources, max(ts) last_seen
         FROM ev WHERE kind = 'long_task' GROUP BY path ORDER BY sum_ms DESC NULLS LAST LIMIT 25) x),
       'dead_clicks', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, coalesce(meta->>'label', message) label, sum(count)::int n, count(DISTINCT user_email)::int users, array_remove(array_agg(DISTINCT app_version), NULL) versions, max(ts) last_seen
@@ -27014,6 +27016,8 @@ async function hzHealthReportExtra(days) {
       'api', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT method, path, status, sum(count)::int n, max(ms) max_ms, count(DISTINCT user_email)::int users, (array_agg(message ORDER BY ts DESC))[1] message, max(ts) last_seen
         FROM ev WHERE kind = 'api_failure' GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 25) x),
       'integ', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT meta->>'service' service, path, status, sum(count)::int n, coalesce(sum(count) FILTER (WHERE meta->>'timeout' = 'true'), 0)::int timeouts, max(ms) max_ms,
+        coalesce(sum(count) FILTER (WHERE meta->>'timeout' = 'true' AND meta ? 'thaw_gap_ms'), 0)::int thaw_timeouts, (array_agg(meta->>'example' ORDER BY ts DESC) FILTER (WHERE meta ? 'example'))[1] example,
+        (array_agg(meta->>'user' ORDER BY ts DESC) FILTER (WHERE meta ? 'user'))[1] last_user,   -- v28.370: route + user (rows from v28.370 on), timeouts that spanned an instance freeze
         (array_agg(message ORDER BY ts DESC))[1] message, min(ts) first_seen, max(ts) last_seen FROM ev WHERE kind = 'integration_error' GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 25) x),
       'data', (SELECT coalesce(json_agg(x ORDER BY x.last_seen DESC), '[]') FROM (SELECT DISTINCT ON (kind, path) kind, path, message, count n, ts first_seen, coalesce((meta->>'last_seen')::timestamptz, ts) last_seen, meta
         FROM ev WHERE kind IN ('etl_stale', 'etl_flat', 'etl_drop', 'data_lag') ORDER BY kind, path, ts DESC) x),
@@ -27021,7 +27025,11 @@ async function hzHealthReportExtra(days) {
         FROM ev WHERE kind = 'sanity' ORDER BY path, source, ts DESC) x),
       'db_pool', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, sum(count)::int n, max((meta->>'max_waiting')::int) max_waiting, (array_agg(message ORDER BY ts DESC))[1] message, max(ts) last_seen FROM ev WHERE kind = 'db_pool' GROUP BY path ORDER BY n DESC) x),
       'slow_q', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path sql, sum(count)::int n, max(ms) max_ms, round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms))::int p95, (array_agg(meta->>'example' ORDER BY ts DESC))[1] example, max(ts) last_seen
-        FROM ev WHERE kind = 'slow_query' GROUP BY path ORDER BY max_ms DESC LIMIT 25) x),
+        FROM ev WHERE kind = 'slow_query' AND NOT (meta ? 'thaw_gap_ms') GROUP BY path ORDER BY max_ms DESC LIMIT 25) x),
+      -- v28.370 (Diviyaj 14-Oct-26, the "240s" slow queries): a statement whose time spans a Vercel instance freeze is freeze time, not DB time
+      -- (statement_timeout is 30s on live), so it is kept out of the slow list and its p95 and summarised here instead
+      'slow_q_thaw', (SELECT json_build_object('n', coalesce(sum(count), 0)::int, 'statements', count(DISTINCT path)::int, 'max_ms', max(ms), 'max_gap_ms', max((meta->>'thaw_gap_ms')::bigint), 'last_seen', max(ts))
+        FROM ev WHERE kind = 'slow_query' AND meta ? 'thaw_gap_ms'),
       'pages', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT path, array_agg(DISTINCT source) sources, sum(coalesce((meta->>'visits')::int, count))::int visits, count(DISTINCT user_email)::int users, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s
         FROM ev WHERE kind = 'page_view' GROUP BY path ORDER BY visits DESC LIMIT 30) x),
       'page_users', (SELECT coalesce(json_agg(x), '[]') FROM (SELECT user_email, sum(coalesce((meta->>'visits')::int, count))::int visits, round(sum(coalesce((meta->>'active_s')::numeric, 0)))::bigint active_s, count(DISTINCT path)::int pages, max(ts) last_seen
@@ -27100,7 +27108,8 @@ function hzHealthMarkdown(d) {
     tbl('## 9. API failures seen by browsers', 'Client-observed: 5xx, 408 / 429 / 504, network errors (status 0) and responses slower than 10s. Includes Vercel 504s that never reach the server log.', ['Endpoint', 'Status', 'Count', 'Max ms', 'Users', 'Last seen', 'Likely file'],
       d.api.map(r => [(r.method || 'GET') + ' ' + r.path, r.status || 'network', r.n, r.max_ms, r.users, dt(r.last_seen), r.file]));
     tbl('## 10. Database', 'db_pool = requests queued for a connection (pool max 4 on Vercel) or connect / query timeouts. Slow queries = one statement >= 2s, literals stripped; find it by its text in server.mjs.', ['Kind', 'What', 'Count', 'Max ms / waiting', 'Example route', 'Last seen'],
-      d.db_pool.map(r => ['db_pool', r.message || r.path, r.n, r.max_waiting == null ? '' : r.max_waiting + ' waiting', '', dt(r.last_seen)]).concat(d.slow_q.map(r => ['slow_query', r.sql, r.n, r.max_ms + ' ms', r.example || '', dt(r.last_seen)])));
+      d.db_pool.map(r => ['db_pool', r.message || r.path, r.n, r.max_waiting == null ? '' : r.max_waiting + ' waiting', '', dt(r.last_seen)]).concat(d.slow_q.map(r => ['slow_query', r.sql, r.n, r.max_ms + ' ms', r.example || '', dt(r.last_seen)]))
+      .concat(d.slow_q_thaw && d.slow_q_thaw.n ? [['slow_query (spans a freeze, not DB time)', d.slow_q_thaw.statements + ' statements', d.slow_q_thaw.n, d.slow_q_thaw.max_ms + ' ms', '', dt(d.slow_q_thaw.last_seen)]] : []));   // v28.370
     const ra = d.red_alerts || {}; tbl('## 11. Red alerts', `Immediate alert emails (one health email per rolling hour, enforced in the DB). Pending now: ${ra.pending || 0}. Next allowed send: ${ra.next_allowed ? hzSydney(ra.next_allowed) + ' Sydney' : 'now'}.`, ['Raised', 'Alert', 'Events', 'Status'],
       (ra.rows || []).map(r => [hzSydney(r.ts), r.message, r.n, r.meta && r.meta.pending_alert ? 'pending' : 'sent ' + (r.meta && r.meta.sent_at ? hzSydney(r.meta.sent_at) : '')]));
     tbl('## 12. Page usage', null, ['View', 'Visits', 'Users', 'Active time'], d.pages.map(r => [r.path, r.visits, r.users, Math.round((r.active_s || 0) / 60) + ' min']));
