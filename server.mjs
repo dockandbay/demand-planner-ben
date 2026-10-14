@@ -17651,9 +17651,50 @@ async function _tplFileRefAmounts(f) {
   _tplRefCache.set(key, v);
   return v;
 }
-// current = { ref: amount billed THIS period }. Returns the exception payload the UI paints red (null-safe, never throws).
+// v28.373 (Ben 15-Oct-26, Rita's G10 Sep "duplicates" + Sarah: EU repeats were returns): PARCEL-LEVEL detail per file, so a repeat order can
+// be told apart. key = the parcel (G10 Tracking Number, ILG HAWB, iFulfilment BID), amount = that parcel's charge, ret = a return line
+// (G10 / ILG service containing "return", ILG reference "RTN…", any order on an iFulfilment Returns sheet). Files without a parcel id
+// (Coghlans, ILG INVA detail) give refs with no keys = "not checkable".
+const _tplParcelCache = new Map();
+async function _tplFileParcels(f) {
+  const ck = String(f.id); if (_tplParcelCache.has(ck)) return _tplParcelCache.get(ck);
+  const refs = {}, add = (ref, key, amount, ret) => { ref = String(ref == null ? '' : ref).trim(); if (!ref) return; const o = refs[ref] || (refs[ref] = { parcels: [], ret: false }); if (ret) o.ret = true; if (amount != null || key) o.parcels.push({ key: String(key || '').trim(), amount: Number(amount) || 0, ret: !!ret }); };
+  const isCsv = /\.csv$/i.test(f.filename || '') || /csv/i.test(f.content_type || '');
+  const hdrAt = (grid, test) => { for (let i = 0; i < Math.min(20, grid.length); i++) { const h = (grid[i] || []).map(x => String(x == null ? '' : x).trim()); if (test(h)) return i; } return -1; };
+  try {
+    let sheets = [];
+    if (isCsv) { const parse = l => { const o = []; let c = '', q = false; for (let i = 0; i < l.length; i++) { const ch = l[i]; if (ch === '"') { if (q && l[i + 1] === '"') { c += '"'; i++; } else q = !q; } else if (ch === ',' && !q) { o.push(c); c = ''; } else c += ch; } o.push(c); return o; };
+      sheets = [{ name: '', grid: String(f.content.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(parse) }]; }
+    else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(f.content);
+      wb.eachSheet(ws => { const grid = []; ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); grid.push(a); }); sheets.push({ name: String(ws.name || ''), grid }); }); }
+    const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'], mm = /^\d{4}-(\d{2})/.exec(String(f.period || '')), pref = mm ? MON[Number(mm[1]) - 1] : null;
+    for (const { name, grid } of sheets) {
+      if (f.tpl === 'us_geneva') { const n = name.toUpperCase(); if (!(n.indexOf('PARCEL') >= 0 || n.indexOf('SMALL') >= 0) || (pref && n.indexOf(pref) < 0)) continue;
+        const hr = hdrAt(grid, h => h.some(x => /order\s*id/i.test(x)) && h.some(x => /carrier\s*amount\s*due/i.test(x))); if (hr < 0) continue; const h = grid[hr];
+        const oi = h.findIndex(x => /order\s*id/i.test(x)), ai = h.findIndex(x => /carrier\s*amount\s*due/i.test(x)), ti = h.findIndex(x => /tracking/i.test(x)), si = h.findIndex(x => /service/i.test(x));
+        for (let r = hr + 1; r < grid.length; r++) { const row = grid[r] || []; const ref = row[oi]; if (ref == null || !/^[A-Za-z0-9]/.test(String(ref).trim())) continue; const a = _tplNum(row[ai]); if (a == null) continue;
+          add(ref, ti >= 0 ? row[ti] : '', a, si >= 0 && /return/i.test(String(row[si] || ''))); } }
+      else if (f.tpl === 'uk_ilg' && isCsv) { const hr = hdrAt(grid, h => h.some(x => /^hawb$/i.test(x)) && h.some(x => /^gross$/i.test(x))); if (hr < 0) continue; const h = grid[hr].map(x => x.toLowerCase());
+        const ki = h.indexOf('hawb'), ri = h.indexOf('your reference'), gi = h.indexOf('gross'), si = h.indexOf('service');
+        for (let r = hr + 1; r < grid.length; r++) { const row = grid[r] || []; const ref = String(row[ri] == null ? '' : row[ri]).trim(); const g = _tplNum(row[gi]); if (!ref || g == null) continue;
+          add(ref, row[ki], g, /return/i.test(String(row[si] || '')) || /^RTN/i.test(ref)); } }
+      else if (f.tpl === 'eu_ifulfilment') {
+        if (/^returns/i.test(name)) { const hr = hdrAt(grid, h => h.includes('Reference') && h.some(x => /return charges/i.test(x))); if (hr < 0) continue; const ri = grid[hr].indexOf('Reference');
+          for (let r = hr + 1; r < grid.length; r++) { const ref = (grid[r] || [])[ri]; if (ref != null && String(ref).trim()) add(ref, '', null, true); } }
+        else { const hr = hdrAt(grid, h => h.includes('Reference') && h.includes('Shipping Fee')); if (hr < 0) continue; const h = grid[hr];
+          const ri = h.indexOf('Reference'), bi = h.indexOf('BID'), ti = h.indexOf('Total Cost') >= 0 ? h.indexOf('Total Cost') : h.indexOf('Shipping Fee');
+          for (let r = hr + 1; r < grid.length; r++) { const row = grid[r] || []; const ref = row[ri]; if (ref == null || !String(ref).trim()) continue; add(ref, bi >= 0 ? row[bi] : '', _tplNum(row[ti]) || 0, false); } } }
+    }
+  } catch (e) { /* unreadable: no parcel detail, refs fall back to "not checkable" */ }
+  const v = { period: f.period, refs };
+  if (_tplParcelCache.size > 200) _tplParcelCache.clear(); _tplParcelCache.set(ck, v); return v;
+}
+// current = { ref: amount billed THIS period }. Returns the exception payload (null-safe, never throws).
+// v28.373: each repeat ref is classified: duplicate (same parcel AND same amount as an earlier month: dispute), return, rerate (same parcel,
+// new amount), extra (a different parcel), unchecked (no parcel id on the invoice to compare). orders / amount = duplicate + unchecked
+// (what to look at); kinds = the per-kind counts and amounts; returns are never in the red total.
 async function _tplCrossMonthDupes(tpl, period, current) {
-  const out = { orders: 0, amount: 0, by_month: [], refs: [] };
+  const out = { orders: 0, amount: 0, by_month: [], refs: [], kinds: { duplicate: { orders: 0, amount: 0 }, unchecked: { orders: 0, amount: 0 }, return: { orders: 0, amount: 0 }, rerate: { orders: 0, amount: 0 }, extra: { orders: 0, amount: 0 } } };
   try {
     const refs = Object.keys(current || {}); if (!refs.length || !tpl || !period) return out;
     const files = (await pool.query(`SELECT id, tpl, period, filename, content_type, content FROM planner.tpl_invoice_files
@@ -17661,10 +17702,29 @@ async function _tplCrossMonthDupes(tpl, period, current) {
     if (!files.length) return out;
     const seen = {};   // ref -> Set(period)
     for (const f of files) { const v = await _tplFileRefAmounts(f); Object.keys(v.refs).forEach(r => { if (current[r] == null) return; if (!seen[r]) seen[r] = new Set(); seen[r].add(v.period); }); }
+    // v28.373: parcel detail for this period's files and the earlier files that share a ref
+    const P = r => ({ parcels: [], ret: false }), merge = (a, b) => { if (b) { a.parcels.push(...b.parcels); if (b.ret) a.ret = true; } return a; };
+    const curFiles = (await pool.query(`SELECT id, tpl, period, filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl=$1 AND period=$2 AND (filename ~* '\\.(xlsx|xls|csv)$' OR content_type ~* 'csv|sheet|excel')`, [tpl, period])).rows;
+    const cur = {}, prior = {}, anyRet = {};
+    for (const f of curFiles) { const v = await _tplFileParcels(f); Object.keys(seen).forEach(r => { if (v.refs[r]) { cur[r] = merge(cur[r] || P(), v.refs[r]); if (v.refs[r].ret) anyRet[r] = true; } }); }
+    for (const f of files) { const v = await _tplFileParcels(f); Object.keys(seen).forEach(r => { if (v.refs[r]) { prior[r] = merge(prior[r] || P(), v.refs[r]); if (v.refs[r].ret) anyRet[r] = true; } }); }
+    const same = (a, b) => Math.abs(a - b) < 0.005;
     const byM = {};
-    Object.keys(seen).forEach(r => { const amt = Number(current[r]) || 0; out.orders++; out.amount += amt; const months = [...seen[r]].sort();
-      months.forEach(m => { if (!byM[m]) byM[m] = { period: m, orders: 0, amount: 0 }; byM[m].orders++; byM[m].amount += amt; });
-      if (out.refs.length < 300) out.refs.push({ ref: r, amount: Math.round(amt * 100) / 100, also_in: months }); });
+    Object.keys(seen).forEach(r => { const amt = Number(current[r]) || 0, c = cur[r] || P(), p = prior[r] || P(), months = [...seen[r]].sort();
+      const ck = c.parcels.filter(x => x.key), pk = p.parcels.filter(x => x.key);
+      const dupP = ck.filter(x => pk.some(y => y.key === x.key && same(y.amount, x.amount)));
+      let kind, kamt = amt;
+      if (dupP.length) { kind = 'duplicate'; kamt = dupP.reduce((s, x) => s + x.amount, 0) || amt; }
+      else if (c.ret || anyRet[r] || c.parcels.some(x => x.ret)) kind = 'return';
+      else if (ck.some(x => pk.some(y => y.key === x.key))) kind = (amt - p.parcels.reduce((s, x) => s + x.amount, 0) >= 100) ? 'unchecked' : 'rerate';   // a re-rate that adds 100+ (TRF-1801758 129.81 -> 2,323) is worth a look
+      else if (ck.length && pk.length) kind = 'extra';
+      else kind = 'unchecked';
+      const K = out.kinds[kind]; K.orders++; K.amount += kamt;
+      if (kind === 'duplicate' || kind === 'unchecked') { out.orders++; out.amount += kamt;
+        months.forEach(m => { if (!byM[m]) byM[m] = { period: m, orders: 0, amount: 0 }; byM[m].orders++; byM[m].amount += kamt; }); }
+      if (out.refs.length < 300) out.refs.push({ ref: r, amount: Math.round(kamt * 100) / 100, also_in: months, kind,
+        parcel: dupP[0] ? dupP[0].key : (ck[0] ? ck[0].key : ''), prior_amount: Math.round(p.parcels.reduce((s, x) => s + x.amount, 0) * 100) / 100 }); });
+    Object.values(out.kinds).forEach(k => { k.amount = Math.round(k.amount * 100) / 100; });
     out.amount = Math.round(out.amount * 100) / 100;
     out.by_month = Object.values(byM).map(m => ({ ...m, amount: Math.round(m.amount * 100) / 100 })).sort((a, b) => a.period < b.period ? -1 : 1);
     out.refs.sort((a, b) => b.amount - a.amount);

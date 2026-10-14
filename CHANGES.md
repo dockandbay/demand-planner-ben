@@ -1,3 +1,8 @@
+## v28.373 (15-Oct-26) 3PL invoices: duplicates told apart from returns, re-rates and extra parcels
+- Rita's G10 September flags and Sarah's EU "double charges" were orders billed again for a legitimate reason. The cross-month check matched on order reference only; it now compares the PARCEL (G10 Tracking Number, ILG HAWB, iFulfilment BID) and amount. Red = the same parcel at the same amount (dispute); amber = cannot be checked (no parcel id on the invoice) or a re-rate that adds 100+; grey list = returns, re-rates and extra parcels (e.g. a second carton), not disputed and not in Copy for email.
+- Tested on the real invoices: G10 Aug vs Jul = 40 duplicates, $429.63 (matches G10's admitted double billing) plus 1 extra parcel; EU Aug = 46 returns and 52 re-rates, 0 disputes, TRF-1801758 (129.81 then 2,323.03) amber to check; UK Aug/Sep = extra labels only.
+- No migration, no env change, no new routes.
+
 ## v28.372 (15-Oct-26) Reconcile: note for Xero on bills (team notes used automatically)
 - ACCOUNTS > Reconcile drawer: new "Note for Xero" box; the note goes first in the Xero bill line description ("SS27 picnic · <receipt> (receipt from accounts@, date)"), with a live preview.
 - Pre-filled, and used by Auto bills and batch bills too, from the note a team member typed when forwarding the receipt to accounts@, only when it is explicit (at most 2 short lines, 80 characters, after greetings, sign-offs, signatures, "see attached", @mentions and "please pay" are dropped). The accounts@ mailbox's own replies never count. Sandbox check on the 50 latest team forwards: 6 notes found, all Emma's, e.g. "Wink Models Pty Ltd. $6314.70 - Photo SHOOTS - (SS27 - Beach Group model)"; "@Ben please pay" correctly ignored.
