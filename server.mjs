@@ -1584,7 +1584,7 @@ app.use((req, res, next) => {
 // values for a few seconds coalesces bursts (refresh, multiple tabs, the auto-update reload) → repeat loads skip
 // the build. We cache DATA only, NOT the HTML, so DEV live-editing still works (the file is re-read + re-injected
 // each request). Invalidated on forecast saves so an edit shows on the next load.
-let _dataCache = null, _dataRefresh = null, _bgRefreshing = false, _kvBlobAt = 0;   // _kvBlobAt = build time of the KV blob currently loaded (drives the self-heal rebuild)
+let _dataCache = null, _dataRefresh = null, _bgRefreshing = false, _kvBlobAt = 0, _kvBlobGen = 0, _dataPending = null;   // v28.371: _kvBlobGen = shared generation of the loaded KV blob; _dataPending = a save's bump + rebuild   // _kvBlobAt = build time of the KV blob currently loaded (drives the self-heal rebuild)
 const DATA_TTL_MS = 600000;   // 10 min — with KV + n8n-triggered invalidation this is just a staleness heartbeat, not the primary refresh.
 const MAX_BLOB_AGE_MS = 6 * 60 * 60 * 1000;   // 6h — SELF-HEAL: rebuild the KV blob FROM SUPABASE at least this often so daily n8n product-field syncs (market_tier, launch dates, cost…) surface WITHOUT needing an explicit /api/data-cache/invalidate. n8n can still invalidate post-sync for instant freshness; this is the safety net so live data can never sit stale for more than ~6h.
 // ── Shared cross-instance data cache (Vercel KV / Upstash REST) ───────────────────────────────────────────────
@@ -1615,15 +1615,15 @@ async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command
   if (!r.ok) { if (r.status >= 500) _kvDownUntil = Date.now() + KV_BREAK_MS; throw new Error('KV ' + r.status); }
   return (await r.json()).result;
 }
-async function kvWriteBlob(vals) {   // store the built 14-tuple as gzip+base64 chunks + a meta record
+async function kvWriteBlob(vals, sgen) {   // store the built 14-tuple as gzip+base64 chunks + a meta record (v28.371: + the shared data generation it was built at)
   const b64 = (await new Promise((ok, ko) => zlib.gzip(Buffer.from(JSON.stringify(vals)), (e, b) => (e ? ko(e) : ok(b))))).toString('base64');   // v28.163: async gzip (~12 MB; was gzipSync, blocking the event loop after every rebuild)
   const n = Math.ceil(b64.length / KV_CHUNK);
   for (let i = 0; i < n; i++) await kvCmd(['SET', KV_KEY + ':' + i, b64.slice(i * KV_CHUNK, (i + 1) * KV_CHUNK)]);
-  await kvCmd(['SET', KV_KEY + ':meta', JSON.stringify({ n, at: Date.now(), len: b64.length })]);
+  await kvCmd(['SET', KV_KEY + ':meta', JSON.stringify({ n, at: Date.now(), len: b64.length, gen: Number(sgen) || 0 })]);
 }
 async function kvReadBlob() {   // reassemble the blob from KV; null on miss/corruption (caller falls back to Supabase)
   const meta = await kvCmd(['GET', KV_KEY + ':meta']); if (!meta) return null;
-  const m = JSON.parse(meta); _kvBlobAt = Number(m.at) || 0; let b64 = '';
+  const m = JSON.parse(meta); _kvBlobAt = Number(m.at) || 0; _kvBlobGen = Number(m.gen) || 0; let b64 = '';
   for (let i = 0; i < m.n; i++) { const c = await kvCmd(['GET', KV_KEY + ':' + i]); if (c == null) return null; b64 += c; }
   let vals; try { vals = JSON.parse(zlib.gunzipSync(Buffer.from(b64, 'base64')).toString()); } catch (e) { return null; }
   return (Array.isArray(vals) && vals.length >= 14) ? vals : null;   // sanity-check shape before trusting it
@@ -1697,13 +1697,14 @@ async function _buildDataVals() {
 let _dataGen = 0;
 function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
   if (_dataRefresh) return _dataRefresh;
-  const _gen = _dataGen;
+  const _gen = _dataGen, _sg = _dGen.v;   // v28.371: the shared generation this build reflects (read before the build starts)
   _dataRefresh = _buildDataVals()
     .then(async (vals) => {
       if (_gen !== _dataGen) { _dataRefresh = null; return refreshDataCache(); }   // invalidated mid-build: stale, rebuild once more
-      _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
+      _dataCache = { at: Date.now(), vals, sgen: _sg }; _kvBlobAt = Date.now(); _dataRefresh = null;
       try { invalidateBiCache(); } catch (e) { /* v27.886: fresh source data (ETL / self-heal rebuild) → BI/KPI projections recompute on next read */ }
-      if (KV_ON) { try { await kvWriteBlob(vals); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })
+      if (KV_ON) { try { const m = await kvCmd(['GET', KV_KEY + ':meta']).catch(() => null); const have = m ? (Number(JSON.parse(m).gen) || 0) : -1;
+        if (have <= _sg) await kvWriteBlob(vals, _sg); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })   // v28.371: never overwrite a newer blob
     .catch((e) => { _dataRefresh = null; throw e; });
   return _dataRefresh;
 }
@@ -1714,23 +1715,63 @@ function bgRefresh() {
   if (!KV_ON) { hzWaitUntil(refreshDataCache().catch(() => {})); return; }   // v28.231: hzWaitUntil = finish before Vercel freezes the instance
   if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { hzWaitUntil(refreshDataCache().catch(() => {})); return; }   // blob past max age → authoritative rebuild from Supabase (surfaces ETL'd product-field changes), else just re-read
   _bgRefreshing = true; const _gen = _dataGen;
-  hzWaitUntil(kvReadBlob()).then((v) => { if (v && _gen === _dataGen) _dataCache = { at: Date.now(), vals: v }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
+  hzWaitUntil(kvReadBlob()).then((v) => { if (v && _gen === _dataGen && _kvBlobGen >= ((_dataCache && _dataCache.sgen) || 0)) _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; })   // v28.151 (review E3): not over a newer invalidation.catch(() => {}).finally(() => { _bgRefreshing = false; });
 }
 // The accessor every serve path uses. In-process first; on a cold start, prefer KV (no Supabase); else build once.
 let _dataSrc = 'memory';   // v28.314: where the last getDataVals answer came from (memory | kv | supabase), for the slow page-build health row
+// v28.371 (Ben 15-Oct-26, kathryn's FBA edit "no change"): CROSS-INSTANCE FRESHNESS. A save rebuilt only the instance that handled it; every
+// other warm instance served its pre-save copy for up to DATA_TTL_MS (10 min), and the saving instance itself could read the old KV blob
+// before its rebuild landed. Now a save bumps a shared generation (planner.app_settings 'data_cache_gen'); every cached copy and KV blob
+// records the generation it was built at; an instance whose copy is older (checked every DATA_GEN_POLL_MS) waits for the fresh KV blob
+// (the saving instance pushes it, ~15-25 s after the save), or rebuilds from Supabase itself if that has not landed within a minute.
+const DATA_GEN_POLL_MS = 5000, DATA_CATCHUP_WAIT_MS = 25000;
+const _dGen = { v: 0, at: 0, chgAt: 0, seen: false }; let _dGenInflight = null, _dataCatchUp = null;
+function _dGenAdopt(v, t) { if (Number.isFinite(v) && v >= _dGen.v) { _dGen.v = v; if (Number.isFinite(t)) _dGen.chgAt = t; } _dGen.at = Date.now(); _dGen.seen = true; }
+async function currentDataGen() {
+  if (_dGen.seen && Date.now() - _dGen.at < DATA_GEN_POLL_MS) return _dGen.v;
+  if (_dGenInflight) return _dGenInflight;
+  _dGenInflight = pool.query(`SELECT coalesce(value,'0')::bigint v, (extract(epoch FROM updated_at) * 1000)::float8 t FROM planner.app_settings WHERE key = 'data_cache_gen'`)
+    .then(r => { const row = r.rows[0]; _dGenAdopt(row ? Number(row.v) : 0, row ? Number(row.t) : 0); return _dGen.v; })
+    .catch(() => { _dGen.at = Date.now(); return _dGen.v; }).finally(() => { _dGenInflight = null; });   // keep the last known value on error
+  return _dGenInflight;
+}
+async function bumpDataGen() {
+  try { const r = await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES ('data_cache_gen', '1')
+      ON CONFLICT (key) DO UPDATE SET value = ((coalesce(planner.app_settings.value, '0')::bigint) + 1)::text, updated_at = now() RETURNING value, (extract(epoch FROM updated_at) * 1000)::float8 t`);
+    if (r.rows[0]) _dGenAdopt(Number(r.rows[0].value), Number(r.rows[0].t)); } catch (e) { console.error('[cache] data generation bump failed:', e.message); }
+}
+function _dataCatchUpTo(sg) {   // single-flight per instance; resolves to fresh vals (or null = keep serving what we have)
+  if (_dataCatchUp) return _dataCatchUp;
+  _dataCatchUp = (async () => { const t0 = Date.now();
+    if (KV_ON) while (Date.now() - t0 < DATA_CATCHUP_WAIT_MS) {
+      try { const m = await kvCmd(['GET', KV_KEY + ':meta']); if (m && (Number(JSON.parse(m).gen) || 0) >= sg) { const v = await kvReadBlob(); if (v && _kvBlobGen >= sg) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; _dataSrc = 'kv'; return v; } } } catch (_) {}
+      if (Date.now() - (_dGen.chgAt || 0) > 60000) break;   // the saving instance should have pushed by now (frozen or failed): rebuild here
+      await new Promise(r => setTimeout(r, 1500)); }
+    try { const v = await refreshDataCache(); _dataSrc = 'supabase'; return v; } catch (e) { console.error('[cache] catch-up rebuild failed:', e.message); return null; }
+  })().finally(() => { _dataCatchUp = null; });
+  return _dataCatchUp;
+}
+async function _dataFresh(vals) {   // vals = the copy about to be served; swapped for a fresh one when a newer save exists
+  try { const sg = await currentDataGen(); if (_dataCache && sg > (_dataCache.sgen || 0)) { const v = await _dataCatchUpTo(sg); if (v) return v; } } catch (_) {}
+  return vals;
+}
 async function getDataVals() {
-  if (_dataCache) { _dataSrc = 'memory'; if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataCache.vals; }
-  if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; _dataSrc = 'kv'; return v; } } catch (e) { console.error('[kv] read failed:', e.message); } }
+  if (!_dataCache && (_dataPending || _dataRefresh)) { try { await (_dataPending || _dataRefresh); } catch (_) {} }   // v28.371: right after a save on THIS instance, wait for its rebuild (never the pre-save KV blob)
+  if (_dataCache) { _dataSrc = 'memory'; if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataFresh(_dataCache.vals); }
+  if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; _dataSrc = 'kv'; return _dataFresh(v); } } catch (e) { console.error('[kv] read failed:', e.message); } }
   _dataSrc = 'supabase';
+  try { await currentDataGen(); } catch (_) {}   // so the build is stamped with the current shared generation
   return await refreshDataCache();   // KV miss / not configured → authoritative Supabase build (also writes KV)
 }
 // Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
 // background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
 // v28.231 (Ben, health review fix 1): the rebuild is kept alive with hzWaitUntil (was frozen mid-build on Vercel: 570 pool events + 2 false
 // red alerts in one forecast-editing session on 07-Oct-26).
-function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoDrop(); } catch (_) {} hzWaitUntil(refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message))); }
+function invalidateDataCache() { _dataGen++; _dataCache = null; try { shellMemoDrop(); } catch (_) {}
+  const p = bumpDataGen().then(() => refreshDataCache()).catch((e) => console.error('[cache] rebuild failed:', e.message));   // v28.371: bump the shared generation first, so the rebuild is stamped with it
+  const q = _dataPending = p.finally(() => { if (_dataPending === q) _dataPending = null; }); hzWaitUntil(q); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
-(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
+(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v, sgen: _kvBlobGen }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await currentDataGen().catch(() => {}); await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();   // v28.371: stamp the boot build with the shared generation
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
 // actual band per category × market, then runs the rule set (R1 over-plan, R2 under-plan, R3 step change, R6 zero
 // plan on live range; "no plan" ≠ "plan is low"). Units only, read-only. Cutoff = last complete month (current partial
