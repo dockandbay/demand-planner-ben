@@ -13874,30 +13874,32 @@
     return (Date.now()-dt.getTime())>4*24*3600*1000; }catch(e){ return false; } }
   // v28.364 (Ben 14-Oct-26): DTC MISMATCH 2.0 (from Fulfil). One card per open Fulfil SO with a dropship / backorder line: per SKU, SO qty vs
   // the Fulfil POs linked to the SO vs the matching HORIZON POs. Refresh = read-only Fulfil read; Accept / note per SO.
-  var _dtc2F={issues:true,hideAcc:true,q:'',ch:''};
+  var _dtc2F={issues:true,hideAcc:true,q:'',ch:'',noPo:false};
   function renderDtc2(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var c=d.counts||{}, FB=d.fulfil_base||'https://dockandbay.fulfil.io';
     var fmtD=function(iso){ if(!iso)return 'never'; var x=new Date(iso); return isNaN(x)?String(iso):(x.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-')+' '+x.toTimeString().slice(0,5)); };
     var chans={}; (d.orders||[]).forEach(function(o){ if(o.channel)chans[o.channel]=1; });
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--nav)">DTC mismatch 2.0 <span class="mut tiny" style="font-weight:400">(from Fulfil)</span></div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:900px">Every <b>open Fulfil sales order</b> with a <b>dropship or backorder</b> line, the Fulfil purchase orders linked to it, and the matching HORIZON POs (same number, PO link, Fulfil reference, or the PO&rsquo;s sales order ref). Per SKU: SO qty vs Fulfil PO qty vs HORIZON PO qty. Accept or note an order to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc2-sync" style="background:var(--blue);color:#fff;border:0;font-weight:800">&#8635; Refresh from Fulfil</button><span id="dtc2-msg" class="mut tiny">Last read '+esc(fmtD(d.synced_at))+(d.synced_by?' by '+esc(String(d.synced_by).replace(/@.*/,'@')):'')+'</span>'
-        +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',c.issues||0,'var(--neg)')+_dtcPill('Accepted',c.accepted||0,'var(--muted)')+_dtcPill('OK',c.ok||0,'var(--pos)')+'</span></div>'
+        +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',c.issues||0,'var(--neg)')+_dtcPill('Accepted',c.accepted||0,'var(--muted)')+_dtcPill('OK',c.ok||0,'var(--pos)')+_dtcPill('Without a PO',c.no_po_orders||0,'var(--amber)')+'</span></div>'
       +'<div class="bar" style="gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><input id="dtc2-q" placeholder="Filter: SO, reference, customer, PO or SKU…" value="'+esc(_dtc2F.q)+'" style="width:100%;max-width:360px;box-sizing:border-box;font-size:12px;padding:6px 9px;border:1px solid var(--line);border-radius:6px">'
         +'<select id="dtc2-ch" class="flt" style="max-width:220px"><option value="">All channels</option>'+Object.keys(chans).sort().map(function(k){return '<option'+(k===_dtc2F.ch?' selected':'')+'>'+esc(k)+'</option>';}).join('')+'</select>'
         +'<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="dtc2-iss"'+(_dtc2F.issues?' checked':'')+'> Issue rows only</label>'
+        +'<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;cursor:pointer" title="Dropship / backorder lines with no live Fulfil PO: not sent to purchasing, requested but no PO yet, or the PO was cancelled"><input type="checkbox" id="dtc2-nopo"'+(_dtc2F.noPo?' checked':'')+'> Dropship without a PO only</label>'
         +'<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="dtc2-acc"'+(_dtc2F.hideAcc?' checked':'')+'> Hide accepted</label><span id="dtc2-n" class="mut tiny"></span></div>'
       +'<div id="dtc2-list"></div>';
-    var issCol=function(t){ return t==='ok'?'var(--pos)':/^HORIZON only|^not on SO/.test(t)?'var(--amber)':'var(--neg)'; };
+    var issCol=function(t){ return t==='ok'?'var(--pos)':/^HORIZON only|^not on SO|^requested/.test(t)?'var(--amber)':'var(--neg)'; };
     var poCell=function(o,kind){ var ks=Object.keys(o||{}); if(!ks.length)return '<span class="mut">none</span>'; return ks.map(function(k){ return (kind==='hz'?'<a href="#" class="dtc2-po" data-po="'+esc(k)+'">'+esc(k)+'</a>':esc(k))+' <b>'+Number(o[k]).toLocaleString()+'</b>'; }).join('<br>'); };
     function draw(){ var q=_dtc2F.q.trim().toLowerCase(), list=(d.orders||[]).filter(function(o){
-        if(_dtc2F.hideAcc&&o.accepted&&o.issues)return false; if(_dtc2F.ch&&o.channel!==_dtc2F.ch)return false;
+        if(_dtc2F.hideAcc&&o.accepted&&o.issues)return false; if(_dtc2F.ch&&o.channel!==_dtc2F.ch)return false; if(_dtc2F.noPo&&!o.no_po_lines)return false;
         if(!q)return true; var hay=[o.so,o.reference,o.customer,o.channel].concat(o.fulfil_pos.map(function(p){return p.number;}),o.hz_pos.map(function(p){return p.po;}),o.rows.map(function(r){return r.sku;})).join(' ').toLowerCase(); return q.split(',').some(function(t){t=t.trim();return t&&hay.indexOf(t)>=0;}); });
       document.getElementById('dtc2-n').textContent=list.length+' of '+(d.orders||[]).length+' orders';
       document.getElementById('dtc2-list').innerHTML=list.length?list.map(function(o){
-        var rows=_dtc2F.issues&&o.issues?o.rows.filter(function(r){return r.issue!=='ok';}):o.rows;
+        var rows=_dtc2F.noPo?o.rows.filter(function(r){return r.no_po&&!Object.keys(r.fulfil||{}).length;}):(_dtc2F.issues&&o.issues?o.rows.filter(function(r){return r.issue!=='ok';}):o.rows);
         return '<div class="card" style="border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--card)">'
           +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--bg-soft,rgba(0,0,0,.02))">'
             +'<a href="'+FB+'/v2/erp/model/sales_order/'+o.fulfil_id+'" target="_blank" rel="noopener" style="font-weight:800">'+esc(o.so)+' &#8599;</a><span>'+esc(o.reference||'')+'</span><span class="mut">'+esc(o.customer||'')+'</span><span class="mut tiny">'+esc(o.channel||'')+' &middot; '+esc(o.warehouse||'')+' &middot; '+esc(o.shipment_state||'')+'</span>'
+            +(o.no_po_lines?'<span class="pill" style="color:var(--amber);font-weight:700" title="Dropship / backorder lines with no live Fulfil PO">'+o.no_po_lines+' without a PO ('+Number(o.no_po_qty||0).toLocaleString()+' units)</span>':'')
             +'<span style="margin-left:auto" class="pill" title="'+(o.accepted?'accepted by '+esc(o.accepted_by||''):'')+'">'+(o.issues?'<b style="color:'+(o.accepted?'var(--muted)':'var(--neg)')+'">'+o.issues+' issue'+(o.issues>1?'s':'')+(o.accepted?' (accepted)':'')+'</b>':'<b style="color:var(--pos)">OK</b>')+'</span></div>'
           +'<div class="tiny" style="padding:6px 12px;display:flex;gap:16px;flex-wrap:wrap"><span><span class="mut">Fulfil POs:</span> '+(o.fulfil_pos.length?o.fulfil_pos.map(function(p){return '<a href="'+FB+'/v2/erp/model/purchase_order/'+p.id+'" target="_blank" rel="noopener" title="'+esc((p.supplier||'')+' · '+(p.state||'')+(p.reference?' · '+p.reference:''))+'">'+esc(p.number)+'</a>';}).join(' '):'<span style="color:var(--neg)">none</span>')+'</span>'
             +'<span><span class="mut">HORIZON:</span> '+(o.hz_pos.length?o.hz_pos.map(function(p){return '<a href="#" class="dtc2-po" data-po="'+esc(p.po)+'" title="'+esc((p.supplier||'')+' · '+(p.status||'')+' · '+(p.branch||'')+' · matched by '+p.why.join(', '))+'">'+esc(p.po)+'</a>';}).join(' '):'<span style="color:var(--neg)">none</span>')+'</span></div>'
@@ -13918,6 +13920,7 @@
     document.getElementById('dtc2-ch').onchange=function(){_dtc2F.ch=this.value;draw();};
     document.getElementById('dtc2-iss').onchange=function(){_dtc2F.issues=this.checked;draw();};
     document.getElementById('dtc2-acc').onchange=function(){_dtc2F.hideAcc=this.checked;draw();};
+    document.getElementById('dtc2-nopo').onchange=function(){_dtc2F.noPo=this.checked;draw();};   // v28.367
     document.getElementById('dtc2-sync').onclick=function(){ var bt=this,m=document.getElementById('dtc2-msg'); bt.disabled=true; m.textContent='Reading open sales orders and POs from Fulfil…';
       fetch('/api/supply/dtc2/sync',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error); m.textContent='Read '+j.sales+' orders, '+j.purchases+' Fulfil POs.'; selectReport('dtc2'); })
         .catch(function(e){ bt.disabled=false; m.style.color='var(--neg)'; m.textContent='Fulfil read failed: '+e.message; }); };

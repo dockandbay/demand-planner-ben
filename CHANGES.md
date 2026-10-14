@@ -1,3 +1,8 @@
+## v28.367 (14-Oct-26) DTC mismatch 2.0: dropship without a PO
+- Every open dropship / backorder line with no live Fulfil PO is labelled with the reason: not sent to purchasing, requested but no PO yet, or PO cancelled (a cancelled PO replaced by another PO on the same sales order is not flagged). New "Without a PO" count, a "Dropship without a PO only" filter and a badge per order (lines, units).
+- Live 14-Oct: 10 orders / 34 lines (Gartner GWIN28835-1 8,925 units, British Shop 3,900, Goldstar 2,240, Tordoffs, Berenberg not sent to purchasing; A Play, XKI, Trendform, John Lewis, Good News Cruise requested with no PO).
+- No migration (the Fulfil read adds two fields to the existing snapshot; click Refresh from Fulfil once after deploy). No env change.
+
 ## v28.366 (14-Oct-26) Reconcile: no PDF reload after a bill push
 - ACCOUNTS > Reconcile drawer: once "Push bill to Xero" succeeds the email / PDF pane is hidden (the PDF is no longer re-rendered); the drawer shows the confirmation and a blue "Open bill in Xero" button next to Close. No server change.
 

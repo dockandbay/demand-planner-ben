@@ -18626,13 +18626,13 @@ async function dtc2Sync(user) {
   const saleIds = [...new Set(ds.map(l => l.sale).filter(Boolean))];
   if (!saleIds.length) { const data = { sales: [], purchases: [] }; await pool.query(`INSERT INTO planner.dtc2_snapshot (key,data,synced_at,synced_by) VALUES ('fulfil',$1,now(),$2) ON CONFLICT (key) DO UPDATE SET data=excluded.data, synced_at=now(), synced_by=excluded.synced_by`, [JSON.stringify(data), user || null]); return { sales: 0, purchases: 0 }; }
   const sales = await _dtc2Read(cfg, 'sale.sale', [['id', 'in', saleIds]], ['id', 'number', 'reference', 'state', 'shipment_state', 'sale_date', 'party.name', 'channel.name', 'warehouse.name']);
-  const lines = await _dtc2Read(cfg, 'sale.line', [['sale', 'in', saleIds], ['type', '=', 'line']], ['id', 'sale', 'product.code', 'product.rec_name', 'quantity', 'quantity_shipped', 'quantity_canceled', 'delivery_mode', 'purchase_request_state', 'purchase_request.purchase', 'purchase_request.purchase.number']);
+  const lines = await _dtc2Read(cfg, 'sale.line', [['sale', 'in', saleIds], ['type', '=', 'line']], ['id', 'sale', 'product.code', 'product.rec_name', 'quantity', 'quantity_shipped', 'quantity_canceled', 'delivery_mode', 'purchase_request', 'purchase_request_state', 'purchase_request.purchase', 'purchase_request.purchase.number', 'purchase_request.purchase.state']);
   const purIds = [...new Set(lines.map(l => l['purchase_request.purchase']).filter(Boolean))];   // purchase.sales is not searchable in Fulfil; read it back on the POs below
   const purchases = purIds.length ? await _dtc2Read(cfg, 'purchase.purchase', [['id', 'in', purIds]], ['id', 'number', 'reference', 'state', 'sales', 'party.name', 'warehouse.name', 'delivery_date']) : [];
   const plines = purIds.length ? await _dtc2Read(cfg, 'purchase.line', [['purchase', 'in', purIds], ['type', '=', 'line']], ['purchase', 'product.code', 'quantity']) : [];
   const pm = new Map(purchases.map(p => [p.id, Object.assign(p, { lines: [] })])); plines.forEach(l => { const p = pm.get(l.purchase); if (p) p.lines.push({ sku: l['product.code'], qty: Number(l.quantity) || 0 }); });
   const sm = new Map(sales.map(s => [s.id, Object.assign(s, { lines: [], purchases: [] })]));
-  lines.forEach(l => { const s = sm.get(l.sale); if (!s) return; s.lines.push({ sku: l['product.code'], name: l['product.rec_name'], qty: (Number(l.quantity) || 0) - (Number(l.quantity_canceled) || 0), shipped: Number(l.quantity_shipped) || 0, mode: l.delivery_mode, req: l.purchase_request_state || null, po: l['purchase_request.purchase.number'] || null });
+  lines.forEach(l => { const s = sm.get(l.sale); if (!s) return; s.lines.push({ sku: l['product.code'], name: l['product.rec_name'], qty: (Number(l.quantity) || 0) - (Number(l.quantity_canceled) || 0), shipped: Number(l.quantity_shipped) || 0, mode: l.delivery_mode, req: l.purchase_request_state || null, has_req: !!l.purchase_request, po: l['purchase_request.purchase.number'] || null, po_state: l['purchase_request.purchase.state'] || null });
     const pid = l['purchase_request.purchase']; if (pid && !s.purchases.includes(pid)) s.purchases.push(pid); });
   purchases.forEach(p => (p.sales || []).forEach(sid => { const s = sm.get(sid); if (s && !s.purchases.includes(p.id)) s.purchases.push(p.id); }));
   const data = { sales: [...sm.values()], purchases: [...pm.values()] };
@@ -18675,7 +18675,11 @@ async function dtc2Build(db) {
         const tail = _dtc2Key(String(fp.reference || '').split('/').pop()); if (tail && byPo.has(tail) && tail !== n) hit([byPo.get(tail).po], 'Fulfil reference'); });
       [s.number].concat(String(s.reference || '').split(/[,;\/]/)).map(_dtc2Key).filter(t => t.length >= 5).forEach(t => hit(bySoTok.get(t), 'sales order ref'));
       const skus = new Map(), row = sku => { if (!skus.has(sku)) skus.set(sku, { sku, name: '', so: 0, shipped: 0, mode: '', fulfil: {}, hz: {} }); return skus.get(sku); };
-      (s.lines || []).filter(l => l.mode === 'dropship' || l.mode === 'backorder').forEach(l => { const r = row(l.sku); r.so += l.qty; r.shipped += l.shipped; r.mode = r.mode && r.mode !== l.mode ? 'mixed' : l.mode; r.name = r.name || l.name || ''; });
+      // v28.367 (Ben 14-Oct-26): why a dropship / backorder line has no PO: never sent to purchasing (no purchase request), requested but
+      // no PO created yet, or its PO was cancelled. Lines read before v28.367 have no has_req: they count as not sent when no PO and no request state.
+      const noPoWhy = l => { if (l.po && !/^cancel/.test(String(l.po_state || ''))) return null; if (l.po) return 'po_cancelled'; if (l.has_req || (l.req && l.req !== 'cancel')) return 'requested'; return 'not_sent'; };
+      (s.lines || []).filter(l => l.mode === 'dropship' || l.mode === 'backorder').forEach(l => { const r = row(l.sku); r.so += l.qty; r.shipped += l.shipped; r.mode = r.mode && r.mode !== l.mode ? 'mixed' : l.mode; r.name = r.name || l.name || '';
+        const why = noPoWhy(l); if (why && l.qty - l.shipped > 0) { r.no_po = r.no_po || why; r.no_po_qty = (r.no_po_qty || 0) + (l.qty - l.shipped); } });
       fps.forEach(fp => (fp.lines || []).forEach(l => { const r = row(l.sku); r.fulfil[fp.number] = (r.fulfil[fp.number] || 0) + l.qty; }));
       [...hzSet].forEach(po => (hzLines.get(po) || []).forEach(l => { const r = row(l.sku); r.hz[po] = (r.hz[po] || 0) + l.qty; }));
       (s.lines || []).filter(l => l.mode !== 'dropship' && l.mode !== 'backorder').forEach(l => { const r = skus.get(l.sku); if (!r || (r.mode && r.mode !== 'stock')) return; r.so += l.qty; r.shipped += l.shipped; r.mode = 'stock'; r.name = r.name || l.name || ''; });   // a PO SKU that is a from-stock line on the SO
@@ -18683,16 +18687,18 @@ async function dtc2Build(db) {
       const rows = [...skus.values()].map(r => { const f = sum(r.fulfil), h = sum(r.hz), fn = Object.keys(r.fulfil).length, hn = Object.keys(r.hz).length; let issue = 'ok';
         if (r.mode === 'stock') { issue = f === h ? 'ok' : !fn ? 'HORIZON PO only' : !hn ? 'not in HORIZON' : 'HORIZON ' + sg(h - f); return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }   // from stock on the SO: compare the two POs only
         if (!r.so && !fn && hn) return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue: 'HORIZON only' });   // on a matched HORIZON PO, but not on the SO or its Fulfil POs
-        if (r.so && !fn) issue = 'no Fulfil PO'; else if (!r.so && fn) issue = 'not on SO'; else if (r.so !== f) issue = 'Fulfil ' + (f - r.so > 0 ? '+' : '') + (f - r.so);
+        if (r.so && !fn) issue = r.no_po === 'po_cancelled' ? 'Fulfil PO cancelled' : r.no_po === 'requested' ? 'requested, no Fulfil PO yet' : r.no_po === 'not_sent' ? 'not sent to purchasing' : 'no Fulfil PO'; else if (!r.so && fn) issue = 'not on SO'; else if (r.so !== f) issue = 'Fulfil ' + (f - r.so > 0 ? '+' : '') + (f - r.so);
         if (issue === 'ok' || /^Fulfil|not on SO/.test(issue)) { const base = fn ? f : r.so; if (!hn) issue = issue === 'ok' ? 'not in HORIZON' : issue + ' · not in HORIZON'; else if (h !== base) issue = (issue === 'ok' ? '' : issue + ' · ') + 'HORIZON ' + (h - base > 0 ? '+' : '') + (h - base); }
         return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }).sort((a, b) => (a.issue === 'ok') - (b.issue === 'ok') || a.sku.localeCompare(b.sku));
       const issues = rows.filter(r => r.issue !== 'ok').length, rvw = rv.get(s.number) || {};
-      return { so: s.number, fulfil_id: s.id, reference: s.reference, customer: s['party.name'], channel: s['channel.name'], warehouse: s['warehouse.name'], sale_date: s.sale_date, state: s.state, shipment_state: s.shipment_state,
+      const noPoRows = rows.filter(r => r.no_po && !Object.keys(r.fulfil).length);
+      return { no_po_lines: noPoRows.length, no_po_qty: noPoRows.reduce((a, r) => a + (r.no_po_qty || 0), 0), so: s.number, fulfil_id: s.id, reference: s.reference, customer: s['party.name'], channel: s['channel.name'], warehouse: s['warehouse.name'], sale_date: s.sale_date, state: s.state, shipment_state: s.shipment_state,
         fulfil_pos: fps.map(p => ({ number: p.number, id: p.id, state: p.state, supplier: p['party.name'], reference: p.reference })),
         hz_pos: [...hzSet].map(po => { const p = hzByPo.get(po) || {}; return { po, status: p.status, supplier: p.supplier_name, branch: p.branch, why: [...(why[po] || [])] }; }),
         rows, issues, note: rvw.note || '', accepted: !!rvw.accepted, accepted_by: rvw.accepted_by || null };
     }).sort((a, b) => (b.issues > 0) - (a.issues > 0) || String(a.so).localeCompare(String(b.so)));
-    const counts = { issues: orders.filter(o => o.issues && !o.accepted).length, accepted: orders.filter(o => o.issues && o.accepted).length, ok: orders.filter(o => !o.issues).length };
+    const counts = { issues: orders.filter(o => o.issues && !o.accepted).length, accepted: orders.filter(o => o.issues && o.accepted).length, ok: orders.filter(o => !o.issues).length,
+      no_po_orders: orders.filter(o => o.no_po_lines).length, no_po_lines: orders.reduce((a, o) => a + (o.no_po_lines || 0), 0) };   // v28.367: dropship / backorder without a live Fulfil PO
     return { synced_at: snap.synced_at, synced_by: snap.synced_by, fulfil_base: 'https://' + (fulfilConfigFor('live').subdomain || 'dockandbay') + '.fulfil.io', orders, counts };
   }
 }
