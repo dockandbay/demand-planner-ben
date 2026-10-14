@@ -1,3 +1,7 @@
+## v28.350 (14-Oct-26) Paid > Xero creates a missing supplier contact
+- A supplier Xero contact that does not exist (e.g. "ACME Ltd - BL" in UK) is no longer an error: the popup shows it in amber ("created when you push") and the push creates it (fresh exact-name lookup, then PUT Contacts), then posts by ContactID. Same for the bank-org contact on a cross-org payment. A failed lookup (Xero down / daily limit) still blocks. Other posts (credit note, push queue, AU migration) unchanged.
+- No migration, no env change. Checked on the sandbox up to the push (not pushed: the sandbox uses the real Xero orgs).
+
 ## v28.349 (14-Oct-26) SUPPLY > CONFIG > Xero: Production category box left-aligned
 - The "Sync the Production category" box (name, options) was right-aligned by the SUPPLY input style; now left-aligned.
 - UI only.

@@ -85,12 +85,12 @@ fingerprints:
   server.mjs::cashflowResponse: cf5b17407ac2
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
-  server.mjs::computeXeroRunPlan: e30705be13c5
-  server.mjs::/api/supply/payments/xero-post: 3e5718ada7c2
+  server.mjs::computeXeroRunPlan: 272d2b966a1d
+  server.mjs::/api/supply/payments/xero-post: 7e34aad57277
   server.mjs::/api/supply/xero/deposit-credit-note: b9feb152d0f2
   server.mjs::_poXeroRegion: 844d7ad9c549
   server.mjs::/api/supply/payments/xero-preflight: 0e54d381e8ff
-  server.mjs::_xeroPlanIssues: 20dc55ced28a
+  server.mjs::_xeroPlanIssues: 0bc6980e329f
   server.mjs::_xeroErrMsg: 6b79e9488cf7
   server.mjs::xeroContactFor: 874272a2feb3
   server.mjs::xeroContactLookup: a7f17b379f1d
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.347
+verified_version: v28.350
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -304,6 +304,7 @@ verified_version: v28.347
 - A failed Xero call reports Xero's own validation messages (every ValidationErrors entry, including nested ones) rather than the generic "A validation exception occurred". (source: server.mjs :: _xeroErrMsg)
 - Supplier Xero contact (from v28.176): every supplier bill and credit note HORIZON posts (supplier-payment bill, deposit credit note, push-queue bill or credit note, AU bill migration) references the supplier's Xero contact by ContactID, never by name, because Xero silently creates a new contact when a posted name does not match. The contact name is suppliers.xero_contact_uk or xero_contact_au for that org (SUPPLY ▸ CONFIG ▸ Suppliers, and the Manage supplier drawer); when blank it is "<name> - <code>" for a kind=supplier row with a code (Fulfil's convention, e.g. "Nice Look - NL"), otherwise the supplier name. Fulfil builds the name from ITS supplier name, so migration 330 (v28.177) seeds the three that differ from HORIZON: MQ = "MQ Print - MQ", JM = "Jinma (merry) - JM", Huzhou Double Qing (Ribbon) = "Huzhou Double Qing (Ribbon) - HDQ". On 06-Oct-26 all 11 Fulfil suppliers had their "- CODE" contact in Xero UK and AU; Chilly Bottles, Foamie, Forming Reality, Kangxun and Zhongshan Huiming are not in Fulfil and posting for them is blocked until their contact exists or is configured. It is looked up by exact name among ACTIVE contacts in that org (GET only); found contacts are cached 10 minutes per org, misses 1 minute, and the post itself re-checks fresh. (source: server.mjs :: xeroContactFor, xeroContactLookup, xeroContactTarget, xeroContactDefault)
 - If the contact is not found nothing is posted (no bill, payment, credit note or tracking option) and the error says "Xero contact '<name>' not found in <UK|AU>: create or merge it in Xero, or change the supplier's Xero contact in SUPPLY > CONFIG > Suppliers". HORIZON never creates a supplier contact in Xero (the old AU-migration auto-create was removed). The Create in Xero popup shows "Supplier: <name> → Xero: <contact>" and disables the post when it is missing; the preflight badge counts it as a blocking problem. Each contact field has a read-only "check" button. Commission (rep group) and 3PL bills still post by contact name. (source: server.mjs :: computeXeroRunPlan, _xeroPlanIssues, xero-post, deposit-credit-note, /api/supply/xero/contact-check)
+- v28.350 (Ben 14-Oct-26: "you can create the contact in xero, do not make this an error"): Paid > Xero creates a missing supplier contact when you push (fresh exact-name lookup first, then PUT Contacts with the target name, e.g. "ACME Ltd - BL"; xeroContactEnsure); the plan shows it as a warning, not an error. A failed lookup (Xero down, daily limit) still blocks: nothing is created on a failed lookup. Other posts (deposit credit note, push queue, AU bill migration) still need the contact to exist. (source: server.mjs :: xeroContactEnsure, computeXeroRunPlan, xero-post, payments/pay)
 - Matching Xero bills back to suppliers by contact name treats "<name>", "<name> - <code>" (or any "<name> - <suffix>"), "<name> (<person>)" and the configured contact names as the same supplier, plus the AU alias Jinmatex (Merry) = Jinma (Merry). (source: server.mjs :: supplierByXeroContactIndex, sweepSupplierPaymentBills)
 
 ## Xero bill links and the bill cache (from v28.183)
