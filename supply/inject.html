@@ -19860,7 +19860,7 @@
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.em={error:e.message}; acDrPaint(); });
     fetch('/api/accounts/bills/create?dry=1',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:[{org:r.org,payee_key:r.payee_key,email_id:r.match.id}]})}).then(acDrJson)
       .then(function(j){ if(AC_DR!==mine)return; var c=(j.candidates||[])[0]||{reason:'This receipt has already been billed, or it no longer matches an open line'}; AC_DR.busy=false; AC_DR.c=c;
-        AC_DR.f={contact:c.contact||'',account_code:c.account_code||'',tax_type:c.tax_type||'',invoice_number:c.invoice_number||''}; acDrPaint(); })
+        AC_DR.f={contact:c.contact||'',account_code:c.account_code||'',tax_type:c.tax_type||'',invoice_number:c.invoice_number||'',note:c.note||''}; acDrPaint(); })
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.busy=false; AC_DR.c={reason:e.message}; acDrPaint(); }); }
   function acDrAcctHtml(org,code,dis){ return acComboHtml('account',org,code||'',acAcctLabel(org,code),'acdr-acct',dis); }   // v28.282: searchable
   function acDrCanPush(){ var c=AC_DR.c, f=AC_DR.f; return !!(c&&(c.ok||/No coding yet/.test(c.reason||''))&&f.contact&&f.account_code&&f.tax_type&&!AC_DR.done); }
@@ -19879,6 +19879,10 @@
     if(AC_DR.done)form='<div class="annot" style="border-color:var(--pos)"><b>Bill created in Xero</b> (Awaiting payment, receipt attached). Now reconcile the '+esc(r.account_name)+' line in Xero with <b>Match</b>. <a href="'+esc(AC_DR.done.url)+'" target="_blank" rel="noopener">Open the bill ↗</a>'+(AC_DR.done.rule?'<div class="tiny" style="margin-top:4px">'+esc(r.payee_key)+' is now on Auto bill: its next receipts are billed automatically. Delete its Xero bank rule if it has one (Rules ▸ Auto bills).</div>':'')+'</div>';
     else if(AC_DR.busy)form='<div class="count">Checking the bill…</div>';
     else { if(c&&!c.ok)form+='<div class="annot" style="border-color:var(--neg);margin-bottom:8px">'+esc(c.reason||'Cannot create this bill')+'</div>';
+      // v28.372 (Ben 15-Oct-26, Emma): a short note goes first in the Xero line description ("SS27 picnic"), pre-filled from the team member's forward
+      form+='<div style="margin-bottom:10px">'+fld('Note for Xero (goes first in the description, e.g. SS27 picnic)','<input class="acdr-in" id="acdr-note" maxlength="120" placeholder="Optional: which shoot or project this is for" value="'+esc(f.note||'')+'"'+dis+'>'
+          +'<div class="tiny mut" style="margin-top:2px">'+(c&&c.note_source==='team'&&f.note===c.team_note?'From the note '+esc(String(c.from||'').replace(/^.*<|>.*$/g,''))+' added when forwarding the receipt. ':'')
+          +'Xero description: <b id="acdr-desc">'+esc((f.note?f.note+' · ':'')+((c&&c.subject)||r.payee_key))+'</b></div>')+'</div>';
       form+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
         +fld('Xero contact (pick from Xero, or type a new name: it is created in Xero on push)',acComboHtml('contact',r.org,f.contact||'',f.contact||'','acdr-contact',dis))
         +fld('Reference','<input class="acdr-in" id="acdr-ref" value="'+esc(f.invoice_number||'')+'"'+dis+'>')
@@ -19914,14 +19918,14 @@
         :(AC_DR.pushing?'<span class="save-btn ac-blue" style="opacity:.7">Creating the bill in Xero…</span>'   // v28.316 (Ben): one click, no confirm step
           :'<span class="save-btn ac-blue" id="acdr-push"'+(can?'':' style="opacity:.45;pointer-events:none"')+'>Push bill to Xero</span>')+'<span class="save-btn light" id="acdr-ig" style="margin-left:auto">Ignore payee '+esc(r.payee_key)+'</span>')+'</div>';
     var g=function(id){ return document.getElementById(id); }; acComboWire(el); if(AC_DR.view==='pdf'&&em&&!em.error&&!AC_DR.done)acPdfRender(g('acdr-pdf'),'/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id));
-    var keep=function(){ ['contact','ref','acct','tax','loan'].forEach(function(k){ var x=g('acdr-'+k); if(x){ var key={contact:'contact',ref:'invoice_number',acct:'account_code',tax:'tax_type',loan:'loan_amount'}[k]; AC_DR.f[key]=x.dataset.cb?acComboVal(x).v:x.value.trim(); } }); var a=g('acdr-auto'); if(a&&!a.disabled)AC_DR.auto=a.checked; };
+    var keep=function(){ ['contact','ref','acct','tax','loan','note'].forEach(function(k){ var x=g('acdr-'+k); if(x){ var key={contact:'contact',ref:'invoice_number',acct:'account_code',tax:'tax_type',loan:'loan_amount',note:'note'}[k]; AC_DR.f[key]=x.dataset.cb?acComboVal(x).v:x.value.trim(); } }); var a=g('acdr-auto'); if(a&&!a.disabled)AC_DR.auto=a.checked; };
     var lo=g('acdr-loan'); if(lo)lo.onchange=function(){ keep(); acDrPaint(); };   // v28.354: refresh the GST-free amount
-    ['contact','ref','acct','tax','auto'].forEach(function(k){ var x=g('acdr-'+k); if(x){ x.oninput=x.onchange=function(){ keep(); var p=g('acdr-push'); if(p){ var ok=acDrCanPush(); p.style.opacity=ok?'':'.45'; p.style.pointerEvents=ok?'':'none'; } }; } });
+    ['contact','ref','acct','tax','auto','note'].forEach(function(k){ var x=g('acdr-'+k); if(x){ x.oninput=x.onchange=function(){ keep(); var dd=g('acdr-desc'); if(dd&&k==='note')dd.textContent=(AC_DR.f.note?AC_DR.f.note+' · ':'')+((AC_DR.c&&AC_DR.c.subject)||r.payee_key); var p=g('acdr-push'); if(p){ var ok=acDrCanPush(); p.style.opacity=ok?'':'.45'; p.style.pointerEvents=ok?'':'none'; } }; } });
     [g('acdr-x'),g('acdr-x2')].forEach(function(x){ if(x)x.onclick=acDrClose; });
     el.querySelectorAll('[data-drv]').forEach(function(x){ x.onclick=function(){ keep(); AC_DR.view=x.dataset.drv; acDrPaint(); }; });
     var pu=g('acdr-push'); if(pu)pu.onclick=function(){ keep(); if(!acDrCanPush())return; AC_DR.err=''; doGo(); };   // v28.316: Push creates the bill straight away
     var doGo=function(){ if(AC_DR.pushing)return; AC_DR.pushing=true; acDrPaint(); var mine=AC_DR, f=AC_DR.f;
-      fetch('/api/accounts/bills/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:[{org:r.org,payee_key:r.payee_key,email_id:r.match.id,override:{contact:f.contact,account_code:f.account_code,tax_type:f.tax_type,invoice_number:f.invoice_number,loan_amount:Number(String(f.loan_amount||0).replace(/,/g,''))||0}}]})}).then(acDrJson)
+      fetch('/api/accounts/bills/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:[{org:r.org,payee_key:r.payee_key,email_id:r.match.id,override:{contact:f.contact,account_code:f.account_code,tax_type:f.tax_type,invoice_number:f.invoice_number,note:f.note||'',loan_amount:Number(String(f.loan_amount||0).replace(/,/g,''))||0}}]})}).then(acDrJson)
         .then(function(j){ var c=(j.candidates||[])[0]||{}; if(c.result!=='created')throw new Error((c.result||c.reason||(j.errors||[]).join('; ')||'The bill was not created'));
           var done={invoice_id:c.invoice_id,url:'https://go.xero.com/AccountsPayable/View.aspx?invoiceID='+encodeURIComponent(c.invoice_id),rule:false};
           var rule=mine.auto&&r.treatment!=='autobill'?fetch('/api/accounts/payee-rule/coding',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({org:r.org,payee_key:r.payee_key,contact:f.contact,account_code:f.account_code,tax_type:f.tax_type})}).then(acDrJson)

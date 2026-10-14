@@ -3901,6 +3901,35 @@ async function gmailGetPaced(path, budget) {   // Gmail per-user quota: back off
   }
   throw new Error('Gmail busy (quota), try again later');
 }
+// v28.372 (Ben 15-Oct-26, Emma "SS27 picnic"): a team member's EXPLICIT note on a receipt they forwarded to accounts@ goes first in the Xero bill
+// description. Only from a dockandbay.com sender, only the text they typed above the forwarded message, and only when it reads as a note: at
+// most 2 short lines (<= 80 characters) once greetings, sign-offs, "see attached" and signatures are dropped. Anything longer is a message,
+// not a note, and is ignored (the person can still type the note in the Reconcile drawer). Returns '' when there is no explicit note.
+const ACC_TEAM_RE = /@dockandbay\.com\b/i;
+const ACC_FWD_RE = /^[\s>]*(?:-{2,}\s*Forwarded message\s*-{2,}|Begin forwarded message:|-{2,}\s*Original Message\s*-{2,}|_{5,}|From:\s.+|On .{6,120}wrote:)\s*$/im;
+const ACC_FILLER_RE = /^(?:hi|hey|hello|dear\b.*|morning|afternoon|good (?:morning|afternoon)|thanks?(?: you)?|thank you|cheers|ta|regards|kind regards|best|thx|fyi|fwd?:?|please (?:see|find) (?:attached|below)(?: receipt| invoice)?|see (?:attached|below)(?: receipt| invoice)?|attached(?: receipt| invoice)?|receipt(?: attached)?|invoice(?: attached)?|sent from my \w+.*|get outlook for \w+.*|x+|[a-z]+@dockandbay\.com|(?:pls|please|can you|could you)?\s*(?:pay|process|reconcile|code|approve|check)(?: this| it| please| asap| thanks)*|(?:to be |already |has been |been )?paid(?: by [\w ]+| on [\w ]+)?|for payment|to pay)[\s.,!:-]*$/i;   // v28.372: instructions are not notes
+function accTeamNote(from, text, html) {
+  try { if (!ACC_TEAM_RE.test(String(from || '')) || /\baccounts@dockandbay\.com\b/i.test(String(from || ''))) return '';   // the accounts@ mailbox's own replies are not team notes
+    let body = String(text || '').replace(/[\uFFFC\u200B-\u200D\uFEFF]/g, '');   // inline-image placeholders / zero-width characters
+    if (!body.trim() && html) body = String(html).replace(/<br\s*\/?>|<\/(?:p|div)>/gi, '\n').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+    const m = ACC_FWD_RE.exec(body); if (!m) return '';   // not a forward: the team member sent their own receipt, nothing typed above it
+    let top = body.slice(0, m.index).split(/\r?\n/);
+    const sig = top.findIndex(l => /^\s*(?:--|thanks?(?: you)?|thank you|cheers|ta|regards|kind regards|best(?: regards)?|thx|many thanks)[\s.,!]*$/i.test(l)); if (sig >= 0) top = top.slice(0, sig);   // sign-off or signature: the rest is the name / signature
+    const lines = top.map(l => l.replace(/^[>\s]+/, '').replace(/^(?:@[\w.-]+[\s,:]*)+/, '').replace(/\s+/g, ' ').trim()).filter(l => l && !ACC_FILLER_RE.test(l));   // "@Ben" mentions dropped
+    if (!lines.length || lines.length > 2) return '';
+    const note = lines.join(' ').replace(/^(?:note|desc(?:ription)?|for|re)\s*[:\-]\s*/i, '').trim();
+    return note.length >= 2 && note.length <= 80 ? note : '';
+  } catch (_) { return ''; } }
+// On demand for an email parsed before v28.372 (team_note NULL): one Gmail read, stored ('' = none). Never throws.
+async function accTeamNoteFill(e) {
+  if (!e || e.team_note != null) return e ? (e.team_note || '') : '';
+  if (!ACC_TEAM_RE.test(String(e.from_addr || '')) || /\baccounts@dockandbay\.com\b/i.test(String(e.from_addr || ''))) { e.team_note = ''; pool.query(`UPDATE planner.accounts_gmail_msgs SET team_note = '' WHERE id = $1 AND team_note IS NULL`, [e.id]).catch(() => {}); return ''; }
+  try { const m = await gmailGetPaced('messages/' + e.id + '?format=full'); let text = '', html = '';
+    const b64 = s => Buffer.from(String(s || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const walk = p => { if (!p) return; if (!p.filename && p.mimeType === 'text/plain' && p.body && p.body.data) text += b64(p.body.data).toString('utf8'); else if (!p.filename && p.mimeType === 'text/html' && p.body && p.body.data) html += b64(p.body.data).toString('utf8'); (p.parts || []).forEach(walk); };
+    walk(m && m.payload); e.team_note = accTeamNote(e.from_addr, text, html);
+    await pool.query(`UPDATE planner.accounts_gmail_msgs SET team_note = $2 WHERE id = $1`, [e.id, e.team_note]).catch(() => {});
+    return e.team_note; } catch (_) { return ''; } }   // Gmail not connected / quota: no note this time, checked again next run
 // Parse new accounts@ mail into planner.accounts_gmail_msgs (amounts only, no bodies). Returns { parsed, pending } (pending > 0 = budget ran out).
 async function accGmailCache(days, budget) {
   const ids = []; let tok = '';
@@ -3922,9 +3951,9 @@ async function accGmailCache(days, budget) {
       try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v));
         accGstLabelled(t).forEach(k => gstLab.add(k)); }   // v28.354: "Invoice total includes GST of: $6.96" -> 6.96 is the GST
       catch (e) { if (e && e.code === 'budget') throw e; } }
-    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm]))]; };   // GST pairs first: the amount's own currency mark wins in the maps
+    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm])), accTeamNote(H('from'), text, html)]; };   // GST pairs first: the amount's own currency mark wins in the maps   // v28.372: + team note
   const flush = async buf => { if (!buf.length) return;
-    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 8 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
+    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts, team_note) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 9 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
   let parsed = 0, i = 0, buf = [];
   try {
     for (; i < todo.length; i += 4) { if (budget && budget.out()) break;
@@ -4697,7 +4726,7 @@ async function accBillCandidates(rules, only) {
   const out = []; if (!rules.length) return out;
   const minFrom = rules.reduce((m, r) => (r.bill_from || '2000-01-01') < m ? (r.bill_from || '2000-01-01') : m, '9999-12-31');
   const onlyIds = only ? only.map(o => o.email_id) : null, _ambC = await accAmbig();   // v28.319
-  const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
+  const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts, team_note FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
   const used = new Set((await pool.query(`SELECT org || '|' || email_id k FROM planner.accounts_bill_log WHERE status IN ('created','creating')`)).rows.map(r => r.k));
   const lines = (await pool.query(`SELECT org, account_name, to_char(line_date,'YYYY-MM-DD') d, amount::float8 amount, reference, description FROM planner.accounts_stmt_lines WHERE NOT reconciled AND amount < 0`)).rows
     .map(l => Object.assign(l, { key: accPayeeKeyX(l.org, l.reference, l.description, _ambC), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
@@ -4722,6 +4751,9 @@ async function accBillCandidates(rules, only) {
       const ov = (only && (only.find(o => o.email_id === e.id) || {}).override) || null;   // v28.280: the person's edits in the Reconcile drawer
       const c = { org: r.org, payee_key: r.payee_key, email_id: e.id, email_date: e.d, subject: e.subject, from: e.from_addr, currency: ACC_ORG_CCY[r.org], ...code, contact_id: r.contact_id || null, ok: false };
       if (ov) { ['contact', 'account_code', 'tax_type'].forEach(f => { const v = String(ov[f] == null ? '' : ov[f]).trim().slice(0, 120); if (v) c[f] = v; }); if (c.contact !== (r.contact || code.contact)) c.contact_id = null; }
+      // v28.372: the note first in the Xero description: what the person typed in the drawer (even cleared), else the team member's explicit note
+      c.team_note = await accTeamNoteFill(e);
+      if (ov && ov.note != null) { c.note = String(ov.note).replace(/\s+/g, ' ').trim().slice(0, 120); c.note_source = c.note ? 'person' : ''; } else { c.note = c.team_note || ''; c.note_source = c.note ? 'team' : ''; }
       const line = lines.filter(l => l.org === r.org && !usedLine.has(l.id) && accSameP(l.key, r.payee_key) && amts.includes(Math.abs(l.amount).toFixed(2)) && days(l.d, e.d) >= -60 && days(l.d, e.d) <= 25)   // v28.354: late receipts (payee already matched by accSameP)
         .sort((a, b) => Math.abs(days(a.d, e.d)) - Math.abs(days(b.d, e.d)))[0];
       // the charge can follow the email by up to 25 days (Optus: bill emailed ~6th, debited ~21st): a receipt already reconciled in Xero needs nothing
@@ -4757,8 +4789,9 @@ async function accBillCandidates(rules, only) {
   return out;
 }
 async function accCreateBill(c, by, mode) {
-  const lg = (await pool.query(`INSERT INTO planner.accounts_bill_log (org, payee_key, email_id, invoice_number, contact, bill_date, amount, currency, account_code, tax_type, stmt_line, mode, status, run_by)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'creating',$13) RETURNING id`, [c.org, c.payee_key, c.email_id, c.invoice_number, c.contact, c.date, c.amount, c.currency, c.account_code, c.tax_type, c.stmt_line || null, mode, by || 'job'])).rows[0].id;
+  const lg = (await pool.query(`INSERT INTO planner.accounts_bill_log (org, payee_key, email_id, invoice_number, contact, bill_date, amount, currency, account_code, tax_type, stmt_line, mode, status, run_by, description)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'creating',$13,$14) RETURNING id`, [c.org, c.payee_key, c.email_id, c.invoice_number, c.contact, c.date, c.amount, c.currency, c.account_code, c.tax_type, c.stmt_line || null, mode, by || 'job',
+      ((c.note ? c.note + ' · ' : '') + (c.subject || c.payee_key)).slice(0, 500)])).rows[0].id;   // v28.372: description (note + receipt)
   try {
     let cid = c.contact_id;
     if (!cid) { let k = await xeroContactLookup(c.org, c.contact, { fresh: true });
@@ -4768,7 +4801,7 @@ async function accCreateBill(c, by, mode) {
         const n0 = r0 && r0.Contacts && r0.Contacts[0]; if (n0 && n0.ContactID) { xeroContactBust(); k = { ok: true, ContactID: n0.ContactID, Name: n0.Name, created: true }; } }
       if (!k.ok) throw new Error(k.error.replace(/, or change the supplier's.*$/, '')); cid = k.ContactID;
       await pool.query(`UPDATE planner.accounts_payee_rules SET contact_id=$3, contact=coalesce(contact,$4) WHERE org=$1 AND payee_key=$2`, [c.org, c.payee_key, cid, c.contact]); }
-    const _desc = (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', sp = c.gst_split;
+    const _desc = (c.note ? c.note + ' · ' : '') + (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', sp = c.gst_split;   // v28.372: note first
     // v28.315: part GST-free receipts go in as two tax-exclusive lines on the same account (GST component, GST-free component)
     const ll = c.loan_line, la = ll ? ll.amount : 0, loanItem = ll ? [{ Description: _desc + ' (personal: ' + ll.name + ')', Quantity: 1, UnitAmount: la, AccountCode: ll.code, TaxType: 'BASEXCLUDED' }] : [];   // v28.354
     const body = sp ? { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Exclusive',
