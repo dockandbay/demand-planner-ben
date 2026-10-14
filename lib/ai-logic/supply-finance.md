@@ -58,7 +58,7 @@ fingerprints:
   supply/inject.html::acCfReload: 38efe35ae70b
   supply/inject.html::acInLinesHtml: 450c10abe212
   supply/inject.html::acDrOpen: d2b68af1bd9f
-  supply/inject.html::acDrPaint: be22a7265d7f
+  supply/inject.html::acDrPaint: c1b0a1f3741c
   supply/inject.html::acRenderStmt: 43008dd01ade
   supply/inject.html::acRenderAgeing: 12f7b1f017e1
   supply/inject.html::acComboWire: 821987bad274
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.365
+verified_version: v28.367
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -517,3 +517,4 @@ verified_version: v28.365
 
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
+- v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
