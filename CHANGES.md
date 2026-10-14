@@ -1,3 +1,6 @@
+## v28.368 (14-Oct-26) DTC mismatch 2.0: scheduled refresh endpoint
+- POST /api/cron/dtc2-sync (header x-webhook-secret = N8N_WEBHOOK_SECRET) runs the same live Fulfil read as "Refresh from Fulfil". The v28.364 sync route needs a signed-in user, so it could not be scheduled. Optional n8n daily. No migration, no env change.
+
 ## v28.367 (14-Oct-26) DTC mismatch 2.0: dropship without a PO
 - Every open dropship / backorder line with no live Fulfil PO is labelled with the reason: not sent to purchasing, requested but no PO yet, or PO cancelled (a cancelled PO replaced by another PO on the same sales order is not flagged). New "Without a PO" count, a "Dropship without a PO only" filter and a badge per order (lines, units).
 - Live 14-Oct: 10 orders / 34 lines (Gartner GWIN28835-1 8,925 units, British Shop 3,900, Goldstar 2,240, Tordoffs, Berenberg not sent to purchasing; A Play, XKI, Trendform, John Lewis, Good News Cruise requested with no PO).

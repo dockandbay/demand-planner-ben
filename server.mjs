@@ -18639,6 +18639,11 @@ async function dtc2Sync(user) {
   await pool.query(`INSERT INTO planner.dtc2_snapshot (key,data,synced_at,synced_by) VALUES ('fulfil',$1,now(),$2) ON CONFLICT (key) DO UPDATE SET data=excluded.data, synced_at=now(), synced_by=excluded.synced_by`, [JSON.stringify(data), user || null]);
   return { sales: data.sales.length, purchases: data.purchases.length, lines: lines.length };
 }
+// v28.368: scheduled DTC 2.0 refresh. PROD SCHEDULE (optional): n8n daily, POST /api/cron/dtc2-sync, header x-webhook-secret = N8N_WEBHOOK_SECRET.
+app.post('/api/cron/dtc2-sync', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(Object.assign({ ok: true }, await dtc2Sync('cron'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/dtc2/sync', async (req, res) => {
   try { res.json(Object.assign({ ok: true }, await dtc2Sync(authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
