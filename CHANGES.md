@@ -1,3 +1,8 @@
+## v28.356 (14-Oct-26) Reconcile: Learn from Xero button; UP FX import link
+- Reconcile shows when payee coding was last learned from Xero, with a "Learn from Xero" button. Live has never run the learn job (accounts_spend_history empty), so contact / account / tax suggestions are blank there (Mini Models on live vs sandbox). **Diviyaj: schedule n8n weekly POST /api/cron/accounts-learn (Mon 05:00, x-webhook-secret = N8N_WEBHOOK_SECRET; loop until done:true), and run it once now.**
+- Bank statement: direct link to the Xero UK import page for Universal Partners FX USD.
+- UI only (uses the existing learn endpoints). No migration, no env change.
+
 ## v28.355 (14-Oct-26) ACCOUNTS > Bank statement: Download UP FX statement button is blue
 - Easier to see (was a light button). UI only.
 
