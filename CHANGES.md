@@ -1,3 +1,7 @@
+## v28.358 (14-Oct-26) Reconcile: a payee contact not in Xero is created on push
+- The review drawer contact box accepted only a contact picked from Xero ("never created"), so a new payee (FASTCOURIER 10.89) could not be billed. Now a typed name is accepted ("Not in Xero: this name will be created"), and on push HORIZON creates the contact (fresh exact-name lookup first) and then the bill. A failed Xero lookup still stops it.
+- No migration, no env change.
+
 ## v28.357 (14-Oct-26) Reconcile: cleaner invoice number from the PDF name
 - An INV-style number wins ("Match-Invoice INV-0248.pdf" -> INV-0248, was the whole name), then a run of 5+ digits (00371863), then an invoice / receipt name with a number (LBINVOICE 10-13). A generic name with no number (Receipt.pdf) falls back to payee + date.
 

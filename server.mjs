@@ -4717,7 +4717,12 @@ async function accCreateBill(c, by, mode) {
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'creating',$13) RETURNING id`, [c.org, c.payee_key, c.email_id, c.invoice_number, c.contact, c.date, c.amount, c.currency, c.account_code, c.tax_type, c.stmt_line || null, mode, by || 'job'])).rows[0].id;
   try {
     let cid = c.contact_id;
-    if (!cid) { const k = await xeroContactLookup(c.org, c.contact); if (!k.ok) throw new Error(k.error.replace(/, or change the supplier's.*$/, '')); cid = k.ContactID;
+    if (!cid) { let k = await xeroContactLookup(c.org, c.contact, { fresh: true });
+      // v28.358 (Ben 14-Oct-26, FASTCOURIER 10.89): a payee contact that is not in Xero yet is created first (exact name typed in review), then billed.
+      // Never on a failed lookup (Xero down / limit): that still stops the bill.
+      if (!k.ok && !k.lookup_failed && String(c.contact || '').trim()) { const r0 = await xeroFetch(c.org, '/api.xro/2.0/Contacts', { method: 'PUT', body: { Contacts: [{ Name: String(c.contact).trim() }] } });
+        const n0 = r0 && r0.Contacts && r0.Contacts[0]; if (n0 && n0.ContactID) { xeroContactBust(); k = { ok: true, ContactID: n0.ContactID, Name: n0.Name, created: true }; } }
+      if (!k.ok) throw new Error(k.error.replace(/, or change the supplier's.*$/, '')); cid = k.ContactID;
       await pool.query(`UPDATE planner.accounts_payee_rules SET contact_id=$3, contact=coalesce(contact,$4) WHERE org=$1 AND payee_key=$2`, [c.org, c.payee_key, cid, c.contact]); }
     const _desc = (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', sp = c.gst_split;
     // v28.315: part GST-free receipts go in as two tax-exclusive lines on the same account (GST component, GST-free component)

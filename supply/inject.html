@@ -19733,9 +19733,11 @@
     return (blank||!cur?'<option value=""'+(cur?'':' selected')+'>'+esc(blank||'choose…')+'</option>':'')+rows.map(function(t){ return '<option value="'+esc(t[0])+'"'+(t[0]===cur?' selected':'')+'>'+esc(t[1])+'</option>'; }).join(''); }
   function acAcctLabel(org,code){ var X=AC_XACC[org], a=X&&X.rows&&X.rows.filter(function(x){ return x.code===code; })[0]; return code?(a?code+' · '+a.name:code):''; }
   function acComboHtml(kind,org,val,label,id,dis,ph){ return '<div class="ac-cb"><input class="ac-hl" id="'+id+'" data-cb="'+kind+'" data-org="'+org+'" data-val="'+esc(val||'')+'" data-picked="1" value="'+esc(label||'')+'" placeholder="'+esc(ph||(kind==='contact'?'Search Xero contacts':'Search account code or name'))+'" autocomplete="off"'+(dis||'')+'><div class="ac-cb-list" hidden></div></div>'; }
-  function acComboVal(inp){ if(!inp)return {ok:true,v:''}; if(inp.dataset.picked==='1')return {ok:true,v:inp.dataset.cb==='account'?(inp.dataset.val||''):inp.value.trim()}; return {ok:!inp.value.trim(),v:''}; }
+  function acComboVal(inp){ if(!inp)return {ok:true,v:''}; if(inp.dataset.picked==='1')return {ok:true,v:inp.dataset.cb==='account'?(inp.dataset.val||''):inp.value.trim()};
+    if(inp.dataset.cb==='contact'&&inp.value.trim())return {ok:true,v:inp.value.trim(),created:true};   // v28.358 (Ben): a typed contact that is not in Xero is created on push
+    return {ok:!inp.value.trim(),v:''}; }
   function acComboWire(root){ root.querySelectorAll('input[data-cb]').forEach(function(inp){ if(inp._cb)return; inp._cb=1; var list=inp.nextElementSibling, kind=inp.dataset.cb, org=inp.dataset.org, t=null, items=[], hi=-1;
-    var show=function(rows,msg){ items=rows; hi=-1; list.innerHTML=msg?'<div class="mut" style="cursor:default">'+esc(msg)+'</div>':(rows.map(function(x,i){ return '<div data-i="'+i+'">'+esc(x.label)+'</div>'; }).join('')||'<div class="mut" style="cursor:default">No match in Xero</div>'); list.hidden=false;
+    var show=function(rows,msg){ items=rows; hi=-1; list.innerHTML=msg?'<div class="mut" style="cursor:default">'+esc(msg)+'</div>':(rows.map(function(x,i){ return '<div data-i="'+i+'">'+esc(x.label)+'</div>'; }).join('')||'<div class="mut" style="cursor:default">'+(kind==='contact'?'Not in Xero: this name will be created as a new contact':'No match in Xero')+'</div>'); list.hidden=false;
       list.querySelectorAll('[data-i]').forEach(function(el){ el.onmousedown=function(e){ e.preventDefault(); pick(items[+el.dataset.i]); }; }); };
     var pick=function(x){ if(!x)return; inp.value=x.label; inp.dataset.val=x.value; inp.dataset.picked='1'; list.hidden=true; inp.dispatchEvent(new Event('change',{bubbles:true})); };
     var search=function(q){
@@ -19788,7 +19790,7 @@
     else if(AC_DR.busy)form='<div class="count">Checking the bill…</div>';
     else { if(c&&!c.ok)form+='<div class="annot" style="border-color:var(--neg);margin-bottom:8px">'+esc(c.reason||'Cannot create this bill')+'</div>';
       form+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-        +fld('Xero contact (pick from Xero, never created)',acComboHtml('contact',r.org,f.contact||'',f.contact||'','acdr-contact',dis))
+        +fld('Xero contact (pick from Xero, or type a new name: it is created in Xero on push)',acComboHtml('contact',r.org,f.contact||'',f.contact||'','acdr-contact',dis))
         +fld('Reference','<input class="acdr-in" id="acdr-ref" value="'+esc(f.invoice_number||'')+'"'+dis+'>')
         +fld('Account',acDrAcctHtml(r.org,f.account_code,dis))
         +fld('Tax (from Xero)','<select class="acdr-in" id="acdr-tax"'+dis+'>'+acTaxOpts(r.org,f.tax_type||'')+'</select>'+(c&&c.coding_source==='bills'?'<div class="tiny mut" style="margin-top:2px">suggested from previous Xero bills to this contact</div>':c&&c.coding_source==='spend'?'<div class="tiny mut" style="margin-top:2px">suggested from reconciled Spend Money</div>':''))   // v28.316
