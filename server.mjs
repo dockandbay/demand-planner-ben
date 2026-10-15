@@ -8855,6 +8855,38 @@ async function _xpfPace(org) {
     if (w.length < XPF_PER_MIN) { w.push(now); return; }
     await new Promise(r => setTimeout(r, w[0] + 60000 - now + 50)); }
 }
+// v28.383 (Ben 15-Oct-26: "these are not linked bills ... RED BUTTON on xero payments ... make it clearer what the issues are to follow up",
+// e.g. PO-57DILLARDS-XRJULY no linked bill): DATABASE-ONLY follow-up check for every Payments Report run, sent to Xero or not. Per PO line
+// (completion / balance; deposits draw down by credit note): no Xero bill linked, or (once the run is in Xero) the PO bill payment was not
+// posted or failed. Master PO lines report their client PO shares still waiting. No Xero calls.
+app.post('/api/supply/payments/xero-followup', async (req, res) => {
+  try {
+    const runs = (Array.isArray(req.body && req.body.runs) ? req.body.runs : []).slice(0, 200), out = {};
+    const pos = [...new Set(runs.flatMap(r => (r.lines || []).filter(l => /completion|balance|final/i.test(String(l.type || ''))).map(l => String(l.reference || '').trim())).filter(Boolean))];
+    if (!pos.length) return res.json({ ok: true, results: {} });
+    const links = {}; (await pool.query(`SELECT l.po, l.external_id, l.external_ref, upper(coalesce(b.status,'')) bill_status, coalesce(b.amount_due,0)::float8 due, b.currency_code ccy FROM planner.po_links l LEFT JOIN planner.xero_bills b ON b.invoice_id = l.external_id
+      WHERE l.system='xero' AND l.status='linked' AND l.po = ANY($1::text[])`, [pos])).rows.forEach(r => { links[r.po] = r; });   // the bill's state from the hourly Xero copy
+    const known = new Set((await pool.query(`SELECT po FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [pos])).rows.map(r => r.po));
+    const groups = new Set((await pool.query(`SELECT DISTINCT po FROM planner.po_fulfil_group WHERE po = ANY($1::text[])`, [pos]).catch(() => ({ rows: [] }))).rows.map(r => r.po));
+    const keys = runs.map(r => String(r.run_key || ((r.dt || '') + '|' + (r.supplier || ''))));
+    const pays = {}; (await pool.query(`SELECT run_key, invoice_id, status, error FROM planner.xero_run_payments WHERE run_key LIKE ANY($1::text[])`, [keys.map(k => k.replace(/[%_]/g, '\\$&') + '%')])).rows.forEach(r => { (pays[r.run_key.split('|').slice(0, 2).join('|')] = pays[r.run_key.split('|').slice(0, 2).join('|')] || []).push(r); });
+    const shares = {}; if (groups.size) (await pool.query(`SELECT po, count(*) FILTER (WHERE status IN ('pending','error'))::int waiting FROM planner.po_group_shares WHERE po = ANY($1::text[]) GROUP BY po`, [[...groups]]).catch(() => ({ rows: [] }))).rows.forEach(r => { shares[r.po] = r.waiting; });
+    runs.forEach((r, i) => { const k = String(r.k || keys[i]), rk = keys[i].split('|').slice(0, 2).join('|'), done = !!r.xero_done, items = [];
+      if (done && String(r.dt || '') < '2026-09-21') { out[k] = { items }; return; }   // sent before HORIZON posted to Xero (Payments Report "Xero ✓" legacy): not checked
+      (r.lines || []).filter(l => /completion|balance|final/i.test(String(l.type || ''))).forEach(l => { const po = String(l.reference || '').trim(); if (!po) return;
+        if (!known.has(po)) { items.push({ po, issue: 'not a HORIZON PO', fix: 'Check the PO number on this payment', link: null }); return; }
+        if (groups.has(po)) { if (shares[po]) items.push({ po, issue: shares[po] + ' client PO share' + (shares[po] === 1 ? '' : 's') + ' waiting for a Xero bill', fix: 'Applied automatically when the bills arrive', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/payments' }); return; }
+        const lk = links[po];
+        if (!lk) { items.push({ po, issue: 'no Xero bill linked' + (done ? ': PO bill payment not made' : ': PO bill payment will be skipped'), fix: 'Link bill', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/master-data' }); return; }
+        if (!done) return;
+        if (/VOIDED|DELETED/.test(lk.bill_status)) { items.push({ po, issue: 'linked Xero bill ' + (lk.external_ref || '') + ' was voided', fix: 'Choose the right bill', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/master-data' }); return; }
+        const p = (pays[rk] || []).filter(x => x.invoice_id === lk.external_id), failed = p.find(x => x.status === 'failed' || (x.error && x.status !== 'created'));
+        if (failed) { items.push({ po, issue: 'PO bill payment failed in Xero' + (failed.error ? ': ' + String(failed.error).slice(0, 120) : ''), fix: 'Open Paid > Xero and retry', link: null }); return; }
+        if (lk.bill_status && lk.due > 0.005 && !p.some(x => x.status === 'created')) items.push({ po, issue: 'PO bill ' + (lk.external_ref || '') + ' still owes ' + (lk.ccy ? lk.ccy + ' ' : '') + lk.due.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' in Xero', fix: 'Open Paid > Xero and retry, or check the bill', link: null }); });
+      out[k] = { items }; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, results: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/payments/xero-preflight', async (req, res) => {
   const runs = (Array.isArray(req.body && req.body.runs) ? req.body.runs : []).slice(0, 10);
   const job = async () => {

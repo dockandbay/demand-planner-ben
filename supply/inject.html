@@ -12036,7 +12036,7 @@
         rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopy(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
         rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
         rep.querySelectorAll('.pay-xero-preview').forEach(function(btn){ btn.onclick=function(){ _xbRow=f[+btn.dataset.i]; xbPreview(_xbRow,btn); }; });
-        try{ payXpfRun(f); }catch(_e){} }   // v28.173 (Ben): preflight badges fill in after render, never block it
+        try{ payXpfRun(f); }catch(_e){} try{ payXfuRun(f); }catch(_e){} }   // v28.173 (Ben): preflight badges fill in after render, never block it; v28.383 follow-ups
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); if(window._payTod)clearTimeout(window._payTod); window._payTod=setTimeout(draw,250); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
@@ -12288,7 +12288,22 @@
           st('pay','done',det); }); })
       .then(function(){ if(PX!==P)return; P.busy=false; pxPaint(); })
       .catch(function(e){ if(PX!==P)return; P.busy=false; if(e.step&&!e.shown)st(e.step,'err',esc(e.message)); else if(!e.step)st('hz','err',esc(e.message||String(e))); P.err=''; pxPaint(); }); }
-  function payXeroCell(r,i){   // v28.347 (Ben 14-Oct-26): one green "Paid > Xero" button (opens the 4-step popup); the XERO and "bank ↗" buttons are gone
+  // v28.383 (Ben 15-Oct-26): follow-up check for every run (database only): a PO line with no Xero bill linked, or a PO bill payment not made /
+  // failed, turns the Paid > Xero button RED and lists each issue under it with what to do (Link bill opens the PO's Linked records).
+  var PAY_XFU={};
+  function payXeroCell(r,i){ return '<span class="pay-xfu-wrap" data-k="'+esc(payRunKey(r))+'">'+payXeroCell0(r,i)+'<div class="pay-xfu" data-k="'+esc(payRunKey(r))+'">'+payXfuInner(PAY_XFU[payRunKey(r)])+'</div></span>'; }
+  function payXfuInner(x){ if(!x||!(x.items||[]).length)return '';
+    return '<div style="margin-top:4px;text-align:left;max-width:340px;font-size:11px;line-height:1.35;color:var(--neg)"><b>⚠ '+x.items.length+' to follow up</b>'
+      +x.items.map(function(it){ return '<div style="margin-top:2px"><b>'+esc(it.po)+'</b>: '+esc(it.issue)+(it.link?' <a href="'+esc(it.link)+'" style="color:var(--blue);font-weight:700;white-space:nowrap">'+esc(it.fix)+' &rarr;</a>':(it.fix?' <span class="mut">('+esc(it.fix)+')</span>':''))+'</div>'; }).join('')+'</div>'; }
+  function payXfuPaint(){ var rep=document.getElementById('pay-rep'); if(!rep)return;
+    rep.querySelectorAll('.pay-xfu-wrap').forEach(function(w){ var x=PAY_XFU[w.getAttribute('data-k')], bad=!!(x&&(x.items||[]).length), f=w.querySelector('.pay-xfu'); if(f)f.innerHTML=payXfuInner(x);
+      w.querySelectorAll('.px-open').forEach(function(b){ if(bad){ b.style.background='var(--neg)'; b.style.borderColor='var(--neg)'; b.style.color='#fff'; b.style.padding='3px 9px'; b.style.borderRadius='6px'; b.title='Follow up needed: '+x.items.map(function(it){ return it.po+': '+it.issue; }).join('; '); } }); }); }
+  function payXfuRun(rows){ var runs=(rows||[]).filter(function(r){ return (r.lines||[]).some(function(l){ return /completion|balance|final/i.test(String(l.type||'')); }); }).slice(0,200)
+      .map(function(r){ return {k:payRunKey(r), run_key:r.run_key, dt:r.dt, supplier:r.supplier, xero_done:!!r.xero_done, lines:(r.lines||[]).map(function(l){ return {reference:l.reference, type:l.type}; })}; });
+    if(!runs.length)return;
+    fetch('/api/supply/payments/xero-followup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({runs:runs})}).then(function(r){ return r.json(); })
+      .then(function(j){ if(!j||j.error)return; Object.keys(j.results||{}).forEach(function(k){ PAY_XFU[k]=j.results[k]; }); payXfuPaint(); }).catch(function(){}); }
+  function payXeroCell0(r,i){   // v28.347 (Ben 14-Oct-26): one green "Paid > Xero" button (opens the 4-step popup); the XERO and "bank ↗" buttons are gone
     var dk=' data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'" data-reg="'+esc(r.region||'UK')+'"';
     var paid=(r.other_amount!=null)&&String(r.bank_ccy||'').trim();
     if(r.xero_done){ var bills=r.xero_bills||[];
