@@ -5793,6 +5793,17 @@ app.post('/api/supply/fulfil/import-pos', async (req, res) => {
     res.json({ ...pos, internal_shipments: is }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
 });
+// v28.377 (Ben 15-Oct-26: "can i fully update the fulfil po's manually from a button click? we just changed po's"): the same full Fulfil PO
+// refresh as the 3-hourly n8n job (PO mirror, ERP qty, client PO groups, internal shipments), from PURCHASE ORDERS > Import/Export. Signed-in,
+// supply edit or admin. Reads Fulfil only; writes HORIZON's own copy. A run already in progress is joined, not repeated.
+app.post('/api/supply/fulfil/refresh-pos', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  const t0 = Date.now();
+  try { const pos = await fulfilImportPOs(); let is = null; try { is = await fulfilImportInternalShipments(); } catch (e) { is = { ok: false, error: String(e.message || e) }; }
+    try { invalidateSupplyCaches('po'); } catch (_) {} try { _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null }; } catch (_) {}   // ERP Compare re-reads too
+    res.json({ ...pos, internal_shipments: is, ms: Date.now() - t0, by: authUser(req) || null }); }
+  catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
+});
 // Drift: every Horizon PO should be in Fulfil. Compares planner.purchase_orders to the mirror — missing + mismatches.
 app.get('/api/supply/fulfil/drift', async (req, res) => {
   try {

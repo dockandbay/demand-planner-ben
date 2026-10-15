@@ -1,3 +1,7 @@
+## v28.377 (15-Oct-26) Refresh from Fulfil button
+- PURCHASE ORDERS > Import/Export > "↻ Refresh from Fulfil": the full Fulfil PO refresh on demand (same as the 3-hourly job: PO mirror, ERP qty lines, client PO groups, internal shipments), then the grid reloads. Signed-in, supply edit or admin; reads Fulfil only. New signed-in route POST /api/supply/fulfil/refresh-pos (not a cron route; normal login applies). Sandbox test: 204 POs, 108 internal shipments (107 s on the slow sandbox DB; live measured 7.5 s for the same job).
+- No migration, no env change.
+
 ## v28.376 (15-Oct-26) Master PO payments shared across client PO bills
 - Ben's design: for a master PO (client PO group, e.g. Dillard's) the starting deposit, completion and balance are shared across the Fulfil client PO bills IN PROPORTION TO THEIR FULFIL VALUE. Starting deposit = one credit note DEPOSIT-<po> allocated by share; completion / balance in a payment run = one bank payment as now, then one payment per client PO bill (602.1 in the paying org, loan 901 in the other org). Bills are found by the Fulfil PO number in the Xero bill reference (Fulfil posts each PO to its company's Xero).
 - A share whose bill is not in Xero yet waits ("Waiting for bill") and is applied after the hourly Xero bill sync on production, or with "Apply waiting shares now" on PO > PAYMENTS > Xero bills > Payment shares. Never more than a bill's live amount due; two bills naming one client PO blocks; each share applied once.

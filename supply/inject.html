@@ -3236,6 +3236,7 @@
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
           +'<button class="save-btn" id="po-erp-compare" style="'+lb+'" title="ERP compare (Fulfil) — open Fulfil purchase orders that are missing from the planner">⇄ ERP compare</button>'   // v28.144: replaces ⬆ Import from Cin7 (100% on Fulfil)
           +'<button class="save-btn" id="po-import-fulfil" style="'+lb+'" title="import a purchase order from Fulfil — by PO number, or every PO linked to a sales order — brings in supplier, branch, SKUs, quantities &amp; prices">⬆ Import Fulfil PO</button>'
+          +'<button class="save-btn" id="po-fulfil-refresh" style="'+lb+'" title="re-read every PO from Fulfil now (the same refresh that runs every 3 hours): ERP quantities, states, client PO groups and internal shipments. Reads Fulfil only.">↻ Refresh from Fulfil</button>'   /* v28.377 */
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
@@ -3515,6 +3516,15 @@
     document.getElementById('po-upload').onclick=openPoUpload;
     var _erpBtn=document.getElementById('po-erp-compare'); if(_erpBtn)_erpBtn.onclick=function(){ openErpDrawer(); };   // v28.144
     var _fimpBtn=document.getElementById('po-import-fulfil'); if(_fimpBtn)_fimpBtn.onclick=openPoImportFulfil;
+    // v28.377 (Ben 15-Oct-26): full Fulfil PO refresh on demand (same as the 3-hourly job), then the grid reloads with the new figures
+    var _frBtn=document.getElementById('po-fulfil-refresh'); if(_frBtn)_frBtn.onclick=function(){ var b=this, orig=b.textContent; if(b.disabled)return; b.disabled=true; b.textContent='↻ Refreshing from Fulfil…';
+      fetch('/api/supply/fulfil/refresh-pos',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){
+        if(!j||j.error)throw new Error((j&&j.error)||'refresh failed');
+        var e=j.erp_qty||{}, is=j.internal_shipments||{};
+        b.textContent='✓ '+(j.imported||0)+' POs refreshed'; setTimeout(function(){ b.textContent=orig; b.disabled=false; },6000);
+        try{ if(typeof toast==='function')toast('Fulfil refresh: '+(j.imported||0)+' POs, '+(e.lines_updated||0)+' ERP qty lines updated'+(is.internal_shipments!=null?', '+is.internal_shipments+' internal shipments':'')+' ('+Math.round((j.ms||0)/100)/10+' s)'); }catch(_){}
+        invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');
+      }).catch(function(err){ b.textContent=orig; b.disabled=false; alert('Fulfil refresh failed: '+(err&&err.message||err)); }); };
     var _mrgBtn=document.getElementById('po-merge'); if(_mrgBtn)_mrgBtn.onclick=openPoMerge;
     var _mstBtn=document.getElementById('po-master'); if(_mstBtn)_mstBtn.onclick=openMasterCreate;
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
