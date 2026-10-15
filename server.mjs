@@ -4783,7 +4783,13 @@ async function accBillCandidates(rules, only) {
       const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
       if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
       const hasPdf = (e.pdf_amounts || []).length > 0, ovTax = ov && String(ov.tax_type || '').trim();
-      const gc = accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
+      // v28.386 (Ben 15-Oct-26, ICON Management 00371863: "it had a message that it would create 2 lines but those 2 lines were not created"):
+      // a receipt that shows part GST / part GST-free is ALWAYS split, whatever tax type is in the drawer or on the payee rule (a GST-free rule
+      // or box used to skip the check at push time, so the bill went in as one GST-free line while the preview showed two). The tax type set
+      // by the person / rule still applies to receipts with no split.
+      const gcSplit = accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0]));
+      const gc = gcSplit.kind === 'split' ? gcSplit : accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
+      if (gc.kind === 'split' && ACC_GST[r.org]) c.tax_type = ACC_GST[r.org].std;   // the taxable part goes in at GST; the free part at the free type
       if (!c.tax_type && ACC_GST[r.org] && ['full', 'split'].includes(gc.kind)) c.tax_type = ACC_GST[r.org].std;   // v28.353: tax type from the invoice when not coded yet
       if (gc.kind === 'none' && !ovTax) c.tax_type = gc.free_type;   // v28.353: no GST on the invoice = one GST-free line
       if (!c.contact || !c.account_code || !c.tax_type) { c.reason = 'No coding yet: set the Xero contact, account and tax type for ' + r.payee_key; out.push(c); continue; }
