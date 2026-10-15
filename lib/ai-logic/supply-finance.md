@@ -118,7 +118,7 @@ fingerprints:
   server.mjs::fulfilExistingCandidates: 4a108d8a257b
   server.mjs::FULFIL_CLIENT_PO_SQL: 1dfcdf1c9fe5
   server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
-  server.mjs::/api/supply/po/:po/links: 0bdb5f8c0dfd
+  server.mjs::/api/supply/po/:po/links: 57b777e68775
   server.mjs::sovAnalyse: 9b73b85176ff
   server.mjs::sovLineBlock: bf5806a2f16a
   server.mjs::sovModeBlock: daa8ceb2c541
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.376
+verified_version: v28.379
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
