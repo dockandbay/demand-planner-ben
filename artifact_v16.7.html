@@ -3263,7 +3263,7 @@ try{ window.buildXlsx=buildXlsx; }catch(_e){}   // BUGFIX (same class as skuMatc
 var FBA_SKU_ALIAS_EUUK={'BAGF-CAB-MD-NAVY':'BAGF-CAB-MD-NAVY.'};
 function downloadFbaTransfer(dest){
   var awd=(dest==='awd');   // US AWD upload = a DIFFERENT Amazon template (no lot code; adds Palletized?/Boxes Per Pallet/Number of pallets)
-  var us=(CUR==='US'||CUR==='CA'), euuk=(CUR==='UK'||CUR==='EU');
+  var us=(CUR==='US'||CUR==='CA'), euuk=(CUR==='UK'||CUR==='EU'), au=(CUR==='AU');
   var DIMS=(typeof window!=='undefined'&&window.FBA_DIMS)||{};
   var n=function(x){return (x==null||x==='')?null:Number(x);};
   var r1=function(x){return Math.round(x*10)/10;}, r2=function(x){return Math.round(x*100)/100;};
@@ -3289,6 +3289,7 @@ function downloadFbaTransfer(dest){
     // Amazon requires Quantity == Units per box × Number of boxes. Otherwise send loose units (case cols blank).
     var caseOk=cp>0 && (qty % cp)===0;
     if(awd) rows.push([outSku, qty, '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'', '', '', '']);   // AWD: no lot code; pallet cols left blank for the team to complete
+    else if(au) rows.push([outSku, qty, '', '', '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'']);   // v28.389 AU: Prep owner + Labeling owner blank (= the Seller defaults), expiry blank
     else rows.push([outSku, qty, '', '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'']);
   });
   if(!rows.length){alert('No rows ticked for '+CUR+'. Tick the Ship box on the rows you want to transfer.');return;}
@@ -3306,6 +3307,18 @@ function downloadFbaTransfer(dest){
       ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Units per box','Number of boxes','Box length (in)','Box width (in)','Box height (in)','Box weight (lb)','Palletized?','Boxes Per Pallet','Number of pallets']
     ];
     fname='AWD_Transfer_US_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  } else if(au){   // v28.389 (Ben 16-Oct-26, Seller Central AU "D8 : The uploaded file isn't valid"): Amazon AU's template has Prep owner +
+    // Labeling owner in C/D and no lot code column; headers copied exactly from Amazon's file (incl. the trailing space in "Units per box ")
+    hdr=[
+      ['Please review the Example tab before you complete this sheet'],
+      [],
+      ['Default prep owner','Seller'],
+      ['Default labeling owner','Seller'],
+      [],[],
+      ['','','Optional','','','Optional: Use only for case-packed SKUs'],
+      ['Merchant SKU','Quantity','Prep owner','Labeling owner','Expiration date (MM/DD/YYYY)','Units per box ','Number of boxes'].concat(boxCols)
+    ];
+    fname='FBA_Transfer_AU_'+new Date().toISOString().slice(0,10)+'.xlsx';
   } else {
     hdr=[
       ['Please review the Example tab before you complete this sheet'],

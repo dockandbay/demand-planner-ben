@@ -1,3 +1,9 @@
+## v28.389 (16-Oct-26) FBA Transfer Upload: AU file matches Amazon's AU template
+- Ben: Seller Central AU rejected the upload with "D8 : The uploaded file isn't valid". Amazon's AU template has Prep owner and Labeling owner in columns C and D and no Manufacturing lot code column; HORIZON wrote the UK/EU layout (lot code in D).
+- AU now writes Amazon's AU headers exactly (row 7 labels over C and F; row 8 Merchant SKU, Quantity, Prep owner, Labeling owner, Expiration date, Units per box, Number of boxes, box cm/kg). Prep and labeling owner left blank per row (the Seller defaults apply). UK, EU, US, CA and AWD files unchanged.
+- Tested: generated AU file compared cell by cell with Amazon's AU template rows 1 to 8: no differences; case-pack and loose rows land in the right columns. UK file identical to before.
+- No migration, no env change.
+
 ## v28.388 (15-Oct-26) Reconcile finds the payee in the PDF receipt (Woolworths)
 - Ben: AMEX 18-Sep WOOLWORTHS A$225.48 did not match its receipt in accounts@ (emailed 14-Oct as "woowlroths 225.48"): a receipt more than 7 days after the bank line needs the payee named, and the subject's typo hid it. Now the PDF's own words are searched too (the PDF says WOOLWORTHS), and a small typo in a payee word still counts (8+ letters 2 edits incl. swapped letters, 5 to 7 letters 1, shorter exact).
 - Migration 375 (additive): accounts_gmail_msgs.pdf_words. New emails store their PDF words when read; older ones are read once in the background when they are an amount match (Gmail reads only), so after deploy the Woolworths line matches on the next Reconcile load.

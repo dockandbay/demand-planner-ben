@@ -133,6 +133,7 @@ verified_version: v28.168
 - FBA inbound splits by effective ETA: a missing or past ETA is treated as today + 4 days. Includes in-flight transfers. Display only. (source: fbaInbSplit, _fbaEffEta)
 - Override accepts shortcuts: `2c` = 2 x carton qty; `50r` = 50 rounded UP to the next full carton; plain numbers pass through. Overrides and ticks are session-only and do not change the buy plan. (source: fbaResolveQty, fbaTransferEff)
 - Selected total = units and cartons (sum of qty / carton qty, rounded up) across ticked rows. FBA Transfer Upload and AWD Transfer Upload (US) download ticked rows with qty > 0. (source: fbaSelSummary, downloadFbaTransfer)
+- FBA Transfer Upload file layout follows Amazon's Send-to-Amazon template per region: UK/EU = SKU, Quantity, Expiration date, Manufacturing lot code, case-pack columns (cm/kg); AU = SKU, Quantity, Prep owner, Labeling owner, Expiration date, case-pack columns (cm/kg), no lot code; US/CA = imperial (in/lb). Default prep and labeling owner = Seller; per-row owners and dates left blank. Case-pack columns filled only when quantity is a whole number of cartons. (source: downloadFbaTransfer)
 
 ## TRANSFER tab (3PL to 3PL)
 - Lanes and lead weeks come from `planner.transfer_lead_times` (CONFIG ▸ Branches). A lane with no entry is never recommended. (source: buildTRANSFER_LEADS, trfLane)
