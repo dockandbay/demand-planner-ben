@@ -1,3 +1,8 @@
+## v28.391 (16-Oct-26) 3PL invoicing Push actuals: paced so Fulfil stops rate-limiting it
+- Diviyaj's list: 13-Oct-26 19:35 to 19:43 UTC, 67 Fulfil 429 (too many requests) errors. Cause (live health log, read only): rita@'s EU iFulfilment Push actuals (file 77), 25 chunks. Each chunk looked up 40 references in Fulfil with no pause, then wrote 3 to 4 calls per shipment; the next chunk started immediately. Retries absorbed it (every chunk 200, no failed push) but chunks slowed from 8s to 49s.
+- Now: 120ms between reference lookups (as the writes already had) and 1s between chunks. A push takes a few seconds longer per chunk instead of minutes of retries. A failed shipment note is still logged in the health log by the Fulfil call itself (integration_error with the route).
+- No migration, no env change.
+
 ## v28.390 (16-Oct-26) Transfer FBA: only 3PL stock on hand can be sent
 - Ben: BUY & MOVE > Transfer FBA recommended 76 of COOL-CAB-LTPNK-R and 3 of COOL-DES-SUNSRUN with UK 3PL at -2 and -3. Cause: since v27.686 the transfer counted 3PL inbound landing later this month as available (PO-56UKBE2, due 19-Oct), so it offered stock still at sea. Ben chose option A: on-hand only.
 - The transfer (and its 50% / website reserve cap) now uses 3PL on-hand now, floored at 0. Inbound lifts the transfer once received. nearTerm3plInbound removed (its only caller). The buy simulation still draws this month's transfer from its running pool as before.

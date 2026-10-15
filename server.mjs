@@ -18209,6 +18209,7 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
     const end = Math.min(total, offset + limit);
     const byShip = {}, shipCache = {}; let unresolved = 0; const unref = [];
     for (let i = offset; i < end; i++) { const ref = uniqRefs[i];
+      if (i > offset) await new Promise(r => setTimeout(r, 120));   // v28.391: pace the lookups like the writes. 13-Oct-26 EU iFulfilment push: 40 unpaced reads a chunk hit 67 Fulfil 429s (chunks 8s -> 49s)
       const sh = await fulfilShipmentForRef(ref, shipCache);
       if (!sh.id) { unresolved++; if (unref.length < 50) unref.push(ref); continue; }
       const ra = refAgg.get(ref) || { freight: 0, process: 0 };
