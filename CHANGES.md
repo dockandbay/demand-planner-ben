@@ -1,3 +1,9 @@
+## v28.390 (16-Oct-26) Transfer FBA: only 3PL stock on hand can be sent
+- Ben: BUY & MOVE > Transfer FBA recommended 76 of COOL-CAB-LTPNK-R and 3 of COOL-DES-SUNSRUN with UK 3PL at -2 and -3. Cause: since v27.686 the transfer counted 3PL inbound landing later this month as available (PO-56UKBE2, due 19-Oct), so it offered stock still at sea. Ben chose option A: on-hand only.
+- The transfer (and its 50% / website reserve cap) now uses 3PL on-hand now, floored at 0. Inbound lifts the transfer once received. nearTerm3plInbound removed (its only caller). The buy simulation still draws this month's transfer from its running pool as before.
+- Buy plan before / after on the sandbox, all SKUs x UK/US/EU/AU/CA: Buy 3PL, Urgent, Buy FBA, Zalando unchanged everywhere; one Transfer FBA change: UK BAGDRY-MD-NAVY 30 -> 0. Sandbox data is older than live, so live will show more rows going to 0 (the two COOL SKUs above).
+- No migration, no env change.
+
 ## v28.389 (16-Oct-26) FBA Transfer Upload: AU file matches Amazon's AU template
 - Ben: Seller Central AU rejected the upload with "D8 : The uploaded file isn't valid". Amazon's AU template has Prep owner and Labeling owner in columns C and D and no Manufacturing lot code column; HORIZON wrote the UK/EU layout (lot code in D).
 - AU now writes Amazon's AU headers exactly (row 7 labels over C and F; row 8 Merchant SKU, Quantity, Prep owner, Labeling owner, Expiration date, Units per box, Number of boxes, box cm/kg). Prep and labeling owner left blank per row (the Seller defaults apply). UK, EU, US, CA and AWD files unchanged.

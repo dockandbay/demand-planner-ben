@@ -2641,14 +2641,6 @@ function fbaTransferSized(sku,mkt,capUnits){
 //  - Amazon-only SKUs (FBA available, DTC not): exempt from the 50% cap (3PL only feeds Amazon)
 //  - carton rounding off next-90-day FBA demand; skip if <70% of a carton
 //  - skip if the result is <20% of next-60-day FBA demand (defer to a fuller shipment)
-// Near-term 3PL inbound arriving LATER THIS month (day > today) — the SAME lines the buy sim credits to the running
-// 3PL pool during the current-month "Remaining" pass, so counting them here keeps fbaTransferRec's cap consistent
-// with the stock the transfer actually draws from. (Ben C, v27.686)
-function nearTerm3plInbound(md){
-  var cy=TODAY.getFullYear()+'-'+String(TODAY.getMonth()+1).padStart(2,'0'), dd=String(TODAY.getDate()).padStart(2,'0'), s=0;
-  (md.inb||[]).forEach(function(x){ if((x.wh||'').includes('fba'))return; var e=x.eta; if(e&&e.slice(0,7)===cy&&e.slice(8,10)>dd)s+=(Number(x.qty)||0); });
-  return s;
-}
 // Days until the next SUBSTANTIAL 3PL replenishment (>= half a month of website demand) — used to shorten the
 // website hold-back: it only needs to bridge to the next real top-up, not a flat 4 weeks. (Ben B, v27.686)
 function daysToNext3plReplen(md){
@@ -2661,8 +2653,10 @@ function fbaTransferRec(sku,mkt){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const ch=md.ch||[];
   const amazonOnly=ch.includes('FBA')&&!ch.includes('DTC');
-  const near3=nearTerm3plInbound(md);                 // C: firm-dated 3PL stock landing this month, already in the sim's running pool
-  const i3=Math.max((md.i3||0)+near3,0);
+  // v28.390 (Ben 16-Oct-26: "fba recommended when 3PL has no inventory (negative)", option A): only 3PL stock ON HAND now can be sent.
+  // Was on-hand + 3PL inbound landing later this month (v27.686 rule C), so COOL-CAB-LTPNK-R at -2 recommended 76 off PO-56UKBE2 still at
+  // sea. Inbound now lifts the transfer once it is received; the buy sim draws this from its pool as before.
+  const i3=Math.max(md.i3||0,0);
   // Website protection (Hybrid): dual-channel SKUs never transfer more than 50% of 3PL AND never draw 3PL
   // below the website (DTC+B2B) cover that must bridge to the next 3PL replenishment. Amazon-only SKUs are exempt.
   let cap;

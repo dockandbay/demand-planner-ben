@@ -10,7 +10,6 @@ sources:
   - artifact_v16.7.html :: fbaResolveQty
   - artifact_v16.7.html :: fbaFwdDemand
   - artifact_v16.7.html :: webFwdDemand
-  - artifact_v16.7.html :: nearTerm3plInbound
   - artifact_v16.7.html :: daysToNext3plReplen
   - artifact_v16.7.html :: awdOf
   - artifact_v16.7.html :: nonGrsOf
@@ -37,14 +36,13 @@ sources:
   - server.mjs :: /api/supply/fba-transfers/list
   - server.mjs :: /api/cron/fba-inflight-refresh
 fingerprints:
-  artifact_v16.7.html::fbaTransferRec: e193d4279ab4
+  artifact_v16.7.html::fbaTransferRec: 2c58b46155be
   artifact_v16.7.html::fbaTransferSized: d58f25df052b
   artifact_v16.7.html::fbaTransferNonGrs: ea083446f165
   artifact_v16.7.html::fbaTransferEff: 20e956620966
   artifact_v16.7.html::fbaResolveQty: 14ecb84bd2c9
   artifact_v16.7.html::fbaFwdDemand: 02d6a090e262
   artifact_v16.7.html::webFwdDemand: 69d14da89558
-  artifact_v16.7.html::nearTerm3plInbound: eb6548acfb3d
   artifact_v16.7.html::daysToNext3plReplen: 0b5f8e87cd8f
   artifact_v16.7.html::awdOf: f072dda28079
   artifact_v16.7.html::nonGrsOf: 7a1b63f8cf8b
@@ -70,7 +68,7 @@ fingerprints:
   server.mjs::fbaInflightExcludedCodes: 7089bef268c5
   server.mjs::/api/supply/fba-transfers/list: d968d218b3ca
   server.mjs::/api/cron/fba-inflight-refresh: 7732e28433a0
-verified_version: v28.168
+verified_version: v28.390
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -87,7 +85,7 @@ verified_version: v28.168
 
 ## Website protection cap (the hybrid guard)
 - Applies to dual-channel SKUs (sold on DTC as well as FBA in that market). (source: fbaTransferRec)
-- 3PL available = 3PL on-hand + 3PL inbound with a firm ETA later THIS month (day after today). (source: nearTerm3plInbound)
+- 3PL available = 3PL on-hand now, floored at 0. Inbound to the 3PL (even landing later this month) does not count until it is received, so a SKU with 3PL at or below 0 gets no transfer. (source: fbaTransferRec; v28.390, was on-hand + inbound later this month)
 - Website reserve = next month's DTC + B2B forecast x reserve weeks / 4.33, rounded. Reserve weeks = 4 (TRF_MIN_3PL_WKS), shortened to the days until the next substantial 3PL inbound / 7 when one is due. "Substantial" = at least half of next month's DTC + B2B demand. (source: daysToNext3plReplen, webFwdDemand)
 - Cap = the smaller of 50% of 3PL available (floored) and 3PL available minus the website reserve. Never below 0. (source: fbaTransferRec)
 - **Amazon-only SKUs** (FBA available but DTC not available in that market) have no cap: all 3PL stock can transfer. (source: fbaTransferRec)
@@ -153,10 +151,10 @@ verified_version: v28.168
 
 ## Common questions
 **Q:** Why is Transfer FBA 0 when FBA is clearly low?
-**A:** Check in order: (1) FBA on-hand + on-order + AWD + in-flight already covers the next N months of FBA forecast; (2) the website cap is 0 (3PL is small or the 4-week website reserve uses it all); (3) under Full, the shortfall is less than one carton or next-90-day FBA demand is under 70% of a carton. Switch the pill to Partial or Any to see stragglers.
+**A:** Check in order: (1) FBA on-hand + on-order + AWD + in-flight already covers the next N months of FBA forecast; (2) the website cap is 0 (3PL is small or the 4-week website reserve uses it all); (3) under Full, the shortfall is less than one carton or next-90-day FBA demand is under 70% of a carton. (4) 3PL on-hand is 0 or negative: stock still inbound to the 3PL (even due this week) cannot be sent until it is received. Switch the pill to Partial or Any to see stragglers.
 
 **Q:** Why does the transfer stop at half my 3PL stock?
-**A:** For SKUs sold on both the website and Amazon, the transfer is capped at 50% of 3PL (on-hand plus inbound landing later this month) and also keeps a website reserve of up to 4 weeks of next month's DTC + B2B demand. Amazon-only SKUs are not capped. Use Override to go higher.
+**A:** For SKUs sold on both the website and Amazon, the transfer is capped at 50% of 3PL on-hand and also keeps a website reserve of up to 4 weeks of next month's DTC + B2B demand. Amazon-only SKUs are not capped. Use Override to go higher.
 
 **Q:** Why is Buy FBA 0 but there is a transfer?
 **A:** Buy FBA is a whole-carton slice of Buy 3PL. When the FBA need fits within one carton it is shown as 0 and handled by a 3PL to FBA transfer instead.
