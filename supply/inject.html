@@ -12284,7 +12284,9 @@
           if(x.bill&&x.bill.id){ v.existing_bill={bill_id:x.bill.id,bill_number:x.bill.number,bill_url:x.bill.url}; }
           if(S[1].s==='run')st('bill','done',x.bill?lnk(x.bill.url,x.bill.number||'bill'):'');
           var bad=(x.skipped||[]).filter(function(k){ return k.error; }); v.po_paid=(v.po_paid||[]).concat((x.payments||[]).map(function(pp){ var l=(v.lines||[]).filter(function(L){ return L.reference===pp.po; })[0]; return {invoice_id:l&&l.linked_bill&&l.linked_bill.id}; }));
-          st('po',bad.length?'err':'done',(x.payments||[]).map(function(pp){ return esc(pp.po)+' '+money(pp.amount); }).join(', ')+(bad.length?'<div style="color:var(--neg)">'+bad.map(function(k){ return esc(k.po)+': '+esc(k.reason); }).join('<br>')+'</div>':''));
+          // v28.392 (Ben 16-Oct-26: "show the bill direct link for each po ... a list of 1 line per po"): one line per PO, with its Xero bill link
+          st('po',bad.length?'err':'done',(x.payments||[]).map(function(pp){ var l=(v.lines||[]).filter(function(L){ return L.reference===pp.po; })[0], lb=l&&l.linked_bill;
+            return '<div style="white-space:nowrap">'+esc(pp.po)+' <span style="font-variant-numeric:tabular-nums">'+money(pp.amount)+'</span> · bill '+(lb&&(lb.url||lb.id)?lnk(lb.url||('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+lb.id),lb.number||pp.bill||'open'):esc(pp.bill||'?'))+'</div>'; }).join('')+(bad.length?'<div style="color:var(--neg)">'+bad.map(function(k){ return esc(k.po)+': '+esc(k.reason); }).join('<br>')+'</div>':''));
           if(bad.length)throw Object.assign(new Error('Some PO bill payments failed: retry to finish them'),{step:'po'}); }); })
       .then(function(){ if(S[3].s!=='todo')return; st('pay','run');
         return fetch('/api/supply/payments/pay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run:run,bank_account_id:bk.id,date:P.date,amount:P.amount,confirm:true})}).then(j2).then(function(x){

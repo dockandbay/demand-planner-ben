@@ -1,3 +1,7 @@
+## v28.392 (16-Oct-26) Paid > Xero: PO bill payments listed one per line, each with its Xero bill link
+- Payments Report > Paid > Xero, step 4 "PO bill payments": was one comma-separated line (PO and amount). Now one line per PO: PO, amount, and the Xero bill number linked straight to the bill in Xero (built from the bill id when the PO link has no saved URL).
+- Display only. No server change, no migration, no env change.
+
 ## v28.391 (16-Oct-26) 3PL invoicing Push actuals: paced so Fulfil stops rate-limiting it
 - Diviyaj's list: 13-Oct-26 19:35 to 19:43 UTC, 67 Fulfil 429 (too many requests) errors. Cause (live health log, read only): rita@'s EU iFulfilment Push actuals (file 77), 25 chunks. Each chunk looked up 40 references in Fulfil with no pause, then wrote 3 to 4 calls per shipment; the next chunk started immediately. Retries absorbed it (every chunk 200, no failed push) but chunks slowed from 8s to 49s.
 - Now: 120ms between reference lookups (as the writes already had) and 1s between chunks. A push takes a few seconds longer per chunk instead of minutes of retries. A failed shipment note is still logged in the health log by the Fulfil call itself (integration_error with the route).
