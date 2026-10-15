@@ -2216,6 +2216,31 @@
       }).catch(function(e){ if(my===seq)res.innerHTML='<div class="mut tiny" style="color:var(--neg)">Fulfil search failed: '+esc(e&&e.message||e)+'</div>'; }); }
     q.oninput=function(){ clearTimeout(t); t=setTimeout(function(){ run(false); },350); }; q.focus(); run(true);
   }
+  // v28.375 (Ben 15-Oct-26): PO > PAYMENTS > Xero bills. Status of every Xero bill tied to the PO (linked bill, bills naming the PO, and for a
+  // client PO group the bills naming its Fulfil client POs), with HORIZON's payments on each and anything else Xero counts as paid.
+  function poXbLoad(el){ if(!el||el._loaded||el._loading)return; el._loading=1; var po=el.dataset.po;
+    fetch('/api/supply/po/'+encodeURIComponent(po)+'/xero-bills').then(function(r){return r.json();}).then(function(d){ el._loading=0; el._loaded=1; poXbRender(el,d); })
+      .catch(function(e){ el._loading=0; el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load Xero bills: '+esc(e&&e.message||e)+'</div>'; }); }
+  function poXbRender(el,d){
+    if(!d||d.error){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load Xero bills'+(d&&d.error?': '+esc(d.error):'')+'</div>'; return; }
+    var B=d.bills||[], T=d.totals||{}, ccy=(B[0]&&B[0].currency_code)||'';
+    var m=function(n,c){ return (c?esc(c)+' ':'')+(Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var pill=function(s){ var M={paid:['Paid','var(--pos)'],part:['Part paid','var(--amber)'],unpaid:['Awaiting payment','var(--neg)'],draft:['Draft','var(--muted)'],'void':['Voided','var(--muted)']}[s]||[s,'var(--muted)'];
+      return '<span style="display:inline-block;border:1px solid '+M[1]+';color:'+M[1]+';border-radius:999px;padding:0 7px;font-size:11px;font-weight:700;white-space:nowrap">'+M[0]+'</span>'; };
+    if(!B.length){ el.innerHTML='<div class="mut tiny">No Xero bills found for this PO yet'+(d.group?' or its '+d.group+' Fulfil client POs':'')+'. Bills appear here within an hour of being created in Xero; link one in Master data &amp; docs &gt; Linked records.</div>'; return; }
+    var TH='style="text-align:left;padding:4px 8px;white-space:nowrap"', THr='style="text-align:right;padding:4px 8px;white-space:nowrap"', TD='style="padding:5px 8px;vertical-align:top"', TDr='style="padding:5px 8px;vertical-align:top;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums"';
+    el.innerHTML='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:760px"><thead><tr class="mut tiny" style="border-bottom:1px solid var(--line)">'
+      +'<th '+TH+'>Bill</th><th '+TH+'>Reference</th><th '+TH+'>Tied by</th><th '+TH+'>Date</th><th '+TH+'>Due</th><th '+TH+'>Status</th><th '+THr+'>Total</th><th '+THr+'>Paid or credited</th><th '+THr+'>Still due</th><th '+THr+'>By HORIZON</th><th '+THr+'>Other credits</th></tr></thead><tbody>'
+      +B.map(function(b){ var c=b.currency_code||'', pays=(b.payments||[]);
+        var payTip=pays.map(function(p){ return (p.payment_date?fd(p.payment_date):'')+' '+m(p.amount,p.currency||c)+' from '+(p.bank_name||'')+(p.status!=='created'?' ('+p.status+(p.error?': '+p.error:'')+')':''); }).join('\n');
+        return '<tr style="border-top:1px solid var(--line)'+(b.state==='void'?';opacity:.5':'')+'"><td '+TD+'><a href="'+esc(b.url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700;white-space:nowrap">'+esc(b.invoice_number||'(no number)')+' ↗</a><div class="mut tiny">'+esc(String(b.region||'').toUpperCase())+(b.contact_name?' &middot; '+esc(b.contact_name):'')+'</div></td>'
+          +'<td style="padding:5px 8px;vertical-align:top;word-break:break-word">'+esc(b.reference||'')+'</td><td '+TD+'><span class="tiny">'+esc((b.roles||[]).join(', '))+'</span></td>'
+          +'<td style="padding:5px 8px;vertical-align:top;white-space:nowrap">'+esc(b.invoice_date?fd(b.invoice_date):'')+'</td><td style="padding:5px 8px;vertical-align:top;white-space:nowrap">'+esc(b.due_date?fd(b.due_date):'')+'</td><td '+TD+'>'+pill(b.state)+'</td>'
+          +'<td '+TDr+'>'+m(b.total,c)+'</td><td '+TDr+'>'+m(b.settled)+'</td><td style="padding:5px 8px;vertical-align:top;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums'+(b.due>0.005&&b.state!=='void'?';color:var(--neg);font-weight:700':'')+'">'+m(b.due)+'</td>'
+          +'<td '+TDr+(payTip?' title="'+esc(payTip)+'"':'')+'>'+(pays.length?m(b.hz_paid)+' <span class="mut tiny">('+pays.length+')</span>':'<span class="mut">-</span>')+'</td><td '+TDr+' title="Paid or credited in Xero other than by a HORIZON payment: deposit credit notes, manual payments">'+(b.other_paid?m(b.other_paid):'<span class="mut">-</span>')+'</td></tr>'; }).join('')
+      +'</tbody><tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td '+TD+' colspan="6">'+T.bills+' live bill'+(T.bills===1?'':'s')+(d.group?' &middot; client PO group of '+d.group:'')+'</td><td '+TDr+'>'+m(T.total,ccy)+'</td><td '+TDr+'>'+m(T.paid)+'</td><td '+TDr+'>'+m(T.due)+'</td><td '+TDr+'>'+m(T.hz_paid)+'</td><td '+TDr+'>'+m(T.other_paid)+'</td></tr></tfoot></table></div>'
+      +'<div class="mut tiny" style="margin-top:4px">'+(d.synced_at?'Xero copy as of '+esc(fd(d.synced_at.slice(0,10)))+' '+esc(d.synced_at.slice(11)):'')+' &middot; hover &ldquo;By HORIZON&rdquo; for each payment.</div>';
+  }
   function linkedRecordsPanel(po){
     return '<div class="sect-h">Linked records <span class="mut tiny">— how this PO maps to Xero, Fulfil, Flexport &amp; DHL. Any SHIPPED PO must have a Xero bill.</span></div>'
       +'<div class="po-links-ctx" data-po="'+esc(po)+'"><div class="mut tiny">Open to load linkages…</div></div>';
@@ -5448,7 +5473,9 @@
       // with fresh figures when they're opened (poRefetchPanel keeps the just-activated tab)
       var pd=document.getElementById('podet-'+i);
       if(pt==='masterdata'){ root.querySelectorAll('.potab-panel[data-pt="masterdata"] .po-links-ctx').forEach(function(el){ loadPoLinks(el,false); }); }   // Linked records: lazy-load on first open (live Xero lookup)
+      if(pt==='pay')root.querySelectorAll('.po-xb').forEach(function(el){ poXbLoad(el); });   // v28.375: Xero bills
       if(pd && pd.dataset.calcStale==='1' && (pt==='pay'||pt==='landed')){ pd.dataset.calcStale=''; poRefetchPanel(po,i); } }; });   // deep-link the open sub-tab into the URL
+    if(root)root.querySelectorAll('.po-xb').forEach(function(el){ poXbLoad(el); });   // v28.375: PAYMENTS is often the first tab: load straight away (local cache only)
     // Open-actions banner: a chip / line jumps to its sub-tab (clicks the matching .potab).
     if(root) root.querySelectorAll('.poact-chip,.poact-line').forEach(function(b){ b.onclick=function(){ var t=root.querySelector('.potab[data-pt="'+b.dataset.pt+'"]'); if(t)t.click(); }; });
     // Flexport booking request (SHIPMENTS tab)
@@ -5540,7 +5567,7 @@
     var docsH=docsPanel(po,d);
     // LANDED COSTS now lives under PAYMENTS, DOCUMENTS under MASTER DATA — no standalone tabs.
     var _sep='<div style="margin-top:20px;border-top:1px solid #e6ebf2;padding-top:12px"></div>';
-    var payH2=p.pay+_sep+p.landed;                 // PAYMENTS + landed costs; landed exceptions fold into the PAYMENTS badge
+    var payH2=p.pay+_sep+'<div class="sect-h">Xero bills <span class="mut tiny">— every Xero bill tied to this PO and how far it is paid (from HORIZON&rsquo;s hourly Xero copy).</span></div><div class="po-xb" data-po="'+esc(po)+'"><div class="mut tiny">Loading…</div></div>'+_sep+p.landed;   // v28.375: Xero bills table
     var masterH2='<div style="margin:2px 0 14px"><button class="save-btn po-pdf-dl" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue);border:1px solid #93c5fd;font-weight:700;font-size:13px;padding:6px 14px">⤓ Download PO details (PDF)</button> <span class="mut tiny">all PO details — header, client/FBA, packing &amp; labelling, order plan (SUG-0034)</span></div>'
       +masterH+_sep+linkedRecordsPanel(po)+_sep+docsH;               // MASTER DATA + Linked records + documents + full-PO PDF download (SUG-0034)
     var _docsAwaiting=((d&&d.all_docs)||[]).filter(function(x){return (x.approval_status||'')==='submitted';}).length;   // supplier docs awaiting approval → flag the tab

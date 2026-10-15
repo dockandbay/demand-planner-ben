@@ -8154,6 +8154,34 @@ app.get('/api/supply/fulfil/po-search', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, po: po || null, client_po: ctx ? ctx.client_po : null, sales_order_ref: ctx ? ctx.sales_order_ref : null, current: cur, env: fc.env, rows });
   } catch (e) { if (e.code !== 'FULFIL_LOOKUP_FAILED' && e.code !== 'NO_FULFIL_CFG') log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_LOOKUP_FAILED' ? 503 : 500).json({ error: e.message }); }
 });
+// ═══ v28.375 (Ben 15-Oct-26): PO drawer > PAYMENTS > "Xero bills": every Xero bill tied to this PO and how far it is paid. From HORIZON's
+// own Xero cache (planner.xero_bills, synced hourly), no live Xero call. Bills = the linked PO bill (Linked records), bills whose number or
+// reference names the PO, and for a client PO group the bills naming any of its Fulfil client POs. Payments = HORIZON's Xero payments on
+// those bills (xero_run_payments); anything else Xero shows as paid (deposit credit notes, manual payments) is "other credits".
+app.get('/api/supply/po/:po/xero-bills', async (req, res) => {
+  try { const po = String(req.params.po || '').trim(); if (!po) return res.status(400).json({ error: 'po required' });
+    const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), tok = s => '(^|[^A-Za-z0-9])' + esc(s) + '([^A-Za-z0-9-]|$)';
+    const grp = (await pool.query(`SELECT fulfil_id::text id, number FROM planner.po_fulfil_group WHERE po=$1 AND number IS NOT NULL`, [po]).catch(() => ({ rows: [] }))).rows;
+    const link = (await pool.query(`SELECT external_id FROM planner.po_links WHERE po=$1 AND system='xero' AND status IN ('linked','action')`, [po])).rows.map(r => r.external_id);
+    const pats = [{ re: tok(po), role: 'names this PO' }].concat(grp.map(g => ({ re: tok(g.number), role: 'client PO ' + g.number })));
+    const where = pats.map((_, i) => `(b.invoice_number ~* $${i + 2} OR b.reference ~* $${i + 2})`).join(' OR ');
+    const rows = (await pool.query(`SELECT b.invoice_id, lower(b.region) region, b.invoice_number, b.reference, b.contact_name, upper(coalesce(b.status,'')) status, b.total::float8 total,
+        coalesce(b.amount_paid,0)::float8 paid, coalesce(b.amount_due,0)::float8 due, b.currency_code, to_char(b.invoice_date,'YYYY-MM-DD') invoice_date, to_char(b.due_date,'YYYY-MM-DD') due_date,
+        to_char(b.synced_at,'YYYY-MM-DD HH24:MI') synced_at
+      FROM planner.xero_bills b WHERE b.invoice_id = ANY($1::text[]) OR ${where} ORDER BY b.invoice_date NULLS LAST, b.invoice_number`, [link, ...pats.map(p => p.re)])).rows;
+    const pays = rows.length ? (await pool.query(`SELECT invoice_id, run_key, bank_name, amount::float8 amount, currency, to_char(payment_date,'YYYY-MM-DD') payment_date, status, error
+      FROM planner.xero_run_payments WHERE invoice_id = ANY($1::text[]) ORDER BY payment_date, id`, [rows.map(r => r.invoice_id)])).rows : [];
+    const bills = rows.map(b => { const mine = pays.filter(p => p.invoice_id === b.invoice_id), hz = mine.filter(p => p.status === 'created').reduce((a, p) => a + (p.amount || 0), 0);
+      const roles = []; if (link.includes(b.invoice_id)) roles.push('linked PO bill'); pats.forEach(p => { if (new RegExp(p.re, 'i').test(b.invoice_number || '') || new RegExp(p.re, 'i').test(b.reference || '')) roles.push(p.role); });
+      const state = /VOIDED|DELETED/.test(b.status) ? 'void' : b.status === 'DRAFT' ? 'draft' : b.status === 'PAID' || (b.total > 0 && b.due <= 0.005) ? 'paid' : b.paid > 0.005 ? 'part' : 'unpaid';
+      return Object.assign(b, { url: xbUrl(b.invoice_id), roles: [...new Set(roles)], state,
+        settled: Math.round(Math.max(b.paid, (b.total || 0) - (b.due || 0)) * 100) / 100,   // paid OR credited (Xero's AmountPaid leaves out credit notes)
+        hz_paid: Math.round(hz * 100) / 100, other_paid: Math.round(Math.max(0, Math.max(b.paid, (b.total || 0) - (b.due || 0)) - hz) * 100) / 100, payments: mine }); });
+    const live = bills.filter(b => b.state !== 'void'), sum = k => Math.round(live.reduce((a, b) => a + (Number(b[k]) || 0), 0) * 100) / 100;
+    res.set('Cache-Control', 'no-store').json({ ok: true, po, group: grp.length, bills, totals: { bills: live.length, total: sum('total'), paid: sum('settled'), due: sum('due'), hz_paid: sum('hz_paid'), other_paid: sum('other_paid') },
+      synced_at: rows.reduce((m, r) => (r.synced_at && (!m || r.synced_at > m) ? r.synced_at : m), null) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ═══ v28.374 (Ben 15-Oct-26, Dillard's): CLIENT PO GROUP. One HORIZON client PO (same set as the v28.199 push guard: Direct to Client /
 // B2B JLEW / B2B NEXT / key account) can stand for MANY Fulfil client POs (Fulfil makes one PO per client order). PO drawer > Master & Docs >
 // Linked records: paste Fulfil PO numbers, client refs or SO numbers > Check (reads LIVE Fulfil, read only) > Link. Stored in

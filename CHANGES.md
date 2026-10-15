@@ -1,3 +1,7 @@
+## v28.375 (15-Oct-26) PO > Payments: Xero bills table
+- New "Xero bills" table on the PO drawer PAYMENTS tab: every Xero bill tied to the PO (the linked bill, bills naming the PO such as freight bills, and for a client PO group the bills of its Fulfil client POs) with status, total, paid or credited, still due, HORIZON's own payments (hover for each) and other credits (deposit credit notes, manual payments), plus totals. From HORIZON's hourly Xero copy: no Xero API calls. Tested on sandbox POs (PO-23AUXR1: linked bill + a freight bill naming it; PO-10649).
+- No migration, no env change, no new routes beyond the read-only GET /api/supply/po/:po/xero-bills.
+
 ## v28.374 (15-Oct-26) Client PO groups: one HORIZON PO for many Fulfil client POs (Dillard's)
 - PO drawer > Master & Docs > Linked records > new "Client POs in Fulfil" (client POs only: Direct to Client, B2B JLEW, B2B NEXT, key account). Paste Fulfil PO numbers, client references or sales order numbers (any mix), Check reads live Fulfil (read only) and shows what each paste found; other suppliers, cancelled POs and duplicates are skipped (Fulfil splits each Dillard's order by supplier: XR Textile, Lixin, Weierken), a PO already in another group moves only on confirm. Link / unlink per PO; totals by SKU vs this PO.
 - DTC mismatch 2.0: on each sales order card a grouped HORIZON PO counts only that order's client POs ("group of N"); a new Client PO groups panel and Group issues pill reconcile each HORIZON PO against the sum of all its client POs.
