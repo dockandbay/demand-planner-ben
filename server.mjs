@@ -8935,6 +8935,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
   try {
     const plan = await computeXeroRunPlan((req.body && req.body.run) || {}, { contactFresh: true });
     if (!plan.ok) return res.status(400).json({ error: plan.error });
+    if (req.body && req.body.date != null && req.body.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date))) return res.status(400).json({ error: 'Date paid "' + String(req.body.date).slice(0, 30) + '" is not a date (YYYY-MM-DD): nothing was posted' });   // v28.382
     const region = plan.region, today = new Date().toISOString().slice(0, 10), _reqDate = String((req.body && req.body.date) || ''), date = (/^\d{4}-\d{2}-\d{2}$/.test(_reqDate) ? _reqDate : null) || plan.date || today;   // v28.347: the paid date from Paid > Xero
     // v28.176 (Ben): the bill references the supplier's Xero contact by ContactID (fresh lookup). Not found = nothing posted
     // (posting by Name would make Xero create a duplicate contact and undo Ben's merges).
@@ -9114,6 +9115,7 @@ app.post('/api/supply/payments/pay', async (req, res) => {   // v28.305 (Ben 13-
     const run = b.run || {}; const plan = await payRunPlan(run);
     const bank = plan.banks.find(x => x.id === String(b.bank_account_id || ''));
     if (!bank) return res.status(400).json({ error: 'Choose a bank account in Xero ' + plan.org.toUpperCase() });
+    if (b.date != null && b.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(String(b.date))) return res.status(400).json({ error: 'Date paid "' + String(b.date).slice(0, 30) + '" is not a date (YYYY-MM-DD): nothing was posted' });   // v28.382: never the run date silently
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? b.date : run.dt, amount = Math.round((Number(String(b.amount || '').replace(/,/g, '')) || 0) * 100) / 100;
     const blocks = plan.checks.filter(c => c.level === 'error').map(c => c.msg).concat(plan.bills.filter(x => x.problem).map(x => x.problem));
     const cross = !!bank.cross;   // v28.292: a bank in the other org pays via the intercompany loans

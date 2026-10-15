@@ -1,3 +1,9 @@
+## v28.382 (15-Oct-26) Paid > Xero: the date you type is the date posted
+- Ben: a Lixin payment (run 01-Oct, USD 189,494.51) was posted to Xero dated 01-Oct although 13/10 was entered. Cause: Date paid could not read a date with no year ("13/10", "13-Oct", "13 Oct"); the box turned red but the popup and the server silently used the run date.
+- Dates with no year are now this year; impossible dates (31-Feb) are refused; an unreadable Date paid blocks the push with a message; the confirmation names the date ("... now, dated 13-Oct-26?"); the server refuses an unreadable date instead of using the run date (payments/pay and xero-post).
+- The 01-Oct payment already in Xero is not changed by this release.
+- No migration, no env change.
+
 ## v28.381 (15-Oct-26) Import from Fulfil labelled "(recommended)"
 - Client PO Order plan button now reads "⬇ Import from Fulfil (recommended)" (Ben: Fulfil owns a Direct to Client PO's lines). Label only.
 

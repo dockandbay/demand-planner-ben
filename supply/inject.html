@@ -1418,12 +1418,18 @@
   // Paste-friendly dates: a native <input type="date"> only accepts yyyy-mm-dd in the exact locale
   // format, so pasting "25/06/2023" from Sheets/Excel silently fails. Parse the common formats → ISO.
   function parseDateLoose(s){ s=String(s||'').trim(); if(!s)return null; s=s.replace(/[T ]\d{1,2}:\d.*$/,'').trim();   // drop a trailing time part ("2023-06-25 00:00:00" / "…T09:30") but keep "25 Jun 2023"
-    function mk(y,mo,d){ mo=+mo; d=+d; if(!(mo>=1&&mo<=12&&d>=1&&d<=31))return null; if(String(y).length===2)y='20'+y; return y+'-'+('0'+mo).slice(-2)+'-'+('0'+d).slice(-2); }
+    function mk(y,mo,d){ mo=+mo; d=+d; if(!(mo>=1&&mo<=12&&d>=1&&d<=31))return null; if(String(y).length===2)y='20'+y; if(new Date(Date.UTC(+y,mo-1,d)).getUTCDate()!==d)return null;   // v28.382: real calendar days only (no 31-Feb)
+      return y+'-'+('0'+mo).slice(-2)+'-'+('0'+d).slice(-2); }
     var m, mons={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
     if(m=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/)) return mk(m[1],m[2],m[3]);            // yyyy-mm-dd (ISO / year-first)
     if(m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/)) return mk(m[3],m[2],m[1]);           // dd/mm/yyyy (UK day-first)
     if(m=s.match(/^(\d{1,2})[ \-]([A-Za-z]{3,})[ \-,]+(\d{2,4})$/)){ var a=mons[m[2].slice(0,3).toLowerCase()]; return a?mk(m[3],a,m[1]):null; }   // 25 Jun 2023 / 12-may-25
     if(m=s.match(/^([A-Za-z]{3,})[ \-]+(\d{1,2})[ ,]+(\d{2,4})$/)){ var b=mons[m[1].slice(0,3).toLowerCase()]; return b?mk(m[3],b,m[2]):null; }    // Jun 25, 2023
+    // v28.382 (Ben 15-Oct-26: "13/10" posted a Xero payment on the run date): a date with no year = this year (13/10, 13-Oct, 13 Oct, Oct 13)
+    var yr=new Date().getFullYear();
+    if(m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})$/)) return mk(yr,m[2],m[1]);                                                       // 13/10 (UK day-first)
+    if(m=s.match(/^(\d{1,2})[ \-]([A-Za-z]{3,})$/)){ var c=mons[m[2].slice(0,3).toLowerCase()]; return c?mk(yr,c,m[1]):null; }  // 13-Oct / 13 Oct
+    if(m=s.match(/^([A-Za-z]{3,})[ \-]+(\d{1,2})$/)){ var e=mons[m[1].slice(0,3).toLowerCase()]; return e?mk(yr,e,m[2]):null; }  // Oct 13
     return null; }
   // one-time (capture phase): intercept a paste into any date field, parse loosely, set ISO + fire change
   // so the existing onchange savers run. Unparseable text is left to the browser's default handling.
@@ -12145,7 +12151,7 @@
     var hz=g('ppd-hz'); if(hz)hz.onclick=function(){ hz.disabled=true; saveHz().then(function(){ bg.remove(); PPD=null; payRefreshState(); }).catch(function(e){ hz.disabled=false; PPD.err='Save failed: '+(e.message||e); payPaidPaint(); }); };
     var xb=g('ppd-xero'); if(xb)xb.onclick=function(){ PPD.confirm=true; PPD.err=''; payPaidPaint(); };
     var no=g('ppd-no'); if(no)no.onclick=function(){ PPD.confirm=false; payPaidPaint(); };
-    var go=g('ppd-go'); if(go)go.onclick=function(){ if(PPD.busy)return; PPD.busy=true; payPaidPaint(); var P=PPD, run=P.run, bk=payPaidBank(), needBill=(P.plan.bills||[]).some(function(b){ return b.will_create&&!b.paid; });
+    var go=g('ppd-go'); if(go)go.onclick=function(){ if(PPD.busy)return; var _de=bg.querySelector('.ppd-date'); if(_de&&_de.value){ var _i=parseDateLoose(_de.value); if(!_i){ alert('Date paid "'+_de.value+'" is not a date: type it like 13-Oct-26.'); return; } PPD.date=_i; }   // v28.382 PPD.busy=true; payPaidPaint(); var P=PPD, run=P.run, bk=payPaidBank(), needBill=(P.plan.bills||[]).some(function(b){ return b.will_create&&!b.paid; });
       var j2=function(r){ return r.json().then(function(j){ if(!r.ok&&!j.error)j.error='HTTP '+r.status; return j; }); };
       saveHz().then(function(){ if(!needBill)return null;
           return fetch('/api/supply/payments/xero-post',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run:run,confirm:true})}).then(j2).then(function(x){ if(x&&x.error)throw new Error('Supplier payment bill: '+x.error); return x; }); })
@@ -12255,7 +12261,10 @@
   function pxSaveHz(){ var bk=pxBank(), run=PX.run; return fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:run.dt,supplier:run.supplier,region:run.region||'UK',paid_currency:bk?bk.ccy:(run.base_ccy||'USD'),paid_amount:PX.amount,bank_account_id:bk?bk.id:null,bank_name:bk?bk.name:null})})
       .then(function(r){ return r.json(); }).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.emailPreview&&typeof showEmailPreview==='function')showEmailPreview(j.emailPreview); return j; }); }
   function pxPush(){ if(!PX||PX.busy)return; var P=PX, run=P.run, v=P.prev, p=P.plan, bk=pxBank();
-    if(!confirm('Mark paid and push to live Xero '+p.org.toUpperCase()+' now?'))return;
+    // v28.382: the date typed in Date paid must be readable; never fall back to the run date silently
+    var _dEl=document.querySelector('.px-date'); if(_dEl&&_dEl.value){ var _iso=parseDateLoose(_dEl.value); if(!_iso){ P.err='Date paid "'+_dEl.value+'" is not a date: type it like 13-Oct-26 or 13/10/26, then push again.'; pxPaint(); return; } P.date=_iso; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(P.date||''))){ P.err='Set the Date paid first.'; pxPaint(); return; }
+    if(!confirm('Mark paid and push to live Xero '+p.org.toUpperCase()+' now, dated '+fd(P.date)+'?'))return;
     var poTodo=v?(v.lines||[]).filter(function(l){ return pxPoState(l).k==='todo'; }).length:0, needPost=!!v&&(!v.existing_bill||poTodo>0);
     var S=P.steps&&P.steps.length?P.steps:[{k:'hz',t:'Mark paid in HORIZON',s:'todo'},{k:'bill',t:v?'Supplier payment bill':'No supplier payment bill',s:v&&!v.existing_bill?'todo':'skip'},{k:'po',t:'PO bill payments',s:poTodo?'todo':'skip'},{k:'pay',t:'Pay from '+bk.name,s:(p.bills||[]).some(function(b){ return !b.paid; })?'todo':'skip'}];
     S.forEach(function(r){ if(r.s==='err')r.s='todo'; }); P.steps=S; P.busy=true; P.err=''; pxPaint();
