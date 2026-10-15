@@ -8914,12 +8914,13 @@ app.post('/api/supply/payments/xero-followup', async (req, res) => {
         if (!known.has(po)) { items.push({ po, issue: 'not a HORIZON PO', fix: 'Check the PO number on this payment', link: null }); return; }
         if (groups.has(po)) { if (shares[po]) items.push({ po, issue: shares[po] + ' client PO share' + (shares[po] === 1 ? '' : 's') + ' waiting for a Xero bill', fix: 'Applied automatically when the bills arrive', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/payments' }); return; }
         const lk = links[po];
-        if (!lk) { items.push({ po, issue: 'no Xero bill linked' + (done ? ': PO bill payment not made' : ': PO bill payment will be skipped'), fix: 'Link bill', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/master-data' }); return; }
-        if (!done) return;
-        if (/VOIDED|DELETED/.test(lk.bill_status)) { items.push({ po, issue: 'linked Xero bill ' + (lk.external_ref || '') + ' was voided', fix: 'Choose the right bill', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/master-data' }); return; }
+        // v28.393 (Ben 16-Oct-26: "the warnings should only be for unpaid items BEFORE we push into xero"): once the run is in Xero, the only
+        // follow-up is a PO bill payment HORIZON logged as failed. "Still owes" was a guess from the bill's balance and fired on runs that paid
+        // part of a bill (Lixin 28-Sep paid 50%; its payments were made 12-Oct, before the payment log existed) or paid it outside HORIZON.
+        if (!lk) { if (!done) items.push({ po, issue: 'no Xero bill linked: PO bill payment will be skipped', fix: 'Link bill', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/master-data' }); return; }
+        if (!done) { if (/VOIDED|DELETED/.test(lk.bill_status)) items.push({ po, issue: 'linked Xero bill ' + (lk.external_ref || '') + ' was voided', fix: 'Choose the right bill', link: '#/supply/purchase-orders/' + encodeURIComponent(po) + '/master-data' }); return; }
         const p = (pays[rk] || []).filter(x => x.invoice_id === lk.external_id), failed = p.find(x => x.status === 'failed' || (x.error && x.status !== 'created'));
-        if (failed) { items.push({ po, issue: 'PO bill payment failed in Xero' + (failed.error ? ': ' + String(failed.error).slice(0, 120) : ''), fix: 'Open Paid > Xero and retry', link: null }); return; }
-        if (lk.bill_status && lk.due > 0.005 && !p.some(x => x.status === 'created')) items.push({ po, issue: 'PO bill ' + (lk.external_ref || '') + ' still owes ' + (lk.ccy ? lk.ccy + ' ' : '') + lk.due.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' in Xero', fix: 'Open Paid > Xero and retry, or check the bill', link: null }); });
+        if (failed && !p.some(x => x.status === 'created')) items.push({ po, issue: 'PO bill payment failed in Xero' + (failed.error ? ': ' + String(failed.error).slice(0, 120) : ''), fix: 'Open Paid > Xero and retry', link: null }); });
       out[k] = { items }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, results: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }

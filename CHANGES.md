@@ -1,3 +1,8 @@
+## v28.393 (16-Oct-26) Payments Report follow-up: warnings only before the run is pushed to Xero
+- Ben (live): the Lixin run showed "7 to follow up ... still owes USD 49,918.45 in Xero" although the supplier payment bill and the PO bill payments were made. Cause (live, read only): those 7 PO bills were paid 50% on 12-Oct 04:14 by the Lixin 28-Sep run, before HORIZON logged PO bill payments (xero_run_payments, v28.347). With no log row and money still owing on the bill (the other 50%, for a later run), the check called it unpaid.
+- Now: before the push, a PO line is flagged when no Xero bill is linked or the linked bill was voided. After the push, only a PO bill payment HORIZON logged as failed (and never succeeded) is flagged. "Still owes" is gone.
+- No migration, no env change. lib/ai-logic/supply-finance.md updated.
+
 ## v28.392 (16-Oct-26) Paid > Xero: PO bill payments listed one per line, each with its Xero bill link
 - Payments Report > Paid > Xero, step 4 "PO bill payments": was one comma-separated line (PO and amount). Now one line per PO: PO, amount, and the Xero bill number linked straight to the bill in Xero (built from the bill id when the PO link has no saved URL).
 - Display only. No server change, no migration, no env change.
