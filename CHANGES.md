@@ -1,3 +1,6 @@
+## v28.381 (15-Oct-26) Import from Fulfil labelled "(recommended)"
+- Client PO Order plan button now reads "⬇ Import from Fulfil (recommended)" (Ben: Fulfil owns a Direct to Client PO's lines). Label only.
+
 ## v28.380 (15-Oct-26) Client PO > Order plan > Import from Fulfil
 - Ben, PO362: a Direct to Client / dropship PO's lines are owned by Fulfil. New "Import from Fulfil" button on the Order plan of client POs: reads the linked Fulfil PO live (read only), previews quantity changes, NEW Fulfil SKUs (added with Fulfil's price when it has one) and SKUs no longer in Fulfil (set to 0), then applies so the plan equals Fulfil, ERP qty included, and saves this PO's Fulfil copy at once. PO362 today: Fulfil has 5 SKUs HORIZON lacks (TOWLB-CAB-MD-BLUE 50, TOWLB-CAB-MD-YELL 50, PONCHA-DES-MD-PCHBCH 20, PONCHK-CAB-SM-YELL 30, PONCHK-CAB-MD-YELL 30); the other 57 match.
 - Tested on the sandbox (preview, apply, re-preview shows no changes, stock PO refused). New signed-in route POST /api/supply/po/:po/import-fulfil-lines. No migration, no env change.
