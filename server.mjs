@@ -5736,7 +5736,7 @@ async function _fulfilImportPOsRun() {
   // v28.374: refresh each client PO group member from this pull, then write each grouped HORIZON PO's mirror row as the group sum
   const _gPos = new Set(); for (const p of list) { if (!p._grp) continue; _gPos.add(p._grp);
     const sk = {}; (byPo[p.id] || []).forEach(l => { const k = String(l.sku || '').trim(); if (k) sk[k] = (sk[k] || 0) + (Number(l.qty) || 0); }); const ln = Object.keys(sk).sort().map(k => ({ sku: k, qty: sk[k] }));
-    await pool.query(`UPDATE planner.po_fulfil_group SET number=coalesce($2, number), reference=coalesce($3, reference), state=coalesce($4, state), supplier=coalesce($5, supplier), lines=$6::jsonb, units=$7, synced_at=now() WHERE fulfil_id=$1`, [p.id, p.number || null, p.reference || null, p.state || null, p['party.name'] || null, JSON.stringify(ln), ln.reduce((a, l) => a + l.qty, 0)]).catch(() => {}); }
+    await pool.query(`UPDATE planner.po_fulfil_group SET number=coalesce($2, number), reference=coalesce($3, reference), state=coalesce($4, state), supplier=coalesce($5, supplier), lines=$6::jsonb, units=$7, total_amount=coalesce($8, total_amount), currency=coalesce($9, currency), synced_at=now() WHERE fulfil_id=$1`, [p.id, p.number || null, p.reference || null, p.state || null, p['party.name'] || null, JSON.stringify(ln), ln.reduce((a, l) => a + l.qty, 0), _fulfilNum(p.total_amount), p['currency.code'] || null]).catch(() => {}); }
   for (const g of _gPos) await _fgMirrorRow(g).catch(() => {});
   // v27.902 (Ben): a full refresh also PRUNES rows the source no longer has (cancelled-and-purged POs, or rows imported from
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
@@ -8257,10 +8257,11 @@ app.post('/api/supply/po/:po/fulfil-group/link', async (req, res) => {
     const taken = (await pool.query(`SELECT fulfil_id::text id, po FROM planner.po_fulfil_group WHERE fulfil_id = ANY($1::bigint[]) AND po <> $2`, [live.map(p => p.id), po])).rows;
     if (taken.length && !move) return res.status(409).json({ error: taken.length + ' of these Fulfil POs are already in another HORIZON PO group: ' + taken.slice(0, 5).map(t => t.po).join(', '), taken });
     const L = await _fgLines(live.map(p => p.id));
-    for (const p of live) { const ln = L[p.id] || [];
-      await pool.query(`INSERT INTO planner.po_fulfil_group (fulfil_id, po, number, reference, supplier, state, lines, units, added_by, synced_at) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,now())
-        ON CONFLICT (fulfil_id) DO UPDATE SET po=excluded.po, number=excluded.number, reference=excluded.reference, supplier=excluded.supplier, state=excluded.state, lines=excluded.lines, units=excluded.units, added_by=excluded.added_by, added_at=now(), synced_at=now()`,
-        [p.id, po, p.number || null, p.reference || null, p['party.name'] || null, p.state || null, JSON.stringify(ln), ln.reduce((a, l) => a + l.qty, 0), by]); }
+    const V = {}; (await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', live.map(p => p.id)]], ['id', 'total_amount', 'currency.code'], 500, 'client PO values')).forEach(v => { V[v.id] = v; });   // v28.376: share basis
+    for (const p of live) { const ln = L[p.id] || [], v = V[p.id] || {};
+      await pool.query(`INSERT INTO planner.po_fulfil_group (fulfil_id, po, number, reference, supplier, state, lines, units, added_by, synced_at, total_amount, currency) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,now(),$10,$11)
+        ON CONFLICT (fulfil_id) DO UPDATE SET po=excluded.po, number=excluded.number, reference=excluded.reference, supplier=excluded.supplier, state=excluded.state, lines=excluded.lines, units=excluded.units, added_by=excluded.added_by, added_at=now(), synced_at=now(), total_amount=excluded.total_amount, currency=excluded.currency`,
+        [p.id, po, p.number || null, p.reference || null, p['party.name'] || null, p.state || null, JSON.stringify(ln), ln.reduce((a, l) => a + l.qty, 0), by, _fulfilNum(v.total_amount), v['currency.code'] || null]); }
     await _fgMirrorRow(po).catch(() => {});
     try { invalidateSupplyCaches('po'); } catch (_) {}
     res.json(Object.assign({ ok: true, linked: live.length, skipped: ids.length - live.length }, await _fgCurrent(po)));
@@ -8285,6 +8286,96 @@ async function _fgMirrorRow(po) {
     ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id, state=excluded.state, party_name=excluded.party_name, line_count=excluded.line_count, lines=excluded.lines, last_synced_at=now(), source='group', updated_at=now()`,
     [po, (open[0] || g[0]).fulfil_id, state, (open[0] || g[0]).supplier || null, lines.length, JSON.stringify(lines)]);
 }
+// ═══ v28.376 (Ben 15-Oct-26): MASTER PO PAYMENT SHARES. A client PO group's starting deposit (credit note), completion and balance payments
+// are shared across its Fulfil client POs in proportion to their Fulfil value (units when a value is missing). Each Fulfil PO's bill is
+// found in HORIZON's Xero copy by the Fulfil PO number in the bill reference (Fulfil posts each PO to its company's Xero: AU to AU, UK to
+// UK). A share whose bill is not in Xero yet waits in planner.po_group_shares (mig 374) and is applied when the bill appears (after each
+// hourly bill sync, or Apply pending on the PO). Never more than the bill's live amount due; a share is applied once (status claim + the
+// xero_run_payments unique key).
+async function _fgShares(po) {
+  const g = (await pool.query(`SELECT fulfil_id, number, state, total_amount, units FROM planner.po_fulfil_group WHERE po=$1 ORDER BY fulfil_id`, [po]).catch(() => ({ rows: [] }))).rows.filter(r => !/^cancel/.test(r.state || ''));
+  if (!g.length) return [];
+  const byVal = g.every(r => Number(r.total_amount) > 0), w = g.map(r => byVal ? Number(r.total_amount) : (Number(r.units) || 0)), W = w.reduce((a, b) => a + b, 0);
+  return g.map((r, i) => ({ fulfil_id: Number(r.fulfil_id), number: r.number, pct: W > 0 ? w[i] / W : 1 / g.length, basis: W > 0 ? (byVal ? 'value' : 'units') : 'equal' }));
+}
+function _fgSplit(amount, shares) {   // exact to the cent: floor each share, then the leftover cents one by one to the largest shares
+  const cents = Math.round((Number(amount) || 0) * 100), parts = shares.map(s => Math.floor(cents * s.pct)); let rest = cents - parts.reduce((a, b) => a + b, 0);
+  const order = shares.map((_, i) => i).sort((a, b) => shares[b].pct - shares[a].pct); for (let k = 0; rest > 0 && order.length; k = (k + 1) % order.length) { parts[order[k]]++; rest--; }
+  return shares.map((s, i) => Object.assign({}, s, { amount: parts[i] / 100 }));
+}
+async function _fgBillsFor(numbers) {   // Fulfil PO number -> its live Xero bill (or { ambiguous } when two bills name it)
+  const nums = [...new Set(numbers.filter(Boolean))], out = {}; if (!nums.length) return out;
+  const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), tok = s => '(^|[^A-Za-z0-9])' + esc(s) + '([^A-Za-z0-9-]|$)';
+  const rows = (await pool.query(`SELECT invoice_id, lower(region) region, invoice_number, reference, upper(coalesce(status,'')) status, coalesce(amount_due,0)::float8 due, total::float8 total
+      FROM planner.xero_bills WHERE upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') AND (${nums.map((_, i) => `reference ~* $${i + 1} OR invoice_number ~* $${i + 1}`).join(' OR ')})`, nums.map(tok))).rows;
+  nums.forEach(n => { const re = new RegExp(tok(n), 'i'), hit = rows.filter(r => re.test(r.reference || '') || re.test(r.invoice_number || ''));
+    if (hit.length === 1) out[n] = hit[0]; else if (hit.length > 1) out[n] = { ambiguous: hit.map(h => h.invoice_number || h.invoice_id) }; });
+  return out;
+}
+async function _fgSettleAcct(org, payingOrg) {   // same org as the money -> Supplier Payments 602.1; the other org -> its loan 901
+  if (org === payingOrg) { const cfg = await _xeroFinanceCfg(); const a = ((cfg.accounts && cfg.accounts[org]) || {}).supplier_payments; return a && a.id ? { id: a.id, name: (a.code || '602.1') + ' ' + (a.name || 'Supplier Payments'), from: 'account' } : null; }
+  const ln = await _xeroLoanAcct(org); return ln ? { id: ln.id, name: ln.code + ' ' + ln.name, from: 'loan' } : null;
+}
+async function _fgApplyShare(sh, bill, by) {
+  const claim = (await pool.query(`UPDATE planner.po_group_shares SET status='applying', error=null WHERE id=$1 AND status IN ('pending','error') RETURNING id`, [sh.id])).rows[0];
+  if (!claim) return { id: sh.id, status: 'skipped' };
+  const done = async (status, extra) => { await pool.query(`UPDATE planner.po_group_shares SET status=$2, error=$3, invoice_id=coalesce($4, invoice_id), xero_id=coalesce($5, xero_id), applied_at=CASE WHEN $2='applied' THEN now() ELSE applied_at END WHERE id=$1`,
+    [sh.id, status, (extra && extra.error) || null, (extra && extra.invoice_id) || null, (extra && extra.xero_id) || null]); return Object.assign({ id: sh.id, number: sh.number, amount: Number(sh.amount), status }, extra || {}); };
+  try {
+    if (!bill) return await done('pending', { error: 'no Xero bill for ' + sh.number + ' yet' });
+    if (bill.ambiguous) return await done('error', { error: 'more than one Xero bill names ' + sh.number + ': ' + bill.ambiguous.join(', ') });
+    if (bill.status === 'DRAFT') return await done('pending', { error: 'bill ' + (bill.invoice_number || '') + ' is still a draft in Xero', invoice_id: bill.invoice_id });
+    const amt = Math.round(Number(sh.amount) * 100) / 100;
+    const li = await xeroFetch(bill.region, '/api.xro/2.0/Invoices/' + bill.invoice_id); const inv = li && li.Invoices && li.Invoices[0];   // live amount due
+    const due = inv ? Number(inv.AmountDue) || 0 : null;
+    if (due == null) return await done('error', { error: 'could not read bill ' + (bill.invoice_number || '') + ' in Xero', invoice_id: bill.invoice_id });
+    if (amt > due + 0.01) return await done('error', { error: 'share ' + amt.toFixed(2) + ' is more than bill ' + (bill.invoice_number || '') + ' still owes (' + due.toFixed(2) + ')', invoice_id: bill.invoice_id });
+    const date = new Date().toISOString().slice(0, 10);
+    if (sh.kind === 'deposit_cn') {
+      if (bill.region !== sh.paying_org) return await done('error', { error: 'the deposit credit note is in Xero ' + String(sh.paying_org).toUpperCase() + ' but bill ' + (bill.invoice_number || '') + ' is in Xero ' + bill.region.toUpperCase() + ': deposits never cross orgs', invoice_id: bill.invoice_id });
+      await xeroFetch(bill.region, '/api.xro/2.0/CreditNotes/' + sh.source_ref + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: bill.invoice_id }, Amount: amt, Date: date }] } });
+      xeroPreflightBust(); return await done('applied', { invoice_id: bill.invoice_id, xero_id: 'allocation' });
+    }
+    const acc = await _fgSettleAcct(bill.region, sh.paying_org); if (!acc) return await done('error', { error: 'no payment account mapped in Xero ' + bill.region.toUpperCase(), invoice_id: bill.invoice_id });
+    let lg = null;
+    try { lg = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, currency_rate, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
+        [sh.source_ref, bill.region, bill.invoice_id, bill.invoice_number || null, acc.id, 'master PO share from ' + acc.name, amt, sh.currency || 'USD', acc.from === 'account' ? sh.currency_rate : null, date, by || 'system'])).rows[0].id; }
+    catch (le) { if (/duplicate key/.test(le.message)) return await done('applied', { invoice_id: bill.invoice_id, error: 'already paid by this run' }); throw le; }
+    const payObj = { Invoice: { InvoiceID: bill.invoice_id }, Account: { AccountID: acc.id }, Date: date, Amount: amt };
+    if (acc.from === 'account' && Number(sh.currency_rate) > 0) payObj.CurrencyRate = Number(sh.currency_rate);   // same org: the run's rate; cross-org: Xero's own daily rate (as today)
+    try { const pr = await xeroFetch(bill.region, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } }); const pay = pr && pr.Payments && pr.Payments[0];
+      await pool.query(`UPDATE planner.xero_run_payments SET status='created', xero_payment_id=$2 WHERE id=$1`, [lg, pay && pay.PaymentID]).catch(() => {}); xeroPreflightBust();
+      return await done('applied', { invoice_id: bill.invoice_id, xero_id: pay && pay.PaymentID }); }
+    catch (pe) { await pool.query(`UPDATE planner.xero_run_payments SET status='failed', error=$2 WHERE id=$1`, [lg, String(pe.message).slice(0, 500)]).catch(() => {}); throw pe; }
+  } catch (e) { return await done('error', { error: String((e && e.message) || e).slice(0, 400) }); }
+}
+// Creates the share rows for one payment (idempotent per source) and applies every share whose bill is already in Xero.
+async function fgShareOut(po, kind, sourceRef, label, amount, currency, payingOrg, rate, by) {
+  const shares = _fgSplit(amount, await _fgShares(po)); if (!shares.length) return { ok: false, error: po + ' has no client PO group' };
+  for (const s of shares) await pool.query(`INSERT INTO planner.po_group_shares (po, kind, source_ref, source_label, fulfil_id, number, share_pct, amount, currency, currency_rate, paying_org, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (kind, source_ref, fulfil_id) DO NOTHING`, [po, kind, sourceRef, label, s.fulfil_id, s.number, Math.round(s.pct * 1e6) / 1e6, s.amount, currency || 'USD', rate || null, payingOrg, by || 'system']);
+  return fgApplyPending(po, by, { kind, source_ref: sourceRef });
+}
+async function fgApplyPending(po, by, only) {   // po null = every master PO (the hourly run); only = { kind, source_ref }
+  const p = [], w = [`status IN ('pending'${only ? ",'error'" : ''})`]; if (po) { p.push(po); w.push('po=$' + p.length); }
+  if (only) { p.push(only.kind); w.push('kind=$' + p.length); p.push(only.source_ref); w.push('source_ref=$' + p.length); }
+  const rows = (await pool.query(`SELECT * FROM planner.po_group_shares WHERE ${w.join(' AND ')} ORDER BY id`, p).catch(() => ({ rows: [] }))).rows;
+  if (!rows.length) return { ok: true, applied: 0, pending: 0, errors: 0, results: [] };
+  const bills = await _fgBillsFor(rows.map(r => r.number)), results = [];
+  for (const r of rows) results.push(await _fgApplyShare(r, bills[r.number] || null, by));
+  return { ok: true, applied: results.filter(x => x.status === 'applied').length, pending: results.filter(x => x.status === 'pending').length, errors: results.filter(x => x.status === 'error').length, results };
+}
+app.get('/api/supply/po/:po/group-shares', async (req, res) => {
+  try { const po = String(req.params.po); const rows = (await pool.query(`SELECT s.id, s.kind, s.source_label, s.number, s.share_pct::float8 share_pct, s.amount::float8 amount, s.currency, s.paying_org, s.status, s.error, s.invoice_id, b.invoice_number bill_number,
+        to_char(s.created_at,'YYYY-MM-DD') created, to_char(s.applied_at,'YYYY-MM-DD') applied FROM planner.po_group_shares s LEFT JOIN planner.xero_bills b ON b.invoice_id = s.invoice_id WHERE s.po=$1 ORDER BY s.id`, [po]).catch(() => ({ rows: [] }))).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, po, shares: await _fgShares(po), rows }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/po/:po/group-shares/apply', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access or admin required to post to Xero' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  if ((req.body && req.body.confirm) !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Xero' });
+  try { res.json(await fgApplyPending(String(req.params.po), authUser(req) || 'unknown', null)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // v28.172 (Ben): search Xero bills to (re)link a PO (PO drawer ▸ MASTER DATA & DOCS ▸ Linked records ▸ change). Reads the
 // LOCAL planner.xero_bills cache (kept fresh by syncXeroBills). Matches bill number / reference / supplier;
 // each hit says which PO(s) it is already linked to, so a relink can't silently double-link a bill.
@@ -8571,6 +8662,14 @@ async function computeXeroRunPlan(run, ctx) {
       }
     }
   });
+  // v28.376 (Ben 15-Oct-26): a completion / balance line for a MASTER PO (client PO group) is shared across its client PO bills by value;
+  // each share is paid at posting (602.1 in the paying org, loan 901 in the other org) or waits until its Fulfil bill is in Xero.
+  for (const l of outLines) { if (/deposit/i.test(String(l.type || '')) || l.blocked) continue;
+    const sh = await _fgShares(String(l.reference || '')); if (!sh.length) continue;
+    const parts = _fgSplit(l.amount, sh), bills = await _fgBillsFor(parts.map(p => p.number));
+    l.group = { parts: parts.map(p => { const b = bills[p.number]; return { number: p.number, pct: Math.round(p.pct * 10000) / 100, amount: p.amount, basis: p.basis,
+      bill: b && !b.ambiguous ? { number: b.invoice_number, region: b.region, due: b.due, status: b.status, cross: b.region !== paying } : null, ambiguous: b && b.ambiguous ? b.ambiguous : null }; }) };
+    l.linked_bill = null; l.will_pay = false; }
   // deposit-reference exchange rates (pre-P58 same-org deposit payments post at these)
   const depRefs = [...new Set(outLines.filter(l => l.legacy && /deposit/i.test(String(l.type || '')) && l.deposit_ref).map(l => l.deposit_ref))];
   const depRate = {};
@@ -8641,7 +8740,7 @@ async function computeXeroRunPlan(run, ctx) {
     } } catch (e) { console.warn('[xero-plan] split key lines: ' + e.message); }
   const willCreate = outLines.filter(l => l.tracking && !l.tracking.exists).map(l => l.tracking.option);
   if (willCreate.length) checks.push({ level: (trackOk === null ? 'warn' : 'ok'), msg: 'Will auto-create Production option(s): ' + [...new Set(willCreate)].join(', ') });
-  const noBill = outLines.filter(l => !l.linked_bill && !l.blocked).map(l => l.reference);
+  const noBill = outLines.filter(l => !l.linked_bill && !l.blocked && !l.group).map(l => l.reference);
   if (noBill.length) checks.push({ level: 'warn', msg: noBill.length + ' line(s) have no linked Xero bill yet (payment can be posted after the bill exists / is linked): ' + [...new Set(noBill)].join(', ') });
   // v28.183 (Ben): voided linked bills. Healed = relinked to the PO's single live bill (said so); unresolved = blocks the post.
   const voidedLinks = (heal.flagged || []).filter(f => payLines.some(l => String(l.reference || '') === f.po));
@@ -8681,6 +8780,10 @@ function _xeroPlanIssues(plan) {
     if (Math.abs(Number(l.amount) || 0) > 0.005 && !(l.account && l.account.code)) add(block, po + ': no Xero account mapped (' + (l.account_role === 'loan' ? 'intercompany loan 901' : String(l.account_role || '').replace('_', ' ')) + ')');
     if (l.blocked) return;
     if (isDep && !l.legacy) add(warn, po + ': P58+ deposit, no payment posted (draws down via a credit note)');
+    else if (l.group) { const P = l.group.parts, pend = P.filter(x => !x.bill && !x.ambiguous), amb = P.filter(x => x.ambiguous), over = P.filter(x => x.bill && x.amount > x.bill.due + 0.01);   // v28.376
+      add(warn, po + ': master PO, shared across ' + P.length + ' client PO bills by ' + (P[0].basis || 'value') + ': ' + P.map(x => x.number + ' ' + x.pct + '% ' + _n(x.amount) + (x.bill ? ' (bill ' + (x.bill.number || '') + (x.bill.cross ? ', ' + String(x.bill.region).toUpperCase() + ' via loan 901' : '') + ')' : x.ambiguous ? ' (2 bills!)' : ' (waiting for bill)')).join(', ') + (pend.length ? '. Shares waiting for a bill are applied when it arrives.' : ''));
+      amb.forEach(x => add(block, po + ': more than one Xero bill names ' + x.number + ' (' + x.ambiguous.join(', ') + ')'));
+      over.forEach(x => add(block, po + ': share ' + _n(x.amount) + ' for ' + x.number + ' is more than its bill still owes (' + _n(x.bill.due) + ')')); }
     else if (!(l.linked_bill && l.linked_bill.id)) add(warn, po + ': no linked Xero bill, payment will be skipped');
     else if (l.will_pay && l.pay_ok == null) add(warn, po + ': could not read the bill amount due in Xero');
     if (l.cross && !isDep) add(warn, po + ': cross-org, settles in ' + String(l.home_org || '').toUpperCase() + ' via the intercompany loan (901)');
@@ -8843,6 +8946,10 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
       const isDep = /deposit/i.test(String(l.type || ''));
       if (l.blocked) { out.skipped.push({ po: l.reference, reason: l.blocked }); continue; }
       if (isDep && !l.legacy) { out.skipped.push({ po: l.reference, reason: 'P58+ deposit → create a credit note' }); continue; }
+      if (l.group) {   // v28.376: master PO: one payment per client PO bill by share; shares without a bill wait (applied when the bill arrives)
+        const g = await fgShareOut(l.reference, 'payment', _rk + '|' + (l.type || '') + '|' + l.reference, (plan.reference || 'run') + ' ' + (l.type || ''), l.amount, plan.currency || 'USD', plan.paying_org, runRate, authUser(req) || 'system');
+        (out.group = out.group || []).push({ po: l.reference, type: l.type, amount: l.amount, applied: g.applied, pending: g.pending, errors: g.errors, results: (g.results || []).map(x => ({ number: x.number, amount: x.amount, status: x.status, error: x.error || null })) });
+        (g.results || []).filter(x => x.status === 'error').forEach(x => out.skipped.push({ po: l.reference, reason: 'master PO share ' + x.number, error: x.error })); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
       if (!l.settle_account_id) { out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'payment') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
       const rate = l.cross ? null : ((isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate);
@@ -9044,10 +9151,11 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     const acct = ((cfg.accounts && cfg.accounts[region]) || {}).stock_deposits;
     if (!acct || !acct.code) return res.status(400).json({ error: 'No Stock Deposits (602) account mapped for ' + region.toUpperCase() + ' — set it in CONFIG ▸ Xero' });
     const link = (await pool.query(`SELECT external_id, external_ref FROM planner.po_links WHERE system='xero' AND status='linked' AND po=$1`, [po])).rows[0];
-    if (!link || !link.external_id) return res.status(400).json({ error: 'No linked Xero bill for ' + po + ' to allocate the credit note to — resolve its Linked records first.' });
+    const grpShares = await _fgShares(po);   // v28.376: a master PO's deposit is shared across its client PO bills (no single linked bill needed)
+    if (!grpShares.length && (!link || !link.external_id)) return res.status(400).json({ error: 'No linked Xero bill for ' + po + ' to allocate the credit note to — resolve its Linked records first.' });
     // can't allocate more than the bill still owes
     let due = null; let billRate = null;
-    try { const bi = await xeroFetch(region, '/api.xro/2.0/Invoices/' + link.external_id); const inv = bi && bi.Invoices && bi.Invoices[0]; if (inv) { due = Number(inv.AmountDue) || 0; billRate = (inv.CurrencyRate != null ? Number(inv.CurrencyRate) : null); } } catch (e) {}
+    if (!grpShares.length) try { const bi = await xeroFetch(region, '/api.xro/2.0/Invoices/' + link.external_id); const inv = bi && bi.Invoices && bi.Invoices[0]; if (inv) { due = Number(inv.AmountDue) || 0; billRate = (inv.CurrencyRate != null ? Number(inv.CurrencyRate) : null); } } catch (e) {}
     if (due != null && amount > due + 0.01) return res.status(400).json({ error: 'Deposit ' + _usd(amount) + ' exceeds the bill’s amount due ' + _usd(due) + ' — cannot allocate more than is owed.' });
     // v28.176 (Ben): resolve the supplier's Xero contact (ContactID) BEFORE any write; not found = nothing posted.
     const xc = await xeroContactFor(region, poRow.supplier, { fresh: true });
@@ -9060,13 +9168,19 @@ app.post('/api/supply/xero/deposit-credit-note', async (req, res) => {
     xeroPreflightBust();   // v28.173 (Ben): the allocation changes the bill's amount due
     const cn = cr && cr.CreditNotes && cr.CreditNotes[0];
     let allocated = false, allocErr = null, _recErr = null;
-    if (cn && cn.CreditNoteID) {
+    let groupOut = null;
+    if (cn && cn.CreditNoteID && grpShares.length) {   // v28.376: master PO: one credit note, allocated to each client PO bill by its share (pending where no bill yet)
+      try { groupOut = await fgShareOut(po, 'deposit_cn', cn.CreditNoteID, cn.CreditNoteNumber || ('DEPOSIT-' + po), amount, 'USD', region, null, authUser(req) || 'unknown'); allocated = groupOut.applied > 0; if (groupOut.errors) allocErr = groupOut.errors + ' share(s) not applied: see the PO Xero bills panel'; }
+      catch (ge) { allocErr = ge.message; }
+    } else if (cn && cn.CreditNoteID) {
       try { await xeroFetch(region, '/api.xro/2.0/CreditNotes/' + cn.CreditNoteID + '/Allocations', { method: 'PUT', body: { Allocations: [{ Invoice: { InvoiceID: link.external_id }, Amount: amount }] } }); allocated = true; }
       catch (ae) { allocErr = ae.message; }
+    }
+    if (cn && cn.CreditNoteID) {
       // record it so the "uncreated credit note" exception clears for this PO
       try { await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at) VALUES ($1,'xero_credit_note',$2,$3,$4,'linked',$5,'auto',now(),now()) ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, updated_at=now()`, [po, cn.CreditNoteID, cn.CreditNoteNumber || ('DEPOSIT-' + po), 'https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID, _usd(amount) + (trackOption ? ' ' + trackOption : '')]); } catch (e) { _recErr = e.message; log500(e); }   // v28.116 (review S8): swallowing this made the PO show "uncreated credit note" again → a second credit note
     }
-    res.json({ ok: true, region, po, production: trackOption, amount, account: acct.code, bill: link.external_ref, record_failed: _recErr, xero_contact: xc.Name,
+    res.json({ ok: true, region, po, production: trackOption, amount, account: acct.code, bill: link ? link.external_ref : null, group: groupOut, record_failed: _recErr, xero_contact: xc.Name,
       credit_note_id: cn && cn.CreditNoteID, credit_note_number: cn && cn.CreditNoteNumber, allocated, allocation_error: allocErr,
       url: (cn && cn.CreditNoteID) ? ('https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=' + cn.CreditNoteID) : null });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
@@ -9394,6 +9508,9 @@ async function syncXeroBills(opts) {
     try { const h = await xeroHealAllVoided(); r.healed = h.healed.length; r.flagged = h.flagged.length; } catch (e) { r.heal_error = e.message; }
     try { const s = await xeroVoidLinkFinding(); r.voided_links = s ? s.meta.n : 0; if (s) await pool.query(HZ_FINDINGS_UPSERT, [JSON.stringify([s]), APP_VERSION]); } catch (e) { console.warn('[xero-bills] sanity check failed: ' + e.message); }
     if (r.changed || r.healed || r.flagged) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); xeroPreflightBust(); }
+    // v28.376: master PO shares waiting for their client PO bill are applied once the bill is in the copy. PRODUCTION ONLY: the sandbox talks
+    // to the same live Xero companies, so it never posts shares on its own (Apply pending on the PO is the manual route there).
+    if (!IS_SANDBOX && r.changed) { try { const g = await fgApplyPending(null, 'auto (bill sync)', null); if (g.applied || g.errors) { r.group_shares = { applied: g.applied, errors: g.errors }; console.log('[group-shares] auto applied ' + g.applied + ', errors ' + g.errors); } } catch (e) { r.group_share_error = e.message; } }
     _xbLast = r; return r;
   })().finally(() => { _xbSyncP = null; });
   return _xbSyncP;

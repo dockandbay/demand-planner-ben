@@ -2227,7 +2227,8 @@
     var m=function(n,c){ return (c?esc(c)+' ':'')+(Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); };
     var pill=function(s){ var M={paid:['Paid','var(--pos)'],part:['Part paid','var(--amber)'],unpaid:['Awaiting payment','var(--neg)'],draft:['Draft','var(--muted)'],'void':['Voided','var(--muted)']}[s]||[s,'var(--muted)'];
       return '<span style="display:inline-block;border:1px solid '+M[1]+';color:'+M[1]+';border-radius:999px;padding:0 7px;font-size:11px;font-weight:700;white-space:nowrap">'+M[0]+'</span>'; };
-    if(!B.length){ el.innerHTML='<div class="mut tiny">No Xero bills found for this PO yet'+(d.group?' or its '+d.group+' Fulfil client POs':'')+'. Bills appear here within an hour of being created in Xero; link one in Master data &amp; docs &gt; Linked records.</div>'; return; }
+    if(!B.length){ el.innerHTML='<div class="mut tiny">No Xero bills found for this PO yet'+(d.group?' or its '+d.group+' Fulfil client POs':'')+'. Bills appear here within an hour of being created in Xero; link one in Master data &amp; docs &gt; Linked records.</div>'
+      +(d.group?'<div class="po-xbs" style="margin-top:12px"></div>':''); if(d.group)poXbShares(el.querySelector('.po-xbs'),d.po); return; }
     var TH='style="text-align:left;padding:4px 8px;white-space:nowrap"', THr='style="text-align:right;padding:4px 8px;white-space:nowrap"', TD='style="padding:5px 8px;vertical-align:top"', TDr='style="padding:5px 8px;vertical-align:top;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums"';
     el.innerHTML='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:760px"><thead><tr class="mut tiny" style="border-bottom:1px solid var(--line)">'
       +'<th '+TH+'>Bill</th><th '+TH+'>Reference</th><th '+TH+'>Tied by</th><th '+TH+'>Date</th><th '+TH+'>Due</th><th '+TH+'>Status</th><th '+THr+'>Total</th><th '+THr+'>Paid or credited</th><th '+THr+'>Still due</th><th '+THr+'>By HORIZON</th><th '+THr+'>Other credits</th></tr></thead><tbody>'
@@ -2239,7 +2240,32 @@
           +'<td '+TDr+'>'+m(b.total,c)+'</td><td '+TDr+'>'+m(b.settled)+'</td><td style="padding:5px 8px;vertical-align:top;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums'+(b.due>0.005&&b.state!=='void'?';color:var(--neg);font-weight:700':'')+'">'+m(b.due)+'</td>'
           +'<td '+TDr+(payTip?' title="'+esc(payTip)+'"':'')+'>'+(pays.length?m(b.hz_paid)+' <span class="mut tiny">('+pays.length+')</span>':'<span class="mut">-</span>')+'</td><td '+TDr+' title="Paid or credited in Xero other than by a HORIZON payment: deposit credit notes, manual payments">'+(b.other_paid?m(b.other_paid):'<span class="mut">-</span>')+'</td></tr>'; }).join('')
       +'</tbody><tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td '+TD+' colspan="6">'+T.bills+' live bill'+(T.bills===1?'':'s')+(d.group?' &middot; client PO group of '+d.group:'')+'</td><td '+TDr+'>'+m(T.total,ccy)+'</td><td '+TDr+'>'+m(T.paid)+'</td><td '+TDr+'>'+m(T.due)+'</td><td '+TDr+'>'+m(T.hz_paid)+'</td><td '+TDr+'>'+m(T.other_paid)+'</td></tr></tfoot></table></div>'
-      +'<div class="mut tiny" style="margin-top:4px">'+(d.synced_at?'Xero copy as of '+esc(fd(d.synced_at.slice(0,10)))+' '+esc(d.synced_at.slice(11)):'')+' &middot; hover &ldquo;By HORIZON&rdquo; for each payment.</div>';
+      +'<div class="mut tiny" style="margin-top:4px">'+(d.synced_at?'Xero copy as of '+esc(fd(d.synced_at.slice(0,10)))+' '+esc(d.synced_at.slice(11)):'')+' &middot; hover &ldquo;By HORIZON&rdquo; for each payment.</div>'
+      +(d.group?'<div class="po-xbs" style="margin-top:12px"><div class="mut tiny">Loading payment shares…</div></div>':'');
+    if(d.group)poXbShares(el.querySelector('.po-xbs'),d.po);
+  }
+  // v28.376 (Ben 15-Oct-26): master PO payment shares. Deposit credit notes, completion and balance payments split across the client PO bills
+  // by Fulfil value; a share waits until its bill is in Xero (applied automatically after the hourly bill sync on production, or Apply now).
+  function poXbShares(box,po){ if(!box)return;
+    fetch('/api/supply/po/'+encodeURIComponent(po)+'/group-shares').then(function(r){return r.json();}).then(function(d){
+      if(!d||d.error){ box.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load payment shares'+(d&&d.error?': '+esc(d.error):'')+'</div>'; return; }
+      var S=d.shares||[], R=d.rows||[], pend=R.filter(function(r){return r.status==='pending'||r.status==='error';});
+      var m=function(n){ return (Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      var st=function(s){ var M={applied:['Applied','var(--pos)'],pending:['Waiting for bill','var(--amber)'],error:['Problem','var(--neg)'],applying:['Applying','var(--muted)']}[s]||[s,'var(--muted)']; return '<b style="color:'+M[1]+';white-space:nowrap">'+M[0]+'</b>'; };
+      box.innerHTML='<div class="sect-h" style="font-size:13px">Payment shares <span class="mut tiny">— each payment on this master PO is shared across its client PO bills by '+esc((S[0]&&S[0].basis)||'value')+': '
+          +S.map(function(s){ return esc(s.number)+' '+(Math.round(s.pct*1000)/10)+'%'; }).join(', ')+'</span></div>'
+        +(R.length?'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:640px"><thead><tr class="mut tiny"><th style="text-align:left;padding:3px 8px">Payment</th><th style="text-align:left;padding:3px 8px">Client PO</th><th style="text-align:right;padding:3px 8px">Share</th><th style="text-align:right;padding:3px 8px">Amount</th><th style="text-align:left;padding:3px 8px">Status</th><th style="text-align:left;padding:3px 8px">Bill / note</th></tr></thead><tbody>'
+          +R.map(function(r){ return '<tr style="border-top:1px solid var(--line)"><td style="padding:4px 8px;white-space:nowrap">'+esc(r.kind==='deposit_cn'?'Deposit credit note':'Payment')+' <span class="mut tiny">'+esc(r.source_label||'')+'</span></td><td style="padding:4px 8px">'+esc(r.number||'')+'</td>'
+            +'<td style="padding:4px 8px;text-align:right">'+(Math.round((r.share_pct||0)*1000)/10)+'%</td><td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums">'+esc(r.currency||'')+' '+m(r.amount)+'</td><td style="padding:4px 8px">'+st(r.status)+'</td>'
+            +'<td style="padding:4px 8px;word-break:break-word">'+esc(r.bill_number||'')+(r.error?'<div class="tiny" style="color:'+(r.status==='error'?'var(--neg)':'var(--muted)')+'">'+esc(r.error)+'</div>':'')+'</td></tr>'; }).join('')+'</tbody></table></div>'
+          :'<div class="mut tiny">No payments shared yet. A starting deposit credit note, or a completion / balance in a payment run, is shared here automatically.</div>')
+        +(pend.length?'<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="save-btn xbs-apply" style="background:var(--blue);color:#fff;border:0">Apply '+pend.length+' waiting share'+(pend.length===1?'':'s')+' now</button><span class="xbs-msg mut tiny">Posts to live Xero for any share whose bill is now there.</span></div>':'');
+      var ap=box.querySelector('.xbs-apply'); if(ap)ap.onclick=function(){ if(!confirm('Apply the waiting payment shares for '+po+' in Xero now? Only shares whose client PO bill is already in Xero are posted.'))return;
+        ap.disabled=true; ap.textContent='Applying…';
+        fetch('/api/supply/po/'+encodeURIComponent(po)+'/group-shares/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirm:true})}).then(function(r){return r.json();})
+          .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'apply failed'); var msg=box.querySelector('.xbs-msg'); poXbShares(box,po); setTimeout(function(){ var m2=box.querySelector('.xbs-msg'); if(m2)m2.textContent='Applied '+j.applied+', still waiting '+j.pending+', problems '+j.errors+'.'; },400); })
+          .catch(function(e){ alert('Failed: '+(e&&e.message||e)); ap.disabled=false; ap.textContent='Apply now'; }); };
+    }).catch(function(e){ box.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load payment shares: '+esc(e&&e.message||e)+'</div>'; });
   }
   function linkedRecordsPanel(po){
     return '<div class="sect-h">Linked records <span class="mut tiny">— how this PO maps to Xero, Fulfil, Flexport &amp; DHL. Any SHIPPED PO must have a Xero bill.</span></div>'
