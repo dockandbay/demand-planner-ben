@@ -1073,7 +1073,12 @@
     if(url.indexOf('/api/')!==0||m!=='GET'||(init&&init.body)){ var w=_f(input,init); if(m!=='GET'&&url.indexOf('/api/')===0)w.then(function(){memo={};},function(){}); return w; }
     var now=Date.now(), h=memo[url]; if(h&&now-h.at<MEMO_MS){ try{ return Promise.resolve(h.res.clone()); }catch(e){ delete memo[url]; } }
     if(inflight[url]) return inflight[url].then(function(r){ return r.clone(); });
-    var p=_f(input,init).then(function(r){ delete inflight[url]; if(r.ok&&memoable(url)){ try{ memo[url]={at:Date.now(),res:r.clone()}; }catch(e){} } return r; },function(e){ delete inflight[url]; throw e; });
+    // v28.385 (Ben 15-Oct-26, "didnt load on first click ... loaded on second"): a GET that fails on the network or with 502 / 503 / 504
+    // (a server copy waking from a freeze, a dead pooled connection) is tried ONCE more after 600 ms before the view sees it. Reads only.
+    // Each failed attempt is still an api_failure in the health log; the retry is noted as a metric (api_retry, ok or not).
+    var _once=function(){ return _f(input,init); }, _retry=function(why){ return new Promise(function(res){ setTimeout(res,600); }).then(_once).then(function(r2){ try{ if(window.hzHealthMetric)window.hzHealthMetric('metric','api_retry '+(r2.ok?'ok':'failed'),{path:url.split('?')[0],first:why,second:r2.status},'api_retry'); }catch(_){} return r2; }); };
+    var p=_once().then(function(r){ return (r.status===502||r.status===503||r.status===504)?_retry('HTTP '+r.status):r; },function(e){ if(e&&e.name==='AbortError')throw e; return _retry('network'); })
+      .then(function(r){ delete inflight[url]; if(r.ok&&memoable(url)){ try{ memo[url]={at:Date.now(),res:r.clone()}; }catch(e){} } return r; },function(e){ delete inflight[url]; throw e; });
     inflight[url]=p; return p.then(function(r){ return r.clone(); });
   };
 })();

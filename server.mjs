@@ -179,7 +179,15 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
 const HZ_THAW_MS = 3000, HZ_INSTANCE = Math.random().toString(36).slice(2, 10), HZ_BOOT_UPTIME_MS = Math.round(process.uptime() * 1000);
 let _hzTickAt = Date.now(), _hzThaw = null, _hzColdDone = false;   // _hzThaw = { at, gap }
 function hzThawCheck() { const now = Date.now(), gap = now - _hzTickAt - 1000; _hzTickAt = now;
-  if (gap > HZ_THAW_MS) { _hzThaw = { at: now, gap }; try { hzHealthEvt('instance', 'thaw', { path: 'instance thaw', ms: gap, message: 'Instance resumed after a ' + Math.round(gap / 1000) + 's freeze', meta: { max_gap_ms: gap } }); } catch (_) {} } }
+  if (gap > HZ_THAW_MS) { _hzThaw = { at: now, gap }; const dropped = hzDropIdleDb(gap);
+    try { hzHealthEvt('instance', 'thaw', { path: 'instance thaw', ms: gap, message: 'Instance resumed after a ' + Math.round(gap / 1000) + 's freeze' + (dropped ? ', ' + dropped + ' idle DB connection(s) dropped' : ''), meta: { max_gap_ms: gap, max_dropped: dropped } }); } catch (_) {} } }
+// v28.385 (Ben 15-Oct-26, "didnt load on first click ... loaded on second"): an instance frozen for a while holds IDLE pooled connections the
+// pooler has already closed; the first request after the thaw took one and failed ("Connection terminated due to connection timeout" at
+// 02:18:27). After a freeze of 10 s or more the idle connections are dropped (checked-out ones are untouched), so the next query opens a
+// fresh one. Uses pg-pool's own removal (ends the socket, updates the count); never throws.
+const HZ_THAW_DROP_MS = 10000;
+function hzDropIdleDb(gap) { try { if (gap < HZ_THAW_DROP_MS || !pool || !Array.isArray(pool._idle) || typeof pool._remove !== 'function') return 0;
+  const idle = pool._idle.slice(); idle.forEach(it => { try { pool._remove(it.client); } catch (_) {} }); return idle.length; } catch (_) { return 0; } }
 { const _t = setInterval(hzThawCheck, 1000); _t.unref?.(); }
 function hzThawGap() { if (Date.now() - _hzTickAt - 1000 > HZ_THAW_MS) hzThawCheck(); return (_hzThaw && Date.now() - _hzThaw.at < 60000) ? _hzThaw.gap : 0; }
 // v28.231 (Ben, health review fix 1): keep a Vercel instance alive until post-response work finishes, instead of freezing it mid-query.

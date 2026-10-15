@@ -1,3 +1,10 @@
+## v28.385 (15-Oct-26) First click that loaded nothing: fresh DB connections after a freeze + one quiet retry
+- Ben: #/supply/config/xero did not load on the first click, did on the second. Live health log 02:18: server copies resumed from 8 to 16 s freezes, then "db connect timeout: Connection terminated due to connection timeout"; the first request failed, the second went to a fresh copy.
+- Server: after a freeze of 10 s or more an instance drops its IDLE pooled DB connections (checked-out ones untouched; pg-pool's own removal), so the next query opens a fresh one. The thaw health row says how many were dropped (meta.max_dropped). Diviyaj: please review (pool internals: pool._idle / pool._remove, guarded; a no-op if absent).
+- Browser: a same-origin GET /api/... that fails on the network or with 502 / 503 / 504 is tried once more after 600 ms before the page sees it (reads only, never saves; aborted requests not retried). Each failed attempt is still an api_failure; the retry is a metric "api_retry ok|failed" with the path.
+- Tested: retry (503 then 200, network error then 200, 503 twice, 404 not retried, POST not retried); idle drop on a real pool (5 s freeze keeps them, 20 s drops 3, next query fine).
+- No migration, no env change.
+
 ## v28.384 (15-Oct-26) Receipt PDF from an email no longer fails on odd characters
 - ACCOUNTS > Reconcile (Microsoft, 01-Oct): "Could not show the PDF: WinAnsi cannot encode \r (0x000d)". The PDF made from an email with no PDF attachment kept carriage returns and tabs, which the standard PDF font cannot draw. Line endings now become line breaks, tabs spaces, the typographic set (curly quotes, dashes, bullet, ellipsis, euro, trade mark) is kept, and any character the font still cannot draw becomes a space instead of failing the whole PDF.
 - No migration, no env change.
