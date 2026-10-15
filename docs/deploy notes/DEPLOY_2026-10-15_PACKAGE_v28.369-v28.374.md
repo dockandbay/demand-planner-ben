@@ -1,3 +1,5 @@
+> **SUPERSEDED 15-Oct-26** by `DEPLOY_2026-10-15_PACKAGE_v28.369-v28.388.md` (this package was never deployed).
+
 # HORIZON deploy: v28.369 to v28.374
 
 **AT A GLANCE:** branch `review-fixes-2026-10-05`, HEAD `9393201a` (`9393201aeb6b05cde1e73dcbc2c3d1ff35065f6b`, v28.374). Live checked 15-Oct-26 (`/api/version`): **v28.368**. Migrations **372 and 373** (additive, idempotent; not on live). No new env vars. **No new `/api/cron/*` or other secret-only routes** (nothing to add to the login-gate exemption list).
