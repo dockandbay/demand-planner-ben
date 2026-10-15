@@ -5806,6 +5806,32 @@ app.post('/api/supply/fulfil/refresh-pos', async (req, res) => {
     res.json({ ...pos, internal_shipments: is, ms: Date.now() - t0, by: authUser(req) || null }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
 });
+// v28.379 (Ben 15-Oct-26: PO363 "the user should be able to relink here"): a leftover Fulfil copy named after a removed HORIZON PO is moved
+// to an existing HORIZON PO: the Fulfil link moves there (one HORIZON PO per Fulfil PO), the copy is renamed to it (replacing that PO's own
+// copy) and its ERP qty is recomputed now. Supply edit or admin. HORIZON data only; nothing is written to Fulfil.
+app.post('/api/supply/fulfil/mirror/:po/relink', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  const from = String(req.params.po || ''), to = String((req.body || {}).to || '').trim(), by = authUser(req) || 'unknown';
+  if (!to) return res.status(400).json({ error: 'Choose the HORIZON PO' });
+  const client = await pool.connect();
+  try {
+    if ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [from])).rows.length) return res.status(400).json({ error: from + ' is a HORIZON PO: change its link in Linked records instead' });
+    if (!(await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [to])).rows.length) return res.status(404).json({ error: to + ' is not a HORIZON PO' });
+    const m = (await client.query(`SELECT fulfil_id FROM planner.fulfil_purchase_orders WHERE po=$1`, [from])).rows[0];
+    if (!m) return res.status(404).json({ error: 'No Fulfil copy named ' + from });
+    const fid = String(m.fulfil_id), ref = ((await client.query(`SELECT external_ref FROM planner.po_links WHERE system='fulfil' AND external_id=$1 AND external_ref IS NOT NULL LIMIT 1`, [fid])).rows[0] || {}).external_ref || fid;
+    await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '30s'");
+    await client.query(`DELETE FROM planner.po_links WHERE system='fulfil' AND (external_id=$1 OR po=$2) AND po <> $3`, [fid, from, to]);
+    await client.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, status, found_by, note, found_at, updated_at) VALUES ($1,'fulfil',$2,$3,'linked','manual',$4,now(),now())
+      ON CONFLICT (po, system) DO UPDATE SET external_id=excluded.external_id, external_ref=excluded.external_ref, status='linked', found_by='manual', note=excluded.note, updated_at=now()`, [to, fid, ref, 'relinked from leftover copy ' + from + ' by ' + by]);
+    await client.query(`DELETE FROM planner.fulfil_purchase_orders WHERE po=$1`, [to]);
+    await client.query(`UPDATE planner.fulfil_purchase_orders SET po=$2, updated_at=now() WHERE po=$1`, [from, to]);
+    await client.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Linked records',$2,$3)`, [to, 'Fulfil PO linked: ' + ref + ' (id ' + fid + '), moved from leftover copy ' + from, by]);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); return res.status(500).json({ error: e.message }); } finally { client.release(); }
+  let erp = null; try { erp = await fulfilErpQtyFromMirror(); } catch (e) { erp = { ok: false, error: e.message }; }
+  res.json({ ok: true, from, to, erp_qty: erp });
+});
 // Drift: every Horizon PO should be in Fulfil. Compares planner.purchase_orders to the mirror — missing + mismatches.
 app.get('/api/supply/fulfil/drift', async (req, res) => {
   try {
@@ -8048,7 +8074,14 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
   try {
     const po = String(req.params.po || '');
     const poRow = (await pool.query(`SELECT po, status, production_status, country_code, branch, flexport_reference, shipment_ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
-    if (!poRow) return res.status(404).json({ error: 'PO not found' });
+    if (!poRow) {   // v28.379 (Ben 15-Oct-26, PO363): a name that is only a leftover Fulfil copy (its HORIZON PO was removed) -> offer to relink it
+      const m = (await pool.query(`SELECT fulfil_id, state, party_name, line_count, to_char(last_synced_at,'YYYY-MM-DD HH24:MI') synced FROM planner.fulfil_purchase_orders WHERE po=$1`, [po])).rows[0];
+      if (!m) return res.status(404).json({ error: 'PO not found' });
+      const num = (await pool.query(`SELECT external_ref FROM planner.po_links WHERE system='fulfil' AND external_id=$1 AND external_ref IS NOT NULL LIMIT 1`, [String(m.fulfil_id)])).rows[0];
+      const held = (await pool.query(`SELECT l.po FROM planner.po_links l JOIN planner.purchase_orders p ON p.po=l.po WHERE l.system='fulfil' AND l.status='linked' AND l.external_id=$1`, [String(m.fulfil_id)])).rows.map(r => r.po);
+      const fnum = (num && num.external_ref) || null, sugg = held[0] || (fnum && (await pool.query(`SELECT po FROM planner.purchase_orders WHERE po=$1`, [fnum])).rows[0] ? fnum : null);
+      return res.json({ po, missing: true, fulfil: { id: String(m.fulfil_id), number: fnum, state: m.state, supplier: m.party_name, lines: m.line_count, synced: m.synced }, linked_to: held, suggest: sugg });
+    }
     const doResolve = String(req.query.refresh || '') === '1';   // read from the DB by default (fast); only hit the live APIs on an explicit refresh
     // v28.183 (Ben): a link to a VOIDED/DELETED bill heals first: from the cache on a normal read, re-checked live in Xero on refresh.
     let heal = null; try { heal = await xeroHealPoLinks([po], { live: doResolve }); if (heal.healed.length || heal.flagged.some(f => f.changed)) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); } } catch (e) { console.warn('[po-links] heal failed for ' + po + ': ' + e.message); }

@@ -2273,6 +2273,21 @@
       +'<div class="po-links-ctx" data-po="'+esc(po)+'"><div class="mut tiny">Open to load linkages…</div></div>';
   }
   function renderPoLinks(el,d){
+    // v28.379 (Ben 15-Oct-26, PO363): the name is only a leftover Fulfil copy (its HORIZON PO was removed): relink it to a HORIZON PO here
+    if(d&&d.missing){ var F=d.fulfil||{};
+      el.innerHTML='<div class="annot" style="border-color:var(--amber);max-width:760px"><b>'+esc(d.po)+' is not a HORIZON PO.</b> It is only a leftover copy of Fulfil <b>'+esc(F.number||('id '+F.id))+'</b>'+(F.supplier?' ('+esc(F.supplier)+(F.state?', '+esc(F.state):'')+')':'')+', kept under the name of a PO that was removed. Link that Fulfil PO to the right HORIZON PO and the copy moves there (ERP quantities update straight away).'
+        +(d.linked_to&&d.linked_to.length?'<div class="tiny" style="margin-top:4px">Fulfil '+esc(F.number||F.id)+' is linked to HORIZON <b>'+d.linked_to.map(esc).join(', ')+'</b>.</div>':'')+'</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px"><span class="tiny">Link to HORIZON PO</span><input class="fci pomiss-to" value="'+esc(d.suggest||'')+'" placeholder="e.g. PO362" style="width:160px;text-align:left;padding:5px 8px">'
+        +'<button class="save-btn pomiss-go" style="background:var(--blue);color:#fff;border:0">Link and move the copy</button><span class="tiny pomiss-msg"></span></div>';
+      var go=el.querySelector('.pomiss-go'), to=el.querySelector('.pomiss-to'), msg=el.querySelector('.pomiss-msg');
+      go.onclick=function(){ var v=String(to.value||'').trim(); if(!v){ msg.textContent='Type the HORIZON PO number.'; return; }
+        if(!confirm('Link Fulfil '+(F.number||F.id)+' to '+v+' and move the leftover copy '+d.po+' there? Any other HORIZON PO linked to it loses the link. HORIZON only; nothing is written to Fulfil.'))return;
+        go.disabled=true; msg.textContent='Linking…';
+        fetch('/api/supply/fulfil/mirror/'+encodeURIComponent(d.po)+'/relink',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({to:v})}).then(function(r){return r.json();})
+          .then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'relink failed'); el.innerHTML='<div class="annot" style="border-color:var(--pos)">Done: Fulfil '+esc(F.number||F.id)+' is now linked to <a href="#/supply/purchase-orders/'+encodeURIComponent(v)+'/master-data" style="color:var(--blue);font-weight:700">'+esc(v)+'</a> and its ERP quantities are updated ('+((j.erp_qty&&j.erp_qty.lines_updated)||0)+' lines). '+esc(d.po)+' no longer exists.</div>';
+            try{ invalidateDerived(); delete cache['purchase-orders']; }catch(_){} })
+          .catch(function(e){ go.disabled=false; msg.textContent=''; alert('Failed: '+(e&&e.message||e)); }); };
+      return; }
     if(!d||d.error){ el.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load linkages'+(d&&d.error?': '+esc(d.error):'')+'</div>'; return; }
     var po=d.po;
     var acts=(d.actions||[]).map(function(a){ return '<div style="background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);border-radius:6px;padding:7px 9px;margin-bottom:8px;font-weight:600">⚠ '+esc(a.msg)+'</div>'; }).join('')

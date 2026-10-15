@@ -1,3 +1,8 @@
+## v28.379 (15-Oct-26) Relink a leftover Fulfil copy from its PO page (PO363)
+- https://horizon.dockandbay.com/#/supply/purchase-orders/PO363/master-data showed "Could not load linkages: PO not found": PO363 was removed but a Fulfil copy under that name remained (Fulfil PO362, id 521). Linked records now explains it and offers "Link to HORIZON PO" (suggested PO362): the Fulfil link moves there, the copy is renamed to that PO and ERP quantities update at once. Supply edit or admin; HORIZON data only, nothing written to Fulfil. New signed-in route POST /api/supply/fulfil/mirror/:po/relink.
+- Live data 15-Oct-26 (Ben's OK): leftover link PO364 -> Fulfil 634 deleted (PO470 -> Fulfil PO470 is the right one); rollback: INSERT INTO planner.po_links (po,system,external_id,external_ref,found_by,status,found_at,updated_at) VALUES ('PO364','fulfil','634','PO470','manual','linked','2026-10-14 01:23:39+00',now()).
+- No migration, no env change.
+
 ## v28.378 (15-Oct-26) One HORIZON PO per Fulfil PO link (PO362 fix)
 - PO362 (Direct to Client) showed no Fulfil quantities: PO363 had been deleted but its manual link to the same Fulfil PO (id 521) stayed, and the Fulfil import let the later link win, so Fulfil PO362 was copied under "PO363". Live data fix done 15-Oct-26 with Ben's OK (that one leftover link deleted; the next Fulfil import copies 521 into PO362).
 - Code: the import only uses links of POs that exist (newest wins); linking a Fulfil PO already linked to another live PO is refused unless the move is confirmed (the picker now says "Move the link to ..."); leftovers from deleted POs are cleared on link; deleting or merging away a PO removes its Fulfil link and client PO group.
