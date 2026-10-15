@@ -2202,9 +2202,10 @@
       res.querySelectorAll('.fpl-open').forEach(function(a){ a.onclick=function(ev){ ev.stopPropagation(); }; });
       res.querySelectorAll('tr.fpl-row').forEach(function(tr){ tr.onclick=function(){ var p=L[+tr.dataset.i]; if(/^cancel/i.test(p.state||''))return; if(p.current){ close(); return; }
         var others=(p.linked_pos||[]).filter(function(x){return x.po!==po;});
-        if(others.length && !confirm('Fulfil '+(p.number||p.id)+' is already tied to '+others.map(function(x){return x.po;}).join(', ')+'. Link it to '+po+' as well?'))return;
+        var _mv=others.some(function(x){return x.by!=='mirror';});   // v28.378: a Fulfil PO links to ONE HORIZON PO: linking here moves it
+        if(others.length && !confirm('Fulfil '+(p.number||p.id)+' is already tied to '+others.map(function(x){return x.po;}).join(', ')+'. Move the link to '+po+'? '+others.map(function(x){return x.po;}).join(', ')+' will no longer be linked to it.'))return;
         if(!confirm('Link '+po+' to Fulfil '+(p.number||p.id)+' ('+(p.supplier||'')+', '+(p.state||'')+', '+p.line_count+' lines, '+p.units+' units)?\n\nThis saves the link in HORIZON only; nothing is written to Fulfil.'))return;
-        fetch('/api/supply/po/'+encodeURIComponent(po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'fulfil',external_id:String(p.id),external_ref:p.number||String(p.id),url:p.url})})
+        fetch('/api/supply/po/'+encodeURIComponent(po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:'fulfil',external_id:String(p.id),external_ref:p.number||String(p.id),url:p.url,move:_mv})})
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); close(); if(done)done(); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
     }
     function run(first){ var v=q.value.trim(); var my=++seq; res.innerHTML='<div class="mut tiny">Searching Fulfil…</div>';

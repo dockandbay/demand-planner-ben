@@ -1,3 +1,9 @@
+## v28.378 (15-Oct-26) One HORIZON PO per Fulfil PO link (PO362 fix)
+- PO362 (Direct to Client) showed no Fulfil quantities: PO363 had been deleted but its manual link to the same Fulfil PO (id 521) stayed, and the Fulfil import let the later link win, so Fulfil PO362 was copied under "PO363". Live data fix done 15-Oct-26 with Ben's OK (that one leftover link deleted; the next Fulfil import copies 521 into PO362).
+- Code: the import only uses links of POs that exist (newest wins); linking a Fulfil PO already linked to another live PO is refused unless the move is confirmed (the picker now says "Move the link to ..."); leftovers from deleted POs are cleared on link; deleting or merging away a PO removes its Fulfil link and client PO group.
+- Still open on live (not touched): PO364 (deleted) -> Fulfil 634 leftover next to PO470 (awaiting Ben's OK); PO-1895872 and PO-1903237 both linked to Fulfil PO386 (a real conflict, Ben's DTC decision).
+- No migration, no env change.
+
 ## v28.377 (15-Oct-26) Refresh from Fulfil button
 - PURCHASE ORDERS > Import/Export > "↻ Refresh from Fulfil": the full Fulfil PO refresh on demand (same as the 3-hourly job: PO mirror, ERP qty lines, client PO groups, internal shipments), then the grid reloads. Signed-in, supply edit or admin; reads Fulfil only. New signed-in route POST /api/supply/fulfil/refresh-pos (not a cron route; normal login applies). Sandbox test: 204 POs, 108 internal shipments (107 s on the slow sandbox DB; live measured 7.5 s for the same job).
 - No migration, no env change.

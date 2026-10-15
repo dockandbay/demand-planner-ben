@@ -5718,7 +5718,9 @@ async function _fulfilImportPOsRun() {
   // external_id = the Fulfil PO id; old Cin7 numbers are kept during the transition so suppliers are not confused). Order: reference =
   // a HORIZON PO, else the PO link, else a HORIZON PO number at the end of the reference. Linked POs missing from the pull are fetched too.
   const _hz = new Set((await pool.query(`SELECT po FROM planner.purchase_orders`)).rows.map(r => r.po));
-  const _link = new Map((await pool.query(`SELECT po, external_id FROM planner.po_links WHERE system='fulfil' AND coalesce(status,'linked')='linked' AND external_id ~ '^[0-9]+$'`).catch(() => ({ rows: [] }))).rows.map(r => [Number(r.external_id), r.po]));
+  // v28.378 (Ben 15-Oct-26, PO362): only links of POs that still exist, oldest first so the newest link wins (a deleted PO363's leftover link
+  // to Fulfil PO362 took that PO's mirror row, so the live PO362 never got its Fulfil quantities)
+  const _link = new Map((await pool.query(`SELECT l.po, l.external_id FROM planner.po_links l JOIN planner.purchase_orders p ON p.po = l.po WHERE l.system='fulfil' AND coalesce(l.status,'linked')='linked' AND l.external_id ~ '^[0-9]+$' ORDER BY l.found_at NULLS FIRST`).catch(() => ({ rows: [] }))).rows.map(r => [Number(r.external_id), r.po]));
   const _grp = new Map((await pool.query(`SELECT fulfil_id, po FROM planner.po_fulfil_group`).catch(() => ({ rows: [] }))).rows.map(r => [Number(r.fulfil_id), r.po]));   // v28.374: client PO groups
   const _have = new Set(list.map(p => Number(p.id))), _missing = [...new Set([..._link.keys(), ..._grp.keys()])].filter(id => !_have.has(id));
   for (let i = 0; i < _missing.length; i += 200) { try { (await fulfilSearchAll(FULFIL_MAP.poModel, [['id', 'in', _missing.slice(i, i + 200)]], _flds)).forEach(p => list.push(p)); } catch (_) {} }
@@ -8103,6 +8105,12 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
       catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 503).json({ error: e.message }); }
       if (!fp) return res.status(404).json({ error: 'Fulfil PO id ' + eid + ' not found in Fulfil' });
       if (/^cancel/.test(String(fp.state || ''))) return res.status(409).json({ error: 'Fulfil ' + (fp.number || eid) + ' is cancelled: choose a live PO' });
+      // v28.378: one HORIZON PO per Fulfil PO link. Links left behind by deleted POs are cleared; a link held by another live PO moves only
+      // when asked (move:true), so the import can never map one Fulfil PO to two HORIZON POs again.
+      await pool.query(`DELETE FROM planner.po_links l WHERE l.system='fulfil' AND l.external_id=$1 AND l.po <> $2 AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.po = l.po)`, [eid, req.params.po]);
+      const held = (await pool.query(`SELECT po FROM planner.po_links WHERE system='fulfil' AND status='linked' AND external_id=$1 AND po <> $2`, [eid, req.params.po])).rows.map(r => r.po);
+      if (held.length && !(req.body && req.body.move === true)) return res.status(409).json({ code: 'FULFIL_LINK_HELD', held, error: 'Fulfil ' + (fp.number || eid) + ' is already linked to ' + held.join(', ') + '. Move the link to ' + req.params.po + '?' });
+      if (held.length) await pool.query(`DELETE FROM planner.po_links WHERE system='fulfil' AND external_id=$1 AND po = ANY($2::text[])`, [eid, held]);
       const fc = fulfilConfigFor(await activeFulfilEnv());
       const furl = fc.subdomain ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fp.id + '?window_name=default') : url;
       await pool.query(
@@ -20712,6 +20720,8 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     await client.query('DELETE FROM planner.portal_attachments WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.supplier_submissions WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.supplier_notes WHERE po=$1', [po]);
+    await client.query(`DELETE FROM planner.po_links WHERE po=$1 AND system='fulfil'`, [po]);   // v28.378: no leftover Fulfil link (it stole PO362's mirror row)
+    await client.query('DELETE FROM planner.po_fulfil_group WHERE po=$1', [po]).catch(() => {});
     const r = await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [po]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount });
@@ -20809,6 +20819,7 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('DELETE FROM planner.portal_attachments WHERE po=$1', [from]);
     await client.query('DELETE FROM planner.supplier_submissions WHERE po=$1', [from]);
     await client.query('DELETE FROM planner.supplier_notes WHERE po=$1', [from]);
+    await client.query(`DELETE FROM planner.po_links WHERE po=$1 AND system='fulfil'`, [from]);   // v28.378: merged-from PO's Fulfil link goes too
     await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
     await client.query('COMMIT');
     res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
