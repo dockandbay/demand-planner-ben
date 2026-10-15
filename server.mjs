@@ -20713,6 +20713,51 @@ app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
   const val = req.body && req.body.approved;
   return patch(res, 'planner.purchase_order_lines', 'po_sku', req.params.po_sku, { [col]: 'boolean' }, { [col]: val });
 });
+// v28.380 (Ben 15-Oct-26, PO362: "this is direct to client / drop ship, so we should have option to IMPORT FROM FULFIL"): for a CLIENT PO
+// (Direct to Client / B2B JLEW / B2B NEXT / key account) Fulfil owns the lines, so the order plan can be made to match the linked Fulfil PO:
+// qty changes, NEW Fulfil SKUs added (Fulfil's price when it has one, else none: the price chain fills it or it shows as missing), SKUs not in
+// Fulfil set to 0. Reads LIVE Fulfil (read only); without confirm it is a preview. Also writes this PO's Fulfil copy + ERP qty, so ERP
+// deviations work again at once. Supply edit or admin. Logged in the PO record of change.
+app.post('/api/supply/po/:po/import-fulfil-lines', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  const po = String(req.params.po || ''), confirm = (req.body || {}).confirm === true, by = authUser(req) || 'unknown';
+  try {
+    const pr = (await pool.query(`SELECT p.po, ${FULFIL_CLIENT_PO_SQL('p', 'b')} client FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch WHERE p.po=$1`, [po])).rows[0];
+    if (!pr) return res.status(404).json({ error: 'PO not found' });
+    if (!pr.client) return res.status(400).json({ error: po + ' is not a client PO (Direct to Client, B2B JLEW, B2B NEXT or key account): its lines are planned in HORIZON and pushed to Fulfil' });
+    if ((await pool.query(`SELECT 1 FROM planner.po_fulfil_group WHERE po=$1 LIMIT 1`, [po]).catch(() => ({ rows: [] }))).rows.length) return res.status(400).json({ error: po + ' is a master PO for a client PO group: its lines are compared with the whole group (DTC mismatch 2.0), not imported from one Fulfil PO' });
+    const lk = (await pool.query(`SELECT external_id FROM planner.po_links WHERE po=$1 AND system='fulfil' AND status='linked' AND external_id ~ '^[0-9]+$'`, [po])).rows[0];
+    if (!lk) return res.status(400).json({ error: 'Link ' + po + ' to its Fulfil PO first (Master data & docs > Linked records > Link Fulfil PO)' });
+    const fp = await fulfilReadPoById(Number(lk.external_id)); if (!fp) return res.status(404).json({ error: 'Fulfil PO id ' + lk.external_id + ' not found in Fulfil' });
+    if (/^cancel/.test(String(fp.state || ''))) return res.status(409).json({ error: 'Fulfil ' + (fp.number || lk.external_id) + ' is cancelled' });
+    const F = {}; (fp.lines || []).forEach(l => { const k = String(l.sku || '').trim(); if (!k) return; const c = F[k] || (F[k] = { sku: k, qty: 0, cost: null }); c.qty += Number(l.qty) || 0; if (Number(l.cost) > 0 && c.cost == null) c.cost = Number(l.cost); });
+    const H = {}; (await pool.query(`SELECT sku, sum(coalesce(qty,0))::int qty, max(cost_price)::float8 cost FROM planner.purchase_order_lines WHERE po=$1 GROUP BY sku`, [po])).rows.forEach(r => { H[r.sku] = r; });
+    const changed = [], added = [], removed = [];
+    Object.values(F).forEach(f => { const h = H[f.sku]; if (!h) added.push({ sku: f.sku, qty: f.qty, cost: f.cost }); else if ((h.qty || 0) !== f.qty) changed.push({ sku: f.sku, from: h.qty || 0, to: f.qty }); });
+    Object.values(H).forEach(h => { if (!F[h.sku] && (h.qty || 0) !== 0) removed.push({ sku: h.sku, from: h.qty }); });
+    const summary = { fulfil: { id: String(fp.fulfil_id), number: fp.number, state: fp.state, lines: Object.keys(F).length, units: Object.values(F).reduce((a, f) => a + f.qty, 0) },
+      horizon: { lines: Object.values(H).filter(h => h.qty).length, units: Object.values(H).reduce((a, h) => a + (h.qty || 0), 0) }, changed, added, removed };
+    if (!confirm) return res.json(Object.assign({ ok: true, preview: true, po }, summary));
+    const client = await pool.connect();
+    try { await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '30s'");
+      for (const c of changed) await client.query(`UPDATE planner.purchase_order_lines SET qty=$3, erp_qty=$3, proposed_at=NULL, proposed_by=NULL WHERE po=$1 AND sku=$2`, [po, c.sku, c.to]);
+      for (const a of added) await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, cost_price, erp_cost, proposed_at, proposed_by) VALUES ($1,$2,$3,$4::int,$4::int,$5::numeric,$5::numeric,NULL,NULL)
+          ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, erp_qty=excluded.erp_qty, cost_price=coalesce(planner.purchase_order_lines.cost_price, excluded.cost_price), proposed_at=NULL, proposed_by=NULL`, [po + '|' + a.sku, po, a.sku, a.qty, a.cost]);
+      for (const r of removed) await client.query(`UPDATE planner.purchase_order_lines SET qty=0, erp_qty=0, proposed_at=NULL, proposed_by=NULL WHERE po=$1 AND sku=$2`, [po, r.sku]);
+      await client.query(`UPDATE planner.purchase_order_lines SET erp_qty=qty WHERE po=$1 AND erp_qty IS DISTINCT FROM qty`, [po]);   // every line now equals Fulfil
+      const det = [changed.length ? changed.length + ' changed (' + changed.slice(0, 12).map(c => c.sku + ' ' + c.from + '>' + c.to).join(', ') + ')' : '', added.length ? added.length + ' added (' + added.slice(0, 12).map(a => a.sku + ' ' + a.qty).join(', ') + ')' : '', removed.length ? removed.length + ' set to 0 (' + removed.slice(0, 12).map(r => r.sku).join(', ') + ')' : ''].filter(Boolean).join('; ');
+      await client.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Order plan: import from Fulfil',$2,$3)`, [po, ('Fulfil ' + (fp.number || fp.fulfil_id) + ': ' + (det || 'already matched')).slice(0, 1000), by]);
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    // this PO's Fulfil copy (ERP deviations, drift) follows at once, whatever the scheduled import does
+    try { await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE fulfil_id=$1 AND po <> $2 AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders x WHERE x.po = planner.fulfil_purchase_orders.po)`, [fp.fulfil_id, po]);
+      await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po, fulfil_id, state, party_name, line_count, lines, last_synced_at, source, updated_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,now(),'import',now())
+        ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id, state=excluded.state, party_name=excluded.party_name, line_count=excluded.line_count, lines=excluded.lines, last_synced_at=now(), source='import', updated_at=now()`,
+        [po, fp.fulfil_id, fp.state || null, fp.supplier_name || null, Object.keys(F).length, JSON.stringify(Object.values(F).map(f => ({ sku: f.sku, qty: f.qty, unit_price: f.cost })))]); } catch (e) { console.warn('[import-fulfil-lines] mirror: ' + e.message); }
+    try { invalidateSupplyCaches('po'); } catch (_) {}
+    res.json(Object.assign({ ok: true, applied: true, po }, summary));
+  } catch (e) { if (e.code !== 'FULFIL_LOOKUP_FAILED' && e.code !== 'NO_FULFIL_CFG') log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_LOOKUP_FAILED' ? 503 : 500).json({ error: e.message }); }
+});
 // v28.362 (Ben 14-Oct-26): "Use Fulfil qty" for a PO: the plan takes the ERP (Fulfil) qty on every line that differs (dropship POs are
 // changed in Fulfil). Lines with no ERP qty are left alone. Logged in the PO record of change.
 app.post('/api/supply/po/:po/use-erp-qty', async (req, res) => {
