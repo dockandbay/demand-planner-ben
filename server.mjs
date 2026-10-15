@@ -4471,9 +4471,12 @@ async function accEmailPdf(msgId) {
     .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica), bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const clean = t => String(t || '').replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€]/g, ' ');   // WinAnsi only
+  // v28.384 (Ben 15-Oct-26, Microsoft receipt: "WinAnsi cannot encode \r"): line endings become \n, tabs spaces; only characters the
+  // standard font can draw are kept (Latin-1 + the WinAnsi typographic set: curly quotes, dashes, bullet, ellipsis, euro, trade mark)
+  const clean = t => String(t || '').replace(/\r\n?/g, '\n').replace(/\t/g, ' ').replace(/[^\x0A\x20-\x7E\xA0-\xFF€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/g, ' ');
+  const safeLine = (f, s) => { try { f.encodeText(s); return s; } catch (_) { return [...s].map(ch => { try { f.encodeText(ch); return ch; } catch (__) { return ' '; } }).join(''); } };   // never fail a whole PDF on one character
   let page = doc.addPage([595, 842]), y = 800; const W = 515, put = (t, f, size) => { const words = clean(t).split(/(\s+)/); let line = '';
-    const flush = () => { if (y < 50) { page = doc.addPage([595, 842]); y = 800; } page.drawText(line, { x: 40, y, size, font: f, color: rgb(0.1, 0.1, 0.1) }); y -= size + 4; line = ''; };
+    const flush = () => { if (y < 50) { page = doc.addPage([595, 842]); y = 800; } page.drawText(safeLine(f, line), { x: 40, y, size, font: f, color: rgb(0.1, 0.1, 0.1) }); y -= size + 4; line = ''; };
     for (const w of words) { if (w === '\n' || /\n/.test(w)) { flush(); continue; } if (f.widthOfTextAtSize(line + w, size) > W && line) flush(); line += w; } if (line) flush(); };
   // v28.281 (Ben 12-Oct-26): the email's images go into the PDF where they sit in the email (inline cid: parts, data: URIs, and https images:
   // public hosts only, 6 s, 3 MB, at most 15). PNG and JPEG only (pdf-lib); tracking pixels (3 px or less) are skipped.

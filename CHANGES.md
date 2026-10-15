@@ -1,3 +1,7 @@
+## v28.384 (15-Oct-26) Receipt PDF from an email no longer fails on odd characters
+- ACCOUNTS > Reconcile (Microsoft, 01-Oct): "Could not show the PDF: WinAnsi cannot encode \r (0x000d)". The PDF made from an email with no PDF attachment kept carriage returns and tabs, which the standard PDF font cannot draw. Line endings now become line breaks, tabs spaces, the typographic set (curly quotes, dashes, bullet, ellipsis, euro, trade mark) is kept, and any character the font still cannot draw becomes a space instead of failing the whole PDF.
+- No migration, no env change.
+
 ## v28.383 (15-Oct-26) Payments Report: red Paid > Xero button and a follow-up list
 - Ben: PO lines with no linked Xero bill (e.g. PO-57DILLARDS-XRJULY) showed a blue button. Every run with completion / balance lines is now checked from HORIZON's own data (no Xero calls): no Xero bill linked, linked bill voided, PO bill payment failed, or (sent runs) the linked bill still owes money in Xero with no payment from this run; master POs list client PO shares still waiting. Any of these turns Paid > Xero RED and lists each PO, the issue and the fix under it (Link bill opens the PO's Linked records). Runs sent before 21-Sep-26 are not checked.
 - Sandbox: 200 runs checked in 2.5 s, 1 needs follow-up (two POs with no linked bill). Live: PO-57DILLARDS-XRJULY has no Xero bill linked and no bill names it. New read-only route POST /api/supply/payments/xero-followup. No migration, no env change.
