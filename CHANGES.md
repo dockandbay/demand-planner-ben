@@ -1,3 +1,7 @@
+## v28.387 (15-Oct-26) Bank lines oldest first; earlier-month lines shaded red
+- ACCOUNTS > Reconcile and the Bank statement tab's statement lines now list oldest to newest (were newest first), and any line dated before the current month (last month or older: still open at month end) has a light red background with a hover note. Display only.
+- No migration, no env change.
+
 ## v28.386 (15-Oct-26) Reconcile: the receipt's GST split is always used (ICON Management)
 - Ben: the drawer said the ICON Management bill (00371863, AUD 1,716.40) would go to Xero as two lines, but one GST-free line was created. The payee rule / drawer tax type (GST Free Expenses) skipped the GST check at push time. Now a receipt that shows part GST / part GST-free is always split (here 224.00 + 22.40 GST on GST on Expenses, 1,470.00 GST free), whatever tax type is set; the set tax type applies to receipts with no split. Dry-run on the real receipt with either tax type: split as above.
 - The bill already in Xero (contact THE ICONIC, one line) is not changed by this release. No migration, no env change.
