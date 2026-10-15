@@ -3942,11 +3942,18 @@ async function accTeamNoteFill(e) {
 // characters, ~4,000 characters max) so the payee's name is found in the PDF too. '' = no PDF / no text. Never throws.
 function accPdfWords(t) { try { const seen = new Set(), out = []; for (const w of String(t || '').toLowerCase().split(/[^a-z0-9]+/)) { if (w.length < 3 || /^\d+$/.test(w) || seen.has(w)) continue; seen.add(w); out.push(w); }
   return out.join(' ').slice(0, 4000); } catch (_) { return ''; } }
+// v28.394 (Ben 16-Oct-26, Woolworths A$225.48 "says No GST on the invoice ... the pdf definitely has gst of 10.89"): emails read before the
+// labelled-GST reader (v28.354) never had "Invoice total includes GST of: $10.89" tagged, and the v28.388 words fill did not tag it either.
+// The fill now also tags the PDF's labelled GST amounts in pdf_amounts and marks the words with ACC_GST_CHECKED; new mail is marked when read.
+const ACC_GST_CHECKED = 'gstchecked', accGstChecked = e => new RegExp('\\b' + ACC_GST_CHECKED + '\\b').test(String(e && e.pdf_words || ''));
 async function accPdfWordsFill(e) {   // older cached emails: read their first PDF once (Gmail read) and store its words; null on failure (tried next time)
   try { const m = await gmailGetPaced('messages/' + e.id + '?format=full'); const pdfs = []; const walk = p => { if (!p) return; if (p.filename && /\.pdf$/i.test(p.filename) && p.body && p.body.attachmentId && (p.body.size || 0) <= 3e6) pdfs.push(p); (p.parts || []).forEach(walk); }; walk(m && m.payload);
-    let txt = ''; if (pdfs.length) { const { PDFParse } = await import('pdf-parse'); const a = await gmailGetPaced('messages/' + e.id + '/attachments/' + pdfs[0].body.attachmentId);
-      txt = (await new PDFParse({ data: new Uint8Array(Buffer.from(String(a.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64')) }).getText()).text || ''; }
-    const w = accPdfWords(txt); await pool.query(`UPDATE planner.accounts_gmail_msgs SET pdf_words=$2 WHERE id=$1`, [e.id, w]).catch(() => {}); return w; } catch (_) { return null; } }
+    let txt = ''; if (pdfs.length) { const { PDFParse } = await import('pdf-parse'); for (const pd of pdfs.slice(0, 2)) { const a = await gmailGetPaced('messages/' + e.id + '/attachments/' + pd.body.attachmentId);
+      txt += ' ' + ((await new PDFParse({ data: new Uint8Array(Buffer.from(String(a.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64')) }).getText()).text || ''); } }
+    const w = accPdfWords(txt) + (pdfs.length ? ' ' + ACC_GST_CHECKED : ''), had = Array.isArray(e.pdf_amounts) ? e.pdf_amounts : [];
+    const lab = accGstLabelled(txt).filter(k => !had.some(a => a[0] === k && a[1] === 'GST')), pam = lab.map(k => [k, 'GST']).concat(had);   // GST pairs first, as when mail is read
+    await pool.query(`UPDATE planner.accounts_gmail_msgs SET pdf_words=$2` + (lab.length ? `, pdf_amounts=$3::jsonb` : '') + ` WHERE id=$1`, lab.length ? [e.id, w, JSON.stringify(pam)] : [e.id, w]).catch(() => {});
+    e.pdf_words = w; if (lab.length) e.pdf_amounts = pam; return w; } catch (_) { return null; } }
 // Parse new accounts@ mail into planner.accounts_gmail_msgs (amounts only, no bodies). Returns { parsed, pending } (pending > 0 = budget ran out).
 async function accGmailCache(days, budget) {
   const ids = []; let tok = '';
@@ -3968,7 +3975,7 @@ async function accGmailCache(days, budget) {
       try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v)); pdfTxt += ' ' + t;
         accGstLabelled(t).forEach(k => gstLab.add(k)); }   // v28.354: "Invoice total includes GST of: $6.96" -> 6.96 is the GST
       catch (e) { if (e && e.code === 'budget') throw e; } }
-    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm])), accTeamNote(H('from'), text, html), accPdfWords(pdfTxt)]; };   // GST pairs first: the amount's own currency mark wins in the maps   // v28.372: + team note
+    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm])), accTeamNote(H('from'), text, html), accPdfWords(pdfTxt) + (pdfTxt.trim() ? ' ' + ACC_GST_CHECKED : '')]; };   // v28.394: GST labels read   // GST pairs first: the amount's own currency mark wins in the maps   // v28.372: + team note
   const flush = async buf => { if (!buf.length) return;
     await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts, team_note, pdf_words) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 10 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
   let parsed = 0, i = 0, buf = [];
@@ -4757,7 +4764,8 @@ async function accBillCandidates(rules, only) {
   const out = []; if (!rules.length) return out;
   const minFrom = rules.reduce((m, r) => (r.bill_from || '2000-01-01') < m ? (r.bill_from || '2000-01-01') : m, '9999-12-31');
   const onlyIds = only ? only.map(o => o.email_id) : null, _ambC = await accAmbig();   // v28.319
-  const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts, team_note FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
+  let _gstRe = 0;   // v28.394: PDFs read again this call (GST labels)
+  const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts, team_note, pdf_words FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
   const used = new Set((await pool.query(`SELECT org || '|' || email_id k FROM planner.accounts_bill_log WHERE status IN ('created','creating')`)).rows.map(r => r.k));
   const lines = (await pool.query(`SELECT org, account_name, to_char(line_date,'YYYY-MM-DD') d, amount::float8 amount, reference, description FROM planner.accounts_stmt_lines WHERE NOT reconciled AND amount < 0`)).rows
     .map(l => Object.assign(l, { key: accPayeeKeyX(l.org, l.reference, l.description, _ambC), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
@@ -4807,6 +4815,9 @@ async function accBillCandidates(rules, only) {
       // a receipt that shows part GST / part GST-free is ALWAYS split, whatever tax type is in the drawer or on the payee rule (a GST-free rule
       // or box used to skip the check at push time, so the bill went in as one GST-free line while the preview showed two). The tax type set
       // by the person / rule still applies to receipts with no split.
+      // v28.394: about to say "no GST" on an email read before the labelled-GST reader: read its PDF again once (Gmail read, capped per load)
+      if (hasPdf && ACC_GST[r.org] && !accGstChecked(e) && _gstRe < 6 && accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])).kind === 'none') {
+        _gstRe++; if ((await accPdfWordsFill(e)) != null) for (const a of (e.pdf_amounts || [])) if (a[1] === 'GST' && !pairs.some(x => x[0] === a[0] && x[1] === 'GST')) pairs.unshift(a); }
       const gcSplit = accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0]));
       const gc = gcSplit.kind === 'split' ? gcSplit : accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
       if (gc.kind === 'split' && ACC_GST[r.org]) c.tax_type = ACC_GST[r.org].std;   // the taxable part goes in at GST; the free part at the free type
