@@ -1,3 +1,9 @@
+## v28.388 (15-Oct-26) Reconcile finds the payee in the PDF receipt (Woolworths)
+- Ben: AMEX 18-Sep WOOLWORTHS A$225.48 did not match its receipt in accounts@ (emailed 14-Oct as "woowlroths 225.48"): a receipt more than 7 days after the bank line needs the payee named, and the subject's typo hid it. Now the PDF's own words are searched too (the PDF says WOOLWORTHS), and a small typo in a payee word still counts (8+ letters 2 edits incl. swapped letters, 5 to 7 letters 1, shorter exact).
+- Migration 375 (additive): accounts_gmail_msgs.pdf_words. New emails store their PDF words when read; older ones are read once in the background when they are an amount match (Gmail reads only), so after deploy the Woolworths line matches on the next Reconcile load.
+- Tested on the real receipt: PDF words contain "woolworths"; match without them false, with them true; typo cases pass (wollworths, optsu, microsfot) and unrelated words are refused (woolies, coles, opus, ikae).
+- No env change.
+
 ## v28.387 (15-Oct-26) Bank lines oldest first; earlier-month lines shaded red
 - ACCOUNTS > Reconcile and the Bank statement tab's statement lines now list oldest to newest (were newest first), and any line dated before the current month (last month or older: still open at month end) has a light red background with a hover note. Display only.
 - No migration, no env change.

@@ -3938,6 +3938,15 @@ async function accTeamNoteFill(e) {
     walk(m && m.payload); e.team_note = accTeamNote(e.from_addr, text, html);
     await pool.query(`UPDATE planner.accounts_gmail_msgs SET team_note = $2 WHERE id = $1`, [e.id, e.team_note]).catch(() => {});
     return e.team_note; } catch (_) { return ''; } }   // Gmail not connected / quota: no note this time, checked again next run
+// v28.388 (Ben 15-Oct-26: "the pdf attachment must have correct spelling"): the words of an email's PDF receipt (lower-case, unique, 3+
+// characters, ~4,000 characters max) so the payee's name is found in the PDF too. '' = no PDF / no text. Never throws.
+function accPdfWords(t) { try { const seen = new Set(), out = []; for (const w of String(t || '').toLowerCase().split(/[^a-z0-9]+/)) { if (w.length < 3 || /^\d+$/.test(w) || seen.has(w)) continue; seen.add(w); out.push(w); }
+  return out.join(' ').slice(0, 4000); } catch (_) { return ''; } }
+async function accPdfWordsFill(e) {   // older cached emails: read their first PDF once (Gmail read) and store its words; null on failure (tried next time)
+  try { const m = await gmailGetPaced('messages/' + e.id + '?format=full'); const pdfs = []; const walk = p => { if (!p) return; if (p.filename && /\.pdf$/i.test(p.filename) && p.body && p.body.attachmentId && (p.body.size || 0) <= 3e6) pdfs.push(p); (p.parts || []).forEach(walk); }; walk(m && m.payload);
+    let txt = ''; if (pdfs.length) { const { PDFParse } = await import('pdf-parse'); const a = await gmailGetPaced('messages/' + e.id + '/attachments/' + pdfs[0].body.attachmentId);
+      txt = (await new PDFParse({ data: new Uint8Array(Buffer.from(String(a.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64')) }).getText()).text || ''; }
+    const w = accPdfWords(txt); await pool.query(`UPDATE planner.accounts_gmail_msgs SET pdf_words=$2 WHERE id=$1`, [e.id, w]).catch(() => {}); return w; } catch (_) { return null; } }
 // Parse new accounts@ mail into planner.accounts_gmail_msgs (amounts only, no bodies). Returns { parsed, pending } (pending > 0 = budget ran out).
 async function accGmailCache(days, budget) {
   const ids = []; let tok = '';
@@ -3954,14 +3963,14 @@ async function accGmailCache(days, budget) {
     walk(m.payload);
     const stripe = /https:\/\/(?:pay|invoice)\.stripe\.com\//.test(html + ' ' + text);
     const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&euro;/g, '€')).replace(/\s+/g, ' ');
-    const pdfAm = new Map(), gstLab = new Set();   // v28.354: GST-labelled amounts kept apart (an amount keeps its currency mark)
+    const pdfAm = new Map(), gstLab = new Set(); let pdfTxt = '';   // v28.354: GST-labelled amounts kept apart (an amount keeps its currency mark); v28.388 + the PDF's words
     if (PDFParse) for (const a of atts.filter(a => /pdf/i.test(a.type) || /\.pdf$/i.test(a.name)).slice(0, 2)) { if (!a.aid || a.size > 3e6) continue;
-      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v));
+      try { const d = await gmailGetPaced('messages/' + id + '/attachments/' + a.aid, budget); const t = (await new PDFParse({ data: new Uint8Array(b64(d.data)) }).getText()).text || ''; accAmounts(t).forEach(([k, v]) => pdfAm.set(k, v)); pdfTxt += ' ' + t;
         accGstLabelled(t).forEach(k => gstLab.add(k)); }   // v28.354: "Invoice total includes GST of: $6.96" -> 6.96 is the GST
       catch (e) { if (e && e.code === 'budget') throw e; } }
-    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm])), accTeamNote(H('from'), text, html)]; };   // GST pairs first: the amount's own currency mark wins in the maps   // v28.372: + team note
+    return [id, new Date(Number(m.internalDate)).toISOString().slice(0, 10), H('from').slice(0, 300), H('subject').slice(0, 500), JSON.stringify(atts.map(a => a.name)), stripe, JSON.stringify(accAmounts(H('subject') + ' ' + body)), JSON.stringify([...gstLab].map(k => [k, 'GST']).concat([...pdfAm])), accTeamNote(H('from'), text, html), accPdfWords(pdfTxt)]; };   // GST pairs first: the amount's own currency mark wins in the maps   // v28.372: + team note
   const flush = async buf => { if (!buf.length) return;
-    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts, team_note) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 9 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
+    await pool.query(`INSERT INTO planner.accounts_gmail_msgs (id, msg_date, from_addr, subject, files, stripe_link, amounts, pdf_amounts, team_note, pdf_words) VALUES ` + buf.map((r, k) => '(' + r.map((_, n) => '$' + (k * 10 + n + 1)).join(',') + ')').join(',') + ' ON CONFLICT (id) DO NOTHING', buf.flat()); };
   let parsed = 0, i = 0, buf = [];
   try {
     for (; i < todo.length; i += 4) { if (budget && budget.out()) break;
@@ -4144,7 +4153,15 @@ function accPayeeKey(ref, desc) {
 // "Fonzirelli Pizza" (plural / suffix). Also true when the text without spaces contains the key word, or a word of the text (5+ letters) is the
 // start of the key word and covers most of it.
 function accNameHit(toks, hay) { hay = String(hay || '').toLowerCase(); const flat = hay.replace(/[^a-z0-9]/g, ''), words = hay.split(/[^a-z0-9]+/).filter(w => w.length >= 5);
-  return toks.some(t => hay.includes(t) || flat.includes(t) || words.some(w => t.startsWith(w) && w.length >= t.length - 2)); }
+  return toks.some(t => hay.includes(t) || flat.includes(t) || words.some(w => (t.startsWith(w) && w.length >= t.length - 2) || accTypo(t, w))); }
+// v28.388 (Ben 15-Oct-26, WOOLWORTHS A$225.48 18-Sep vs the receipt emailed as "woowlroths 225.48"): a payee word typed with a small slip still
+// names the payee: 8+ letters up to 2 edits, 5 to 7 letters 1 edit (insert / delete / change / swap of two neighbours); shorter words exact.
+function accTypo(a, b) { if (!a || !b) return false; const L = Math.min(a.length, b.length), max = L >= 8 ? 2 : L >= 5 ? 1 : 0; if (!max || Math.abs(a.length - b.length) > max) return false;
+  const d = []; for (let i = 0; i <= a.length; i++) { d[i] = [i]; } for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) { let rowMin = Infinity; for (let j = 1; j <= b.length; j++) { const c = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c); if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, d[i - 2][j - 2] + 1);
+      d[i][j] = v; if (v < rowMin) rowMin = v; } if (rowMin > max) return false; }
+  return d[a.length][b.length] <= max; }
 const accSameP = (ck, rk) => ck === rk || (rk.length >= 4 && ck.length >= 4 && (ck.startsWith(rk) || rk.startsWith(ck)));
 // v28.319 (Ben 13-Oct-26: "longer keys if needed will help"): a payee key shared by DIFFERENT Xero contacts of the same org (MINI = Mini Models
 // Talent Agency and 24 Mini Cab Services) gets its next word when the text has one of them: MINI MODELS / MINI CAB. Built from Xero contact
@@ -4185,14 +4202,16 @@ async function accInboxProposals() {
   // v28.270: payee keys of HORIZON product suppliers (and their Xero "<name> - <code>" contacts): the same normaliser over the supplier names
   const supKeys = new Set(); try { (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(trim(name),'')<>''`)).rows.forEach(r => { const k = accPayeeKey(r.name, ''); if (k && k !== '(blank)' && k.length >= 3) supKeys.add(k); }); } catch (_) {}
   const minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31'), _amb = await accAmbig();   // v28.319
-  const em = lines.length ? (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 60`, [minD])).rows
+  const em = lines.length ? (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, files, stripe_link, amounts, pdf_amounts, pdf_words FROM planner.accounts_gmail_msgs WHERE msg_date >= $1::date - 60`, [minD])).rows
     .map(e => Object.assign(e, { am: new Map(e.amounts || []), pam: new Map(e.pdf_amounts || []) })) : [];
   const byAmt = new Map(); em.forEach(e => new Set([...e.am.keys(), ...e.pam.keys()]).forEach(k => { if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(e); }));
   const sym = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$', CAD: '$' };
+  const _pdfFill = new Set();
   const out = lines.map(l => {
     const key = accPayeeKeyX(l.org, l.reference, l.description, _amb), k = Math.abs(l.amount).toFixed(2), td = new Date(l.line_date), toks = key.toLowerCase().split(' ').filter(t => t.length >= 3);
     const c = l.amount < 0 ? (byAmt.get(k) || []).map(e => { const lag = Math.round((td - new Date(e.d)) / 864e5); if (lag < -60 || lag > 45) return null;   // v28.354: late receipts (up to 60 days after the bank line) only with the payee named, below
-        const hay = (e.from_addr + ' ' + e.subject).toLowerCase(), name = accNameHit(toks, hay), cs = e.am.get(k) || e.pam.get(k) || '';
+        const hay = (e.from_addr + ' ' + e.subject + ' ' + (e.pdf_words || '')).toLowerCase(), name = accNameHit(toks, hay), cs = e.am.get(k) || e.pam.get(k) || '';   // v28.388: + the PDF's words
+        if (!name && e.pdf_words == null && Array.isArray(e.files) && e.files.some(f => /\.pdf$/i.test(f))) _pdfFill.add(e);   // older email: read its PDF words (below, capped) for the next load
         const ccyOk = !cs || cs === l.currency || cs === sym[l.currency] || (cs === '$' && ['AUD', 'USD', 'CAD', 'NZD'].includes(l.currency)), nAm = new Set([...e.am.keys(), ...e.pam.keys()]).size;
         // v28.324: a receipt a colleague forwards with the amount in the subject ("ICON Management Pty Ltd $3082.80") is a deliberate match even
         // when the bank shows a trading name (BELLA MAGEMENT); allowed up to 30 days before the bank line
@@ -4212,6 +4231,7 @@ async function accInboxProposals() {
   try { const ids = [...new Set(out.filter(l => l.match).map(l => l.match.id))];   // v28.280: a bill HORIZON already created from this receipt (match it in Xero)
     if (ids.length) { const bl = new Map((await pool.query(`SELECT email_id, invoice_id, invoice_number, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_bill_log WHERE status='created' AND email_id = ANY($1)`, [ids])).rows.map(x => [x.email_id, x]));
       out.forEach(l => { const x = l.match && bl.get(l.match.id); if (x) l.bill = { invoice_id: x.invoice_id, number: x.invoice_number, at: x.at, url: xbUrl(x.invoice_id) }; }); } } catch (_) {}
+  if (_pdfFill.size) hzWaitUntil((async () => { for (const e of [..._pdfFill].slice(0, 8)) await accPdfWordsFill(e); })().catch(() => {}));   // v28.388: older emails' PDF words, in the background (next load matches)
   return out;
 }
 app.get('/api/accounts/inbox/proposals', async (req, res) => {
