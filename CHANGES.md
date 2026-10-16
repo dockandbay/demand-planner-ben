@@ -1,3 +1,8 @@
+## v28.398 (17-Oct-26) 3PL invoicing Push actuals: progress, one push at a time, a notice when done
+- Ben: Rita pushed the Coghlans invoice and it "said loading and that didn't disappear". Live health log (read only), 16-Oct 21:48 to 21:57 UTC: the Xero bill was created fine (1.3 s); Push actuals to Fulfil ran about 7 times, every chunk HTTP 200 but 10 to 48 s each (chunks of 40 references, paced since v28.391). The message only said "Pushing to Fulfil… 0 shipments", so it looked stuck; she clicked again and moved to other pages.
+- Now: "Pushing to Fulfil: x of y references (z%), about n min left. You can use other pages meanwhile". One push per invoice at a time (a second click shows the progress instead of starting again). The push carries on when you leave the page and shows its progress again when you come back. When it ends, a notice appears bottom right wherever you are (success with the counts, or the error).
+- Display only (artifact_v16.7.html). No server change, no migration, no env change.
+
 ## v28.397 (16-Oct-26) Reconcile: Flexport AU and DHL live in Bank lines (no tabs); DHL lines match again
 - Ben: "the flexport au feature can simply live in the main reconcile item" and "dhl should be the same, not a separate tab". The DHL import and Flexport AU tabs are gone. In Bank lines > Receipt found:
 - A Bank of America Flexport line that matches an open Xero AU Flexport bill shows the AU bill and one button, Pay AU bill + Spend Money (same two Xero writes as v28.396, confirmed). Done: the Spend Money link, "match it in Xero".
