@@ -4430,7 +4430,8 @@ async function dhlImportPlan(fresh) {
   const nums = invs.map(i => i.number).filter(Boolean);
   const xb = nums.length ? (await pool.query(`SELECT region, invoice_id, invoice_number, total::float8 total, status FROM planner.xero_bills WHERE invoice_number ~* $1 AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, ['(' + nums.join('|') + ')'])).rows : [];
   const docs = nums.length ? (await pool.query(`SELECT DISTINCT ON (invoice_number, part) invoice_number, part, status, xero_invoice_id, xero_url, error, created_by, to_char(created_at,'YYYY-MM-DD') at FROM planner.dhl_invoice_docs WHERE invoice_number = ANY($1) ORDER BY invoice_number, part, id DESC`, [nums]).catch(() => ({ rows: [] }))).rows : [];
-  const stmt = (await pool.query(`SELECT l.id, to_char(l.line_date,'YYYY-MM-DD') d, l.amount::float8 amount, l.reference, l.description, l.account_name FROM planner.accounts_stmt_lines l WHERE l.org='au' AND l.amount < 0 AND (coalesce(l.description,'') || ' ' || coalesce(l.reference,'')) ~* '\\mDHL\\M' ORDER BY l.line_date`).catch(() => ({ rows: [] }))).rows;
+  // v28.397: accounts_stmt_lines has no id column (the old SELECT l.id failed and was swallowed, so no invoice ever matched); key = date|amount|reference
+  const stmt = (await pool.query(`SELECT to_char(l.line_date,'YYYY-MM-DD') || '|' || l.amount::text || '|' || coalesce(l.reference,'') id, to_char(l.line_date,'YYYY-MM-DD') d, l.amount::float8 amount, l.reference, l.description, l.account_name FROM planner.accounts_stmt_lines l WHERE l.org='au' AND l.amount < 0 AND (coalesce(l.description,'') || ' ' || coalesce(l.reference,'')) ~* '\\mDHL\\M' ORDER BY l.line_date`).catch(() => ({ rows: [] }))).rows;
   const used = new Set();
   return invs.map(i => { if (!i.number) return i;
     const xau = xb.filter(b => b.region === 'au' && new RegExp(i.number, 'i').test(b.invoice_number)), xuk = xb.filter(b => b.region === 'uk' && new RegExp(i.number, 'i').test(b.invoice_number));
@@ -4442,7 +4443,7 @@ async function dhlImportPlan(fresh) {
     const ships = (i.shipments || []).map(s => Object.assign({}, s, { po: (po[s.awb] || {}).po || null, au_account: s.business === 'au' ? DHL_AU_ACCT_DEFAULT : DHL_LOAN_AU }));
     const bill = d('au_bill'), ign = d('ignore');
     const status = ign && ign.status === 'ignored' ? 'ignored' : (bill && bill.status === 'created') || xau.length ? 'done' : line ? 'todo' : 'waiting';
-    return Object.assign({}, i, { shipments: ships, stmt_line: line ? { id: line.id, date: line.d, amount: -line.amount, description: line.description, fee: Math.round((-line.amount - i.total) * 100) / 100 } : null,
+    return Object.assign({}, i, { shipments: ships, stmt_line: line ? { id: line.id, date: line.d, amount: -line.amount, reference: line.reference, description: line.description, fee: Math.round((-line.amount - i.total) * 100) / 100 } : null,
       xero_au: xau.map(b => ({ number: b.invoice_number, status: b.status, url: xbUrl(b.invoice_id) })).concat(bill && bill.status === 'created' ? [{ number: i.number, status: 'created by HORIZON ' + bill.at, url: bill.xero_url }] : []),
       xero_uk: xuk.map(b => ({ number: b.invoice_number, status: b.status, url: xbUrl(b.invoice_id) })), doc: bill, ignored: !!(ign && ign.status === 'ignored'), status,
       uk_total: Math.round(ships.filter(s => s.business === 'uk').reduce((a, s) => a + s.amount, 0) * 100) / 100, au_total: Math.round(ships.filter(s => s.business === 'au').reduce((a, s) => a + s.amount, 0) * 100) / 100 }); }); }

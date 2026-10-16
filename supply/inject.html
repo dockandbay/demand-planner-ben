@@ -19960,15 +19960,17 @@
     b.querySelectorAll('[data-agt]').forEach(function(x){ x.onclick=function(){ AC_AG.tab=x.dataset.agt; acRenderAgeing(b); }; });
     var qi=document.getElementById('ac-agq'); if(qi)qi.oninput=function(){ AC_AG.q=qi.value; clearTimeout(AC_AG._t); AC_AG._t=setTimeout(function(){ acRenderAgeing(b); var n=document.getElementById('ac-agq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); }; }
   // ── RECONCILE: the list ──
-  function acRcKind(r){ if(r.treatment==='ignore'||r.treatment==='rule'||r.amount>=0)return 'ignored'; return r.match?'found':'none'; }
+  function acRcKind(r){ if(acFlexOf(r)||acDhlOf(r))return 'found';   // v28.397: a Bank of America Flexport line with an AU bill; an ANZ DHL line with its invoice
+    if(r.treatment==='ignore'||r.treatment==='rule'||r.amount>=0)return 'ignored'; return r.match?'found':'none'; }
   // v28.387 (Ben 15-Oct-26): bank lines oldest first, and lines from an earlier month (not yet reconciled at month end) shaded light red
   function acPrevMonthBg(d){ var m=new Date(); var first=m.getFullYear()+'-'+('0'+(m.getMonth()+1)).slice(-2)+'-01'; return String(d||'')<first?' style="background:var(--neg-bg)" title="from an earlier month: reconcile before month end"':''; }
   function acByDateAsc(a,c){ return a.line_date<c.line_date?-1:a.line_date>c.line_date?1:0; }
   function acInLinesHtml(){ var P=AC_IN.p; if(!P)return '<div class="count" style="margin:10px 0">Loading statement lines…</div>';
     if(P.error)return '<div class="count" style="color:var(--neg)">'+esc(P.error)+'</div>';
     var rows=P.rows||[], F=(['found','none','ignored'].indexOf(AC_IN.pF)>=0?AC_IN.pF:'found'), A=AC_IN.pA||'all', q=AC_IN.pQ.toLowerCase();
-    var nBilled=rows.filter(function(r){ return r.bill&&(A==='all'||acAccTab(r)===A); }).length;
-    var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&r.bill); }), n={found:0,none:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
+    acFlexEnsure(); acDhlEnsure();   // v28.397: Flexport AU matches (Bank of America) and DHL invoices (ANZ)
+    var nBilled=rows.filter(function(r){ return acHasBill(r)&&(A==='all'||acAccTab(r)===A); }).length;
+    var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&acHasBill(r)); }), n={found:0,none:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
     var vis=inTab.filter(function(r){ return acRcKind(r)===F&&(!q||(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)>=0); }).sort(acByDateAsc);   // v28.387: oldest first
     var pill=function(k,l){ return '<span class="pill'+(F===k?' active':'')+'" data-pf="'+k+'">'+l+' ('+n[k]+')</span>'; };
     var h='<div class="tiny mut" style="margin:0 0 8px;max-width:980px"><b>How it works:</b> 1. Upload the bank statement (Bank statement tab). 2. Lines whose receipt is in accounts@ show under <b>Receipt found</b>: press <b>Review</b>, check the bill and <b>Push bill to Xero</b>. 3. In Xero, reconcile the line with <b>Match</b>. Payees that never need a receipt: <b>Ignore</b>.</div>'
@@ -19980,12 +19982,13 @@
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the bank statement first (Bank statement tab).</div>';
     h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Payee</th><th>Statement line</th><th>Amount</th><th>'+(F==='found'?'Receipt in accounts@':F==='none'?'Receipt':'Why')+'</th><th></th></tr></thead><tbody>';
-    h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r);
-      var rc=k==='found'?('<div>'+esc(hzTrkDate(m.date))+' · '+esc(String(m.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from)+(m.ambiguous?' <span class="pill" style="cursor:default" title="Another email has the same amount: check it in Review">check</span>':'')+'</div><div class="tiny mut">'+esc(String(m.subject||'').slice(0,70))+'</div>')
+    h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r), fx=acFlexOf(r)?acFlexCells(r,i):(acDhlOf(r)?acDhlCells(r,i):null);
+      var rc=fx?fx.rc:k==='found'?('<div>'+esc(hzTrkDate(m.date))+' · '+esc(String(m.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from)+(m.ambiguous?' <span class="pill" style="cursor:default" title="Another email has the same amount: check it in Review">check</span>':'')+'</div><div class="tiny mut">'+esc(String(m.subject||'').slice(0,70))+'</div>')
         :k==='none'?'<span class="tiny" style="color:var(--neg)">none found in accounts@</span>':'<span class="tiny mut">'+(r.amount>=0?'money in':(r.treatment_source==='manual'?'ignored (your rule)':'ignored (built-in rule)'))+'</span>';
-      var act=k==='found'?(r.bill?'<a href="'+esc(r.bill.url)+'" target="_blank" rel="noopener">Bill in Xero ↗</a><div class="tiny mut">match it in Xero</div>':'<span class="save-btn" data-rv="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">Review</span>'+(r.treatment==='autobill'?' <span class="pill" style="cursor:default" title="This payee is on Auto bill: HORIZON creates the bill automatically every 6 hours">Auto bill</span>':'')+' <span class="save-btn light" data-ig="'+i+'">Ignore</span>')
+      var act=fx?fx.act:k==='found'?(r.bill?'<a href="'+esc(r.bill.url)+'" target="_blank" rel="noopener">Bill in Xero ↗</a><div class="tiny mut">match it in Xero</div>':'<span class="save-btn" data-rv="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">Review</span>'+(r.treatment==='autobill'?' <span class="pill" style="cursor:default" title="This payee is on Auto bill: HORIZON creates the bill automatically every 6 hours">Auto bill</span>':'')+' <span class="save-btn light" data-ig="'+i+'">Ignore</span>')
         :k==='none'?'<span class="save-btn light" data-ig="'+i+'">Ignore</span>':(r.amount<0&&r.treatment_source==='manual'?'<span class="save-btn light" data-unig="'+i+'">Un-ignore</span>':'');
-      return '<tr'+acPrevMonthBg(r.line_date)+'><td class="l">'+esc(hzTrkDate(r.line_date))+'</td><td class="l">'+esc(r.account_name)+'</td><td class="l"><b>'+esc(r.payee_key)+'</b></td><td class="l tiny" style="max-width:280px;white-space:normal">'+esc(String(r.reference||'').slice(0,90))+'</td><td class="l">'+(r.amount<0?acMoney(-r.amount,r.currency):'<span class="pos">+'+acMoney(r.amount,r.currency)+'</span>')+'</td><td class="l" style="max-width:320px;white-space:normal">'+rc+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }).join('')
+      return '<tr'+acPrevMonthBg(r.line_date)+'><td class="l">'+esc(hzTrkDate(r.line_date))+'</td><td class="l">'+esc(r.account_name)+'</td><td class="l"><b>'+esc(r.payee_key)+'</b></td><td class="l tiny" style="max-width:280px;white-space:normal">'+esc(String(r.reference||'').slice(0,90))+'</td><td class="l">'+(r.amount<0?acMoney(-r.amount,r.currency):'<span class="pos">+'+acMoney(r.amount,r.currency)+'</span>')+'</td><td class="l" style="max-width:320px;white-space:normal">'+rc+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'
+        +(fx&&fx.open?'<tr><td colspan="7" style="padding:6px 0 14px;text-align:left">'+fx.card+'<div id="ac-sup"></div></td></tr>':''); }).join('')   // v28.397: the DHL invoice card opens under its line
       +(vis.length?'':'<tr><td colspan="7" class="l mut">Nothing here.</td></tr>')+'</tbody></table></div>';
     return h; }
   function acIgnorePayee(r,on){ var rows=(AC_IN.p&&AC_IN.p.rows)||[];
@@ -19996,6 +19999,9 @@
     p.then(function(){ AC_CF.d=null; acLinesReload(); }).catch(function(){ acLinesReload(); }); }
   function acRcWire(b){
     b.querySelectorAll('[data-rv]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.rv]; if(r)acDrOpen(r); }; });
+    b.querySelectorAll('[data-flex]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.flex]; if(r)acFlexGo(r,x); }; });   // v28.397
+    b.querySelectorAll('[data-dhl]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.dhl], I=r&&acDhlOf(r); if(!I)return; AC_DHL.open[I.number]=!AC_DHL.open[I.number]; var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acLinesRerender(); sc.scrollTop=y; }; });
+    acDhlWire(b);
     b.querySelectorAll('[data-ig]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.ig]; if(r)acIgnorePayee(r,true); }; });
     b.querySelectorAll('[data-unig]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.unig]; if(r)acIgnorePayee(r,false); }; });
     var mb=document.getElementById('ac-mbx'); if(mb)mb.onclick=function(){ AC_IN.mbx=!AC_IN.mbx; var x=document.getElementById('ac-mbxbody'); if(x)x.style.display=AC_IN.mbx?'':'none'; mb.firstChild.textContent=AC_IN.mbx?'▾ ':'▸ '; }; }
@@ -20189,7 +20195,7 @@
   // the ANZ line in Xero; the UK side opens Create sample bills pre-filled (Fulfil invoice + landed cost via the PO, else a Xero UK bill).
   var AC_DHL={d:null,busy:false,err:'',acct:{},msg:{},open:{}};
   function acRecTabs(){ var v=AC_IN.view||'lines'; var b=function(k,t){ return '<button class="save-btn'+(v===k?'':' light')+'" style="'+(v===k?'background:var(--ink);color:#fff;border-color:var(--ink);':'')+'border-radius:999px;padding:4px 12px;font-size:12px" onclick="window.acRecView&&window.acRecView(\''+k+'\')">'+t+'</button>'; };
-    return '<div style="display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap;align-items:center">'+b('lines','Bank lines')+b('dhl','DHL import')+b('flex','Flexport AU')
+    return '<div style="display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap;align-items:center">'   // v28.397: DHL and Flexport AU live in Bank lines (no tabs)
       +'<span style="margin-left:auto" class="tiny mut" id="ac-learn-st">'+acLearnText()+'</span><button class="save-btn light" style="font-size:12px" onclick="window.acLearnRun&&window.acLearnRun(this)" title="Reads past Xero spend and bills to learn each payee\'s contact, account and tax (the coding Reconcile suggests). Runs weekly when scheduled; a first run takes a few minutes.">↻ Learn from Xero</button></div>'; }
   // v28.356 (Ben 14-Oct-26, Mini Models blank on live, filled on the sandbox): the learn job (payee coding from Xero history) had no trigger on
   // live once Back-date left the menu. Status + a button here; the weekly n8n call (POST /api/cron/accounts-learn) is still the schedule.
@@ -20202,19 +20208,19 @@
   window.acLearnRun=function(btn){ if(AC_LEARN.busy)return; AC_LEARN.busy=true; if(btn){ btn.disabled=true; btn.textContent='Learning…'; }
     fetch('/api/accounts/backdate/refresh',{method:'POST'}).then(function(r){ return r.json().catch(function(){ return {}; }); }).then(function(){ AC_LEARN.d=Object.assign({},AC_LEARN.d||{},{running:true}); acLearnPaint(); setTimeout(acLearnStatus,4000); }).catch(function(){ AC_LEARN.busy=false; if(btn){ btn.disabled=false; btn.textContent='↻ Learn from Xero'; } }); };
   window.acRecView=function(v){ AC_IN.view=v; acInRender(); };
-  function acDhlLoad(fresh){ if(AC_DHL.busy)return; AC_DHL.busy=true; AC_DHL.err=''; acDhlRender(document.getElementById('accounts-body'));
-    fetch('/api/accounts/dhl/import'+(fresh?'?fresh=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_DHL.busy=false; if(j.error){ AC_DHL.err=j.error; } else AC_DHL.d=j; if(ACCOUNTS_SUB==='inbox'&&AC_IN.view==='dhl')acDhlRender(document.getElementById('accounts-body')); })
-      .catch(function(e){ AC_DHL.busy=false; AC_DHL.err=e.message||String(e); acDhlRender(document.getElementById('accounts-body')); }); }
-  function acDhlRender(b){ if(!b)return; var D=AC_DHL.d;
-    var h='<div style="text-align:left">'+acRecTabs()+'<div style="font-weight:700;font-size:15px">DHL import <span class="mut tiny" style="font-weight:400">AU account 51214671 · direct debit from ANZ</span></div>'
-      +'<div class="tiny mut" style="margin:4px 0 10px;max-width:980px">Each DHL invoice from accounts@ ("Your latest DHL invoice"), matched to its <b>DHL</b> line on the uploaded ANZ statement. Create in Xero AU makes one bill (contact DHL AU): shipments to Australia go to an AU account, to the UK or USA to <b>901 Loan - D&amp;B Ltd (UK)</b>. Then <b>Match</b> the bill to the ANZ line in Xero. The UK side opens Create sample bills pre-filled: a Fulfil supplier invoice + landed cost when the air waybill traces to a PO, else a Xero UK bill. Anything already in Xero is never created again. DHL lines are set to ignore in Bank lines.</div>';
-    if(!D){ b.innerHTML=h+'<div class="count">'+(AC_DHL.err?'<span style="color:var(--neg)">'+esc(AC_DHL.err)+'</span>':'Reading the DHL invoices in accounts@…')+'</div></div>'; if(!AC_DHL.busy&&!AC_DHL.err)acDhlLoad(false); return; }
-    var inv=D.invoices||[], cnt=function(s){ return inv.filter(function(i){ return i.status===s; }).length; };
-    var pill=function(cls,t){ var c={todo:'var(--blue)',done:'var(--pos)',ignored:'var(--muted)',waiting:'var(--muted)',err:'var(--neg)',warn:'var(--amber)'}[cls]||'var(--muted)'; return '<span style="display:inline-block;border:1px solid '+c+';color:'+c+';border-radius:999px;padding:0 8px;font-size:11px;font-weight:700;white-space:nowrap">'+esc(t)+'</span>'; };
-    h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+pill('todo',cnt('todo')+' to do')+pill('done',cnt('done')+' in Xero AU')+pill('waiting',cnt('waiting')+' not on the ANZ statement')+pill('ignored',cnt('ignored')+' ignored')
-      +'<button class="save-btn light" id="ac-dhl-refresh" style="margin-left:auto">'+(AC_DHL.busy?'Reading…':'↻ Re-read accounts@')+'</button></div>';
-    var orgTag=function(s){ var k=s.dest==='AU'?'AU':(s.dest==='US'?'US':'UK'); return '<span style="display:inline-block;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;'+(k==='AU'?'background:#dcfce7;color:#15803d':k==='US'?'background:#dbeafe;color:#1d4ed8':'background:#fee2e2;color:#b91c1c')+'">'+k+'</span>'; };
-    h+=inv.map(function(i){ if(!i.number)return '<div class="count" style="color:var(--neg)">An email could not be read: '+esc(i.error||'')+'</div>';
+  // v28.352 DHL import; v28.397 (Ben 16-Oct-26: "dhl should be the same, not a separate tab"): each DHL invoice shows on its ANZ line in
+  // Bank lines (Receipt found) with a Review button that opens the invoice card (AU accounts, Create in Xero AU, UK side, Ignore) under the line.
+  function acDhlLoad(fresh){ if(AC_DHL.busy)return; AC_DHL.busy=true; AC_DHL.err='';
+    fetch('/api/accounts/dhl/import'+(fresh?'?fresh=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_DHL.busy=false; if(j.error){ AC_DHL.err=j.error; } else AC_DHL.d=j; acLinesRerender(); })
+      .catch(function(e){ AC_DHL.busy=false; AC_DHL.err=e.message||String(e); }); }
+  function acIsDhlAnz(r){ return r&&r.org==='au'&&r.amount<0&&/\bDHL\b/i.test((r.reference||'')+' '+(r.payee_key||'')+' '+(r.description||'')); }
+  function acDhlEnsure(){ var rows=(AC_IN.p&&AC_IN.p.rows)||[]; if(AC_DHL.d||AC_DHL.busy||AC_DHL.err||!rows.some(acIsDhlAnz))return; acDhlLoad(false); }
+  function acDhlOf(r){ if(!AC_DHL.d||!acIsDhlAnz(r))return null; var a=-Number(r.amount);
+    return (AC_DHL.d.invoices||[]).filter(function(i){ var L=i.stmt_line; return L&&i.status!=='ignored'&&L.date===r.line_date&&Math.abs(L.amount-a)<0.005&&(L.reference==null||L.reference===r.reference); })[0]||null; }
+  var acDhlPill=function(cls,t){ var c={todo:'var(--blue)',done:'var(--pos)',ignored:'var(--muted)',waiting:'var(--muted)',err:'var(--neg)',warn:'var(--amber)'}[cls]||'var(--muted)'; return '<span style="display:inline-block;border:1px solid '+c+';color:'+c+';border-radius:999px;padding:0 8px;font-size:11px;font-weight:700;white-space:nowrap">'+esc(t)+'</span>'; };
+  var acDhlOrgTag=function(s){ var k=s.dest==='AU'?'AU':(s.dest==='US'?'US':'UK'); return '<span style="display:inline-block;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:4px;'+(k==='AU'?'background:#dcfce7;color:#15803d':k==='US'?'background:#dbeafe;color:#1d4ed8':'background:#fee2e2;color:#b91c1c')+'">'+k+'</span>'; };
+  function acDhlCard(i){ var D=AC_DHL.d, pill=acDhlPill, orgTag=acDhlOrgTag;
+    if(!i.number)return '<div class="count" style="color:var(--neg)">An email could not be read: '+esc(i.error||'')+'</div>';
       var st=i.status, L=i.stmt_line, ukShips=(i.shipments||[]).filter(function(s){ return s.business==='uk'; });
       var head='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--hover)"><b>'+(L?esc(hzTrkDate(L.date))+' · ANZ −'+money(L.amount):'Invoice '+esc(hzTrkDate(i.date))+' · AUD '+money(i.total))+'</b><span style="font-family:ui-monospace,Menlo,monospace">'+esc(i.number)+'</span><span class="mut tiny">invoice '+esc(hzTrkDate(i.date))+' · '+(i.shipments||[]).length+' shipment'+((i.shipments||[]).length===1?'':'s')+(L&&L.fee>0.005?' · ANZ is '+money(L.fee)+' more than the invoice (card fee?)':'')+'</span><span style="margin-left:auto">'
         +(st==='todo'?pill('todo','to do'):st==='done'?pill('done','in Xero AU'):st==='ignored'?pill('ignored','ignored'):pill('waiting','not on the ANZ statement'))+'</span></div>';
@@ -20229,9 +20235,14 @@
       foot+='<button class="save-btn light ac-dhl-ign" data-n="'+esc(i.number)+'" data-on="'+(st==='ignored'?'0':'1')+'">'+(st==='ignored'?'Un-ignore':'Ignore')+'</button>';
       return '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden">'+head
         +'<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">AWB</th><th class="l">Route</th><th class="l">From → to</th><th class="l" style="text-align:right">AUD</th><th class="l">Xero AU line</th><th class="l">UK side</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-        +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px">'+foot+'</div>'+(m?'<div style="padding:0 14px 10px;font-size:12.5px;color:'+(m.ok?'var(--pos)':'var(--neg)')+'">'+m.html+'</div>':'')+'</div>'; }).join('');
-    b.innerHTML=h+'<div id="ac-sup"></div></div>';
-    var rf=document.getElementById('ac-dhl-refresh'); if(rf)rf.onclick=function(){ acDhlLoad(true); };
+        +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px">'+foot+'</div>'+(m?'<div style="padding:0 14px 10px;font-size:12.5px;color:'+(m.ok?'var(--pos)':'var(--neg)')+'">'+m.html+'</div>':'')+'</div>'; }
+  function acDhlCells(r,i){ var I=acDhlOf(r), uk=(I.shipments||[]).filter(function(s){ return s.business==='uk'; }).length, n=(I.shipments||[]).length;
+    var rc='<div><span class="pill" style="cursor:default;background:#fef9c3;color:#854d0e;border-color:#fde047">DHL invoice</span> <span style="font-family:ui-monospace,Menlo,monospace">'+esc(I.number)+'</span> <span class="mut">AUD '+money(I.total)+'</span></div>'
+      +'<div class="tiny mut">'+esc(hzTrkDate(I.date))+' · '+n+' shipment'+(n===1?'':'s')+(uk?' ('+uk+' UK / USA: 901 + UK side)':'')+(I.stmt_line&&I.stmt_line.fee>0.005?' · ANZ is '+money(I.stmt_line.fee)+' more (card fee?)':'')+'</div>';
+    var act=I.status==='done'?(I.xero_au||[]).map(function(x){ return '<a href="'+esc(x.url||'#')+'" target="_blank" rel="noopener">'+esc(x.number)+' ↗</a>'; }).join(' ')+'<div class="tiny mut">match it in Xero</div>'
+      :'<span class="save-btn" data-dhl="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">'+(AC_DHL.open[I.number]?'Close':'Review')+'</span>';
+    return {rc:rc,act:act,open:!!AC_DHL.open[I.number],card:AC_DHL.open[I.number]?acDhlCard(I):''}; }
+  function acDhlWire(b){
     b.querySelectorAll('.ac-dhl-acct').forEach(function(s){ s.onchange=function(){ (AC_DHL.acct[s.dataset.n]=AC_DHL.acct[s.dataset.n]||{})[s.dataset.awb]=s.value; }; });
     b.querySelectorAll('.ac-dhl-ign').forEach(function(x){ x.onclick=function(){ x.disabled=true; fetch('/api/accounts/dhl/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invoice_number:x.dataset.n,ignored:x.dataset.on==='1'})}).then(function(r){ return r.json(); }).then(function(){ acDhlLoad(true); }); }; });
     b.querySelectorAll('.ac-dhl-au').forEach(function(x){ x.onclick=function(){ var n=x.dataset.n, I=(AC_DHL.d.invoices||[]).filter(function(v){ return v.number===n; })[0]; if(!I)return;
@@ -20245,53 +20256,39 @@
       var lines=(I.shipments||[]).filter(function(s){ return s.business==='uk'; }).map(function(s){ return {ship_date:s.ship_date||'',tracking:s.awb,charge:'freight',description:'DHL '+s.awb+' '+s.orig+'→'+s.dest+' '+s.sender+' → '+s.receiver,ship_to:s.dest==='GB'?'UK':s.dest,po:s.po||'',amount:s.amount}; });
       if(typeof sbOpen==='function')sbOpen(function(){ acDhlLoad(true); },{host:document.getElementById('ac-sup'),head:{supplier:'DHL',ref_base:n,invoice_date:I.date,due_date:I.due||I.date,currency:'AUD',source_file:'DHL '+n}, lines:lines}); }; });
   }
-  // ═══ v28.396 (Ben 16-Oct-26): ACCOUNTS > Reconcile > Flexport AU. Bank of America (Xero UK, USD) pays every Flexport invoice; the ones
-  // Fulfil put in Xero AU are paid there from 901 Loan - D&B Ltd (UK), and a Spend Money for the same USD amount goes in Bank of America
-  // in Xero UK, coded to 901 Loan - D&B PTY LTD (Australia). Then reconcile the Bank of America line against that Spend Money in Xero.
+  // ═══ v28.396 (Ben 16-Oct-26) Flexport AU; v28.397 (Ben: "can simply live in the main reconcile item ... a custom element"): Bank of
+  // America (Xero UK, USD) pays every Flexport invoice. A Bank of America Flexport line that matches an open Xero AU Flexport bill shows in
+  // Bank lines under Receipt found with its AU bill and one button that (a) pays the AU bill in Xero AU from 901 Loan - D&B Ltd (UK) and
+  // (b) creates a Spend Money in Bank of America in Xero UK for the same USD amount, coded to 901 Loan - D&B PTY LTD (Australia). Then the
+  // Bank of America line is matched to that Spend Money in Xero UK. Matches come from /api/accounts/flexport-au, read once the lines load.
   var AC_FLEX={d:null,busy:false,err:'',msg:{}};
-  function acFlexLoad(fresh){ if(AC_FLEX.busy)return; AC_FLEX.busy=true; AC_FLEX.err=''; acFlexRender(document.getElementById('accounts-body'));
-    fetch('/api/accounts/flexport-au'+(fresh?'?fresh=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_FLEX.busy=false; if(j.error)AC_FLEX.err=j.error; else AC_FLEX.d=j; if(ACCOUNTS_SUB==='inbox'&&AC_IN.view==='flex')acFlexRender(document.getElementById('accounts-body')); })
-      .catch(function(e){ AC_FLEX.busy=false; AC_FLEX.err=e.message||String(e); acFlexRender(document.getElementById('accounts-body')); }); }
-  function acFlexRender(b){ if(!b)return; var D=AC_FLEX.d;
-    var h='<div style="text-align:left">'+acRecTabs()+'<div style="font-weight:700;font-size:15px">Flexport AU <span class="mut tiny" style="font-weight:400">paid from Bank of America (Xero UK, USD)</span></div>'
-      +'<div class="tiny mut" style="margin:4px 0 10px;max-width:980px">Every Flexport invoice is paid from <b>Bank of America</b>, one statement line each. When the bill is for the AU business, Fulfil puts it in <b>Xero AU</b>. For each Bank of America Flexport line that matches an open AU Flexport bill (same USD amount), <b>Create in Xero</b> does two things: (a) pays the AU bill in Xero AU from <b>'+esc((D&&D.loan_au)||'901 Loan - Dock & Bay Ltd (UK)')+'</b>, dated the Bank of America line, at Xero\'s rate for the day; (b) creates a <b>Spend Money</b> in Bank of America in Xero UK for the same USD amount, contact Flexport, coded to <b>'+esc((D&&D.loan_uk)||'901 Loan - Dock & Bay PTY LTD (Australia)')+'</b>, No VAT. Then reconcile the Bank of America line against that Spend Money in Xero UK. Lines with no AU bill are UK bills: reconcile them as usual. Uses the uploaded Bank of America statement.</div>';
-    if(!D){ b.innerHTML=h+'<div class="count">'+(AC_FLEX.err?'<span style="color:var(--neg)">'+esc(AC_FLEX.err)+'</span>':'Reading the Flexport lines and the open Xero AU Flexport bills…')+'</div></div>'; if(!AC_FLEX.busy&&!AC_FLEX.err)acFlexLoad(false); return; }
-    var L=D.lines||[], cnt=function(s){ return L.filter(function(l){ return l.status===s; }).length; };
-    var pill=function(cls,t){ var c={todo:'var(--blue)',done:'var(--pos)',partial:'var(--amber)',uk:'var(--muted)',reconciled:'var(--muted)',creating:'var(--amber)'}[cls]||'var(--muted)'; return '<span style="display:inline-block;border:1px solid '+c+';color:'+c+';border-radius:999px;padding:0 8px;font-size:11px;font-weight:700;white-space:nowrap">'+esc(t)+'</span>'; };
-    var lab={todo:'to do',done:'done',partial:'AU paid, UK Spend Money missing',creating:'being created',uk:'UK bill (nothing to do)',reconciled:'reconciled in Xero UK'};
-    if(!AC_FLEX.show)AC_FLEX.show='todo';
-    h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
-      +['todo','partial','done','uk','reconciled'].filter(function(s){ return s==='todo'||cnt(s); }).map(function(s){ var on=AC_FLEX.show===s||(AC_FLEX.show==='todo'&&s==='partial'); return '<button class="save-btn light ac-flex-f" data-s="'+s+'" style="border-radius:999px;padding:2px 10px;font-size:12px;'+(AC_FLEX.show===s?'background:var(--ink);color:#fff;border-color:var(--ink)':'')+'">'+cnt(s)+' '+esc(lab[s])+'</button>'; }).join('')
-      +'<span class="tiny mut">'+D.au_bills_open+' open Flexport bill'+(D.au_bills_open===1?'':'s')+' in Xero AU'+(D.cached?' (from the bills cache: Xero AU could not be read)':'')+'</span>'
-      +'<button class="save-btn light" id="ac-flex-refresh" style="margin-left:auto">'+(AC_FLEX.busy?'Reading…':'↻ Re-read Xero AU')+'</button></div>';
-    var rows=L.filter(function(l){ return AC_FLEX.show==='todo'?(l.status==='todo'||l.status==='partial'||l.status==='creating'):l.status===AC_FLEX.show; });
-    var key=function(l){ return l.date+'|'+l.amount+'|'+l.reference; };
-    h+=rows.length?'<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Bank of America line</th><th class="l" style="text-align:right">USD</th><th class="l">Flexport payment</th><th class="l">Xero AU bill</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'
-      +rows.map(function(l){ var k=key(l), m=AC_FLEX.msg[k], s=l.settlement||{};
-        var bills=(l.bills||[]).map(function(x){ return '<a href="'+esc(x.url||('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+x.invoice_id))+'" target="_blank" rel="noopener" style="color:var(--blue);font-family:ui-monospace,Menlo,monospace">'+esc(x.number||'bill')+' ↗</a> <span class="mut">'+money(x.amount)+'</span>'; }).join('<br>')||'<span class="mut tiny">none</span>';
-        var act=(l.status==='todo'||l.status==='partial')?'<button class="save-btn ac-flex-go" data-k="'+esc(k)+'" style="background:var(--blue);border-color:var(--blue);color:#fff;white-space:nowrap">'+(l.status==='partial'?'Finish UK Spend Money':'Create in Xero')+'</button>'
-          :(l.status==='done'&&s.uk_txn_id?'<a href="https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID='+esc(s.uk_txn_id)+'" target="_blank" rel="noopener" style="color:var(--blue)" class="tiny">UK Spend Money ↗</a> <span class="tiny mut">'+esc(s.created_by?String(s.created_by).replace(/@.*/,'@'):'')+' '+esc(s.at?hzTrkDate(s.at):'')+'</span>':'');
-        return '<tr style="border-top:1px solid var(--line)"><td style="white-space:nowrap">'+esc(hzTrkDate(l.date))+'</td><td style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td style="font-family:ui-monospace,Menlo,monospace" class="tiny">'+esc(l.st||'')+'</td><td>'+bills+'</td><td>'+pill(l.status,lab[l.status]||l.status)
-          +((l.error||s.error)?'<div class="tiny" style="color:var(--neg);max-width:320px;white-space:normal">'+esc(l.error||s.error)+'</div>':'')+'</td><td>'+act+'</td></tr>'
-          +(m?'<tr><td colspan="6" style="font-size:12.5px;color:'+(m.ok?'var(--pos)':'var(--neg)')+';white-space:normal">'+m.html+'</td></tr>':''); }).join('')+'</tbody></table></div>'
-      :'<div class="count">Nothing here.'+(AC_FLEX.show==='todo'?' No Bank of America Flexport line on the uploaded statement matches an open AU Flexport bill.':'')+'</div>';
-    if((D.au_unmatched||[]).length)h+='<div class="tiny" style="margin-top:12px;color:var(--amber)"><b>Open AU Flexport bills with no matching Bank of America line</b> (not paid yet, or the statement is not uploaded to that date): '+D.au_unmatched.map(function(x){ return '<a href="'+esc(x.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(x.number||'bill')+'</a> USD '+money(x.due); }).join(', ')+'</div>';
-    b.innerHTML=h+'</div>';
-    var rf=document.getElementById('ac-flex-refresh'); if(rf)rf.onclick=function(){ acFlexLoad(true); };
-    b.querySelectorAll('.ac-flex-f').forEach(function(x){ x.onclick=function(){ AC_FLEX.show=x.dataset.s; acFlexRender(b); }; });
-    b.querySelectorAll('.ac-flex-go').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k, l=(AC_FLEX.d.lines||[]).filter(function(v){ return key(v)===k; })[0]; if(!l)return;
-      var bl=(l.bills||[]).map(function(v){ return v.number+'  USD '+money(v.amount); }).join('\n'), tot=(l.bills||[]).reduce(function(a,v){ return a+v.amount; },0);
-      var msg=l.status==='partial'?'The AU bill is already paid. Create the Spend Money in Bank of America (Xero UK) for USD '+money(tot)+', coded to '+(AC_FLEX.d.loan_uk||'901')+'?\n\nThis writes to live Xero UK.'
-        :'Bank of America '+hzTrkDate(l.date)+', USD '+money(l.amount)+'\n\n(a) Xero AU: pay\n'+bl+'\nfrom '+(AC_FLEX.d.loan_au||'901 Loan - D&B Ltd (UK)')+', dated '+hzTrkDate(l.date)+'.\n\n(b) Xero UK: Spend Money in Bank of America, USD '+money(tot)+', contact Flexport, '+(AC_FLEX.d.loan_uk||'901 Loan - D&B PTY LTD (Australia)')+'.\n\nThis writes to live Xero AU and Xero UK.';
-      if(!confirm(msg))return; x.disabled=true; x.textContent='Creating…';
-      fetch('/api/accounts/flexport-au/settle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line:{date:l.date,amount:l.amount,reference:l.reference},confirm:true})}).then(function(r){ return r.json(); }).then(function(j){
-        AC_FLEX.msg[k]=j.error?{ok:false,html:esc(j.error)}:{ok:true,html:'✓ Xero AU: '+j.au.map(function(v){ return '<a href="'+esc(v.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(v.number)+' ↗</a> paid USD '+money(v.amount); }).join(', ')+' from '+esc(j.loan_au)+'. Xero UK: <a href="'+esc(j.uk.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">Spend Money USD '+money(j.uk.amount)+' ↗</a> to '+esc(j.uk.account)+'. Now reconcile the Bank of America line against it in Xero UK.'};
-        if(!j.error)AC_FLEX.show='done'; acFlexLoad(true); })
-        .catch(function(e){ AC_FLEX.msg[k]={ok:false,html:esc(e.message||String(e))}; acFlexLoad(true); }); }; });
-  }
+  function acIsFlexBofa(r){ return r&&r.org==='uk'&&r.amount<0&&/bank of america/i.test(r.account_name||'')&&/flexport/i.test((r.reference||'')+' '+(r.payee_key||'')+' '+(r.description||'')); }
+  function acFlexEnsure(){ var rows=(AC_IN.p&&AC_IN.p.rows)||[]; if(AC_FLEX.d||AC_FLEX.busy||AC_FLEX.err||!rows.some(acIsFlexBofa))return; acFlexLoad(); }
+  function acFlexLoad(){ AC_FLEX.busy=true;
+    fetch('/api/accounts/flexport-au',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_FLEX.busy=false; if(j.error)AC_FLEX.err=j.error; else AC_FLEX.d=j; acLinesRerender(); })
+      .catch(function(e){ AC_FLEX.busy=false; AC_FLEX.err=e.message||String(e); }); }
+  function acFlexOf(r){ if(!AC_FLEX.d||!acIsFlexBofa(r))return null; var a=-Number(r.amount);
+    var l=(AC_FLEX.d.lines||[]).filter(function(x){ return x.date===r.line_date&&Math.abs(x.amount-a)<0.005&&x.reference===r.reference; })[0];
+    return l&&['todo','partial','creating','done'].indexOf(l.status)>=0?l:null; }
+  function acHasBill(r){ var f=acFlexOf(r), d=acDhlOf(r); return !!(r.bill||(f&&f.status==='done')||(d&&d.status==='done')); }
+  function acFlexCells(r,i){ var f=acFlexOf(r), s=f.settlement||{}, m=AC_FLEX.msg[r.line_date+'|'+r.reference];
+    var rc='<div><span class="pill" style="cursor:default;background:#dcfce7;color:#15803d;border-color:#86efac">AU bill</span> '+(f.bills||[]).map(function(x){ return '<a href="'+esc(x.url||('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+x.invoice_id))+'" target="_blank" rel="noopener" style="font-family:ui-monospace,Menlo,monospace">'+esc(x.number||'bill')+' ↗</a> <span class="mut">USD '+money(x.amount)+'</span>'; }).join(', ')+'</div>'
+      +'<div class="tiny mut">Xero AU Flexport bill: pay from '+esc(AC_FLEX.d.loan_au||'901 Loan - D&B Ltd (UK)')+' + Spend Money here to '+esc(AC_FLEX.d.loan_uk||'901 Loan - D&B PTY LTD (Australia)')+'</div>'
+      +((f.error||s.error)?'<div class="tiny" style="color:var(--neg);white-space:normal;max-width:320px">'+esc(f.error||s.error)+'</div>':'')
+      +(m?'<div class="tiny" style="white-space:normal;max-width:360px;color:'+(m.ok?'var(--pos)':'var(--neg)')+'">'+m.html+'</div>':'');
+    var act=f.status==='done'?(s.uk_txn_id?'<a href="https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID='+esc(s.uk_txn_id)+'" target="_blank" rel="noopener">Spend Money in Xero ↗</a>':'Done')+'<div class="tiny mut">AU bill paid · match it in Xero</div>'
+      :f.status==='creating'?'<span class="tiny mut">being created…</span>'
+      :'<span class="save-btn" data-flex="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700;white-space:nowrap" title="(a) Xero AU: pay the AU bill from 901 Loan. (b) Xero UK: Spend Money in Bank of America to 901 Loan AU.">'+(f.status==='partial'?'Finish UK Spend Money':'Pay AU bill + Spend Money')+'</span>';
+    return {rc:rc,act:act}; }
+  function acFlexGo(r,btn){ var f=acFlexOf(r); if(!f)return; var bl=(f.bills||[]).map(function(v){ return v.number+'  USD '+money(v.amount); }).join('\n'), tot=(f.bills||[]).reduce(function(a,v){ return a+v.amount; },0);
+    var msg=f.status==='partial'?'The AU bill is already paid. Create the Spend Money in Bank of America (Xero UK) for USD '+money(tot)+', coded to '+(AC_FLEX.d.loan_uk||'901')+'?\n\nThis writes to live Xero UK.'
+      :'Bank of America '+hzTrkDate(f.date)+', USD '+money(f.amount)+'\n\n(a) Xero AU: pay\n'+bl+'\nfrom '+(AC_FLEX.d.loan_au||'901 Loan - D&B Ltd (UK)')+', dated '+hzTrkDate(f.date)+'.\n\n(b) Xero UK: Spend Money in Bank of America, USD '+money(tot)+', contact Flexport, '+(AC_FLEX.d.loan_uk||'901 Loan - D&B PTY LTD (Australia)')+'.\n\nThis writes to live Xero AU and Xero UK.';
+    if(!confirm(msg))return; if(btn){ btn.style.pointerEvents='none'; btn.textContent='Creating…'; } var k=r.line_date+'|'+r.reference;
+    fetch('/api/accounts/flexport-au/settle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line:{date:f.date,amount:f.amount,reference:f.reference},confirm:true})}).then(function(x){ return x.json(); }).then(function(j){
+      AC_FLEX.msg[k]=j.error?{ok:false,html:esc(j.error)}:{ok:true,html:'✓ AU '+j.au.map(function(v){ return '<a href="'+esc(v.url)+'" target="_blank" rel="noopener">'+esc(v.number)+' ↗</a>'; }).join(', ')+' paid; <a href="'+esc(j.uk.url)+'" target="_blank" rel="noopener">Spend Money USD '+money(j.uk.amount)+' ↗</a> created. Match the line to it in Xero.'};
+      AC_FLEX.d=null; acFlexLoad(); })
+      .catch(function(e){ AC_FLEX.msg[k]={ok:false,html:esc(e.message||String(e))}; AC_FLEX.d=null; acFlexLoad(); }); }
   function acInRender(){ var b=document.getElementById('accounts-body'); if(!b||ACCOUNTS_SUB!=='inbox')return; acInFlash();
-    if(AC_IN.view==='dhl'){ acDhlRender(b); return; }   // v28.352
-    if(AC_IN.view==='flex'){ acFlexRender(b); return; }   // v28.396
     if(!AC_IN.st){ b.innerHTML='<div class="count">Loading…</div>'; acInLoad(); return; }
     var st=AC_IN.st, h='<div style="text-align:left">'+acRecTabs();   /* v28.269: full width for the statement-lines table; v28.352 Bank lines | DHL import */
     if(AC_IN.flash){ var ok=/^connected /.test(AC_IN.flash); h+='<div class="count" style="padding:8px 10px;border-radius:6px;margin-bottom:10px;background:'+(ok?'var(--pos-bg,#e7f6ec)':'var(--neg-bg,#fdecec)')+';color:'+(ok?'var(--pos)':'var(--neg)')+'">'+esc(ok?('Gmail '+AC_IN.flash):AC_IN.flash)+'</div>'; }

@@ -1,3 +1,11 @@
+## v28.397 (16-Oct-26) Reconcile: Flexport AU and DHL live in Bank lines (no tabs); DHL lines match again
+- Ben: "the flexport au feature can simply live in the main reconcile item" and "dhl should be the same, not a separate tab". The DHL import and Flexport AU tabs are gone. In Bank lines > Receipt found:
+- A Bank of America Flexport line that matches an open Xero AU Flexport bill shows the AU bill and one button, Pay AU bill + Spend Money (same two Xero writes as v28.396, confirmed). Done: the Spend Money link, "match it in Xero".
+- An ANZ DHL line that matches a DHL invoice shows the invoice; Review opens its card under the line (AU accounts, Create in Xero AU, UK side, Ignore). Done: the AU bill link.
+- Both count as "bill created" for the Hide tick box. Bank of America Flexport lines with no AU bill stay ignored (UK bills).
+- Fix: the DHL statement query selected a line id that planner.accounts_stmt_lines does not have; the error was swallowed, so no DHL invoice ever matched its ANZ line (all showed "not on the ANZ statement"). Now matched on date, amount and reference. Sandbox: 2 of 7 invoices match their ANZ lines (both already billed in Xero AU); the other 5 have no ANZ line on the sandbox statement.
+- No migration (376 from v28.396 still needed), no env change. lib/ai-logic/supply-finance.md updated.
+
 ## v28.396 (16-Oct-26) Reconcile: Flexport AU (pay the Xero AU bill from the UK loan, Spend Money in Bank of America)
 - Ben: Flexport is always paid from Bank of America (Xero UK, USD), but some bills are for the AU business and Fulfil puts them in Xero AU. New ACCOUNTS > Reconcile > Flexport AU view: each Bank of America Flexport line on the uploaded statement is matched to open Xero AU Flexport bill(s) of the same USD amount (read live from Xero AU, one call kept 5 minutes).
 - Create in Xero (admins and ACCOUNTS users, confirmed): (a) pays the AU bill(s) in Xero AU from 901 Loan - Dock & Bay Ltd (UK), dated the Bank of America line, Xero's day rate; (b) creates a Spend Money in Bank of America in Xero UK for the same USD amount, contact Flexport, 901 Loan - Dock & Bay PTY LTD (Australia), No VAT. Then reconcile the Bank of America line against the Spend Money in Xero UK. If (b) fails after (a), the line shows "AU paid, UK Spend Money missing" and Create finishes only (b).

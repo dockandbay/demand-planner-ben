@@ -56,7 +56,7 @@ fingerprints:
   supply/inject.html::accountsCan: c51271303351
   supply/inject.html::acRenderConfig: ff44fe83f193
   supply/inject.html::acCfReload: 38efe35ae70b
-  supply/inject.html::acInLinesHtml: 1061b93e34c6
+  supply/inject.html::acInLinesHtml: d5227626974b
   supply/inject.html::acDrOpen: b3be4c0b9c61
   supply/inject.html::acDrPaint: 06889ab883b7
   supply/inject.html::acRenderStmt: 43008dd01ade
@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.396
+verified_version: v28.397
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -501,19 +501,21 @@ verified_version: v28.396
 - Filters (v28.236): category (products.category_name_final, else category), status (products.status), search on SKU or product name, and quick filters All / Changed / Big moves / Sets / Supplier cost / Has blanks. History opens in its own modal.
 - Persistence (v28.238): every Analyse saves its full result (planner.cogs_analysis, newest row only, migration 345). Opening the tab shows that saved result with "Analysed <date time> by <user>" until the next Analyse. Times are London time. (source: /api/supply/cogs/last, /api/supply/cogs/analyse)
 
-## DHL import (ACCOUNTS > Reconcile > DHL import, from v28.352)
+## DHL import (ACCOUNTS > Reconcile > Bank lines, from v28.352; own tab until v28.397)
+- v28.397 (Ben 16-Oct-26: "not a separate tab"): no tab. An ANZ DHL line on the uploaded AU statement that matches a DHL invoice shows in Bank lines under Receipt found (DHL invoice, total, shipments); Review opens the invoice card under the line (AU accounts per shipment, Create in Xero AU, UK side, Ignore). Once the AU bill exists the line shows the bill link (match it in Xero) and counts as bill created for the Hide tick box. The match is by statement date, amount and reference (until v28.397 the statement query asked for a line id the table does not have, failed quietly, and no invoice ever matched its ANZ line).
 - Ben 14-Oct-26: DHL AU (account 51214671) invoices arrive in accounts@ as "Your latest DHL invoice" with a CSV and are paid by direct debit from ANZ (Xero AU), so they belong in Reconcile, not Payables. AU "DHL" debits are set to ignore in Bank lines (built-in rule) because this view handles them.
 - Each invoice is read from its CSV (one line per shipment: air waybill, route, sender, receiver, amount) and matched to the DHL line on the uploaded ANZ statement (same amount, or up to 1.5% more for a card fee, on or after the invoice date minus 3 days). Status: to do (on the statement, not in Xero AU), in Xero AU, not on the ANZ statement (not debited yet, or already reconciled e.g. as Spend Money), ignored.
 - Create in Xero AU: one AUTHORISED bill, contact "DHL AU" (else "DHL"), invoice number = the DHL invoice number, dated the invoice date. Shipments to Australia: an AU account (302 by default; 405.2 Cost of Sales - AU - Wholesale for an AU wholesale order, e.g. TBAY27776-2; 313); GST free (EXEMPTEXPENSES). Shipments to the UK or USA: 901 Loan - D&B Ltd (UK), BAS excluded (UK business, intercompany). Lines must add up to the invoice total. Then the bill is matched to the ANZ line in Xero (Reconcile rule: bill only against an uploaded statement line).
 - Never twice: refused when the invoice number is already an AU bill (HORIZON's Xero bills copy, a live Xero AU check, or planner.dhl_invoice_docs, migration 370, written before the Xero call).
 - UK side (UK / USA shipments): opens Create sample bills pre-filled (supplier DHL, the DHL invoice number, AUD, one line per shipment with its air waybill and PO when the air waybill is on a HORIZON shipment): a Fulfil supplier invoice + landed cost when it traces to a PO, else a Xero UK bill. An invoice already billed in Xero UK is shown and never recreated.
-- Ignore marks an invoice as needing nothing (Un-ignore reverses). (source: server.mjs :: dhlParseInvoice, dhlImportPlan, dhl/import, dhl/au-bill, dhl/ignore, accounts inbox proposals; inject.html :: acDhlRender, sbOpen pre)
+- Ignore marks an invoice as needing nothing (Un-ignore reverses). (source: server.mjs :: dhlParseInvoice, dhlImportPlan, dhl/import, dhl/au-bill, dhl/ignore, accounts inbox proposals; inject.html :: acDhlOf, acDhlCells, acDhlCard, acDhlWire, sbOpen pre)
 
-## Flexport AU (ACCOUNTS > Reconcile > Flexport AU, from v28.396)
+## Flexport AU (ACCOUNTS > Reconcile > Bank lines, from v28.396; own tab in v28.396 only)
+- v28.397 (Ben 16-Oct-26: "simply live in the main reconcile item"): no tab. A Bank of America Flexport line that matches an open AU Flexport bill shows in Bank lines under Receipt found (although Flexport is ignored for receipts) with the AU bill and one button, Pay AU bill + Spend Money (Finish UK Spend Money when only the UK side is left). Done lines show the Spend Money link (match it in Xero) and count as bill created for the Hide tick box. Bank of America Flexport lines with no AU bill stay ignored (UK bills).
 - Ben 16-Oct-26: Flexport is always paid from Bank of America (Xero UK, USD), one statement line per Flexport invoice ("FLEXPORT.COM ... ID:ST-..."). When the invoice is for the AU business, Fulfil puts the bill in Xero AU, so the payment and the bill sit in different orgs.
 - Lines: Bank of America Flexport debits on the uploaded Xero UK statement. Bills: open (AUTHORISED, amount due above 0, USD) Xero AU bills whose contact name contains Flexport, read live from Xero AU (one call, kept 5 minutes; the bills cache if Xero cannot be read). Match: the same USD amount (one bill, closest date), else 2 or 3 open AU bills that add up to the line exactly. Status: to do, done, AU paid but UK Spend Money missing, UK bill (no AU bill: nothing to do, reconcile as usual), reconciled in Xero UK.
 - Create in Xero (admins and ACCOUNTS users, confirmed): (a) Xero AU: pays each matched AU bill in full from 901 Loan - Dock & Bay Ltd (UK), dated the Bank of America line, no rate given so Xero uses its rate for the day (as cross-org PO payments); (b) Xero UK: one Spend Money in Bank of America (the line's bank account), contact "Flexport - 95585" (else "Flexport"), USD, the AU bills' total, account 901 Loan - Dock & Bay PTY LTD (Australia), No VAT, reference "AU <bill numbers>". Then the Bank of America line is reconciled against that Spend Money in Xero UK (the API cannot reconcile).
-- Checked before writing: the line is on the statement and not reconciled; each bill is re-read live (open, USD, Flexport, amount due); the bills add up to no more than the line; no bill or line settled before (planner.flexport_au_settlements, migration 376, written before the Xero calls, one live row per line). If the AU payment succeeds and the UK Spend Money fails, the row stays "AU paid, UK Spend Money missing" and Create finishes only the UK side. (source: server.mjs :: flexAuOpenBills, flexAuPlan, flexport-au, flexport-au/settle, accountsGate; inject.html :: acFlexRender)
+- Checked before writing: the line is on the statement and not reconciled; each bill is re-read live (open, USD, Flexport, amount due); the bills add up to no more than the line; no bill or line settled before (planner.flexport_au_settlements, migration 376, written before the Xero calls, one live row per line). If the AU payment succeeds and the UK Spend Money fails, the row stays "AU paid, UK Spend Money missing" and Create finishes only the UK side. (source: server.mjs :: flexAuOpenBills, flexAuPlan, flexport-au, flexport-au/settle, accountsGate; inject.html :: acFlexOf, acFlexCells, acFlexGo, acRcKind)
 
 ## ERP deviations follow Fulfil (v28.362)
 - Ben 14-Oct-26: dropship / backorder (Direct to Client) POs are changed in Fulfil (the sales order is linked to the PO) and cannot be pushed from HORIZON, so HORIZON must take Fulfil's quantities. Example PO-1895877 = Fulfil PO388: Fulfil and the plan both 600 for COOL-CAB-LTGRY-R, but HORIZON's ERP copy (erp_qty) still held the Cin7-era 420, so it showed an ERP deviation.
