@@ -1,3 +1,7 @@
+## v28.395 (16-Oct-26) Reconcile: tick box to hide lines whose bill is already created
+- ACCOUNTS > Reconcile: new tick box "Hide lines with bill created (n)" next to the search. Ticked, lines whose bill HORIZON already created in Xero (only the Match in Xero left) are hidden, and the Receipt found / No receipt / Ignored counts leave them out. The choice is remembered in this browser (off by default).
+- Display only. No server change, no migration, no env change.
+
 ## v28.394 (16-Oct-26) Reconcile: receipts read before the GST reader are checked again before "No GST on the invoice"
 - Ben (live): WOOLWORTHS A$225.48 (AMEX, 18-Sep-26) said "No GST on the invoice: one GST-free line", but the PDF says "Invoice total includes GST of: $10.89". Cause (live, read only): the email was read on 14-Oct before the labelled-GST reader (v28.354) ran on live, so its GST was never tagged; the v28.388 PDF words fill re-read the PDF for words only. Today's reader on the same PDF finds 10.89 (tested on the real PDF text).
 - Now: before a receipt with a PDF is called "no GST", HORIZON reads its PDF again once (Gmail read only, at most 6 per load) and stores the labelled GST. Woolworths 225.48 becomes A$108.90 + GST A$10.89 and A$105.69 GST free. Checked emails are marked in their PDF words ('gstchecked'), and new mail is marked when read, so a PDF is never read twice. The v28.388 words fill also stores labelled GST now.

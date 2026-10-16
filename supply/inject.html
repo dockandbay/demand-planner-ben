@@ -19883,6 +19883,8 @@
   // ── v28.248 ACCOUNTS > Reconcile, step 1: connect the accounts@ Gmail mailbox (read-only) and preview recent mail.
   // Matching to unreconciled bank lines + bill creation follow; this tab proves the connection and shows what the scan will read.
   var AC_IN={st:null,msgs:null,q:'newer_than:60d',busy:false,err:'',flash:'',disc:false,p:null,pBusy:false,pF:'needs',pQ:'',readBusy:false,readMsg:''};
+  // v28.395 (Ben 16-Oct-26: "have a tick box to hide items which are reconciled with bill created"): hide lines whose bill is already in Xero; remembered in this browser
+  try{ AC_IN.hideBilled=localStorage.getItem('hz_ac_hide_billed')==='1'; }catch(_){ AC_IN.hideBilled=false; }
   // v28.269: statement lines (Bank ageing upload) with a treatment per payee and the matching accounts@ receipt. Read only: nothing is sent to Xero.
   var AC_TR=[['autobill','Auto bill'],['bill','Bill (review)'],['rule','Xero bank rule (no receipt)'],['ignore','Ignore']];   // v28.276: one process (a bill with the receipt); Spend Money retired
   var AC_BS={sel:{},busy:false,chk:null,msg:''};   // v28.276 Bill (review): ticked lines -> check -> confirm -> bills in Xero
@@ -19965,13 +19967,16 @@
   function acInLinesHtml(){ var P=AC_IN.p; if(!P)return '<div class="count" style="margin:10px 0">Loading statement lines…</div>';
     if(P.error)return '<div class="count" style="color:var(--neg)">'+esc(P.error)+'</div>';
     var rows=P.rows||[], F=(['found','none','ignored'].indexOf(AC_IN.pF)>=0?AC_IN.pF:'found'), A=AC_IN.pA||'all', q=AC_IN.pQ.toLowerCase();
-    var inTab=rows.filter(function(r){ return A==='all'||acAccTab(r)===A; }), n={found:0,none:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
+    var nBilled=rows.filter(function(r){ return r.bill&&(A==='all'||acAccTab(r)===A); }).length;
+    var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&r.bill); }), n={found:0,none:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
     var vis=inTab.filter(function(r){ return acRcKind(r)===F&&(!q||(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)>=0); }).sort(acByDateAsc);   // v28.387: oldest first
     var pill=function(k,l){ return '<span class="pill'+(F===k?' active':'')+'" data-pf="'+k+'">'+l+' ('+n[k]+')</span>'; };
     var h='<div class="tiny mut" style="margin:0 0 8px;max-width:980px"><b>How it works:</b> 1. Upload the bank statement (Bank statement tab). 2. Lines whose receipt is in accounts@ show under <b>Receipt found</b>: press <b>Review</b>, check the bill and <b>Push bill to Xero</b>. 3. In Xero, reconcile the line with <b>Match</b>. Payees that never need a receipt: <b>Ignore</b>.</div>'
       +acAccTabsHtml(rows,A,'data-pa')
       +'<div class="bar">'+pill('found','Receipt found')+pill('none','No receipt')+pill('ignored','Ignored')
-      +'<input class="fci" id="ac-pq2" placeholder="Search payee, line, email" style="width:200px" value="'+esc(AC_IN.pQ)+'"><span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
+      +'<input class="fci" id="ac-pq2" placeholder="Search payee, line, email" style="width:200px" value="'+esc(AC_IN.pQ)+'">'
+      +'<label class="tiny" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Lines whose bill HORIZON already created in Xero: only the Match in Xero is left"><input type="checkbox" id="ac-hidebill"'+(AC_IN.hideBilled?' checked':'')+'> Hide lines with bill created'+(nBilled?' ('+nBilled+')':'')+'</label>'
+      +'<span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the bank statement first (Bank statement tab).</div>';
     h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Payee</th><th>Statement line</th><th>Amount</th><th>'+(F==='found'?'Receipt in accounts@':F==='none'?'Receipt':'Why')+'</th><th></th></tr></thead><tbody>';
@@ -20151,6 +20156,7 @@
     b.querySelectorAll('[data-fwu]').forEach(function(x){ x.onclick=function(){ var r=AC_FW.d.rows[+x.dataset.fwu]; fwPost('/api/accounts/forwarding/action',{org:r.org,contact:r.contact,status:'open'},x); }; });
     var fh=document.getElementById('ac-fwh'); if(fh)fh.onclick=function(){ fh.style.pointerEvents='none'; fh.textContent='Starting…'; fetch('/api/accounts/forwarding/history',{method:'POST'}).then(function(){ AC_FW.d=null; acInRender(); setTimeout(function(){ AC_FW.d=null; acInRender(); },60000); }); };
     b.querySelectorAll('[data-pf]').forEach(function(x){ x.onclick=function(){ AC_IN.pF=x.dataset.pf; acInRender(); }; });
+    var hb=document.getElementById('ac-hidebill'); if(hb)hb.onchange=function(){ AC_IN.hideBilled=hb.checked; try{ localStorage.setItem('hz_ac_hide_billed',hb.checked?'1':'0'); }catch(_){} var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acInRender(); sc.scrollTop=y; };
     b.querySelectorAll('[data-pa]').forEach(function(x){ x.onclick=function(){ AC_IN.pA=x.dataset.pa; acInRender(); }; });
     var q=document.getElementById('ac-pq2'); if(q)q.oninput=function(){ AC_IN.pQ=q.value; clearTimeout(AC_IN._qt); AC_IN._qt=setTimeout(function(){ acInRender(); var n=document.getElementById('ac-pq2'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); };
     b.querySelectorAll('input.ac-bsel').forEach(function(x){ x.onchange=function(){ AC_BS.sel[x.dataset.i]=x.checked; AC_BS.chk=null; AC_BS.msg=''; acInRender(); }; });   // v28.276
