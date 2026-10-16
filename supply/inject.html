@@ -20189,7 +20189,7 @@
   // the ANZ line in Xero; the UK side opens Create sample bills pre-filled (Fulfil invoice + landed cost via the PO, else a Xero UK bill).
   var AC_DHL={d:null,busy:false,err:'',acct:{},msg:{},open:{}};
   function acRecTabs(){ var v=AC_IN.view||'lines'; var b=function(k,t){ return '<button class="save-btn'+(v===k?'':' light')+'" style="'+(v===k?'background:var(--ink);color:#fff;border-color:var(--ink);':'')+'border-radius:999px;padding:4px 12px;font-size:12px" onclick="window.acRecView&&window.acRecView(\''+k+'\')">'+t+'</button>'; };
-    return '<div style="display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap;align-items:center">'+b('lines','Bank lines')+b('dhl','DHL import')
+    return '<div style="display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap;align-items:center">'+b('lines','Bank lines')+b('dhl','DHL import')+b('flex','Flexport AU')
       +'<span style="margin-left:auto" class="tiny mut" id="ac-learn-st">'+acLearnText()+'</span><button class="save-btn light" style="font-size:12px" onclick="window.acLearnRun&&window.acLearnRun(this)" title="Reads past Xero spend and bills to learn each payee\'s contact, account and tax (the coding Reconcile suggests). Runs weekly when scheduled; a first run takes a few minutes.">↻ Learn from Xero</button></div>'; }
   // v28.356 (Ben 14-Oct-26, Mini Models blank on live, filled on the sandbox): the learn job (payee coding from Xero history) had no trigger on
   // live once Back-date left the menu. Status + a button here; the weekly n8n call (POST /api/cron/accounts-learn) is still the schedule.
@@ -20245,8 +20245,53 @@
       var lines=(I.shipments||[]).filter(function(s){ return s.business==='uk'; }).map(function(s){ return {ship_date:s.ship_date||'',tracking:s.awb,charge:'freight',description:'DHL '+s.awb+' '+s.orig+'→'+s.dest+' '+s.sender+' → '+s.receiver,ship_to:s.dest==='GB'?'UK':s.dest,po:s.po||'',amount:s.amount}; });
       if(typeof sbOpen==='function')sbOpen(function(){ acDhlLoad(true); },{host:document.getElementById('ac-sup'),head:{supplier:'DHL',ref_base:n,invoice_date:I.date,due_date:I.due||I.date,currency:'AUD',source_file:'DHL '+n}, lines:lines}); }; });
   }
+  // ═══ v28.396 (Ben 16-Oct-26): ACCOUNTS > Reconcile > Flexport AU. Bank of America (Xero UK, USD) pays every Flexport invoice; the ones
+  // Fulfil put in Xero AU are paid there from 901 Loan - D&B Ltd (UK), and a Spend Money for the same USD amount goes in Bank of America
+  // in Xero UK, coded to 901 Loan - D&B PTY LTD (Australia). Then reconcile the Bank of America line against that Spend Money in Xero.
+  var AC_FLEX={d:null,busy:false,err:'',msg:{}};
+  function acFlexLoad(fresh){ if(AC_FLEX.busy)return; AC_FLEX.busy=true; AC_FLEX.err=''; acFlexRender(document.getElementById('accounts-body'));
+    fetch('/api/accounts/flexport-au'+(fresh?'?fresh=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_FLEX.busy=false; if(j.error)AC_FLEX.err=j.error; else AC_FLEX.d=j; if(ACCOUNTS_SUB==='inbox'&&AC_IN.view==='flex')acFlexRender(document.getElementById('accounts-body')); })
+      .catch(function(e){ AC_FLEX.busy=false; AC_FLEX.err=e.message||String(e); acFlexRender(document.getElementById('accounts-body')); }); }
+  function acFlexRender(b){ if(!b)return; var D=AC_FLEX.d;
+    var h='<div style="text-align:left">'+acRecTabs()+'<div style="font-weight:700;font-size:15px">Flexport AU <span class="mut tiny" style="font-weight:400">paid from Bank of America (Xero UK, USD)</span></div>'
+      +'<div class="tiny mut" style="margin:4px 0 10px;max-width:980px">Every Flexport invoice is paid from <b>Bank of America</b>, one statement line each. When the bill is for the AU business, Fulfil puts it in <b>Xero AU</b>. For each Bank of America Flexport line that matches an open AU Flexport bill (same USD amount), <b>Create in Xero</b> does two things: (a) pays the AU bill in Xero AU from <b>'+esc((D&&D.loan_au)||'901 Loan - Dock & Bay Ltd (UK)')+'</b>, dated the Bank of America line, at Xero\'s rate for the day; (b) creates a <b>Spend Money</b> in Bank of America in Xero UK for the same USD amount, contact Flexport, coded to <b>'+esc((D&&D.loan_uk)||'901 Loan - Dock & Bay PTY LTD (Australia)')+'</b>, No VAT. Then reconcile the Bank of America line against that Spend Money in Xero UK. Lines with no AU bill are UK bills: reconcile them as usual. Uses the uploaded Bank of America statement.</div>';
+    if(!D){ b.innerHTML=h+'<div class="count">'+(AC_FLEX.err?'<span style="color:var(--neg)">'+esc(AC_FLEX.err)+'</span>':'Reading the Flexport lines and the open Xero AU Flexport bills…')+'</div></div>'; if(!AC_FLEX.busy&&!AC_FLEX.err)acFlexLoad(false); return; }
+    var L=D.lines||[], cnt=function(s){ return L.filter(function(l){ return l.status===s; }).length; };
+    var pill=function(cls,t){ var c={todo:'var(--blue)',done:'var(--pos)',partial:'var(--amber)',uk:'var(--muted)',reconciled:'var(--muted)',creating:'var(--amber)'}[cls]||'var(--muted)'; return '<span style="display:inline-block;border:1px solid '+c+';color:'+c+';border-radius:999px;padding:0 8px;font-size:11px;font-weight:700;white-space:nowrap">'+esc(t)+'</span>'; };
+    var lab={todo:'to do',done:'done',partial:'AU paid, UK Spend Money missing',creating:'being created',uk:'UK bill (nothing to do)',reconciled:'reconciled in Xero UK'};
+    if(!AC_FLEX.show)AC_FLEX.show='todo';
+    h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+      +['todo','partial','done','uk','reconciled'].filter(function(s){ return s==='todo'||cnt(s); }).map(function(s){ var on=AC_FLEX.show===s||(AC_FLEX.show==='todo'&&s==='partial'); return '<button class="save-btn light ac-flex-f" data-s="'+s+'" style="border-radius:999px;padding:2px 10px;font-size:12px;'+(AC_FLEX.show===s?'background:var(--ink);color:#fff;border-color:var(--ink)':'')+'">'+cnt(s)+' '+esc(lab[s])+'</button>'; }).join('')
+      +'<span class="tiny mut">'+D.au_bills_open+' open Flexport bill'+(D.au_bills_open===1?'':'s')+' in Xero AU'+(D.cached?' (from the bills cache: Xero AU could not be read)':'')+'</span>'
+      +'<button class="save-btn light" id="ac-flex-refresh" style="margin-left:auto">'+(AC_FLEX.busy?'Reading…':'↻ Re-read Xero AU')+'</button></div>';
+    var rows=L.filter(function(l){ return AC_FLEX.show==='todo'?(l.status==='todo'||l.status==='partial'||l.status==='creating'):l.status===AC_FLEX.show; });
+    var key=function(l){ return l.date+'|'+l.amount+'|'+l.reference; };
+    h+=rows.length?'<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th class="l">Bank of America line</th><th class="l" style="text-align:right">USD</th><th class="l">Flexport payment</th><th class="l">Xero AU bill</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'
+      +rows.map(function(l){ var k=key(l), m=AC_FLEX.msg[k], s=l.settlement||{};
+        var bills=(l.bills||[]).map(function(x){ return '<a href="'+esc(x.url||('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+x.invoice_id))+'" target="_blank" rel="noopener" style="color:var(--blue);font-family:ui-monospace,Menlo,monospace">'+esc(x.number||'bill')+' ↗</a> <span class="mut">'+money(x.amount)+'</span>'; }).join('<br>')||'<span class="mut tiny">none</span>';
+        var act=(l.status==='todo'||l.status==='partial')?'<button class="save-btn ac-flex-go" data-k="'+esc(k)+'" style="background:var(--blue);border-color:var(--blue);color:#fff;white-space:nowrap">'+(l.status==='partial'?'Finish UK Spend Money':'Create in Xero')+'</button>'
+          :(l.status==='done'&&s.uk_txn_id?'<a href="https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID='+esc(s.uk_txn_id)+'" target="_blank" rel="noopener" style="color:var(--blue)" class="tiny">UK Spend Money ↗</a> <span class="tiny mut">'+esc(s.created_by?String(s.created_by).replace(/@.*/,'@'):'')+' '+esc(s.at?hzTrkDate(s.at):'')+'</span>':'');
+        return '<tr style="border-top:1px solid var(--line)"><td style="white-space:nowrap">'+esc(hzTrkDate(l.date))+'</td><td style="text-align:right;font-variant-numeric:tabular-nums">'+money(l.amount)+'</td><td style="font-family:ui-monospace,Menlo,monospace" class="tiny">'+esc(l.st||'')+'</td><td>'+bills+'</td><td>'+pill(l.status,lab[l.status]||l.status)
+          +((l.error||s.error)?'<div class="tiny" style="color:var(--neg);max-width:320px;white-space:normal">'+esc(l.error||s.error)+'</div>':'')+'</td><td>'+act+'</td></tr>'
+          +(m?'<tr><td colspan="6" style="font-size:12.5px;color:'+(m.ok?'var(--pos)':'var(--neg)')+';white-space:normal">'+m.html+'</td></tr>':''); }).join('')+'</tbody></table></div>'
+      :'<div class="count">Nothing here.'+(AC_FLEX.show==='todo'?' No Bank of America Flexport line on the uploaded statement matches an open AU Flexport bill.':'')+'</div>';
+    if((D.au_unmatched||[]).length)h+='<div class="tiny" style="margin-top:12px;color:var(--amber)"><b>Open AU Flexport bills with no matching Bank of America line</b> (not paid yet, or the statement is not uploaded to that date): '+D.au_unmatched.map(function(x){ return '<a href="'+esc(x.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(x.number||'bill')+'</a> USD '+money(x.due); }).join(', ')+'</div>';
+    b.innerHTML=h+'</div>';
+    var rf=document.getElementById('ac-flex-refresh'); if(rf)rf.onclick=function(){ acFlexLoad(true); };
+    b.querySelectorAll('.ac-flex-f').forEach(function(x){ x.onclick=function(){ AC_FLEX.show=x.dataset.s; acFlexRender(b); }; });
+    b.querySelectorAll('.ac-flex-go').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k, l=(AC_FLEX.d.lines||[]).filter(function(v){ return key(v)===k; })[0]; if(!l)return;
+      var bl=(l.bills||[]).map(function(v){ return v.number+'  USD '+money(v.amount); }).join('\n'), tot=(l.bills||[]).reduce(function(a,v){ return a+v.amount; },0);
+      var msg=l.status==='partial'?'The AU bill is already paid. Create the Spend Money in Bank of America (Xero UK) for USD '+money(tot)+', coded to '+(AC_FLEX.d.loan_uk||'901')+'?\n\nThis writes to live Xero UK.'
+        :'Bank of America '+hzTrkDate(l.date)+', USD '+money(l.amount)+'\n\n(a) Xero AU: pay\n'+bl+'\nfrom '+(AC_FLEX.d.loan_au||'901 Loan - D&B Ltd (UK)')+', dated '+hzTrkDate(l.date)+'.\n\n(b) Xero UK: Spend Money in Bank of America, USD '+money(tot)+', contact Flexport, '+(AC_FLEX.d.loan_uk||'901 Loan - D&B PTY LTD (Australia)')+'.\n\nThis writes to live Xero AU and Xero UK.';
+      if(!confirm(msg))return; x.disabled=true; x.textContent='Creating…';
+      fetch('/api/accounts/flexport-au/settle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line:{date:l.date,amount:l.amount,reference:l.reference},confirm:true})}).then(function(r){ return r.json(); }).then(function(j){
+        AC_FLEX.msg[k]=j.error?{ok:false,html:esc(j.error)}:{ok:true,html:'✓ Xero AU: '+j.au.map(function(v){ return '<a href="'+esc(v.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">'+esc(v.number)+' ↗</a> paid USD '+money(v.amount); }).join(', ')+' from '+esc(j.loan_au)+'. Xero UK: <a href="'+esc(j.uk.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">Spend Money USD '+money(j.uk.amount)+' ↗</a> to '+esc(j.uk.account)+'. Now reconcile the Bank of America line against it in Xero UK.'};
+        if(!j.error)AC_FLEX.show='done'; acFlexLoad(true); })
+        .catch(function(e){ AC_FLEX.msg[k]={ok:false,html:esc(e.message||String(e))}; acFlexLoad(true); }); }; });
+  }
   function acInRender(){ var b=document.getElementById('accounts-body'); if(!b||ACCOUNTS_SUB!=='inbox')return; acInFlash();
     if(AC_IN.view==='dhl'){ acDhlRender(b); return; }   // v28.352
+    if(AC_IN.view==='flex'){ acFlexRender(b); return; }   // v28.396
     if(!AC_IN.st){ b.innerHTML='<div class="count">Loading…</div>'; acInLoad(); return; }
     var st=AC_IN.st, h='<div style="text-align:left">'+acRecTabs();   /* v28.269: full width for the statement-lines table; v28.352 Bank lines | DHL import */
     if(AC_IN.flash){ var ok=/^connected /.test(AC_IN.flash); h+='<div class="count" style="padding:8px 10px;border-radius:6px;margin-bottom:10px;background:'+(ok?'var(--pos-bg,#e7f6ec)':'var(--neg-bg,#fdecec)')+';color:'+(ok?'var(--pos)':'var(--neg)')+'">'+esc(ok?('Gmail '+AC_IN.flash):AC_IN.flash)+'</div>'; }

@@ -3436,7 +3436,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -4490,6 +4490,116 @@ app.post('/api/accounts/dhl/au-bill', async (req, res) => {
     await pool.query(`UPDATE planner.dhl_invoice_docs SET status='created', xero_invoice_id=$2, xero_url=$3 WHERE id=$1`, [lg, b.InvoiceID, url]);
     res.json({ ok: true, invoice_number: n, bill: { id: b.InvoiceID, number: b.InvoiceNumber, total: b.Total, status: b.Status, url }, contact: xc2.Name, lines: lines.map(l => ({ awb: l.awb, account: l.account, amount: l.amount })) });
   } catch (e) { if (lg) await pool.query(`UPDATE planner.dhl_invoice_docs SET status='error', error=$2 WHERE id=$1`, [lg, String(e.message).slice(0, 400)]).catch(() => {}); log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
+});
+// ═══ v28.396 (Ben 16-Oct-26): ACCOUNTS > Reconcile > Flexport AU. Flexport is always paid from Bank of America (UK org, USD, one
+// statement line per Flexport invoice, "FLEXPORT.COM ... ID:ST-..."). When the bill is for the AU business Fulfil puts it in Xero AU,
+// so for each Bank of America Flexport line that matches open AU Flexport bill(s) HORIZON (a) pays the AU bill(s) in Xero AU from
+// 901 Loan - Dock & Bay Ltd (UK) (Xero's day rate, as cross-org PO payments) and (b) creates a Spend Money in Bank of America in Xero UK
+// for the same USD amount, contact Flexport, coded to 901 Loan - Dock & Bay PTY LTD (Australia), No VAT. The person then reconciles the
+// Bank of America line against that Spend Money in Xero (the API cannot reconcile). Lines with no AU bill are UK bills: nothing to do.
+const FLEX_LINE_RE = '\\mflexport', _flexAuMemo = { at: 0, bills: null };
+async function flexAuOpenBills(fresh) {   // open AU Flexport bills, live from Xero AU (one call, 5 min); the bills cache as the fallback
+  if (!fresh && _flexAuMemo.bills && Date.now() - _flexAuMemo.at < 5 * 60 * 1000) return _flexAuMemo.bills;
+  try {
+    const where = 'Type=="ACCPAY" AND Status=="AUTHORISED" AND Contact.Name.Contains("Flexport")';
+    const j = await xeroFetch('au', '/api.xro/2.0/Invoices?summaryOnly=false&page=1&where=' + encodeURIComponent(where));
+    const bills = ((j && j.Invoices) || []).filter(v => Number(v.AmountDue) > 0.005).map(v => ({ invoice_id: v.InvoiceID, number: v.InvoiceNumber || v.Reference || '', reference: v.Reference || '',
+      date: (String(v.DateString || '').slice(0, 10)) || null, ccy: v.CurrencyCode, total: Number(v.Total) || 0, due: Number(v.AmountDue) || 0, contact: (v.Contact && v.Contact.Name) || 'Flexport', url: xbUrl(v.InvoiceID) }));
+    _flexAuMemo.at = Date.now(); _flexAuMemo.bills = bills; return bills;
+  } catch (e) {
+    if (_flexAuMemo.bills) return _flexAuMemo.bills;
+    const r = (await pool.query(`SELECT invoice_id, invoice_number, reference, to_char(invoice_date,'YYYY-MM-DD') d, currency_code, total::float8 total, amount_due::float8 due, contact_name FROM planner.xero_bills
+      WHERE region='au' AND contact_name ~* 'flexport' AND upper(coalesce(status,''))='AUTHORISED' AND amount_due > 0.005`)).rows;
+    return r.map(v => ({ invoice_id: v.invoice_id, number: v.invoice_number || v.reference || '', reference: v.reference || '', date: v.d, ccy: v.currency_code, total: v.total, due: v.due, contact: v.contact_name, url: xbUrl(v.invoice_id), cached: true }));
+  }
+}
+const flexStId = ref => { const m = /ID:\s*(ST-[A-Z0-9]+)/i.exec(String(ref || '')); return m ? m[1].toUpperCase() : null; };
+const flexKey = l => l.d + '|' + Math.round(l.amount * 100) + '|' + l.reference;
+async function flexAuPlan(fresh) {
+  const lines = (await pool.query(`SELECT org, account_name, account_id, to_char(line_date,'YYYY-MM-DD') d, (-amount)::float8 amount, reference, description, reconciled FROM planner.accounts_stmt_lines
+    WHERE org='uk' AND account_name ~* 'bank of america' AND amount < 0 AND (coalesce(description,'') || ' ' || coalesce(reference,'')) ~* $1 ORDER BY line_date DESC LIMIT 400`, [FLEX_LINE_RE])).rows;
+  const log = (await pool.query(`SELECT id, to_char(line_date,'YYYY-MM-DD') d, line_amount::float8 amount, line_ref, bills, amount::float8 total, au_done, uk_txn_id, status, error, created_by, to_char(created_at,'YYYY-MM-DD') at
+    FROM planner.flexport_au_settlements ORDER BY id DESC`).catch(() => ({ rows: [] }))).rows;
+  const logBy = new Map(); log.forEach(r => { const k = r.d + '|' + Math.round(r.amount * 100) + '|' + r.line_ref; if (!logBy.has(k)) logBy.set(k, r); });
+  const bills = await flexAuOpenBills(fresh), busy = new Set(log.filter(r => r.status !== 'error').flatMap(r => (r.bills || []).map(b => b.invoice_id)));
+  const free = bills.filter(b => !busy.has(b.invoice_id) && String(b.ccy || 'USD').toUpperCase() === 'USD'), used = new Set();
+  const eq = (a, b) => Math.abs(a - b) < 0.005;
+  const out = lines.map(l => {
+    const L = { date: l.d, amount: Math.round(l.amount * 100) / 100, reference: l.reference, st: flexStId(l.reference), account_id: l.account_id, account: l.account_name, reconciled: !!l.reconciled };
+    const done = logBy.get(flexKey(l)) || null;
+    if (done && done.status !== 'error') return Object.assign(L, { status: done.status === 'created' ? 'done' : done.status, settlement: done, bills: done.bills || [] });
+    if (l.reconciled) return Object.assign(L, { status: 'reconciled', bills: [] });
+    // exact single bill first (closest date), else 2 or 3 open AU bills that add up to the line exactly
+    const cand = free.filter(b => !used.has(b.invoice_id)), byDate = (a, b) => Math.abs(new Date(a.date || l.d) - new Date(l.d)) - Math.abs(new Date(b.date || l.d) - new Date(l.d));
+    let pick = cand.filter(b => eq(b.due, l.amount)).sort(byDate).slice(0, 1);
+    if (!pick.length && cand.length <= 40) { outer: for (let i = 0; i < cand.length; i++) for (let j = i + 1; j < cand.length; j++) { if (eq(cand[i].due + cand[j].due, l.amount)) { pick = [cand[i], cand[j]]; break outer; }
+      for (let k = j + 1; k < cand.length; k++) if (eq(cand[i].due + cand[j].due + cand[k].due, l.amount)) { pick = [cand[i], cand[j], cand[k]]; break outer; } } }
+    pick.forEach(b => used.add(b.invoice_id));
+    return Object.assign(L, { status: pick.length ? 'todo' : 'uk', bills: pick.map(b => ({ invoice_id: b.invoice_id, number: b.number, amount: b.due, date: b.date, url: b.url })), error: done && done.status === 'error' ? done.error : null });
+  });
+  const unmatched = free.filter(b => !used.has(b.invoice_id));
+  return { lines: out, au_bills_open: bills.length, au_unmatched: unmatched, cached: bills.some(b => b.cached) };
+}
+app.get('/api/accounts/flexport-au', async (req, res) => {
+  try { const p = await flexAuPlan(String(req.query.fresh || '') === '1'); const [lu, la] = await Promise.all([_xeroLoanAcct('uk').catch(() => null), _xeroLoanAcct('au').catch(() => null)]);
+    res.set('Cache-Control', 'no-store').json(Object.assign({ ok: true, loan_uk: lu ? lu.code + ' ' + lu.name : null, loan_au: la ? la.code + ' ' + la.name : null }, p)); }
+  catch (e) { if (!/not connected/.test(e.message)) log500(e); res.status(/not connected/.test(e.message) ? 409 : 500).json({ error: e.message }); }
+});
+// Body: { line: { date, amount, reference }, bills: [invoice_id, ...] (the AU bills to pay; default = the plan's match), confirm: true }.
+// Writes to LIVE Xero AU (payments) and Xero UK (Spend Money). A row stuck at 'partial' (AU paid, UK failed) retries the UK side only.
+app.post('/api/accounts/flexport-au/settle', async (req, res) => {
+  const b = req.body || {}; if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Xero AU and Xero UK' });
+  const want = b.line || {}; let lg = null;
+  try {
+    const plan = await flexAuPlan(true), L = plan.lines.find(x => x.date === want.date && Math.abs(x.amount - Number(want.amount)) < 0.005 && x.reference === want.reference);
+    if (!L) return res.status(404).json({ error: 'That Bank of America line is not on the uploaded statement' });
+    if (L.status === 'done') return res.status(409).json({ error: 'Already done for this line' });
+    if (L.status === 'reconciled') return res.status(409).json({ error: 'That line is already reconciled in Xero UK' });
+    if (L.status === 'creating') return res.status(409).json({ error: 'Already being created' });
+    const [loanUk, loanAu] = await Promise.all([_xeroLoanAcct('uk'), _xeroLoanAcct('au')]);
+    if (!loanUk || !loanAu) return res.status(400).json({ error: 'No intercompany loan (901) account found in Xero ' + (!loanUk ? 'UK' : 'AU') + ': nothing created' });
+    let row = L.status === 'partial' ? L.settlement : null, billsDone = row ? (row.bills || []) : null;
+    if (!row) {
+      // the AU bills: the ones asked for (each must be an open AU Flexport bill) else the plan's match; re-read live, pay the full amount due
+      const ids = Array.isArray(b.bills) && b.bills.length ? b.bills.map(String) : L.bills.map(x => x.invoice_id);
+      if (!ids.length) return res.status(400).json({ error: 'No AU Flexport bill matches this line: nothing to do (it is a UK bill)' });
+      const live = await xeroFetch('au', '/api.xro/2.0/Invoices?IDs=' + ids.join(','));
+      const inv = ((live && live.Invoices) || []); if (inv.length !== ids.length) return res.status(400).json({ error: 'Some of those bills were not found in Xero AU' });
+      const bad = inv.find(v => v.Type !== 'ACCPAY' || v.Status !== 'AUTHORISED' || !(Number(v.AmountDue) > 0) || String(v.CurrencyCode).toUpperCase() !== 'USD' || !/flexport/i.test((v.Contact && v.Contact.Name) || ''));
+      if (bad) return res.status(409).json({ error: (bad.InvoiceNumber || bad.InvoiceID) + ' is not an open USD Flexport bill in Xero AU (status ' + bad.Status + ', due ' + bad.AmountDue + ')' });
+      const other = (await pool.query(`SELECT id FROM planner.flexport_au_settlements WHERE status <> 'error' AND bills @> ANY($1::jsonb[])`, [ids.map(id => JSON.stringify([{ invoice_id: id }]))])).rows;
+      if (other.length) return res.status(409).json({ error: 'One of those AU bills is already settled against another Bank of America line' });
+      const sum = Math.round(inv.reduce((a, v) => a + Number(v.AmountDue), 0) * 100) / 100;
+      if (sum > L.amount + 0.005) return res.status(400).json({ error: 'The AU bills come to USD ' + sum + ', more than the Bank of America line (USD ' + L.amount + '): nothing created' });
+      billsDone = inv.map(v => ({ invoice_id: v.InvoiceID, number: v.InvoiceNumber || v.Reference || '', amount: Math.round(Number(v.AmountDue) * 100) / 100, payment_id: null }));
+      try { row = (await pool.query(`INSERT INTO planner.flexport_au_settlements (line_date, line_amount, line_ref, account_id, bills, amount, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING *`,
+        [L.date, L.amount, L.reference, L.account_id, JSON.stringify(billsDone), sum, authUser(req) || 'system'])).rows[0]; }
+      catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: 'This line is already being settled or was settled' }); throw e; }
+      lg = row.id;
+      // (a) pay the AU bill(s) from 901 Loan - Dock & Bay Ltd (UK), dated the Bank of America line; no CurrencyRate = Xero's day rate
+      const ref = ('BofA Flexport ' + (L.st || L.reference)).slice(0, 255);
+      const pr = await xeroFetch('au', '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: billsDone.map(x => ({ Invoice: { InvoiceID: x.invoice_id }, Account: { AccountID: loanAu.id }, Date: L.date, Amount: x.amount, Reference: ref })) } });
+      const pays = (pr && pr.Payments) || []; billsDone.forEach((x, i) => { x.payment_id = pays[i] && pays[i].PaymentID || null; });
+      if (pays.length !== billsDone.length || billsDone.some(x => !x.payment_id)) throw new Error('Xero AU did not confirm every payment');
+      await pool.query(`UPDATE planner.flexport_au_settlements SET bills=$2::jsonb, au_done=true, status='partial', updated_at=now() WHERE id=$1`, [lg, JSON.stringify(billsDone)]);
+    } else lg = row.id;
+    // (b) Spend Money in Bank of America (Xero UK): contact Flexport, 901 Loan - Dock & Bay PTY LTD (Australia), No VAT, same USD amount
+    const xc = await xeroContactLookup('uk', 'Flexport - 95585', { fresh: true }), xc2 = xc.ok ? xc : await xeroContactLookup('uk', 'Flexport', { fresh: true });
+    if (!xc2.ok) throw new Error((xc2.lookup_failed ? xc2.error : "No Xero UK contact 'Flexport - 95585' or 'Flexport'") + ' (the AU payment is done; press Create again to finish the UK side)');
+    const total = Math.round(billsDone.reduce((a, x) => a + x.amount, 0) * 100) / 100, nums = billsDone.map(x => x.number).filter(Boolean).join(', ');
+    const bt = { Type: 'SPEND', Contact: { ContactID: xc2.ContactID }, BankAccount: { AccountID: L.account_id }, Date: L.date, Reference: ('AU ' + nums).slice(0, 255), CurrencyCode: 'USD', LineAmountTypes: 'NoTax', Status: 'AUTHORISED',
+      LineItems: [{ Description: ('Flexport ' + nums + ' (Xero AU bill' + (billsDone.length === 1 ? '' : 's') + ') paid for Dock & Bay Pty Ltd from Bank of America' + (L.st ? ', ' + L.st : '')).slice(0, 3900), Quantity: 1, UnitAmount: total, AccountCode: loanUk.code }] };
+    const r = await xeroFetch('uk', '/api.xro/2.0/BankTransactions', { method: 'PUT', body: { BankTransactions: [bt] } });
+    const t = r && r.BankTransactions && r.BankTransactions[0]; if (!t || !t.BankTransactionID) throw new Error('Xero UK did not return the Spend Money (the AU payment is done; press Create again to finish the UK side)');
+    await pool.query(`UPDATE planner.flexport_au_settlements SET uk_txn_id=$2, status='created', error=null, updated_at=now() WHERE id=$1`, [lg, t.BankTransactionID]);
+    _flexAuMemo.at = 0;
+    res.json({ ok: true, line: { date: L.date, amount: L.amount }, au: billsDone.map(x => ({ number: x.number, amount: x.amount, url: xbUrl(x.invoice_id) })), loan_au: loanAu.code + ' ' + loanAu.name,
+      uk: { id: t.BankTransactionID, amount: total, url: 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + t.BankTransactionID, account: loanUk.code + ' ' + loanUk.name } });
+  } catch (e) {
+    if (lg) { const cur = (await pool.query(`SELECT au_done FROM planner.flexport_au_settlements WHERE id=$1`, [lg]).catch(() => ({ rows: [] }))).rows[0];
+      await pool.query(`UPDATE planner.flexport_au_settlements SET status=$2, error=$3, updated_at=now() WHERE id=$1`, [lg, cur && cur.au_done ? 'partial' : 'error', String(e.message).slice(0, 400)]).catch(() => {}); }
+    _flexAuMemo.at = 0; log500(e); res.status(e.code === 503 ? 503 : e.code === 429 ? 429 : 500).json({ error: e.message });
+  }
 });
 async function accEmailPdf(msgId) {
   const m = await gmailGetPaced('messages/' + msgId + '?format=full'); if (!m || !m.payload) throw new Error('email not found');

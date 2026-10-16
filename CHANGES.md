@@ -1,3 +1,9 @@
+## v28.396 (16-Oct-26) Reconcile: Flexport AU (pay the Xero AU bill from the UK loan, Spend Money in Bank of America)
+- Ben: Flexport is always paid from Bank of America (Xero UK, USD), but some bills are for the AU business and Fulfil puts them in Xero AU. New ACCOUNTS > Reconcile > Flexport AU view: each Bank of America Flexport line on the uploaded statement is matched to open Xero AU Flexport bill(s) of the same USD amount (read live from Xero AU, one call kept 5 minutes).
+- Create in Xero (admins and ACCOUNTS users, confirmed): (a) pays the AU bill(s) in Xero AU from 901 Loan - Dock & Bay Ltd (UK), dated the Bank of America line, Xero's day rate; (b) creates a Spend Money in Bank of America in Xero UK for the same USD amount, contact Flexport, 901 Loan - Dock & Bay PTY LTD (Australia), No VAT. Then reconcile the Bank of America line against the Spend Money in Xero UK. If (b) fails after (a), the line shows "AU paid, UK Spend Money missing" and Create finishes only (b).
+- Sandbox check (read only): the 4 open Bank of America lines of 28-Sep / 30-Sep (USD 236.86, 7,727.05, 547.26, 1,433.11) match the 4 open AU bills FLEX-4025988-5, FLEX-4025988-6, FLEX-4004425-4, FLEX-4004425-3A. Nothing was created in Xero.
+- MIGRATION: migrations/376_flexport_au_settlements.sql (new table planner.flexport_au_settlements). No env change. accountsGate allows POST /api/accounts/flexport-au/settle for ACCOUNTS users. lib/ai-logic/supply-finance.md updated.
+
 ## v28.395 (16-Oct-26) Reconcile: tick box to hide lines whose bill is already created
 - ACCOUNTS > Reconcile: new tick box "Hide lines with bill created (n)" next to the search. Ticked, lines whose bill HORIZON already created in Xero (only the Match in Xero left) are hidden, and the Receipt found / No receipt / Ignored counts leave them out. The choice is remembered in this browser (off by default).
 - Display only. No server change, no migration, no env change.
