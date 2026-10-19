@@ -68,7 +68,7 @@ fingerprints:
   server.mjs::fbaInflightExcludedCodes: 7089bef268c5
   server.mjs::/api/supply/fba-transfers/list: d968d218b3ca
   server.mjs::/api/cron/fba-inflight-refresh: 7732e28433a0
-verified_version: v28.403
+verified_version: v28.404
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -95,7 +95,7 @@ verified_version: v28.403
 - Default is **Full** (FBA_CARTON_MODE = 'FULL'). The pills only show on the FBA tab under the Transfer FBA filters. (source: FBA_CARTON_MODE)
 - Whole cartons ROUND UP (v28.403, Ben 19-Oct-26 "definitely round up for fba"): cartons = min(ceil(capped need / carton qty), max(1, ceil(next-90-day FBA demand / carton qty)), floor(website-protection cap / carton qty)). If next-90-day FBA demand is below 70% of one carton, whole cartons = 0. So 58 needed with a 60 carton sends 60 when 3PL can spare 60; when 3PL cannot spare a full carton, Full is 0 and Any / Partial show the part amount. Was floor (58 of 60 = 0 cartons). (source: fbaTransferSized)
 - **Full**: send the whole-carton amount; sub-carton stragglers are 0.
-- **Partial**: send only stragglers (raw shortfall, rounded to units) for SKUs that do NOT fill a whole carton; any SKU with at least one whole carton shows 0 here.
+- **Partial**: send only stragglers (raw shortfall, rounded to units) for SKUs that get NO whole carton; any SKU with at least one whole carton shows 0 here. From v28.403 "no whole carton" means it cannot be rounded up to one (3PL / the non-GRS pool cannot spare a full carton, or next-90-day FBA demand is under 70% of a carton), not "need is under a carton": a 40 need with a 60 carton that 3PL can spare now shows 60 under Full and 0 under Partial (was 40 under Partial). Full + Partial still equal Any.
 - **Any**: whole-carton amount if there is one, else the raw straggler amount.
 - Full + Partial together equal Any exactly (v27.834: the old 20%-of-60-day floor and the empty-FBA seed were removed so the pills partition Any). The in-app "FBA Transfer Logic" help panel still mentions the 20% minimum; that line is out of date. (source: fbaTransferSized)
 - Carton qty = products case pack (falls back to 1 if unknown). (source: buildPROD_CONST)

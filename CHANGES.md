@@ -1,3 +1,7 @@
+## v28.404 (20-Oct-26) Logic library: Partial carton pill meaning after the round-up
+- Diviyaj (deploy review of v28.403): with whole cartons rounding up, Partial now holds only SKUs that cannot be rounded up to a carton (3PL / non-GRS pool cannot spare one, or 90-day FBA demand under 70% of a carton). Before, it held any SKU whose need was under a carton. Intended: it follows from the round-up and keeps Full + Partial = Any. Partial is display only; the buy plan uses Full.
+- lib/ai-logic/transfers.md updated. No code change, no migration, no env change.
+
 ## v28.403 (19-Oct-26) FBA transfers round UP to whole cartons
 - Ben: HAIRW-WAF-BOHMDRM UK recommended 58 with a 60 carton; "definitely round up for fba". The normal 3PL to FBA transfer always rounded DOWN (58 of 60 = 0 cartons under Full; Any / Partial showed the raw 58). The round-up Ben remembered was the non-GRS rule of v25.515, replaced in v26.484.
 - Now (fbaTransferSized): cartons = min(ceil(capped need / carton), max(1, ceil(next-90-day FBA demand / carton)), floor(website-protection cap / carton)); still 0 when next-90-day FBA demand is under 70% of a carton. When 3PL cannot spare a full carton, Full is 0 and Any / Partial show the part amount, as before. Non-GRS (fbaTransferNonGrs): cartons = min(ceil(need / carton), floor(pool / carton)).
