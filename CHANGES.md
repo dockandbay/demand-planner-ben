@@ -1,3 +1,7 @@
+## v28.407 (20-Oct-26) DTC mismatch 2.0: clearer label for dropship lines with no purchase request
+- Ben: change "not sent to purchasing" to "no PO created, sales order not processed". Issue text in SUPPLY > Reports > DTC MISMATCH 2.0 and the filter tooltip. Same rule (dropship / backorder SO line with no live Fulfil PO and no purchase request); wording only.
+- No migration, no env change.
+
 ## v28.406 (20-Oct-26) Klaviyo BIS: Hide closed products (default on) + Last season group
 - Ben: DEMAND > Inputs > Klaviyo BIS "can you have a tick box defaulted to yes to hide any closed products. and a grouping for active/last season".
 - New "Hide closed products" tick box on the analysis summary, ticked by default and remembered per browser. Ticked hides Closed SKUs and leaves them out of the SKU / subscriber counts. The CSV download still lists every SKU with its status.
