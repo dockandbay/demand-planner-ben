@@ -19637,26 +19637,31 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
 // BEGIN _tplJournalPayload
 function _tplJournalPayload(j, period, REG, rate, filename) {
   const endOf = ym => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
-  const r2 = x => Math.round(x * 100) / 100, tax = REG === 'AU' ? 'BASEXCLUDED' : 'NONE', ACCRUALS = '805';
-  const suffix = REG === 'AU' ? (' (' + String(filename || '').replace(/\.[a-z0-9]+$/i, '').replace(/\s*\(.*\)\s*$/, '').trim() + ')') : '';
+  const firstAfter = ym => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10); };
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+  const r2 = x => Math.round(x * 100) / 100, AU = REG === 'AU', tax = AU ? 'BASEXCLUDED' : 'NONE', ACCRUALS = '805';
   const journals = [], out = [];
   Object.keys(j).sort().forEach(ym => {
-    const narr = '3PL ' + REG + ' ' + period + ' reclass to ' + ym + suffix, desc = 'Reclass ' + ym + ' orders out of ' + period;
+    // v28.401 (Ben 19-Oct-26, Xero AU journals 77bb72da / 874147f6): Coghlans follows Xero AU's own monthly accrual style:
+    // "Coughlin: Monthly adjustment", every line (805 too) "Appropriation of Sept-2026 costs", reversal on the 1st of the next month, shown on cash basis reports.
+    const narr = AU ? 'Coughlin: Monthly adjustment' : ('3PL ' + REG + ' ' + period + ' reclass to ' + ym);
+    const desc = AU ? ('Appropriation of ' + MON[Number(ym.slice(5, 7)) - 1] + '-' + ym.slice(0, 4) + ' costs') : ('Reclass ' + ym + ' orders out of ' + period);
     const ls = Object.keys(j[ym]).sort().map(code => ({ AccountCode: code, Description: desc, TaxType: tax, LineAmount: r2(j[ym][code] / (rate || 1)) })).filter(l => l.LineAmount > 0.005);
     if (!ls.length) return; const tot = r2(ls.reduce((a, l) => a + l.LineAmount, 0));
-    const orig = { Narration: narr, Date: endOf(ym), Status: 'POSTED', LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false, JournalLines: [...ls, { AccountCode: ACCRUALS, TaxType: tax, LineAmount: -tot }] };
-    const rev = { Narration: 'Reversal: ' + narr, Date: endOf(period), Status: 'POSTED', LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false, JournalLines: orig.JournalLines.map(l => Object.assign({}, l, { LineAmount: -l.LineAmount })) };
+    const acc = AU ? { AccountCode: ACCRUALS, Description: desc, TaxType: tax, LineAmount: -tot } : { AccountCode: ACCRUALS, TaxType: tax, LineAmount: -tot };
+    const orig = { Narration: narr, Date: endOf(ym), Status: 'POSTED', LineAmountTypes: 'NoTax', ShowOnCashBasisReports: AU, JournalLines: [...ls, acc] };
+    const rev = { Narration: 'Reversal: ' + narr, Date: AU ? firstAfter(ym) : endOf(period), Status: 'POSTED', LineAmountTypes: 'NoTax', ShowOnCashBasisReports: AU, JournalLines: orig.JournalLines.map(l => Object.assign({}, l, { LineAmount: -l.LineAmount })) };
     journals.push(orig, rev); out.push({ month: ym, narration: narr, date: orig.Date, reversal_date: rev.Date, total: tot });
   });
   return { journals, out };
 }
 // END _tplJournalPayload
-app.post('/api/supply/tpl/journal/:id', async (req, res) => {
-  try {
-    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
-    if (!row) return res.status(404).json({ error: 'not found' });
+// v28.401: the cross-month split of one 3PL invoice file: j = { order month: { account: amount } } (moved OUT of the file's period).
+async function _tplJournalCalc(id) {
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [id])).rows[0];
+    if (!row) return { status: 404, error: 'not found' };
     const tpl0 = row.tpl || null, period = row.period;
-    if (!/^\d{4}-\d{2}$/.test(String(period || ''))) return res.json({ ok: false, error: 'Invoice period (month) is not set for this file.' });
+    if (!/^\d{4}-\d{2}$/.test(String(period || ''))) return { error: 'Invoice period (month) is not set for this file.' };
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     let orders;
     if (tpl0 === 'uk_ilg') {   // ILG uses "Your reference"/"Gross" columns (not the generic parser) — combine ALL invoice_0* freight sheets; the per-order FREIGHT is what's datable (DI fees aren't per-order)
@@ -19670,7 +19675,7 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     } else {
       orders = await _tplOrderRows(row.content, isCsv, tpl0, period);   // per-order {reference, shipping, fulfilment}
     }
-    if (!orders.length) return res.json({ ok: false, error: 'No per-order cost lines to journal for this invoice.' });
+    if (!orders.length) return { error: 'No per-order cost lines to journal for this invoice.' };
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc, to_char(invoice_date,'YYYY-MM') ym FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const v = { cc: String(r.cc || '').trim(), ym: r.ym }; if (r.reference) byRef[r.reference] = v; if (r.customer_order_no) byCon[r.customer_order_no] = v; });
@@ -19684,6 +19689,13 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
       matched++; crossTotal += cost;
       const label = String(cc || '').replace(/^COGS\s*-\s*/i, ''); const code = /^OTHER/i.test(cc || '') ? '' : (amap[label.toLowerCase()] || '');
       const key = code || '(no account)'; if (!j[ym]) j[ym] = {}; if (!j[ym][key]) j[ym][key] = 0; j[ym][key] += cost; });
+    return { row, tpl0, period, j, crossTotal, matched, noDate, fromFulfil };
+}
+app.post('/api/supply/tpl/journal/:id', async (req, res) => {
+  try {
+    const calc = await _tplJournalCalc(req.params.id);
+    if (calc.error) return calc.status ? res.status(calc.status).json({ error: calc.error }) : res.json({ ok: false, error: calc.error });
+    const { row, tpl0, period, j, matched, noDate, fromFulfil } = calc; let { crossTotal } = calc;
     const endOf = ym => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
     const dd = iso => iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
     const REG = { eu_ifulfilment: 'EU', uk_ilg: 'UK', us_geneva: 'US', au_coghlans: 'AU' }[tpl0] || (tpl0 || '');
@@ -19705,7 +19717,18 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     if (req.body && (req.body.push || req.body.dry)) {
       const dry = !req.body.push;
       if (!dry) { try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required to push a journal to Xero (CONFIG > Admin > Permissions)' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); } }
-      const months = Object.keys(j).sort(); if (!months.length) return res.json({ ok: false, error: 'Nothing to journal: no orders on this invoice shipped in an earlier month.' });
+      // v28.401: Coghlans invoices weekly; Xero AU takes ONE journal per month ("Coughlin: Monthly adjustment"), so add up every Coghlans
+      // invoice of this period (one file per invoice number) before building it.
+      let files = [row.filename];
+      if (REG === 'AU') {
+        const sibs = (await pool.query(`SELECT DISTINCT ON (upper(coalesce(invoice_no, substring(filename from '(?i)(DOK[0-9]+)'), filename))) id, filename FROM planner.tpl_invoice_files
+          WHERE tpl='au_coghlans' AND period=$1 AND filename ~* '\\.xlsx?$' ORDER BY upper(coalesce(invoice_no, substring(filename from '(?i)(DOK[0-9]+)'), filename)), id DESC`, [period])).rows;
+        const merged = {}; files = [];
+        for (const f of sibs) { const c = await _tplJournalCalc(f.id); if (c.error) continue; files.push(f.filename);
+          Object.keys(c.j).forEach(ym => Object.keys(c.j[ym]).forEach(code => { if (!merged[ym]) merged[ym] = {}; merged[ym][code] = (merged[ym][code] || 0) + c.j[ym][code]; })); }
+        Object.keys(j).forEach(k => delete j[k]); Object.assign(j, merged);
+      }
+      const months = Object.keys(j).sort(); if (!months.length) return res.json({ ok: false, error: 'Nothing to journal: no orders on ' + (REG === 'AU' ? 'this month\'s Coghlans invoices' : 'this invoice') + ' shipped in an earlier month.' });
       const noAcct = months.filter(ym => j[ym]['(no account)'] > 0.005);
       if (noAcct.length) return res.status(400).json({ error: 'Some cost has no Xero account (months ' + noAcct.join(', ') + '). Map the cost centre in 3PL invoicing > Config / Accounts first.' });
       const xregion = REG === 'AU' ? 'au' : 'uk', tax = xregion === 'au' ? 'BASEXCLUDED' : 'NONE', ACCRUALS = '805';
@@ -19719,13 +19742,14 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
       }
       const { journals, out } = _tplJournalPayload(j, period, REG, rate, row.filename);
       if (!journals.length) return res.json({ ok: false, error: 'Nothing to journal after rounding.' });
-      const info = { ok: true, dry, region: xregion, org: xregion === 'au' ? 'Xero AU' : 'Xero UK', currency_rate: rate !== 1 ? rate : null, bill: billRef, months: out, journals: dry ? journals : undefined };
+      const info = { ok: true, dry, region: xregion, org: xregion === 'au' ? 'Xero AU' : 'Xero UK', currency_rate: rate !== 1 ? rate : null, bill: billRef, files, months: out, journals: dry ? journals : undefined };
       if (dry) return res.json(info);
       // one push per month: refuse if Xero already has a (not voided) journal with this narration
       for (const m of out) {
-        let ex = null; try { const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent('Narration=="' + m.narration.replace(/["\\]/g, '') + '"')); ex = ((r && r.ManualJournals) || []).find(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || ''))) || null; }
+        let ex = null; try { const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent('Narration=="' + m.narration.replace(/["\\]/g, '') + '"')); const dOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
+          ex = ((r && r.ManualJournals) || []).find(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || '')) && (REG !== 'AU' || dOf(x.Date) === m.date)) || null; }   // AU: same narration every month, so the month's date decides
         catch (e) { return res.status(502).json({ error: 'Could not check ' + info.org + ' for an existing journal (' + e.message + '). Nothing created.' }); }
-        if (ex) return res.status(409).json({ error: 'A journal "' + m.narration + '" is already in ' + info.org + '. Nothing created.', xero_id: ex.ManualJournalID, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + ex.ManualJournalID });
+        if (ex) return res.status(409).json({ error: 'A journal "' + m.narration + '" dated ' + m.date + ' is already in ' + info.org + '. Nothing created.', xero_id: ex.ManualJournalID, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + ex.ManualJournalID });
       }
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: journals } });
