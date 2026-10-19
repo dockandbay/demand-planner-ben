@@ -1,3 +1,10 @@
+## v28.405 (20-Oct-26) Search finds POs by sales order number; Fulfil "change" under the link
+- Ben: "horizon POs are not letting sales order numbers be searchable". Checked on live: the PO grid filter box does find them (SO65897 shows PO461 to PO467), but the top Search bar (global search) only matched PO number and supplier, so a sales order number gave "No matches".
+- Global search: new "Sales orders" group. Matches sales_order_ref or client_po_ref (3+ characters), shows client and every PO on that order (child POs included). Choosing it opens the PO grid searched for that sales order. Server: /api/hz-search returns sos.
+- PO grid filter placeholder now "Filter PO / SO / supplier".
+- PO grid Fulfil column: "change" now sits under the linked Fulfil PO badge (was beside it).
+- Buy plan untouched (search and display only). No migration, no env change, no new routes (existing /api/hz-search gains a field).
+
 ## v28.404 (20-Oct-26) Logic library: Partial carton pill meaning after the round-up
 - Diviyaj (deploy review of v28.403): with whole cartons rounding up, Partial now holds only SKUs that cannot be rounded up to a carton (3PL / non-GRS pool cannot spare one, or 90-day FBA demand under 70% of a carton). Before, it held any SKU whose need was under a carton. Intended: it follows from the round-up and keeps Full + Partial = Any. Partial is display only; the buy plan uses Full.
 - lib/ai-logic/transfers.md updated. No code change, no migration, no env change.
