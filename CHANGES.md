@@ -1,3 +1,9 @@
+## v28.403 (19-Oct-26) FBA transfers round UP to whole cartons
+- Ben: HAIRW-WAF-BOHMDRM UK recommended 58 with a 60 carton; "definitely round up for fba". The normal 3PL to FBA transfer always rounded DOWN (58 of 60 = 0 cartons under Full; Any / Partial showed the raw 58). The round-up Ben remembered was the non-GRS rule of v25.515, replaced in v26.484.
+- Now (fbaTransferSized): cartons = min(ceil(capped need / carton), max(1, ceil(next-90-day FBA demand / carton)), floor(website-protection cap / carton)); still 0 when next-90-day FBA demand is under 70% of a carton. When 3PL cannot spare a full carton, Full is 0 and Any / Partial show the part amount, as before. Non-GRS (fbaTransferNonGrs): cartons = min(ceil(need / carton), floor(pool / carton)).
+- Buy plan before vs after (sandbox, all markets), confirmed by Ben ("ship it"): FBA transfers now 3,098 -> 6,672 (+3,574 units; 89 SKU-markets change, 46 newly get one carton); Buy 3PL 32,758 -> 32,888 (+130); Urgent and Buy FBA unchanged; future-month buys 141,390 -> 148,200 (+6,810; largest HAIRW-SUM-UNICN-NB UK +2,340, HAIRW-CAB-NAVY-NB UK +2,160, AU / EU beach towels +300 to 660) because 3PL is drawn down sooner.
+- No server change, no migration, no env change.
+
 ## v28.402 (19-Oct-26) Coghlans journal narration spelled "Coghlan"
 - Ben: "Coghlan". Narration is now "Coghlan: Monthly adjustment" (and "Reversal: Coghlan: ..."). The duplicate check also matches the old "Coughlin" spelling, so a month already posted by hand (Sep-26) cannot be posted again.
 - No migration, no env change.

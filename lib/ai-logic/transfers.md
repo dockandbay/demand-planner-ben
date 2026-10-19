@@ -37,8 +37,8 @@ sources:
   - server.mjs :: /api/cron/fba-inflight-refresh
 fingerprints:
   artifact_v16.7.html::fbaTransferRec: 2c58b46155be
-  artifact_v16.7.html::fbaTransferSized: d58f25df052b
-  artifact_v16.7.html::fbaTransferNonGrs: ea083446f165
+  artifact_v16.7.html::fbaTransferSized: 9b9e832b97db
+  artifact_v16.7.html::fbaTransferNonGrs: dacf5d318013
   artifact_v16.7.html::fbaTransferEff: 20e956620966
   artifact_v16.7.html::fbaResolveQty: 14ecb84bd2c9
   artifact_v16.7.html::fbaFwdDemand: 02d6a090e262
@@ -58,9 +58,9 @@ fingerprints:
   server.mjs::buildTRANSFER_LEADS: 2c23341bb9a2
   server.mjs::buildZalStock: c704a06358cc
   server.mjs::/api/supply/fba-transfers/refresh: 5d5383070888
-  artifact_v16.7.html::fbaCoverWks: 956940d76303
-  artifact_v16.7.html::fbaBoxWks: 22746e12a8aa
-  artifact_v16.7.html::fbaSsmWks: fd6b1e925671
+  artifact_v16.7.html::fbaCoverWks: 069ac754bab8
+  artifact_v16.7.html::fbaBoxWks: cc0555e0f4f3
+  artifact_v16.7.html::fbaSsmWks: 550dc0928606
   artifact_v16.7.html::fbaTrfBoot: 071baeea24ca
   artifact_v16.7.html::bpExtraStockBoot: 5cc1e43fd049
   server.mjs::refreshFbaInflight: d83cb659fda1
@@ -68,7 +68,7 @@ fingerprints:
   server.mjs::fbaInflightExcludedCodes: 7089bef268c5
   server.mjs::/api/supply/fba-transfers/list: d968d218b3ca
   server.mjs::/api/cron/fba-inflight-refresh: 7732e28433a0
-verified_version: v28.390
+verified_version: v28.403
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -93,7 +93,7 @@ verified_version: v28.390
 
 ## Cartons pills (Any / Full / Partial)
 - Default is **Full** (FBA_CARTON_MODE = 'FULL'). The pills only show on the FBA tab under the Transfer FBA filters. (source: FBA_CARTON_MODE)
-- Whole cartons = min(floor(capped need / carton qty), floor(next-90-day FBA demand / carton qty)). If next-90-day FBA demand is below 70% of one carton, whole cartons = 0. (source: fbaTransferSized)
+- Whole cartons ROUND UP (v28.403, Ben 19-Oct-26 "definitely round up for fba"): cartons = min(ceil(capped need / carton qty), max(1, ceil(next-90-day FBA demand / carton qty)), floor(website-protection cap / carton qty)). If next-90-day FBA demand is below 70% of one carton, whole cartons = 0. So 58 needed with a 60 carton sends 60 when 3PL can spare 60; when 3PL cannot spare a full carton, Full is 0 and Any / Partial show the part amount. Was floor (58 of 60 = 0 cartons). (source: fbaTransferSized)
 - **Full**: send the whole-carton amount; sub-carton stragglers are 0.
 - **Partial**: send only stragglers (raw shortfall, rounded to units) for SKUs that do NOT fill a whole carton; any SKU with at least one whole carton shows 0 here.
 - **Any**: whole-carton amount if there is one, else the raw straggler amount.
@@ -102,7 +102,7 @@ verified_version: v28.390
 - The pill is a session setting. Because the buy plan calls the same function, switching the pill also changes the buy plan's transfer-now until reload. (source: fbaTransferRec, project)
 
 ## Non-GRS transfers (UK and US only)
-- "Transfer FBA (non GRS)" pill uses `fbaTransferNonGrs`: same FBA target and cover-held maths, capped at the non-GRS 3PL pool, NO website cap and NO 90-day / 70% gates. Pure carton maths under the same Any / Full / Partial rules. Only SKUs with a non-zero non-GRS transfer are listed. (source: fbaTransferNonGrs)
+- "Transfer FBA (non GRS)" pill uses `fbaTransferNonGrs`: same FBA target and cover-held maths, capped at the non-GRS 3PL pool, NO website cap and NO 90-day / 70% gates. Pure carton maths under the same Any / Full / Partial rules. Only SKUs with a non-zero non-GRS transfer are listed. (source: fbaTransferNonGrs) From v28.403 whole cartons round UP: cartons = min(ceil(need capped at the pool / carton), floor(pool / carton)).
 - In the buy plan, FBA transfers draw the non-GRS pool down FIRST; only the excess reduces GRS "SOH 3PL". This lowers 3PL buying for SKUs holding non-GRS stock. The plan popup shows "SOH 3PL non-GRS (closing)" when the SKU has non-GRS stock. (source: project)
 - Non-GRS and AWD quantities come from /api/buy-extra-stock (EXTRA_STOCK), loaded at startup (v28.168; was on the first BUY render, so buy numbers computed elsewhere first missed them). A failed load retries on the next buy render. Non-GRS is 0 outside UK/US; AWD is 0 outside US. (source: nonGrsOf, awdOf, bpExtraStockBoot)
 

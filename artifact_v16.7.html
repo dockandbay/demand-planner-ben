@@ -2622,7 +2622,11 @@ function fbaTransferSized(sku,mkt,capUnits){
   const d90=fbaFwdDemand(md,3), d60=fbaFwdDemand(md,2);
   // Whole-carton amount (this IS the FULL result). Also used to gate PARTIAL: a SKU that fills >=1 whole carton
   // belongs to FULL and is EXCLUDED from Partial, so it is never sent as both (e.g. 120 full AND 124 partial).
-  const cartons=(d90<0.7*cp)?0:Math.min(Math.floor(base/cp),Math.floor(d90/cp));
+  // v28.403 (Ben 19-Oct-26: "definitely round up for fba", HAIRW-WAF-BOHMDRM UK showed 58 with a 60 carton): round UP to whole
+  // cartons (Amazon receives cartons), as long as 3PL can spare them (capUnits = the website-protection cap) and next-90-day FBA
+  // demand is at least 70% of a carton. Was floor (58 of 60 = 0 cartons). When 3PL cannot spare a full carton it stays as before:
+  // FULL 0, ANY/PARTIAL the part amount.
+  const cartons=(d90<0.7*cp)?0:Math.min(Math.ceil(base/cp),Math.max(1,Math.ceil(d90/cp)),Math.floor(Math.max(capUnits,0)/cp));
   const fullQty=cartons*cp;
   // ANY = send everything, but carton-round the whole-carton part (Amazon ships in cartons) — so a 589 need with
   // full cartons shows 560, not 589. Sub-carton stragglers (no full carton) still send the raw amount.
@@ -2683,10 +2687,11 @@ function fbaTransferNonGrs(sku,mkt){
   const need=Math.max(0,fbaFwdDemand(md,targetMonths)-(iF+oof+awd+_fbaPendingOf(sku,mkt)));   // FBA shortfall vs target — includes in-flight transfers (overlay)
   const base=Math.min(need,pool);                                      // capped at the non-GRS pool we hold
   if(base<=0)return 0;
-  const isFullCarton=base>=cp;                                         // fills at least one whole carton?
-  if(FBA_CARTON_MODE==='ANY')return isFullCarton?Math.floor(base/cp)*cp:Math.round(base);   // carton-round fillers; stragglers raw
-  if(FBA_CARTON_MODE==='PARTIAL')return isFullCarton?0:Math.round(base);   // stragglers only
-  return isFullCarton?Math.floor(base/cp)*cp:0;                        // FULL: whole cartons only
+  // v28.403 (Ben 19-Oct-26: "definitely round up for fba"): round UP to whole cartons, capped at the whole cartons the pool can fill.
+  const cartons=Math.min(Math.ceil(base/cp),Math.floor(pool/cp)), upQty=cartons*cp;
+  if(FBA_CARTON_MODE==='ANY')return upQty>0?upQty:Math.round(base);     // whole cartons (rounded up); stragglers raw when the pool is under a carton
+  if(FBA_CARTON_MODE==='PARTIAL')return upQty>0?0:Math.round(base);     // stragglers only
+  return upQty;                                                        // FULL: whole cartons only
 }
 // Override cell shortcuts (same as SUPPLY ▸ Order Plan): "2c" = 2 × carton qty; "50r" = round 50 UP to the
 // nearest full carton. Plain numbers pass through. cp = the SKU's carton quantity.
