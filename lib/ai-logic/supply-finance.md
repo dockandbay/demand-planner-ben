@@ -200,7 +200,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.397
+verified_version: v28.399
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -233,6 +233,7 @@ verified_version: v28.397
 
 ## Shipments
 - A shipment groups one or more POs. Its destination (country, branch) and export port use the shipment's own override if set, else the master PO's values. They are never written back to the POs. (source: server.mjs :: case 'shipments')
+- Flexport dates (v28.399, Flexport import): landing = Flexport port arrival (actual_arrival_date, else estimated_arrival_date); arrival = delivery to us (actual_delivered_in_full_date, else estimated_delivered_in_full_date, which Flexport shows as Predicted Delivery), else the port arrival. (source: server.mjs :: runFlexportImport)
 - Shipment grid dates: departure, then landing, then arrival, then completion. Each uses the shipment override, else Flexport, else a calculation from the master PO (production end + 7, then + branch transit by mode). Completion = delivery_date override, else arrival + 7 days. (source: server.mjs :: case 'shipments')
 - Flexport match: flexport_shipments_effective where flex_id = carrier_ref or shipment_name = shipment_ref. (source: server.mjs :: case 'shipments')
 - DHL/FedEx tracking: shipments with carrier DHL or FedEx, a carrier_ref and no arrival date are polled. The delivered date (else the carrier ETA) is written to shipments.tracked_delivery_date with tracked_source dhl or fedex. This field does not feed v_po_finance. (source: server.mjs :: upsertTracking)

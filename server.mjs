@@ -10196,6 +10196,12 @@ async function runFlexportImport(opts) {
         const actDep = _fxDate(_fxPick(s, ['actual_departure_date']));
         const estArr = _fxDate(_fxPick(s, ['estimated_arrival_date', 'est_arrival_date', 'estimated_delivered_in_full_date']));
         const actArr = _fxDate(_fxPick(s, ['actual_arrival_date', 'actual_delivered_in_full_date']));
+        // v28.399 (Ben 19-Oct-26: "the flexport dates are not syncing", PO-56AUWK1 showed 10-Oct, Flexport "Predicted Delivery 21-Oct"):
+        // landing = the port arrival (actual, else estimated); arrival = DELIVERY to us (delivered in full: actual, else estimated), else the
+        // port arrival. Before, arrival was the port arrival, so a delivery Flexport moved later never reached HORIZON once the ship docked.
+        const actPort = _fxDate(_fxPick(s, ['actual_arrival_date'])), estPort = _fxDate(_fxPick(s, ['estimated_arrival_date', 'est_arrival_date']));
+        const actDel = _fxDate(_fxPick(s, ['actual_delivered_in_full_date', 'delivered_in_full_date'])), estDel = _fxDate(_fxPick(s, ['estimated_delivered_in_full_date']));
+        const landing = actPort || estPort || estArr, arrival = actDel || estDel || actPort || estPort || actArr || estArr;
         const cargoReady = _fxDate(_fxPick(s, ['cargo_ready_date']));
         const name = _fxPick(s, ['name']); const mode = _fxPick(s, ['transportation_mode', 'mode']);
         const status = _fxPick(s, ['status', 'status_name']); const incoterm = _fxPick(s, ['incoterm']);
@@ -10241,7 +10247,7 @@ async function runFlexportImport(opts) {
              last_modified_time=EXCLUDED.last_modified_time`,
           [flexId, name, mode, status, incoterm,
            freightType, mbl, quoted, freightCost, estShipCost, planTransit, actTransit,
-           estDep, actDep, estArr, actArr, cargoReady, actDep || estDep, estArr, actArr || estArr, updated]);
+           estDep, actDep, estArr, actArr, cargoReady, actDep || estDep, landing, arrival, updated]);
         if (oceanS && !actArr) oceanSeen.push({ flexId, numId: id, name });   // in-transit ocean → candidate for container numbers
         imported++;
         if (samples.length < 5) samples.push({ flex_id: flexId, name, mode, mbl, quoted, est_dep: estDep, act_dep: actDep, est_arr: estArr, act_arr: actArr });
