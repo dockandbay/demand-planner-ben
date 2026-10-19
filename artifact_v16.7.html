@@ -16332,11 +16332,13 @@ function renderKlaviyoBisView(body){
     if(!(p.av&&p.av[k]))return 'closed';                          // not available in THIS market → not sold here (Ben: TOWLB-ANI-XL-LEOPD isn't sold in US)
     var st=String(p.st||'').toUpperCase();
     if(st==='ACTIVE')return 'active';                             // products.status ACTIVE → Active (discontinue_date_final is a season/review date, NOT the discontinuation)
-    var dd=(p.disc&&p.disc[k])?String(p.disc[k]).slice(0,10):''; // PHASE OUT / LAST SEASON → Discontinued while within the date; Closed once that market's discontinue date passes
+    if(st==='CLOSED')return 'closed';                             // v28.406 (Ben): products.status CLOSED → Closed
+    var dd=(p.disc&&p.disc[k])?String(p.disc[k]).slice(0,10):''; // PHASE OUT / LAST SEASON → their own group while within the date; Closed once that market's discontinue date passes
     if(dd&&dd<TDY)return 'closed';
-    return 'disc'; }
-  var BIS_GRP=[['active','Active','var(--pos)','var(--pos-bg)'],['disc','Discontinued','var(--amber)','var(--amber-bg)'],['closed','Closed','var(--muted)','var(--hover)']];
-  var BIS_STLBL={active:'Active',disc:'Discontinued',closed:'Closed'};
+    return st==='LAST SEASON'?'last':'disc'; }                    // v28.406 (Ben): Last season is its own group; Phase out (and other statuses) stay under Discontinued
+  var BIS_GRP=[['active','Active','var(--pos)','var(--pos-bg)'],['last','Last season','var(--blue-ink)','var(--blue-soft)'],['disc','Discontinued (phase out)','var(--amber)','var(--amber-bg)'],['closed','Closed','var(--muted)','var(--hover)']];
+  var BIS_STLBL={active:'Active',last:'Last season',disc:'Discontinued',closed:'Closed'};
+  var BIS_HIDE_CLOSED=true; try{ BIS_HIDE_CLOSED=localStorage.getItem('hz_bis_hide_closed')!=='0'; }catch(e){}   // v28.406 (Ben): tick box, default ticked = hide Closed
   body.innerHTML='<div style="max-width:1000px">'
     +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">Klaviyo &mdash; Back-in-Stock subscriptions</div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Upload each Klaviyo account’s raw back-in-stock export (.xlsx or .csv — the combined workbook works too). We sum <b>Queued Subscriptions</b> per SKU (subscribed in the last 6 months) and show a &#128276; count on the DEMAND plan for that market. The last file per market persists for everyone until replaced.</div>'
@@ -16346,7 +16348,8 @@ function renderKlaviyoBisView(body){
   var _bt=body.querySelector('#bis-take'); if(_bt)_bt.onchange=function(){ var v=Math.max(1,Math.min(100,parseInt(this.value,10)||35)); this.value=v; BIS_CFG.take_rate=v;
     fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'bis_take_rate',value:String(v)})}).catch(function(){}); };
   var boxes=body.querySelector('#kb-boxes'), summary=body.querySelector('#kb-summary'), DROWS=[];
-  function draw(d){ var st=d.markets||{}; DROWS=d.rows||[];
+  var _kbLast={};
+  function draw(d){ _kbLast=d; var st=d.markets||{}; DROWS=d.rows||[];
     boxes.innerHTML=MK.map(function(mk){ var c=col(mk), s=st[mk];
       return '<div class="kb-drop" data-mk="'+mk+'" style="border:2px solid '+c+';border-radius:10px;overflow:hidden;background:var(--card)">'
         +'<div style="background:'+c+';color:var(--ink);font-weight:700;padding:6px 11px;font-size:13px">'+mk+'</div>'
@@ -16370,15 +16373,17 @@ function renderKlaviyoBisView(body){
       dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.outline=''; var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)doKbUp(f, mk); }); });
     // ---- analysis summary ----
     if(!DROWS.length){ summary.innerHTML='<div class="mut tiny">No back-in-stock data yet — upload a file above.</div>'; return; }
-    var mtot={UK:0,US:0,EU:0,AU:0}, msku={UK:0,US:0,EU:0,AU:0}, gtot=0;
-    DROWS.forEach(function(r){ MK.forEach(function(m){ if(r[m]>0){mtot[m]+=r[m];msku[m]++;} }); gtot+=r.total; });
+    var mtot={UK:0,US:0,EU:0,AU:0}, msku={UK:0,US:0,EU:0,AU:0}, gtot=0, nsku=0;
+    function shownQ(r,m){ return (r[m]>0 && !(BIS_HIDE_CLOSED && bisStatus(r.sku,m)==='closed'))?r[m]:0; }   // v28.406: counts follow the Hide closed tick box
+    DROWS.forEach(function(r){ var any=false; MK.forEach(function(m){ var q=shownQ(r,m); if(q>0){mtot[m]+=q;msku[m]++;gtot+=q;any=true;} }); if(any)nsku++; });
     var chips=MK.map(function(m){ return '<span style="display:inline-block;background:'+col(m)+';color:var(--ink);font-weight:700;border-radius:5px;padding:3px 9px;font-size:11px;margin-right:6px">'+m+': '+msku[m]+' SKUs · '+mtot[m].toLocaleString()+' subs</span>'; }).join('');
-    var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:14px">Analysis summary <span class="mut tiny">— back-in-stock subscribers by SKU, grouped by status (Active · Discontinued incl. phase-out · Closed) — by each market&rsquo;s availability + product status · '+DROWS.length+' SKUs · '+gtot.toLocaleString()+' total</span></div>'
-      +'<button id="kb-dl" class="save-btn" style="margin-left:auto;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">&#8595; Download CSV</button></div>'
+    var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:14px">Analysis summary <span class="mut tiny">— back-in-stock subscribers by SKU, grouped by status (Active · Last season · Discontinued (phase out) · Closed) — by each market&rsquo;s availability + product status · '+nsku+' SKUs · '+gtot.toLocaleString()+' total</span></div>'
+      +'<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;margin-left:auto;cursor:pointer;white-space:nowrap"><input type="checkbox" id="kb-hideclosed"'+(BIS_HIDE_CLOSED?' checked':'')+'> Hide closed products</label>'
+      +'<button id="kb-dl" class="save-btn" style="background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">&#8595; Download CSV</button></div>'
       +'<div style="margin-bottom:8px">'+chips+'</div>';
     // per-country columns (each its own SKU + QTY list, sorted by that market's subs) — mirrors the upload sheet's BIS_REPORT_FILTERED
     function bisRow(x){ return '<tr><td style="padding:2px 8px 2px 0"><div title="'+e2(x.sku)+'" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Menlo,monospace;font-size:11px;text-align:left">'+e2(x.sku)+'</div></td><td style="padding:2px 2px 2px 8px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:56px">'+x.q.toLocaleString()+'</td></tr>'; }
-    var blocks=MK.map(function(m){ var list=DROWS.filter(function(r){return r[m]>0;}).map(function(r){return {sku:r.sku,q:r[m],st:bisStatus(r.sku,m)};}).sort(function(a,b){return b.q-a.q;});
+    var blocks=MK.map(function(m){ var list=DROWS.filter(function(r){return r[m]>0;}).map(function(r){return {sku:r.sku,q:r[m],st:bisStatus(r.sku,m)};}).filter(function(x){ return !(BIS_HIDE_CLOSED&&x.st==='closed'); }).sort(function(a,b){return b.q-a.q;});
       var sub=list.reduce(function(a,x){return a+x.q;},0);
       // v27.831 (Ben): group this market's SKUs by status (Active / Discontinued incl. phase out / Closed), a labelled section each
       var gbody=BIS_GRP.map(function(g){ var gl=list.filter(function(x){return x.st===g[0];}); if(!gl.length)return '';
@@ -16388,6 +16393,7 @@ function renderKlaviyoBisView(body){
         +'<div style="background:'+col(m)+';color:var(--ink);font-weight:700;padding:5px 10px;font-size:12px;display:flex;justify-content:space-between;gap:8px"><span>'+m+'</span><span style="font-weight:600">'+list.length+' SKUs &middot; '+sub.toLocaleString()+'</span></div>'
         +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;table-layout:auto;width:100%"><tbody>'+(gbody||'<tr><td colspan="2" class="mut tiny" style="padding:8px">none</td></tr>')+'</tbody></table></div></div>'; }).join('');
     summary.innerHTML=head+'<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start">'+blocks+'</div>';
+    var hc=summary.querySelector('#kb-hideclosed'); if(hc)hc.onchange=function(){ BIS_HIDE_CLOSED=this.checked; try{ localStorage.setItem('hz_bis_hide_closed',this.checked?'1':'0'); }catch(e){} draw(_kbLast); };
     var dl=summary.querySelector('#kb-dl'); if(dl)dl.onclick=function(){ var out=[['SKU','UK subs','UK status','US subs','US status','EU subs','EU status','AU subs','AU status','Total']];
       DROWS.forEach(function(r){ var st=function(m){ return (r[m]>0)?(BIS_STLBL[bisStatus(r.sku,m)]||''):''; }; out.push([r.sku, r.UK||0, st('UK'), r.US||0, st('US'), r.EU||0, st('EU'), r.AU||0, st('AU'), r.total||0]); });
       var csv=out.map(function(row){return row.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');

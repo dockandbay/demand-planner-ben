@@ -1,3 +1,10 @@
+## v28.406 (20-Oct-26) Klaviyo BIS: Hide closed products (default on) + Last season group
+- Ben: DEMAND > Inputs > Klaviyo BIS "can you have a tick box defaulted to yes to hide any closed products. and a grouping for active/last season".
+- New "Hide closed products" tick box on the analysis summary, ticked by default and remembered per browser. Ticked hides Closed SKUs and leaves them out of the SKU / subscriber counts. The CSV download still lists every SKU with its status.
+- Groups per market are now Active > Last season > Discontinued (phase out) > Closed. Last season (products.status LAST SEASON) was folded into Discontinued before. Products with status CLOSED now always count as Closed (as do SKUs not sold in that market, out of planning scope, or past that market's discontinue date, as before).
+- Sandbox: ticked shows 32 SKUs / 792 subs, unticked 174 SKUs / 2,560 subs.
+- Display only: no forecast or buy effect. Buy plan before vs after on the same data: 418 SKU-markets, 0 differences. No server change, no migration, no env change.
+
 ## v28.405 (20-Oct-26) Search finds POs by sales order number; Fulfil "change" under the link
 - Ben: "horizon POs are not letting sales order numbers be searchable". Checked on live: the PO grid filter box does find them (SO65897 shows PO461 to PO467), but the top Search bar (global search) only matched PO number and supplier, so a sales order number gave "No matches".
 - Global search: new "Sales orders" group. Matches sales_order_ref or client_po_ref (3+ characters), shows client and every PO on that order (child POs included). Choosing it opens the PO grid searched for that sales order. Server: /api/hz-search returns sos.

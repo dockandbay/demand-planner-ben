@@ -3,6 +3,7 @@ topic: actions
 title: Actions and Exceptions
 covers: Action lists and exception reports in HORIZON: DEMAND Exceptions (9 sub-tabs), DEMAND Actions (server rules, client detectors, Trend Gaps), SUPPLY BI & REPORTS Actions, PO action items, Recommendations, ERP Compare, DTC Mismatch, Urgent Buy, Reallocate, Container Fill, Consolidate, BUY & MOVE Actions
 sources:
+  - artifact_v16.7.html :: renderKlaviyoBisView
   - artifact_v16.7.html :: renderExceptionsView
   - artifact_v16.7.html :: skuMonthlyMap
   - artifact_v16.7.html :: renderDemandActionsView
@@ -35,6 +36,7 @@ sources:
   - server.mjs :: biContainerFill
   - server.mjs :: biConsolidations
 fingerprints:
+  artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
   artifact_v16.7.html::renderExceptionsView: c5c8aa1bfeec
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
@@ -66,7 +68,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.380
+verified_version: v28.406
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -181,6 +183,7 @@ verified_version: v28.380
     - A spike > 5x both neighbours and >= 500.
     - The latest month < 30% or > 300% of the prior 3-month average (the < 30% rule needs that average > 200).
 - Back-in-stock demand: Klaviyo subscribers >= 10. Uplift = subscribers x take rate (default 35%). (source: daBis)
+- DEMAND > Inputs > Klaviyo BIS summary (display only, no forecast or buy effect): each market's SKUs are grouped Active (products.status ACTIVE) > Last season (LAST SEASON, before that market's discontinue date) > Discontinued (phase out and other statuses, before the date) > Closed (status CLOSED, not available in that market, out of planning scope, or past that market's discontinue date). A "Hide closed products" tick box (default ticked, remembered per browser) hides Closed and takes it out of the counts; the CSV still lists every SKU with its status (v28.406). (source: renderKlaviyoBisView)
 - Insights tab = Trading behind/ahead of LY and Forecast vs trend. Everything else is in Actions.
 
 ## DEMAND Actions: Trend Gaps and lifecycle
