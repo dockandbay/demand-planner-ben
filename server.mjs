@@ -19630,6 +19630,27 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
 // Cross-month reclass JOURNAL (all 3PLs): orders on this invoice whose Cin7/Fulfil invoice-date (ship date) falls in a
 // month BEFORE the invoice period → their 3PL cost is reclassed OUT of the invoice month INTO the order's month. Xero
 // manual-journal CSV (balanced: debit the prior month, credit the invoice month, per account). Reclass is tax-neutral (No VAT).
+// v28.400: the Xero manual journals for a 3PL cross-month reclass, in the format of the journals posted by hand (Xero UK, Sep-26): per month
+// moved into, an original (that month's last day: cost accounts debited, "Reclass <ym> orders out of <period>", one 805 Accruals credit)
+// and its reversal (the invoice month's last day, "Reversal: ..."), POSTED, NoTax. j = { ym: { accountCode: amount in invoice currency } };
+// rate = invoice currency per 1 base currency (1 for GBP / AUD). Pure (no I/O) so it can be checked offline.
+// BEGIN _tplJournalPayload
+function _tplJournalPayload(j, period, REG, rate, filename) {
+  const endOf = ym => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
+  const r2 = x => Math.round(x * 100) / 100, tax = REG === 'AU' ? 'BASEXCLUDED' : 'NONE', ACCRUALS = '805';
+  const suffix = REG === 'AU' ? (' (' + String(filename || '').replace(/\.[a-z0-9]+$/i, '').replace(/\s*\(.*\)\s*$/, '').trim() + ')') : '';
+  const journals = [], out = [];
+  Object.keys(j).sort().forEach(ym => {
+    const narr = '3PL ' + REG + ' ' + period + ' reclass to ' + ym + suffix, desc = 'Reclass ' + ym + ' orders out of ' + period;
+    const ls = Object.keys(j[ym]).sort().map(code => ({ AccountCode: code, Description: desc, TaxType: tax, LineAmount: r2(j[ym][code] / (rate || 1)) })).filter(l => l.LineAmount > 0.005);
+    if (!ls.length) return; const tot = r2(ls.reduce((a, l) => a + l.LineAmount, 0));
+    const orig = { Narration: narr, Date: endOf(ym), Status: 'POSTED', LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false, JournalLines: [...ls, { AccountCode: ACCRUALS, TaxType: tax, LineAmount: -tot }] };
+    const rev = { Narration: 'Reversal: ' + narr, Date: endOf(period), Status: 'POSTED', LineAmountTypes: 'NoTax', ShowOnCashBasisReports: false, JournalLines: orig.JournalLines.map(l => Object.assign({}, l, { LineAmount: -l.LineAmount })) };
+    journals.push(orig, rev); out.push({ month: ym, narration: narr, date: orig.Date, reversal_date: rev.Date, total: tot });
+  });
+  return { journals, out };
+}
+// END _tplJournalPayload
 app.post('/api/supply/tpl/journal/:id', async (req, res) => {
   try {
     const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
@@ -19673,6 +19694,46 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
         lines.push({ narration: narr, date: dd(endOf(period)), desc: 'Reclass ' + ym + ' orders out of ' + period, code: (code === '(no account)' ? '' : code), taxRate: 'No VAT', amount: -amt }); }); // CR the invoice month
       screen.push({ month: ym, amount: Math.round(mtot * 100) / 100 }); });
     if (req.body && req.body.preview) return res.json({ ok: true, period, region: REG, months: screen, crossTotal: Math.round(crossTotal * 100) / 100, matched, noDate, fromFulfil, journals: Object.keys(j).length, lineCount: lines.length });
+    // v28.400 (Ben 19-Oct-26: "PUSH JOURNAL TO XERO button, which actually creates the journal in xero ... one journal needed for each
+    // month"). The SAME format as the journals already posted by hand (Xero UK, e.g. "3PL UK 2026-09 reclass to 2026-07"): per month moved into,
+    // an original dated that month's last day (cost accounts debited, described "Reclass <ym> orders out of <period>", one 805 Accruals credit
+    // for the total) and its reversal dated the invoice month's last day ("Reversal: ..."), both POSTED, NoTax (UK NONE, AU BASEXCLUDED).
+    // Coghlans (AU) goes to Xero AU and adds its invoice number to the narration (weekly invoices); the rest go to Xero UK. A Xero journal
+    // is in the base currency (GBP / AUD), so EU and US amounts are converted at the rate of this invoice's own Xero bill (same reference
+    // as the bill push), which must exist first. A journal with the same narration already in Xero (not voided) stops the push.
+    // dry:true returns exactly what would be sent (no Xero write). Admin or ACCOUNTS only (like the bill).
+    if (req.body && (req.body.push || req.body.dry)) {
+      const dry = !req.body.push;
+      if (!dry) { try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required to push a journal to Xero (CONFIG > Admin > Permissions)' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); } }
+      const months = Object.keys(j).sort(); if (!months.length) return res.json({ ok: false, error: 'Nothing to journal: no orders on this invoice shipped in an earlier month.' });
+      const noAcct = months.filter(ym => j[ym]['(no account)'] > 0.005);
+      if (noAcct.length) return res.status(400).json({ error: 'Some cost has no Xero account (months ' + noAcct.join(', ') + '). Map the cost centre in 3PL invoicing > Config / Accounts first.' });
+      const xregion = REG === 'AU' ? 'au' : 'uk', tax = xregion === 'au' ? 'BASEXCLUDED' : 'NONE', ACCRUALS = '805';
+      let rate = 1, billRef = null;
+      if (REG === 'EU' || REG === 'US') {   // foreign currency invoice in the GBP org: the bill's own rate (Xero CurrencyRate = foreign per 1 GBP)
+        billRef = 'FULFILLMENT-' + REG + '-' + endOf(period);
+        let bill = null; try { const r = await xeroFetch('uk', '/api.xro/2.0/Invoices?where=' + encodeURIComponent('Type=="ACCPAY" AND InvoiceNumber=="' + billRef + '"')); bill = ((r && r.Invoices) || []).find(x => !/^(DELETED|VOIDED)$/i.test(String(x.Status || ''))) || null; }
+        catch (e) { return res.status(502).json({ error: 'Could not read the Xero bill ' + billRef + ' for its exchange rate (' + e.message + '). Nothing created.' }); }
+        if (!bill || !(Number(bill.CurrencyRate) > 0)) return res.status(409).json({ error: 'Create the Xero bill ' + billRef + ' first: the journal converts ' + (REG === 'US' ? 'USD' : 'EUR') + ' to GBP at that bill\'s rate.' });
+        rate = Number(bill.CurrencyRate);
+      }
+      const { journals, out } = _tplJournalPayload(j, period, REG, rate, row.filename);
+      if (!journals.length) return res.json({ ok: false, error: 'Nothing to journal after rounding.' });
+      const info = { ok: true, dry, region: xregion, org: xregion === 'au' ? 'Xero AU' : 'Xero UK', currency_rate: rate !== 1 ? rate : null, bill: billRef, months: out, journals: dry ? journals : undefined };
+      if (dry) return res.json(info);
+      // one push per month: refuse if Xero already has a (not voided) journal with this narration
+      for (const m of out) {
+        let ex = null; try { const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent('Narration=="' + m.narration.replace(/["\\]/g, '') + '"')); ex = ((r && r.ManualJournals) || []).find(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || ''))) || null; }
+        catch (e) { return res.status(502).json({ error: 'Could not check ' + info.org + ' for an existing journal (' + e.message + '). Nothing created.' }); }
+        if (ex) return res.status(409).json({ error: 'A journal "' + m.narration + '" is already in ' + info.org + '. Nothing created.', xero_id: ex.ManualJournalID, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + ex.ManualJournalID });
+      }
+      try {
+        const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: journals } });
+        const made = ((r && r.ManualJournals) || []).map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID }));
+        console.log('[tpl journal] pushed', info.org, period, REG, made.length, 'journals');
+        return res.json(Object.assign(info, { created: made }));
+      } catch (e) { return res.status(502).json({ error: 'Xero refused the journal: ' + e.message }); }
+    }
     const HDR = '*Narration,*Date,Description,*AccountCode,*TaxRate,*Amount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const csv = HDR + '\n' + lines.map(l => [l.narration, l.date, l.desc, l.code, l.taxRate, l.amount.toFixed(2), '', '', '', ''].map(esc).join(',')).join('\n');

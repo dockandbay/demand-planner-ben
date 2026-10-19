@@ -1,3 +1,12 @@
+## v28.400 (19-Oct-26) 3PL invoicing: Push journal to Xero
+- Ben: "in 3pl invoicing can you also have a PUSH JOURNAL TO XERO button, which actually creates the journal in xero ... one journal needed for each month", matching the journals posted by hand (Xero UK, 5ae7624d = "Reversal: 3PL UK 2026-09 reclass to 2026-07").
+- Format read from Xero UK (read only): per month moved into, an original dated that month's last day (cost accounts debited, "Reclass <ym> orders out of <period>", one 805 Accruals credit) and its reversal dated the invoice month's last day ("Reversal: ..."), POSTED, NoTax. HORIZON's CSV used a different layout (same account debited and credited across the two months, no 805); the CSV is unchanged and the push uses the posted format.
+- Xero AU: no 3PL journals there yet; same layout with 805 Accruals (exists in AU) and BAS Excluded, narration adds the Coghlans invoice number (weekly invoices, so one journal per invoice per month).
+- EU and US invoices sit in the GBP org: amounts are converted at the rate of the invoice's own Xero bill (FULFILLMENT-<region>-<month end>; Sep-26: US 1.32646, EU 1.17063). The push refuses if that bill is missing, if a journal with the same narration is already in Xero, or if any cost has no account.
+- UI: the cross-month reclass box gets "Push journal to Xero UK / AU" next to the CSV download; it shows the journals (dry run), asks, then posts and links each created journal. Admin or ACCOUNTS only.
+- Checked offline: _tplJournalPayload rebuilt the hand-posted UK Sep-26 journals (Jul 97.28, Aug 6,822.59, lines, dates, reversal, 805, NoTax) exactly; every journal balances. No journal was posted from the sandbox.
+- No migration, no env change. Route: existing POST /api/supply/tpl/journal/:id with { dry: true } or { push: true } (signed-in, not a cron route).
+
 ## v28.399 (19-Oct-26) Flexport: arrival = delivery to us, not the port arrival
 - Ben: "the flexport dates are not syncing" (PO-56AUWK1: HORIZON landing and arrival 10-Oct, Flexport "Predicted Delivery 21-Oct"). The sync was running (Flexport changed it on 16-Oct and HORIZON had that change), but it stored Flexport's PORT arrival in both landing and arrival, and only used the delivery date when there was no port date. Once a ship docked, a later delivery never reached HORIZON.
 - Now (Flexport import, server.mjs runFlexportImport): landing = port arrival (actual, else estimated); arrival = delivered in full (actual, else estimated), else the port arrival. dest_estimated_arrival / dest_actual_arrival unchanged.
