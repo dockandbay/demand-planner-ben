@@ -31,9 +31,9 @@ fingerprints:
   artifact_v16.7.html::discCutoffMo: 5e942f8dd917
   artifact_v16.7.html::ssmParamsFor: 757995abb45b
   artifact_v16.7.html::ssmEnabled: 9751a3702e64
-  artifact_v16.7.html::fbaCoverWks: 956940d76303
-  artifact_v16.7.html::fbaSsmWks: fd6b1e925671
-  artifact_v16.7.html::fbaBoxWks: 22746e12a8aa
+  artifact_v16.7.html::fbaCoverWks: 069ac754bab8
+  artifact_v16.7.html::fbaSsmWks: 550dc0928606
+  artifact_v16.7.html::fbaBoxWks: cc0555e0f4f3
   artifact_v16.7.html::ssmServiceLevel: 45efb7e8a5ff
   artifact_v16.7.html::ssmZ: 0b0158b65185
   artifact_v16.7.html::ssmCoverWeeks: 29a4ae6c62ea
@@ -46,7 +46,7 @@ fingerprints:
   server.mjs::buildPROD_CONST: b8b131b6ad8b
   server.mjs::buildBRANCH_FREIGHT: d4506891f8e0
   server.mjs::expediteActions: 2357d115088a
-verified_version: v28.168
+verified_version: v28.403
 ---
 ## Buy 3PL Urgent: when it fires
 - Urgent is a separate scan after the normal Buy 3PL pass. It covers 3PL only (not FBA). See topic buy-plan for normal Buy 3PL. (source: project)
