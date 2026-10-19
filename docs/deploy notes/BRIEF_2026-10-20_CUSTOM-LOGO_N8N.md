@@ -14,6 +14,7 @@ Every US order that contains the **CUSTOM-LOGO** product and ships from **US Gen
 ## Why polling is safe on timing (live, read only, 20-Oct-26)
 - US web shipments at Geneva are created **on hold** (hold reason 2) and released about **1 hour** later. Example: CS61280 created 15:42, sent to G10 16:48.
 - Wholesale shipments (USWS) sit on hold (reason 36) until released by hand.
+- Exceptions seen: CS61274 went to G10 3 minutes after creation (released early), and Amazon MCF shipments (e.g. CS61273) have no hold at all. MCF orders never carry CUSTOM-LOGO; the early-release case is why step 8 (late catch alert) matters.
 - A poll every **5 minutes** fixes the shipment well inside that window. G10 only receives it after release (`tpl_status` goes to `sent`).
 
 ## The n8n workflow (Fulfil REST API, X-API-KEY)
