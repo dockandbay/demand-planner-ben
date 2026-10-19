@@ -19643,8 +19643,9 @@ function _tplJournalPayload(j, period, REG, rate, filename) {
   const journals = [], out = [];
   Object.keys(j).sort().forEach(ym => {
     // v28.401 (Ben 19-Oct-26, Xero AU journals 77bb72da / 874147f6): Coghlans follows Xero AU's own monthly accrual style:
-    // "Coughlin: Monthly adjustment", every line (805 too) "Appropriation of Sept-2026 costs", reversal on the 1st of the next month, shown on cash basis reports.
-    const narr = AU ? 'Coughlin: Monthly adjustment' : ('3PL ' + REG + ' ' + period + ' reclass to ' + ym);
+    // "Coghlan: Monthly adjustment" (v28.402; earlier journals "Coughlin"), every line (805 too) "Appropriation of Sept-2026 costs", reversal on the 1st of the next month, shown on cash basis reports.
+    const narr = AU ? 'Coghlan: Monthly adjustment' :   // v28.402 (Ben): correct spelling; journals before Oct-26 say "Coughlin"
+      ('3PL ' + REG + ' ' + period + ' reclass to ' + ym);
     const desc = AU ? ('Appropriation of ' + MON[Number(ym.slice(5, 7)) - 1] + '-' + ym.slice(0, 4) + ' costs') : ('Reclass ' + ym + ' orders out of ' + period);
     const ls = Object.keys(j[ym]).sort().map(code => ({ AccountCode: code, Description: desc, TaxType: tax, LineAmount: r2(j[ym][code] / (rate || 1)) })).filter(l => l.LineAmount > 0.005);
     if (!ls.length) return; const tot = r2(ls.reduce((a, l) => a + l.LineAmount, 0));
@@ -19746,7 +19747,8 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
       if (dry) return res.json(info);
       // one push per month: refuse if Xero already has a (not voided) journal with this narration
       for (const m of out) {
-        let ex = null; try { const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent('Narration=="' + m.narration.replace(/["\\]/g, '') + '"')); const dOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
+        let ex = null; try { const nq = REG === 'AU' ? ('Narration=="' + m.narration + '" OR Narration=="' + m.narration.replace('Coghlan:', 'Coughlin:') + '"') : ('Narration=="' + m.narration.replace(/["\\]/g, '') + '"');   // AU: the old spelling counts too
+          const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent(nq)); const dOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
           ex = ((r && r.ManualJournals) || []).find(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || '')) && (REG !== 'AU' || dOf(x.Date) === m.date)) || null; }   // AU: same narration every month, so the month's date decides
         catch (e) { return res.status(502).json({ error: 'Could not check ' + info.org + ' for an existing journal (' + e.message + '). Nothing created.' }); }
         if (ex) return res.status(409).json({ error: 'A journal "' + m.narration + '" dated ' + m.date + ' is already in ' + info.org + '. Nothing created.', xero_id: ex.ManualJournalID, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + ex.ManualJournalID });

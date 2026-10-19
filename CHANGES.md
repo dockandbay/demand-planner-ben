@@ -1,3 +1,7 @@
+## v28.402 (19-Oct-26) Coghlans journal narration spelled "Coghlan"
+- Ben: "Coghlan". Narration is now "Coghlan: Monthly adjustment" (and "Reversal: Coghlan: ..."). The duplicate check also matches the old "Coughlin" spelling, so a month already posted by hand (Sep-26) cannot be posted again.
+- No migration, no env change.
+
 ## v28.401 (19-Oct-26) Push journal to Xero: Coghlans in Xero AU's own style, one per month
 - Ben shared the Xero AU Coghlans journals (77bb72da "Coughlin: Monthly adjustment" 30-Sep-26 and its reversal 874147f6 dated 01-Oct-26). Read only. AU differs from the UK 3PL journals: narration "Coughlin: Monthly adjustment" every month; every line, 805 included, described "Appropriation of Sept-2026 costs"; the reversal is dated the 1st of the next month (UK: the invoice month's last day); shown on cash basis reports.
 - Coghlans now builds that format, and Push journal adds up EVERY Coghlans invoice of the period (one file per invoice number) into one journal per month moved into (Coghlans invoices weekly; Xero AU takes one monthly adjustment). The duplicate check for AU uses narration and date (the narration repeats every month).
