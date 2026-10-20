@@ -1,3 +1,11 @@
+## v28.411 (20-Oct-26) Push journal to Xero: a month already in Xero is overwritten with the total of all its invoices
+- Ben (on Diviyaj's review point that the AU push was one-shot per month): "top up push is ok to overwrite ... they should be additive".
+- Now a re-push finds the month's journal and its reversal in Xero (Coghlans: "Coghlan" or the old "Coughlin" narration, matched by date; UK/EU/US: the reclass narration) and UPDATES them in place with the current total of every invoice for that month, so a late weekly Coghlans invoice adds to the month. Missing journals are created as before. Was: refused as a duplicate.
+- The preview / confirm shows each month as NEW or OVERWRITE "Xero now -> new (+change)", flagged when the new total is lower. The result says updated or posted per journal.
+- Note: overwriting replaces the hand-posted Sep-26 Coghlans journal (77bb72da) if a Sep-period push is made; Ben OK'd overwrite.
+- Not testable end to end on the sandbox (no live order-date feed: every Coghlans invoice is "nothing to journal" there). Safe failure: the preview only reads Xero; all journals go in one Xero call, so a refusal changes nothing. First live use with Ben.
+- No migration, no env change, no new routes.
+
 ## v28.410 (20-Oct-26) Reconcile: never bill on a GST guess when the PDF's labelled GST has not been read
 - Ben: Woolworths 160.95 (04-Sep-26, Xero AU bill WOOLWORTHS 2026-09-04) "gst doesnt match": the PDF says "Invoice total includes GST of: $6.96". Cause (live, read only): the email was read on 14-Oct before the labelled-GST reader ran, so 6.96 was never tagged; the guess then took the $14.00 popcorn line as the GST (140.00 + 14.00 GST, 6.95 GST free, because $6.96 is within a cent of 6.95). v28.394 re-read the PDF only before a "no GST" result, not before a guessed split.
 - Now: any PDF receipt not GST-checked yet with no GST-labelled amount is read again once before its bill is decided; past the 6-per-load cap it waits for the next load instead of guessing. Checked on the real PDF: the reader finds 6.96 and the bill splits into 69.60 + GST 6.96 (GST on Expenses) and 84.39 GST free (total 160.95).

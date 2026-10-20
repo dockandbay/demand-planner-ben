@@ -16955,12 +16955,14 @@ function render3plInvoice(body){
           if(jp)jp.onclick=function(){ var org=(jd.region==='AU')?'Xero AU':'Xero UK'; jp.disabled=true; jm.style.color='var(--muted)'; jm.textContent='Checking…';
             fetch('/api/supply/tpl/journal/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({dry:true})}).then(function(r){return r.json();}).then(function(dj){
               if(!dj||dj.error||!dj.ok)throw new Error((dj&&dj.error)||'could not build the journal');
-              var lines=dj.months.map(function(m){return '  '+m.narration+': '+fmt(m.total)+' (dated '+m.date+', reversal '+m.reversal_date+')';}).join('\n');
-              if(!confirm('Post '+dj.months.length+' journal'+(dj.months.length===1?'':'s')+' (each with its reversal) to '+org+'?\n\n'+lines+(dj.currency_rate?'\n\nConverted to GBP at the bill '+dj.bill+' rate '+dj.currency_rate+'.':'')+'\n\nPosted, not draft.')){ jp.disabled=false; jm.textContent=''; return; }
+              // v28.411 (Ben): a month already in Xero is OVERWRITTEN with the total of all its invoices (additive), shown as Xero now -> new
+              var nOv=dj.months.filter(function(m){return m.action==='overwrite';}).length;
+              var lines=dj.months.map(function(m){return '  '+m.narration+' '+m.date+': '+(m.action==='overwrite'?'OVERWRITE '+fmt(m.xero_total)+' -> '+fmt(m.total)+' ('+(m.change>=0?'+':'')+fmt(m.change)+')'+(m.change<0?'  LOWER than Xero now':''):'NEW '+fmt(m.total))+' (reversal '+m.reversal_date+')';}).join('\n');
+              if(!confirm((nOv?'Update '+nOv+' month'+(nOv===1?'':'s')+' already in '+org+' to the total of all its invoices'+(dj.months.length>nOv?' and post '+(dj.months.length-nOv)+' new':''):'Post '+dj.months.length+' journal'+(dj.months.length===1?'':'s'))+' (each with its reversal) in '+org+'?\n\n'+lines+(dj.currency_rate?'\n\nConverted to GBP at the bill '+dj.bill+' rate '+dj.currency_rate+'.':'')+'\n\nPosted, not draft.')){ jp.disabled=false; jm.textContent=''; return; }
               jm.textContent='Posting to '+org+'…';
               return fetch('/api/supply/tpl/journal/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({push:true})}).then(function(r){return r.json();}).then(function(pj){
                 jp.disabled=false; if(!pj||pj.error)throw new Error((pj&&pj.error)||'Xero did not create the journal');
-                jm.style.color='var(--pos)'; jm.innerHTML='Posted to '+e(org)+': '+(pj.created||[]).map(function(c){return '<a href="'+e(c.url)+'" target="_blank" rel="noopener">'+e(c.narration)+'</a>';}).join(' · ');
+                jm.style.color='var(--pos)'; jm.innerHTML='Done in '+e(org)+': '+(pj.created||[]).map(function(c){return (c.updated?'updated ':'posted ')+'<a href="'+e(c.url)+'" target="_blank" rel="noopener">'+e(c.narration)+'</a>';}).join(' · ');
               });
             }).catch(function(err){ jp.disabled=false; jm.style.color='var(--neg)'; jm.textContent=err.message; });
           };

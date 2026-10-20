@@ -19906,18 +19906,30 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
       const { journals, out } = _tplJournalPayload(j, period, REG, rate, row.filename);
       if (!journals.length) return res.json({ ok: false, error: 'Nothing to journal after rounding.' });
       const info = { ok: true, dry, region: xregion, org: xregion === 'au' ? 'Xero AU' : 'Xero UK', currency_rate: rate !== 1 ? rate : null, bill: billRef, files, months: out, journals: dry ? journals : undefined };
+      // v28.411 (Ben 20-Oct-26: "top up push is ok to overwrite ... they should be additive"): a month already in Xero is OVERWRITTEN in place
+      // (same Xero journal and reversal, updated by ManualJournalID) with the current total of ALL its invoices, so a late weekly Coghlans
+      // invoice adds to the month instead of being blocked. Was: refused. The preview shows each month's Xero total now vs after.
+      const dOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
+      const q = s => String(s).replace(/["\\]/g, '');
+      const findJ = async (narrs, date) => {   // a live (not voided) journal with one of these narrations (and this date when given), with its lines
+        const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent(narrs.map(n => 'Narration=="' + q(n) + '"').join(' OR ')));
+        let ex = ((r && r.ManualJournals) || []).find(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || '')) && (!date || dOf(x.Date) === date)) || null;
+        if (ex && !Array.isArray(ex.JournalLines)) { const one = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals/' + ex.ManualJournalID); ex = ((one && one.ManualJournals) || [])[0] || ex; }
+        return ex; };
+      const totOf = x => Math.round(((x && x.JournalLines) || []).reduce((a, l) => a + Math.max(0, Number(l.LineAmount) || 0), 0) * 100) / 100;
+      try {
+        for (let mi = 0; mi < out.length; mi++) { const m = out[mi], narrs = REG === 'AU' ? [m.narration, m.narration.replace('Coghlan:', 'Coughlin:')] : [m.narration];
+          const ex = await findJ(narrs, REG === 'AU' ? m.date : null);
+          const rx = await findJ(narrs.map(n => 'Reversal: ' + n).concat(REG === 'AU' ? narrs : []), m.reversal_date);   // AU hand reversals may carry the plain narration on the 1st
+          m.action = ex ? 'overwrite' : 'create';
+          if (ex) { m.xero_total = totOf(ex); m.xero_id = ex.ManualJournalID; m.xero_url = 'https://go.xero.com/Journal/View.aspx?invoiceID=' + ex.ManualJournalID; m.change = Math.round((m.total - m.xero_total) * 100) / 100; journals[mi * 2].ManualJournalID = ex.ManualJournalID; }
+          if (rx) { m.reversal_xero_id = rx.ManualJournalID; journals[mi * 2 + 1].ManualJournalID = rx.ManualJournalID; } }
+      } catch (e) { return res.status(502).json({ error: 'Could not check ' + info.org + ' for an existing journal (' + e.message + '). Nothing changed.' }); }
       if (dry) return res.json(info);
-      // one push per month: refuse if Xero already has a (not voided) journal with this narration
-      for (const m of out) {
-        let ex = null; try { const nq = REG === 'AU' ? ('Narration=="' + m.narration + '" OR Narration=="' + m.narration.replace('Coghlan:', 'Coughlin:') + '"') : ('Narration=="' + m.narration.replace(/["\\]/g, '') + '"');   // AU: the old spelling counts too
-          const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals?where=' + encodeURIComponent(nq)); const dOf = x => { const t = /\/Date\((\d+)/.exec(String(x || '')); return t ? new Date(+t[1]).toISOString().slice(0, 10) : String(x || '').slice(0, 10); };
-          ex = ((r && r.ManualJournals) || []).find(x => !/^(VOIDED|DELETED)$/i.test(String(x.Status || '')) && (REG !== 'AU' || dOf(x.Date) === m.date)) || null; }   // AU: same narration every month, so the month's date decides
-        catch (e) { return res.status(502).json({ error: 'Could not check ' + info.org + ' for an existing journal (' + e.message + '). Nothing created.' }); }
-        if (ex) return res.status(409).json({ error: 'A journal "' + m.narration + '" dated ' + m.date + ' is already in ' + info.org + '. Nothing created.', xero_id: ex.ManualJournalID, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + ex.ManualJournalID });
-      }
       try {
         const r = await xeroFetch(xregion, '/api.xro/2.0/ManualJournals', { method: 'POST', body: { ManualJournals: journals } });
-        const made = ((r && r.ManualJournals) || []).map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID }));
+        const upd = new Set(journals.filter(x => x.ManualJournalID).map(x => x.ManualJournalID));
+        const made = ((r && r.ManualJournals) || []).map(x => ({ id: x.ManualJournalID, narration: x.Narration, status: x.Status, updated: upd.has(x.ManualJournalID), url: 'https://go.xero.com/Journal/View.aspx?invoiceID=' + x.ManualJournalID }));
         console.log('[tpl journal] pushed', info.org, period, REG, made.length, 'journals');
         return res.json(Object.assign(info, { created: made }));
       } catch (e) { return res.status(502).json({ error: 'Xero refused the journal: ' + e.message }); }
