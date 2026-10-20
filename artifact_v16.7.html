@@ -9973,6 +9973,7 @@ var _makeGrandTotRow=null;   // set by buildBody; lets refreshRow() rebuild the 
 // normal single-market view.
 var PLAN_AGG=(function(){ try{ var j=JSON.parse(localStorage.getItem('hzPlanAgg')||'null'); if(j&&j.co&&j.ch)return {on:false,co:j.co,ch:j.ch}; }catch(e){} return {on:false,co:{UK:1,US:1,EU:1,AU:1},ch:{DTC:1,FBA:1,B2B:1}}; })();
 var PLAN_AGG_COMBOS=[['UK','DTC'],['UK','FBA'],['UK','B2B'],['UK','TIK'],['US','DTC'],['US','FBA'],['US','B2B'],['US','TIK'],['EU','DTC'],['EU','FBA'],['EU','B2B'],['EU','ZAL'],['AU','DTC'],['AU','FBA'],['CA','FBA']];
+var PLAN_AGG_FYC=(function(){ try{ return JSON.parse(localStorage.getItem('hzPlanAggFy')||'{}')||{}; }catch(e){ return {}; } })();   // v28.414 (Ben): Combine view financial years collapsed (FY start year -> 1)
 function _aggSave(){ try{ localStorage.setItem('hzPlanAgg',JSON.stringify({co:PLAN_AGG.co,ch:PLAN_AGG.ch})); }catch(e){} }
 function setPlanAgg(on){ PLAN_AGG.on=!!on; _aggSave(); try{ hzRowCacheClear(); }catch(e){} _VIEW_ONLY_RENDER=true; render(); }
 function planAggToggle(kind,v){ var m=PLAN_AGG[kind]; if(m[v])delete m[v]; else m[v]=1; _aggSave(); _VIEW_ONLY_RENDER=true; render(); }
@@ -9991,7 +9992,10 @@ function renderPlanTopline(tw){
     var f=fu[m]||0; try{ return expFc(d.s,d.co,d.ch,m,f,a).E; }catch(e){ return f; } }
   function lyOf(d,m){ var lm=lyMonth(m), a=ga(d.co,d.ch,d.s)||{}, raw=(a[lm]&&a[lm][0])||0; if(lm>=CUR_MONTH)return unitsOf(d,lm); try{ return expAct(d.s,d.co,d.ch,lm,raw).E; }catch(e){ return raw; } }
   function mtdOf(d){ var a=ga(d.co,d.ch,d.s)||{}; return (a[CUR_MONTH]&&a[CUR_MONTH][0])||0; }
-  var cols=TIME_COLS.map(function(tc){ return {tc:tc,ms:tc.t==='m'||tc.t==='fc'?[tc.m]:tc.t==='tot'?fyMonths(tc.startY):(tc.months||[])}; });
+  var _fyOf=function(tc){ return tc.startY!=null?tc.startY:fyStartOf(tc.m); };
+  // v28.414 (Ben): a collapsed financial year keeps only its total / period columns (months hidden)
+  var _fyHasTot={}, _fyHasM={}; TIME_COLS.forEach(function(tc){ if(tc.t!=='m'&&tc.t!=='fc')_fyHasTot[_fyOf(tc)]=1; else _fyHasM[_fyOf(tc)]=1; });   // a year can collapse only if it has months AND a total / period column   // only a year with a total / period column can collapse
+  var cols=TIME_COLS.filter(function(tc){ var Y=_fyOf(tc); return !(_fyHasTot[Y]&&PLAN_AGG_FYC[Y]&&(tc.t==='m'||tc.t==='fc')); }).map(function(tc){ return {tc:tc,ms:tc.t==='m'||tc.t==='fc'?[tc.m]:tc.t==='tot'?fyMonths(tc.startY):(tc.months||[])}; });
   function vec(rows){ return cols.map(function(c){ var u=0, ly=0, mtd=0; rows.forEach(function(d){ c.ms.forEach(function(m){ u+=unitsOf(d,m); ly+=lyOf(d,m); }); if(c.tc.t==='fc')mtd+=mtdOf(d); }); return {u:u,ly:ly,mtd:mtd}; }); }
   var fmtU=function(n){ return n?Math.round(n).toLocaleString():'<span style="color:var(--faint)">-</span>'; };
   function cell(v,c,bold){ var per=c.tc.t!=='m'&&c.tc.t!=='fc', g=(v.ly>0)?Math.round((v.u-v.ly)/v.ly*100):null;
@@ -10001,18 +10005,22 @@ function renderPlanTopline(tw){
     return '<td class="'+(per?'agg-per':'')+'" style="text-align:left">'+lyx+'<div style="font-weight:'+(bold?800:per?700:500)+'">'+fmtU(v.u)+mtd+'</div>'+gx+'</td>'; }
   var cats={}; Object.keys(subs).forEach(function(s){ (cats[subs[s].cat]=cats[subs[s].cat]||[]).push(s); });
   var catOrder=Object.keys(cats).sort();
-  var hdr1='<tr><th rowspan="2" class="agg-st" style="text-align:left">Category / Sub-category</th>'+(function(){ var g=[], cur=null; cols.forEach(function(c){ var Y=c.tc.startY!=null?c.tc.startY:fyStartOf(c.tc.m); if(cur&&cur.Y===Y)cur.n++; else { cur={Y:Y,n:1}; g.push(cur); } }); return g.map(function(x){ return '<th colspan="'+x.n+'" class="'+fyBg(x.Y)+'" style="text-align:left">'+fyLabel(x.Y)+'</th>'; }).join(''); })()+'</tr>';
+  var hdr1='<tr><th rowspan="2" class="agg-st" style="text-align:left">Category / Sub-category</th>'+(function(){ var g=[], cur=null; cols.forEach(function(c){ var Y=c.tc.startY!=null?c.tc.startY:fyStartOf(c.tc.m); if(cur&&cur.Y===Y)cur.n++; else { cur={Y:Y,n:1}; g.push(cur); } }); return g.map(function(x){ if(!_fyHasTot[x.Y]||!_fyHasM[x.Y])return '<th colspan="'+x.n+'" class="'+fyBg(x.Y)+'" style="text-align:left">'+fyLabel(x.Y)+'</th>'; var col=!!PLAN_AGG_FYC[x.Y];
+      return '<th colspan="'+x.n+'" class="'+fyBg(x.Y)+'" style="text-align:left;cursor:pointer;user-select:none" data-aggfy="'+x.Y+'" title="'+(col?'Expand':'Collapse')+' '+fyLabel(x.Y)+' (months)">'+(col?'&#9656; ':'&#9662; ')+fyLabel(x.Y)+'</th>'; }).join(''); })()+'</tr>';
   var hdr2='<tr>'+cols.map(function(c){ var tc=c.tc, l=tc.t==='m'||tc.t==='fc'?(function(p){ return MN[p.mo-1]+' '+String(p.y).slice(2); })(pa(tc.m)):tc.label; return '<th class="'+(tc.t==='m'||tc.t==='fc'?fyBg(fyStartOf(tc.m)):'agg-per')+'" style="text-align:left">'+l+(tc.t==='fc'?' <span style="font-size:9px">(MTD)</span>':'')+'</th>'; }).join('')+'</tr>';
   var allRows=[]; Object.keys(subs).forEach(function(s){ allRows=allRows.concat(subs[s].rows); });
-  var body='<tr class="agg-gt"><td class="agg-st"><b>Grand total</b></td>'+vec(allRows).map(function(v,i){ return cell(v,cols[i],true); }).join('')+'</tr>';
+  var body='<tr class="agg-gt"><td class="agg-st" style="text-align:left"><b>Grand total</b></td>'+vec(allRows).map(function(v,i){ return cell(v,cols[i],true); }).join('')+'</tr>';
   catOrder.forEach(function(cat){ var ss=cats[cat].sort(), cr=[]; ss.forEach(function(s){ cr=cr.concat(subs[s].rows); });
-    body+='<tr class="agg-cat"><td class="agg-st"><b>'+hzEscH(cat)+'</b></td>'+vec(cr).map(function(v,i){ return cell(v,cols[i],true); }).join('')+'</tr>';
-    ss.forEach(function(s){ var n=subs[s].rows.length; body+='<tr><td class="agg-st" style="padding-left:18px">'+hzEscH(s)+' <span style="font-size:10px;color:var(--faint)" title="'+subs[s].rows.map(function(d){ return d.co+' '+d.ch; }).join(', ')+'">'+n+' market'+(n===1?'':'s')+'</span></td>'+vec(subs[s].rows).map(function(v,i){ return cell(v,cols[i],false); }).join('')+'</tr>'; }); });
+    // v28.414 (Ben): a category with a single sub-category shows the category row only (no repeated sub-category line)
+    var _one=ss.length===1, _n1=_one?subs[ss[0]].rows.length:0;
+    body+='<tr class="agg-cat"><td class="agg-st" style="text-align:left"><b>'+hzEscH(cat)+'</b>'+(_one?' <span style="font-size:10px;color:var(--faint)" title="'+hzEscH(ss[0])+': '+subs[ss[0]].rows.map(function(d){ return d.co+' '+d.ch; }).join(', ')+'">'+_n1+' market'+(_n1===1?'':'s')+'</span>':'')+'</td>'+vec(cr).map(function(v,i){ return cell(v,cols[i],true); }).join('')+'</tr>';
+    if(!_one)ss.forEach(function(s){ var n=subs[s].rows.length; body+='<tr><td class="agg-st" style="padding-left:18px;text-align:left">'+hzEscH(s)+' <span style="font-size:10px;color:var(--faint)" title="'+subs[s].rows.map(function(d){ return d.co+' '+d.ch; }).join(', ')+'">'+n+' market'+(n===1?'':'s')+'</span></td>'+vec(subs[s].rows).map(function(v,i){ return cell(v,cols[i],false); }).join('')+'</tr>'; }); });
   var lbl=combos.map(function(c){ return c[0]+' '+c[1]; }).join(', ');
   tw.innerHTML='<style>#agg-t{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums;width:max-content}#agg-t th,#agg-t td{padding:5px 9px;border-bottom:1px solid var(--line2);white-space:nowrap;vertical-align:top}#agg-t th{background:var(--hdr-tint);font-size:11px;position:sticky;top:0;z-index:2}#agg-t thead tr:nth-child(2) th{top:26px}'
-    +'#agg-t .agg-st{position:sticky;left:0;background:var(--card);z-index:1;border-right:1px solid var(--line);min-width:220px}#agg-t th.agg-st{z-index:3;background:var(--hdr-tint)}#agg-t tr.agg-gt td{background:var(--hdr-cur)}#agg-t tr.agg-cat td{background:var(--row-alt)}#agg-t .agg-per{background:var(--blue-soft)}</style>'
+    +'#agg-t .agg-st{position:sticky;left:0;background:var(--card);z-index:1;border-right:1px solid var(--line);min-width:220px;text-align:left}#agg-t th.agg-st{z-index:3;background:var(--hdr-tint)}#agg-t tr.agg-gt td{background:var(--hdr-cur)}#agg-t tr.agg-cat td{background:var(--row-alt)}#agg-t .agg-per{background:var(--blue-soft)}</style>'
     +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 4px;font-size:12px"><b>Combined topline</b><span style="color:var(--muted)">'+(combos.length?combos.length+' market x channel: '+hzEscH(lbl):'Pick at least one country and channel above.')+'</span><span style="color:var(--muted)">Read-only, units (sets exploded). Each cell: last year (faint), this year (actuals then forecast), growth %. Switch off Combine to edit.</span></div>'
-    +(combos.length?'<table id="agg-t"><thead>'+hdr1+hdr2+'</thead><tbody>'+body+'</tbody></table>':''); }
+    +(combos.length?'<table id="agg-t"><thead>'+hdr1+hdr2+'</thead><tbody>'+body+'</tbody></table>':'');
+  tw.querySelectorAll('th[data-aggfy]').forEach(function(th){ th.onclick=function(){ var Y=th.dataset.aggfy; if(PLAN_AGG_FYC[Y])delete PLAN_AGG_FYC[Y]; else PLAN_AGG_FYC[Y]=1; try{ localStorage.setItem('hzPlanAggFy',JSON.stringify(PLAN_AGG_FYC)); }catch(e){} renderPlanTopline(tw); }; }); }
 function buildBody(){
   _PCS_MEMO={};   // v28.218 column sort values are recomputed per grid build
   const cm=filteredCats(),frag=document.createDocumentFragment();

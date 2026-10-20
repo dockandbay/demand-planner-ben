@@ -1,3 +1,10 @@
+## v28.414 (20-Oct-26) Demand plan Combine view: left aligned, single sub-categories collapsed, financial years collapse / expand
+- Ben: "the column Category / Sub-category should be left aligned AND when there is only 1 sub cat do not show the category and sub category, just show the category"; "allow minimise and expand of each financial year".
+- Category / Sub-category cells are left aligned (inline, so no wider rule overrides them). A category with one sub-category shows only the category row (with its market count).
+- Click a financial year header (arrow) to collapse its months to the year's total / period columns, click again to expand; remembered per browser.
+- Sandbox render test: UK + US DTC, 21 category rows, 10 sub-category rows only under multi-sub categories; collapsing FY26/27 took it from 15 to 3 columns with header and cells aligned; expand restores 15.
+- Display only, no buy-plan effect. No server change, no migration, no env change.
+
 ## v28.413 (20-Oct-26) 3PL invoices: IS numbers (Fulfil internal shipments) find their cost centre
 - Ben: yes to building the matcher on planner.fulfil_internal_shipments (Diviyaj found the IS data already on live, synced by cron).
 - 3PL invoice lines billed against an IS number (or its reference) no longer fall to "Other": to an Amazon FBA location = that country's Amazon cost centre (same as the FBA* rule), to another of our warehouses = OTHER COSTS (branch transfer, as TRF*). Month from the effective date, else the planned date. Order: rules, Cin7, Fulfil customer shipments, then these internal shipments, then live Fulfil.
