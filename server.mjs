@@ -4927,8 +4927,12 @@ async function accBillCandidates(rules, only) {
       // or box used to skip the check at push time, so the bill went in as one GST-free line while the preview showed two). The tax type set
       // by the person / rule still applies to receipts with no split.
       // v28.394: about to say "no GST" on an email read before the labelled-GST reader: read its PDF again once (Gmail read, capped per load)
-      if (hasPdf && ACC_GST[r.org] && !accGstChecked(e) && _gstRe < 6 && accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])).kind === 'none') {
+      // v28.410 (Ben 20-Oct-26, Woolworths 160.95 went in with GST 14.00, the PDF says 6.96): without the labelled GST the guess can pick a WRONG
+      // split too (a $14.00 line item and $6.96 within a cent of the 6.95 free part), not only "no GST". So any PDF receipt not GST-checked yet
+      // and with no GST-labelled amount is read again once before its bill is decided, whatever the guess says.
+      if (hasPdf && ACC_GST[r.org] && !accGstChecked(e) && _gstRe < 6 && !pairs.some(a => a[1] === 'GST')) {
         _gstRe++; if ((await accPdfWordsFill(e)) != null) for (const a of (e.pdf_amounts || [])) if (a[1] === 'GST' && !pairs.some(x => x[0] === a[0] && x[1] === 'GST')) pairs.unshift(a); }
+      if (hasPdf && ACC_GST[r.org] && !accGstChecked(e) && _gstRe >= 6 && !pairs.some(a => a[1] === 'GST')) { c.reason = 'Reading this receipt\u2019s PDF for its GST first: ready on the next load'; out.push(c); continue; }   // v28.410: never bill on a GST guess just because the re-read cap was hit
       const gcSplit = accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0]));
       const gc = gcSplit.kind === 'split' ? gcSplit : accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
       if (gc.kind === 'split' && ACC_GST[r.org]) c.tax_type = ACC_GST[r.org].std;   // the taxable part goes in at GST; the free part at the free type
