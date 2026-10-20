@@ -18453,13 +18453,24 @@ async function _tplFulfilShipLookup(refs) {
          OR EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(order_reference,''), ' | ')) x WHERE trim(x) = ANY($1))
          OR EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(sale_number,''), ' | ')) x WHERE trim(x) = ANY($1))
       ORDER BY ship_date DESC NULLS LAST, shipment_id DESC`, [uniq])).rows;
-  } catch (e) { return {}; }   // table absent (sandbox before mig 303) -> behave as before
-  if (!rows.length) return {};
-  const chanCC = await _tplFulfilChannelCC();
+  } catch (e) { rows = []; }   // table absent (sandbox before mig 303) -> behave as before
   const want = new Set(uniq), out = {};
+  const chanCC = rows.length ? await _tplFulfilChannelCC() : {};
   const keys = r => [r.shipment_number, ...String(r.order_reference || '').split(' | '), ...String(r.sale_number || '').split(' | ')].map(x => String(x || '').trim()).filter(Boolean);
   rows.forEach(r => { const hit = { cc: r.channel_name ? (chanCC[String(r.channel_name).trim().toLowerCase()] || null) : null, ym: r.ym || null, channel: r.channel_name || null, warehouse: r.warehouse_code || null, shipment_number: r.shipment_number || null, ship_date: r.ship_date || null };
     keys(r).forEach(k => { if (want.has(k) && !out[k]) out[k] = hit; }); });   // newest shipment wins per reference
+  // v28.413 (Ben 20-Oct-26, Coghlans IS224 -> "Other"): Fulfil INTERNAL shipments (IS numbers, already synced into planner.fulfil_internal_shipments)
+  // for references no customer shipment matched: to an Amazon FBA location = that country's Amazon cost centre (same label as the FBA* standing
+  // rule); to another of our warehouses = branch transfer, OTHER COSTS (as TRF*). Month = effective date, else planned date.
+  const left = uniq.filter(k => !out[k]);
+  if (left.length) {
+    let is = [];
+    try { is = (await pool.query(`SELECT number, reference, coalesce(from_location,'') from_location, coalesce(to_location,'') to_location, to_char(coalesce(effective_date, planned_date),'YYYY-MM-DD') d
+        FROM planner.fulfil_internal_shipments WHERE number = ANY($1) OR reference = ANY($1) ORDER BY coalesce(effective_date, planned_date) DESC NULLS LAST`, [left])).rows; } catch (_) { is = []; }
+    is.forEach(r => { const m = /Amazon\s*FBA\s*-\s*([A-Z]{2})/i.exec(r.to_location); const cc = m ? ('COGS - ' + m[1].toUpperCase() + ' - Amazon') : 'OTHER COSTS';
+      const hit = { cc, ym: r.d ? r.d.slice(0, 7) : null, channel: 'Internal shipment to ' + r.to_location, warehouse: r.from_location || null, shipment_number: r.number || null, ship_date: r.d || null, internal: true };
+      [r.number, r.reference].map(x => String(x || '').trim()).forEach(k => { if (k && want.has(k) && !out[k]) out[k] = hit; }); });
+  }
   return out;
 }
 // v27.793 (Ben): push ACTUAL 3PL costs (ex-tax) onto Fulfil shipments as numeric metafields. Two shipment kinds:
