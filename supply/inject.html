@@ -3263,6 +3263,7 @@
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
           +'<button class="save-btn" id="po-erp-compare" style="'+lb+'" title="ERP compare (Fulfil) — open Fulfil purchase orders that are missing from the planner">⇄ ERP compare</button>'   // v28.144: replaces ⬆ Import from Cin7 (100% on Fulfil)
           +'<button class="save-btn" id="po-import-fulfil" style="'+lb+'" title="import a purchase order from Fulfil — by PO number, or every PO linked to a sales order — brings in supplier, branch, SKUs, quantities &amp; prices">⬆ Import Fulfil PO</button>'
+          +'<button class="save-btn" id="po-add-so" style="'+lb+'" title="search open Fulfil sales orders, see which of their POs are not in HORIZON, tick and add them per supplier to a HORIZON client PO group (e.g. Dillard&rsquo;s). Reads Fulfil only.">＋ Add sales orders from Fulfil</button>'   /* v28.409 */
           +'<button class="save-btn" id="po-fulfil-refresh" style="'+lb+'" title="re-read every PO from Fulfil now (the same refresh that runs every 3 hours): ERP quantities, states, client PO groups and internal shipments. Reads Fulfil only.">↻ Refresh from Fulfil</button>'   /* v28.377 */
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
@@ -3554,6 +3555,7 @@
       }).catch(function(err){ b.textContent=orig; b.disabled=false; alert('Fulfil refresh failed: '+(err&&err.message||err)); }); };
     var _mrgBtn=document.getElementById('po-merge'); if(_mrgBtn)_mrgBtn.onclick=openPoMerge;
     var _mstBtn=document.getElementById('po-master'); if(_mstBtn)_mstBtn.onclick=openMasterCreate;
+    var _asoBtn=document.getElementById('po-add-so'); if(_asoBtn)_asoBtn.onclick=openAddSalesOrders;   // v28.409
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
     // the row "⚠ Date ≠ ERP" button); complete POs are excluded (poComplete). Live write → strong confirm.
     var _c7dBtn=document.getElementById('po-cin7-dates'); if(_c7dBtn)_c7dBtn.onclick=function(){ var btn=this;   // v28.095: button removed (Cin7 decommissioned) — guard so the render doesn't throw
@@ -3649,6 +3651,84 @@
   }
   // v27.778 (Ben): Import a PO from Fulfil — by PO number, OR by sales order (imports every PO linked to that SO).
   // Fulfil links a sale's generated POs via the PO's `reference` = the sale number (e.g. SO49664 → PO155 + PO156).
+  // v28.409 (Ben 20-Oct-26, many Dillard's orders): Import/Export > Add sales orders from Fulfil. Search open Fulfil sales orders, see which
+  // of their Fulfil POs are not in HORIZON, tick orders, and per supplier add them to a HORIZON client PO group (existing open PO or a new one).
+  var _aso={q:'',notIn:true,data:null,tick:{},tgt:{}};
+  function openAddSalesOrders(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    bg.innerHTML='<div class="pomodal" style="width:1100px;max-width:96vw">'
+      +'<div class="bar" style="align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:14px">Add sales orders from Fulfil</div><span style="margin-left:auto"></span><button class="save-btn light aso-x">Close</button></div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Open Fulfil sales orders with purchase orders (dropship / backorder). Tick the orders to add: their Fulfil POs are grouped <b>per supplier</b> into one HORIZON client PO (an open one, or a new one), its lines become the total of the group, and the order references are added to the PO. Fulfil is only read.</div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><input id="aso-q" placeholder="Search: customer, reference or SO number (e.g. dillards)" value="'+esc(_aso.q)+'" style="flex:1;min-width:220px;font-size:13px;padding:6px 9px;border:1px solid var(--line);border-radius:6px"><button class="save-btn" id="aso-go" style="background:var(--blue);color:#fff;border:0">Search Fulfil</button>'
+        +'<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="aso-notin"'+(_aso.notIn?' checked':'')+'> Not in HORIZON only</label><span id="aso-n" class="mut tiny"></span></div>'
+      +'<div id="aso-list" style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px"><div class="mut tiny" style="padding:12px">Search to list open sales orders.</div></div>'
+      +'<div id="aso-add" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bg);
+    var close=function(){ if(bg.parentNode)bg.parentNode.removeChild(bg); if(_aso.changed){ _aso.changed=false; try{ invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); }catch(e){} } };
+    bg.querySelector('.aso-x').onclick=close; bg.onclick=function(e){ if(e.target===bg)close(); };
+    var L=bg.querySelector('#aso-list'), A=bg.querySelector('#aso-add'), N=bg.querySelector('#aso-n');
+    var money=function(v){ return Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var visible=function(){ var d=_aso.data; if(!d)return []; return d.orders.filter(function(o){ return !_aso.notIn||o.status!=='all'; }); };
+    var openPos=function(o){ return o.pos.filter(function(p){ return !p.in_horizon; }); };
+    // rank a HORIZON PO for a client key: already grouped for that client > named for it; then Future > Production; then highest prod #
+    function candScore(c,key){ var nm=String(c.po).toUpperCase().replace(/[^A-Z0-9]/g,''), g=key&&(c.group_keys||[]).indexOf(key)>=0, n=key&&nm.indexOf(key)>=0; if(!g&&!n)return -1;
+      return (g?1000:0)+(n?500:0)+(c.status==='FUTURE'?200:c.status==='PRODUCTION'?100:0)+Math.min(99,parseFloat(c.prod_no)||0); }
+    function bestFor(cs,key){ var b=null,bs=-1; cs.forEach(function(c){ var sc=candScore(c,key); if(sc>bs){ bs=sc; b=c; } }); return bs>=0?b:null; }
+    function suggestName(sup,code,key){ var d=_aso.data||{}, cs=(d.candidates||[]).filter(function(c){ return /^PO-\d+[A-Z]{2}[A-Z]{2}\d+-/.test(String(c.po).toUpperCase()); }), tpl=bestFor(cs,key);
+      var m=tpl&&/^(PO-\d+[A-Z]{2})([A-Z]{2})(\d+)-(.+)$/.exec(String(tpl.po).toUpperCase());
+      return { name: m?(m[1]+(code||'XX')+'1-'+m[4]):('PO-'+(key||'CLIENT')+'-'+(code||'XX')+'1'), prod_no: tpl?tpl.prod_no:'', batch_id: tpl?tpl.batch_id:'', country_code: tpl?tpl.country_code:'', client: '' }; }
+    function groupsNow(){ var d=_aso.data; if(!d)return []; var G={};
+      d.orders.forEach(function(o){ if(!_aso.tick[o.so])return; openPos(o).forEach(function(p){ if(!p.supplier)return; var k=p.supplier+'|'+o.client_key;
+        var g=G[k]||(G[k]={key:k,supplier:p.supplier,code:p.code,client_key:o.client_key,customer:o.customer,ids:[],refs:[],value:0,currency:p.currency,orders:{}});
+        g.ids.push(p.id); g.value+=p.value; g.orders[o.so]=1; var ref=o.reference||o.so; if(g.refs.indexOf(ref)<0)g.refs.push(ref); }); });
+      return Object.keys(G).sort().map(function(k){ return G[k]; }); }
+    function drawAdd(){ var gs=groupsNow(), d=_aso.data||{};
+      if(!gs.length){ A.innerHTML=(d.orders?'<div class="mut tiny">Tick orders above to add their Fulfil POs.</div>':''); return; }
+      A.innerHTML='<div style="font-weight:700;margin-bottom:6px">Add to</div><div style="overflow-x:auto"><table class="grid" style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Supplier</th><th style="text-align:left">Client</th><th style="text-align:right">Orders</th><th style="text-align:right">Fulfil POs</th><th style="text-align:right">Value</th><th style="text-align:left">HORIZON PO</th></tr></thead><tbody>'
+        +gs.map(function(g){ var cs=(d.candidates||[]).filter(function(c){ return c.supplier===g.supplier; }), key=g.client_key;
+          cs.sort(function(a,b){ return candScore(b,key)-candScore(a,key)||String(a.po).localeCompare(String(b.po)); });
+          var sg=suggestName(g.supplier,g.code,key), cur=_aso.tgt[g.key];
+          if(!cur){ var best=bestFor(cs,key); if(best&&!(best.members>0)&&sg.prod_no&&String(best.prod_no)!==String(sg.prod_no))best=null;   // an older production's PO is never the default: suggest a new one for the current production
+            cur=_aso.tgt[g.key]=best?{po:best.po}:{create:true,name:sg.name}; }
+          var opts=cs.map(function(c){ return '<option value="'+esc(c.po)+'"'+(!cur.create&&cur.po===c.po?' selected':'')+'>'+esc(c.po)+' ('+esc((c.status||'').toLowerCase())+(c.members?', '+c.members+' in group':'')+')</option>'; }).join('')+'<option value="__new"'+(cur.create?' selected':'')+'>+ new PO…</option>';
+          return '<tr data-k="'+esc(g.key)+'"><td><b>'+esc(g.supplier)+'</b> <span class="mut">'+esc(g.code||'')+'</span></td><td>'+esc(g.customer||key||'')+'</td><td style="text-align:right">'+Object.keys(g.orders).length+'</td><td style="text-align:right">'+g.ids.length+'</td><td style="text-align:right">'+money(g.value)+' <span class="mut">'+esc(g.currency||'')+'</span></td>'
+            +'<td><select class="aso-tgt" style="font-size:12px;max-width:260px">'+opts+'</select>'+(cur.create?' <input class="aso-new" value="'+esc(cur.name||sg.name)+'" style="font-size:12px;width:200px;padding:3px 6px;border:1px solid var(--line);border-radius:5px" title="name of the new HORIZON PO (Direct to Client, status Future'+(sg.prod_no?', prod '+esc(sg.prod_no):'')+')">':'')+'</td></tr>'; }).join('')
+        +'</tbody></table></div><div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:10px"><span id="aso-msg" class="mut tiny"></span><button class="save-btn" id="aso-addgo" style="background:var(--pos);color:#fff;border:0;font-weight:800">Add '+Object.keys(_aso.tick).filter(function(k){return _aso.tick[k];}).length+' order'+(Object.keys(_aso.tick).filter(function(k){return _aso.tick[k];}).length===1?'':'s')+'</button></div>';
+      A.querySelectorAll('tr[data-k]').forEach(function(tr){ var k=tr.dataset.k, sel=tr.querySelector('.aso-tgt'), nw=tr.querySelector('.aso-new');
+        sel.onchange=function(){ var g=groupsNow().find(function(x){return x.key===k;}); _aso.tgt[k]=sel.value==='__new'?{create:true,name:suggestName(g.supplier,g.code,g.client_key).name}:{po:sel.value}; drawAdd(); };
+        if(nw)nw.oninput=function(){ _aso.tgt[k].name=nw.value.trim(); }; });
+      A.querySelector('#aso-addgo').onclick=function(){ var bt=this, msg=A.querySelector('#aso-msg'); var groups=groupsNow().map(function(g){ var t=_aso.tgt[g.key]||{}, sg=suggestName(g.supplier,g.code,g.client_key);
+          return t.create?{supplier:g.supplier,target_po:t.name||sg.name,create:{po:t.name||sg.name,prod_no:sg.prod_no||null,batch_id:sg.batch_id||null,country_code:sg.country_code||null,branch:'Direct to Client',status:'FUTURE',client:g.customer||null},fulfil_ids:g.ids,so_refs:g.refs}
+                         :{supplier:g.supplier,target_po:t.po,client:g.customer||null,fulfil_ids:g.ids,so_refs:g.refs}; });
+        var nNew=groups.filter(function(g){return g.create;}).length;
+        msg.style.color=''; msg.innerHTML='Add '+groups.reduce(function(a,g){return a+g.fulfil_ids.length;},0)+' Fulfil POs to '+groups.length+' HORIZON PO'+(groups.length===1?'':'s')+(nNew?' ('+nNew+' new)':'')+'? <a href="#" id="aso-yes" style="font-weight:800;color:var(--pos)">Yes, add</a> &middot; <a href="#" id="aso-no">cancel</a>';
+        A.querySelector('#aso-no').onclick=function(e){ e.preventDefault(); msg.textContent=''; };
+        A.querySelector('#aso-yes').onclick=function(e){ e.preventDefault(); bt.disabled=true; msg.textContent='Adding… (reads Fulfil, links, fills the lines)';
+          fetch('/api/supply/client-orders/add',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({groups:groups})}).then(function(r){return r.json();}).then(function(j){ bt.disabled=false;
+            var rs=(j&&j.results)||[]; msg.style.color=j&&j.ok?'var(--pos)':'var(--neg)';
+            msg.innerHTML=(j&&j.error&&!rs.length)?esc(j.error):rs.map(function(r){ return '<b>'+esc(r.po)+'</b>: '+(r.error?'<span style="color:var(--neg)">'+esc(r.error)+'</span>':(r.created?'created, ':'')+r.linked+' linked'+(r.lines&&r.lines.fulfil?', '+r.lines.fulfil.lines+' lines / '+Number(r.lines.fulfil.units||0).toLocaleString()+' units':''))+(r.skipped&&r.skipped.length?' <span class="mut">(skipped: '+esc(r.skipped.slice(0,4).join('; '))+(r.skipped.length>4?' …':'')+')</span>':''); }).join('<br>');
+            _aso.changed=true; try{ invalidateDerived(); delete cache['purchase-orders']; }catch(_){}
+            _aso.tick={}; _aso.tgt={}; search(true); })
+            .catch(function(err){ bt.disabled=false; msg.style.color='var(--neg)'; msg.textContent='Failed: '+(err.message||err); }); }; }; }
+    function drawList(){ var d=_aso.data; if(!d)return; var vis=visible();
+      N.textContent=d.orders.length+' open orders · '+d.orders.filter(function(o){return o.status==='none';}).length+' not in HORIZON · '+d.orders.filter(function(o){return o.status==='partly';}).length+' partly';
+      if(!vis.length){ L.innerHTML='<div class="mut tiny" style="padding:12px">'+(d.orders.length?'Every order found is already in HORIZON (untick "Not in HORIZON only" to see them).':'No open sales orders with purchase orders match.')+'</div>'; drawAdd(); return; }
+      var FB=d.fulfil_base||'';
+      L.innerHTML='<table class="grid" style="width:100%;font-size:12px"><thead><tr><th style="width:26px"><input type="checkbox" id="aso-all" title="tick every order shown that has POs not in HORIZON"></th><th style="text-align:left">SO</th><th style="text-align:left">Reference</th><th style="text-align:left">Customer</th><th style="text-align:left">Date</th><th style="text-align:left">Fulfil POs (supplier &middot; value)</th><th style="text-align:left">In HORIZON</th></tr></thead><tbody>'
+        +vis.map(function(o){ var can=openPos(o).length>0;
+          return '<tr><td>'+(can?'<input type="checkbox" class="aso-t" data-so="'+esc(o.so)+'"'+(_aso.tick[o.so]?' checked':'')+'>':'')+'</td><td style="white-space:nowrap">'+(FB?'<a href="'+FB+'/v2/erp/model/sales_order/'+o.sale_id+'" target="_blank" rel="noopener">'+esc(o.so)+' &#8599;</a>':esc(o.so))+'</td><td>'+esc(o.reference)+'</td><td>'+esc(o.customer)+'</td><td style="white-space:nowrap">'+esc(fd(o.date))+'</td>'
+            +'<td>'+o.pos.map(function(p){ return '<span style="display:inline-block;margin:1px 6px 1px 0;white-space:nowrap'+(p.in_horizon?';opacity:.55':'')+'" title="'+esc(p.fulfil_supplier+' · '+(p.state||'')+(p.in_horizon?' · in HORIZON as '+p.in_horizon:''))+'">'+(FB?'<a href="'+FB+'/v2/erp/model/purchase_order/'+p.id+'" target="_blank" rel="noopener">'+esc(p.number)+'</a>':esc(p.number))+' <b>'+esc(p.code||p.supplier)+'</b> '+money(p.value)+'</span>'; }).join('')+'</td>'
+            +'<td>'+(o.status==='all'?'<span style="color:var(--pos);font-weight:700">yes</span>':o.status==='partly'?'<span style="color:var(--amber);font-weight:700">partly</span> <span class="mut tiny">'+esc(o.pos.filter(function(p){return p.in_horizon;}).map(function(p){return p.in_horizon;}).filter(function(v,i,a){return a.indexOf(v)===i;}).join(', '))+'</span>':'<span style="color:var(--neg);font-weight:700">no</span>')+'</td></tr>'; }).join('')+'</tbody></table>';
+      L.querySelectorAll('.aso-t').forEach(function(cb){ cb.onchange=function(){ _aso.tick[cb.dataset.so]=cb.checked; drawAdd(); }; });
+      var all=L.querySelector('#aso-all'); if(all)all.onchange=function(){ vis.forEach(function(o){ if(openPos(o).length)_aso.tick[o.so]=all.checked; }); drawList(); };
+      drawAdd(); }
+    function search(keep){ var q=bg.querySelector('#aso-q').value.trim(); _aso.q=q; if(!keep)L.innerHTML='<div class="mut tiny" style="padding:12px">Reading open sales orders and their POs from Fulfil…</div>';
+      fetch('/api/supply/client-orders?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(j){ if(!j||j.error)throw new Error((j&&j.error)||'failed'); _aso.data=j; drawList(); })
+        .catch(function(e){ L.innerHTML='<div style="color:var(--neg);padding:12px">Fulfil read failed: '+esc(e.message||e)+'</div>'; }); }
+    bg.querySelector('#aso-go').onclick=function(){ _aso.tick={}; _aso.tgt={}; search(); };
+    bg.querySelector('#aso-q').onkeydown=function(e){ if(e.key==='Enter'){ _aso.tick={}; _aso.tgt={}; search(); } };
+    bg.querySelector('#aso-notin').onchange=function(){ _aso.notIn=this.checked; drawList(); };
+    if(_aso.q)search();
+  }
   function openPoImportFulfil(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
     bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Import PO from Fulfil</div>'
       +'<div class="mut tiny" style="margin-bottom:8px">Look up by a Fulfil <b>purchase order number</b>, or by a <b>sales order</b> to import every purchase order linked to it. We bring in the supplier, branch, SKUs, quantities &amp; prices. Existing POs have their lines overwritten from Fulfil.</div>'
@@ -5459,7 +5539,7 @@
         var bd=document.createElement('div'); bd.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px;overflow:auto';
         bd.innerHTML='<div style="background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);width:100%;max-width:560px;padding:16px 18px">'
           +'<div style="font-weight:800;font-size:15px">Import from Fulfil: '+esc(po)+'</div>'
-          +'<div class="mut tiny" style="margin:4px 0 6px">Fulfil '+esc(F.number||F.id)+' ('+esc(F.state||'')+'): '+F.lines+' lines, '+Number(F.units||0).toLocaleString()+' units &middot; HORIZON now: '+j.horizon.lines+' lines, '+Number(j.horizon.units||0).toLocaleString()+' units</div>'
+          +'<div class="mut tiny" style="margin:4px 0 6px">'+(F.group?'Client PO group: total of '+F.pos+' Fulfil PO'+(F.pos===1?'':'s')+' ('+esc((F.numbers||[]).slice(0,12).join(', ')+((F.numbers||[]).length>12?' …':''))+')':'Fulfil '+esc(F.number||F.id)+' ('+esc(F.state||'')+')')+': '+F.lines+' lines, '+Number(F.units||0).toLocaleString()+' units &middot; HORIZON now: '+j.horizon.lines+' lines, '+Number(j.horizon.units||0).toLocaleString()+' units</div>'
           +(n?tbl('Quantity changes',j.changed,function(r){ return r.from+' &rarr; <b>'+r.to+'</b>'; })+tbl('New in Fulfil, will be added',j.added,function(r){ return '<b>'+r.qty+'</b>'+(r.cost?' <span class="mut">@ '+r.cost+'</span>':' <span class="mut">no Fulfil price</span>'); })+tbl('Not in Fulfil, will be set to 0',j.removed,function(r){ return r.from+' &rarr; <b>0</b>'; })
             :'<div style="margin:12px 0;color:var(--pos);font-weight:700">&#10003; This order plan already matches Fulfil.</div>')
           +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="save-btn light fi-x">Close</button>'+(n?'<button class="save-btn fi-go" style="background:var(--blue);color:#fff;border:0">Apply '+n+' change'+(n===1?'':'s')+'</button>':'<button class="save-btn fi-go" style="background:var(--blue);color:#fff;border:0" title="refresh this PO&rsquo;s Fulfil copy so ERP deviations follow Fulfil">Refresh Fulfil copy</button>')+'</div></div>';
@@ -14094,7 +14174,7 @@
             +(o.issues?'<button class="save-btn dtc2-acc" data-so="'+esc(o.so)+'" data-acc="'+(o.accepted?0:1)+'">'+(o.accepted?'Un-accept':'Accept')+'</button>':'')+'</div></div>';
       }).join(''):'<div class="mut" style="padding:20px 0">'+(d.synced_at?'No orders match.':'Not read yet: click Refresh from Fulfil.')+'</div>';
       var L=document.getElementById('dtc2-list');
-      L.querySelectorAll('.dtc2-po').forEach(function(a){a.onclick=function(e){e.preventDefault(); if(typeof openPODrawer==='function')openPODrawer(a.dataset.po); else gotoPO(a.dataset.po);};});
+      b.querySelectorAll('.dtc2-po').forEach(function(a){a.onclick=function(e){e.preventDefault(); if(typeof openPODrawer==='function')openPODrawer(a.dataset.po); else gotoPO(a.dataset.po);};});   // v28.409: the whole report, so Client PO groups open too
       var save=function(so,acc,note){ return fetch('/api/supply/dtc2/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so:so,accepted:acc,note:note})}).then(function(r){return r.json();}); };
       L.querySelectorAll('.dtc2-acc').forEach(function(bt){bt.onclick=function(){ var o=d.orders.find(function(x){return x.so===bt.dataset.so;}), n=L.querySelector('.dtc2-note[data-so="'+bt.dataset.so+'"]'); bt.disabled=true;
         save(bt.dataset.so,bt.dataset.acc==='1',n?n.value:null).then(function(){ selectReport('dtc2'); }).catch(function(){bt.disabled=false;}); };});

@@ -8497,6 +8497,156 @@ async function _fgMirrorRow(po) {
     ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id, state=excluded.state, party_name=excluded.party_name, line_count=excluded.line_count, lines=excluded.lines, last_synced_at=now(), source='group', updated_at=now()`,
     [po, (open[0] || g[0]).fulfil_id, state, (open[0] || g[0]).supplier || null, lines.length, JSON.stringify(lines)]);
 }
+// ═══ v28.409 (Ben 20-Oct-26, "there are many many dillards orders"): ADD SALES ORDERS FROM FULFIL. PURCHASE ORDERS > Import/Export >
+// "Add sales orders from Fulfil": search open Fulfil sales orders (confirmed / processing, not fully shipped) with their Fulfil POs, show
+// which POs are not in HORIZON yet, tick orders, and per supplier add their Fulfil POs to a HORIZON client PO group (an existing open
+// client PO, or a new one). Adding links the group (po_fulfil_group), fills the HORIZON lines with the group total and appends the order
+// references to the PO's sales order ref. Fulfil is only read.
+async function _fgLinesCost(ids) {   // { fulfil id: [{sku, qty, cost}] } (sum per SKU, first non-zero unit price), read only
+  const by = {}; for (let i = 0; i < ids.length; i += 200) { const b = ids.slice(i, i + 200); if (!b.length) continue;
+    (await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', 'in', b], ['product', '!=', null]], ['purchase', 'product.code', 'quantity', 'unit_price'])).forEach(l => {
+      const m = by[l.purchase] || (by[l.purchase] = {}), k = String(l['product.code'] || '').trim(); if (!k) return;
+      const c = m[k] || (m[k] = { sku: k, qty: 0, cost: null }); c.qty += Number(_fulfilNum(l.quantity)) || 0; const u = Number(_fulfilNum(l.unit_price)) || 0; if (u > 0 && c.cost == null) c.cost = u; }); }
+  const out = {}; Object.keys(by).forEach(id => { out[id] = Object.values(by[id]).sort((a, b) => a.sku.localeCompare(b.sku)); }); return out; }
+// Group master lines = the SUM of the group's live (not cancelled) Fulfil client POs, re-read from Fulfil. Returns the preview / applied summary.
+async function _fgGroupLines(po, confirm, by) {
+  const g = (await pool.query(`SELECT fulfil_id::text id, number, state FROM planner.po_fulfil_group WHERE po=$1 ORDER BY number`, [po])).rows;
+  const ids = g.map(r => Number(r.id));
+  const live = ids.length ? (await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', ids]], FULFIL_GUARD_PO_FIELDS, 500, 'group POs')).filter(p => !/^cancel/.test(p.state || '')) : [];
+  const L = live.length ? await _fgLinesCost(live.map(p => p.id)) : {};
+  const F = {}; live.forEach(p => (L[p.id] || []).forEach(l => { const c = F[l.sku] || (F[l.sku] = { sku: l.sku, qty: 0, cost: null }); c.qty += l.qty; if (l.cost > 0 && c.cost == null) c.cost = l.cost; }));
+  Object.values(F).forEach(f => { f.qty = Math.round(f.qty); });
+  const H = {}; (await pool.query(`SELECT sku, sum(coalesce(qty,0))::int qty, max(cost_price)::float8 cost FROM planner.purchase_order_lines WHERE po=$1 GROUP BY sku`, [po])).rows.forEach(r => { H[r.sku] = r; });
+  const changed = [], added = [], removed = [];
+  Object.values(F).forEach(f => { const h = H[f.sku]; if (!h) added.push({ sku: f.sku, qty: f.qty, cost: f.cost }); else if ((h.qty || 0) !== f.qty) changed.push({ sku: f.sku, from: h.qty || 0, to: f.qty }); });
+  Object.values(H).forEach(h => { if (!F[h.sku] && (h.qty || 0) !== 0) removed.push({ sku: h.sku, from: h.qty }); });
+  const summary = { fulfil: { group: true, pos: live.length, numbers: live.map(p => p.number), lines: Object.keys(F).length, units: Object.values(F).reduce((a, f) => a + f.qty, 0) },
+    horizon: { lines: Object.values(H).filter(h => h.qty).length, units: Object.values(H).reduce((a, h) => a + (h.qty || 0), 0) }, changed, added, removed };
+  if (!confirm) return summary;
+  const client = await pool.connect();
+  try { await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '30s'");
+    for (const c of changed) await client.query(`UPDATE planner.purchase_order_lines SET qty=$3, erp_qty=$3, proposed_at=NULL, proposed_by=NULL WHERE po=$1 AND sku=$2`, [po, c.sku, c.to]);
+    for (const a of added) await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, cost_price, erp_cost, proposed_at, proposed_by) VALUES ($1,$2,$3,$4::int,$4::int,$5::numeric,$5::numeric,NULL,NULL)
+        ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, erp_qty=excluded.erp_qty, cost_price=coalesce(planner.purchase_order_lines.cost_price, excluded.cost_price), proposed_at=NULL, proposed_by=NULL`, [po + '|' + a.sku, po, a.sku, a.qty, a.cost]);
+    for (const r of removed) await client.query(`UPDATE planner.purchase_order_lines SET qty=0, erp_qty=0, proposed_at=NULL, proposed_by=NULL WHERE po=$1 AND sku=$2`, [po, r.sku]);
+    await client.query(`UPDATE planner.purchase_order_lines SET erp_qty=qty WHERE po=$1 AND erp_qty IS DISTINCT FROM qty`, [po]);
+    const det = [changed.length ? changed.length + ' changed (' + changed.slice(0, 12).map(c => c.sku + ' ' + c.from + '>' + c.to).join(', ') + ')' : '', added.length ? added.length + ' added (' + added.slice(0, 12).map(a => a.sku + ' ' + a.qty).join(', ') + ')' : '', removed.length ? removed.length + ' set to 0 (' + removed.slice(0, 12).map(r => r.sku).join(', ') + ')' : ''].filter(Boolean).join('; ');
+    await client.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Order plan: import from Fulfil',$2,$3)`, [po, ('Client PO group (' + live.length + ' Fulfil POs: ' + live.map(p => p.number).slice(0, 30).join(', ') + '): ' + (det || 'already matched')).slice(0, 1000), by]);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+  await _fgMirrorRow(po).catch(() => {});
+  return Object.assign(summary, { applied: true });
+}
+const _coUp = s => String(s || '').toUpperCase().trim();
+const _coDate = v => v == null ? null : typeof v === 'object' ? (v.iso_string || null) : String(v).slice(0, 10);
+const _coClientKey = (ref, party) => { const r = String(ref || ''); const m = /^\s*([A-Za-z][A-Za-z0-9&' ]{1,30}?)\s+-\s+/.exec(r); return _coUp((m ? m[1] : String(party || '').split(/\s+/)[0]) || '').replace(/[^A-Z0-9]/g, ''); };
+app.get('/api/supply/client-orders', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().slice(0, 80);
+    const open = [['state', 'in', ['confirmed', 'processing']], ['shipment_state', '!=', 'sent']];
+    const pat = '%' + q.replace(/([\\%_])/g, '\\$1') + '%';
+    const dom = q ? open.concat([['OR', [['number', 'ilike', pat]], [['reference', 'ilike', pat]], [['party.name', 'ilike', pat]]]]) : open;
+    const sales = await fulfilStrictSearch('sale.sale', dom, ['id', 'number', 'reference', 'sale_date', 'party.name', 'channel.name', 'state', 'shipment_state'], 400, 'open sales orders');
+    if (!sales.length) return res.set('Cache-Control', 'no-store').json({ ok: true, q, orders: [], candidates: [] });
+    const sById = new Map(sales.map(s => [s.id, s])), saleOf = {};   // fulfil PO id -> Set(sale id)
+    for (let i = 0; i < sales.length; i += 100) { const b = sales.slice(i, i + 100).map(s => s.id);
+      (await fulfilSearchAll('purchase.request', [['sale_lines.sale', 'in', b], ['purchase_line', '!=', null]], ['purchase_line.purchase', 'sale_lines.sale'])).forEach(r => {
+        const pid = r['purchase_line.purchase']; [].concat(r['sale_lines.sale'] || []).forEach(sid => { if (pid && sById.has(sid)) (saleOf[pid] = saleOf[pid] || new Set()).add(sid); }); }); }
+    // the request's sale link is not always readable (Dillard's): POs carrying the order's client reference count too
+    const refs = [...new Set(sales.map(s => String(s.reference || '').trim()).filter(r => r.length >= 5))];
+    const byRef = {}; sales.forEach(s => { const r = _coUp(s.reference); if (r.length >= 5) (byRef[r] = byRef[r] || []).push(s.id); });
+    const extra = [];
+    for (let i = 0; i < refs.length; i += 50) { const b = refs.slice(i, i + 50);
+      (await fulfilStrictSearch(FULFIL_MAP.poModel, [['reference', 'in', b]], ['id', 'reference'], 500, 'client POs by reference')).forEach(p => { (byRef[_coUp(p.reference)] || []).forEach(sid => { (saleOf[p.id] = saleOf[p.id] || new Set()).add(sid); }); extra.push(p.id); }); }
+    const pids = Object.keys(saleOf).map(Number);
+    const pos = pids.length ? await fulfilSearchAll(FULFIL_MAP.poModel, [['id', 'in', pids]], ['id', 'number', 'reference', 'state', 'party', 'party.name', 'total_amount', 'currency.code', 'purchase_date']) : [];
+    const livePos = pos.filter(p => !/^cancel/.test(p.state || ''));
+    // where each Fulfil PO already sits in HORIZON
+    const inHz = {}; const ids = livePos.map(p => p.id);
+    if (ids.length) {
+      (await pool.query(`SELECT fulfil_id::text id, po FROM planner.po_fulfil_group WHERE fulfil_id = ANY($1::bigint[])
+        UNION SELECT external_id, po FROM planner.po_links WHERE system='fulfil' AND status='linked' AND coalesce(external_id,'') ~ '^[0-9]+$' AND external_id::bigint = ANY($1::bigint[]) AND EXISTS (SELECT 1 FROM planner.purchase_orders x WHERE x.po=planner.po_links.po)
+        UNION SELECT fulfil_id::text, po FROM planner.fulfil_purchase_orders WHERE coalesce(source,'') <> 'group' AND fulfil_id = ANY($1::bigint[]) AND EXISTS (SELECT 1 FROM planner.purchase_orders x WHERE x.po=planner.fulfil_purchase_orders.po)
+        UNION SELECT NULL, po FROM planner.purchase_orders WHERE false`, [ids])).rows.forEach(r => { if (r.id) inHz[r.id] = inHz[r.id] || r.po; });
+      const byNum = new Set((await pool.query(`SELECT po FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [livePos.map(p => p.number).filter(Boolean)])).rows.map(r => r.po));
+      livePos.forEach(p => { if (!inHz[String(p.id)] && byNum.has(p.number)) inHz[String(p.id)] = p.number; }); }
+    const sups = (await pool.query(`SELECT name, upper(coalesce(code,'')) code, fulfil_id::text fid FROM planner.suppliers`)).rows;
+    const supByFid = new Map(sups.filter(s => s.fid).map(s => [s.fid, s])), supByName = new Map(sups.map(s => [String(s.name || '').toLowerCase().replace(/[^a-z0-9]/g, ''), s]));
+    const supOf = p => supByFid.get(String(p.party || '')) || supByName.get(String(p['party.name'] || '').toLowerCase().replace(/[^a-z0-9]/g, '')) || null;
+    const orders = sales.map(s => { const mine = livePos.filter(p => saleOf[p.id] && saleOf[p.id].has(s.id)).map(p => { const sp = supOf(p);
+        return { id: String(p.id), number: p.number, reference: p.reference, state: p.state, supplier: sp ? sp.name : (p['party.name'] || ''), code: sp ? sp.code : '', fulfil_supplier: p['party.name'] || '',
+          value: Number(_fulfilNum(p.total_amount)) || 0, currency: p['currency.code'] || '', date: _coDate(p.purchase_date), in_horizon: inHz[String(p.id)] || null }; })
+        .sort((a, b) => a.supplier.localeCompare(b.supplier) || String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
+      const n = mine.length, k = mine.filter(p => p.in_horizon).length;
+      return { sale_id: s.id, so: s.number, reference: s.reference || '', customer: s['party.name'] || '', channel: s['channel.name'] || '', date: _coDate(s.sale_date), state: s.state, shipment_state: s.shipment_state,
+        client_key: _coClientKey(s.reference, s['party.name']), pos: mine, status: !n ? 'no_po' : k === n ? 'all' : k ? 'partly' : 'none' }; })
+      .filter(o => o.pos.length).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(a.so).localeCompare(String(b.so), undefined, { numeric: true }));
+    // open HORIZON client POs of these suppliers (targets), with the client keys their groups already hold
+    const supNames = [...new Set(orders.flatMap(o => o.pos.map(p => p.supplier)).filter(Boolean))];
+    const cands = supNames.length ? (await pool.query(`SELECT p.po, p.supplier_name supplier, coalesce(p.client,'') client, coalesce(p.prod_no::text,'') prod_no, coalesce(p.batch_id::text,'') batch_id, coalesce(p.country_code,'') country_code, coalesce(p.branch,'') branch, upper(coalesce(p.status,'')) status,
+        (SELECT count(*)::int FROM planner.po_fulfil_group g WHERE g.po=p.po) members,
+        (SELECT array_agg(DISTINCT upper(split_part(coalesce(g.reference,''),' - ',1))) FROM planner.po_fulfil_group g WHERE g.po=p.po) group_keys
+      FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch
+      WHERE ${FULFIL_CLIENT_PO_SQL('p', 'b')} AND p.supplier_name = ANY($1::text[]) AND coalesce(p.master_po,'')='' AND upper(coalesce(p.status,'')) NOT IN ('COMPLETE','CANCELLED','DELIVERED')
+      ORDER BY p.po`, [supNames])).rows : [];
+    cands.forEach(c => { c.group_keys = (c.group_keys || []).filter(Boolean).map(x => x.replace(/[^A-Z0-9]/g, '')); });
+    const _fc = fulfilConfigFor(await activeFulfilEnv());
+    res.set('Cache-Control', 'no-store').json({ ok: true, q, fulfil_base: _fc.subdomain ? 'https://' + _fc.subdomain + '.fulfil.io' : null, orders, candidates: cands });
+  } catch (e) { if (e.code !== 'FULFIL_LOOKUP_FAILED' && e.code !== 'NO_FULFIL_CFG') log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_LOOKUP_FAILED' ? 503 : 500).json({ error: e.message }); }
+});
+app.post('/api/supply/client-orders/add', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  const by = authUser(req) || 'unknown', groups = Array.isArray((req.body || {}).groups) ? req.body.groups.slice(0, 20) : [];
+  if (!groups.length) return res.status(400).json({ error: 'groups required' });
+  const out = [];
+  try {
+    for (const g of groups) {
+      const r = { supplier: g.supplier || '', po: String(g.target_po || (g.create && g.create.po) || '').trim(), created: false, linked: 0, skipped: [], error: null };
+      try {
+        const ids = Array.from(new Set((g.fulfil_ids || []).map(Number).filter(x => Number.isFinite(x) && x > 0))).slice(0, 300);
+        if (!r.po) throw new Error('no HORIZON PO chosen'); if (!ids.length) throw new Error('no Fulfil POs');
+        const sup = (await pool.query(`SELECT id, name, fulfil_id::text fid FROM planner.suppliers WHERE name=$1 LIMIT 1`, [g.supplier])).rows[0];
+        if (!sup) throw new Error('supplier ' + g.supplier + ' not found in HORIZON');
+        let exists = (await pool.query(`SELECT po, supplier_name FROM planner.purchase_orders WHERE po=$1`, [r.po])).rows[0];
+        if (g.create && !exists) {
+          if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{2,59}$/.test(r.po)) throw new Error('PO name ' + r.po + ' is not valid (letters, digits, - . / only)');
+          const c = g.create;
+          await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, country_code, branch, status, prod_no, batch_id, client) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [r.po, sup.name, sup.id, c.country_code || null, c.branch || 'Direct to Client', c.status || 'FUTURE', c.prod_no || null, c.batch_id || null, c.client || null]);
+          await notePoCreated(pool, r.po, by); r.created = true; exists = { po: r.po, supplier_name: sup.name };
+        }
+        if (!exists) throw new Error(r.po + ' not found');
+        if (String(exists.supplier_name || '') !== sup.name) throw new Error(r.po + ' is a ' + (exists.supplier_name || 'different supplier') + ' PO, not ' + sup.name);
+        if (!(await _fgIsClientPo(r.po))) throw new Error(r.po + ' is not a client PO (Direct to Client, B2B JLEW, B2B NEXT or key account)');
+        const pos = await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', 'in', ids]], ['id', 'number', 'reference', 'state', 'party', 'party.name', 'total_amount', 'currency.code'], 500, 'client POs');   // re-read: never trust the browser's copy
+        const okSup = p => (sup.fid && String(p.party) === sup.fid) || String(p['party.name'] || '').toLowerCase().replace(/[^a-z0-9]/g, '') === sup.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const taken = new Map((await pool.query(`SELECT fulfil_id::text id, po FROM planner.po_fulfil_group WHERE fulfil_id = ANY($1::bigint[])`, [ids])).rows.map(t => [t.id, t.po]));
+        const live = [];
+        pos.forEach(p => { if (/^cancel/.test(p.state || '')) r.skipped.push(p.number + ' cancelled'); else if (!okSup(p)) r.skipped.push(p.number + ' is ' + (p['party.name'] || 'another supplier'));
+          else if (taken.has(String(p.id)) && taken.get(String(p.id)) !== r.po) r.skipped.push(p.number + ' already in ' + taken.get(String(p.id))); else live.push(p); });
+        const L = live.length ? await _fgLines(live.map(p => p.id)) : {};
+        for (const p of live) { const ln = L[p.id] || [];
+          await pool.query(`INSERT INTO planner.po_fulfil_group (fulfil_id, po, number, reference, supplier, state, lines, units, added_by, synced_at, total_amount, currency) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,now(),$10,$11)
+            ON CONFLICT (fulfil_id) DO UPDATE SET po=excluded.po, number=excluded.number, reference=excluded.reference, supplier=excluded.supplier, state=excluded.state, lines=excluded.lines, units=excluded.units, synced_at=now(), total_amount=excluded.total_amount, currency=excluded.currency`,
+            [p.id, r.po, p.number || null, p.reference || null, p['party.name'] || null, p.state || null, JSON.stringify(ln), ln.reduce((a, l) => a + l.qty, 0), by, _fulfilNum(p.total_amount), p['currency.code'] || null]); }
+        r.linked = live.length;
+        // order references onto the PO (search + DTC mismatch), client name when empty
+        const addRefs = [...new Set((g.so_refs || []).map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+        if (addRefs.length || (g.create && g.create.client)) {
+          const cur = (await pool.query(`SELECT coalesce(sales_order_ref,'') s, coalesce(client,'') c FROM planner.purchase_orders WHERE po=$1`, [r.po])).rows[0] || { s: '', c: '' };
+          const have = cur.s.split(/\s*,\s*/).map(x => x.trim()).filter(Boolean), seen = new Set(have.map(_coUp));
+          addRefs.forEach(x => { if (!seen.has(_coUp(x))) { have.push(x); seen.add(_coUp(x)); } });
+          await pool.query(`UPDATE planner.purchase_orders SET sales_order_ref=$2, client=coalesce(nullif(client,''),$3), updated_at=now() WHERE po=$1`, [r.po, have.join(', ').slice(0, 4000), (g.create && g.create.client) || g.client || null]);
+        }
+        if (live.length) { await pool.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Client PO group: sales orders added',$2,$3)`, [r.po, (live.length + ' Fulfil POs added from ' + addRefs.length + ' sales order(s): ' + live.map(p => p.number).join(', ')).slice(0, 1000), by]);
+          r.lines = await _fgGroupLines(r.po, true, by); }
+      } catch (e) { r.error = e.message; }
+      out.push(r);
+    }
+    try { invalidateSupplyCaches('po'); } catch (_) {}
+    res.json({ ok: out.every(x => !x.error), results: out });
+  } catch (e) { if (e.code !== 'FULFIL_LOOKUP_FAILED' && e.code !== 'NO_FULFIL_CFG') log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : e.code === 'FULFIL_LOOKUP_FAILED' ? 503 : 500).json({ error: e.message, results: out }); }
+});
 // ═══ v28.376 (Ben 15-Oct-26): MASTER PO PAYMENT SHARES. A client PO group's starting deposit (credit note), completion and balance payments
 // are shared across its Fulfil client POs in proportion to their Fulfil value (units when a value is missing). Each Fulfil PO's bill is
 // found in HORIZON's Xero copy by the Fulfil PO number in the bill reference (Fulfil posts each PO to its company's Xero: AU to AU, UK to
@@ -19349,10 +19499,10 @@ async function dtc2Build(db) {
       (s.lines || []).filter(l => l.mode !== 'dropship' && l.mode !== 'backorder').forEach(l => { const r = skus.get(l.sku); if (!r || (r.mode && r.mode !== 'stock')) return; r.so += l.qty; r.shipped += l.shipped; r.mode = 'stock'; r.name = r.name || l.name || ''; });   // a PO SKU that is a from-stock line on the SO
       const sum = o => Object.values(o).reduce((a, b) => a + b, 0), sg = n => (n > 0 ? '+' : '') + n;
       const rows = [...skus.values()].filter(r => !DTC2_IGNORE_SKUS.has(String(r.sku || '').toUpperCase())).map(r => { const f = sum(r.fulfil), h = sum(r.hz), fn = Object.keys(r.fulfil).length, hn = Object.keys(r.hz).length; let issue = 'ok';
-        if (r.mode === 'stock') { issue = f === h ? 'ok' : !fn ? 'HORIZON PO only' : !hn ? 'not in HORIZON' : 'HORIZON ' + sg(h - f); return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }   // from stock on the SO: compare the two POs only
+        if (r.mode === 'stock') { issue = f === h ? 'ok' : !fn ? 'HORIZON PO only' : !hn ? 'SKU not in HORIZON order plan' : 'HORIZON ' + sg(h - f); return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }   // from stock on the SO: compare the two POs only
         if (!r.so && !fn && hn) return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue: 'HORIZON only' });   // on a matched HORIZON PO, but not on the SO or its Fulfil POs
         if (r.so && !fn) issue = r.no_po === 'po_cancelled' ? 'Fulfil PO cancelled' : r.no_po === 'requested' ? 'requested, no Fulfil PO yet' : r.no_po === 'not_sent' ? 'no PO created, sales order not processed' : 'no Fulfil PO'; else if (!r.so && fn) issue = 'not on SO'; else if (r.so !== f) issue = 'Fulfil ' + (f - r.so > 0 ? '+' : '') + (f - r.so);
-        if (issue === 'ok' || /^Fulfil|not on SO/.test(issue)) { const base = fn ? f : r.so; if (!hn) issue = issue === 'ok' ? 'not in HORIZON' : issue + ' · not in HORIZON'; else if (h !== base) issue = (issue === 'ok' ? '' : issue + ' · ') + 'HORIZON ' + (h - base > 0 ? '+' : '') + (h - base); }
+        if (issue === 'ok' || /^Fulfil|not on SO/.test(issue)) { const base = fn ? f : r.so; if (!hn) issue = issue === 'ok' ? 'SKU not in HORIZON order plan' : issue + ' · SKU not in HORIZON order plan'; else if (h !== base) issue = (issue === 'ok' ? '' : issue + ' · ') + 'HORIZON ' + (h - base > 0 ? '+' : '') + (h - base); }
         return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }).sort((a, b) => (a.issue === 'ok') - (b.issue === 'ok') || a.sku.localeCompare(b.sku));
       const issues = rows.filter(r => r.issue !== 'ok').length, rvw = rv.get(s.number) || {};
       const noPoRows = rows.filter(r => r.no_po && !Object.keys(r.fulfil).length);
@@ -19367,7 +19517,7 @@ async function dtc2Build(db) {
     const groups = [...grpPos].sort().map(po => { const mem = grp.filter(g => g.po === po), live = mem.filter(g => !/^cancel/.test(g.state || '')), sk = {};
       (hzLines.get(po) || []).forEach(l => { (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }).hz += l.qty; });
       live.forEach(g => (g.lines || []).forEach(l => { (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }).fulfil += Number(l.qty) || 0; }));
-      const rows = Object.values(sk).filter(r => !DTC2_IGNORE_SKUS.has(String(r.sku || '').toUpperCase())).map(r => Object.assign(r, { issue: r.hz === r.fulfil ? 'ok' : !r.hz ? 'not in HORIZON' : !r.fulfil ? 'HORIZON only' : 'HORIZON ' + (r.hz - r.fulfil > 0 ? '+' : '') + (r.hz - r.fulfil) }))
+      const rows = Object.values(sk).filter(r => !DTC2_IGNORE_SKUS.has(String(r.sku || '').toUpperCase())).map(r => Object.assign(r, { issue: r.hz === r.fulfil ? 'ok' : !r.hz ? 'SKU not in HORIZON order plan' : !r.fulfil ? 'HORIZON only' : 'HORIZON ' + (r.hz - r.fulfil > 0 ? '+' : '') + (r.hz - r.fulfil) }))
         .sort((a, b) => (a.issue === 'ok') - (b.issue === 'ok') || a.sku.localeCompare(b.sku));
       const p = hzByPo.get(po) || {};
       return { po, status: p.status, supplier: p.supplier_name, branch: p.branch, members: mem.length, cancelled: mem.length - live.length, open_sos: orders.filter(o => o.hz_pos.some(h => h.po === po)).length,
@@ -21021,7 +21171,9 @@ app.post('/api/supply/po/:po/import-fulfil-lines', async (req, res) => {
     const pr = (await pool.query(`SELECT p.po, ${FULFIL_CLIENT_PO_SQL('p', 'b')} client FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch WHERE p.po=$1`, [po])).rows[0];
     if (!pr) return res.status(404).json({ error: 'PO not found' });
     if (!pr.client) return res.status(400).json({ error: po + ' is not a client PO (Direct to Client, B2B JLEW, B2B NEXT or key account): its lines are planned in HORIZON and pushed to Fulfil' });
-    if ((await pool.query(`SELECT 1 FROM planner.po_fulfil_group WHERE po=$1 LIMIT 1`, [po]).catch(() => ({ rows: [] }))).rows.length) return res.status(400).json({ error: po + ' is a master PO for a client PO group: its lines are compared with the whole group (DTC mismatch 2.0), not imported from one Fulfil PO' });
+    if ((await pool.query(`SELECT 1 FROM planner.po_fulfil_group WHERE po=$1 LIMIT 1`, [po]).catch(() => ({ rows: [] }))).rows.length) {   // v28.409 (Ben): a client PO group master imports the SUM of its group
+      const sm = await _fgGroupLines(po, confirm, by); try { if (confirm) invalidateSupplyCaches('po'); } catch (_) {}
+      return res.json(Object.assign({ ok: true, po }, confirm ? { applied: true } : { preview: true }, sm)); }
     const lk = (await pool.query(`SELECT external_id FROM planner.po_links WHERE po=$1 AND system='fulfil' AND status='linked' AND external_id ~ '^[0-9]+$'`, [po])).rows[0];
     if (!lk) return res.status(400).json({ error: 'Link ' + po + ' to its Fulfil PO first (Master data & docs > Linked records > Link Fulfil PO)' });
     const fp = await fulfilReadPoById(Number(lk.external_id)); if (!fp) return res.status(404).json({ error: 'Fulfil PO id ' + lk.external_id + ' not found in Fulfil' });
