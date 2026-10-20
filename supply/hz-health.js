@@ -59,10 +59,21 @@
   var API_SKIP=/^\/(api\/(health\/|portal\/health\/|cp\/health\/)|hz-health\.js)/;
   function nv(h){ return String(h||'').split('?')[0].split('/').map(function(s){ return /^v\d{1,2}$/.test(s)?s:(s.length>24||/^\d+$/.test(s)||(/\d/.test(s)&&s.length>=5))?':id':s; }).join('/').slice(0,200); }
   function nview(){ return nv(view()); }
-  function ltNote(ms,v){ try{ if(!(ms>=1000))return false; var now=Date.now(); if(now-ltT>60000){ltT=now;ltN=0;} if(++ltN>10)return false;
-    v=v||nview(); var a=LT[v]||(LT[v]={n:0,max:0,sum:0}); a.n++; a.sum+=ms; if(ms>a.max)a.max=ms; return true; }catch(e){ return false; } }
+  // v28.415 (Ben 20-Oct-26, 21-73 s Demand plan freezes with no clue what triggered them): the last user action (click / key on a control)
+  // before each long task, so a freeze says what started it: "click #agg-btn (Combine)", "key Enter in .fc-cell". Labels only, never values.
+  var ACT=[];
+  function actLabel(el){ try{ for(var i=0;el&&i<5;i++,el=el.parentElement){ if(!el.tagName)break; var tg=el.tagName.toLowerCase();
+      if(el.id||/^(button|a|select|input|label|th|summary)$/.test(tg)||(el.getAttribute&&(el.getAttribute('role')==='button'||el.onclick))){
+        var tx=(tg==='input'||tg==='select')?'':String(el.textContent||'').replace(/\s+/g,' ').trim().slice(0,30);
+        return (el.id?'#'+el.id:tg+(el.className&&typeof el.className==='string'?'.'+el.className.trim().split(/\s+/)[0]:''))+(tx?' ('+tx+')':''); } } }catch(e){} return ''; }
+  function actNote(kind,e){ try{ var l=actLabel(e.target); if(!l)return; ACT.push({t:performance.now(),a:kind+' '+l,v:nview()}); if(ACT.length>20)ACT.shift(); }catch(_){} }
+  try{ document.addEventListener('pointerdown',function(e){ actNote('click',e); },true); document.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key==='Tab'||e.key==='Escape')actNote('key '+e.key,e); },true); }catch(e){}
+  function actBefore(st){ for(var i=ACT.length-1;i>=0;i--){ if(ACT[i].t<=st+50){ return (st-ACT[i].t)<=15000?ACT[i]:null; } } return null; }
+  function ltNote(ms,v,st){ try{ if(!(ms>=1000))return false; var now=Date.now(); if(now-ltT>60000){ltT=now;ltN=0;} if(++ltN>10)return false;
+    v=v||nview(); var a=LT[v]||(LT[v]={n:0,max:0,sum:0,acts:{}}); a.n++; a.sum+=ms; if(ms>a.max)a.max=ms;
+    var b=st!=null?actBefore(st):null, k=b?(b.a+(b.v!==v?' on '+b.v:'')):'no recent action'; a.acts[k]=Math.max(a.acts[k]||0,Math.round(ms)); return true; }catch(e){ return false; } }
   try{ if(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes&&PerformanceObserver.supportedEntryTypes.indexOf('longtask')>=0)
-    new PerformanceObserver(function(l){ try{ var es=l.getEntries(); for(var i=0;i<es.length;i++)if(es[i].duration>=1000)ltNote(es[i].duration); }catch(_){} }).observe({type:'longtask',buffered:true}); }catch(e){}
+    new PerformanceObserver(function(l){ try{ var es=l.getEntries(); for(var i=0;i<es.length;i++)if(es[i].duration>=1000)ltNote(es[i].duration,null,es[i].startTime); }catch(_){} }).observe({type:'longtask',buffered:true}); }catch(e){}
   function apiPath(u){ var s=String(u||''); if(/^https?:/i.test(s)){ if(s.indexOf(location.origin+'/')!==0)return null; s=s.slice(location.origin.length); }
     if(s.indexOf('/api/')!==0||API_SKIP.test(s))return null; return nv(s); }
   // v28.188 (Ben): the supplier portal also records 4xx (session expired 401, "not your shipment" 403, 404, validation 400 / 409):
@@ -115,7 +126,7 @@
   function pvEnter(){ try{ pvAccrue(); curV=nview(); var a=PV[curV]||(PV[curV]={n:0,s:0}); a.n++; }catch(e){} }
   function aggFlush(){ try{ pvAccrue(); var k, a, rows=[];
     for(k in PV){ a=PV[k]; if(a.n||a.s>=1)rows.push({kind:'page_view',message:'page view',path:k,count:Math.max(1,a.n),v:VER,meta:{visits:a.n,active_s:Math.round(a.s)}}); } PV={};
-    for(k in LT){ a=LT[k]; rows.push({kind:'long_task',message:'Main thread blocked >= 1s',path:k,ms:Math.round(a.max),count:a.n,v:VER,meta:{sum_ms:Math.round(a.sum)}}); } LT={};
+    for(k in LT){ a=LT[k]; rows.push({kind:'long_task',message:'Main thread blocked >= 1s',path:k,ms:Math.round(a.max),count:a.n,v:VER,meta:{sum_ms:Math.round(a.sum),actions:(function(m){ var o={}; Object.keys(m||{}).sort(function(x,y){ return m[y]-m[x]; }).slice(0,5).forEach(function(k){ o[k.slice(0,90)]=m[k]; }); return o; })(a.acts)}}); } LT={};   // v28.415: actions = last action before each freeze -> its longest freeze (ms)
     for(k in DC){ a=DC[k]; rows.push({kind:'dead_click',message:'Dead click: '+a.label,path:a.path,count:a.n,v:VER,meta:{label:a.label}}); } DC={};   // v28.179
     for(k in API){ a=API[k]; rows.push({kind:'api_failure',message:(a.s?'HTTP '+a.s:a.err)+' '+a.m+' '+a.p+(a.err==='slow'?' (> 10s)':a.err==='slow_hidden'?' (> 10s, tab hidden meanwhile)':a.err==='slow_sleep'?' (> 10s, device slept)':''),path:a.p,method:a.m,status:a.s||null,ms:a.max,count:a.n,v:VER,meta:{err:a.err}}); } API={};
     for(var i=0;i<rows.length&&i<60;i++)q.push(rows[i]); return rows.length; }catch(e){ return 0; } }

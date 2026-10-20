@@ -1,3 +1,9 @@
+## v28.415 (20-Oct-26) App health: freezes record what triggered them
+- Ben asked to look into the Combine freeze. Live check: Combine switches in 30 ms (on) / 12 ms (off), also straight after a fresh load; not reproduced. The health log shows the real freezes: Demand plan on v28.397, 25 freezes in 7 days, up to 73 s (kathryn@ 16-17 Oct, many around 21 s), and ben@ 31 s on Buy & Move > FBA (19-Oct 21:05). The log had no clue what started them.
+- Now each long-task (freeze) event carries meta.actions: the last click / Enter / Tab / Escape on a control before each freeze (within 15 s), e.g. "click #agg-btn (Combine)" -> its longest freeze in ms, or "no recent action". Labels only (element id / tag / class and up to 30 characters of its text; never input values). Top 5 per view per minute, so it stays under the 1,000-character meta limit.
+- Tested (jsdom, simulated observer): a 2.5 s freeze after a Combine click records {"click #agg-btn (Combine)": 2500}; a freeze 40 s later records "no recent action".
+- No server change, no migration, no env change.
+
 ## v28.414 (20-Oct-26) Demand plan Combine view: left aligned, single sub-categories collapsed, financial years collapse / expand
 - Ben: "the column Category / Sub-category should be left aligned AND when there is only 1 sub cat do not show the category and sub category, just show the category"; "allow minimise and expand of each financial year".
 - Category / Sub-category cells are left aligned (inline, so no wider rule overrides them). A category with one sub-category shows only the category row (with its market count).
