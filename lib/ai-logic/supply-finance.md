@@ -7,7 +7,7 @@ sources:
   - migrations/213_vpol_carton_from_products.sql :: planner.v_purchase_order_lines (full/partial carton check)
   - server.mjs :: PO_ROWS_SQL (admin PO grid, shipment mastering, due dates, action flags, landed cost)
   - server.mjs :: /api/hz-search (global search: POs, sales orders, shipments, SKUs, suppliers, samples)
-  - supply/inject.html :: runCmd, gotoPO, fillErpFulfil
+  - supply/inject.html :: runCmd, gotoPO, gotoPOFilter, hzCmdPages, fillErpFulfil
   - server.mjs :: accountsGate, /api/accounts/payables (ACCOUNTS > Payables)
   - server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun (ACCOUNTS bills from accounts@ receipts)
   - supply/inject.html :: acRenderPayables, accountsCan, acRenderConfig, acCfReload, acInLinesHtml, acDrOpen, acDrPaint, acRenderStmt, acRenderAgeing, acComboWire, acPdfRender, acMetricsHtml
@@ -49,9 +49,11 @@ fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
   server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
-  server.mjs::/api/hz-search: 527ff4bbc339
-  supply/inject.html::runCmd: 391a1526782c
+  server.mjs::/api/hz-search: 73ad48851aa1
+  supply/inject.html::runCmd: d0195899403f
   supply/inject.html::gotoPO: 3a92dc2c4023
+  supply/inject.html::gotoPOFilter: 0775f59112be
+  supply/inject.html::hzCmdPages: bc7658efa513
   supply/inject.html::fillErpFulfil: 6c4f114920f4
   server.mjs::accountsGate: b80533c811f1
   server.mjs::/api/accounts/payables: fdbef5a26279
@@ -206,7 +208,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.411
+verified_version: v28.412
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -418,6 +420,7 @@ verified_version: v28.411
 - A failed or malformed Fulfil lookup is never treated as "not found": the push stops with 503 and nothing is sent. Every refusal (including lookup failures) logs a sanity row "fulfil:create_refused:<po>" in the App health log. All guard checks run before the dry-run / write. (source: server.mjs :: fulfilStrictSearch, fulfilGuardRefuse, /api/supply/po/:po/cin7-lines)
 - Rate limits (v28.231): when Fulfil answers 429 (too many requests) to a READ (GET, search_read, read, search, search_count), HORIZON waits (Retry-After, else 1s, 2s, 4s) and retries up to 3 times. Writes are never retried, since a rate-limited write may still have run. (source: server.mjs :: fulfilFetch)
 - Finding POs by sales order (v28.405, Ben 20-Oct-26): the PO grid filter box matches every field of the PO row, so a sales order number (sales_order_ref, e.g. SO65897) or the client's PO ref shows all that order's POs; placeholder "Filter PO / SO / supplier". The top Search bar (global search) now also lists a "Sales orders" group: each sales order whose number or client PO ref matches (3+ characters), with client and all its POs, child POs included; choosing it opens the PO grid searched for that sales order (the search overrides the filters). (source: server.mjs :: /api/hz-search; supply/inject.html :: runCmd, gotoPO)
+- Global search (top Search bar / Cmd-K), v28.412 (Ben 20-Oct-26: "must be able to search everything and associate to PO's, shipments, config etc"; notes in "if it can be efficient"): ONE database round trip (every group a capped sub-select aggregated to JSON; tables are small, largest ~3k rows). From 2 characters. Groups: Sales orders (v28.405); Productions (exact P# / number) and Batches -> PO grid filtered to them (all statuses, completed and archived included); Purchase orders matched on PO, supplier, batch, deposit, shipment, Flexport ref, ERP PO, Fulfil IS, ASN, dispatch ref, custom dev ref, client, client PO ref, sales order ref, the PO's notes (client requirements, packing notes, delivery notes) and PO messages, plus Fulfil PO numbers / references linked or grouped to a PO; each says what matched (notes with a snippet) and opens the PO drawer; Shipments & freight (shipment ref, carrier ref, master PO, delivery notes; Flexport ID / name, container, MBL, AMS with the POs aboard); SKUs & products (SKU, name, SKU / carton / inner barcode) -> PO grid filtered to POs with that SKU; Suppliers & clients (name, code, business / contact name with open PO count; key accounts -> PO grid search); Payments & invoices (deposit reference / doc number -> its POs, payment run invoice refs -> Payments report, 3PL invoice numbers -> Accounts > 3PL invoicing); Samples (ref, supplier, tracking codes); Pages: every page and sub-tab as a deep link (Demand, Buy & Move, Reports, Supply POs / Payments / BI & reports / Config, Config admin + demand, Product, Client, Accounts when allowed), every typed word must appear. (source: server.mjs :: /api/hz-search; supply/inject.html :: runCmd, hzCmdPages, gotoPOFilter)
 - A PO linked to a Fulfil PO by hand shows the green link badge with "change" on the line below it (v28.405). (source: supply/inject.html :: fillErpFulfil)
 - Link Fulfil PO: PO grid Fulfil column (every client PO not linked by hand, replacing Update lines / both / date and a reference-only "in sync"), the ERP update popup and the PO drawer Linked records. The picker searches live Fulfil READ ONLY: first the guard's own candidates ("suggested"), then by number, reference, supplier or sales order; it shows number, supplier, state, SO-generated flag, line count, units, last modification and which HORIZON PO already points at it. Choosing one saves po_links fulfil (manual) after checking the id exists and is not cancelled; nothing is written to Fulfil. A linked client PO shows a link badge in the grid (no push). (source: server.mjs :: /api/supply/fulfil/po-search, /api/supply/po/:po/links, /api/supply/fulfil/grid-status; supply/inject.html :: fulfilPoPicker, fillErpFulfil, erpUploadInert)
 - Dev only: HZ_FULFIL_WRITE_STUB=1 (ignored on Vercel) makes the PO push run its guard and preflight reads, then return what it would send without any write. (source: server.mjs :: fulfilPushLines)

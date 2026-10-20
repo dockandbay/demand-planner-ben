@@ -10679,36 +10679,71 @@ app.post('/api/supply/flexport/booking-submit', async (req, res) => {
 // ── Global command search (v28.072, Ben) — the ⌘K palette. One query across the domains a user works in: purchase
 // orders, shipments, SKUs/products, suppliers, samples. Read-only, parameterised ILIKE, tightly capped. Pages + quick
 // actions are added client-side. Path is 2-segment so the /api/supply/:section catch-all never swallows it.
+// v28.412 (Ben 20-Oct-26: "global search must be able to search everything and associate to PO's, shipments, config etc" + "notes are in
+// for search if it can be efficient"): one call, a handful of capped ILIKE queries on small tables (largest ~3k rows). Every hit says WHY it
+// matched and links back to its POs: references on the PO (production, batch, deposit, Flexport, ASN, dispatch, custom dev, client, Fulfil PO
+// and IS numbers, notes), freight (container, MBL, AMS, carrier ref), deposits, payment runs, 3PL invoices, SKUs + barcodes, suppliers,
+// key accounts, samples (incl. tracking). Pages / config come from the client-side catalogue.
 app.get('/api/hz-search', async (req, res) => {
-  const raw = String(req.query.q || '').trim();
-  if (raw.length < 1) return res.json({ q: raw, sos: [], pos: [], shipments: [], skus: [], suppliers: [], samples: [] });
-  const like = '%' + raw.replace(/[%_]/g, m => '\\' + m) + '%';
-  const q = (sql, p) => pool.query(sql, p).then(r => r.rows).catch(() => []);
+  const raw = String(req.query.q || '').trim().slice(0, 80);
+  const empty = { q: raw, sos: [], pos: [], productions: [], batches: [], shipments: [], freight: [], deposits: [], payments: [], tpl: [], skus: [], suppliers: [], clients: [], samples: [] };
+  if (raw.length < 2) return res.json(empty);
+  const like = '%' + raw.replace(/[%_\\]/g, m => '\\' + m) + '%';
+  const t0 = Date.now();
   try {
-    const [pos, sos, shipments, skus, suppliers, samples] = await Promise.all([
-      q(`SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status,
-             upper(coalesce(nullif(p.country_code,''), b.country_code,'')) market
+    const NOTE_COLS = ['client_requirements', 'pack_polybags_notes', 'pack_dnb_barcodes_notes', 'pack_rfid_barcodes_notes', 'pack_dnb_carton_notes', 'pack_client_carton_notes', 'pack_pallet_notes', 'pack_other_notes', 'branch_delivery_notes'];
+    const REF_COLS = [['po', 'PO'], ['supplier_name', 'supplier'], ['prod_no::text', 'production'], ['batch_id::text', 'batch'], ['deposit_ref', 'deposit'], ['shipment_ref', 'shipment'], ['flexport_reference', 'Flexport'], ['erp_po', 'ERP PO'], ['fulfil_is_number', 'Fulfil IS'], ['asn_numbers::text', 'ASN'], ['dispatch_order_ref', 'dispatch ref'], ['custom_dev_ref', 'custom dev ref'], ['client', 'client'], ['client_po_ref', 'client PO ref'], ['sales_order_ref', 'sales order']];
+    const why = REF_COLS.map(([c, l]) => `WHEN p.${c} ILIKE $1 THEN '${l}'`).join(' ') + ' ' + NOTE_COLS.map(c => `WHEN p.${c} ILIKE $1 THEN 'note'`).join(' ');
+    const snip = 'coalesce(' + NOTE_COLS.map(c => `CASE WHEN p.${c} ILIKE $1 THEN p.${c} END`).join(',') + ')';
+    const prodTok = (/^(?:p\s*#?\s*|prod(?:uction)?\s*#?\s*)?(\d{1,4})$/i.exec(raw) || [])[1] || null;
+    // ONE round trip: every group is a sub-select aggregated to JSON ($1 = %raw%, $2 = raw, $3 = production number or null)
+    const PO_META = `coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status, upper(coalesce(nullif(p.country_code,''), b.country_code,'')) market`;
+    const G = {
+      pos: `SELECT p.po, ${PO_META}, CASE ${why} END why, left(${snip}, 140) snippet
            FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch
-           WHERE coalesce(p.master_po,'')='' AND (p.po ILIKE $1 OR p.supplier_name ILIKE $1)
-           ORDER BY (p.po ILIKE $1) DESC, p.po DESC LIMIT 8`, [like]),
-      // v28.405 (Ben): sales order number (or the client's PO ref) -> that order with ALL its POs (child POs included)
-      raw.length < 3 ? [] : q(`SELECT p.sales_order_ref so, coalesce(max(nullif(p.client,'')),'') client, count(*)::int n,
-             string_agg(p.po, ', ' ORDER BY p.po) pos
-           FROM planner.purchase_orders p
-           WHERE coalesce(p.sales_order_ref,'')<>'' AND (p.sales_order_ref ILIKE $1 OR p.client_po_ref ILIKE $1)
-           GROUP BY p.sales_order_ref ORDER BY (p.sales_order_ref ILIKE $1) DESC, p.sales_order_ref DESC LIMIT 6`, [like]),
-      q(`SELECT s.shipment_ref ref, coalesce(lower(s.mode),'') mode, coalesce(s.status,'') status
-           FROM planner.shipments s WHERE s.shipment_ref ILIKE $1 ORDER BY s.shipment_ref DESC LIMIT 6`, [like]),
-      q(`SELECT sku, coalesce(product_name,'') name FROM planner.products
-           WHERE sku ILIKE $1 OR product_name ILIKE $1 ORDER BY (sku ILIKE $1) DESC, sku LIMIT 8`, [like]),
-      q(`SELECT name, coalesce(code,'') code, coalesce(kind,'') kind FROM planner.suppliers
-           WHERE name ILIKE $1 OR code ILIKE $1 ORDER BY name LIMIT 6`, [like]),
-      q(`SELECT ref, coalesce(supplier_name,'') supplier FROM planner.sample_requests
-           WHERE ref ILIKE $1 OR supplier_name ILIKE $1 ORDER BY created_at DESC LIMIT 6`, [like]),
-    ]);
-    res.json({ q: raw, sos, pos, shipments, skus, suppliers, samples });
+           WHERE ${REF_COLS.filter(([c]) => c !== 'prod_no::text').map(([c]) => 'p.' + c + ' ILIKE $1').concat(NOTE_COLS.map(c => 'p.' + c + ' ILIKE $1')).join(' OR ')}
+           ORDER BY (p.po ILIKE $2) DESC, (p.po ILIKE $1) DESC, (upper(coalesce(p.status,'')) LIKE 'COMPLETE%') ASC, p.po DESC LIMIT 12`,
+      linked: `SELECT h.po, h.why, h.snippet, ${PO_META} FROM (
+             SELECT l.po, 'Fulfil ' || l.external_ref why, NULL::text snippet, 1 o FROM planner.po_links l WHERE l.system='fulfil' AND coalesce(l.status,'linked')<>'removed' AND l.external_ref ILIKE $1
+             UNION ALL SELECT g.po, 'Fulfil ' || coalesce(g.number,'') || coalesce(' · ' || g.reference,''), NULL, 2 FROM planner.po_fulfil_group g WHERE g.number ILIKE $1 OR g.reference ILIKE $1
+             UNION ALL SELECT n.po, 'message', left(n.body, 140), 3 FROM planner.supplier_notes n WHERE n.po IS NOT NULL AND n.body ILIKE $1) h
+           JOIN planner.purchase_orders p ON p.po=h.po LEFT JOIN planner.branches b ON b.name=p.branch ORDER BY h.o LIMIT 12`,
+      sos: `SELECT p.sales_order_ref so, coalesce(max(nullif(p.client,'')),'') client, count(*)::int n, string_agg(p.po, ', ' ORDER BY p.po) pos
+           FROM planner.purchase_orders p WHERE length($2) >= 3 AND coalesce(p.sales_order_ref,'')<>'' AND (p.sales_order_ref ILIKE $1 OR p.client_po_ref ILIKE $1)
+           GROUP BY p.sales_order_ref ORDER BY (p.sales_order_ref ILIKE $1) DESC, p.sales_order_ref DESC LIMIT 6`,
+      productions: `SELECT p.prod_no::text prod, count(*)::int n, (count(*) FILTER (WHERE upper(coalesce(p.status,'')) NOT LIKE 'COMPLETE%'))::int open, string_agg(DISTINCT p.supplier_name, ', ') suppliers
+           FROM planner.purchase_orders p WHERE $3::text IS NOT NULL AND p.prod_no::text = $3::text GROUP BY 1`,
+      batches: `SELECT p.batch_id::text batch, count(*)::int n, string_agg(DISTINCT p.supplier_name, ', ') suppliers FROM planner.purchase_orders p WHERE p.batch_id::text ILIKE $1 GROUP BY 1 ORDER BY 1 DESC LIMIT 5`,
+      shipments: `SELECT s.shipment_ref ref, coalesce(lower(s.mode),'') mode, coalesce(s.status,'') status,
+             CASE WHEN s.shipment_ref ILIKE $1 THEN 'shipment' WHEN s.carrier_ref ILIKE $1 THEN 'carrier ref' WHEN s.master_po ILIKE $1 THEN 'master PO' ELSE 'note' END why,
+             (SELECT count(*)::int FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref) pos
+           FROM planner.shipments s WHERE s.shipment_ref ILIKE $1 OR s.carrier_ref ILIKE $1 OR s.master_po ILIKE $1 OR s.delivery_notes ILIKE $1 ORDER BY (s.shipment_ref ILIKE $1) DESC, s.shipment_ref DESC LIMIT 6`,
+      freight: `SELECT f.flex_id, f.shipment_name, CASE WHEN f.container_numbers::text ILIKE $1 THEN 'container' WHEN f.mbl_number ILIKE $1 THEN 'MBL' WHEN f.ams_numbers::text ILIKE $1 THEN 'AMS' WHEN f.flex_id ILIKE $1 THEN 'Flexport ID' ELSE 'Flexport name' END why,
+             (SELECT string_agg(p.po, ', ' ORDER BY p.po) FROM planner.purchase_orders p WHERE p.flexport_reference=f.flex_id OR (coalesce(f.shipment_name,'')<>'' AND p.shipment_ref=f.shipment_name)) pos
+           FROM planner.flexport_shipments f WHERE f.flex_id ILIKE $1 OR f.shipment_name ILIKE $1 OR f.mbl_number ILIKE $1 OR f.container_numbers::text ILIKE $1 OR f.ams_numbers::text ILIKE $1 LIMIT 6`,
+      deposits: `SELECT d.reference, coalesce(d.supplier_name,'') supplier, d.prod_no::text prod, CASE WHEN d.reference ILIKE $1 THEN 'deposit' ELSE 'deposit doc' END why,
+             (SELECT count(*)::int FROM planner.purchase_orders p WHERE p.deposit_ref=d.reference) pos
+           FROM planner.deposits d WHERE d.reference ILIKE $1 OR d.doc_number ILIKE $1 ORDER BY d.reference DESC LIMIT 5`,
+      payments: `SELECT r.invoice_reference ref, coalesce(r.supplier_name,'') supplier FROM planner.payment_runs r WHERE r.invoice_reference ILIKE $1 LIMIT 5`,
+      tpl: `SELECT f.id::text id, f.tpl, f.period, coalesce(f.invoice_no, f.filename) ref FROM planner.tpl_invoice_files f WHERE f.invoice_no ILIKE $1 OR f.filename ILIKE $1 ORDER BY f.period DESC LIMIT 5`,
+      skus: `SELECT sku, coalesce(product_name,'') name, CASE WHEN sku ILIKE $1 OR product_name ILIKE $1 THEN '' ELSE 'barcode' END why
+           FROM planner.products WHERE sku ILIKE $1 OR product_name ILIKE $1 OR sku_barcode ILIKE $1 OR carton_barcode ILIKE $1 OR inner_barcode ILIKE $1
+           ORDER BY (sku ILIKE $2) DESC, (sku ILIKE $1) DESC, sku LIMIT 8`,
+      suppliers: `SELECT s.name, coalesce(s.code,'') code, coalesce(s.kind,'') kind, (SELECT (count(*) FILTER (WHERE upper(coalesce(p.status,'')) NOT LIKE 'COMPLETE%'))::int FROM planner.purchase_orders p WHERE p.supplier_name=s.name) open_pos
+           FROM planner.suppliers s WHERE s.name ILIKE $1 OR s.code ILIKE $1 OR s.business_name ILIKE $1 OR s.contact_name ILIKE $1 ORDER BY s.name LIMIT 6`,
+      clients: `SELECT k.name, (SELECT count(*)::int FROM planner.purchase_orders p WHERE p.client ILIKE '%' || k.name || '%') pos FROM planner.key_accounts k WHERE k.name ILIKE $1 OR k.contact_person ILIKE $1 LIMIT 5`,
+      samples: `SELECT ref, coalesce(supplier_name,'') supplier, CASE WHEN tracking_code ILIKE $1 OR tracking_code_2 ILIKE $1 THEN 'tracking' ELSE '' END why FROM planner.sample_requests
+           WHERE ref ILIKE $1 OR supplier_name ILIKE $1 OR tracking_code ILIKE $1 OR tracking_code_2 ILIKE $1 ORDER BY created_at DESC LIMIT 6`,
+    };
+    const sql = 'SELECT json_build_object(' + Object.keys(G).map(k => `'${k}', (SELECT coalesce(json_agg(t), '[]'::json) FROM (${G[k]}) t)`).join(', ') + ') r';
+    const R = ((await pool.query(sql, [like, raw, prodTok])).rows[0] || {}).r || {};
+    const pos = R.pos || [], sos = R.sos || [], prods = R.productions || [], batches = R.batches || [], shipments = R.shipments || [], freight = R.freight || [], deposits = R.deposits || [],
+      payments = R.payments || [], tpl = R.tpl || [], skus = R.skus || [], suppliers = R.suppliers || [], clients = R.clients || [], samples = R.samples || [];
+    const seen = new Set(pos.map(p => p.po)); (R.linked || []).forEach(h => { if (!seen.has(h.po)) { seen.add(h.po); pos.push(h); } });   // Fulfil numbers / messages, one row per PO
+    res.json({ q: raw, ms: Date.now() - t0, sos, pos: pos.slice(0, 15), productions: prods, batches, shipments, freight, deposits, payments, tpl, skus, suppliers, clients, samples });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+
 
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.

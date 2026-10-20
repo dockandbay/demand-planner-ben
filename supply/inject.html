@@ -1125,6 +1125,7 @@
   var _opExc={count:0,byPo:{}};   // ORDER PLAN unapproved exceptions (partials/suprisk/disc/country) per PO → nav counter + sub-tab badge
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={};
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
+  var _pendingPoFilter=null;   // v28.412: global search > open the PO grid with filters (prod / batch / sku), all statuses
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null,_pendingSampleTab=null;
   var _newDepId=null;   // v28.127: id of a just-created deposit → pinned + opened for edit on the next Deposits render
   var _poInclArch=false;   // "Show archived" toggle on the PO grid → appends ?includeArchived=1 (archive cutoff set in CONFIG ▸ Admin ▸ General)   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
@@ -2606,6 +2607,7 @@
   // drawer jumps to the full Shipments tab via gotoShipmentPage.
   function gotoShipment(ref){ openShipDrawer(ref); }
   function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; showPoSub('plan'); }
+  function gotoPOFilter(f){ _pendingPoFilter=f||{}; if((f&&(f.prod||f.batch))&&!_poInclArch){ _poInclArch=true; try{ delete cache['purchase-orders']; }catch(e){} } showPoSub('plan'); }   // older productions / batches are archived: show them   // v28.412: e.g. {prod:'59'} / {batch:'59.1026'} / {sku:'TOWLB-...'}
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
   function gotoDeposit(ref){ _pendingDep=ref; showPoSub('deposits'); }   // → PURCHASE ORDERS ▸ Deposits, filtered to this ref
   // → SUPPLY ▸ Samples, expand this sample request by ref (used from the PRODUCT grid / detail links + the #/supply/samples/<ref> deep link)
@@ -3205,7 +3207,8 @@
     }
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,qSeed:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // v28.165 (Ben): qSeed = a link-seeded PO search always overrides the filters, even with the tick box off   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
+    if(_pendingPoFilter){ _poState=Object.assign({f:{},q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:'',sku:'',recent:false},_pendingPoFilter); _pendingPoFilter=null; }   // v28.412
+    else if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,qSeed:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // v28.165 (Ben): qSeed = a link-seeded PO search always overrides the filters, even with the tick box off   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
     else if(!_poState){ var _posv=hzFilterLoad('po'); _poState=(_posv&&typeof _posv==='object')?_posv:{f:{production:1},q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};
       _poState.q=''; _poState.f=_poState.f||{}; _poState.act=_poState.act||{}; _poState.ctry=_poState.ctry||{}; }   // restore persisted filters (sliding 1h TTL); never restore the free-text search
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
@@ -3503,6 +3506,7 @@
       var toks=v.split(/[\s,]+/).filter(Boolean);
       fetch('/api/supply/pos-by-sku?q='+encodeURIComponent(toks.join(','))).then(function(r){return r.json();}).then(function(j){ _poSkuSet=new Set((j&&j.pos)||[]); view(); }).catch(function(){ _poSkuSet=new Set(); view(); }); }
     var _skuIn=document.getElementById('po-sku-search'); if(_skuIn)_skuIn.oninput=debounce(function(){ state.sku=this.value; runSku(); },350);
+    if(state.sku&&_poSkuSet===null){ if(_skuIn)_skuIn.value=state.sku; runSku(); }   // v28.412: a SKU filter seeded from global search
     var _skuPop=document.getElementById('po-sku-pop'), _skuTa=document.getElementById('po-sku-ta'), _skuExp=document.getElementById('po-sku-exp');
     if(_skuExp)_skuExp.onclick=function(){ if(!_skuPop)return; if(_skuPop.style.display!=='none'){ _skuPop.style.display='none'; return; } if(_skuTa)_skuTa.value=state.sku||''; _skuPop.style.display=''; if(_skuTa)_skuTa.focus(); };
     var _skuApply=document.getElementById('po-sku-apply'); if(_skuApply)_skuApply.onclick=function(){ state.sku=String((_skuTa&&_skuTa.value)||'').trim(); if(_skuIn)_skuIn.value=state.sku; if(_skuPop)_skuPop.style.display='none'; runSku(); };
@@ -21151,13 +21155,30 @@
     b.innerHTML='<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span>Search</span><span class="kk">⌘K</span>';
     var nav=document.getElementById('supply-btn'); if(nav&&nav.nextSibling)row.insertBefore(b,nav.nextSibling); else if(nav)row.appendChild(b); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp)row.insertBefore(b,sp); else row.appendChild(b); }
     b.onclick=function(e){ e.stopPropagation(); openCmd(); }; }
+  // v28.412 (Ben: global search must find "config etc"): every page and sub-tab as a deep link, built from the app's own tab lists
+  // (only the open module's menu is in the page, so the rail cannot be read). Config labels mirror renderConfig's SC/ADM/DM maps.
   function hzCmdPages(){
-    var pages=[];
-    try{ (SECTIONS||[]).forEach(function(s){ pages.push({label:'Supply ▸ '+_titleCase(s[1]),go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection(s[0]); }}); }); }catch(e){}
-    pages.push({label:'Demand ▸ Plan',go:function(){ location.hash='#/demand'; _cmdRoute(); }});
-    pages.push({label:'Buy plan',go:function(){ location.hash='#/buy'; _cmdRoute(); }});
-    pages.push({label:'FBA',go:function(){ location.hash='#/fba'; _cmdRoute(); }});
-    pages.push({label:'Reports ▸ Exec',go:function(){ location.hash='#/exec'; _cmdRoute(); }});
+    var pages=[], add=function(path,hash){ pages.push({label:path,go:function(){ if(location.hash===hash){ try{ applyRoute(); }catch(e){} } else location.hash=hash; }}); };
+    var tc=function(s){ s=String(s||'').replace(/[⬆⬇↻⇄]/g,'').trim(); return /[a-z]/.test(s)?s:s.charAt(0)+s.slice(1).toLowerCase(); };
+    try{ var DX={klaviyobis:'Klaviyo BIS',preorders:'Preorders',snapshots:'Snapshots',replacements:'Replacement forecasts',ssmbacktest:'Backtest',aspadj:'More settings'};
+      (typeof DEMAND_TABS!=='undefined'?DEMAND_TABS:[]).forEach(function(t){ if(t[0]!=='kpis')add('Demand ▸ '+t[1],'#/demand/'+t[0]); });
+      Object.keys(DX).forEach(function(k){ add('Demand ▸ '+DX[k],'#/demand/'+k); }); }catch(e){}
+    try{ (typeof BUYMOVE_TABS!=='undefined'?BUYMOVE_TABS:[]).forEach(function(t){ add('Buy & Move ▸ '+tc(t[1]),'#/buy-move/'+t[0]); }); }catch(e){}
+    try{ (typeof REPORT_TABS!=='undefined'?REPORT_TABS:[]).forEach(function(t){ add('Reports ▸ '+t[1],'#/reports/'+t[0]); }); add('Reports ▸ Performance ▸ Demand metrics','#/reports/performance/demand-metrics'); }catch(e){}
+    try{ add('Supply ▸ Purchase orders','#/supply/purchase-orders'); PO_SUBS.forEach(function(t){ add('Supply ▸ Purchase orders ▸ '+tc(t[1]),'#/supply/purchase-orders/'+t[0]); });
+      PAY_SUBS.forEach(function(t){ add('Supply ▸ Payments ▸ '+tc(t[1]),'#/supply/payments/'+t[0]); });
+      REPORT_SECTIONS.forEach(function(t){ add('Supply ▸ BI & reports ▸ '+tc(t[1]),'#/supply/reports/'+t[0]); });
+      SECTIONS.forEach(function(t){ if(['purchase-orders','reports','payments','config'].indexOf(t[0])<0)add('Supply ▸ '+tc(t[1]),'#/supply/'+t[0]); }); }catch(e){}
+    var SCL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes',keyaccounts:'Key accounts',portalusers:'Portal users',portal:'Portal',onboarding:'Onboarding',warehouse:'Warehouse rules',xero:'Xero'};
+    Object.keys(SCL).forEach(function(k){ add('Supply ▸ Config ▸ '+SCL[k],'#/supply/config/'+k); });
+    var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','ask-feedback':'Ask Claude feedback'};
+    Object.keys(ADL).forEach(function(k){ add('Config ▸ Admin ▸ '+ADL[k],'#/config/admin/'+k); });
+    var DML={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
+    Object.keys(DML).forEach(function(k){ add('Config ▸ Demand ▸ '+DML[k],'#/config/demand/'+k); });
+    [['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']].forEach(function(t){ add('Config ▸ '+t[1],'#/config/'+t[0]); });
+    [['products','Products'],['sampling','Sampling'],['specs','Specifications'],['reports','Reports'],['config','Config']].forEach(function(t){ add('Product ▸ '+t[1],'#/product/'+t[0]); });
+    [['clients','Clients & agents'],['orders','Orders'],['commission','Commissions'],['messages','Messages'],['config','Config']].forEach(function(t){ add('Client ▸ '+t[1],'#/client/'+t[0]); });
+    try{ if(typeof accountsCan==='function'&&accountsCan())ACCOUNTS_TABS.forEach(function(t){ add('Accounts ▸ '+t[1],'#/accounts/'+t[0]); }); }catch(e){}
     return pages; }
   function _titleCase(s){ s=String(s||''); return s.length>3?s.charAt(0)+s.slice(1).toLowerCase():s; }
   function _cmdRoute(){ if(typeof applyRoute==='function')try{applyRoute();}catch(e){} }
@@ -21170,7 +21191,7 @@
   var _cmdSel=0, _cmdItems=[], _cmdT=null;
   function openCmd(){ var sc=document.getElementById('hzcmd-scrim');
     if(!sc){ sc=document.createElement('div'); sc.id='hzcmd-scrim';
-      sc.innerHTML='<div id="hzcmd" role="dialog" aria-label="Search"><div class="hd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="hzcmd-q" placeholder="Search POs, shipments, SKUs, suppliers, pages — or an action…" autocomplete="off" spellcheck="false"><span class="esc">esc</span></div><div class="body" id="hzcmd-body"></div><div class="ft"><span><b>↑↓</b> move</span><span><b>↵</b> open</span><span><b>esc</b> close</span><span style="margin-left:auto">Global search</span></div></div>';
+      sc.innerHTML='<div id="hzcmd" role="dialog" aria-label="Search"><div class="hd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="hzcmd-q" placeholder="Search POs, sales orders, productions, shipments, containers, SKUs, barcodes, notes, pages…" autocomplete="off" spellcheck="false"><span class="esc">esc</span></div><div class="body" id="hzcmd-body"></div><div class="ft"><span><b>↑↓</b> move</span><span><b>↵</b> open</span><span><b>esc</b> close</span><span style="margin-left:auto">Global search</span></div></div>';
       document.body.appendChild(sc);
       sc.addEventListener('mousedown',function(e){ if(e.target===sc)closeCmd(); });
       var qi=document.getElementById('hzcmd-q');
@@ -21194,7 +21215,8 @@
     var ql=q.toLowerCase();
     var groups=[]; // {label, items:[{icon,kind,primary,sub,links,go}]}
     var actions=hzCmdActions().filter(function(a){ return !q||a.label.toLowerCase().indexOf(ql)>=0; }).map(function(a){ return {kind:'action',primary:a.label,sub:a.hint,go:a.go}; });
-    var pages=hzCmdPages().filter(function(p){ return !q||p.label.toLowerCase().indexOf(ql)>=0; }).slice(0,8).map(function(p){ return {kind:'page',primary:p.label,go:p.go}; });
+    var _qw=ql.split(/\s+/).filter(Boolean);   // v28.412: every word must appear ("config bank", "payments due")
+    var pages=hzCmdPages().filter(function(p){ var l=p.label.toLowerCase(); return !q||_qw.every(function(w){ return l.indexOf(w)>=0; }); }).slice(0,q?10:8).map(function(p){ return {kind:'page',primary:p.label,go:function(){ p.go(); closeCmd(); }}; });
     if(!q){
       groups.push({label:'Quick actions',items:actions});
       groups.push({label:'Jump to',items:pages.slice(0,6)});
@@ -21206,15 +21228,26 @@
     else { var _b=document.getElementById('hzcmd-body'); if(_b)_b.innerHTML='<div class="empty">Searching…</div>'; _cmdItems=[]; _cmdSel=0; }
     fetch('/api/hz-search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){
       if(document.getElementById('hzcmd-q')&&document.getElementById('hzcmd-q').value.trim()!==q)return;   // stale
-      var g2=[];
+      var g2=[], sup=function(){ if(typeof showSupply==='function')showSupply(true); }, pl=function(n){ return n+' PO'+(n===1?'':'s'); };
+      var whyTxt=function(w,sn){ return w?(w==='note'||w==='message'?(w==='message'?'message: ':'note: ')+'“'+String(sn||'').replace(/\s+/g,' ').slice(0,70)+'”':'matched '+w):''; };
       if(actions.length)g2.push({label:'Actions',items:actions});
+      (d.sos||[]).length&&g2.push({label:'Sales orders',items:d.sos.map(function(o){ return {kind:'po',primary:o.so,sub:[o.client,o.n+' PO'+(o.n==1?'':'s')+': '+o.pos].filter(Boolean).join(' · '),go:function(){ sup(); if(typeof gotoPO==='function')gotoPO(o.so); closeCmd(); }}; })});   // v28.405
+      (d.productions||[]).length&&g2.push({label:'Productions',items:d.productions.map(function(x){ return {kind:'po',primary:'P# '+x.prod,sub:pl(x.n)+' ('+x.open+' open) · '+(x.suppliers||''),go:function(){ sup(); gotoPOFilter({prod:String(x.prod)}); closeCmd(); }}; })});
+      (d.batches||[]).length&&g2.push({label:'Batches',items:d.batches.map(function(x){ return {kind:'po',primary:'Batch '+x.batch,sub:pl(x.n)+' · '+(x.suppliers||''),go:function(){ sup(); gotoPOFilter({batch:String(x.batch)}); closeCmd(); }}; })});
+      (d.pos||[]).length&&g2.push({label:'Purchase orders',items:d.pos.map(function(p){ return {kind:'po',primary:p.po,sub:[p.supplier,p.market,p.status,whyTxt(p.why&&p.why!=='PO'?p.why:'',p.snippet)].filter(Boolean).join(' · '),go:function(){ sup(); if(typeof openPODrawer==='function')openPODrawer(p.po,'timeline'); closeCmd(); }}; })});
+      var fr=(d.shipments||[]).map(function(s){ return {kind:'ship',primary:s.ref,sub:[s.mode&&s.mode.toUpperCase(),s.status,pl(s.pos||0),s.why&&s.why!=='shipment'?'matched '+s.why:''].filter(Boolean).join(' · '),go:function(){ sup(); if(typeof gotoShipment==='function')gotoShipment(s.ref); closeCmd(); }}; })
+        .concat((d.freight||[]).map(function(f){ return {kind:'ship',primary:f.shipment_name||f.flex_id,sub:['Flexport '+(f.flex_id||''),'matched '+f.why,f.pos?'POs: '+f.pos:'no POs linked'].filter(Boolean).join(' · '),go:function(){ sup(); if(f.shipment_name&&typeof gotoShipment==='function')gotoShipment(f.shipment_name); else gotoPO(f.flex_id); closeCmd(); }}; }));
+      fr.length&&g2.push({label:'Shipments & freight',items:fr});
+      (d.skus||[]).length&&g2.push({label:'SKUs & products',items:d.skus.map(function(s){ return {kind:'sku',primary:s.sku,sub:[s.name,s.why?'matched '+s.why:''].filter(Boolean).join(' · '),links:['POs with this SKU'],go:function(){ sup(); gotoPOFilter({sku:s.sku}); closeCmd(); }}; })});
+      var sc=(d.suppliers||[]).map(function(s){ return {kind:'supplier',primary:s.name,sub:[s.code,s.kind,(s.open_pos||0)+' open POs'].filter(Boolean).join(' · '),go:function(){ sup(); if(typeof openSupplierDrawer==='function')openSupplierDrawer(s.name); closeCmd(); }}; })
+        .concat((d.clients||[]).map(function(k){ return {kind:'supplier',primary:k.name,sub:'key account · '+pl(k.pos||0),go:function(){ sup(); gotoPO(k.name); closeCmd(); }}; }));
+      sc.length&&g2.push({label:'Suppliers & clients',items:sc});
+      var fin=(d.deposits||[]).map(function(x){ return {kind:'po',primary:x.reference,sub:['deposit',x.supplier,x.prod?'P# '+x.prod:'',pl(x.pos||0)].filter(Boolean).join(' · '),go:function(){ sup(); gotoPO(x.reference); closeCmd(); }}; })
+        .concat((d.payments||[]).map(function(x){ return {kind:'po',primary:x.ref,sub:'payment run · '+(x.supplier||''),go:function(){ location.hash='#/supply/payments/payreport'; closeCmd(); }}; }))
+        .concat((d.tpl||[]).map(function(x){ return {kind:'po',primary:x.ref,sub:'3PL invoice · '+(x.tpl||'')+' · '+(x.period||''),go:function(){ location.hash='#/accounts/3pl-invoicing'; closeCmd(); }}; }));
+      fin.length&&g2.push({label:'Payments & invoices',items:fin});
+      (d.samples||[]).length&&g2.push({label:'Samples',items:d.samples.map(function(s){ return {kind:'sample',primary:s.ref,sub:[s.supplier,s.why?'matched '+s.why:''].filter(Boolean).join(' · '),go:function(){ if(typeof gotoSample==='function')gotoSample(s.ref); closeCmd(); }}; })});
       if(pages.length)g2.push({label:'Pages',items:pages});
-      (d.sos||[]).length&&g2.push({label:'Sales orders',items:d.sos.map(function(o){ return {kind:'po',primary:o.so,sub:[o.client,o.n+' PO'+(o.n==1?'':'s')+': '+o.pos].filter(Boolean).join(' · '),go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof gotoPO==='function')gotoPO(o.so); closeCmd(); }}; })});   // v28.405 (Ben): a sales order number opens the PO grid filtered to all its POs
-      (d.pos||[]).length&&g2.push({label:'Purchase orders',items:d.pos.map(function(p){ return {kind:'po',primary:p.po,sub:[p.supplier,p.market,p.status].filter(Boolean).join(' · '),links:['Payments','Shipment','Order plan'],go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof openPODrawer==='function')openPODrawer(p.po,'timeline'); closeCmd(); }}; })});
-      (d.shipments||[]).length&&g2.push({label:'Shipments',items:d.shipments.map(function(s){ return {kind:'ship',primary:s.ref,sub:[s.mode&&s.mode.toUpperCase(),s.status].filter(Boolean).join(' · '),links:['POs aboard','Flexport'],go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof gotoShipment==='function')gotoShipment(s.ref); closeCmd(); }}; })});
-      (d.skus||[]).length&&g2.push({label:'SKUs & products',items:d.skus.map(function(s){ return {kind:'sku',primary:s.sku,sub:s.name,links:['Open POs','Demand','Product'],go:function(){ if(typeof showSupply==='function')showSupply(true); selectSection('purchase-orders'); closeCmd(); }}; })});
-      (d.suppliers||[]).length&&g2.push({label:'Suppliers',items:d.suppliers.map(function(s){ return {kind:'supplier',primary:s.name,sub:[s.code,s.kind].filter(Boolean).join(' · '),links:['POs','Samples'],go:function(){ if(typeof showSupply==='function')showSupply(true); if(typeof openSupplierDrawer==='function')openSupplierDrawer(s.name); closeCmd(); }}; })});
-      (d.samples||[]).length&&g2.push({label:'Samples',items:d.samples.map(function(s){ return {kind:'sample',primary:s.ref,sub:s.supplier,go:function(){ if(typeof gotoSample==='function')gotoSample(s.ref); closeCmd(); }}; })});
       _cmdPaint(g2.filter(function(g){return g.items.length;}));
     }).catch(function(){});
   }

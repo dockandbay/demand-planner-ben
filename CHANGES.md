@@ -1,3 +1,11 @@
+## v28.412 (20-Oct-26) Global search: everything, linked to its POs; notes in; every page and config tab
+- Ben: "global search must be able to search everything and associate to PO's, shipments, config etc", "notes are in for search if it can be efficient".
+- Now finds: sales orders; productions (P# 59) and batches -> PO grid filtered (all statuses incl. completed / archived); POs by any reference on them (batch, deposit, shipment, Flexport, ERP PO, Fulfil IS, ASN, dispatch, custom dev, client, client PO ref, sales order) and by their notes and PO messages (with a snippet), and by linked / grouped Fulfil PO numbers; shipments by carrier ref, master PO, delivery notes; Flexport freight by container, MBL, AMS (with the POs aboard); SKUs by barcode too -> PO grid filtered to that SKU; suppliers by business / contact name (open POs); key accounts; deposits, payment runs and 3PL invoice numbers; samples by tracking code. Each result says what matched.
+- Pages: every page and sub-tab is searchable as a deep link (Demand, Buy & Move, Reports, Supply, Config admin / demand / supply, Product, Client, Accounts when allowed); all typed words must match ("payments due", "klaviyo").
+- Efficient: one database round trip for all groups (~0.4 s on the sandbox, which has ~0.4 s per round trip; was up to 2.5 s with separate queries).
+- Correction: the "duplicate quick actions" reported earlier were a print artefact on my side; there are 4 distinct actions.
+- Display / navigation only, no buy-plan effect. No migration, no env change, no new routes (/api/hz-search returns more groups).
+
 ## v28.411 (20-Oct-26) Push journal to Xero: a month already in Xero is overwritten with the total of all its invoices
 - Ben (on Diviyaj's review point that the AU push was one-shot per month): "top up push is ok to overwrite ... they should be additive".
 - Now a re-push finds the month's journal and its reversal in Xero (Coghlans: "Coghlan" or the old "Coughlin" narration, matched by date; UK/EU/US: the reclass narration) and UPDATES them in place with the current total of every invoice for that month, so a late weekly Coghlans invoice adds to the month. Missing journals are created as before. Was: refused as a duplicate.
