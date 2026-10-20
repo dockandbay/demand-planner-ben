@@ -4608,9 +4608,10 @@ app.post('/api/accounts/flexport-au/settle', async (req, res) => {
 // imports the payment through the store's "manual" gateway, which books it to the store's clearing account) and (2) a Xero Receive Money in
 // that bank, dated the bank line, to the same clearing account, so the clearing account nets to zero. The clearing account comes from
 // Fulfil's own gateway mapping (sale.channel.payment_gateway, code manual), never typed here. Then the line is matched in Xero.
-const CR_CHANNELS = { 'dockandbay-uk': { store: 'UK', org: 'uk' }, 'dockandbay-us': { store: 'US', org: 'uk' }, 'dockandbay-eu': { store: 'EU', org: 'uk' }, 'dockandbay-au': { store: 'AU', org: 'au' },
+// v28.419 (Ben 21-Oct-26: "au stays out"): the AU store (dockandbay-au, Xero AU) is not offered; its Fulfil manual gateway has no account code.
+const CR_CHANNELS = { 'dockandbay-uk': { store: 'UK', org: 'uk' }, 'dockandbay-us': { store: 'US', org: 'uk' }, 'dockandbay-eu': { store: 'EU', org: 'uk' },
   'dockandbay-uk-ws': { store: 'UKWS', org: 'uk' }, 'dockandbay-us-ws': { store: 'USWS', org: 'uk' }, 'dockandbay-eu-ws': { store: 'EUWS', org: 'uk' } };
-const CR_STORES = ['UK', 'US', 'EU', 'AU', 'UKWS', 'USWS', 'EUWS'];
+const CR_STORES = ['UK', 'US', 'EU', 'UKWS', 'USWS', 'EUWS'];
 const CR_SALE_FIELDS = ['id', 'number', 'reference', 'state', 'sale_date', 'total_amount', 'payment_total', 'currency.code', 'channel.name', 'party.name'];
 const CR_BASE = [['state', 'in', ['confirmed', 'processing', 'done']], ['channel.name', 'in', Object.keys(CR_CHANNELS)]];
 const crIso = d => ({ __class__: 'date', iso_string: d });
