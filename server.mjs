@@ -19306,6 +19306,8 @@ app.post('/api/supply/dtc2/review', async (req, res) => {
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 function _dtc2Key(s) { return String(s == null ? '' : s).toUpperCase().replace(/\s+/g, ''); }
+// v28.408 (Ben 20-Oct-26): custom-order service lines are not exceptions: never shown or counted in DTC mismatch 2.0.
+const DTC2_IGNORE_SKUS = new Set(['CUSTOM-LOGO', 'CUSTOM-LOGO-OLD', 'CUSTOM-ORDER-OLD']);
 // dtc2Build(db): db = pool or any client with .query (a read-only live client in tests). Returns the report JSON.
 async function dtc2Build(db) {
   {
@@ -19346,7 +19348,7 @@ async function dtc2Build(db) {
         (hzLines.get(po) || []).forEach(l => { const r = row(l.sku); r.hz[po] = (r.hz[po] || 0) + l.qty; }); });
       (s.lines || []).filter(l => l.mode !== 'dropship' && l.mode !== 'backorder').forEach(l => { const r = skus.get(l.sku); if (!r || (r.mode && r.mode !== 'stock')) return; r.so += l.qty; r.shipped += l.shipped; r.mode = 'stock'; r.name = r.name || l.name || ''; });   // a PO SKU that is a from-stock line on the SO
       const sum = o => Object.values(o).reduce((a, b) => a + b, 0), sg = n => (n > 0 ? '+' : '') + n;
-      const rows = [...skus.values()].map(r => { const f = sum(r.fulfil), h = sum(r.hz), fn = Object.keys(r.fulfil).length, hn = Object.keys(r.hz).length; let issue = 'ok';
+      const rows = [...skus.values()].filter(r => !DTC2_IGNORE_SKUS.has(String(r.sku || '').toUpperCase())).map(r => { const f = sum(r.fulfil), h = sum(r.hz), fn = Object.keys(r.fulfil).length, hn = Object.keys(r.hz).length; let issue = 'ok';
         if (r.mode === 'stock') { issue = f === h ? 'ok' : !fn ? 'HORIZON PO only' : !hn ? 'not in HORIZON' : 'HORIZON ' + sg(h - f); return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue }); }   // from stock on the SO: compare the two POs only
         if (!r.so && !fn && hn) return Object.assign(r, { fulfil_qty: f, hz_qty: h, issue: 'HORIZON only' });   // on a matched HORIZON PO, but not on the SO or its Fulfil POs
         if (r.so && !fn) issue = r.no_po === 'po_cancelled' ? 'Fulfil PO cancelled' : r.no_po === 'requested' ? 'requested, no Fulfil PO yet' : r.no_po === 'not_sent' ? 'no PO created, sales order not processed' : 'no Fulfil PO'; else if (!r.so && fn) issue = 'not on SO'; else if (r.so !== f) issue = 'Fulfil ' + (f - r.so > 0 ? '+' : '') + (f - r.so);
@@ -19365,7 +19367,7 @@ async function dtc2Build(db) {
     const groups = [...grpPos].sort().map(po => { const mem = grp.filter(g => g.po === po), live = mem.filter(g => !/^cancel/.test(g.state || '')), sk = {};
       (hzLines.get(po) || []).forEach(l => { (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }).hz += l.qty; });
       live.forEach(g => (g.lines || []).forEach(l => { (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }).fulfil += Number(l.qty) || 0; }));
-      const rows = Object.values(sk).map(r => Object.assign(r, { issue: r.hz === r.fulfil ? 'ok' : !r.hz ? 'not in HORIZON' : !r.fulfil ? 'HORIZON only' : 'HORIZON ' + (r.hz - r.fulfil > 0 ? '+' : '') + (r.hz - r.fulfil) }))
+      const rows = Object.values(sk).filter(r => !DTC2_IGNORE_SKUS.has(String(r.sku || '').toUpperCase())).map(r => Object.assign(r, { issue: r.hz === r.fulfil ? 'ok' : !r.hz ? 'not in HORIZON' : !r.fulfil ? 'HORIZON only' : 'HORIZON ' + (r.hz - r.fulfil > 0 ? '+' : '') + (r.hz - r.fulfil) }))
         .sort((a, b) => (a.issue === 'ok') - (b.issue === 'ok') || a.sku.localeCompare(b.sku));
       const p = hzByPo.get(po) || {};
       return { po, status: p.status, supplier: p.supplier_name, branch: p.branch, members: mem.length, cancelled: mem.length - live.length, open_sos: orders.filter(o => o.hz_pos.some(h => h.po === po)).length,

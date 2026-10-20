@@ -1,3 +1,8 @@
+## v28.408 (20-Oct-26) DTC mismatch 2.0: Issues / Accepted / OK tabs; CUSTOM-LOGO lines ignored
+- Ben: "what is the OK button, doesnt seem to do anything ... we should have ISSUE, ACCEPTED, OK tabs with the count". The Issues / Accepted / OK boxes were stat counts that looked like buttons. They are now tabs with counts: Issues (orders with issue lines, not accepted), Accepted (issue lines, accepted), OK (every line matches). Each tab lists its orders with the Fulfil SO, Fulfil PO and HORIZON PO links. The Hide accepted box is gone (the tabs do that).
+- Ben: CUSTOM-LOGO and CUSTOM-ORDER-OLD lines "are not exceptions". CUSTOM-LOGO, CUSTOM-LOGO-OLD and CUSTOM-ORDER-OLD are ignored in the report (not shown, not counted), including client PO groups.
+- Report only: no buy-plan effect. No migration, no env change.
+
 ## v28.407 (20-Oct-26) DTC mismatch 2.0: clearer label for dropship lines with no purchase request
 - Ben: change "not sent to purchasing" to "no PO created, sales order not processed". Issue text in SUPPLY > Reports > DTC MISMATCH 2.0 and the filter tooltip. Same rule (dropship / backorder SO line with no live Fulfil PO and no purchase request); wording only.
 - No migration, no env change.

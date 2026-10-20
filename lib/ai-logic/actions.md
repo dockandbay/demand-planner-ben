@@ -17,6 +17,8 @@ sources:
   - artifact_v16.7.html :: daSkuInsights
   - artifact_v16.7.html :: scanBIPatterns
   - artifact_v16.7.html :: scanAnomalyAlerts
+  - server.mjs :: dtc2Build
+  - supply/inject.html :: renderDtc2
   - artifact_v16.7.html :: renderBuyMoveActions
   - supply/inject.html :: PO_ACTCOND
   - supply/inject.html :: cfUnpaidActions
@@ -50,6 +52,8 @@ fingerprints:
   artifact_v16.7.html::daSkuInsights: fb55471971c2
   artifact_v16.7.html::scanBIPatterns: d2ea6bd0080c
   artifact_v16.7.html::scanAnomalyAlerts: 371e8b968fc6
+  server.mjs::dtc2Build: 910633a8876d
+  supply/inject.html::renderDtc2: f821d1c86336
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
   supply/inject.html::PO_ACTCOND: c295b79fd5d6
   supply/inject.html::cfUnpaidActions: fe40096c76b7
@@ -68,7 +72,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.407
+verified_version: v28.408
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -338,6 +342,7 @@ verified_version: v28.407
 - Per SKU: SO qty (ordered minus cancelled; dropship / backorder lines, plus from-stock lines for SKUs on a matched PO) vs Fulfil PO qty vs HORIZON PO qty.
 - Issues: "no Fulfil PO", "Fulfil +/-n" (Fulfil PO vs SO), "not in HORIZON", "HORIZON +/-n" (vs Fulfil PO, or SO when no Fulfil PO), "HORIZON only" (on a matched HORIZON PO but not on the SO / Fulfil POs), "not on SO". Stock lines compare the two POs only.
 - Accept / note per SO in planner.dtc2_review; accepted orders drop out of the Issues count.
+- v28.408 (Ben 20-Oct-26): three tabs with counts: Issues (orders with issue lines, not accepted), Accepted (issue lines, accepted), OK (every line matches); they replace the Hide accepted box and the old Issues / Accepted / OK stat boxes (which looked like buttons but did nothing). Custom-order service SKUs CUSTOM-LOGO, CUSTOM-LOGO-OLD and CUSTOM-ORDER-OLD are ignored everywhere in the report (not shown, not counted, also in client PO groups). (source: dtc2Build, renderDtc2)
 - v28.367 (Ben 14-Oct-26): **Dropship without a PO.** Each dropship / backorder SO line still to ship with no live Fulfil PO for its SKU on the SO is labelled: "no PO created, sales order not processed" (no purchase request; was "not sent to purchasing" until v28.407), "requested, no Fulfil PO yet" (request raised, no PO), or "Fulfil PO cancelled" (its PO cancelled and no other PO on the SO carries the SKU). A cancelled PO replaced by another PO on the same SO with the SKU is covered (not flagged). Summary pill "Without a PO" (orders) + filter "Dropship without a PO only" + a badge per order (lines and units).
 - v28.380 (Ben 15-Oct-26, PO362): CLIENT PO > ORDER PLAN > "Import from Fulfil" (client POs only: Direct to Client / B2B JLEW / B2B NEXT / key account; not a client PO group master). Reads the linked Fulfil PO live (read only) and previews: quantity changes, SKUs new in Fulfil (added with Fulfil's price when it has one), SKUs no longer in Fulfil (set to 0). Apply makes the order plan equal Fulfil, sets ERP qty = Fulfil and writes this PO's Fulfil copy at once (so ERP deviations follow Fulfil even before the next scheduled import). "Use Fulfil qty" only changes existing lines; this also adds and zeroes. Supply edit or admin; logged in the record of change. (source: server.mjs :: /api/supply/po/:po/import-fulfil-lines; supply/inject.html :: op-fulfil-import)
 - v28.379 (Ben 15-Oct-26, PO363): a PO page whose name is only a leftover Fulfil copy (its HORIZON PO was removed, e.g. PO363 holding Fulfil PO362) shows, in Master data & docs > Linked records, what it is and "Link to HORIZON PO" (suggests the PO already linked to that Fulfil PO, else the HORIZON PO with the Fulfil number): the Fulfil link moves there, the copy is renamed to it (replacing that PO's own copy) and ERP qty is recomputed at once. Supply edit or admin; HORIZON only. (source: server.mjs :: /api/supply/po/:po/links missing branch, /api/supply/fulfil/mirror/:po/relink; supply/inject.html :: renderPoLinks)
