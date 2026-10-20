@@ -20049,28 +20049,29 @@
     var qi=document.getElementById('ac-agq'); if(qi)qi.oninput=function(){ AC_AG.q=qi.value; clearTimeout(AC_AG._t); AC_AG._t=setTimeout(function(){ acRenderAgeing(b); var n=document.getElementById('ac-agq'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },250); }; }
   // ── RECONCILE: the list ──
   function acRcKind(r){ if(acFlexOf(r)||acDhlOf(r))return 'found';   // v28.397: a Bank of America Flexport line with an AU bill; an ANZ DHL line with its invoice
+    if(r.amount>0)return 'money';   // v28.418: money in = customer receipts (Shopify orders)
     if(r.treatment==='ignore'||r.treatment==='rule'||r.amount>=0)return 'ignored'; return r.match?'found':'none'; }
   // v28.387 (Ben 15-Oct-26): bank lines oldest first, and lines from an earlier month (not yet reconciled at month end) shaded light red
   function acPrevMonthBg(d){ var m=new Date(); var first=m.getFullYear()+'-'+('0'+(m.getMonth()+1)).slice(-2)+'-01'; return String(d||'')<first?' style="background:var(--neg-bg)" title="from an earlier month: reconcile before month end"':''; }
   function acByDateAsc(a,c){ return a.line_date<c.line_date?-1:a.line_date>c.line_date?1:0; }
   function acInLinesHtml(){ var P=AC_IN.p; if(!P)return '<div class="count" style="margin:10px 0">Loading statement lines…</div>';
     if(P.error)return '<div class="count" style="color:var(--neg)">'+esc(P.error)+'</div>';
-    var rows=P.rows||[], F=(['found','none','ignored'].indexOf(AC_IN.pF)>=0?AC_IN.pF:'found'), A=AC_IN.pA||'all', q=AC_IN.pQ.toLowerCase();
-    acFlexEnsure(); acDhlEnsure();   // v28.397: Flexport AU matches (Bank of America) and DHL invoices (ANZ)
+    var rows=P.rows||[], F=(['found','none','money','ignored'].indexOf(AC_IN.pF)>=0?AC_IN.pF:'found'), A=AC_IN.pA||'all', q=AC_IN.pQ.toLowerCase();
+    acFlexEnsure(); acDhlEnsure(); acCrEnsure();   // v28.397; v28.418 customer receipts (money in): Flexport AU matches (Bank of America) and DHL invoices (ANZ)
     var nBilled=rows.filter(function(r){ return acHasBill(r)&&(A==='all'||acAccTab(r)===A); }).length;
-    var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&acHasBill(r)); }), n={found:0,none:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
+    var inTab=rows.filter(function(r){ return (A==='all'||acAccTab(r)===A)&&!(AC_IN.hideBilled&&acHasBill(r)); }), n={found:0,none:0,money:0,ignored:0}; inTab.forEach(function(r){ n[acRcKind(r)]++; });
     var vis=inTab.filter(function(r){ return acRcKind(r)===F&&(!q||(r.payee_key+' '+r.reference+' '+r.account_name+' '+(r.match?r.match.subject+' '+r.match.from:'')).toLowerCase().indexOf(q)>=0); }).sort(acByDateAsc);   // v28.387: oldest first
     var pill=function(k,l){ return '<span class="pill'+(F===k?' active':'')+'" data-pf="'+k+'">'+l+' ('+n[k]+')</span>'; };
     var h='<div class="tiny mut" style="margin:0 0 8px;max-width:980px"><b>How it works:</b> 1. Upload the bank statement (Bank statement tab). 2. Lines whose receipt is in accounts@ show under <b>Receipt found</b>: press <b>Review</b>, check the bill and <b>Push bill to Xero</b>. 3. In Xero, reconcile the line with <b>Match</b>. Payees that never need a receipt: <b>Ignore</b>.</div>'
       +acAccTabsHtml(rows,A,'data-pa')
-      +'<div class="bar">'+pill('found','Receipt found')+pill('none','No receipt')+pill('ignored','Ignored')
+      +'<div class="bar">'+pill('found','Receipt found')+pill('none','No receipt')+pill('money','Money in')+pill('ignored','Ignored')
       +'<input class="fci" id="ac-pq2" placeholder="Search payee, line, email" style="width:200px" value="'+esc(AC_IN.pQ)+'">'
       +'<label class="tiny" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Lines whose bill HORIZON already created in Xero: only the Match in Xero is left"><input type="checkbox" id="ac-hidebill"'+(AC_IN.hideBilled?' checked':'')+'> Hide lines with bill created'+(nBilled?' ('+nBilled+')':'')+'</label>'
       +'<span class="save-btn light" id="ac-readm">'+(AC_IN.readBusy?'Reading accounts@…':'Read new mail')+'</span>'
       +'<span class="tiny mut" style="margin-left:auto">'+(AC_IN.readMsg?esc(AC_IN.readMsg)+' · ':'')+(P.mail_read_at?'mail read '+acSynced(P.mail_read_at):'')+'</span></div>';
     if(!rows.length)return h+'<div class="count">No open statement lines: upload the bank statement first (Bank statement tab).</div>';
-    h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Payee</th><th>Statement line</th><th>Amount</th><th>'+(F==='found'?'Receipt in accounts@':F==='none'?'Receipt':'Why')+'</th><th></th></tr></thead><tbody>';
-    h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r), fx=acFlexOf(r)?acFlexCells(r,i):(acDhlOf(r)?acDhlCells(r,i):null);
+    h+='<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th>Date</th><th>Account</th><th>Payee</th><th>Statement line</th><th>Amount</th><th>'+(F==='found'?'Receipt in accounts@':F==='none'?'Receipt':F==='money'?'Order paid':'Why')+'</th><th></th></tr></thead><tbody>';
+    h+=vis.slice(0,500).map(function(r){ var i=rows.indexOf(r), m=r.match, k=acRcKind(r), fx=acFlexOf(r)?acFlexCells(r,i):(acDhlOf(r)?acDhlCells(r,i):(r.amount>0?acCrCells(r,i):null));
       var rc=fx?fx.rc:k==='found'?('<div>'+esc(hzTrkDate(m.date))+' · '+esc(String(m.from).replace(/\s*<[^>]+>\s*$/,'').replace(/^"|"$/g,'')||m.from)+(m.ambiguous?' <span class="pill" style="cursor:default" title="Another email has the same amount: check it in Review">check</span>':'')+'</div><div class="tiny mut">'+esc(String(m.subject||'').slice(0,70))+'</div>')
         :k==='none'?'<span class="tiny" style="color:var(--neg)">none found in accounts@</span>':'<span class="tiny mut">'+(r.amount>=0?'money in':(r.treatment_source==='manual'?'ignored (your rule)':'ignored (built-in rule)'))+'</span>';
       var act=fx?fx.act:k==='found'?(r.bill?'<a href="'+esc(r.bill.url)+'" target="_blank" rel="noopener">Bill in Xero ↗</a><div class="tiny mut">match it in Xero</div>':'<span class="save-btn" data-rv="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">Review</span>'+(r.treatment==='autobill'?' <span class="pill" style="cursor:default" title="This payee is on Auto bill: HORIZON creates the bill automatically every 6 hours">Auto bill</span>':'')+' <span class="save-btn light" data-ig="'+i+'">Ignore</span>')
@@ -20089,7 +20090,7 @@
     b.querySelectorAll('[data-rv]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.rv]; if(r)acDrOpen(r); }; });
     b.querySelectorAll('[data-flex]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.flex]; if(r)acFlexGo(r,x); }; });   // v28.397
     b.querySelectorAll('[data-dhl]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.dhl], I=r&&acDhlOf(r); if(!I)return; AC_DHL.open[I.number]=!AC_DHL.open[I.number]; var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acLinesRerender(); sc.scrollTop=y; }; });
-    acDhlWire(b);
+    acDhlWire(b); acCrWire(b);   // v28.418
     b.querySelectorAll('[data-ig]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.ig]; if(r)acIgnorePayee(r,true); }; });
     b.querySelectorAll('[data-unig]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.unig]; if(r)acIgnorePayee(r,false); }; });
     var mb=document.getElementById('ac-mbx'); if(mb)mb.onclick=function(){ AC_IN.mbx=!AC_IN.mbx; var x=document.getElementById('ac-mbxbody'); if(x)x.style.display=AC_IN.mbx?'':'none'; mb.firstChild.textContent=AC_IN.mbx?'▾ ':'▸ '; }; }
@@ -20344,6 +20345,88 @@
       var lines=(I.shipments||[]).filter(function(s){ return s.business==='uk'; }).map(function(s){ return {ship_date:s.ship_date||'',tracking:s.awb,charge:'freight',description:'DHL '+s.awb+' '+s.orig+'→'+s.dest+' '+s.sender+' → '+s.receiver,ship_to:s.dest==='GB'?'UK':s.dest,po:s.po||'',amount:s.amount}; });
       if(typeof sbOpen==='function')sbOpen(function(){ acDhlLoad(true); },{host:document.getElementById('ac-sup'),head:{supplier:'DHL',ref_base:n,invoice_date:I.date,due_date:I.due||I.date,currency:'AUD',source_file:'DHL '+n}, lines:lines}); }; });
   }
+  // ═══ v28.418 (Ben 21-Oct-26: "built into the review process for any Xero uncoded transactions in RECONCILE") Customer receipts: money-in
+  // bank lines (Bank lines > Money in). Review opens a card under the line with the unpaid Shopify orders it may pay (LIVE Fulfil: the order
+  // named on the line, the same amount due, or found by search). Tick the order(s), Preview (reads Fulfil, Shopify and Xero), then Post:
+  // (1) mark paid in Shopify, (2) Xero Receive Money in this bank, dated the line, to the store's clearing account (Fulfil's manual gateway).
+  // Then match the line to it in Xero. Suggestions come from /api/accounts/receipts, read once the lines load.
+  var AC_CR={d:null,busy:false,err:'',open:{},sel:{},srch:{},q:{},plan:{},msg:{},busyK:{}};
+  function acCrKey(r){ return r.org+'|'+r.account_name+'|'+r.line_date+'|'+Number(r.amount).toFixed(2)+'|'+(r.reference||''); }
+  function acCrEnsure(){ var rows=(AC_IN.p&&AC_IN.p.rows)||[]; if(AC_CR.d||AC_CR.busy||AC_CR.err||!rows.some(function(r){ return r.amount>0; }))return; acCrLoad(false); }
+  function acCrLoad(fresh){ AC_CR.busy=true; AC_CR.err='';
+    fetch('/api/accounts/receipts'+(fresh?'?fresh=1':''),{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){ AC_CR.busy=false; if(j.error)AC_CR.err=j.error; else AC_CR.d=j; acCrRepaint(); })
+      .catch(function(e){ AC_CR.busy=false; AC_CR.err=e.message||String(e); acCrRepaint(); }); }
+  function acCrRepaint(){ var sc=document.scrollingElement||document.documentElement, y=sc.scrollTop; acLinesRerender(); sc.scrollTop=y; }
+  function acCrOf(r){ return AC_CR.d&&AC_CR.d.lines?(AC_CR.d.lines[acCrKey(r)]||null):null; }
+  function acCrSel(k){ return AC_CR.sel[k]||(AC_CR.sel[k]={}); }
+  function acCrSig(k){ return Object.keys(acCrSel(k)).sort().join(','); }
+  function acCrRow(k){ return ((AC_IN.p&&AC_IN.p.rows)||[]).filter(function(r){ return acCrKey(r)===k; })[0]||null; }
+  function acCrFind(k,id){ var r=acCrRow(k), c=r&&acCrOf(r); return ((c&&c.suggestions)||[]).concat(AC_CR.srch[k]||[]).filter(function(o){ return String(o.sale_id)===String(id); })[0]||null; }
+  function acCrLineBody(r){ return {org:r.org,account_name:r.account_name,date:r.line_date,amount:r.amount,reference:r.reference||''}; }
+  function acCrCells(r,i){ var k=acCrKey(r), c=acCrOf(r), R=c&&c.receipt, rc, act;
+    if(R&&R.status==='created'){ var cl=(R.orders||[]).map(function(o){ return o.clearing; }).filter(function(v,j,a){ return v&&a.indexOf(v)===j; });
+      rc='<div><span class="pill" style="cursor:default;background:#dcfce7;color:#15803d;border-color:#86efac">Paid</span> '+esc((R.orders||[]).map(function(o){ return o.reference||o.number; }).join(', '))+'</div><div class="tiny mut">marked paid in Shopify · Receive Money to '+esc(cl.join(', '))+' · '+esc(String(R.created_by||'').split('@')[0]+'@')+' '+esc(R.at||'')+'</div>';
+      act=(R.url?'<a href="'+esc(R.url)+'" target="_blank" rel="noopener">Receive Money in Xero ↗</a>':'Done')+'<div class="tiny mut">match it in Xero</div>';
+      return {rc:rc,act:act,open:false,card:''}; }
+    var s=(c&&c.suggestions)||[], b=s[0];
+    rc=AC_CR.err?'<span class="tiny" style="color:var(--neg)">'+esc(AC_CR.err)+'</span>':!AC_CR.d?'<span class="tiny mut">looking for the order…</span>'
+      :b?'<div><span class="pill" style="cursor:default;background:#dbeafe;color:#1d4ed8;border-color:#93c5fd">'+esc(b.store)+'</span> <b>'+esc(b.reference||b.number)+'</b> '+esc(b.customer)+' <span class="mut">'+esc(b.currency)+' '+money(b.due)+'</span></div><div class="tiny mut">'+esc((b.why||[]).join(' · '))+(s.length>1?' · '+(s.length-1)+' more':'')+'</div>'
+      :'<span class="tiny mut">no unpaid order found: Review to search</span>';
+    if(R&&R.status==='shopify_done')rc+='<div class="tiny" style="color:var(--amber);white-space:normal;max-width:320px">Marked paid in Shopify; Xero Receive Money still to do'+(R.error?': '+esc(R.error):'')+'</div>';
+    act='<span class="save-btn" data-cr="'+i+'" style="background:#13B5EA;border-color:#13B5EA;color:#fff;font-weight:700">'+(AC_CR.open[k]?'Close':'Review')+'</span>';
+    return {rc:rc,act:act,open:!!AC_CR.open[k],card:AC_CR.open[k]?acCrCard(r):''}; }
+  function acCrCard(r){ var k=acCrKey(r), c=acCrOf(r)||{}, sel=acCrSel(k), seen={}, list=[], ccy=r.currency||'', S=(AC_CR.d&&AC_CR.d.shopify)||{}, P=AC_CR.plan[k], m=AC_CR.msg[k], R=c.receipt, bz=AC_CR.busyK[k];
+    Object.keys(sel).map(function(id){ return sel[id]; }).concat(c.suggestions||[], AC_CR.srch[k]||[]).forEach(function(o){ if(o&&!seen[o.sale_id]){ seen[o.sale_id]=1; list.push(o); } });
+    var tot=0; Object.keys(sel).forEach(function(id){ tot+=Number(sel[id].due)||0; }); tot=Math.round(tot*100)/100; var diff=Math.round((r.amount-tot)*100)/100, nSel=Object.keys(sel).length;
+    var head='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--hover)"><b>'+esc(hzTrkDate(r.line_date))+' · '+esc(r.account_name)+' · +'+acMoney(r.amount,ccy)+'</b><span class="mut tiny" style="white-space:normal">'+esc(String(r.reference||'').slice(0,120))+'</span></div>';
+    var rows=list.map(function(o){ var on=!!sel[o.sale_id], warn=(ccy&&o.currency!==ccy)||(o.org&&o.org!==r.org);
+      return '<tr style="border-top:1px solid var(--line)"><td><input type="checkbox" class="ac-cr-ck" data-k="'+esc(k)+'" data-id="'+esc(o.sale_id)+'"'+(on?' checked':'')+'></td>'
+        +'<td style="white-space:nowrap"><span class="pill" style="cursor:default">'+esc(o.store||'?')+'</span>'+(o.store&&S[o.store]===false?' <span class="tiny" style="color:var(--amber)" title="SHOPIFY_'+esc(o.store)+'_DOMAIN / _TOKEN not set on this server">Shopify not connected</span>':'')+'</td>'
+        +'<td style="font-family:ui-monospace,Menlo,monospace;white-space:nowrap">'+esc(o.reference||'')+'</td><td style="font-family:ui-monospace,Menlo,monospace">'+esc(o.number||'')+'</td><td>'+esc(o.customer||'')+'</td><td style="white-space:nowrap">'+esc(hzTrkDate(o.sale_date))+'</td>'
+        +'<td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap">'+esc(o.currency)+' '+money(o.total)+'</td><td style="text-align:right;font-variant-numeric:tabular-nums">'+money(o.paid)+'</td><td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+money(o.due)+'</td>'
+        +'<td class="tiny'+(warn?'':' mut')+'"'+(warn?' style="color:var(--neg)"':'')+'>'+esc((o.why||[]).join(' · '))+'</td></tr>'; }).join('');
+    var sb='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px"><input class="fci ac-cr-q" data-k="'+esc(k)+'" placeholder="Find order: UKWS-7033, SO68420 or customer" value="'+esc(AC_CR.q[k]||'')+'" style="width:280px;text-align:left"><button class="save-btn light ac-cr-go" data-k="'+esc(k)+'">'+(bz==='search'?'Searching…':'Search Fulfil')+'</button><span class="tiny mut">unpaid Shopify orders, last 12 months, live Fulfil</span></div>';
+    var ok=P&&P.ok&&P._sig===acCrSig(k);
+    var foot='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line)"><span>Ticked <b>'+acMoney(tot,ccy)+'</b> of '+acMoney(r.amount,ccy)+(nSel?(Math.abs(diff)<0.011?' <span style="color:var(--pos)">✓ matches</span>':' <span style="color:var(--neg)">difference '+money(diff)+'</span>'):'')+'</span>'
+      +'<button class="save-btn light ac-cr-pv" data-k="'+esc(k)+'" style="margin-left:auto"'+(nSel&&!bz?'':' disabled')+'>'+(bz==='preview'?'Checking…':'Preview')+'</button>'
+      +(ok?'<button class="save-btn ac-cr-post" data-k="'+esc(k)+'" style="background:var(--blue);border-color:var(--blue);color:#fff"'+(bz?' disabled':'')+'>'+(bz==='post'?'Posting…':(R&&R.status==='shopify_done'?'Finish Xero Receive Money':'Mark paid in Shopify + Receive Money in Xero'))+'</button>':'')+'</div>';
+    var pv='';
+    if(P){ if(P.error)pv='<div style="padding:8px 14px;color:var(--neg);font-size:12.5px">'+esc(P.error)+'</div>';
+      else { var cls=(P.orders||[]).map(function(o){ return o.clearing?'<b>'+esc(o.clearing.code)+'</b> '+esc(o.clearing.name):'?'; }).filter(function(v,j,a){ return a.indexOf(v)===j; });
+        pv='<div style="padding:8px 14px;font-size:12.5px;border-top:1px solid var(--line)">'+(P._sig!==acCrSig(k)?'<div class="tiny mut" style="margin-bottom:4px">Ticked orders changed: Preview again.</div>':'')
+          +(P.problems.length?'<div style="color:var(--neg);font-weight:700;margin-bottom:4px">Cannot post yet:</div><ul style="margin:0 0 8px 18px;color:var(--neg)">'+P.problems.map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('')+'</ul>':'')
+          +'<div style="font-weight:700;margin-bottom:4px">What Post does</div><ol style="margin:0 0 0 18px">'
+          +'<li>Shopify: mark paid '+(P.orders||[]).map(function(o){ return '<b>'+esc(o.reference||o.number)+'</b> '+esc(o.currency)+' '+money(o.due)+(o.shopify_done?' (done)':o.shopify&&o.shopify.status?' <span class="mut">(now '+esc(String(o.shopify.status).toLowerCase().replace(/_/g,' '))+')</span>':''); }).join(', ')+'. Fulfil then records the payment through the store\'s manual gateway.</li>'
+          +'<li>Xero '+esc(String(P.line.org).toUpperCase())+': Receive Money in <b>'+esc(P.line.account_name)+'</b>, '+esc(hzTrkDate(P.line.line_date))+', '+esc(P.line.currency)+' '+money(P.line.amount)+', contact "'+esc(P.contact||'')+'", no VAT, to '+cls.join(', ')+'.</li>'
+          +'<li>In Xero, match the bank line to that Receive Money.</li></ol>'+(P.notes&&P.notes.length?'<div class="tiny mut" style="margin-top:4px">'+esc(P.notes.join(' · '))+'</div>':'')+'</div>'; } }
+    return '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden">'+head
+      +(list.length?'<div class="tw"><table class="pay-tbl" style="width:100%;font-size:12.5px"><thead><tr><th></th><th class="l">Store</th><th class="l">Order</th><th class="l">Fulfil SO</th><th class="l">Customer</th><th class="l">Ordered</th><th class="l" style="text-align:right">Total</th><th class="l" style="text-align:right">Paid</th><th class="l" style="text-align:right">Due</th><th class="l">Why</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+        :'<div class="tiny mut" style="padding:10px 14px">No unpaid order suggested for this line: search below.</div>')
+      +sb+foot+pv+(m?'<div style="padding:0 14px 10px;font-size:12.5px;color:'+(m.ok?'var(--pos)':'var(--neg)')+'">'+m.html+'</div>':'')+'</div>'; }
+  function acCrSearch(k){ var r=acCrRow(k), q=String(AC_CR.q[k]||'').trim(); if(!r)return; if(q.length<3){ AC_CR.msg[k]={ok:false,html:'Type at least 3 characters.'}; acCrRepaint(); return; } AC_CR.busyK[k]='search'; AC_CR.msg[k]=null; acCrRepaint();
+    fetch('/api/accounts/receipts/search?q='+encodeURIComponent(q)+'&org='+encodeURIComponent(r.org)+'&currency='+encodeURIComponent(r.currency||''),{cache:'no-store'}).then(function(x){ return x.json(); }).then(function(j){ AC_CR.busyK[k]=null;
+      if(j.error)AC_CR.msg[k]={ok:false,html:esc(j.error)}; else { AC_CR.srch[k]=j.rows||[]; if(!AC_CR.srch[k].length)AC_CR.msg[k]={ok:false,html:'No unpaid Shopify order matches "'+esc(q)+'".'}; } acCrRepaint(); })
+      .catch(function(e){ AC_CR.busyK[k]=null; AC_CR.msg[k]={ok:false,html:esc(e.message||String(e))}; acCrRepaint(); }); }
+  function acCrPreview(k){ var r=acCrRow(k), sig=acCrSig(k); if(!r||!sig)return; AC_CR.busyK[k]='preview'; AC_CR.msg[k]=null; acCrRepaint();
+    fetch('/api/accounts/receipts/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line:acCrLineBody(r),sale_ids:sig.split(',').map(Number)})}).then(function(x){ return x.json(); }).then(function(j){ AC_CR.busyK[k]=null; j._sig=sig; AC_CR.plan[k]=j; acCrRepaint(); })
+      .catch(function(e){ AC_CR.busyK[k]=null; AC_CR.plan[k]={error:e.message||String(e)}; acCrRepaint(); }); }
+  function acCrPost(k){ var r=acCrRow(k), P=AC_CR.plan[k]; if(!r||!P||!P.ok||P._sig!==acCrSig(k))return;
+    var ls=P.orders.map(function(o){ return o.reference+'  '+o.customer+'  '+o.currency+' '+money(o.due)+(o.shopify_done?'  (already marked paid)':'')+'  ->  '+o.clearing.code+' '+o.clearing.name; }).join('\n');
+    if(!confirm('Bank line '+hzTrkDate(P.line.line_date)+', '+P.line.account_name+', '+P.line.currency+' '+money(P.line.amount)+'\n\n(1) Shopify: mark paid\n'+ls+'\n\n(2) Xero '+String(P.line.org).toUpperCase()+': Receive Money in '+P.line.account_name+', dated '+hzTrkDate(P.line.line_date)+', contact "'+P.contact+'", to the clearing account(s) above.\n\nThis writes to live Shopify and live Xero.'))return;
+    AC_CR.busyK[k]='post'; AC_CR.msg[k]=null; acCrRepaint();
+    fetch('/api/accounts/receipts/post',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line:acCrLineBody(r),sale_ids:P._sig.split(',').map(Number),confirm:true})}).then(function(x){ return x.json(); }).then(function(j){ AC_CR.busyK[k]=null;
+      AC_CR.msg[k]=j.error?{ok:false,html:esc(j.error)}:{ok:true,html:'✓ '+esc(j.orders.map(function(o){ return o.reference||o.number; }).join(', '))+' marked paid in Shopify; <a href="'+esc(j.xero.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">Receive Money '+money(j.xero.amount)+' ↗</a> created. Match the line to it in Xero.'};
+      if(!j.error){ AC_CR.plan[k]=null; AC_CR.sel[k]={}; } acCrLoad(true); })
+      .catch(function(e){ AC_CR.busyK[k]=null; AC_CR.msg[k]={ok:false,html:esc(e.message||String(e))}; acCrLoad(true); }); }
+  function acCrWire(b){
+    b.querySelectorAll('[data-cr]').forEach(function(x){ x.onclick=function(){ var r=AC_IN.p.rows[+x.dataset.cr]; if(!r)return; var k=acCrKey(r); AC_CR.open[k]=!AC_CR.open[k];
+      if(AC_CR.open[k]){ var c=acCrOf(r), s=acCrSel(k), t=c&&c.suggestions&&c.suggestions[0]; if(!Object.keys(s).length&&t&&t.score>=60)s[t.sale_id]=t; if(AC_CR.q[k]==null)AC_CR.q[k]=(r.payee_key&&r.payee_key!=='(blank)')?r.payee_key:''; }
+      acCrRepaint(); }; });
+    b.querySelectorAll('.ac-cr-ck').forEach(function(x){ x.onchange=function(){ var k=x.dataset.k, s=acCrSel(k), id=x.dataset.id; if(x.checked){ var o=acCrFind(k,id)||s[id]; if(o)s[id]=o; } else delete s[id]; acCrRepaint(); }; });
+    b.querySelectorAll('.ac-cr-q').forEach(function(x){ x.oninput=function(){ AC_CR.q[x.dataset.k]=x.value; }; x.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); acCrSearch(x.dataset.k); } }; });
+    b.querySelectorAll('.ac-cr-go').forEach(function(x){ x.onclick=function(){ acCrSearch(x.dataset.k); }; });
+    b.querySelectorAll('.ac-cr-pv').forEach(function(x){ x.onclick=function(){ acCrPreview(x.dataset.k); }; });
+    b.querySelectorAll('.ac-cr-post').forEach(function(x){ x.onclick=function(){ acCrPost(x.dataset.k); }; }); }
   // ═══ v28.396 (Ben 16-Oct-26) Flexport AU; v28.397 (Ben: "can simply live in the main reconcile item ... a custom element"): Bank of
   // America (Xero UK, USD) pays every Flexport invoice. A Bank of America Flexport line that matches an open Xero AU Flexport bill shows in
   // Bank lines under Receipt found with its AU bill and one button that (a) pays the AU bill in Xero AU from 901 Loan - D&B Ltd (UK) and
@@ -20358,7 +20441,7 @@
   function acFlexOf(r){ if(!AC_FLEX.d||!acIsFlexBofa(r))return null; var a=-Number(r.amount);
     var l=(AC_FLEX.d.lines||[]).filter(function(x){ return x.date===r.line_date&&Math.abs(x.amount-a)<0.005&&x.reference===r.reference; })[0];
     return l&&['todo','partial','creating','done'].indexOf(l.status)>=0?l:null; }
-  function acHasBill(r){ var f=acFlexOf(r), d=acDhlOf(r); return !!(r.bill||(f&&f.status==='done')||(d&&d.status==='done')); }
+  function acHasBill(r){ var f=acFlexOf(r), d=acDhlOf(r), c=r.amount>0&&acCrOf(r); return !!(r.bill||(f&&f.status==='done')||(d&&d.status==='done')||(c&&c.receipt&&c.receipt.status==='created')); }
   function acFlexCells(r,i){ var f=acFlexOf(r), s=f.settlement||{}, m=AC_FLEX.msg[r.line_date+'|'+r.reference];
     var rc='<div><span class="pill" style="cursor:default;background:#dcfce7;color:#15803d;border-color:#86efac">AU bill</span> '+(f.bills||[]).map(function(x){ return '<a href="'+esc(x.url||('https://go.xero.com/AccountsPayable/View.aspx?InvoiceID='+x.invoice_id))+'" target="_blank" rel="noopener" style="font-family:ui-monospace,Menlo,monospace">'+esc(x.number||'bill')+' ↗</a> <span class="mut">USD '+money(x.amount)+'</span>'; }).join(', ')+'</div>'
       +'<div class="tiny mut">Xero AU Flexport bill: pay from '+esc(AC_FLEX.d.loan_au||'901 Loan - D&B Ltd (UK)')+' + Spend Money here to '+esc(AC_FLEX.d.loan_uk||'901 Loan - D&B PTY LTD (Australia)')+'</div>'

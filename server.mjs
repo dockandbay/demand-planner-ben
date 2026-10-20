@@ -3436,7 +3436,7 @@ async function accountsGate(req, res, next) {
     if (me.live && !(me.is_admin || me.accounts_access)) return res.status(403).json({ error: 'ACCOUNTS access required: ask an admin (CONFIG > Admin > Permissions)', code: 'no_accounts_access' });
     // v28.252 (deep dive P1 #11): anything that changes state under ACCOUNTS (Gmail connect / disconnect, job refreshes) is admin only;
     // the ACCOUNTS grant on its own is read access. requiredCap leaves /api/accounts/ to this gate, so this is the only write check.
-    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
+    if (me.live && req.method !== 'GET' && !me.is_admin && !/^\/(bank-ageing\/upload|payee-rule|payee-rule\/delete|payee-rule\/attach|inbox\/read-mail|forwarding\/action|attach\/run|attach\/\d+\/removed|bills\/run|bills\/create|bills\/\d+\/voided|flexport-au\/settle|receipts\/preview|receipts\/post|payee-rule\/coding|payee-rule\/bank-rule-done|payables\/credit-note)\/?$/.test(req.path)) return res.status(403).json({ error: 'Admin only: the ACCOUNTS grant gives read access', code: 'accounts_admin_only' });   // v28.265: the statement upload is for ACCOUNTS users too (Ben)
     req.me = me; next();
   } catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); }
 }
@@ -4600,6 +4600,194 @@ app.post('/api/accounts/flexport-au/settle', async (req, res) => {
     if (lg) { const cur = (await pool.query(`SELECT au_done FROM planner.flexport_au_settlements WHERE id=$1`, [lg]).catch(() => ({ rows: [] }))).rows[0];
       await pool.query(`UPDATE planner.flexport_au_settlements SET status=$2, error=$3, updated_at=now() WHERE id=$1`, [lg, cur && cur.au_done ? 'partial' : 'error', String(e.message).slice(0, 400)]).catch(() => {}); }
     _flexAuMemo.at = 0; log500(e); res.status(e.code === 503 ? 503 : e.code === 429 ? 429 : 500).json({ error: e.message });
+  }
+});
+// ═══ v28.418 (Ben 21-Oct-26) Customer receipts, inside ACCOUNTS > Reconcile > Bank lines (money in). A money-in statement line is matched to
+// the Shopify order(s) it pays, read from LIVE Fulfil (read only): unpaid orders named in the bank text (UKWS-7033, USWS 19357, SO68420), with
+// the same amount due, or found by search (customer, order). Post = (1) mark each order paid in Shopify (Admin API orderMarkAsPaid; Fulfil then
+// imports the payment through the store's "manual" gateway, which books it to the store's clearing account) and (2) a Xero Receive Money in
+// that bank, dated the bank line, to the same clearing account, so the clearing account nets to zero. The clearing account comes from
+// Fulfil's own gateway mapping (sale.channel.payment_gateway, code manual), never typed here. Then the line is matched in Xero.
+const CR_CHANNELS = { 'dockandbay-uk': { store: 'UK', org: 'uk' }, 'dockandbay-us': { store: 'US', org: 'uk' }, 'dockandbay-eu': { store: 'EU', org: 'uk' }, 'dockandbay-au': { store: 'AU', org: 'au' },
+  'dockandbay-uk-ws': { store: 'UKWS', org: 'uk' }, 'dockandbay-us-ws': { store: 'USWS', org: 'uk' }, 'dockandbay-eu-ws': { store: 'EUWS', org: 'uk' } };
+const CR_STORES = ['UK', 'US', 'EU', 'AU', 'UKWS', 'USWS', 'EUWS'];
+const CR_SALE_FIELDS = ['id', 'number', 'reference', 'state', 'sale_date', 'total_amount', 'payment_total', 'currency.code', 'channel.name', 'party.name'];
+const CR_BASE = [['state', 'in', ['confirmed', 'processing', 'done']], ['channel.name', 'in', Object.keys(CR_CHANNELS)]];
+const crIso = d => ({ __class__: 'date', iso_string: d });
+const crDays = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const cr2 = v => Math.round(Number(v) * 100) / 100;
+async function crSearch(domain, n, order) {
+  const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/sale.sale/search_read', [domain, 0, n || 100, order || null, CR_SALE_FIELDS]);
+  return (Array.isArray(rows) ? rows : []).map(r => { const o = {}; Object.keys(r).forEach(k => { o[k] = fulfilUnwrap(r[k]); }); const ch = CR_CHANNELS[o['channel.name']] || {};
+    const total = cr2(o.total_amount || 0), paid = cr2(o.payment_total || 0);
+    return { sale_id: o.id, number: o.number || '', reference: o.reference || '', state: o.state, sale_date: o.sale_date, currency: o['currency.code'] || '', channel: o['channel.name'], store: ch.store || null, org: ch.org || null,
+      customer: o['party.name'] || '', total, paid, due: cr2(total - paid) }; });
+}
+// Shopify order names (and Fulfil SO numbers) written in the bank text
+function crRefsIn(txt) { const s = String(txt || '').toUpperCase(), refs = new Set(), sos = new Set(); let m;
+  const re = /\b(UKWS|USWS|EUWS|UK|US|EU|AU)[\s\-#]?(\d{3,7})\b/g; while ((m = re.exec(s))) refs.add(m[1] + '-' + m[2]);
+  const re2 = /\bSO\s?(\d{4,7})\b/g; while ((m = re2.exec(s))) sos.add('SO' + m[1]);
+  return { refs: [...refs], sos: [...sos] }; }
+function crNameHit(customer, txt) { const hay = ' ' + String(txt || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' ';
+  return String(customer || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').split(' ').filter(t => t.length >= 3 && !/^(LTD|LIMITED|THE|AND|GMBH|INC|LLC|PTY|SHOP|STORE)$/.test(t)).some(t => hay.indexOf(' ' + t + ' ') >= 0); }
+const crLineKey = l => l.org + '|' + l.account_name + '|' + l.line_date + '|' + Number(l.amount).toFixed(2) + '|' + (l.reference || '');
+// Suggestions for every open money-in line: two LIVE Fulfil reads in all (orders named in the bank text; orders whose total equals a line).
+async function crSuggest(lines) {
+  const all = new Map(), add = rows => rows.forEach(r => { if (r.store && r.due > 0.005) all.set(r.sale_id, r); });
+  const refs = new Set(), sos = new Set(); lines.forEach(l => { const x = crRefsIn(l.reference + ' ' + l.description); x.refs.forEach(v => refs.add(v)); x.sos.forEach(v => sos.add(v)); });
+  if (refs.size || sos.size) add(await crSearch(CR_BASE.concat([['OR', [['reference', 'in', [...refs]]], [['number', 'in', [...sos]]]]]), 200));
+  const amts = [...new Set(lines.map(l => cr2(l.amount)))].slice(0, 150), minD = lines.reduce((m, l) => l.line_date < m ? l.line_date : m, '9999-12-31');
+  if (amts.length) add(await crSearch(CR_BASE.concat([['sale_date', '>=', crIso(crDays(minD, -180))], ['OR', ...amts.map(a => [['total_amount_cache', '>=', a - 0.011], ['total_amount_cache', '<=', a + 0.011]])]]), 500));
+  const out = {};
+  lines.forEach(l => { const txt = l.reference + ' ' + l.description, x = crRefsIn(txt), a = cr2(l.amount);
+    const c = [...all.values()].map(o => { const ref = x.refs.includes(String(o.reference).toUpperCase()) || x.sos.includes(o.number), amt = Math.abs(o.due - a) < 0.011;
+      if (!ref && !amt) return null; if (o.org !== l.org || (l.currency && o.currency !== l.currency)) return null;
+      const lag = Math.round((new Date(l.line_date) - new Date(o.sale_date)) / 864e5); if (!ref && (lag < -3 || lag > 180)) return null;
+      const name = crNameHit(o.customer, txt), why = [ref ? 'order named on the bank line' : null, amt ? 'amount due matches' : 'amount due ' + o.due, name ? 'customer named' : null].filter(Boolean);
+      return Object.assign({}, o, { score: (ref ? 60 : 0) + (amt ? 30 : 0) + (name ? 20 : 0) + Math.max(0, 10 - Math.floor(Math.abs(lag) / 7)), why }); })
+      .filter(Boolean).sort((p, q) => q.score - p.score).slice(0, 5);
+    out[crLineKey(l)] = c; });
+  return out;
+}
+const SHOPIFY_API_VERSION = '2025-07';
+function shopifyCfg(store) { const d = (process.env['SHOPIFY_' + store + '_DOMAIN'] || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, ''), t = (process.env['SHOPIFY_' + store + '_TOKEN'] || '').trim();
+  return { store, domain: d, configured: !!(d && t), token: t }; }
+async function shopifyGql(store, query, variables) {
+  const c = shopifyCfg(store); if (!c.configured) { const e = new Error('Shopify ' + store + ' is not connected (set SHOPIFY_' + store + '_DOMAIN and SHOPIFY_' + store + '_TOKEN)'); e.code = 'NO_SHOPIFY'; throw e; }
+  const r = await _fetchT('https://' + c.domain + '/admin/api/' + SHOPIFY_API_VERSION + '/graphql.json', { method: 'POST', headers: { 'X-Shopify-Access-Token': c.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables: variables || {} }) }, 30000);
+  const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (_) {}
+  if (!r.ok) throw new Error('Shopify ' + store + ' ' + r.status + ': ' + String((j && j.errors && JSON.stringify(j.errors)) || t).slice(0, 200));
+  if (j && j.errors && j.errors.length) throw new Error('Shopify ' + store + ': ' + j.errors.map(e => e.message).join('; ').slice(0, 300));
+  return (j && j.data) || {};
+}
+async function shopifyOrderByName(store, name) {
+  const d = await shopifyGql(store, 'query($q:String!){ orders(first:5, query:$q){ nodes{ id name displayFinancialStatus cancelledAt paymentGatewayNames totalOutstandingSet{ shopMoney{ amount currencyCode } } } } }', { q: 'name:"' + String(name).replace(/["\\]/g, '') + '"' });
+  const want = String(name).replace(/^#/, '').toUpperCase();
+  return ((d.orders && d.orders.nodes) || []).find(n => String(n.name || '').replace(/^#/, '').toUpperCase() === want) || null;
+}
+let _crGw = { at: 0, v: null };
+async function crClearingMap() {   // Fulfil: the "manual" gateway (what Shopify's Mark as paid records) per store channel and its account
+  if (_crGw.v && Date.now() - _crGw.at < 600e3) return _crGw.v;
+  const rows = await fulfilFetchCfg(fulfilConfigFor('live'), 'PUT', '/model/sale.channel.payment_gateway/search_read', [[['code', '=', 'manual']], 0, 50, null, ['channel.name', 'gateway.name', 'gateway.account.code', 'gateway.account.name']]);
+  const v = new Map((Array.isArray(rows) ? rows : []).map(r => [r['channel.name'], { gateway: r['gateway.name'] || '', code: r['gateway.account.code'] || null, name: r['gateway.account.name'] || '' }]));
+  _crGw = { at: Date.now(), v }; return v;
+}
+const _crXacc = {};
+async function crXeroAccounts(org) { const m = _crXacc[org]; if (m && Date.now() - m.at < 3600e3) return m.v;
+  const j = await xeroFetch(org, '/api.xro/2.0/Accounts'); const v = new Map(((j && j.Accounts) || []).filter(a => a.Code && a.Status === 'ACTIVE').map(a => [a.Code, a.Name])); _crXacc[org] = { at: Date.now(), v }; return v; }
+// The checks behind Preview and Post (reads only). prior = this line's own receipt row when resuming a post that stopped half way.
+async function crPlan(b, prior) {
+  const L0 = b.line || {}, ids = [...new Set((b.sale_ids || []).map(Number).filter(n => n > 0))], problems = [], notes = [];
+  const line = (await pool.query(`SELECT s.org, s.account_id, s.account_name, coalesce(a.currency,'') currency, to_char(s.line_date,'YYYY-MM-DD') line_date, s.amount::float8 amount, coalesce(s.reference,'') reference, s.reconciled
+    FROM planner.accounts_stmt_lines s LEFT JOIN planner.accounts_bank_accounts a ON a.org=s.org AND a.account_id=s.account_id
+    WHERE s.org=$1 AND s.account_name=$2 AND s.line_date=$3::date AND abs(s.amount - $4::numeric) < 0.005 AND coalesce(s.reference,'')=$5 LIMIT 1`, [L0.org, L0.account_name, L0.date, Number(L0.amount) || 0, L0.reference || ''])).rows[0];
+  if (!line) { const e = new Error('That bank line is not on the uploaded statement'); e.status = 404; throw e; }
+  if (line.reconciled) problems.push('The bank line is already reconciled in Xero');
+  if (!(line.amount > 0)) problems.push('Not a money-in line');
+  if (!line.account_id) problems.push('No Xero bank account id for ' + line.account_name + ': re-upload the statement');
+  if (!ids.length) problems.push('Tick at least one order');
+  const orders = ids.length ? await crSearch([['id', 'in', ids]], 50) : [];
+  if (orders.length !== ids.length) problems.push('Some orders were not found in Fulfil');
+  const done = new Map(((prior && prior.orders) || []).map(o => [Number(o.sale_id), o]));
+  const gw = await crClearingMap(), xacc = await crXeroAccounts(line.org);
+  for (const o of orders) { const pre = done.get(o.sale_id), lab = (o.reference || o.number) + ': ';
+    o.shopify_done = !!(pre && pre.shopify_done); if (pre) { o.due = Number(pre.amount); o.shopify_id = pre.shopify_id; }
+    if (!o.store) { problems.push(lab + 'not a Shopify store order (' + (o.channel || 'no channel') + ')'); continue; }
+    if (o.org !== line.org) problems.push(lab + 'books to Xero ' + String(o.org).toUpperCase() + ', the bank line is in Xero ' + line.org.toUpperCase());
+    if (line.currency && o.currency !== line.currency) problems.push(lab + 'order is ' + o.currency + ', the bank is ' + line.currency);
+    if (!pre && !(o.due > 0.005)) problems.push(lab + 'nothing due in Fulfil (total ' + o.total + ', paid ' + o.paid + ')');
+    const g = gw.get(o.channel); o.clearing = g && g.code ? { code: g.code, name: g.name, gateway: g.gateway } : null;
+    if (!o.clearing) problems.push(lab + 'Fulfil\'s manual gateway for ' + o.channel + ' (' + ((g && g.gateway) || 'none') + ') has no account code' + (g && g.name ? ' (' + g.name + ')' : '') + ': fix it in Fulfil first');
+    else if (!xacc.has(o.clearing.code)) problems.push(lab + 'clearing account ' + o.clearing.code + ' is not an active account in Xero ' + line.org.toUpperCase());
+    if (o.shopify_done) { o.shopify = { done: true }; continue; }
+    if (!shopifyCfg(o.store).configured) { problems.push(lab + 'Shopify ' + o.store + ' is not connected (SHOPIFY_' + o.store + '_DOMAIN / _TOKEN)'); continue; }
+    try { const s = await shopifyOrderByName(o.store, o.reference);
+      if (!s) { problems.push(lab + 'not found in Shopify ' + o.store); continue; }
+      const out = cr2((s.totalOutstandingSet && s.totalOutstandingSet.shopMoney && s.totalOutstandingSet.shopMoney.amount) || 0);
+      o.shopify = { id: s.id, name: s.name, status: s.displayFinancialStatus, outstanding: out, gateways: s.paymentGatewayNames || [] }; o.shopify_id = s.id;
+      if (s.cancelledAt) problems.push(lab + 'cancelled in Shopify');
+      else if (s.displayFinancialStatus === 'PAID') problems.push(lab + 'already paid in Shopify (Fulfil has not caught up?)');
+      else if (Math.abs(out - o.due) > 0.011) problems.push(lab + 'Shopify says ' + out + ' outstanding, Fulfil ' + o.due);
+    } catch (e) { problems.push(lab + e.message); } }
+  const total = cr2(orders.reduce((s, o) => s + (Number(o.due) || 0), 0)), diff = cr2(line.amount - total);
+  if (orders.length && Math.abs(diff) > 0.011) problems.push('The ticked orders come to ' + total.toFixed(2) + ', the bank line is ' + line.amount.toFixed(2) + ' (difference ' + diff.toFixed(2) + '). Only exact payments can be posted for now.');
+  try { const dup = (await pool.query(`SELECT id, line_date::text d, account_name, status FROM planner.accounts_customer_receipts WHERE status <> 'error' AND ($1::bigint IS NULL OR id <> $1) AND (sale_ids && $2::bigint[] OR (org=$3 AND account_name=$4 AND line_date=$5::date AND abs(line_amount-$6::numeric)<0.005 AND line_ref=$7))`,
+      [prior ? prior.id : null, ids, line.org, line.account_name, line.line_date, line.amount, line.reference])).rows;
+    dup.forEach(d => problems.push('Already posted (or being posted): ' + d.account_name + ' ' + d.d + ' (' + d.status + ')'));
+  } catch (e) { if (/does not exist/.test(e.message)) problems.push('Run migration 379 (planner.accounts_customer_receipts) first'); else throw e; }
+  const store = orders[0] && orders[0].store, contact = store ? 'Shopify ' + store + ' customers' : null;
+  if (new Set(orders.map(o => o.store)).size > 1) notes.push('Orders from more than one store: one Receive Money with a line per order, each to its own clearing account');
+  return { ok: !problems.length, problems, notes, line, orders, total, diff, contact };
+}
+let _crMemo = { at: 0, v: null };
+app.get('/api/accounts/receipts', async (req, res) => {
+  try {
+    if (String(req.query.fresh || '') !== '1' && _crMemo.v && Date.now() - _crMemo.at < 180e3) return res.set('Cache-Control', 'no-store').json(_crMemo.v);
+    const lines = (await pool.query(`SELECT s.org, s.account_name, coalesce(a.currency,'') currency, to_char(s.line_date,'YYYY-MM-DD') line_date, s.amount::float8 amount, coalesce(s.reference,'') reference, coalesce(s.description,'') description
+      FROM planner.accounts_stmt_lines s LEFT JOIN planner.accounts_bank_accounts a ON a.org=s.org AND a.account_id=s.account_id WHERE NOT s.reconciled AND s.amount > 0`)).rows;
+    let log = [], migrated = true;
+    try { log = (await pool.query(`SELECT id, org, account_name, to_char(line_date,'YYYY-MM-DD') line_date, line_amount::float8 amount, line_ref reference, orders, xero_txn_id, status, error, created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at FROM planner.accounts_customer_receipts WHERE status <> 'error' OR created_at > now() - interval '30 days' ORDER BY id`)).rows; }
+    catch (e) { if (/does not exist/.test(e.message)) migrated = false; else throw e; }
+    const sug = lines.length ? await crSuggest(lines) : {}, out = {};
+    lines.forEach(l => { const k = crLineKey(l); out[k] = { suggestions: sug[k] || [] }; });
+    log.forEach(r => { const k = crLineKey(r); if (out[k] && (!out[k].receipt || r.status !== 'error')) out[k].receipt = Object.assign(r, { url: r.xero_txn_id ? 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + r.xero_txn_id : null }); });
+    const shopify = {}; CR_STORES.forEach(s => { shopify[s] = shopifyCfg(s).configured; });
+    _crMemo = { at: Date.now(), v: { ok: true, migrated, shopify, lines: out } }; res.set('Cache-Control', 'no-store').json(_crMemo.v);
+  } catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 409 : 500).json({ error: e.message }); }
+});
+// Search unpaid Shopify orders in LIVE Fulfil by order (UKWS-7033 / SO68420) or customer, last 12 months, for a bank line's card.
+app.get('/api/accounts/receipts/search', async (req, res) => {
+  try { const q = String(req.query.q || '').trim().slice(0, 60); if (q.length < 3) return res.status(400).json({ error: 'Type at least 3 characters' });
+    const org = String(req.query.org || ''), ccy = String(req.query.currency || ''), e2 = q.replace(/([\\%_])/g, '\\$1'), x = crRefsIn(q), today = new Date().toISOString().slice(0, 10);
+    const or = [['OR', [['reference', 'ilike', '%' + e2 + '%']], [['party.name', 'ilike', '%' + e2 + '%']], [['number', '=', q.toUpperCase()]]].concat(x.refs.length ? [[['reference', 'in', x.refs]]] : [])];
+    const rows = (await crSearch(CR_BASE.concat([['sale_date', '>=', crIso(crDays(today, -365))]], or), 150, [['sale_date', 'DESC']]))
+      .filter(o => o.due > 0.005 && (!org || o.org === org)).map(o => Object.assign(o, { why: [ccy && o.currency !== ccy ? 'currency ' + o.currency + ', bank ' + ccy : null].filter(Boolean) })).slice(0, 60);
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/accounts/receipts/preview', async (req, res) => {
+  try { const p = await crPlan(req.body || {}, null); res.json(p); }
+  catch (e) { if (e.status !== 404) log500(e); res.status(e.status || (e.code === 429 ? 429 : 500)).json({ error: e.message }); }
+});
+// Body: { line: { org, account_name, date, amount, reference }, sale_ids: [Fulfil sale id, ...], confirm: true }. Writes LIVE Shopify (mark
+// paid) and LIVE Xero (Receive Money). The receipt row is written before either call; a post that stops after Shopify finishes Xero only.
+app.post('/api/accounts/receipts/post', async (req, res) => {
+  const b = req.body || {}; if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required: this writes to live Shopify and live Xero' });
+  let row = null;
+  try {
+    const L0 = b.line || {}, ids = [...new Set((b.sale_ids || []).map(Number).filter(n => n > 0))].sort((p, q) => p - q);
+    const cur = (await pool.query(`SELECT * FROM planner.accounts_customer_receipts WHERE status <> 'error' AND org=$1 AND account_name=$2 AND line_date=$3::date AND abs(line_amount-$4::numeric)<0.005 AND line_ref=$5`, [L0.org, L0.account_name, L0.date, Number(L0.amount) || 0, L0.reference || ''])).rows[0];
+    if (cur && cur.status === 'created') return res.status(409).json({ error: 'Already posted for this bank line' });
+    if (cur && (cur.sale_ids.map(Number).sort((p, q) => p - q).join(',') !== ids.join(',') || (cur.status === 'creating' && Date.now() - new Date(cur.updated_at).getTime() < 120e3))) return res.status(409).json({ error: 'This bank line is already being posted' + (cur.status === 'shopify_done' ? ' with other orders: finish that first' : '') });
+    const P = await crPlan(b, cur || null); if (!P.ok) return res.status(400).json({ error: P.problems.join(' · '), problems: P.problems });
+    const L = P.line, ordJson = () => JSON.stringify(P.orders.map(o => ({ sale_id: o.sale_id, number: o.number, reference: o.reference, store: o.store, customer: o.customer, amount: o.due, clearing: o.clearing.code, shopify_id: o.shopify_id || null, shopify_done: !!o.shopify_done })));
+    if (cur) { row = cur; await pool.query(`UPDATE planner.accounts_customer_receipts SET status='creating', error=null, updated_at=now() WHERE id=$1`, [row.id]); }
+    else try { row = (await pool.query(`INSERT INTO planner.accounts_customer_receipts (org, account_id, account_name, line_date, line_amount, line_ref, currency, orders, sale_ids, clearing_code, contact_name, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12) RETURNING *`, [L.org, L.account_id, L.account_name, L.line_date, L.amount, L.reference, L.currency, ordJson(), ids, [...new Set(P.orders.map(o => o.clearing.code))].join(','), P.contact, authUser(req) || 'system'])).rows[0]; }
+      catch (e) { if (/duplicate key/.test(e.message)) return res.status(409).json({ error: 'This bank line is already being posted or was posted' }); throw e; }
+    // (1) Shopify: mark each order paid (Fulfil imports the payment through the store's manual gateway into its clearing account)
+    for (const o of P.orders) { if (o.shopify_done) continue;
+      const d = await shopifyGql(o.store, 'mutation($input: OrderMarkAsPaidInput!){ orderMarkAsPaid(input:$input){ order{ id name displayFinancialStatus } userErrors{ field message } } }', { input: { id: o.shopify_id } });
+      const r = d.orderMarkAsPaid || {}, ue = r.userErrors || []; if (ue.length) throw new Error('Shopify ' + o.store + ' ' + o.reference + ': ' + ue.map(x => x.message).join('; '));
+      if (!r.order) throw new Error('Shopify ' + o.store + ' did not confirm ' + o.reference + ' as paid');
+      o.shopify_done = true; await pool.query(`UPDATE planner.accounts_customer_receipts SET orders=$2::jsonb, updated_at=now() WHERE id=$1`, [row.id, ordJson()]); }
+    await pool.query(`UPDATE planner.accounts_customer_receipts SET status='shopify_done', orders=$2::jsonb, updated_at=now() WHERE id=$1`, [row.id, ordJson()]);
+    // (2) Xero: Receive Money in the bank, dated the bank line, a line per order to its store's clearing account (No VAT / BAS excluded)
+    let xc = await xeroContactLookup(L.org, P.contact, { fresh: true });
+    if (!xc.ok && xc.lookup_failed) throw new Error(xc.error + ' (Shopify is done; press Post again to finish Xero)');
+    if (!xc.ok) { const r = await xeroFetch(L.org, '/api.xro/2.0/Contacts', { method: 'PUT', body: { Contacts: [{ Name: P.contact }] } }); const n = r && r.Contacts && r.Contacts[0]; if (!n || !n.ContactID) throw new Error('Xero did not create the contact ' + P.contact + ' (Shopify is done; press Post again to finish Xero)'); xc = { ContactID: n.ContactID }; }
+    const items = P.orders.map(o => ({ Description: (o.reference + ' (' + o.number + ') ' + o.customer + ': ' + o.store + ' order paid by bank, ' + L.account_name).slice(0, 3900), Quantity: 1, UnitAmount: cr2(o.due), AccountCode: o.clearing.code }));
+    if (Math.abs(P.diff) > 0.0001 && items.length) items[items.length - 1].UnitAmount = cr2(items[items.length - 1].UnitAmount + P.diff);   // a cent of rounding goes on the last line so it equals the bank line
+    const bt = { Type: 'RECEIVE', Contact: { ContactID: xc.ContactID }, BankAccount: { AccountID: L.account_id }, Date: L.line_date, Reference: P.orders.map(o => o.reference || o.number).join(', ').slice(0, 255), CurrencyCode: L.currency || undefined, LineAmountTypes: 'NoTax', Status: 'AUTHORISED', LineItems: items };
+    const r = await xeroFetch(L.org, '/api.xro/2.0/BankTransactions', { method: 'PUT', body: { BankTransactions: [bt] } });
+    const t = r && r.BankTransactions && r.BankTransactions[0]; if (!t || !t.BankTransactionID) throw new Error('Xero did not return the Receive Money (Shopify is done; press Post again to finish Xero)');
+    await pool.query(`UPDATE planner.accounts_customer_receipts SET xero_txn_id=$2, status='created', error=null, updated_at=now() WHERE id=$1`, [row.id, t.BankTransactionID]);
+    _crMemo.at = 0;
+    res.json({ ok: true, orders: P.orders.map(o => ({ reference: o.reference, number: o.number, amount: o.due, clearing: o.clearing.code })), xero: { id: t.BankTransactionID, amount: L.amount, url: 'https://go.xero.com/Bank/ViewTransaction.aspx?bankTransactionID=' + t.BankTransactionID } });
+  } catch (e) {
+    if (row) { const cur = (await pool.query(`SELECT orders FROM planner.accounts_customer_receipts WHERE id=$1`, [row.id]).catch(() => ({ rows: [] }))).rows[0], any = cur && (cur.orders || []).some(o => o.shopify_done);
+      await pool.query(`UPDATE planner.accounts_customer_receipts SET status=$2, error=$3, updated_at=now() WHERE id=$1`, [row.id, any ? 'shopify_done' : 'error', String(e.message).slice(0, 400)]).catch(() => {}); }
+    _crMemo.at = 0; log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message });
   }
 });
 async function accEmailPdf(msgId) {
