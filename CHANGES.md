@@ -1,3 +1,12 @@
+## v28.416 (20-Oct-26) Weekly demand phase 1: Fulfil order lines, weekly actuals, Order exclusions, forecast migration preview (not switched on)
+- Ben: weekly forecasting on order-date actuals + an Order exclusions page (spec docs/specs/WEEKLY_DEMAND_AND_ORDER_EXCLUSIONS_SPEC_2026-10-20.md).
+- Migration 377 (additive): planner.order_lines, order_exclusions, order_exclusions_log, sales_actuals_weekly, forecast_weekly; app_settings order_exclusion_threshold = 40.
+- Daily sync of every LIVE Fulfil sale line (read only) with HORIZON market + channel, order / ship date basis and ISO week; weekly actuals rebuilt from it (exclusions applied); monthly history spread into weeks before each channel's Fulfil start.
+- DEMAND > Inputs > Order exclusions (orders with a line over 40 units, searchable, toggle per order) and > Weekly switch-over (sync, forecast migration preview + write, actuals ship vs order date, SKU moves, unmapped channels).
+- NOTHING user-facing changes: monthly screens, forecasts and the buy plan still read the monthly tables. Buy plan before vs after: identical.
+- Sandbox run on live Fulfil data: 347,620 lines; first real month May-26; 126 orders over 40 units. Order-date totals do NOT yet reconcile with the monthly actuals for some markets (e.g. UK DTC Jun-26 16,818 vs 33,049; BAGTOI-MD-CHRYBMB UK DTC Sep-26 55 vs 537): reconciliation with Ben before any switch.
+- New routes: POST /api/cron/order-lines-sync (x-webhook-secret, add to the gate exemptions; daily in n8n), POST /api/demand/order-lines/sync (admin), GET/POST /api/demand/order-exclusions..., POST /api/demand/forecast-weekly/migrate (admin), GET /api/demand/weekly-impact. No env change.
+
 ## v28.415 (20-Oct-26) App health: freezes record what triggered them
 - Ben asked to look into the Combine freeze. Live check: Combine switches in 30 ms (on) / 12 ms (off), also straight after a fresh load; not reproduced. The health log shows the real freezes: Demand plan on v28.397, 25 freezes in 7 days, up to 73 s (kathryn@ 16-17 Oct, many around 21 s), and ben@ 31 s on Buy & Move > FBA (19-Oct 21:05). The log had no clue what started them.
 - Now each long-task (freeze) event carries meta.actions: the last click / Enter / Tab / Escape on a control before each freeze (within 15 s), e.g. "click #agg-btn (Combine)" -> its longest freeze in ms, or "no recent action". Labels only (element id / tag / class and up to 30 characters of its text; never input values). Top 5 per view per minute, so it stays under the 1,000-character meta limit.

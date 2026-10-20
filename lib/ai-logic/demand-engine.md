@@ -3,6 +3,8 @@ topic: demand-engine
 title: Demand forecast engine
 covers: Planning scope, actuals and the current month, subcategory forecast (calc), SKU shares and the chained last-year rule, saved SKU overrides, smoothing and auto-smooth, sets explosion, discontinued run-off, Preorder/KA/TikTok/Zalando folds, the 18-month window, fiscal years, trends, ASP, display basis and roll-ups
 sources:
+  - server.mjs :: orderLinesSync, olMapChannel, weeklyActualsBuild, _olCuts, _olFulfilFrom, forecastWeeklyMigrate
+  - artifact_v16.7.html :: renderOrderExclusionsView, renderWeeklySwitchView
   - migrations/248_planning_scope_status_gate.sql :: set_in_planning_scope
   - server.mjs :: buildDATA
   - server.mjs :: buildSKURAW
@@ -70,6 +72,14 @@ sources:
   - artifact_v16.7.html :: renderKeyAccountsView, kafPkaRefresh, loadPreorderKA
   - server.mjs :: /api/supply/ka-forecast-cells, /api/supply/ka-forecast-cell, kaCellQty
 fingerprints:
+  server.mjs::orderLinesSync: a0ed49055023
+  server.mjs::olMapChannel: e6e78e2c0987
+  server.mjs::weeklyActualsBuild: 7298add66c8a
+  server.mjs::_olCuts: 6207cbf8ee47
+  server.mjs::_olFulfilFrom: f51d9ca7896e
+  server.mjs::forecastWeeklyMigrate: c26d6f9e3ace
+  artifact_v16.7.html::renderOrderExclusionsView: 34cc10543185
+  artifact_v16.7.html::renderWeeklySwitchView: 519f7ee32a20
   migrations/248_planning_scope_status_gate.sql::set_in_planning_scope: b1b7fa248f49
   server.mjs::buildDATA: b1b365e09434
   server.mjs::buildSKURAW: 3fa61dca6e8a
@@ -140,7 +150,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.414
+verified_version: v28.416
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -321,3 +331,13 @@ verified_version: v28.414
 - CONFIG ▸ Demand ▸ Contribution model has a **Size split** per sub-category (sizes = products.size_short, e.g. L / XL / M / One Size; only sub-categories with 2+ size types are listed). Same scope and cascade as the tier mix (cell → channel → country → default), stored as `.size` on the contribution row and resolved on its own cascade, so a size-only row never hides a tier-mix row. (source: contribSizeResolve, hzCfgContribModel)
 - When set, the SKU shares of the sub-category's MASTER SKUs are rescaled so each size type gets its % of the masters' share; within a size the SKUs keep their relative weights (history, then tier); masters with no size (or a size with no %) keep their share; % are normalised over the sizes present; sets are not affected (the Sets % reservation still applies afterwards). Blank = no change. This flows into the Plan SKU rows, Cross Market view, downloads and the buy plan. SKU forecast overrides still win over shares. (source: applySizeSplit, buildSkuShares)
 - The screen shows the LY actual mix by size for the scope and the forecast mix for the next 12 months as currently forecast, with "Use actual" to copy last year's mix. A save updates the open planner at once. (source: hzCfgContribModel)
+
+## Weekly demand phase 1 (v28.416, Ben 20-Oct-26; spec docs/specs/WEEKLY_DEMAND_AND_ORDER_EXCLUSIONS_SPEC_2026-10-20.md)
+- NOT switched on: the monthly screens, forecast and buy plan still read sales_actuals / forecast_outputs. The new tables are for review on DEMAND > Inputs > Weekly switch-over.
+- planner.order_lines: every LIVE Fulfil sale line (read only). Market + channel from the Fulfil sales channel: dockandbay-uk/us/eu/au = DTC (TikTok segment on the UK store and the TikTok UK channel = UK TIK); -ws, Faire, eZComm, AU Wholesale, International Distributor = B2B (wholesale); Amazon .co.uk/.com/.com.au/.ca = UK/US/AU/CA FBA, Amazon EU marketplaces = EU FBA; Zalando = EU ZAL; UK/US/EU Key Accounts = key account; Custom/Co-Brand = custom; other channels unmapped. Order date = the ORDER's sale_date (line sale_date is mostly empty; imported history has the import date in created_at). Ship date = line shipping_date. Basis 'ship' when wholesale or key account and ship date > order date + 14 days, else 'order'; demand date per basis; ISO week = Monday.
+- Sync: POST /api/cron/order-lines-sync (n8n, daily) / Read Fulfil orders now (admin): lines changed since the last run (2-day overlap), keyset paging by id, ~45 s per call with a saved cursor (call again while more:true). Full read = ~348k lines (about 40 minutes of calls).
+- planner.sales_actuals_weekly: counts live orders, mapped market + channel, real products (SKU in Products WITH a category: no SHIPPING / gift card / CUSTOM-LOGO / sample lines), not key accounts or custom, demand date today or earlier (future preorders are order book), minus the over-threshold lines of excluded orders. Per market x channel Fulfil is used from the first month (from the first full Fulfil month, the month after the first month with 1,000+ lines) where Fulfil holds at least half the monthly ship-date actuals; channels with no monthly actuals from the first full Fulfil month; earlier days are the monthly actuals spread evenly over the month (source monthly_spread). (source: server.mjs :: orderLinesSync, olMapChannel, weeklyActualsBuild, _olCuts, _olFulfilFrom)
+- Order exclusions (DEMAND > Inputs > Order exclusions): every order with a line over the threshold (app_settings order_exclusion_threshold, default 40), any channel; toggle excluded per order (default kept, logged in order_exclusions_log); excluded orders' over-threshold lines come off the weekly actuals at once. (source: renderOrderExclusionsView, /api/demand/order-exclusions)
+- Forecast migration: from the current month, per SKU x market x channel x financial year (March to February) the FY total is kept and spread over the FY's ISO weeks (a week belongs to the FY holding its Monday) by week-of-year weights from the last 52 weeks of weekly actuals (sub-category, else category, else market x channel with 26+ weeks of sales, else even), largest-remainder rounding so the FY adds up exactly; written as one version (forecast_weekly_version) only on Write; forecast_outputs untouched. (source: forecastWeeklyMigrate)
+- Impact report (Weekly switch-over page): monthly ship-date actuals vs order-date units per market x channel x month, the biggest SKU moves, unmapped channels, key-account / custom units, exclusions. (source: /api/demand/weekly-impact, renderWeeklySwitchView)
+

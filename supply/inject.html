@@ -13946,7 +13946,7 @@
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',po,POTAB_SLUG[tab]||tab]); }   // #/supply/purchase-orders/<PO>/<tab-slug>
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
-    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','preorders','calendar','revenue','pricechanges','klaviyobis','replacements']; var _danl=['summary','accuracy','fcanom','snapshots','trends','safetystock','shipbags','intake','stockcover']; var _dcfg=['contribmodel','buyplan','runoffsubs']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:(_dcfg.indexOf(_dv)>=0?['demand','config',_dv]:(_dv==='scenario'&&window.scenCur?['demand','scenario',window.scenCur()]:['demand',_dv])))); }   // v28.179: the scenario tool stays in the URL (was cut to #/demand/scenario, so health rows split one page in two)   // input/analysis/config → #/demand/<group>/<slug>
+    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','preorders','calendar','revenue','pricechanges','klaviyobis','replacements','orderexcl','weeklyswitch']; var _danl=['summary','accuracy','fcanom','snapshots','trends','safetystock','shipbags','intake','stockcover']; var _dcfg=['contribmodel','buyplan','runoffsubs']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:(_dcfg.indexOf(_dv)>=0?['demand','config',_dv]:(_dv==='scenario'&&window.scenCur?['demand','scenario',window.scenCur()]:['demand',_dv])))); }   // v28.179: the scenario tool stays in the URL (was cut to #/demand/scenario, so health rows split one page in two)   // input/analysis/config → #/demand/<group>/<slug>
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
@@ -21160,7 +21160,7 @@
   function hzCmdPages(){
     var pages=[], add=function(path,hash){ pages.push({label:path,go:function(){ if(location.hash===hash){ try{ applyRoute(); }catch(e){} } else location.hash=hash; }}); };
     var tc=function(s){ s=String(s||'').replace(/[⬆⬇↻⇄]/g,'').trim(); return /[a-z]/.test(s)?s:s.charAt(0)+s.slice(1).toLowerCase(); };
-    try{ var DX={klaviyobis:'Klaviyo BIS',preorders:'Preorders',snapshots:'Snapshots',replacements:'Replacement forecasts',ssmbacktest:'Backtest',aspadj:'More settings'};
+    try{ var DX={klaviyobis:'Klaviyo BIS',orderexcl:'Order exclusions',weeklyswitch:'Weekly switch-over',preorders:'Preorders',snapshots:'Snapshots',replacements:'Replacement forecasts',ssmbacktest:'Backtest',aspadj:'More settings'};
       (typeof DEMAND_TABS!=='undefined'?DEMAND_TABS:[]).forEach(function(t){ if(t[0]!=='kpis')add('Demand ▸ '+t[1],'#/demand/'+t[0]); });
       Object.keys(DX).forEach(function(k){ add('Demand ▸ '+DX[k],'#/demand/'+k); }); }catch(e){}
     try{ (typeof BUYMOVE_TABS!=='undefined'?BUYMOVE_TABS:[]).forEach(function(t){ add('Buy & Move ▸ '+tc(t[1]),'#/buy-move/'+t[0]); }); }catch(e){}

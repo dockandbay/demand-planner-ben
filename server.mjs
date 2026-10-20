@@ -19579,6 +19579,276 @@ async function dtc2Build(db) {
 app.get('/api/supply/dtc2/report', async (req, res) => {
   try { res.json(await dtc2Build(pool)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ═══ v28.416 (Ben 20-Oct-26): WEEKLY DEMAND PHASE 1 (spec docs/specs/WEEKLY_DEMAND_AND_ORDER_EXCLUSIONS_SPEC_2026-10-20.md).
+// planner.order_lines = every Fulfil sale line (LIVE Fulfil, read only), mapped to HORIZON market + channel, with the demand date rule:
+// order date (sale_date), except wholesale / distributor / key-account lines shipping more than 14 days after the order date, which count
+// on their ship date. planner.sales_actuals_weekly = ISO weeks (Monday) built from it minus excluded anomaly orders; weeks before the
+// Fulfil history are the monthly ship-date actuals spread over the month's days. NOTHING here feeds the monthly screens or the buy plan
+// yet: they keep reading sales_actuals / forecast_outputs until Ben switches after the impact report.
+const OL_EU_AMAZON = new Set(['Amazon.de', 'Amazon.es', 'Amazon.fr', 'Amazon.it', 'Amazon.ie', 'Amazon.pl', 'Amazon.se', 'Amazon.com.be', 'Amazon.nl']);
+function olMapChannel(name, segment) {   // Fulfil channel -> { country, channel, wholesale, key, custom } (country/channel null = unmapped)
+  const n = String(name || '').trim(), seg = String(segment || '').toLowerCase();
+  const r = (country, channel, f) => Object.assign({ country, channel, wholesale: false, key: false, custom: false }, f || {});
+  const DTC = { 'dockandbay-uk': 'UK', 'dockandbay-us': 'US', 'dockandbay-eu': 'EU', 'dockandbay-au': 'AU' };
+  if (DTC[n]) return seg === 'tiktok' ? r(DTC[n], 'TIK') : r(DTC[n], 'DTC');   // TikTok orders on the Shopify UK store -> TIK (Ben 20-Oct-26)
+  if (n === 'TikTok UK') return r('UK', 'TIK');
+  const WS = { 'dockandbay-uk-ws': 'UK', 'dockandbay-us-ws': 'US', 'dockandbay-eu-ws': 'EU', 'Faire UK': 'UK', 'Faire US': 'US', 'eZComm': 'US', 'AU - Wholesale': 'AU',
+    'International Distributor (UK entity)': 'UK', 'International Distributor (AU entity)': 'AU', 'EU - International Distributor': 'EU' };
+  if (WS[n]) return r(WS[n], 'B2B', { wholesale: true });
+  const AMZ = { 'Amazon.co.uk': 'UK', 'Amazon.com': 'US', 'Amazon.com.au': 'AU', 'Amazon.ca': 'CA' };
+  if (AMZ[n]) return r(AMZ[n], 'FBA'); if (OL_EU_AMAZON.has(n)) return r('EU', 'FBA');
+  if (/zalando/i.test(n)) return r('EU', 'ZAL');
+  const m = /^(UK|US|EU|AU) - (Key Accounts|Custom\/Co-Brand)$/.exec(n);
+  if (m) return r(m[1], 'B2B', m[2] === 'Key Accounts' ? { wholesale: true, key: true } : { wholesale: true, custom: true });
+  if (/Co Brand/i.test(n)) return r('UK', 'B2B', { wholesale: true, custom: true });
+  return r(null, null);
+}
+const _olIsoMonday = d => { if (!d) return null; const t = new Date(d + 'T00:00:00Z'); const wd = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - wd); return t.toISOString().slice(0, 10); };
+const _olDate = v => v == null ? null : typeof v === 'object' ? (v.iso_string || null) : String(v).slice(0, 10);
+let _olBusy = null;
+async function orderLinesSync(by, full) {
+  if (_olBusy) return _olBusy;
+  _olBusy = (async () => {
+    const cfg = fulfilConfigFor('live'); if (!cfg.configured) throw new Error('Fulfil live API not configured (FULFIL_LIVE_SUBDOMAIN / FULFIL_LIVE_API_KEY).');
+    const t0 = Date.now();
+    const S = async k => ((await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [k])).rows[0] || {}).value || null;
+    const setS = (k, v) => pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [k, v]);
+    // Keyset paging by line id under a time budget (~45 s): a run that runs out of time saves its cursor and the next call carries on
+    // (a full history read is many pages; Vercel functions are time-limited). Incremental runs read lines changed since the last
+    // completed run (2-day overlap).
+    let cursor = Number(await S('order_lines_cursor')) || 0, mode = (await S('order_lines_mode')) || 'inc', since = await S('order_lines_since');
+    if (full) { cursor = 0; mode = 'full'; since = null; }
+    else if (!cursor) { const last = await S('order_lines_synced_at'); mode = last ? 'inc' : 'full'; since = last ? new Date(new Date(last).getTime() - 2 * 86400000).toISOString().slice(0, 19).replace('T', ' ') : null; }
+    const FIELDS = ['id', 'sale', 'product.code', 'quantity', 'quantity_canceled', 'unit_price', 'sale_date', 'shipping_date', 'is_return',
+      'sale.number', 'sale.reference', 'sale.state', 'sale.channel.name', 'sale.channel_segment', 'sale.party.name', 'sale.currency.code'];
+    const rows = [], saleDate = {}; let more = false;
+    for (;;) { const dom = [['type', '=', 'line'], ['product', '!=', null], ['id', '>', cursor]].concat(since ? [['write_date', '>=', since]] : []);
+      const get = async (path, body) => { for (let k = 0; ; k++) { try { return await fulfilFetchCfg(cfg, 'PUT', path, body); } catch (e) { if (k >= 2 || !/Timed out|ECONNRESET|fetch failed|ENOTFOUND|50[234]/.test(String(e.message))) throw e; await new Promise(r => setTimeout(r, 2000)); } } };
+      const page = await get('/model/sale.line/search_read', [dom, 0, 500, [['id', 'ASC']], FIELDS]);
+      if (!Array.isArray(page) || !page.length) break;
+      // the order date lives on the ORDER: one read of the page's orders (dotted sale.sale_date per line is too slow)
+      const sids = [...new Set(page.map(l => l.sale).filter(Boolean))].filter(id => !(id in saleDate));
+      if (sids.length) (await get('/model/sale.sale/search_read', [[['id', 'in', sids]], 0, sids.length, null, ['id', 'sale_date']]) || []).forEach(x => { saleDate[x.id] = _olDate(x.sale_date); });
+      page.forEach(l => { l._sale_date = saleDate[l.sale] || null; });
+      rows.push(...page); cursor = page[page.length - 1].id;
+      if (page.length < 500) break; if (Date.now() - t0 > 45000) { more = true; break; } }
+    const kaNames = (await pool.query(`SELECT lower(name) n FROM planner.key_accounts WHERE coalesce(name,'')<>'' AND lower(name)<>'fba'`).catch(() => ({ rows: [] }))).rows.map(r => r.n);
+    const out = [];
+    for (const l of rows) {
+      const sku = String(l['product.code'] || '').trim(); if (!sku) continue;
+      const mp = olMapChannel(l['sale.channel.name'], l['sale.channel_segment']);
+      const cust = l['sale.party.name'] || null, key = mp.key || (cust && kaNames.some(k => String(cust).toLowerCase().includes(k)));
+      const qty = (Number(_fulfilNum(l.quantity)) || 0) - (Number(_fulfilNum(l.quantity_canceled)) || 0);
+      const od = l._sale_date || _olDate(l.sale_date), sd = _olDate(l.shipping_date);   // the order date lives on the ORDER (line sale_date is empty for most, incl. imported history)
+      const shipBasis = (mp.wholesale || key) && od && sd && (new Date(sd) - new Date(od)) > 14 * 86400000;
+      const dd = shipBasis ? sd : od;
+      out.push([l.id, l.sale, l['sale.number'] || null, l['sale.reference'] || null, l['sale.channel.name'] || null, l['sale.channel_segment'] || null, cust, mp.country, mp.channel,
+        !!mp.wholesale, !!key, !!mp.custom, sku, l.is_return ? -Math.abs(qty) : qty, _fulfilNum(l.unit_price), l['sale.currency.code'] || null, od, sd, l['sale.state'] || null,
+        shipBasis ? 'ship' : 'order', dd, _olIsoMonday(dd)]);
+    }
+    const COLS = ['line_id', 'sale_id', 'so_number', 'reference', 'fulfil_channel', 'channel_segment', 'customer', 'country', 'channel', 'is_wholesale', 'is_key_account', 'is_custom', 'sku', 'qty', 'unit_price', 'currency', 'order_date', 'ship_date', 'sale_state', 'basis', 'demand_date', 'iso_week'];
+    const TYP = ['bigint', 'bigint', 'text', 'text', 'text', 'text', 'text', 'text', 'text', 'boolean', 'boolean', 'boolean', 'text', 'numeric', 'numeric', 'text', 'date', 'date', 'text', 'text', 'date', 'date'];
+    for (let i = 0; i < out.length; i += 1000) { const b = out.slice(i, i + 1000);   // batched multi-row upsert (one statement per 1,000 lines)
+      await pool.query(`INSERT INTO planner.order_lines (${COLS.join(',')}, synced_at) SELECT ${COLS.map((c, k) => 'u.c' + k).join(',')}, now() FROM unnest(${TYP.map((t, k) => '$' + (k + 1) + '::' + t + '[]').join(',')}) AS u(${COLS.map((c, k) => 'c' + k).join(',')})
+        ON CONFLICT (line_id) DO UPDATE SET ${COLS.filter(c => c !== 'line_id').map(c => c + '=excluded.' + c).join(', ')}, synced_at=now()`, COLS.map((c, k) => b.map(r => r[k]))); }
+    if (more) { await setS('order_lines_cursor', String(cursor)); await setS('order_lines_mode', mode); await setS('order_lines_since', since || '');
+      return { lines: out.length, mode, since, more: true, cursor, ms: Date.now() - t0, by: by || null }; }   // call again to continue
+    await setS('order_lines_cursor', '0'); await setS('order_lines_since', ''); await setS('order_lines_mode', 'inc');
+    if (mode === 'full' || !(await S('order_lines_synced_at'))) await setS('order_lines_full_at', new Date(t0).toISOString());
+    await setS('order_lines_synced_at', new Date(t0).toISOString());
+    const built = await weeklyActualsBuild();
+    return { lines: out.length, mode, since, more: false, ms: Date.now() - t0, weekly: built, by: by || null };
+  })().finally(() => { _olBusy = null; });
+  return _olBusy;
+}
+async function _olThreshold() { const v = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='order_exclusion_threshold'`).catch(() => ({ rows: [] }))).rows[0] || {}).value; const n = Number(v); return n > 0 ? n : 40; }
+// Rebuild planner.sales_actuals_weekly in one transaction. Fulfil weeks from the first FULL month of Fulfil history; earlier days from the
+// monthly ship-date actuals spread evenly over the month's days. Lines counted: live orders (not draft / quotation / cancelled), mapped
+// market + channel, not key accounts or custom / co-brand (as the monthly actuals), and not the over-threshold lines of excluded orders.
+// The first FULL month of real Fulfil history: the month after the first month with 1,000+ live lines (a few stray older orders exist);
+// app_settings 'weekly_actuals_fulfil_from' (YYYY-MM-01) overrides it.
+async function _olFulfilFrom() {
+  const ov = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='weekly_actuals_fulfil_from'`).catch(() => ({ rows: [] }))).rows[0] || {}).value;
+  if (ov && /^\d{4}-\d{2}-01$/.test(ov)) return ov;
+  const r = (await pool.query(`SELECT to_char((min(m) + interval '1 month')::date,'YYYY-MM-DD') d FROM (SELECT date_trunc('month', order_date) m FROM planner.order_lines
+    WHERE sale_state NOT IN ('draft','quotation','cancel','cancelled') AND order_date IS NOT NULL GROUP BY 1 HAVING count(*) >= 1000) x`)).rows[0] || {};
+  return r.d || '2999-01-01'; }
+// Lines that count as demand: live orders (not draft / quotation / cancelled), mapped market + channel, real products (a SKU in
+// planner.products: no SHIPPING / service / gift-card lines), not key accounts or custom / co-brand (as the monthly actuals), dated today or
+// earlier (future preorders are order book, not actuals), and not the over-threshold lines of excluded orders.
+const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND NOT l.is_custom
+  AND l.demand_date <= current_date AND EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = l.sku AND coalesce(p.category_name_final,'') <> '')
+  AND NOT (l.qty > ${Number(thr)} AND EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded))`;
+// Fulfil did not take every channel over at once (e.g. UK Amazon only from Sep-26): each market x channel uses Fulfil from the first month
+// (on or after the first full Fulfil month) where Fulfil holds at least half the monthly ship-date actuals; channels with no monthly actuals
+// (new in Fulfil, e.g. UK TIK) from the first full Fulfil month. Earlier days use the monthly actuals spread over the month.
+async function _olCuts(db, thr) {
+  const from = await _olFulfilFrom();
+  const rows = (await db.query(`WITH o AS (SELECT l.country, l.channel, date_trunc('month', l.demand_date)::date m, sum(l.qty) u FROM planner.order_lines l WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date >= $1::date GROUP BY 1,2,3),
+      s AS (SELECT country, channel, month m, sum(units) u FROM planner.sales_actuals WHERE month >= $1::date GROUP BY 1,2,3),
+      cc AS (SELECT DISTINCT country, channel FROM o UNION SELECT DISTINCT country, channel FROM s)
+    SELECT cc.country, cc.channel,
+      coalesce((SELECT min(o.m) FROM o LEFT JOIN s ON s.country=o.country AND s.channel=o.channel AND s.m=o.m WHERE o.country=cc.country AND o.channel=cc.channel AND o.m < date_trunc('month', current_date) AND (coalesce(s.u,0) = 0 OR o.u >= 0.5 * s.u)),
+               CASE WHEN EXISTS (SELECT 1 FROM s WHERE s.country=cc.country AND s.channel=cc.channel) THEN NULL ELSE $1::date END)::text cut
+    FROM cc ORDER BY 1,2`, [from])).rows;
+  return { from, cuts: rows };
+}
+// Rebuild planner.sales_actuals_weekly in one transaction (Fulfil weeks per market x channel from its cut; monthly spread before it).
+async function weeklyActualsBuild() {
+  const t0 = Date.now(), thr = await _olThreshold();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '180s'");
+    const { from, cuts } = await _olCuts(client, thr);
+    await client.query(`CREATE TEMP TABLE _cut (country text, channel text, cut date) ON COMMIT DROP`);
+    if (cuts.length) await client.query(`INSERT INTO _cut SELECT * FROM unnest($1::text[], $2::text[], $3::date[])`, [cuts.map(c => c.country), cuts.map(c => c.channel), cuts.map(c => c.cut || '2999-01-01')]);
+    await client.query(`DELETE FROM planner.sales_actuals_weekly`);
+    const a = await client.query(`INSERT INTO planner.sales_actuals_weekly (sku, country, channel, iso_week, units, revenue, source, built_at)
+      SELECT l.sku, l.country, l.channel, l.iso_week, sum(l.qty), sum(l.qty * coalesce(l.unit_price,0)), 'fulfil', now()
+      FROM planner.order_lines l JOIN _cut c ON c.country = l.country AND c.channel = l.channel
+      WHERE ${OL_LIVE_SQL(thr)} AND l.demand_date >= c.cut AND l.iso_week IS NOT NULL
+      GROUP BY 1,2,3,4 HAVING sum(l.qty) <> 0`);
+    const b = await client.query(`INSERT INTO planner.sales_actuals_weekly (sku, country, channel, iso_week, units, revenue, source, built_at)
+      SELECT s.sku, s.country, s.channel, date_trunc('week', d)::date wk, sum(s.units / dim), sum(coalesce(s.revenue,0) / dim), 'monthly_spread', now()
+      FROM (SELECT sa.sku, sa.country, sa.channel, sa.month, sum(sa.units) units, sum(sa.revenue) revenue, extract(day FROM (date_trunc('month', sa.month) + interval '1 month - 1 day'))::numeric dim, coalesce(c.cut, '2999-01-01'::date) cut
+            FROM planner.sales_actuals sa LEFT JOIN _cut c ON c.country = sa.country AND c.channel = sa.channel GROUP BY 1,2,3,4,8) s
+      CROSS JOIN LATERAL generate_series(s.month, s.month + interval '1 month - 1 day', interval '1 day') d
+      WHERE d < s.cut
+      GROUP BY 1,2,3,4
+      ON CONFLICT (sku, country, channel, iso_week) DO UPDATE SET units = planner.sales_actuals_weekly.units + excluded.units, revenue = coalesce(planner.sales_actuals_weekly.revenue,0) + coalesce(excluded.revenue,0), source = 'mixed'`);
+    await client.query('COMMIT');
+    return { fulfil_rows: a.rowCount, spread_rows: b.rowCount, fulfil_from: from, cuts: cuts.map(c => c.country + ' ' + c.channel + ' ' + (c.cut ? c.cut.slice(0, 7) : 'monthly')), threshold: thr, ms: Date.now() - t0 };
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+}
+app.post('/api/cron/order-lines-sync', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(Object.assign({ ok: true }, await orderLinesSync('cron', String(req.query.full || '') === '1'))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/order-lines/sync', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try { res.json(Object.assign({ ok: true }, await orderLinesSync(authUser(req), !!(req.body || {}).full))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ORDER EXCLUSIONS (Demand > Inputs): every order with a line over the threshold, searchable; toggle per order (default not excluded).
+app.get('/api/demand/order-exclusions', async (req, res) => {
+  try {
+    const thr = await _olThreshold(), q = String(req.query.q || '').trim().slice(0, 80), like = '%' + q.replace(/[%_\\]/g, m => '\\' + m) + '%';
+    const rows = (await pool.query(`WITH big AS (SELECT * FROM planner.order_lines WHERE qty > $1 AND sale_state NOT IN ('draft','quotation','cancel','cancelled'))
+      SELECT b.sale_id, max(b.so_number) so, max(b.reference) reference, max(b.customer) customer, max(b.fulfil_channel) fulfil_channel, max(b.country) country, max(b.channel) channel,
+        max(b.order_date)::text order_date, max(b.ship_date)::text ship_date, bool_or(b.is_key_account) key_account, bool_or(b.is_custom) custom,
+        json_agg(json_build_object('sku', b.sku, 'qty', b.qty) ORDER BY b.qty DESC) lines, sum(b.qty) flagged_units,
+        (SELECT sum(qty) FROM planner.order_lines o WHERE o.sale_id = b.sale_id) order_units,
+        coalesce(bool_or(x.excluded), false) excluded, max(x.note) note, max(x.changed_by) changed_by, max(x.changed_at)::text changed_at
+      FROM big b LEFT JOIN planner.order_exclusions x ON x.sale_id = b.sale_id
+      WHERE ($2 = '' OR b.so_number ILIKE $3 OR b.reference ILIKE $3 OR b.customer ILIKE $3 OR b.sku ILIKE $3 OR b.fulfil_channel ILIKE $3)
+      GROUP BY b.sale_id ORDER BY max(b.order_date) DESC NULLS LAST LIMIT 500`, [thr, q, like])).rows;
+    const fc = fulfilConfigFor('live');
+    res.set('Cache-Control', 'no-store').json({ ok: true, threshold: thr, fulfil_base: fc.subdomain ? 'https://' + fc.subdomain + '.fulfil.io' : null, synced_at: ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='order_lines_synced_at'`)).rows[0] || {}).value || null, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/order-exclusions/:sale', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.is_admin || me.demand_edit || me.supply_edit)) return res.status(403).json({ error: 'Edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try { const sale = Number(req.params.sale), b = req.body || {}, by = authUser(req) || 'unknown'; if (!(sale > 0)) return res.status(400).json({ error: 'sale id required' });
+    const so = ((await pool.query(`SELECT max(so_number) so FROM planner.order_lines WHERE sale_id=$1`, [sale])).rows[0] || {}).so || null;
+    await pool.query(`INSERT INTO planner.order_exclusions (sale_id, so_number, excluded, note, changed_by, changed_at) VALUES ($1,$2,$3,$4,$5,now())
+      ON CONFLICT (sale_id) DO UPDATE SET excluded=excluded.excluded, note=coalesce(excluded.note, planner.order_exclusions.note), changed_by=excluded.changed_by, changed_at=now()`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
+    await pool.query(`INSERT INTO planner.order_exclusions_log (sale_id, so_number, excluded, note, changed_by) VALUES ($1,$2,$3,$4,$5)`, [sale, so, !!b.excluded, b.note == null ? null : String(b.note).slice(0, 500), by]);
+    res.json({ ok: true, weekly: await weeklyActualsBuild() });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/order-exclusions-threshold', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try { const v = Math.round(Number((req.body || {}).value)); if (!(v >= 1 && v <= 100000)) return res.status(400).json({ error: 'threshold must be a whole number of units' });
+    await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('order_exclusion_threshold', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]);
+    res.json({ ok: true, threshold: v, weekly: await weeklyActualsBuild() });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.416: FORECAST MIGRATION monthly -> weekly (decision (a), Ben 20-Oct-26: each financial year's total per SKU x market x channel is kept,
+// months may shift). From the current month onwards, per FY (March to February): FY total = sum of the monthly forecast; spread over the
+// FY's ISO weeks (a week belongs to the FY holding its Monday) by the weekly sales shape of the last 52 weeks (week-of-year weights for
+// sub-category x market x channel, else category, else market x channel, else even), rounded so the FY adds up exactly. Written as one
+// version in planner.forecast_weekly; forecast_outputs is untouched (rollback = ignore / delete the version).
+const _fwMon = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
+const _fwWoy = d => { const t = new Date(d + 'T00:00:00Z'); const th = new Date(t); th.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7)); const y1 = new Date(Date.UTC(th.getUTCFullYear(), 0, 4)); return 1 + Math.round(((th - y1) / 86400000 - 3 + ((y1.getUTCDay() + 6) % 7)) / 7); };
+const _fwFy = ym => { const [y, m] = ym.split('-').map(Number); return m >= 3 ? y : y - 1; };
+function _fwSplit(total, weights) {   // integer split by largest remainder; total may be 0
+  const W = weights.reduce((a, b) => a + b, 0) || weights.length, raw = weights.map(w => total * ((W === weights.length && !weights.some(x => x)) ? 1 : w) / W);
+  const fl = raw.map(Math.floor); let rest = Math.round(total - fl.reduce((a, b) => a + b, 0));
+  const ord = raw.map((r, i) => [r - fl[i], i]).sort((a, b) => b[0] - a[0]); for (let k = 0; rest > 0 && ord.length; k = (k + 1) % ord.length) { fl[ord[k][1]]++; rest--; }
+  return fl; }
+async function forecastWeeklyMigrate(confirm, by) {
+  const t0 = Date.now(), today = new Date().toISOString().slice(0, 10), curMonth = today.slice(0, 7) + '-01';
+  const fc = (await pool.query(`SELECT fo.sku, upper(split_part(fo.warehouse,'_',1)) country, fo.channel, to_char(fo.month,'YYYY-MM') ym, sum(fo.units)::int u,
+      coalesce(p.subcategory_name_final,'') sub, coalesce(p.category_name_final,'') cat
+    FROM planner.forecast_outputs fo LEFT JOIN planner.products p ON p.sku = fo.sku WHERE fo.month >= $1::date GROUP BY 1,2,3,4,6,7`, [curMonth])).rows;
+  // weekly shape (week-of-year weights) from the last 52 weeks of weekly actuals, at three levels
+  const shp = (await pool.query(`SELECT a.country, a.channel, coalesce(p.subcategory_name_final,'') sub, coalesce(p.category_name_final,'') cat, a.iso_week::text wk, sum(a.units)::float8 u
+    FROM planner.sales_actuals_weekly a LEFT JOIN planner.products p ON p.sku = a.sku WHERE a.iso_week >= (current_date - 364) AND a.units > 0 GROUP BY 1,2,3,4,5`)).rows;
+  const S = { sub: {}, cat: {}, mc: {} }, add = (m, k, w, u) => { const o = m[k] || (m[k] = {}); o[w] = (o[w] || 0) + u; };
+  shp.forEach(r => { const w = _fwWoy(r.wk); add(S.sub, r.country + '|' + r.channel + '|' + r.sub, w, r.u); add(S.cat, r.country + '|' + r.channel + '|' + r.cat, w, r.u); add(S.mc, r.country + '|' + r.channel, w, r.u); });
+  const enough = o => o && Object.keys(o).length >= 26;   // a shape needs at least half a year of weeks with sales
+  // group monthly rows into series x FY
+  const G = new Map(); fc.forEach(r => { const fy = _fwFy(r.ym), k = r.sku + '|' + r.country + '|' + r.channel + '|' + fy; let g = G.get(k);
+    if (!g) G.set(k, g = { sku: r.sku, country: r.country, channel: r.channel, fy, sub: r.sub, cat: r.cat, total: 0, months: {}, first: r.ym }); g.total += r.u; g.months[r.ym] = (g.months[r.ym] || 0) + r.u; if (r.ym < g.first) g.first = r.ym; });
+  const out = [], used = { sub: 0, cat: 0, mc: 0, even: 0 }, before = {}, after = {}, monthOfWeekDays = {};
+  const weeksOf = (fy, fromYm) => { const endD = new Date(Date.UTC(fy + 1, 2, 0)).toISOString().slice(0, 10), ws = [];   // Mondays from the first month's week to the FY end, kept when the Monday is in this FY
+    for (let d = new Date(_fwMon(fromYm + '-01') + 'T00:00:00Z'); d.toISOString().slice(0, 10) <= endD; d.setUTCDate(d.getUTCDate() + 7)) { const wk = d.toISOString().slice(0, 10); if (_fwFy(wk.slice(0, 7)) === fy) ws.push(wk); }
+    return ws; };
+  const dayMonths = wk => { if (monthOfWeekDays[wk]) return monthOfWeekDays[wk]; const m = {}; for (let i = 0; i < 7; i++) { const d = new Date(wk + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); const ym = d.toISOString().slice(0, 7); m[ym] = (m[ym] || 0) + 1 / 7; } return (monthOfWeekDays[wk] = m); };
+  for (const g of G.values()) {
+    const ws = weeksOf(g.fy, g.first); if (!ws.length) continue;
+    let shape = S.sub[g.country + '|' + g.channel + '|' + g.sub], lvl = 'sub';
+    if (!enough(shape)) { shape = S.cat[g.country + '|' + g.channel + '|' + g.cat]; lvl = 'cat'; }
+    if (!enough(shape)) { shape = S.mc[g.country + '|' + g.channel]; lvl = 'mc'; }
+    if (!enough(shape)) { shape = null; lvl = 'even'; } used[lvl]++;
+    const w = ws.map(wk => shape ? (shape[_fwWoy(wk)] || 0) + 1e-6 : 1), split = _fwSplit(g.total, w);
+    const mk = g.country + '|' + g.channel;
+    Object.keys(g.months).forEach(ym => { (before[mk] = before[mk] || {})[ym] = (before[mk][ym] || 0) + g.months[ym]; });
+    ws.forEach((wk, i) => { if (split[i]) out.push([g.sku, g.country, g.channel, wk, split[i]]); const dm = dayMonths(wk); Object.keys(dm).forEach(ym => { (after[mk] = after[mk] || {})[ym] = (after[mk][ym] || 0) + split[i] * dm[ym]; }); });
+  }
+  { const M = new Map(); out.forEach(r => { const k = r[0] + '|' + r[1] + '|' + r[2] + '|' + r[3]; M.set(k, (M.get(k) || 0) + r[4]); }); out.length = 0; M.forEach((v, k) => { const p = k.split('|'); out.push([p[0], p[1], p[2], p[3], v]); }); }   // one row per key
+  const months = [...new Set(Object.values(before).flatMap(o => Object.keys(o)).concat(Object.values(after).flatMap(o => Object.keys(o))))].sort();
+  const summary = Object.keys(before).sort().map(mk => ({ market: mk.replace('|', ' '), total_before: Object.values(before[mk]).reduce((a, b) => a + b, 0), total_after: Math.round(Object.values(after[mk] || {}).reduce((a, b) => a + b, 0)),
+    months: months.map(ym => ({ ym, before: Math.round((before[mk] || {})[ym] || 0), after: Math.round((after[mk] || {})[ym] || 0) })) }));
+  const version = 'migrated-' + today, res = { version, series: G.size, rows: out.length, shape_used: used, from_month: curMonth.slice(0, 7), summary, ms: Date.now() - t0 };
+  if (!confirm) return Object.assign(res, { preview: true });
+  const client = await pool.connect();
+  try { await client.query('BEGIN'); await client.query("SET LOCAL statement_timeout = '300s'");
+    await client.query(`DELETE FROM planner.forecast_weekly WHERE version = $1`, [version]);
+    for (let i = 0; i < out.length; i += 5000) { const b = out.slice(i, i + 5000);
+      await client.query(`INSERT INTO planner.forecast_weekly (sku, country, channel, iso_week, units, version, entered_as, updated_by, updated_at)
+        SELECT u.s, u.c, u.ch, u.w, u.n, $6, 'migrated', $7, now() FROM unnest($1::text[], $2::text[], $3::text[], $4::date[], $5::numeric[]) AS u(s, c, ch, w, n)`,
+        [b.map(r => r[0]), b.map(r => r[1]), b.map(r => r[2]), b.map(r => r[3]), b.map(r => r[4]), version, by || null]); }
+    await client.query(`INSERT INTO planner.app_settings (key, value) VALUES ('forecast_weekly_version', $1) ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [version]);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+  return Object.assign(res, { applied: true, ms: Date.now() - t0 });
+}
+app.post('/api/demand/forecast-weekly/migrate', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !me.is_admin) return res.status(403).json({ error: 'Admin only' }); } catch (e) { log500(e); return res.status(500).json({ error: 'permission check failed' }); }
+  try { res.json(Object.assign({ ok: true }, await forecastWeeklyMigrate((req.body || {}).confirm === true, authUser(req)))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// IMPACT REPORT (phase 1, read only): monthly actuals ship-date (today, sales_actuals) vs order-date (order_lines, same exclusions as the
+// weekly build) per market x channel x month over the Fulfil months, the biggest SKU moves, and the excluded units.
+app.get('/api/demand/weekly-impact', async (req, res) => {
+  try {
+    const thr = await _olThreshold();
+    const from = await _olFulfilFrom(); if (from >= '2999') return res.json({ ok: true, empty: true });
+    const LIVE = OL_LIVE_SQL(thr), EXCL = 'true', cutInfo = await _olCuts(pool, thr);
+    const mc = (await pool.query(`WITH o AS (SELECT l.country, l.channel, date_trunc('month', l.demand_date)::date m, sum(l.qty) u FROM planner.order_lines l WHERE ${LIVE} AND ${EXCL} AND l.demand_date >= $1 GROUP BY 1,2,3),
+        s AS (SELECT country, channel, month m, sum(units) u FROM planner.sales_actuals WHERE month >= $1 GROUP BY 1,2,3)
+      SELECT coalesce(o.country, s.country) country, coalesce(o.channel, s.channel) channel, to_char(coalesce(o.m, s.m),'YYYY-MM') ym, coalesce(s.u,0)::int ship_basis, coalesce(o.u,0)::int order_basis
+      FROM o FULL JOIN s ON s.country=o.country AND s.channel=o.channel AND s.m=o.m ORDER BY 1,2,3`, [from])).rows;
+    const sku = (await pool.query(`WITH o AS (SELECT l.sku, l.country, l.channel, date_trunc('month', l.demand_date)::date m, sum(l.qty) u FROM planner.order_lines l WHERE ${LIVE} AND ${EXCL} AND l.demand_date >= $1 GROUP BY 1,2,3,4),
+        s AS (SELECT sku, country, channel, month m, sum(units) u FROM planner.sales_actuals WHERE month >= $1 GROUP BY 1,2,3,4)
+      SELECT coalesce(o.sku, s.sku) sku, coalesce(o.country, s.country) country, coalesce(o.channel, s.channel) channel, to_char(coalesce(o.m, s.m),'YYYY-MM') ym, coalesce(s.u,0)::int ship_basis, coalesce(o.u,0)::int order_basis
+      FROM o FULL JOIN s ON s.sku=o.sku AND s.country=o.country AND s.channel=o.channel AND s.m=o.m ORDER BY abs(coalesce(o.u,0) - coalesce(s.u,0)) DESC LIMIT 40`, [from])).rows;
+    const unm = (await pool.query(`SELECT fulfil_channel, count(*)::int lines, sum(qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.country IS NULL OR l.channel IS NULL) GROUP BY 1 ORDER BY 3 DESC`)).rows;
+    const flags = (await pool.query(`SELECT count(DISTINCT sale_id)::int orders, count(*)::int lines, coalesce(sum(qty),0)::int units, count(DISTINCT sale_id) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded))::int excluded_orders,
+        coalesce(sum(qty) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded)),0)::int excluded_units FROM planner.order_lines l WHERE l.qty > $1 AND l.sale_state NOT IN ('draft','quotation','cancel','cancelled')`, [thr])).rows[0];
+    const ka = (await pool.query(`SELECT l.country, l.channel, to_char(date_trunc('month', l.demand_date),'YYYY-MM') ym, sum(l.qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.is_key_account OR l.is_custom) AND l.demand_date >= $1 AND l.demand_date <= current_date GROUP BY 1,2,3 ORDER BY 1,2,3`, [from])).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, from: from.slice(0, 7), threshold: thr, cuts: cutInfo.cuts, key_custom: ka, by_market_month: mc, top_sku_moves: sku, unmapped_channels: unm, exclusions: flags });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/dtc/mismatch', async (req, res) => {
   const countOnly = !!(req.query && req.query.count);
   // v28.081: the badge (?count=1) is served from a 10-min SWR memo (was a full 9s reconciliation on every page load); the
