@@ -1,0 +1,237 @@
+kit,pp,market,pp_available,kit_sold_28d,threshold,now_first,action,singles_bom
+UK-TEATWL-MD-3SET-FINDIN,PP-TEATWL-MD-3SET-FINDIN,UK,0.0,34.0,3,singles,set singles first (dry-run),233
+US-TEATWL-MD-3SET-FINDIN,PP-TEATWL-MD-3SET-FINDIN,US,0.0,0,3,singles,set singles first (dry-run),287
+EU-TEATWL-MD-3SET-FINDIN,PP-TEATWL-MD-3SET-FINDIN,EU,0.0,0,3,singles,set singles first (dry-run),110
+AU-TEATWL-MD-3SET-FINDIN,PP-TEATWL-MD-3SET-FINDIN,AU,0.0,0,3,singles,set singles first (dry-run),52
+UK-TEATWL-MD-3SET-KTCHDISC,PP-TEATWL-MD-3SET-KTCHDISC,UK,0.0,13.0,3,singles,set singles first (dry-run),234
+US-TEATWL-MD-3SET-KTCHDISC,PP-TEATWL-MD-3SET-KTCHDISC,US,0.0,0,3,singles,set singles first (dry-run),288
+EU-TEATWL-MD-3SET-KTCHDISC,PP-TEATWL-MD-3SET-KTCHDISC,EU,0.0,0,3,singles,set singles first (dry-run),111
+AU-TEATWL-MD-3SET-KTCHDISC,PP-TEATWL-MD-3SET-KTCHDISC,AU,0.0,0,3,singles,set singles first (dry-run),53
+UK-TEATWL-MD-3SET-STRAWFZ,PP-TEATWL-MD-3SET-STRAWFZ,UK,0.0,6.0,3,singles,set singles first (dry-run),235
+US-TEATWL-MD-3SET-STRAWFZ,PP-TEATWL-MD-3SET-STRAWFZ,US,0.0,0,3,singles,set singles first (dry-run),289
+EU-TEATWL-MD-3SET-STRAWFZ,PP-TEATWL-MD-3SET-STRAWFZ,EU,0.0,0,3,singles,set singles first (dry-run),112
+AU-TEATWL-MD-3SET-STRAWFZ,PP-TEATWL-MD-3SET-STRAWFZ,AU,0.0,0,3,singles,set singles first (dry-run),54
+UK-TEATWL-MD-3SET-TART,PP-TEATWL-MD-3SET-TART,UK,0.0,13.0,3,singles,set singles first (dry-run),236
+US-TEATWL-MD-3SET-TART,PP-TEATWL-MD-3SET-TART,US,0.0,0,3,singles,set singles first (dry-run),290
+EU-TEATWL-MD-3SET-TART,PP-TEATWL-MD-3SET-TART,EU,0.0,1.0,3,singles,set singles first (dry-run),113
+AU-TEATWL-MD-3SET-TART,PP-TEATWL-MD-3SET-TART,AU,0.0,0,3,singles,set singles first (dry-run),55
+UK-TEATWL-MD-5SET-CULDEL,PP-TEATWL-MD-5SET-CULDEL,UK,0.0,15.0,3,singles,set singles first (dry-run),237
+US-TEATWL-MD-5SET-CULDEL,PP-TEATWL-MD-5SET-CULDEL,US,0.0,0,3,singles,set singles first (dry-run),291
+EU-TEATWL-MD-5SET-CULDEL,PP-TEATWL-MD-5SET-CULDEL,EU,0.0,0,3,singles,set singles first (dry-run),114
+AU-TEATWL-MD-5SET-CULDEL,PP-TEATWL-MD-5SET-CULDEL,AU,0.0,0,3,singles,set singles first (dry-run),56
+UK-TEATWL-MD-5SET-HOST,PP-TEATWL-MD-5SET-HOST,UK,0.0,0,3,singles,set singles first (dry-run),238
+US-TEATWL-MD-5SET-HOST,PP-TEATWL-MD-5SET-HOST,US,0.0,0,3,singles,set singles first (dry-run),292
+EU-TEATWL-MD-5SET-HOST,PP-TEATWL-MD-5SET-HOST,EU,0.0,0,3,singles,set singles first (dry-run),115
+AU-TEATWL-MD-5SET-HOST,PP-TEATWL-MD-5SET-HOST,AU,0.0,0,3,singles,set singles first (dry-run),57
+UK-TEATWL-MD-5SET-PICKY,PP-TEATWL-MD-5SET-PICKY,UK,0.0,3.0,3,singles,set singles first (dry-run),239
+US-TEATWL-MD-5SET-PICKY,PP-TEATWL-MD-5SET-PICKY,US,0.0,0,3,singles,set singles first (dry-run),293
+EU-TEATWL-MD-5SET-PICKY,PP-TEATWL-MD-5SET-PICKY,EU,0.0,0,3,singles,set singles first (dry-run),116
+AU-TEATWL-MD-5SET-PICKY,PP-TEATWL-MD-5SET-PICKY,AU,0.0,0,3,singles,set singles first (dry-run),58
+UK-TEATWL-MD-6SET-AFTPTY,PP-TEATWL-MD-6SET-AFTPTY,UK,0.0,12.0,3,singles,set singles first (dry-run),240
+US-TEATWL-MD-6SET-AFTPTY,PP-TEATWL-MD-6SET-AFTPTY,US,0.0,0,3,singles,set singles first (dry-run),294
+EU-TEATWL-MD-6SET-AFTPTY,PP-TEATWL-MD-6SET-AFTPTY,EU,0.0,0,3,singles,set singles first (dry-run),117
+AU-TEATWL-MD-6SET-AFTPTY,PP-TEATWL-MD-6SET-AFTPTY,AU,0.0,0,3,singles,set singles first (dry-run),59
+UK-TEATWL-MD-6SET-FRTCTL,PP-TEATWL-MD-6SET-FRTCTL,UK,0.0,2.0,3,singles,set singles first (dry-run),241
+US-TEATWL-MD-6SET-FRTCTL,PP-TEATWL-MD-6SET-FRTCTL,US,0.0,0,3,singles,set singles first (dry-run),295
+EU-TEATWL-MD-6SET-FRTCTL,PP-TEATWL-MD-6SET-FRTCTL,EU,0.0,0,3,singles,set singles first (dry-run),118
+AU-TEATWL-MD-6SET-FRTCTL,PP-TEATWL-MD-6SET-FRTCTL,AU,0.0,0,3,singles,set singles first (dry-run),60
+UK-TOWLB-CAB-LG-4SET-BLUE,PP-TOWLB-CAB-LG-4SET-BLUE,UK,0.0,3.0,3,singles,set singles first (dry-run),242
+US-TOWLB-CAB-LG-4SET-BLUE,PP-TOWLB-CAB-LG-4SET-BLUE,US,0.0,0,3,singles,set singles first (dry-run),296
+EU-TOWLB-CAB-LG-4SET-BLUE,PP-TOWLB-CAB-LG-4SET-BLUE,EU,0.0,0,3,singles,set singles first (dry-run),119
+AU-TOWLB-CAB-LG-4SET-BLUE,PP-TOWLB-CAB-LG-4SET-BLUE,AU,0.0,0,3,singles,set singles first (dry-run),61
+UK-TOWLB-CAB-LG-4SET-ORANGE,PP-TOWLB-CAB-LG-4SET-ORANGE,UK,0.0,1.0,3,singles,set singles first (dry-run),243
+US-TOWLB-CAB-LG-4SET-ORANGE,PP-TOWLB-CAB-LG-4SET-ORANGE,US,0.0,0,3,singles,set singles first (dry-run),297
+EU-TOWLB-CAB-LG-4SET-ORANGE,PP-TOWLB-CAB-LG-4SET-ORANGE,EU,0.0,0,3,singles,set singles first (dry-run),120
+AU-TOWLB-CAB-LG-4SET-ORANGE,PP-TOWLB-CAB-LG-4SET-ORANGE,AU,0.0,0,3,singles,set singles first (dry-run),62
+UK-TOWLB-CAB-LG-4SET-PINK,PP-TOWLB-CAB-LG-4SET-PINK,UK,0.0,2.0,3,singles,set singles first (dry-run),244
+US-TOWLB-CAB-LG-4SET-PINK,PP-TOWLB-CAB-LG-4SET-PINK,US,0.0,0,3,singles,set singles first (dry-run),298
+EU-TOWLB-CAB-LG-4SET-PINK,PP-TOWLB-CAB-LG-4SET-PINK,EU,0.0,0,3,singles,set singles first (dry-run),121
+AU-TOWLB-CAB-LG-4SET-PINK,PP-TOWLB-CAB-LG-4SET-PINK,AU,0.0,0,3,singles,set singles first (dry-run),63
+UK-TOWLB-CAB-LG-4SETA-R,PP-TOWLB-CAB-LG-4SETA-R,UK,0.0,6.0,3,singles,set singles first (dry-run),245
+US-TOWLB-CAB-LG-4SETA-R,PP-TOWLB-CAB-LG-4SETA-R,US,0.0,0,3,singles,set singles first (dry-run),299
+EU-TOWLB-CAB-LG-4SETA-R,PP-TOWLB-CAB-LG-4SETA-R,EU,0.0,0,3,singles,set singles first (dry-run),122
+AU-TOWLB-CAB-LG-4SETA-R,PP-TOWLB-CAB-LG-4SETA-R,AU,0.0,0,3,singles,set singles first (dry-run),64
+UK-TOWLB-CAB-LG-4SETE-R,PP-TOWLB-CAB-LG-4SETE-R,UK,0.0,3.0,3,singles,set singles first (dry-run),246
+US-TOWLB-CAB-LG-4SETE-R,PP-TOWLB-CAB-LG-4SETE-R,US,,,,,skip: kit not in Fulfil,
+EU-TOWLB-CAB-LG-4SETE-R,PP-TOWLB-CAB-LG-4SETE-R,EU,0.0,2.0,3,singles,set singles first (dry-run),123
+AU-TOWLB-CAB-LG-4SETE-R,PP-TOWLB-CAB-LG-4SETE-R,AU,0.0,0,3,singles,set singles first (dry-run),65
+UK-TOWLB-CAB-LG-4SETF-R,PP-TOWLB-CAB-LG-4SETF-R,UK,0.0,4.0,3,singles,set singles first (dry-run),247
+US-TOWLB-CAB-LG-4SETF-R,PP-TOWLB-CAB-LG-4SETF-R,US,0.0,0,3,singles,set singles first (dry-run),300
+EU-TOWLB-CAB-LG-4SETF-R,PP-TOWLB-CAB-LG-4SETF-R,EU,0.0,0,3,singles,set singles first (dry-run),124
+AU-TOWLB-CAB-LG-4SETF-R,PP-TOWLB-CAB-LG-4SETF-R,AU,0.0,0,3,singles,set singles first (dry-run),66
+UK-TOWLB-CAB-LG-4SETG,PP-TOWLB-CAB-LG-4SETG,UK,0.0,15.0,3,singles,set singles first (dry-run),248
+US-TOWLB-CAB-LG-4SETG,PP-TOWLB-CAB-LG-4SETG,US,0.0,0,3,singles,set singles first (dry-run),338
+EU-TOWLB-CAB-LG-4SETG,PP-TOWLB-CAB-LG-4SETG,EU,0.0,2.0,3,singles,set singles first (dry-run),125
+AU-TOWLB-CAB-LG-4SETG,PP-TOWLB-CAB-LG-4SETG,AU,0.0,0,3,singles,set singles first (dry-run),67
+UK-TOWLB-CAB-LG-4SETH,PP-TOWLB-CAB-LG-4SETH,UK,0.0,3.0,3,singles,set singles first (dry-run),249
+US-TOWLB-CAB-LG-4SETH,PP-TOWLB-CAB-LG-4SETH,US,0.0,0,3,singles,set singles first (dry-run),302
+EU-TOWLB-CAB-LG-4SETH,PP-TOWLB-CAB-LG-4SETH,EU,0.0,0,3,singles,set singles first (dry-run),126
+AU-TOWLB-CAB-LG-4SETH,PP-TOWLB-CAB-LG-4SETH,AU,0.0,0,3,singles,set singles first (dry-run),68
+UK-TOWLB-CAB-LG-4SETK,PP-TOWLB-CAB-LG-4SETK,UK,0.0,17.0,3,singles,set singles first (dry-run),250
+US-TOWLB-CAB-LG-4SETK,PP-TOWLB-CAB-LG-4SETK,US,0.0,0,3,singles,set singles first (dry-run),303
+EU-TOWLB-CAB-LG-4SETK,PP-TOWLB-CAB-LG-4SETK,EU,0.0,0,3,singles,set singles first (dry-run),127
+AU-TOWLB-CAB-LG-4SETK,PP-TOWLB-CAB-LG-4SETK,AU,0.0,0,3,singles,set singles first (dry-run),69
+UK-TOWLB-CAB-LG-4SETL,PP-TOWLB-CAB-LG-4SETL,UK,0.0,2.0,3,singles,set singles first (dry-run),251
+US-TOWLB-CAB-LG-4SETL,PP-TOWLB-CAB-LG-4SETL,US,0.0,0,3,singles,set singles first (dry-run),304
+EU-TOWLB-CAB-LG-4SETL,PP-TOWLB-CAB-LG-4SETL,EU,0.0,0,3,singles,set singles first (dry-run),128
+AU-TOWLB-CAB-LG-4SETL,PP-TOWLB-CAB-LG-4SETL,AU,0.0,0,3,singles,set singles first (dry-run),70
+UK-TOWLB-CAB-LG-4SETM,PP-TOWLB-CAB-LG-4SETM,UK,0.0,3.0,3,singles,set singles first (dry-run),252
+US-TOWLB-CAB-LG-4SETM,PP-TOWLB-CAB-LG-4SETM,US,0.0,0,3,singles,set singles first (dry-run),305
+EU-TOWLB-CAB-LG-4SETM,PP-TOWLB-CAB-LG-4SETM,EU,0.0,0,3,singles,set singles first (dry-run),129
+AU-TOWLB-CAB-LG-4SETM,PP-TOWLB-CAB-LG-4SETM,AU,0.0,0,3,singles,set singles first (dry-run),71
+UK-TOWLB-CAB-LG-4SETN,PP-TOWLB-CAB-LG-4SETN,UK,0.0,1.0,3,singles,set singles first (dry-run),253
+US-TOWLB-CAB-LG-4SETN,PP-TOWLB-CAB-LG-4SETN,US,0.0,0,3,singles,set singles first (dry-run),306
+EU-TOWLB-CAB-LG-4SETN,PP-TOWLB-CAB-LG-4SETN,EU,0.0,0,3,singles,set singles first (dry-run),130
+AU-TOWLB-CAB-LG-4SETN,PP-TOWLB-CAB-LG-4SETN,AU,0.0,0,3,singles,set singles first (dry-run),72
+UK-TOWLB-CAB-LG-4SETO,PP-TOWLB-CAB-LG-4SETO,UK,0.0,1.0,3,singles,set singles first (dry-run),254
+US-TOWLB-CAB-LG-4SETO,PP-TOWLB-CAB-LG-4SETO,US,0.0,0,3,singles,set singles first (dry-run),307
+EU-TOWLB-CAB-LG-4SETO,PP-TOWLB-CAB-LG-4SETO,EU,0.0,0,3,singles,set singles first (dry-run),131
+AU-TOWLB-CAB-LG-4SETO,PP-TOWLB-CAB-LG-4SETO,AU,0.0,0,3,singles,set singles first (dry-run),73
+UK-TOWLB-CAB-LG-6SET-BLUE,PP-TOWLB-CAB-LG-6SET-BLUE,UK,0.0,3.0,3,singles,set singles first (dry-run),255
+US-TOWLB-CAB-LG-6SET-BLUE,PP-TOWLB-CAB-LG-6SET-BLUE,US,0.0,0,3,singles,set singles first (dry-run),308
+EU-TOWLB-CAB-LG-6SET-BLUE,PP-TOWLB-CAB-LG-6SET-BLUE,EU,0.0,0,3,singles,set singles first (dry-run),132
+AU-TOWLB-CAB-LG-6SET-BLUE,PP-TOWLB-CAB-LG-6SET-BLUE,AU,0.0,0,3,singles,set singles first (dry-run),74
+UK-TOWLB-CAB-LG-6SET-PINK,PP-TOWLB-CAB-LG-6SET-PINK,UK,0.0,3.0,3,singles,set singles first (dry-run),256
+US-TOWLB-CAB-LG-6SET-PINK,PP-TOWLB-CAB-LG-6SET-PINK,US,0.0,0,3,singles,set singles first (dry-run),309
+EU-TOWLB-CAB-LG-6SET-PINK,PP-TOWLB-CAB-LG-6SET-PINK,EU,0.0,0,3,singles,set singles first (dry-run),133
+AU-TOWLB-CAB-LG-6SET-PINK,PP-TOWLB-CAB-LG-6SET-PINK,AU,0.0,0,3,singles,set singles first (dry-run),75
+UK-TOWLB-CAB-LG-6SET-R,PP-TOWLB-CAB-LG-6SET-R,UK,0.0,7.0,3,singles,set singles first (dry-run),257
+US-TOWLB-CAB-LG-6SET-R,PP-TOWLB-CAB-LG-6SET-R,US,0.0,0,3,singles,set singles first (dry-run),310
+EU-TOWLB-CAB-LG-6SET-R,PP-TOWLB-CAB-LG-6SET-R,EU,0.0,0,3,singles,set singles first (dry-run),134
+AU-TOWLB-CAB-LG-6SET-R,PP-TOWLB-CAB-LG-6SET-R,AU,0.0,0,3,singles,set singles first (dry-run),76
+UK-TOWLB-CAB-LG-6SETI,PP-TOWLB-CAB-LG-6SETI,UK,2.0,7.0,3,singles,set singles first (dry-run),258
+US-TOWLB-CAB-LG-6SETI,PP-TOWLB-CAB-LG-6SETI,US,0.0,0,3,singles,set singles first (dry-run),311
+EU-TOWLB-CAB-LG-6SETI,PP-TOWLB-CAB-LG-6SETI,EU,0.0,1.0,3,singles,set singles first (dry-run),135
+AU-TOWLB-CAB-LG-6SETI,PP-TOWLB-CAB-LG-6SETI,AU,0.0,0,3,singles,set singles first (dry-run),77
+UK-TOWLB-CAB-LG-6SETJ,PP-TOWLB-CAB-LG-6SETJ,UK,0.0,3.0,3,singles,set singles first (dry-run),259
+US-TOWLB-CAB-LG-6SETJ,PP-TOWLB-CAB-LG-6SETJ,US,0.0,0,3,singles,set singles first (dry-run),312
+EU-TOWLB-CAB-LG-6SETJ,PP-TOWLB-CAB-LG-6SETJ,EU,0.0,0,3,singles,set singles first (dry-run),136
+AU-TOWLB-CAB-LG-6SETJ,PP-TOWLB-CAB-LG-6SETJ,AU,0.0,0,3,singles,set singles first (dry-run),78
+UK-TOWLB-CAB-LG-6SETK,PP-TOWLB-CAB-LG-6SETK,UK,0.0,3.0,3,singles,set singles first (dry-run),260
+US-TOWLB-CAB-LG-6SETK,PP-TOWLB-CAB-LG-6SETK,US,0.0,0,3,singles,set singles first (dry-run),313
+EU-TOWLB-CAB-LG-6SETK,PP-TOWLB-CAB-LG-6SETK,EU,0.0,1.0,3,singles,set singles first (dry-run),137
+AU-TOWLB-CAB-LG-6SETK,PP-TOWLB-CAB-LG-6SETK,AU,0.0,0,3,singles,set singles first (dry-run),79
+UK-TOWLB-CAB-LG-6SETL,PP-TOWLB-CAB-LG-6SETL,UK,0.0,8.0,3,singles,set singles first (dry-run),261
+US-TOWLB-CAB-LG-6SETL,PP-TOWLB-CAB-LG-6SETL,US,0.0,0,3,singles,set singles first (dry-run),314
+EU-TOWLB-CAB-LG-6SETL,PP-TOWLB-CAB-LG-6SETL,EU,0.0,0,3,singles,set singles first (dry-run),138
+AU-TOWLB-CAB-LG-6SETL,PP-TOWLB-CAB-LG-6SETL,AU,0.0,0,3,singles,set singles first (dry-run),80
+UK-TOWLB-CAB-LG-6SETM,PP-TOWLB-CAB-LG-6SETM,UK,0.0,1.0,3,singles,set singles first (dry-run),262
+US-TOWLB-CAB-LG-6SETM,PP-TOWLB-CAB-LG-6SETM,US,0.0,0,3,singles,set singles first (dry-run),315
+EU-TOWLB-CAB-LG-6SETM,PP-TOWLB-CAB-LG-6SETM,EU,0.0,0,3,singles,set singles first (dry-run),139
+AU-TOWLB-CAB-LG-6SETM,PP-TOWLB-CAB-LG-6SETM,AU,0.0,0,3,singles,set singles first (dry-run),81
+UK-TOWLB-CAB-XL-4SET-BLUE,PP-TOWLB-CAB-XL-4SET-BLUE,UK,0.0,6.0,3,singles,set singles first (dry-run),263
+US-TOWLB-CAB-XL-4SET-BLUE,PP-TOWLB-CAB-XL-4SET-BLUE,US,0.0,0,3,singles,set singles first (dry-run),316
+EU-TOWLB-CAB-XL-4SET-BLUE,PP-TOWLB-CAB-XL-4SET-BLUE,EU,0.0,0,3,singles,set singles first (dry-run),140
+AU-TOWLB-CAB-XL-4SET-BLUE,PP-TOWLB-CAB-XL-4SET-BLUE,AU,0.0,0,3,singles,set singles first (dry-run),82
+UK-TOWLB-CAB-XL-4SET-ORANGE,PP-TOWLB-CAB-XL-4SET-ORANGE,UK,0.0,2.0,3,singles,set singles first (dry-run),264
+US-TOWLB-CAB-XL-4SET-ORANGE,PP-TOWLB-CAB-XL-4SET-ORANGE,US,0.0,0,3,singles,set singles first (dry-run),317
+EU-TOWLB-CAB-XL-4SET-ORANGE,PP-TOWLB-CAB-XL-4SET-ORANGE,EU,0.0,2.0,3,singles,set singles first (dry-run),141
+AU-TOWLB-CAB-XL-4SET-ORANGE,PP-TOWLB-CAB-XL-4SET-ORANGE,AU,0.0,0,3,singles,set singles first (dry-run),83
+UK-TOWLB-CAB-XL-4SET-PINK,PP-TOWLB-CAB-XL-4SET-PINK,UK,0.0,1.0,3,singles,set singles first (dry-run),265
+US-TOWLB-CAB-XL-4SET-PINK,PP-TOWLB-CAB-XL-4SET-PINK,US,0.0,0,3,singles,set singles first (dry-run),318
+EU-TOWLB-CAB-XL-4SET-PINK,PP-TOWLB-CAB-XL-4SET-PINK,EU,0.0,0,3,singles,set singles first (dry-run),142
+AU-TOWLB-CAB-XL-4SET-PINK,PP-TOWLB-CAB-XL-4SET-PINK,AU,0.0,0,3,singles,set singles first (dry-run),84
+UK-TOWLB-CAB-XL-4SETA-R,PP-TOWLB-CAB-XL-4SETA-R,UK,0.0,1.0,3,singles,set singles first (dry-run),266
+US-TOWLB-CAB-XL-4SETA-R,PP-TOWLB-CAB-XL-4SETA-R,US,0.0,0,3,singles,set singles first (dry-run),319
+EU-TOWLB-CAB-XL-4SETA-R,PP-TOWLB-CAB-XL-4SETA-R,EU,0.0,0,3,singles,set singles first (dry-run),143
+AU-TOWLB-CAB-XL-4SETA-R,PP-TOWLB-CAB-XL-4SETA-R,AU,0.0,0,3,singles,set singles first (dry-run),85
+UK-TOWLB-CAB-XL-4SETE-R,PP-TOWLB-CAB-XL-4SETE-R,UK,0.0,8.0,3,singles,set singles first (dry-run),267
+US-TOWLB-CAB-XL-4SETE-R,PP-TOWLB-CAB-XL-4SETE-R,US,0.0,0,3,singles,set singles first (dry-run),320
+EU-TOWLB-CAB-XL-4SETE-R,PP-TOWLB-CAB-XL-4SETE-R,EU,0.0,1.0,3,singles,set singles first (dry-run),144
+AU-TOWLB-CAB-XL-4SETE-R,PP-TOWLB-CAB-XL-4SETE-R,AU,0.0,0,3,singles,set singles first (dry-run),86
+UK-TOWLB-CAB-XL-4SETF-R,PP-TOWLB-CAB-XL-4SETF-R,UK,0.0,7.0,3,singles,set singles first (dry-run),268
+US-TOWLB-CAB-XL-4SETF-R,PP-TOWLB-CAB-XL-4SETF-R,US,0.0,0,3,singles,set singles first (dry-run),321
+EU-TOWLB-CAB-XL-4SETF-R,PP-TOWLB-CAB-XL-4SETF-R,EU,0.0,1.0,3,singles,set singles first (dry-run),145
+AU-TOWLB-CAB-XL-4SETF-R,PP-TOWLB-CAB-XL-4SETF-R,AU,0.0,0,3,singles,set singles first (dry-run),87
+UK-TOWLB-CAB-XL-4SETG,PP-TOWLB-CAB-XL-4SETG,UK,0.0,30.0,3,singles,set singles first (dry-run),269
+US-TOWLB-CAB-XL-4SETG,PP-TOWLB-CAB-XL-4SETG,US,0.0,0,3,singles,set singles first (dry-run),322
+EU-TOWLB-CAB-XL-4SETG,PP-TOWLB-CAB-XL-4SETG,EU,0.0,2.0,3,singles,set singles first (dry-run),146
+AU-TOWLB-CAB-XL-4SETG,PP-TOWLB-CAB-XL-4SETG,AU,0.0,0,3,singles,set singles first (dry-run),88
+UK-TOWLB-CAB-XL-4SETH,PP-TOWLB-CAB-XL-4SETH,UK,0.0,2.0,3,singles,set singles first (dry-run),270
+US-TOWLB-CAB-XL-4SETH,PP-TOWLB-CAB-XL-4SETH,US,0.0,0,3,singles,set singles first (dry-run),323
+EU-TOWLB-CAB-XL-4SETH,PP-TOWLB-CAB-XL-4SETH,EU,0.0,0,3,singles,set singles first (dry-run),147
+AU-TOWLB-CAB-XL-4SETH,PP-TOWLB-CAB-XL-4SETH,AU,0.0,0,3,singles,set singles first (dry-run),89
+UK-TOWLB-CAB-XL-4SETK,PP-TOWLB-CAB-XL-4SETK,UK,0.0,20.0,3,singles,set singles first (dry-run),271
+US-TOWLB-CAB-XL-4SETK,PP-TOWLB-CAB-XL-4SETK,US,,,,,skip: kit not in Fulfil,
+EU-TOWLB-CAB-XL-4SETK,PP-TOWLB-CAB-XL-4SETK,EU,0.0,0,3,singles,set singles first (dry-run),148
+AU-TOWLB-CAB-XL-4SETK,PP-TOWLB-CAB-XL-4SETK,AU,0.0,0,3,singles,set singles first (dry-run),90
+UK-TOWLB-CAB-XL-4SETL,PP-TOWLB-CAB-XL-4SETL,UK,0.0,1.0,3,singles,set singles first (dry-run),272
+US-TOWLB-CAB-XL-4SETL,PP-TOWLB-CAB-XL-4SETL,US,0.0,0,3,singles,set singles first (dry-run),324
+EU-TOWLB-CAB-XL-4SETL,PP-TOWLB-CAB-XL-4SETL,EU,0.0,1.0,3,singles,set singles first (dry-run),149
+AU-TOWLB-CAB-XL-4SETL,PP-TOWLB-CAB-XL-4SETL,AU,0.0,0,3,singles,set singles first (dry-run),91
+UK-TOWLB-CAB-XL-4SETM,PP-TOWLB-CAB-XL-4SETM,UK,0.0,6.0,3,singles,set singles first (dry-run),273
+US-TOWLB-CAB-XL-4SETM,PP-TOWLB-CAB-XL-4SETM,US,0.0,0,3,singles,set singles first (dry-run),325
+EU-TOWLB-CAB-XL-4SETM,PP-TOWLB-CAB-XL-4SETM,EU,0.0,1.0,3,singles,set singles first (dry-run),150
+AU-TOWLB-CAB-XL-4SETM,PP-TOWLB-CAB-XL-4SETM,AU,0.0,0,3,singles,set singles first (dry-run),92
+UK-TOWLB-CAB-XL-4SETN,PP-TOWLB-CAB-XL-4SETN,UK,0.0,1.0,3,singles,set singles first (dry-run),274
+US-TOWLB-CAB-XL-4SETN,PP-TOWLB-CAB-XL-4SETN,US,0.0,0,3,singles,set singles first (dry-run),326
+EU-TOWLB-CAB-XL-4SETN,PP-TOWLB-CAB-XL-4SETN,EU,0.0,0,3,singles,set singles first (dry-run),151
+AU-TOWLB-CAB-XL-4SETN,PP-TOWLB-CAB-XL-4SETN,AU,0.0,0,3,singles,set singles first (dry-run),93
+UK-TOWLB-CAB-XL-4SETO,PP-TOWLB-CAB-XL-4SETO,UK,0.0,3.0,3,singles,set singles first (dry-run),275
+US-TOWLB-CAB-XL-4SETO,PP-TOWLB-CAB-XL-4SETO,US,,,,,skip: kit not in Fulfil,
+EU-TOWLB-CAB-XL-4SETO,PP-TOWLB-CAB-XL-4SETO,EU,0.0,2.0,3,singles,set singles first (dry-run),152
+AU-TOWLB-CAB-XL-4SETO,PP-TOWLB-CAB-XL-4SETO,AU,0.0,0,3,singles,set singles first (dry-run),94
+UK-TOWLB-CAB-XL-6SET-BLUE,PP-TOWLB-CAB-XL-6SET-BLUE,UK,0.0,2.0,3,singles,set singles first (dry-run),276
+US-TOWLB-CAB-XL-6SET-BLUE,PP-TOWLB-CAB-XL-6SET-BLUE,US,0.0,0,3,singles,set singles first (dry-run),327
+EU-TOWLB-CAB-XL-6SET-BLUE,PP-TOWLB-CAB-XL-6SET-BLUE,EU,0.0,0,3,singles,set singles first (dry-run),153
+AU-TOWLB-CAB-XL-6SET-BLUE,PP-TOWLB-CAB-XL-6SET-BLUE,AU,0.0,0,3,singles,set singles first (dry-run),95
+UK-TOWLB-CAB-XL-6SET-PINK,PP-TOWLB-CAB-XL-6SET-PINK,UK,0.0,2.0,3,singles,set singles first (dry-run),277
+US-TOWLB-CAB-XL-6SET-PINK,PP-TOWLB-CAB-XL-6SET-PINK,US,0.0,0,3,singles,set singles first (dry-run),328
+EU-TOWLB-CAB-XL-6SET-PINK,PP-TOWLB-CAB-XL-6SET-PINK,EU,0.0,0,3,singles,set singles first (dry-run),154
+AU-TOWLB-CAB-XL-6SET-PINK,PP-TOWLB-CAB-XL-6SET-PINK,AU,0.0,0,3,singles,set singles first (dry-run),96
+UK-TOWLB-CAB-XL-6SET-R,PP-TOWLB-CAB-XL-6SET-R,UK,0.0,2.0,3,singles,set singles first (dry-run),278
+US-TOWLB-CAB-XL-6SET-R,PP-TOWLB-CAB-XL-6SET-R,US,0.0,0,3,singles,set singles first (dry-run),329
+EU-TOWLB-CAB-XL-6SET-R,PP-TOWLB-CAB-XL-6SET-R,EU,0.0,0,3,singles,set singles first (dry-run),155
+AU-TOWLB-CAB-XL-6SET-R,PP-TOWLB-CAB-XL-6SET-R,AU,0.0,0,3,singles,set singles first (dry-run),97
+UK-TOWLB-CAB-XL-6SETI,PP-TOWLB-CAB-XL-6SETI,UK,0.0,5.0,3,singles,set singles first (dry-run),279
+US-TOWLB-CAB-XL-6SETI,PP-TOWLB-CAB-XL-6SETI,US,0.0,0,3,singles,set singles first (dry-run),330
+EU-TOWLB-CAB-XL-6SETI,PP-TOWLB-CAB-XL-6SETI,EU,0.0,2.0,3,singles,set singles first (dry-run),156
+AU-TOWLB-CAB-XL-6SETI,PP-TOWLB-CAB-XL-6SETI,AU,0.0,0,3,singles,set singles first (dry-run),98
+UK-TOWLB-CAB-XL-6SETJ,PP-TOWLB-CAB-XL-6SETJ,UK,0.0,2.0,3,singles,set singles first (dry-run),280
+US-TOWLB-CAB-XL-6SETJ,PP-TOWLB-CAB-XL-6SETJ,US,0.0,0,3,singles,set singles first (dry-run),331
+EU-TOWLB-CAB-XL-6SETJ,PP-TOWLB-CAB-XL-6SETJ,EU,0.0,0,3,singles,set singles first (dry-run),157
+AU-TOWLB-CAB-XL-6SETJ,PP-TOWLB-CAB-XL-6SETJ,AU,0.0,0,3,singles,set singles first (dry-run),99
+UK-TOWLB-CAB-XL-6SETK,PP-TOWLB-CAB-XL-6SETK,UK,0.0,3.0,3,singles,set singles first (dry-run),281
+US-TOWLB-CAB-XL-6SETK,PP-TOWLB-CAB-XL-6SETK,US,0.0,0,3,singles,set singles first (dry-run),332
+EU-TOWLB-CAB-XL-6SETK,PP-TOWLB-CAB-XL-6SETK,EU,0.0,2.0,3,singles,set singles first (dry-run),158
+AU-TOWLB-CAB-XL-6SETK,PP-TOWLB-CAB-XL-6SETK,AU,0.0,0,3,singles,set singles first (dry-run),100
+UK-TOWLB-CAB-XL-6SETL,PP-TOWLB-CAB-XL-6SETL,UK,0.0,2.0,3,singles,set singles first (dry-run),282
+US-TOWLB-CAB-XL-6SETL,PP-TOWLB-CAB-XL-6SETL,US,0.0,0,3,singles,set singles first (dry-run),333
+EU-TOWLB-CAB-XL-6SETL,PP-TOWLB-CAB-XL-6SETL,EU,0.0,1.0,3,singles,set singles first (dry-run),159
+AU-TOWLB-CAB-XL-6SETL,PP-TOWLB-CAB-XL-6SETL,AU,0.0,0,3,singles,set singles first (dry-run),101
+UK-TOWLB-CAB-XL-6SETM,PP-TOWLB-CAB-XL-6SETM,UK,0.0,0,3,singles,set singles first (dry-run),283
+US-TOWLB-CAB-XL-6SETM,PP-TOWLB-CAB-XL-6SETM,US,,,,,skip: kit not in Fulfil,
+EU-TOWLB-CAB-XL-6SETM,PP-TOWLB-CAB-XL-6SETM,EU,0.0,0,3,singles,set singles first (dry-run),160
+AU-TOWLB-CAB-XL-6SETM,PP-TOWLB-CAB-XL-6SETM,AU,0.0,0,3,singles,set singles first (dry-run),102
+UK-TOWLB-DES-LG-4SET-SUNBLVD,PP-TOWLB-DES-LG-4SETA,UK,,,,,skip: PP not in Fulfil,
+US-TOWLB-DES-LG-4SET-SUNBLVD,PP-TOWLB-DES-LG-4SETA,US,,,,,skip: PP not in Fulfil,
+EU-TOWLB-DES-LG-4SET-SUNBLVD,PP-TOWLB-DES-LG-4SETA,EU,,,,,skip: PP not in Fulfil,
+AU-TOWLB-DES-LG-4SET-SUNBLVD,PP-TOWLB-DES-LG-4SETA,AU,,,,,skip: PP not in Fulfil,
+UK-TOWLB-DES-LG-4SET-TANGGRN,PP-TOWLB-DES-LG-4SETE,UK,,,,,skip: PP not in Fulfil,
+US-TOWLB-DES-LG-4SET-TANGGRN,PP-TOWLB-DES-LG-4SETE,US,,,,,skip: PP not in Fulfil,
+EU-TOWLB-DES-LG-4SET-TANGGRN,PP-TOWLB-DES-LG-4SETE,EU,,,,,skip: PP not in Fulfil,
+AU-TOWLB-DES-LG-4SET-TANGGRN,PP-TOWLB-DES-LG-4SETE,AU,,,,,skip: PP not in Fulfil,
+UK-TOWLB-DES-LG-6SET-SUMSUGA,PP-TOWLB-DES-LG-6SETA,UK,,,,,skip: no singles BOM on kit,
+US-TOWLB-DES-LG-6SET-SUMSUGA,PP-TOWLB-DES-LG-6SETA,US,,,,,skip: no singles BOM on kit,
+EU-TOWLB-DES-LG-6SET-SUMSUGA,PP-TOWLB-DES-LG-6SETA,EU,,,,,skip: no singles BOM on kit,
+AU-TOWLB-DES-LG-6SET-SUMSUGA,PP-TOWLB-DES-LG-6SETA,AU,,,,,skip: no singles BOM on kit,
+UK-TOWLB-DES-XL-4SET-SUNBLVD,PP-TOWLB-DES-XL-4SETA,UK,0.0,0,3,singles,set singles first (dry-run),284
+US-TOWLB-DES-XL-4SET-SUNBLVD,PP-TOWLB-DES-XL-4SETA,US,0.0,0,3,singles,set singles first (dry-run),334
+EU-TOWLB-DES-XL-4SET-SUNBLVD,PP-TOWLB-DES-XL-4SETA,EU,0.0,0,3,singles,set singles first (dry-run),161
+AU-TOWLB-DES-XL-4SET-SUNBLVD,PP-TOWLB-DES-XL-4SETA,AU,0.0,0,3,singles,set singles first (dry-run),103
+UK-TOWLB-DES-XL-4SET-TANGGRN,PP-TOWLB-DES-XL-4SETE,UK,,,,,skip: PP not in Fulfil,
+US-TOWLB-DES-XL-4SET-TANGGRN,PP-TOWLB-DES-XL-4SETE,US,,,,,skip: PP not in Fulfil,
+EU-TOWLB-DES-XL-4SET-TANGGRN,PP-TOWLB-DES-XL-4SETE,EU,,,,,skip: PP not in Fulfil,
+AU-TOWLB-DES-XL-4SET-TANGGRN,PP-TOWLB-DES-XL-4SETE,AU,,,,,skip: PP not in Fulfil,
+UK-TOWLB-DES-XL-6SET-SUMSUGA,PP-TOWLB-DES-XL-6SETA,UK,,,,,skip: PP not in Fulfil,
+US-TOWLB-DES-XL-6SET-SUMSUGA,PP-TOWLB-DES-XL-6SETA,US,,,,,skip: PP not in Fulfil,
+EU-TOWLB-DES-XL-6SET-SUMSUGA,PP-TOWLB-DES-XL-6SETA,EU,,,,,skip: PP not in Fulfil,
+AU-TOWLB-DES-XL-6SET-SUMSUGA,PP-TOWLB-DES-XL-6SETA,AU,,,,,skip: PP not in Fulfil,
+UK-TOWLB-SUM-LG-6SET-RAINSHRS,PP-TOWLB-SUM-LG-6SETA,UK,,,,,skip: PP not in Fulfil,
+US-TOWLB-SUM-LG-6SET-RAINSHRS,PP-TOWLB-SUM-LG-6SETA,US,,,,,skip: PP not in Fulfil,
+EU-TOWLB-SUM-LG-6SET-RAINSHRS,PP-TOWLB-SUM-LG-6SETA,EU,,,,,skip: PP not in Fulfil,
+AU-TOWLB-SUM-LG-6SET-RAINSHRS,PP-TOWLB-SUM-LG-6SETA,AU,,,,,skip: PP not in Fulfil,
+UK-TOWLB-SUM-XL-6SET-RAINSHRS,PP-TOWLB-SUM-XL-6SETA,UK,,,,,skip: PP not in Fulfil,
+US-TOWLB-SUM-XL-6SET-RAINSHRS,PP-TOWLB-SUM-XL-6SETA,US,,,,,skip: PP not in Fulfil,
+EU-TOWLB-SUM-XL-6SET-RAINSHRS,PP-TOWLB-SUM-XL-6SETA,EU,,,,,skip: PP not in Fulfil,
+AU-TOWLB-SUM-XL-6SET-RAINSHRS,PP-TOWLB-SUM-XL-6SETA,AU,,,,,skip: PP not in Fulfil,

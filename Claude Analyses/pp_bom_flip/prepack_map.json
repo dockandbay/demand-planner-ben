@@ -1,0 +1,238 @@
+[
+ {
+  "pp": "PP-TEATWL-MD-3SET-FINDIN",
+  "set": "TEATWL-MD-3SET-FINDIN"
+ },
+ {
+  "pp": "PP-TEATWL-MD-3SET-KTCHDISC",
+  "set": "TEATWL-MD-3SET-KTCHDISC"
+ },
+ {
+  "pp": "PP-TEATWL-MD-3SET-STRAWFZ",
+  "set": "TEATWL-MD-3SET-STRAWFZ"
+ },
+ {
+  "pp": "PP-TEATWL-MD-3SET-TART",
+  "set": "TEATWL-MD-3SET-TART"
+ },
+ {
+  "pp": "PP-TEATWL-MD-5SET-CULDEL",
+  "set": "TEATWL-MD-5SET-CULDEL"
+ },
+ {
+  "pp": "PP-TEATWL-MD-5SET-HOST",
+  "set": "TEATWL-MD-5SET-HOST"
+ },
+ {
+  "pp": "PP-TEATWL-MD-5SET-PICKY",
+  "set": "TEATWL-MD-5SET-PICKY"
+ },
+ {
+  "pp": "PP-TEATWL-MD-6SET-AFTPTY",
+  "set": "TEATWL-MD-6SET-AFTPTY"
+ },
+ {
+  "pp": "PP-TEATWL-MD-6SET-FRTCTL",
+  "set": "TEATWL-MD-6SET-FRTCTL"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SET-BLUE",
+  "set": "TOWLB-CAB-LG-4SET-BLUE"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SET-ORANGE",
+  "set": "TOWLB-CAB-LG-4SET-ORANGE"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SET-PINK",
+  "set": "TOWLB-CAB-LG-4SET-PINK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETA-R",
+  "set": "TOWLB-CAB-LG-4SETA-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETE-R",
+  "set": "TOWLB-CAB-LG-4SETE-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETF-R",
+  "set": "TOWLB-CAB-LG-4SETF-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETG",
+  "set": "TOWLB-CAB-LG-4SETG"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETH",
+  "set": "TOWLB-CAB-LG-4SETH"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETK",
+  "set": "TOWLB-CAB-LG-4SETK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETL",
+  "set": "TOWLB-CAB-LG-4SETL"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETM",
+  "set": "TOWLB-CAB-LG-4SETM"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETN",
+  "set": "TOWLB-CAB-LG-4SETN"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-4SETO",
+  "set": "TOWLB-CAB-LG-4SETO"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SET-BLUE",
+  "set": "TOWLB-CAB-LG-6SET-BLUE"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SET-PINK",
+  "set": "TOWLB-CAB-LG-6SET-PINK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SET-R",
+  "set": "TOWLB-CAB-LG-6SET-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SETI",
+  "set": "TOWLB-CAB-LG-6SETI"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SETJ",
+  "set": "TOWLB-CAB-LG-6SETJ"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SETK",
+  "set": "TOWLB-CAB-LG-6SETK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SETL",
+  "set": "TOWLB-CAB-LG-6SETL"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-LG-6SETM",
+  "set": "TOWLB-CAB-LG-6SETM"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SET-BLUE",
+  "set": "TOWLB-CAB-XL-4SET-BLUE"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SET-ORANGE",
+  "set": "TOWLB-CAB-XL-4SET-ORANGE"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SET-PINK",
+  "set": "TOWLB-CAB-XL-4SET-PINK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETA-R",
+  "set": "TOWLB-CAB-XL-4SETA-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETE-R",
+  "set": "TOWLB-CAB-XL-4SETE-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETF-R",
+  "set": "TOWLB-CAB-XL-4SETF-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETG",
+  "set": "TOWLB-CAB-XL-4SETG"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETH",
+  "set": "TOWLB-CAB-XL-4SETH"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETK",
+  "set": "TOWLB-CAB-XL-4SETK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETL",
+  "set": "TOWLB-CAB-XL-4SETL"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETM",
+  "set": "TOWLB-CAB-XL-4SETM"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETN",
+  "set": "TOWLB-CAB-XL-4SETN"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-4SETO",
+  "set": "TOWLB-CAB-XL-4SETO"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SET-BLUE",
+  "set": "TOWLB-CAB-XL-6SET-BLUE"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SET-PINK",
+  "set": "TOWLB-CAB-XL-6SET-PINK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SET-R",
+  "set": "TOWLB-CAB-XL-6SET-R"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SETI",
+  "set": "TOWLB-CAB-XL-6SETI"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SETJ",
+  "set": "TOWLB-CAB-XL-6SETJ"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SETK",
+  "set": "TOWLB-CAB-XL-6SETK"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SETL",
+  "set": "TOWLB-CAB-XL-6SETL"
+ },
+ {
+  "pp": "PP-TOWLB-CAB-XL-6SETM",
+  "set": "TOWLB-CAB-XL-6SETM"
+ },
+ {
+  "pp": "PP-TOWLB-DES-LG-4SETA",
+  "set": "TOWLB-DES-LG-4SET-SUNBLVD"
+ },
+ {
+  "pp": "PP-TOWLB-DES-LG-4SETE",
+  "set": "TOWLB-DES-LG-4SET-TANGGRN"
+ },
+ {
+  "pp": "PP-TOWLB-DES-LG-6SETA",
+  "set": "TOWLB-DES-LG-6SET-SUMSUGA"
+ },
+ {
+  "pp": "PP-TOWLB-DES-XL-4SETA",
+  "set": "TOWLB-DES-XL-4SET-SUNBLVD"
+ },
+ {
+  "pp": "PP-TOWLB-DES-XL-4SETE",
+  "set": "TOWLB-DES-XL-4SET-TANGGRN"
+ },
+ {
+  "pp": "PP-TOWLB-DES-XL-6SETA",
+  "set": "TOWLB-DES-XL-6SET-SUMSUGA"
+ },
+ {
+  "pp": "PP-TOWLB-SUM-LG-6SETA",
+  "set": "TOWLB-SUM-LG-6SET-RAINSHRS"
+ },
+ {
+  "pp": "PP-TOWLB-SUM-XL-6SETA",
+  "set": "TOWLB-SUM-XL-6SET-RAINSHRS"
+ }
+]
