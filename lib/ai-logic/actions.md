@@ -54,12 +54,12 @@ fingerprints:
   artifact_v16.7.html::daSkuInsights: fb55471971c2
   artifact_v16.7.html::scanBIPatterns: d2ea6bd0080c
   artifact_v16.7.html::scanAnomalyAlerts: 371e8b968fc6
-  server.mjs::dtc2Build: 29fd0aec4332
+  server.mjs::dtc2Build: bdc612fefcdc
   server.mjs::/api/supply/client-orders: 2047e1aec2db
   server.mjs::/api/supply/client-orders/add: 89a56a724486
   server.mjs::_fgGroupLines: 401878c07394
   supply/inject.html::openAddSalesOrders: d98be5bcfa32
-  supply/inject.html::renderDtc2: f9e031d94a56
+  supply/inject.html::renderDtc2: cb5744635888
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
   supply/inject.html::PO_ACTCOND: c295b79fd5d6
   supply/inject.html::cfUnpaidActions: fe40096c76b7
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.409
+verified_version: v28.417
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -357,4 +357,5 @@ verified_version: v28.409
 - v28.409 (Ben 20-Oct-26, many Dillard's orders): PURCHASE ORDERS > Import/Export > "Add sales orders from Fulfil". Search open Fulfil sales orders (confirmed / processing, not fully shipped) by customer, reference or SO number; each order lists its live Fulfil POs (via purchase requests, or POs carrying the order's client reference) with supplier code and value, and whether each is already in HORIZON (client PO group, Fulfil link, PO mirror or same PO number): yes / partly / no. "Not in HORIZON only" (default) hides orders fully in HORIZON. Ticking orders builds an "Add to" row per supplier and client (client = the reference prefix before " - ", e.g. DILLARDS, else the customer's first word). Default target: the best open HORIZON client PO of that supplier for the client (already grouped for it > named for it; Future > Production; highest prod #), but never an older production's PO with no group; otherwise "+ new PO" named from the best template (PO-59USLX1-DILLARDS gives PO-59USXR1-DILLARDS), copying prod # and batch, Direct to Client, status Future. Add (in-page confirm, supply edit or admin): creates the new POs, re-reads the Fulfil POs and links the live ones of the PO's supplier into its group (cancelled, other-supplier and already-grouped-elsewhere POs are skipped and listed), appends the order references to the PO's sales order ref (client name when empty), then sets the PO lines to the group total. Fulfil is only read.
 - v28.409: Order plan "Import from Fulfil" on a client PO group master imports the TOTAL of all its live grouped Fulfil POs (SKU qty summed, first Fulfil unit price), preview first; before it refused. The Client PO groups panel in DTC mismatch 2.0 now opens the PO drawer.
 - v28.374 (Ben 15-Oct-26, Dillard's): CLIENT PO GROUPS. One HORIZON client PO (Direct to Client / B2B JLEW / B2B NEXT / key account, same set as the push guard) can stand for many Fulfil client POs (Fulfil makes one PO per client order and per supplier: each Dillard's order is split XR Textile / Lixin / Weierken). Linked on the PO drawer > Master & Docs > Linked records > Client POs in Fulfil: paste Fulfil PO numbers, client references or SO numbers, Check (live Fulfil, read only; other suppliers, cancelled POs and POs already in this group are skipped; a PO in another group moves only on confirm), Link. Stored in planner.po_fulfil_group (mig 373). On each DTC 2.0 SO card the group PO counts only that card's member Fulfil POs; a Client PO groups panel reconciles the whole group (HORIZON qty vs the sum of all its client POs). The Fulfil mirror row of a grouped PO is the group sum, so ERP qty compares the plan with all its client POs; a grouped PO no longer shows the Link Fulfil PO action. The Fulfil PO import refreshes member lines every run. (source: server.mjs :: _fgResolve, _fgCurrent, _fgMirrorRow, /api/supply/po/:po/fulfil-group*, dtc2Build, _fulfilImportPOsRun, FULFIL_LINK_NEEDED_SQL; supply/inject.html :: fgRender, renderDtc2)
+- v28.417 (Ben 20-Oct-26, SO56618): a HORIZON PO that is already linked to Fulfil PO(s) (po_links, the PO mirror's fulfil_id) matches an SO by its sales order ref ONLY when one of those linked Fulfil POs belongs to that SO; otherwise the card lists it under "not matched" (ref names this SO but its Fulfil PO is another order's) so the stale ref can be fixed. POs with no Fulfil link, and client PO group masters, still match by ref.
 - v28.368: scheduled refresh POST /api/cron/dtc2-sync (x-webhook-secret = N8N_WEBHOOK_SECRET; optional n8n daily), same read as Refresh from Fulfil.
