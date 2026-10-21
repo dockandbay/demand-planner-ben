@@ -4956,6 +4956,10 @@ app.post('/api/accounts/attach/:id/removed', async (req, res) => {   // a person
 // duplicate), is flagged in Config > Auto bills.
 const ACC_BILL_STALE_DAYS = 10, ACC_RATE_AMTS = new Set(['20.00', '10.00', '5.00', '0.00', '12.50', '15.00']);   // VAT / GST rates printed next to the total
 const ACC_ORG_CCY = { uk: 'GBP', au: 'AUD' }, ACC_CCY_SYM = { uk: ['', '£', 'GBP'], au: ['', '$', 'A$', 'AUD'] };
+// v28.436 (Ben 22-Oct-26, Sellerboard $79 on Amex USD: "Should handle multi currency"): a receipt bill takes the currency of the Xero bank
+// account its statement line is on; the receipt's marked amount must be in that currency ('' = unmarked, accepted as before).
+const ACC_SYM_BY_CCY = { GBP: ['£', 'GBP'], USD: ['$', 'US$', 'USD'], EUR: ['€', 'EUR'], AUD: ['$', 'A$', 'AU$', 'AUD'], CAD: ['$', 'C$', 'CAD'], NZD: ['$', 'NZ$', 'NZD'] };
+const accCcySyms = ccy => [''].concat(ACC_SYM_BY_CCY[String(ccy || '').toUpperCase()] || [String(ccy || '').toUpperCase()]);
 function accFileRef(files) {   // v28.353/357: invoice number from the first PDF's name: an INV-style number (INV-0248), else a run of 5+ digits, else a name that says invoice / receipt
   const f = (files || []).map(x => String((x && x.name) || x || '')).find(n => /\.pdf$/i.test(n)); if (!f) return null; const base = f.replace(/\.pdf$/i, '').trim();
   const inv = base.match(/(?:^|[^A-Za-z])((?:INV|INVOICE|BILL|RCPT|REC)[-_ #]*[0-9][0-9A-Za-z-]*)/i); if (inv) return inv[1].toUpperCase().replace(/_/g, '-');
@@ -5068,11 +5072,14 @@ async function accBillCandidates(rules, only) {
   let _gstRe = 0;   // v28.394: PDFs read again this call (GST labels)
   const em = (await pool.query(`SELECT id, to_char(msg_date,'YYYY-MM-DD') d, from_addr, subject, amounts, pdf_amounts, team_note, pdf_words FROM planner.accounts_gmail_msgs WHERE ${onlyIds ? 'id = ANY($1)' : 'msg_date >= $1::date - 5'} ORDER BY msg_date`, [onlyIds || minFrom])).rows;
   const used = new Set((await pool.query(`SELECT org || '|' || email_id k FROM planner.accounts_bill_log WHERE status IN ('created','creating')`)).rows.map(r => r.k));
-  const lines = (await pool.query(`SELECT org, account_name, to_char(line_date,'YYYY-MM-DD') d, amount::float8 amount, reference, description FROM planner.accounts_stmt_lines WHERE NOT reconciled AND amount < 0`)).rows
-    .map(l => Object.assign(l, { key: accPayeeKeyX(l.org, l.reference, l.description, _ambC), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
+  const lines = (await pool.query(`SELECT l.org, l.account_name, to_char(l.line_date,'YYYY-MM-DD') d, l.amount::float8 amount, l.reference, l.description,
+      (SELECT upper(b.currency) FROM planner.accounts_bank_accounts b WHERE b.org = l.org AND (b.account_id = l.account_id OR b.name = l.account_name) AND coalesce(b.currency,'') <> '' ORDER BY (b.account_id = l.account_id) DESC LIMIT 1) ccy
+    FROM planner.accounts_stmt_lines l WHERE NOT l.reconciled AND l.amount < 0`)).rows
+    .map(l => Object.assign(l, { ccy: l.ccy || ((String(l.account_name).toUpperCase().match(/\b(GBP|USD|EUR|AUD|CAD|NZD)\b/) || [])[1]) || ACC_ORG_CCY[l.org],   // v28.436: the bank account's currency
+      key: accPayeeKeyX(l.org, l.reference, l.description, _ambC), id: l.account_name + '|' + l.d + '|' + l.amount.toFixed(2) + '|' + l.reference }));
   const usedLine = new Set((await pool.query(`SELECT stmt_line FROM planner.accounts_bill_log WHERE status IN ('created','creating') AND stmt_line IS NOT NULL`)).rows.map(r => r.stmt_line));
   const recon = (await pool.query(`SELECT org, to_char(txn_date,'YYYY-MM-DD') d, amount::float8 amount, contact FROM planner.accounts_recon_txns WHERE kind='spend' AND recon AND txn_date >= $1::date - 10`, [minFrom])).rows;
-  const xb = (await pool.query(`SELECT lower(region) org, contact_name, total::float8 total, to_char(invoice_date,'YYYY-MM-DD') d FROM planner.xero_bills WHERE invoice_date >= $1::date - 10 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED')`, [minFrom])).rows;
+  const xb = (await pool.query(`SELECT lower(region) org, contact_name, total::float8 total, upper(coalesce(currency_code,'')) ccy, to_char(invoice_date,'YYYY-MM-DD') d FROM planner.xero_bills WHERE invoice_date >= $1::date - 10 AND upper(coalesce(status,'')) NOT IN ('DELETED','VOIDED')`, [minFrom])).rows;
   const days = (a, b) => Math.round((new Date(a) - new Date(b)) / 864e5);
   const claimed = new Set();
   for (const r of rules) {
@@ -5098,7 +5105,7 @@ async function accBillCandidates(rules, only) {
         .sort((a, b) => Math.abs(days(a.d, e.d)) - Math.abs(days(b.d, e.d)))[0];
       // the charge can follow the email by up to 25 days (Optus: bill emailed ~6th, debited ~21st): a receipt already reconciled in Xero needs nothing
       if (!line && recon.some(t => t.org === r.org && accSameP(accPayeeKey(t.contact, ''), r.payee_key) && real.includes(Math.abs(t.amount).toFixed(2)) && days(t.d, e.d) >= -60 && days(t.d, e.d) <= 25)) { if (only) { c.reason = 'Already reconciled in Xero'; out.push(c); } continue; }
-      if (line) Object.assign(c, { amount: Math.abs(line.amount), date: line.d, stmt_line: line.id, bank: line.account_name });
+      if (line) Object.assign(c, { amount: Math.abs(line.amount), date: line.d, stmt_line: line.id, bank: line.account_name, currency: line.ccy });   // v28.436: bill in the bank line's currency
       // v28.325 (Ben 13-Oct-26, HARD): "never create a bill until an unreconciled transaction is uploaded from the uncoded report". Auto bill needs
       // the open bank line; the statement upload triggers the run. (Review / batch from Reconcile always starts from a bank line.)
       else if (!only) { c.reason = 'Waiting for the bank line: a bill is created only once this payment is on an uploaded statement (Uncoded statement lines)'; out.push(c); continue; }
@@ -5108,8 +5115,9 @@ async function accBillCandidates(rules, only) {
       else if ((() => { const bt = (e.amounts || []).filter(a => a[1] && ACC_CCY_SYM[r.org].includes(a[1])); return bt.length === 1 && (e.pdf_amounts || []).some(a => a[0] === bt[0][0]) && Object.assign(c, { amount: Number(bt[0][0]), date: e.d }); })()) {}
       else { c.reason = amts.length ? 'Several amounts in the email (' + real.slice(0, 4).join(', ') + ') and no open statement line to pick one: wait for the next statement upload, or create it by hand' : 'No amount found in the email'; out.push(c); continue; }
       const k = c.amount.toFixed(2);
-      if (!ACC_CCY_SYM[r.org].includes(sym.get(k) || '')) { c.reason = 'Receipt is in ' + sym.get(k) + ', not ' + ACC_ORG_CCY[r.org]; out.push(c); continue; }
-      const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && Math.abs(days(b.d, c.date)) <= 5);
+      if (!accCcySyms(c.currency).includes(sym.get(k) || '')) { c.reason = 'Receipt is in ' + sym.get(k) + ', not ' + c.currency + (c.bank ? ' (the currency of ' + c.bank + ')' : ''); out.push(c); continue; }
+      const fx = c.currency !== ACC_ORG_CCY[r.org];   // v28.436: a foreign-currency bill (e.g. USD in Xero UK)
+      const xbill = xb.find(b => b.org === r.org && c.contact && accSameP(accPayeeKey(b.contact_name, ''), accPayeeKey(c.contact, '')) && Math.abs(b.total).toFixed(2) === k && (!b.ccy || b.ccy === c.currency) && Math.abs(days(b.d, c.date)) <= 5);
       if (xbill) { c.reason = 'A bill for ' + k + ' dated ' + xbill.d + ' is already in Xero'; out.push(c); continue; }
       const hasPdf = (e.pdf_amounts || []).length > 0, ovTax = ov && String(ov.tax_type || '').trim();
       // v28.386 (Ben 15-Oct-26, ICON Management 00371863: "it had a message that it would create 2 lines but those 2 lines were not created"):
@@ -5120,11 +5128,12 @@ async function accBillCandidates(rules, only) {
       // v28.410 (Ben 20-Oct-26, Woolworths 160.95 went in with GST 14.00, the PDF says 6.96): without the labelled GST the guess can pick a WRONG
       // split too (a $14.00 line item and $6.96 within a cent of the 6.95 free part), not only "no GST". So any PDF receipt not GST-checked yet
       // and with no GST-labelled amount is read again once before its bill is decided, whatever the guess says.
-      if (hasPdf && ACC_GST[r.org] && !accGstChecked(e) && _gstRe < 6 && !pairs.some(a => a[1] === 'GST')) {
+      if (hasPdf && !fx && ACC_GST[r.org] && !accGstChecked(e) && _gstRe < 6 && !pairs.some(a => a[1] === 'GST')) {
         _gstRe++; if ((await accPdfWordsFill(e)) != null) for (const a of (e.pdf_amounts || [])) if (a[1] === 'GST' && !pairs.some(x => x[0] === a[0] && x[1] === 'GST')) pairs.unshift(a); }
-      if (hasPdf && ACC_GST[r.org] && !accGstChecked(e) && _gstRe >= 6 && !pairs.some(a => a[1] === 'GST')) { c.reason = 'Reading this receipt\u2019s PDF for its GST first: ready on the next load'; out.push(c); continue; }   // v28.410: never bill on a GST guess just because the re-read cap was hit
-      const gcSplit = accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0]));
-      const gc = gcSplit.kind === 'split' ? gcSplit : accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
+      if (hasPdf && !fx && ACC_GST[r.org] && !accGstChecked(e) && _gstRe >= 6 && !pairs.some(a => a[1] === 'GST')) { c.reason = 'Reading this receipt\u2019s PDF for its GST first: ready on the next load'; out.push(c); continue; }   // v28.410: never bill on a GST guess just because the re-read cap was hit
+      // v28.436: a foreign-currency receipt is from an overseas supplier: no local GST / VAT guess; tax type from the rule or the drawer
+      const gcSplit = fx ? { kind: 'skip' } : accGstCheck(r.org, c.amount, amts, null, hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0]));
+      const gc = gcSplit.kind === 'split' || fx ? gcSplit : accGstCheck(r.org, c.amount, amts, ovTax ? c.tax_type : (c.tax_type || null), hasPdf, pairs.filter(a => a[1] === 'GST').map(a => a[0])); c.tax_check = gc.kind;   // v28.315; v28.353 the PDF sets the GST lines
       if (gc.kind === 'split' && ACC_GST[r.org]) c.tax_type = ACC_GST[r.org].std;   // the taxable part goes in at GST; the free part at the free type
       if (!c.tax_type && ACC_GST[r.org] && ['full', 'split'].includes(gc.kind)) c.tax_type = ACC_GST[r.org].std;   // v28.353: tax type from the invoice when not coded yet
       if (gc.kind === 'none' && !ovTax) c.tax_type = gc.free_type;   // v28.353: no GST on the invoice = one GST-free line
@@ -5157,10 +5166,11 @@ async function accCreateBill(c, by, mode) {
     const _desc = (c.note ? c.note + ' · ' : '') + (c.subject || c.payee_key) + ' (receipt from accounts@, ' + c.email_date + ')', sp = c.gst_split;   // v28.372: note first
     // v28.315: part GST-free receipts go in as two tax-exclusive lines on the same account (GST component, GST-free component)
     const ll = c.loan_line, la = ll ? ll.amount : 0, loanItem = ll ? [{ Description: _desc + ' (personal: ' + ll.name + ')', Quantity: 1, UnitAmount: la, AccountCode: ll.code, TaxType: 'BASEXCLUDED' }] : [];   // v28.354
-    const body = sp ? { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Exclusive',
+    // v28.436: CurrencyCode = the bank line's currency (USD on Amex USD); Xero converts to the base currency at its own rate
+    const body = sp ? { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, CurrencyCode: c.currency || ACC_ORG_CCY[c.org], Status: 'AUTHORISED', LineAmountTypes: 'Exclusive',
         LineItems: [{ Description: _desc + ' (GST component)', Quantity: 1, UnitAmount: sp.taxable, AccountCode: c.account_code, TaxType: c.tax_type },
           { Description: _desc + ' (GST free component)', Quantity: 1, UnitAmount: Math.round((sp.free - la) * 100) / 100, AccountCode: c.account_code, TaxType: sp.free_type }].concat(loanItem) }
-      : { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, Status: 'AUTHORISED', LineAmountTypes: 'Inclusive',
+      : { Type: 'ACCPAY', Contact: { ContactID: cid }, Date: c.date, DueDate: c.date, InvoiceNumber: c.invoice_number, CurrencyCode: c.currency || ACC_ORG_CCY[c.org], Status: 'AUTHORISED', LineAmountTypes: 'Inclusive',
         LineItems: [{ Description: _desc, Quantity: 1, UnitAmount: Math.round((c.amount - la) * 100) / 100, AccountCode: c.account_code, TaxType: c.tax_type }].concat(loanItem) };
     const j = await xeroFetch(c.org, '/api.xro/2.0/Invoices', { method: 'POST', body: { Invoices: [body] } });
     const inv = (j && j.Invoices && j.Invoices[0]) || {}; if (!inv.InvoiceID) throw new Error('Xero returned no bill');
