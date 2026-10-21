@@ -35,7 +35,7 @@ UPDATE planner.rep_groups SET xero_account_code = '312.4b' WHERE name = 'Agent -
 UPDATE planner.rep_groups SET xero_account_code = '312.4j' WHERE name = 'Agent - TJ';            -- Cost of Sales - DE - Wholesale
 UPDATE planner.rep_groups SET xero_account_code = '312.1a' WHERE name = 'Agent - TR Partners';   -- Cost of Sales - UK - Wholesale
 UPDATE planner.rep_groups SET xero_account_code = '312.5a' WHERE name = 'Agent - Spruce';        -- Cost of Sales - CA - Wholesale
--- TODO (Ben): Agent - Evelyne (market? FR 312.4b / EU excl. DE, FR 312.4e / US 312.2a)
+UPDATE planner.rep_groups SET xero_account_code = '312.4e' WHERE name = 'Agent - Evelyne';       -- Cost of Sales - EU - Wholesale (excl. DE, FR, Dist); Ben 21-Oct-26: Switzerland
 
 -- 4. Statement emails
 -- TODO (Ben): UPDATE planner.rep_groups SET statement_email = '...' WHERE name = '...';
