@@ -29704,8 +29704,20 @@ app.post('/api/client/commission/runs/build-all', async (req, res) => {
     for (const g of G) { if (!v.rows.some(r => r.agent_id === g.id) && !hasRun.has(g.id)) continue;
       try { const r = await cmBuildRun(month, g, v, req.me.email); built.push(Object.assign({ agent: g.name, currency: g.currency || 'USD' }, r)); }
       catch (e) { if (e.status === 409) skipped.push({ agent: g.name, status: e.run ? e.run.status : 'not open' }); else throw e; } }
+    try { await pool.query(`INSERT INTO planner.app_settings (key, value) VALUES ('commission_last_import',$1) ON CONFLICT (key) DO UPDATE SET value=$1`,   // v28.429: shown on Import data
+      [JSON.stringify({ month, at: new Date().toISOString(), by: req.me.email || null, built: built.length, skipped: skipped.length, notes: v.notes })]); } catch (_) {}
     res.json({ ok: true, month, built, skipped, notes: v.notes });
   } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
+});
+// v28.429 (Ben 21-Oct-26: "can it show last imported data on IMPORT DATA"): when the agent customers were last synced, the last payments
+// import (month, when, who, runs built) and when each month's runs were last built.
+app.get('/api/client/commission/import-status', async (req, res) => {
+  try { const cu = (await pool.query(`SELECT count(*)::int n, max(synced_at) at FROM planner.commission_customers`).catch(() => ({ rows: [{}] }))).rows[0] || {};
+    const li = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='commission_last_import'`)).rows[0];
+    let last = null; try { last = li ? JSON.parse(li.value) : null; } catch (_) {}
+    const months = {}; (await pool.query(`SELECT month, max(built_at) at, count(*)::int runs FROM planner.commission_runs WHERE built_at IS NOT NULL GROUP BY month`)).rows.forEach(r => { months[r.month] = { at: r.at, runs: r.runs }; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, customers: { n: cu.n || 0, at: cu.at || null }, last_import: last, months });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.421 (Ben 21-Oct-26): POST /api/client/commission/runs/:id/import-paid (paste a Xero export CSV) removed: the engine reads Xero and Fulfil itself.
 app.post('/api/client/commission/rows/:id', async (req, res) => {
@@ -29727,7 +29739,7 @@ app.post('/api/client/commission/runs/:id/status', async (req, res) => {
     // v28.322 (Ben 13-Oct-26: "after we pay commissions we record them here"): a run marked Paid writes its rows to the paid history
     // (migration 363), replacing any earlier copy of the same run; reopening the run takes them out again. Before migration 363: skipped.
     let hist = null;
-    try { await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]);
+    try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]);   // v28.429: paid history cache
       if (st === 'paid') hist = (await pool.query(`INSERT INTO planner.commission_paid_history (period, period_label, rep_group, customer, invoice_no, po_no, commissionable, rate_pct, commission_due, credit_note, status, paid_amount, notes, payment_code, source, run_id, created_by)
           SELECT to_date(r.month || '-01','YYYY-MM-DD'), to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY'), g.name, cr.customer, coalesce(cr.invoice_ref, cr.order_ref), cr.order_ref, cr.commissionable, cr.rate, cr.commission, cr.credit_note_ref, 'paid', cr.net, cr.note,
                  coalesce(cr.payment_code, to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY') || ' ' || g.name), 'horizon', r.id, $2
@@ -29932,21 +29944,35 @@ app.get('/api/client/commission/customers/fulfil-unmatched', async (req, res) =>
 });
 // v28.322: paid commission history (migration 363): the imported sheet (Jan-22 onward) + every HORIZON run marked Paid. Filters: agent
 // (rep group text), year, free text (invoice / PO / customer). Rows newest first (max 1,000) and totals by month and by agent.
+// v28.429 (Ben 21-Oct-26: "paid history took a long time to load ... caching and maybe prioritising showing last 3 months but with search filters
+// and date folders"): range=recent (default) = the 3 latest paid months; any agent / year / search filter, or range=all, searches everything.
+// Answers are kept 2 minutes per query (cleared when a run is marked paid or reopened, which rewrites the history).
+const _cphMemo = new Map();
 app.get('/api/client/commission/history', async (req, res) => {
+  const _ck = JSON.stringify([req.query.group, req.query.year, req.query.q, req.query.status, req.query.range, req.query.month]), _ch = _cphMemo.get(_ck);
+  if (_ch && Date.now() - _ch.at < 120e3) return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, _ch.v));
   try { const w = [], p = []; const g = String(req.query.group || '').trim(), y = parseInt(req.query.year, 10), q = String(req.query.q || '').trim().slice(0, 60), st = String(req.query.status || 'paid');
+    const mo = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : '';   // one month folder opened
+    const recent = String(req.query.range || 'recent') !== 'all' && !g && !(y > 2000) && !q && !mo;
     if (g) { p.push(g); w.push('rep_group=$' + p.length); }
     if (y > 2000) { p.push(y); w.push('extract(year from period)=$' + p.length); }
     if (q) { p.push('%' + q.toLowerCase() + '%'); w.push(`(lower(coalesce(invoice_no,'')) LIKE $${p.length} OR lower(coalesce(po_no,'')) LIKE $${p.length} OR lower(coalesce(customer,'')) LIKE $${p.length} OR lower(coalesce(credit_note,'')) LIKE $${p.length})`); }
     if (st !== 'all') { p.push(st); w.push('coalesce(status,\'\')=$' + p.length); }
+    const Wall = w.length ? 'WHERE ' + w.join(' AND ') : '';   // the month folders list counts every month (so older folders can be opened)
+    const pAll = p.slice();   // parameters of Wall (before the month filter)
+    if (mo) { p.push(mo); w.push(`to_char(period,'YYYY-MM')=$` + p.length); }
+    if (recent) w.push(`period >= (SELECT date_trunc('month', max(period)) - interval '2 months' FROM planner.commission_paid_history ${Wall})`);
     const W = w.length ? 'WHERE ' + w.join(' AND ') : '';
-    const [rows, byMonth, byGroup, groups, years] = await Promise.all([
+    const [rows, byMonth, byGroup, groups, years, tot] = await Promise.all([
       pool.query(`SELECT id, to_char(period,'YYYY-MM') period, period_label, rep_group, customer, invoice_no, po_no, to_char(invoice_date,'YYYY-MM-DD') invoice_date, currency, commissionable::float8 commissionable, rate_pct::float8 rate_pct, commission_due::float8 commission_due, credit_note, status, paid_amount::float8 paid_amount, coalesce(notes, notes2) notes, payment_code, source, run_id FROM planner.commission_paid_history ${W} ORDER BY period DESC NULLS LAST, rep_group, invoice_no LIMIT 1000`, p),
-      pool.query(`SELECT to_char(period,'YYYY-MM') period, count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W} GROUP BY 1 ORDER BY 1 DESC NULLS LAST LIMIT 60`, p),
+      pool.query(`SELECT to_char(period,'YYYY-MM') period, count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${Wall} GROUP BY 1 ORDER BY 1 DESC NULLS LAST LIMIT 60`, pAll),   // Wall's parameters (the 3-month condition adds none)
       pool.query(`SELECT rep_group, count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W} GROUP BY 1 ORDER BY 3 DESC NULLS LAST`, p),
       pool.query(`SELECT DISTINCT rep_group FROM planner.commission_paid_history WHERE rep_group IS NOT NULL ORDER BY 1`),
-      pool.query(`SELECT DISTINCT extract(year from period)::int y FROM planner.commission_paid_history WHERE period IS NOT NULL ORDER BY 1 DESC`)]);
-    const tot = (await pool.query(`SELECT count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W}`, p)).rows[0];
-    res.set('Cache-Control', 'no-store').json({ rows: rows.rows, by_month: byMonth.rows, by_group: byGroup.rows, groups: groups.rows.map(r => r.rep_group), years: years.rows.map(r => r.y), total: tot });
+      pool.query(`SELECT DISTINCT extract(year from period)::int y FROM planner.commission_paid_history WHERE period IS NOT NULL ORDER BY 1 DESC`),
+      pool.query(`SELECT count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W}`, p)]);
+    const v = { rows: rows.rows, by_month: byMonth.rows, by_group: byGroup.rows, groups: groups.rows.map(r => r.rep_group), years: years.rows.map(r => r.y), total: tot.rows[0], range: recent ? 'recent' : 'all' };
+    _cphMemo.set(_ck, { at: Date.now(), v }); if (_cphMemo.size > 100) _cphMemo.delete(_cphMemo.keys().next().value);
+    res.set('Cache-Control', 'no-store').json(v);
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], by_month: [], by_group: [], groups: [], years: [], total: { n: 0, paid: 0 }, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.021: nicely formatted PDF commission statement for a run (pdf-lib).
