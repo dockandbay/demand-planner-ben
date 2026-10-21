@@ -1,3 +1,9 @@
+## v28.431 (21-Oct-26) Weekly demand: custom / co-brand orders count when the Fulfil order has an agency tag
+- Ben (on whether custom / co-brand orders count in UK B2B demand): "yes they should if they have the agency tag in Fulfil". Weekly actuals (and the order-lines live rule) now keep custom / co-brand lines whose order has an agent code: the Fulfil metafield agent_code, else an agent_* Shopify tag on the order. Untagged custom orders stay out, as do key accounts. The weekly impact report's left-out list follows the same rule.
+- After each order-lines sync, olCustomAgentFill reads the tag for custom orders whose lines changed (LIVE Fulfil, read only, up to 2,000 orders a sync) and stores it on the lines. Migration 381 (additive): order_lines.agent_code, order_lines.agent_checked.
+- Sandbox (live Fulfil): 10 custom orders checked, 0 tagged (e.g. SO54774 Trailfinders 12,000 UK, SO56508 15,000 US, SO56553 8,925 US), so nothing changes until an order is tagged; the 12,000-unit Trailfinders order is why the monthly UK B2B (Sep 14,496) is above the weekly.
+- Weekly demand is still not switched on. Buy plan before vs after on the sandbox: identical. No env change, no new routes.
+
 ## v28.430 (21-Oct-26) Commissions: ✕ defers to the next run; carried-forward and catch-up rows (6 months back); client PO number; agent tab order (drag and drop)
 - Ben: "if you remove an order from a run, what does that mean? for example september run should show any past payments not yet paid as well" (chose: defer to next run; 6 months back). Was: ✕ deleted the row and the next Build put it back.
 - ✕ Defer: the row stays greyed ("deferred to next run", net 0) and is not paid; Undo defer restores it; kept through rebuilds; never marked paid, never on the statement, never in the paid history. Building a later month carries it in as "carried forward from <month>" until a run pays it.

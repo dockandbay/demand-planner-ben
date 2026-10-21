@@ -19845,16 +19845,35 @@ async function orderLinesSync(by, full) {
     const TYP = ['bigint', 'bigint', 'text', 'text', 'text', 'text', 'text', 'text', 'text', 'boolean', 'boolean', 'boolean', 'text', 'numeric', 'numeric', 'text', 'date', 'date', 'text', 'text', 'date', 'date'];
     for (let i = 0; i < out.length; i += 1000) { const b = out.slice(i, i + 1000);   // batched multi-row upsert (one statement per 1,000 lines)
       await pool.query(`INSERT INTO planner.order_lines (${COLS.join(',')}, synced_at) SELECT ${COLS.map((c, k) => 'u.c' + k).join(',')}, now() FROM unnest(${TYP.map((t, k) => '$' + (k + 1) + '::' + t + '[]').join(',')}) AS u(${COLS.map((c, k) => 'c' + k).join(',')})
-        ON CONFLICT (line_id) DO UPDATE SET ${COLS.filter(c => c !== 'line_id').map(c => c + '=excluded.' + c).join(', ')}, synced_at=now()`, COLS.map((c, k) => b.map(r => r[k]))); }
+        ON CONFLICT (line_id) DO UPDATE SET ${COLS.filter(c => c !== 'line_id').map(c => c + '=excluded.' + c).join(', ')}, synced_at=now(), agent_checked=false`, COLS.map((c, k) => b.map(r => r[k]))); }   // v28.431: a changed line has its agency tag read again
     if (more) { await setS('order_lines_cursor', String(cursor)); await setS('order_lines_mode', mode); await setS('order_lines_since', since || '');
       return { lines: out.length, mode, since, more: true, cursor, ms: Date.now() - t0, by: by || null }; }   // call again to continue
     await setS('order_lines_cursor', '0'); await setS('order_lines_since', ''); await setS('order_lines_mode', 'inc');
     if (mode === 'full' || !(await S('order_lines_synced_at'))) await setS('order_lines_full_at', new Date(t0).toISOString());
     await setS('order_lines_synced_at', new Date(t0).toISOString());
+    let agents = null; try { agents = await olCustomAgentFill(cfg); } catch (e) { agents = { error: e.message }; }   // v28.431
     const built = await weeklyActualsBuild();
-    return { lines: out.length, mode, since, more: false, ms: Date.now() - t0, weekly: built, by: by || null };
+    return { lines: out.length, mode, since, more: false, ms: Date.now() - t0, weekly: built, custom_agents: agents, by: by || null };
   })().finally(() => { _olBusy = null; });
   return _olBusy;
+}
+// v28.431 (Ben 21-Oct-26: custom / co-brand orders count in weekly B2B demand "if they have the agency tag in Fulfil"): for custom orders whose
+// lines changed since the last check, read the order's agent code (Fulfil metafield agent_code, else an agent_* Shopify tag in the order's
+// metadata) and store it on the lines. Up to 2,000 orders per sync (LIVE Fulfil, read only).
+async function olCustomAgentFill(cfg) {
+  let checked = 0, tagged = 0;
+  for (let round = 0; round < 4; round++) {
+    const ids = (await pool.query(`SELECT DISTINCT sale_id FROM planner.order_lines WHERE is_custom AND NOT agent_checked LIMIT 500`).catch(() => ({ rows: [] }))).rows.map(r => Number(r.sale_id));
+    if (!ids.length) break;
+    const codes = {};
+    const def = ((await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']])) || [])[0];
+    if (def) ((await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', 'in', ids.map(x => 'sale.sale,' + x)]], 0, 500, null, ['resource', 'value_char']])) || [])
+      .forEach(v => { const sid = Number(String(v.resource).split(',')[1]); if (v.value_char && String(v.value_char).trim()) codes[sid] = String(v.value_char).trim().toLowerCase(); });
+    ((await fulfilFetchCfg(cfg, 'PUT', '/model/sale.sale/search_read', [[['id', 'in', ids]], 0, ids.length, null, ['id', 'metadata']])) || []).forEach(x => {
+      if (codes[x.id]) return; const m = /(^|[,\s])agent_([a-z0-9]+)/i.exec(String((x.metadata && x.metadata.tags) || '')); if (m) codes[x.id] = m[2].toLowerCase(); });
+    await pool.query(`UPDATE planner.order_lines l SET agent_code=u.c, agent_checked=true FROM unnest($1::bigint[], $2::text[]) u(id, c) WHERE l.sale_id=u.id`, [ids, ids.map(i => codes[i] || null)]);
+    checked += ids.length; tagged += ids.filter(i => codes[i]).length; if (ids.length < 500) break; }
+  return { checked, tagged };
 }
 async function _olThreshold() { const v = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='order_exclusion_threshold'`).catch(() => ({ rows: [] }))).rows[0] || {}).value; const n = Number(v); return n > 0 ? n : 40; }
 // v28.417 (Ben 20-Oct-26): the Fulfil history before the cut-over does not reconcile to the monthly (Cin7) actuals for every channel,
@@ -19879,7 +19898,7 @@ const OL_SKU = `(CASE WHEN l.sku ~ '^(UK|US|EU|AU|CA)-' AND NOT EXISTS (SELECT 1
 // Lines that count as demand: live orders (not draft / quotation / cancelled), mapped market + channel, real products (a SKU in
 // planner.products: no SHIPPING / service / gift-card lines), not key accounts or custom / co-brand (as the monthly actuals), dated today or
 // earlier (future preorders are order book, not actuals), and not the over-threshold lines of excluded orders.
-const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND NOT l.is_custom
+const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND (NOT l.is_custom OR coalesce(l.agent_code,'')<>'')
   AND l.demand_date <= current_date AND EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = ${OL_SKU} AND coalesce(p.category_name_final,'') <> '')
   AND NOT (l.qty > ${Number(thr)} AND EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded))`;
 // Cut per market x channel: the Fulfil cut-over month, or none (monthly spread throughout) for the monthly-only channels.
@@ -20047,7 +20066,7 @@ app.get('/api/demand/weekly-impact', async (req, res) => {
     const unm = (await pool.query(`SELECT fulfil_channel, count(*)::int lines, sum(qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.country IS NULL OR l.channel IS NULL) GROUP BY 1 ORDER BY 3 DESC`)).rows;
     const flags = (await pool.query(`SELECT count(DISTINCT sale_id)::int orders, count(*)::int lines, coalesce(sum(qty),0)::int units, count(DISTINCT sale_id) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded))::int excluded_orders,
         coalesce(sum(qty) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded)),0)::int excluded_units FROM planner.order_lines l WHERE l.qty > $1 AND l.sale_state NOT IN ('draft','quotation','cancel','cancelled')`, [thr])).rows[0];
-    const ka = (await pool.query(`SELECT l.country, l.channel, to_char(date_trunc('month', l.demand_date),'YYYY-MM') ym, sum(l.qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.is_key_account OR l.is_custom) AND l.demand_date >= $1 AND l.demand_date <= current_date GROUP BY 1,2,3 ORDER BY 1,2,3`, [from])).rows;
+    const ka = (await pool.query(`SELECT l.country, l.channel, to_char(date_trunc('month', l.demand_date),'YYYY-MM') ym, sum(l.qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.is_key_account OR (l.is_custom AND coalesce(l.agent_code,'')='')) AND l.demand_date >= $1 AND l.demand_date <= current_date GROUP BY 1,2,3 ORDER BY 1,2,3`, [from])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, from: from.slice(0, 7), fulfil_from: cutInfo.from.slice(0, 7), monthly_only: cutInfo.monthly_only, imported: imp, threshold: thr, cuts: cutInfo.cuts, key_custom: ka, by_market_month: mc, top_sku_moves: sku, unmapped_channels: unm, exclusions: flags });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
