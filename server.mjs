@@ -29640,15 +29640,10 @@ app.post('/api/client/commission/runs/add-missed', async (req, res) => {   // ad
     res.json({ ok: true, run_id: run.id, added, ...sum });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-app.post('/api/client/commission/runs/build', async (req, res) => {   // v28.332: from the stage 2 engine (cmEngine); one run per agent and month
-  const b = req.body || {}; const month = String(b.month || '').trim(); const gid = parseInt(b.rep_group_id, 10);
-  if (!/^\d{4}-\d{2}$/.test(month) || !gid) return res.status(400).json({ error: 'month (YYYY-MM) and rep_group_id required' });
-  try {
-    const g = (await pool.query(`SELECT * FROM planner.rep_groups WHERE id=$1`, [gid])).rows[0]; if (!g) return res.status(404).json({ error: 'agent not found' });
-    const v = await cmEngine(month, { env: b.env, fresh: !!b.fresh });
-    if (!v.fulfil_read) return res.status(503).json({ error: 'Fulfil could not be read (' + v.notes.join('; ') + '): nothing changed.' });
+// v28.421: one agent's run from an engine pass (calculated rows rebuilt; imported / hand rows stay). Throws 409 when the run is not open.
+async function cmBuildRun(month, g, v, by) { const gid = g.id;
     const run = (await pool.query(`INSERT INTO planner.commission_runs (month, rep_group_id) VALUES ($1,$2) ON CONFLICT (month, rep_group_id) DO UPDATE SET month=excluded.month RETURNING *`, [month, gid])).rows[0];
-    if (run.status !== 'open') return res.status(409).json({ error: 'run is ' + run.status + ': reopen it first' });
+    if (run.status !== 'open') { const e = new Error('run is ' + run.status + ': reopen it first'); e.status = 409; e.run = run; throw e; }
     const mine = v.rows.filter(r => r.agent_id === gid);
     const client = await pool.connect(); let added = 0;
     try { await client.query('BEGIN');
@@ -29663,21 +29658,40 @@ app.post('/api/client/commission/runs/build', async (req, res) => {   // v28.332
            mine.map(r => r.status === 'exception' ? 'exception' : 'pending'), col('note'), col('source'), col('currency_src'), col('amount_src'), col('fx_rate'), col('invoice_date'), col('earn_date'), col('rate_source'), col('agent_source')])).rowCount; }
       await client.query(`UPDATE planner.commission_runs SET currency=$2, built_at=now() WHERE id=$1`, [run.id, String((mine[0] && mine[0].currency) || g.currency || 'USD')]);
       await client.query('COMMIT'); } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
-    const sum = await cpRunSummary(run.id);
-    await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · ' + added + ' payments', req.me.email);
-    res.json({ ok: true, run_id: run.id, added, notes: v.notes, ...sum });
+  const sum = await cpRunSummary(run.id);
+  await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · ' + added + ' payments', by);
+  return Object.assign({ run_id: run.id, added }, sum);
+}
+app.post('/api/client/commission/runs/build', async (req, res) => {   // v28.332: from the stage 2 engine (cmEngine); one run per agent and month
+  const b = req.body || {}; const month = String(b.month || '').trim(); const gid = parseInt(b.rep_group_id, 10);
+  if (!/^\d{4}-\d{2}$/.test(month) || !gid) return res.status(400).json({ error: 'month (YYYY-MM) and rep_group_id required' });
+  try {
+    const g = (await pool.query(`SELECT * FROM planner.rep_groups WHERE id=$1`, [gid])).rows[0]; if (!g) return res.status(404).json({ error: 'agent not found' });
+    const v = await cmEngine(month, { env: b.env, fresh: !!b.fresh });
+    if (!v.fulfil_read) return res.status(503).json({ error: 'Fulfil could not be read (' + v.notes.join('; ') + '): nothing changed.' });
+    const r = await cmBuildRun(month, g, v, req.me.email);
+    res.json(Object.assign({ ok: true, notes: v.notes }, r));
   } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
-app.post('/api/client/commission/runs/:id/import-paid', async (req, res) => {
-  const rows = Array.isArray((req.body || {}).rows) ? req.body.rows : [];
-  try { const run = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' }); if (run.status !== 'open') return res.status(409).json({ error: 'run is ' + run.status });
-    let n = 0; for (const x of rows) { const ref = String(x.order_ref || x.po || x.invoice || '').trim(); if (!ref) continue; const amt = Number(String(x.amount == null ? '' : x.amount).replace(/[^0-9.\-]/g, '')) || 0; const cn = String(x.credit_note || '').trim(); const rate = x.rate != null && x.rate !== '' ? Number(x.rate) : await cpRateFor(run.rep_group_id, ref, run.default_rate);
-      const com = cn ? 0 : Math.round(amt * rate) / 100; const adj = cn ? Math.round(amt * rate) / 100 : 0;
-      await pool.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,'xero_csv')`,
-        [run.id, ref, x.invoice || null, x.customer || null, x.payment_date || null, amt, rate, com, cn || null, adj, com + adj, run.month + ' ' + run.group_name, x.note || null]); n++; }
-    const sum = await cpRunSummary(run.id); await cpAudit(null, 'Commission paid-invoices imported', run.month + ' · ' + n + ' rows', req.me.email); res.json({ ok: true, imported: n, ...sum });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+// v28.421 (Ben 21-Oct-26: "build/refresh for all rep groups in one button click"): one engine pass (fresh), then every agent that earns
+// commission (not a no-commission group) with payments this month, or with a run for the month already, is built / refreshed. Runs that are
+// finalised or paid are left alone and listed.
+app.post('/api/client/commission/runs/build-all', async (req, res) => {
+  const b = req.body || {}; const month = String(b.month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  try {
+    const v = await cmEngine(month, { env: b.env, fresh: true });
+    if (!v.fulfil_read) return res.status(503).json({ error: 'Fulfil could not be read (' + v.notes.join('; ') + '): nothing changed.' });
+    const G = (await pool.query(`SELECT * FROM planner.rep_groups WHERE active AND NOT coalesce(no_commission,false) ORDER BY name`)).rows;
+    const hasRun = new Set((await pool.query(`SELECT rep_group_id FROM planner.commission_runs WHERE month=$1`, [month])).rows.map(r => r.rep_group_id));
+    const built = [], skipped = [];
+    for (const g of G) { if (!v.rows.some(r => r.agent_id === g.id) && !hasRun.has(g.id)) continue;
+      try { const r = await cmBuildRun(month, g, v, req.me.email); built.push(Object.assign({ agent: g.name, currency: g.currency || 'USD' }, r)); }
+      catch (e) { if (e.status === 409) skipped.push({ agent: g.name, status: e.run ? e.run.status : 'not open' }); else throw e; } }
+    res.json({ ok: true, month, built, skipped, notes: v.notes });
+  } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
+// v28.421 (Ben 21-Oct-26): POST /api/client/commission/runs/:id/import-paid (paste a Xero export CSV) removed: the engine reads Xero and Fulfil itself.
 app.post('/api/client/commission/rows/:id', async (req, res) => {
   const b = req.body || {}; const sets = [], vals = [];
   for (const k of ['status', 'note', 'paid_date', 'rate', 'commissionable', 'credit_adj', 'customer', 'invoice_ref']) if (k in b) { vals.push(b[k] === '' ? null : b[k]); sets.push(k + '=$' + vals.length); }
