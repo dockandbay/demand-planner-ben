@@ -7258,6 +7258,8 @@ function _ediPreview(items) {
     multiSuppliers: skus.filter(x => (x.options || []).length > 1),
     skippedNoSscc: items.skippedNoSscc || 0,   // pages with no SSCC — skipped silently (surfaced as info, not an error)
     skus, byPo,
+    // v28.438: every page's SSCC (+ file, PO, matched) so the client can spot a label printed on more than one page, also across batches
+    pages: items.map(it => [it.sscc, it.srcFile || '', it.po || '', it.matched ? 1 : 0]),
   };
 }
 app.post('/api/supply/edi-labels/parse', async (req, res) => {
@@ -7281,9 +7283,14 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
     // Build the split entries + manifest rows + packing rows once, then either ZIP them (single request) or return
     // them as JSON (batched — the caller passes as_entries=true, dedupes paths ACROSS batches, and builds the ZIP).
     const fileEntries = [], manifestRows = [], packRows = [];
-    const seen = {};
+    const seen = {}, seenSscc = {};
     job.items.forEach(it => {
       let path, supplier = '', ref = '';
+      // v28.438 (Ben 22-Oct-26, Dillards packing list): one SSCC = one carton. A label that appears on more than one page (the same label
+      // in two PDFs, or a reissued label file) is used once: no second PDF, no second packing-list row. Listed in the manifest as a duplicate.
+      // Batched mode returns every page and the client applies the same rule across batches.
+      if (!asEntries && seenSscc[it.sscc]) { manifestRows.push([it.sscc, it.po, String(refs[it.po] || '').trim(), it.store, it.clientSku, it.ean, it.sku, '', 'no (duplicate page: same SSCC as ' + seenSscc[it.sscc] + ')', '']); return; }
+      seenSscc[it.sscc] = (it.srcFile || 'an earlier page');
       if (it.matched) {
         supplier = choices[it.sku] || it.mainSupplier || 'UNKNOWN_SUPPLIER';
         ref = String(refs[it.po] || '').trim();
@@ -7294,13 +7301,13 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
         path = '_UNMATCHED/' + sub + '/' + san(it.sscc) + '.pdf';
       }
       if (!asEntries) { if (seen[path]) { const n = ++seen[path]; path = path.replace(/\.pdf$/i, '_' + n + '.pdf'); } else seen[path] = 1; }   // single-request: dedupe here. Batched: client dedupes across batches.
-      fileEntries.push({ path, buf: it.buf });
+      fileEntries.push({ path, buf: it.buf, sscc: it.sscc, file: it.srcFile || '' });
       manifestRows.push([it.sscc, it.po, ref, it.store, it.clientSku, it.ean, it.sku, supplier, it.matched ? 'yes' : ('no (' + it.reason + ')'), path]);
       if (it.matched) packRows.push([supplier, it.po, ref, it.sku, it.qty || '', it.sscc]);
     });
     if (asEntries) {   // batched mode: hand back this batch's pieces; the client merges + zips
       return res.set('Cache-Control', 'no-store').json({
-        entries: fileEntries.map(f => ({ path: f.path, b64: f.buf.toString('base64') })),
+        entries: fileEntries.map(f => ({ path: f.path, b64: f.buf.toString('base64'), sscc: f.sscc, file: f.file })),
         manifest: manifestRows, pack: packRows });
     }
     const JSZip = (await import('jszip')).default; const zip = new JSZip();

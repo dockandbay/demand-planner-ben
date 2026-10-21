@@ -10732,11 +10732,11 @@
     function collectFiles(){ var out={csv:null,pdfs:[]}; var chain=Promise.resolve();
       if(S.csv)chain=chain.then(function(){ return fileToB64(S.csv).then(function(b){ out.csv={name:S.csv.name,b64:b}; }); });
       S.pdfs.forEach(function(f){ chain=chain.then(function(){ return hzUpload(f,{field:'b64',category:'edi'}).then(function(up){ out.pdfs.push(Object.assign({name:f.name},up)); }); }); });
-      (S.savedFiles||[]).forEach(function(sf){ chain=chain.then(function(){ return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ if(r&&r.b64){ if(sf.kind==='csv'){ if(!out.csv)out.csv={name:sf.filename,b64:r.b64}; } else out.pdfs.push({name:sf.filename,b64:r.b64}); } }); }); });
+      (S.savedFiles||[]).forEach(function(sf){ chain=chain.then(function(){ return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ if(r&&r.b64){ if(sf.kind==='csv'){ if(!S.csv)out.csv={name:sf.filename,b64:r.b64}; }   /* v28.438: the newest saved CSV wins (was the oldest) */ else out.pdfs.push({name:sf.filename,b64:r.b64}); } }); }); });
       return chain.then(function(){ return out; }); }
     // Cin7 sales-order CSV — needs the ASN CSV only (from step 1, or the loaded project)
     function csvOnly(){ if(S.csv)return fileToB64(S.csv).then(function(b){ return {name:S.csv.name,b64:b}; });
-      var sf=(S.savedFiles||[]).filter(function(f){return f.kind==='csv';})[0];
+      var sf=(S.savedFiles||[]).filter(function(f){return f.kind==='csv';}).pop();   // v28.438: newest saved CSV
       if(sf&&S.projectId)return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ return (r&&r.b64)?{name:sf.filename,b64:r.b64}:null; });
       return Promise.resolve(null); }
     // PREPACK price file (optional): its UnitPrice (by UPC) overrides us_rt/2 on the By-Store file.
@@ -10776,10 +10776,17 @@
         cur.push(p); curSize+=sz; });
       if(cur.length)batches.push(cur);
       return {batches:batches, rejected:rejected}; }
+    // v28.438 (Ben 22-Oct-26, Dillards packing list duplicates): one SSCC = one carton. A label on more than one page is used once;
+    // list the repeats and count labels per PO by unique SSCC.
+    function _ediDupes(m){ var by={}, order=[]; (m._pages||[]).forEach(function(pg){ var k=pg[0]; if(!by[k]){ by[k]={sscc:k,files:[],po:pg[2],n:0,matched:pg[3]}; order.push(k); } by[k].n++; by[k].files.push(pg[1]); });
+      m.dupes=order.map(function(k){return by[k];}).filter(function(d){return d.n>1;});
+      m.extraPages=m.dupes.reduce(function(a,d){return a+d.n-1;},0);
+      if(m._pages&&m._pages.length){ var bp={}; order.forEach(function(k){ var d=by[k]; if(d.matched)bp[d.po]=(bp[d.po]||0)+1; }); m.byPo=bp; m.matched=order.filter(function(k){return by[k].matched;}).length; m.total=order.length; } }
     function _ediMerge(dst,j){ if(!j)return;
       dst.total+=(j.total||0); dst.matched+=(j.matched||0); dst.skippedNoSscc=(dst.skippedNoSscc||0)+(j.skippedNoSscc||0);
       (j.unmatched||[]).forEach(function(u){ dst.unmatched.push(u); });
       var bp=j.byPo||{}; Object.keys(bp).forEach(function(po){ dst.byPo[po]=(dst.byPo[po]||0)+bp[po]; });
+      (j.pages||[]).forEach(function(pg){ (dst._pages=dst._pages||[]).push(pg); });
       (j.skus||[]).forEach(function(s){ var e=dst._skuMap[s.sku]; if(e){ e.count+=(s.count||0); } else { dst._skuMap[s.sku]={sku:s.sku,options:s.options,main:s.main,count:s.count||0}; } }); }
     // ── Client-side ZIP assembly (for batched GENERATE) ──────────────────────────────────────────────
     // Generate splits SSCC label PDFs into a folder tree. For a big set (>4.5MB) we batch the request (like parse) and
@@ -10816,7 +10823,7 @@
           return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:batches[i]})})
             .then(function(r){ if(!r.ok)return _ediErr(r); return r.json(); })
             .then(function(j){ _ediMerge(merged,j); return run(i+1); }); }
-        return run(0).then(function(){ merged.skus=Object.keys(merged._skuMap).map(function(k){return merged._skuMap[k];}).sort(function(a,b){return a.sku<b.sku?-1:a.sku>b.sku?1:0;});
+        return run(0).then(function(){ _ediDupes(merged); merged.skus=Object.keys(merged._skuMap).map(function(k){return merged._skuMap[k];}).sort(function(a,b){return a.sku<b.sku?-1:a.sku>b.sku?1:0;});
           merged.multiSuppliers=merged.skus.filter(function(x){return (x.options||[]).length>1;}); return merged; });
       }).then(function(j){ if(j){ S.job=j; renderPrev(j);
           var extra=''; if(j._batches>1)extra+=' · '+j._batches+' batches';
@@ -10824,7 +10831,11 @@
           if(extra){ var se=c.querySelector('#edi-status'); if(se)se.innerHTML+=extra; } } })
         .catch(function(e){ if(e&&e.message==='__done')return; st.textContent='Failed: '+(e.message||e); }); };
     function renderPrev(j){ var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
-      c.querySelector('#edi-status').innerHTML='<b style="color:var(--pos)">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:var(--amber)">'+j.unmatched.length+' unmatched</b>'):'')+(j.skippedNoSscc?(' · <span class="mut">'+j.skippedNoSscc+' page'+(j.skippedNoSscc>1?'s':'')+' skipped (no SSCC)</span>'):'');
+      c.querySelector('#edi-status').innerHTML='<b style="color:var(--pos)">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:var(--amber)">'+j.unmatched.length+' unmatched</b>'):'')+(j.skippedNoSscc?(' · <span class="mut">'+j.skippedNoSscc+' page'+(j.skippedNoSscc>1?'s':'')+' skipped (no SSCC)</span>'):'')
+        +((j.dupes&&j.dupes.length)?('<div style="margin-top:6px;padding:7px 10px;background:var(--amber-bg);border:1px solid #eab308;border-radius:6px;font-size:12px"><b style="color:var(--amber)">'+j.dupes.length+' SSCC label'+(j.dupes.length>1?'s are':' is')+' on more than one page</b> ('+j.extraPages+' extra page'+(j.extraPages>1?'s':'')+'). Each SSCC is one carton, so the ZIP and packing list use it once. Check the label PDFs: the same labels may be in two files.'
+          +'<div style="max-height:160px;overflow:auto;margin-top:5px"><table style="border-collapse:collapse;font-size:11px"><thead><tr style="color:var(--muted)"><th style="text-align:left;padding:1px 10px 1px 0">SSCC</th><th style="text-align:left;padding:1px 10px 1px 0">PO</th><th style="text-align:left;padding:1px 10px 1px 0">Pages</th><th style="text-align:left">Files</th></tr></thead><tbody>'
+          +j.dupes.map(function(d){ var fc={}; d.files.forEach(function(f){ fc[f]=(fc[f]||0)+1; }); return '<tr><td style="padding:1px 10px 1px 0">'+esc(d.sscc)+'</td><td style="padding:1px 10px 1px 0">'+esc(d.po||'')+'</td><td style="padding:1px 10px 1px 0">'+d.n+'</td><td>'+Object.keys(fc).map(function(f){ return esc(f)+(fc[f]>1?(' x'+fc[f]):''); }).join(', ')+'</td></tr>'; }).join('')
+          +'</tbody></table></div></div>'):'');
       // step 4 — vertical list, each ref a searchable crossdock/preorder picker (datalist)
       c.querySelector('#edi-s4').innerHTML='<div class="mut" style="font-size:11px;margin-bottom:6px">Optional. Search a crossdock / preorder ref — the folder becomes "PO - REF".</div>'
         +'<div style="display:flex;flex-direction:column;gap:6px">'+pos.map(function(po){ return '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="min-width:140px;font-weight:600">'+esc(po)+' <span class="mut" style="font-weight:400">('+j.byPo[po]+' labels)</span></span><input class="edi-ref" list="crossdocklist" data-po="'+esc(po)+'" placeholder="search CROSSDOCK / PREORDER…" style="flex:1;max-width:340px;border:1px solid var(--line);border-radius:4px;padding:3px 8px;font-size:12px"></div>'; }).join('')+'</div>';
@@ -10850,14 +10861,17 @@
           if(!cf.csv||!cf.pdfs.length){ throw new Error('Files missing — re-add in steps 1–2 (or reload the project) and parse again.'); }
           var part=_ediBatchPdfs(cf.csv.b64,cf.pdfs), batches=part.batches, rejected=part.rejected;
           if(!batches.length){ throw new Error('All '+rejected.length+' file(s) exceed the 4.5 MB per-file limit — cannot generate.'); }
-          var allEntries=[], allManifest=[], allPack=[], seen={};
+          var allEntries=[], allManifest=[], allPack=[], seen={}, seenSscc={}, packSeen={};   // v28.438: one SSCC = one carton (first page wins)
           function run(i){ if(i>=batches.length)return Promise.resolve();
             gs.textContent='Generating batch '+(i+1)+'/'+batches.length+' — '+batches[i].length+' PDF(s)'+(rejected.length?(' · '+rejected.length+' too large, skipped'):'')+'…';
             return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:batches[i],choices:choices,preorderRefs:preorderRefs,as_entries:true})})
               .then(function(r){ if(!r.ok)return _ediErr(r); return r.json(); })
               .then(function(j){ var ents=(j&&j.entries)||[], man=(j&&j.manifest)||[];
-                for(var k=0;k<ents.length;k++){ var p=ents[k].path; if(seen[p]){ var nn=++seen[p]; p=p.replace(/\.pdf$/i,'_'+nn+'.pdf'); } else seen[p]=1; ents[k].path=p; if(man[k])man[k][9]=p; allEntries.push(ents[k]); if(man[k])allManifest.push(man[k]); }
-                ((j&&j.pack)||[]).forEach(function(pr){ allPack.push(pr); }); return run(i+1); }); }
+                for(var k=0;k<ents.length;k++){ var sc=ents[k].sscc||(man[k]&&man[k][0]);
+                  if(sc&&seenSscc[sc]){ if(man[k]){ man[k][7]=''; man[k][8]='no (duplicate page: same SSCC as '+seenSscc[sc]+')'; man[k][9]=''; allManifest.push(man[k]); } continue; }
+                  if(sc)seenSscc[sc]=ents[k].file||'an earlier page';
+                  var p=ents[k].path; if(seen[p]){ var nn=++seen[p]; p=p.replace(/\.pdf$/i,'_'+nn+'.pdf'); } else seen[p]=1; ents[k].path=p; if(man[k])man[k][9]=p; allEntries.push(ents[k]); if(man[k])allManifest.push(man[k]); }
+                ((j&&j.pack)||[]).forEach(function(pr){ if(packSeen[pr[5]])return; packSeen[pr[5]]=1; allPack.push(pr); }); return run(i+1); }); }
           return run(0).then(function(){
             gs.textContent='Building ZIP…';
             var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };

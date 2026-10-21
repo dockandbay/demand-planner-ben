@@ -1,7 +1,7 @@
 ---
 topic: supply-finance
 title: Supply chain and finance
-covers: PO lifecycle and date chain, shipments, on-order vs inbound, order plan, PO payments and deposits, cash flow, Payments Report and Xero posting, 3PL invoices, Fulfil push and drift, supplier and client portals, commissions, sample charges, barcodes
+covers: PO lifecycle and date chain, shipments, on-order vs inbound, order plan, PO payments and deposits, cash flow, Payments Report and Xero posting, 3PL invoices, Fulfil push and drift, supplier and client portals, commissions, sample charges, barcodes, EDI labels (Dillards SSCC labels and packing lists)
 sources:
   - migrations/322_v_po_finance_setbased.sql :: planner.v_po_finance (canonical PO date + payment calc)
   - migrations/213_vpol_carton_from_products.sql :: planner.v_purchase_order_lines (full/partial carton check)
@@ -49,6 +49,10 @@ sources:
   - server.mjs :: syncXeroBills, _syncXeroBillsRun, xbUpsert, xbLastSync, xeroBillsFullResync, /api/supply/xero/bills-sync-visit, /api/supply/xero/bills-resync-all (Xero bill cache)
   - server.mjs :: xeroHealPoLinks, xeroHealAllVoided, xbRefreshLive, xbLeadMatch, xeroVoidLinkFinding, resolvePoLinks, /api/supply/po/:po/links, /api/supply/xero/bills/search, /api/supply/xero/bills/verify (PO to Xero bill links)
   - supply/inject.html :: xeroBillPicker, xbsVisit, xbsSync
+  - server.mjs :: _ediParse
+  - server.mjs :: _ediPreview
+  - server.mjs :: /api/supply/edi-labels/generate
+  - supply/inject.html :: _ediDupes
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
@@ -217,7 +221,11 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.437
+  server.mjs::_ediParse: 1f26d285b039
+  server.mjs::_ediPreview: a0d388561acf
+  server.mjs::/api/supply/edi-labels/generate: 632b2d3ed286
+  supply/inject.html::_ediDupes: 2bd1091bdf39
+verified_version: v28.438
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -586,3 +594,11 @@ verified_version: v28.437
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+
+## EDI labels: Dillards SSCC labels and supplier packing lists
+- Page: Direct-to-Client report > EDI LABELS (#/supply/purchase-orders/edi-labels). Inputs: the ASN (wc-asn, POST PACK) CSV and the SSCC label PDFs, uploaded or saved in a project. Reads only; nothing is written to Fulfil or the ERP. (source: server.mjs :: _ediParse)
+- The ASN gives one row per carton: PO-store (col 4), client SKU (107), EAN (108), carton qty (111), SSCC (129, last 18 digits). Each PDF page is matched to an ASN row by the SSCC printed after (00); EAN gives our SKU and supplier.
+- Generate splits each label into Supplier / PO (- preorder ref) / SKU / <SSCC>.pdf and writes manifest.csv plus one packing-list-<supplier>.csv per supplier (Supplier, PO, preorder ref, SKU, quantity = the ASN carton qty, SSCC). (source: server.mjs :: /api/supply/edi-labels/generate)
+- One SSCC = one carton (v28.438, Ben 22-Oct-26 after Madison's Dillards packing list showed 8 SSCCs twice, earlier three times, for PO 3242991501): a label on more than one page (the same label in two PDFs, or a reissued label file) is used once. The first page wins; the repeats get no PDF and no packing-list row and are listed in the manifest as "duplicate page: same SSCC as <file>". Large sets are generated in batches and the browser applies the same rule across batches. (source: supply/inject.html :: _ediDupes)
+- Parse shows the repeats in an amber box (SSCC, PO, pages, files) and counts labels and labels per PO by unique SSCC. (source: server.mjs :: _ediPreview)
+- When a project holds more than one ASN CSV, the newest saved one is used (before v28.438 the oldest was used, so a re-downloaded ASN saved next to an old one was ignored). A CSV added in step 1 and not saved wins over saved ones.
