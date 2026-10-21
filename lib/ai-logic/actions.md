@@ -67,7 +67,7 @@ fingerprints:
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: cd22857b63aa
+  server.mjs::buildActionsRows: e51539bd19c6
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 645a4102e9a0
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.435
+verified_version: v28.437
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -239,7 +239,7 @@ verified_version: v28.435
   - Required field missing (amber): PRODUCTION status with no Batch, Production #, Supplier or Branch.
 - ERP:
   - PO not in ERP (high): no lines are mirrored.
-  - Order-plan change pending ERP push (amber): line qty differs from the ERP mirror.
+  - Order-plan change pending ERP push (amber): line qty differs from the ERP mirror Polybag lines (SKU starting POLYBAG) never count (v28.437: Fulfil POs mostly carry no polybags).
   - ERP POs not in planner (amber): one row when ERP Compare has non-ignored rows.
   - Manufacturing POs are excluded from the first two.
 - Money:

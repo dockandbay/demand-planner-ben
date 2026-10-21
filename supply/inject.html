@@ -5911,7 +5911,7 @@
     // Once a PO has shipped/delivered/completed the plan is locked — no partials / supplier-risk to action.
     function poLocked(l){ return /complete|shipping|deliver/i.test(l.status||''); }
     function isUnapprovedPartial(l){ return !poLocked(l) && (l.full_carton_check||'').indexOf('⚠')>=0; }
-    function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
+    function erpDiff(l){ return !/complete/i.test(l.status||'') && !/^POLYBAG/i.test(l.sku||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
     // supplier risk: line ordered against a PO whose supplier isn't in the SKU's allowed multi-supplier list.
     function supMismatch(l){ var a=skuAttr[l.sku]||{}; var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean); var ps=(l.supplier_name||'').trim().toLowerCase(); return allowed.length>0 && !!ps && allowed.indexOf(ps)<0; }
     // discontinued: line's arrive (delivery) date is after the SKU's discontinue date (per-destination).

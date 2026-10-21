@@ -1194,6 +1194,9 @@ const TPL_BRANCH_SQL = b => `(upper(coalesce(${b}.country_code,'')) IN ('UK','US
 // set (only a 3PL counts); when the shipment branch is blank, any OTHER PO on the same shipment_ref with a 3PL branch
 // (e.g. IS198: PO-1845589 Direct to Client rides with PO-57USLX6 US Geneva). ONE definition shared by the PO grid row
 // (xdock_3pl → PO_ACTCOND.crossdock_needed) and SUPPLY ▸ Actions (buildActionsRows), so the counts agree.
+// v28.437 (Ben 22-Oct-26): polybag lines (POLYBAG ...) are packaging that Fulfil POs mostly don't carry, so they never count as an ERP
+// deviation (PO grid, Actions, PO drawer, data health). The lines themselves are kept and still pushed.
+const ERP_DEV_SKU_SQL = sku => `upper(coalesce(${sku},'')) NOT LIKE 'POLYBAG%'`;
 const XDOCK_3PL_SQL = (po, branch, keyAcct, ship) => `(SELECT CASE
     WHEN NOT (upper(coalesce(xob.country_code,''))='DIRECT' OR lower(coalesce(${branch},'')) ~ '(direct to client|b2b jlew|b2b next|fba|awd)'
               OR (coalesce(${keyAcct},false) AND NOT coalesce(${TPL_BRANCH_SQL('xob')},false))) THEN NULL
@@ -11481,7 +11484,7 @@ async function buildActionsRows() {
             FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             JOIN planner.purchase_orders p ON p.po=l.po AND coalesce(p.status,'') NOT ILIKE '%complete%'  -- ignore COMPLETE POs
               AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → no ERP deviation exception
-            WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty)  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel); v28.427: ERP = Fulfil (line erp_qty) else the old snapshot
+            WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty) AND ${ERP_DEV_SKU_SQL('l.sku')}  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel); v28.427: ERP = Fulfil (line erp_qty) else the old snapshot
             GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty, el.qty) IS NOT NULL)>0  -- has ≥1 line in the ERP (else "not in ERP" below)
           UNION ALL
           SELECT 'high','PO not in ERP', l.po,
@@ -20721,7 +20724,7 @@ async function computeOpenActions() {
           OR (trim(coalesce(p.crossdock_skus,''))='' AND ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', "coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1))")} IS NOT NULL)
           OR ${FULFIL_LINK_NEEDED_SQL('p.po', 'p.branch', 'p.dtc_key_account')})`),   // v28.207: + Link Fulfil PO
     one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-      LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(l.erp_qty, el.qty, 0) IS DISTINCT FROM coalesce(l.qty,0)`),   // v28.427: ERP = Fulfil
+      LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(l.erp_qty, el.qty, 0) IS DISTINCT FROM coalesce(l.qty,0) AND ${ERP_DEV_SKU_SQL('l.sku')}`),   // v28.427: ERP = Fulfil
     one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
         AND (p.status ILIKE '%production%' OR p.status ILIKE '%ready to ship%') AND coalesce(p.end_production_overide, current_date) <= current_date + interval '21 days' AND ${hasLines}`),
     (async () => { try { return (await manufacturingActions()).length; } catch (e) { return 0; } })(),
@@ -23066,7 +23069,7 @@ app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
 const _PO_DETAIL_Q = [
   ["lines", `SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
                     coalesce(pol.erp_qty, el.qty) erp_qty, el.cost erp_cost,   -- v28.427: ERP qty = Fulfil (line erp_qty), else the old pushed snapshot
-                    (coalesce(l.qty,0) IS DISTINCT FROM coalesce(pol.erp_qty, el.qty, 0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
+                    (coalesce(l.qty,0) IS DISTINCT FROM coalesce(pol.erp_qty, el.qty, 0) AND ${ERP_DEV_SKU_SQL('l.sku')}) qty_pending,   -- 0 plan == absent from ERP → not a deviation
                     (l.cost_price IS DISTINCT FROM el.cost) cost_pending,
                     -- EXCEPTION: SKU not RELEASED in this PO's market. Uses available_no_disc (the raw channel
                     -- availability flag, IGNORING the discontinue date) — so a SKU that WAS released in the market
@@ -27296,7 +27299,7 @@ const PO_ROWS_SQL = `
             -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
             (CASE WHEN coalesce(status,'') ILIKE '%complete%' OR coalesce(branch,'') ILIKE '%manufactur%' THEN 0 ELSE  -- Manufacturing = FOB → no ERP deviation
               (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(l.erp_qty, el.qty, 0)) END)::int erp_pending,   -- v28.427: ERP = Fulfil (line erp_qty) else the old snapshot   -- 0 plan == absent from ERP (both nothing) → not a deviation
+                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(l.erp_qty, el.qty, 0) AND ${ERP_DEV_SKU_SQL('l.sku')}) END)::int erp_pending,   -- v28.427: ERP = Fulfil (line erp_qty) else the old snapshot   -- 0 plan == absent from ERP (both nothing) → not a deviation
             (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po AND coalesce(l.erp_qty, el.qty) IS NOT NULL)::int erp_in,   -- v28.427
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
@@ -29108,16 +29111,16 @@ const DH_CHECKS = [
         detail: 'Check for a receipt, a transfer or a stock count behind it.', link: '#/buy-move/inventory/status', sig: a + '>' + b }); });
     return out; } },
   // ── inbound (HORIZON POs vs the Fulfil mirror: purchase_order_lines.erp_qty, fulfil_purchase_orders, shipments) ──
-  { key: 'po_erp_deviation', area: 'inbound', label: 'PO quantities differ from Fulfil', run: async () => (await pool.query(`SELECT l.po, count(*) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty))::int n,
+  { key: 'po_erp_deviation', area: 'inbound', label: 'PO quantities differ from Fulfil', run: async () => (await pool.query(`SELECT l.po, count(*) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty) AND ${ERP_DEV_SKU_SQL('l.sku')})::int n,
       sum(coalesce(l.qty, 0))::int hz, sum(coalesce(l.erp_qty, el.qty, 0))::int erp,
-      (array_agg(l.sku || ' ' || coalesce(l.qty, 0) || ' vs ' || coalesce(l.erp_qty, el.qty, 0)) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty)))[1:8] ex
+      (array_agg(l.sku || ' ' || coalesce(l.qty, 0) || ' vs ' || coalesce(l.erp_qty, el.qty, 0)) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty) AND ${ERP_DEV_SKU_SQL('l.sku')}))[1:8] ex
       FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po = l.po LEFT JOIN planner.erp_purchase_order_lines el ON el.po = l.po AND el.sku = l.sku
-      WHERE ${DH_OPEN_PO('p')} GROUP BY l.po HAVING sum(coalesce(l.erp_qty, el.qty, 0)) > 0 AND count(*) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty)) > 0 ORDER BY 1`)).rows
+      WHERE ${DH_OPEN_PO('p')} GROUP BY l.po HAVING sum(coalesce(l.erp_qty, el.qty, 0)) > 0 AND count(*) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty) AND ${ERP_DEV_SKU_SQL('l.sku')}) > 0 ORDER BY 1`)).rows
     .map(r => ({ record: r.po, severity: 'amber', title: r.po + ': ' + r.n + ' line' + (r.n === 1 ? '' : 's') + ' differ from Fulfil (HORIZON ' + _dhN(r.hz) + ' vs Fulfil ' + _dhN(r.erp) + ' units)',
       detail: 'HORIZON vs Fulfil: ' + (r.ex || []).join(', '), link: _dhPo(r.po), sig: r.n + '|' + r.hz + '|' + r.erp })) },
   { key: 'po_not_in_erp', area: 'inbound', label: 'Open PO not in Fulfil', run: async () => (await pool.query(`SELECT l.po, p.status, count(*)::int n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po = l.po
       LEFT JOIN planner.erp_purchase_order_lines el ON el.po = l.po AND el.sku = l.sku
-      WHERE ${DH_OPEN_PO('p')} AND upper(coalesce(p.status,'')) <> 'FUTURE' AND coalesce(l.qty, 0) <> 0 GROUP BY l.po, p.status HAVING sum(coalesce(l.erp_qty, el.qty, 0)) = 0 ORDER BY 1`)).rows
+      WHERE ${DH_OPEN_PO('p')} AND upper(coalesce(p.status,'')) <> 'FUTURE' AND coalesce(l.qty, 0) <> 0 AND ${ERP_DEV_SKU_SQL('l.sku')} GROUP BY l.po, p.status HAVING sum(coalesce(l.erp_qty, el.qty, 0)) = 0 ORDER BY 1`)).rows
     .map(r => ({ record: r.po, severity: 'high', title: r.po + ' (' + (r.status || 'no status') + '): ' + r.n + ' line' + (r.n === 1 ? '' : 's') + ' in HORIZON, none in Fulfil (or all at 0)', detail: 'Push it to Fulfil, or link the Fulfil PO (Import from Fulfil).', link: _dhPo(r.po), sig: String(r.n) })) },
   { key: 'fulfil_po_unlinked', area: 'inbound', label: 'Fulfil PO with no HORIZON PO', run: async () => (await pool.query(`SELECT f.po, f.state, f.party_name, f.warehouse_code, coalesce(f.line_count, 0)::int lines, f.delivery_date::text dd
       FROM planner.fulfil_purchase_orders f WHERE f.state IN ('confirmed','processing') AND f.po !~* 'test' AND coalesce(f.party_name,'') !~* 'test'
