@@ -1,3 +1,7 @@
+## v28.420 (21-Oct-26) Commissions: Monthly run label, month picker, agent and Build / refresh run on one line
+- Ben: "can you put monthly run picker and build/refresh run on the same line". CLIENT > Commissions > Monthly run & bills: "Monthly run", the month picker (wider, so the month is not cut), the agent and Build / refresh run now sit in one group that does not wrap; the month filter stays on the right.
+- jsdom render: the four sit in one no-wrap group. Display only. Buy plan before vs after on the sandbox: identical. No server change, no migration, no env change.
+
 ## v28.419 (21-Oct-26) Customer receipts: AU store left out; Shopify connected
 - Ben: "au stays out". The AU store (dockandbay-au, Xero AU) is no longer suggested or found by search in Reconcile > Money in. Its Fulfil manual gateway still has no account code.
 - Ben filled the 14 Shopify values. Read-only check of every store (shop, scopes, latest order): UK, US, EU, AU, UKWS, USWS, EUWS all connect with read_orders + write_orders.
