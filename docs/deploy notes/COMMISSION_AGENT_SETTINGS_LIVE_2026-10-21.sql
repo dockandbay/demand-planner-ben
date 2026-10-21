@@ -19,7 +19,9 @@ UPDATE planner.rep_groups SET xero_contact = 'IDECO' WHERE name = 'Agent - Ideco
 UPDATE planner.rep_groups SET xero_contact = 'PATRICK AND COMPANY' WHERE name = 'Agent - Patrickco';
 -- Ben 21-Oct-26: TJ = Xero contact 819398f5-bd71-4046-8e3d-b522cd0cf098 "Sparkasse Offenburg/Ortenau - TJ" (the only contact with that name)
 UPDATE planner.rep_groups SET xero_contact = 'Sparkasse Offenburg/Ortenau - TJ' WHERE name = 'Agent - TJ';
--- TODO (Ben): Harper Group, KathCo, TR Partners
+-- Ben 21-Oct-26: Harper Group = Xero contact b77aef07-92f3-4fe9-8302-64c1c8ac90d1 "Harper Group" (the only contact with exactly that name)
+UPDATE planner.rep_groups SET xero_contact = 'Harper Group' WHERE name = 'Agent - Harper Group';
+-- TODO (Ben): KathCo, TR Partners
 
 -- 3. Bill account (Ben 21-Oct-26: "change agent fees to be cost of sales - us - wholesale. and cost of sales - de - wholesale etc"):
 --    the Xero UK "Cost of Sales - <market> - Wholesale" account of the agent's market (codes read from Xero UK 21-Oct-26)
