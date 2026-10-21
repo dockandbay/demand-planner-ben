@@ -41,7 +41,7 @@ sources:
   - server.mjs :: biConsolidations
 fingerprints:
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
-  artifact_v16.7.html::renderExceptionsView: c5c8aa1bfeec
+  artifact_v16.7.html::renderExceptionsView: 0937db43e62d
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
   artifact_v16.7.html::daClientDetectors: 57025c59e925
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.428
+verified_version: v28.435
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -86,7 +86,8 @@ verified_version: v28.428
   - Country UK/US/EU/AU and Channel DTC/FBA/B2B, both defaulting to all. The channel filter is hidden on No availability, Discontinued, Recommendations and Data & config.
   - View: SKUs, or Categories (parent category).
   - Risk: All, Red or Amber.
-  - Min units: hides rows with |delta| below the value entered.
+  - Min units: hides rows with |delta| below the value entered. On Forecast < Actual and Forecast > Run-rate the box is labelled "Min gap" and a Gap column shows the delta it filters on: actual minus forecast (Forecast < Actual), forecast minus run-rate (Forecast > Run-rate). It is the gap, not the size of the row: forecast 120 and actual 125 is a gap of 5, hidden by Min gap 10 (v28.435, Ben 21-Oct-26 chose "keep gap, show it" after "min 10 shows nothing").
+  - Deep links: #/demand/exceptions/<slug> (forecast-less-actual, forecast-greater-run-rate, or the tab key) open that tab; the SUPPLY router maps the slug to the tab key (v28.435; before, the raw slug fell back to the Forecast < Actual maths, so a Forecast > Run-rate link computed the wrong gap).
 - Sets (SKU type SET) are skipped on every sub-tab except Data & config.
 - SKU forecast = the subcategory forecast split by the SKU's share (buildSkuShares), with any manual SKU override applied on top. Actual = SKU sales for CUR_MONTH. A SKU is checked only for channels it is available in. (source: skuMonthlyMap)
 - Run-rate = month-to-date actual / days elapsed x days in month. If CUR_MONTH is before the calendar month (month boundary), the month counts as fully elapsed.

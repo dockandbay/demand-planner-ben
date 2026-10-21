@@ -1,3 +1,10 @@
+## v28.435 (21-Oct-26) DEMAND Exceptions: Min gap shows what it filters on; deep links open the right tab
+- Ben: "#/demand/exceptions/forecast-less-actual min entering 10 shows nothing but there seem to be items more than 10 in the list". Cause: Min filters on the GAP (actual minus forecast), which was not shown, not on the forecast / actual numbers in the row; forecast 120 and actual 125 is a gap of 5, hidden by Min 10. Ben chose: keep the gap, show it.
+- Forecast < Actual and Forecast > Run-rate: the box is now "Min gap" (with a tooltip) and a new Gap column shows the gap per row (actual minus forecast; forecast minus run-rate).
+- Also fixed: opening these tabs by URL (#/demand/exceptions/forecast-less-actual or forecast-greater-run-rate) left the tab set to the URL name, so the page ran the Forecast < Actual maths for both; a Forecast > Run-rate link showed the wrong gap and status. The router now maps the URL name to the tab.
+- jsdom (sandbox): both links open their tab; Forecast < Actual 93 red / 16 amber, Min gap 10 leaves only rows 10+ apart (e.g. HAIRW-SUE-PSTPIER -33, TOWLH-DES-LG-TIGPALM +13); Forecast > Run-rate 747 red / 78 amber with gaps forecast minus run-rate.
+- Display only. No migration, no route, no env change.
+
 ## v28.434 (21-Oct-26) Data health phase 2: live reconciliations (Shopify, 3PL, FBA, kit BOMs, wholesale agents)
 - Ben: "proceed" (phase 2). Five live checks added to the daily run, all reads, run in parallel (each stopped after 120 s); about 27 s for the whole run on the sandbox.
 - Shopify orders missing from Fulfil: every connected store (UK, US, EU, AU, UKWS, USWS, EUWS), orders of the last 7 days (not the last 2 hours), one finding per store. Sandbox: 1,698 orders checked, none missing.

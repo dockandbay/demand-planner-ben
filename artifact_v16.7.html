@@ -13209,8 +13209,8 @@ function renderExceptionsView(body){
       if(isSku)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',co:co,ch:ch,fc:fc,act:act,run:run,status:status,delta:delta});
       else { var k=co+'|'+ch+'|'+(_catOf(sku)); var g=catMap[k]||(catMap[k]={path:[co,ch],label:_catOf(sku),co:co,ch:ch,fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; } });
     if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; g.run=elapsed>0?(g.act/elapsed*total):g.act; if(EXC_SUBTAB==='fgtr'){g.delta=g.fc-g.run;g.status=(g.fc>0&&g.act>0&&frac>=0.34)?(g.run<g.fc*0.5?'RED':(g.run<g.fc*0.75?'AMBER':'')):'';} else {g.delta=g.act-g.fc;g.status=(g.fc>0&&g.act>=g.fc)?'RED':((g.fc>0&&g.run>g.fc&&g.act<g.fc)?'AMBER':'');} if(g.status)flat.push(g); });
-    flat.forEach(function(r){ r.vals=[fn(r.fc)].concat(hasOv?[ovCell(r)]:[]).concat([fn(r.act),fn(r.run)]); });
-    return {rows:flat, cols:['Forecast'].concat(hasOv?['Override']:[]).concat(['Actual ('+curLbl+')','Run-rate'])};
+    flat.forEach(function(r){ var _g=Math.round(r.delta||0); r.vals=[fn(r.fc)].concat(hasOv?[ovCell(r)]:[]).concat([fn(r.act),fn(r.run),(_g>0?'+':'')+fn(_g)]); });   // v28.435 (Ben): Gap = what Min gap filters on (fclt: actual − forecast; fgtr: forecast − run-rate)
+    return {rows:flat, cols:['Forecast'].concat(hasOv?['Override']:[]).concat(['Actual ('+curLbl+')','Run-rate','Gap'])};
   }
   function buildNoAvail(){ var flat=[], catMap={};
     cos.forEach(function(co){ var ctry=co.toLowerCase();
@@ -13332,7 +13332,7 @@ function renderExceptionsView(body){
     +(usesCh?'<div><span style="'+LBL+'">Channel</span>'+[['all','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(x){return PILL('ch',x[0],EXC_CH===x[0],x[1]);}).join('')+'</div>':'')
     +((EXC_SUBTAB==='dataconfig'||EXC_SUBTAB==='recs')?'':'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',isSku,'SKUs')+PILL('grain','category',!isSku,'Categories')+'</div>')
     +'<div><span style="'+LBL+'">Risk</span>'+[['all','All'],['RED','Red'],['AMBER','Amber']].map(function(x){return PILL('sev',x[0],EXC_SEV===x[0],x[1]);}).join('')+'</div>'
-    +'<div><span style="'+LBL+'">Min</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:60px;font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:5px;text-align:left"></div>'
+    +'<div><span style="'+LBL+'">'+((EXC_SUBTAB==='fclt'||EXC_SUBTAB==='fgtr')?'Min gap':'Min')+'</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="'+(EXC_SUBTAB==='fclt'?'Hide rows where actual and forecast are less than this many units apart (the Gap column)':EXC_SUBTAB==='fgtr'?'Hide rows where forecast and run-rate are less than this many units apart (the Gap column)':'Hide rows below this many units')+'" style="width:60px;font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:5px;text-align:left"></div>'
     +'<div style="margin-left:auto;color:var(--faint)"><b style="color:var(--neg)">'+nRed+' red</b> · <b style="color:var(--amber)">'+nAmb+' amber</b></div></div>';
   var subtab='';   // sub-tabs now live in the L3 (light-blue) nav rendered by renderDemandTabs, deep-linked #/demand/exceptions/<key>
   var LEG={fclt:'<b style="color:var(--neg)">Red</b> = actuals already reached forecast (buy plan infers 0 remaining). <b style="color:var(--amber)">Amber</b> = under forecast but run-rate pacing past it. Override (next to forecast) resets the current-month forecast; Save Forecasts to persist.',
