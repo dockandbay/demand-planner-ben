@@ -110,4 +110,7 @@ print(report)
 with open(os.path.join(HERE, "monitor_log.md"), "a") as fh:
     fh.write(report + "\n")
 if not args.no_save:
-    json.dump({"last_check": now.isoformat()}, open(state_path, "w"))
+    tmp = state_path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump({"last_check": now.isoformat()}, fh)
+    os.replace(tmp, state_path)
