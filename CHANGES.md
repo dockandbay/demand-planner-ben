@@ -1,3 +1,13 @@
+## v28.434 (21-Oct-26) Data health phase 2: live reconciliations (Shopify, 3PL, FBA, kit BOMs, wholesale agents)
+- Ben: "proceed" (phase 2). Five live checks added to the daily run, all reads, run in parallel (each stopped after 120 s); about 27 s for the whole run on the sandbox.
+- Shopify orders missing from Fulfil: every connected store (UK, US, EU, AU, UKWS, USWS, EUWS), orders of the last 7 days (not the last 2 hours), one finding per store. Sandbox: 1,698 orders checked, none missing.
+- 3PL stock report vs Fulfil on hand: UK, US, AU reports and EU (BLADE), same comparison as Manage 3PL; one finding per market with the biggest gaps. Not saved to the Manage 3PL import. On the sandbox the gaps are large because sandbox stock is from 06-Oct (live check: AU TOWLB-DES-XL-BLUSKY 1,499 in Fulfil vs 1,500 in the report). BLADE login returns 401 with the sandbox password, so EU shows as a check error here.
+- Amazon FBA report vs Fulfil: the latest upload per market when 7 days old or less; one low finding lists markets with no recent upload (today: US 70 days, UK 63 days, AU / EU / CA never).
+- Kits sold with no active BOM in Fulfil: market-prefixed set SKUs on sale lines of the last 14 days (PP- prepacks are stocked items, not checked). Sandbox: 107 kits, all with a BOM.
+- Paid wholesale orders with no agent: commission engine for the month without Xero (shared daily limit); no-agent payments and Fulfil code vs customer list disagreements. Sandbox: USWS-19345, USWS-19334, EUWS-3323.
+- Not built: Fulfil invoices missing from Xero (no Fulfil-to-Xero mirror to compare with yet).
+- Page: recent runs show Shopify orders and kits checked. A check that read only some markets keeps those findings and marks nothing fixed that run. No migration, no new route, no env change.
+
 ## v28.433 (21-Oct-26) Commissions > Orders: search Fulfil and tag an order to an agent (HORIZON tag, optional write to Fulfil)
 - Ben: "Is there an ability to search fulfil for a sales order to add to an agent? Tag it? We should have that ability in orders" (chose: HORIZON tag + write to Fulfil). Was: the Order overrides box needed the exact order ref typed in, and it only changed commission.
 - COMMISSIONS > Orders > Tag an order to an agent: search Fulfil (read only) by SO number, order reference or customer. Each hit shows its date, state, channel, client PO, total, and the agent now (Fulfil agent code and / or HORIZON tag).

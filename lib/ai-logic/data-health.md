@@ -4,6 +4,7 @@ title: Data health (daily Fulfil data check)
 covers: CONFIG > Admin > Data health and its daily email: the checks of Fulfil-fed data in HORIZON (stock on hand, inbound POs and shipments, sales orders, DTC mismatch 2.0), how findings become new / open / dismissed / fixed, who is emailed and when.
 sources:
   - server.mjs :: DH_CHECKS
+  - server.mjs :: DH_CHECKS_LIVE
   - server.mjs :: dhRun
   - server.mjs :: dhEmail
   - server.mjs :: dhRecipients
@@ -13,17 +14,18 @@ sources:
   - migrations/382_data_health.sql :: file
 fingerprints:
   server.mjs::DH_CHECKS: 6dbc8cfc09e8
-  server.mjs::dhRun: 32e2da4667f0
+  server.mjs::DH_CHECKS_LIVE: cf5be1ee4925
+  server.mjs::dhRun: ac59999fefa8
   server.mjs::dhEmail: a160971867f8
   server.mjs::dhRecipients: a8bdf3cc29eb
   server.mjs::/api/cron/data-health: f6c595aa643d
-  server.mjs::/api/admin/data-health: dcea0a233351
+  server.mjs::/api/admin/data-health: c06a3216d9fd
   server.mjs::/api/admin/data-health/:id/dismiss: ad86d568cc48
   migrations/382_data_health.sql::file: f021cb94b5e1
-verified_version: v28.432
+verified_version: v28.434
 ---
 ## What it is
-- A daily check of the Fulfil data HORIZON already holds. Phase 1 reads only the HORIZON database (no Fulfil, Shopify or 3PL API calls). (source: server.mjs :: DH_CHECKS)
+- A daily check of the Fulfil data HORIZON holds. Phase 1 (v28.432) reads only the HORIZON database. Phase 2 (v28.434) adds live reconciliations that read Shopify, the 3PL stock reports, Fulfil and the commission engine (without Xero). (source: server.mjs :: DH_CHECKS, DH_CHECKS_LIVE)
 - It writes nothing to Fulfil or any other live system. It writes only its own two tables (planner.data_health_findings, planner.data_health_runs) and one app_settings key per day for the email claim. (source: server.mjs :: dhRun)
 - Page: CONFIG > Admin > Data health (#/config/admin/data-health). Admins see it in the Admin tabs; everyone else signed in gets a "Data health" tab in CONFIG, because the daily email goes to non-admins too.
 
@@ -65,5 +67,11 @@ Open PO = status not complete / delivered / cancelled and branch not Manufacturi
 - Content: new / open / fixed per area, the 10 most serious new findings (high first), any checks that failed, and a link to the page. Sent every day, also when nothing is new.
 - Admin buttons: Run now (no email) and Send test (runs, and emails only the signed-in admin; not claimed).
 
-## Phase 2 (not built)
-- Live reconciliations that cost API calls: Fulfil vs Shopify orders per store per day, Fulfil vs 3PL stock (BLADE EU API), Fulfil vs Amazon FBA, kits with no BOM, wholesale orders with no agent, invoices not in Xero.
+## Checks (phase 2: live reconciliations, v28.434)
+Run after the phase 1 checks, all at the same time, each stopped after 120 s. Reads only. (source: server.mjs :: DH_CHECKS_LIVE, dhRun)
+- **Shopify orders missing from Fulfil** (sales, high): every Shopify store with credentials (UK, US, EU, AU, UKWS, USWS, EUWS), orders created from 7 days ago to 2 hours ago (sync lag), test orders left out; an order is missing when no Fulfil sale order has its name as reference. One finding per store listing up to 15 order names. An order older than 7 days drops out of the window, so its finding then shows as fixed. Sandbox 21-Oct-26: 1,698 orders checked, none missing.
+- **3PL stock report vs Fulfil on hand** (inventory): UK, US and AU 3PL CSV reports and EU via BLADE, the same sources and comparison as Manage 3PL (inv3plCompare: report on hand vs products.inventory_<market>_3pl_onhand, the Fulfil feed). One finding per market: SKUs that differ, report vs Fulfil totals of those SKUs, units apart (high at 500 or more), report SKUs not in HORIZON, the 8 biggest (with a PO due within a week, when there is one). Nothing is saved to the Manage 3PL import. A market whose report cannot be read is a check error: the other markets still report, and no finding is marked fixed that run.
+- **Amazon FBA report vs Fulfil** (inventory): the latest FBA report upload per market (US, UK, AU, EU, CA) when it is 7 days old or less, compared as on Manage FBA (invFbaCompare); one finding per market. Markets with no upload in 7 days are listed in one low finding (there is no Amazon API connection; the reports are uploaded).
+- **Kits sold with no active BOM in Fulfil** (inventory, high): market-prefixed set SKUs (e.g. UK-TOWLB-CAB-XL-4SETK) on live sale lines of the last 14 days that have no active BOM, so their components are not taken out of stock. PP- prepacks and plain set SKUs are stocked items and are not checked. Sandbox 21-Oct-26: 107 kits sold, all with a BOM.
+- **Paid wholesale orders with no agent** (sales): the commission engine for the current month WITHOUT Xero (the Xero daily limit is shared with live): payments with no agent (no Fulfil code, customer on no agent's list) and orders whose Fulfil agent code disagrees with the customer's agent. One finding per order.
+- Not built: Fulfil invoices missing from Xero (there is no Fulfil-to-Xero mirror to compare with yet).

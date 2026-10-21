@@ -29166,16 +29166,92 @@ const DH_CHECKS = [
       detail: g.rows.filter(r => r.issue !== 'ok').slice(0, 6).map(r => r.sku + ' ' + r.issue).join(', '), link: '#/supply/reports/dtc2', sig: g.hz_qty + '|' + g.fulfil_qty }));
     return out; } },
 ];
+// ── Phase 2 (v28.434, Ben 21-Oct-26 "proceed"): live reconciliations. Reads only: Shopify (Admin GraphQL), the 3PL stock reports (drivehq
+// CSVs, BLADE API for EU), Fulfil (live), the latest FBA report uploads and the commission engine WITHOUT Xero (the Xero daily limit is
+// shared with live). Nothing is written anywhere but the data health tables. live:true checks run in parallel, each capped at DH_LIVE_MS.
+const DH_LIVE_MS = 120000;
+const DH_SHOP_STORES = ['UK', 'US', 'EU', 'AU', 'UKWS', 'USWS', 'EUWS'];
+const DH_CHECKS_LIVE = [
+  { key: 'shopify_not_in_fulfil', area: 'sales', label: 'Shopify orders missing from Fulfil', live: true, run: async (ctx) => { ctx.meta.shopify = {};
+    const to = new Date(Date.now() - 2 * 3600e3), from = new Date(Date.now() - 7 * 86400e3), out = [];
+    const ff = fulfilConfigFor('live');
+    for (const store of DH_SHOP_STORES) { if (!shopifyCfg(store).configured) continue;
+      const names = []; let after = null;
+      for (let page = 0; page < 40; page++) {
+        const d = await shopifyGql(store, 'query($q:String!,$a:String){ orders(first:250, after:$a, query:$q, sortKey:CREATED_AT){ nodes{ name test } pageInfo{ hasNextPage endCursor } } }',
+          { q: "created_at:>='" + from.toISOString() + "' created_at:<='" + to.toISOString() + "'", a: after });
+        const o = d.orders || {}; (o.nodes || []).forEach(n => { if (!n.test) names.push(String(n.name || '').replace(/^#/, '').trim()); });
+        if (!(o.pageInfo && o.pageInfo.hasNextPage)) break; after = o.pageInfo.endCursor; }
+      if (!names.length) continue;
+      const have = new Set();
+      for (let i = 0; i < names.length; i += 200) ((await fulfilFetchCfg(ff, 'PUT', '/model/sale.sale/search_read', [[['reference', 'in', names.slice(i, i + 200)]], 0, 500, null, ['reference']])) || [])
+        .forEach(s => have.add(String(fulfilUnwrap(s.reference) || '').toUpperCase()));
+      const miss = names.filter(n => !have.has(n.toUpperCase())).sort(); ctx.meta.shopify[store] = { orders: names.length, missing: miss.length };
+      if (miss.length) out.push({ record: 'shopify:' + store, severity: 'high', title: 'Shopify ' + store + ': ' + miss.length + ' of ' + names.length + ' orders from the last 7 days are not in Fulfil',
+        detail: 'Not in Fulfil: ' + miss.slice(0, 15).join(', ') + (miss.length > 15 ? ' and ' + (miss.length - 15) + ' more' : '') + '. Orders from the last 2 hours are not checked (sync lag).', link: null, sig: miss.join(',').slice(0, 480) }); }
+    return out; } },
+  { key: 'tpl_vs_fulfil', area: 'inventory', label: '3PL stock report vs Fulfil on hand', live: true, run: async () => {
+    const out = [], errs = [];
+    for (const mkt of ['UK', 'US', 'AU', 'EU']) { const cfg = INV3PL_SRC[mkt]; if (!cfg) continue;
+      let parsed; try { if (cfg.type === 'blade') parsed = await bladeFetchStock(); else { const r = await _fetchT(cfg.url + '?' + Date.now(), { redirect: 'follow' }, 60000); if (!r.ok) throw new Error('HTTP ' + r.status); parsed = inv3plParse(cfg, await r.text()); } }
+      catch (e) { errs.push(mkt + ': ' + e.message); continue; }
+      if (!parsed || parsed.error || !parsed.rep) { errs.push(mkt + ': ' + ((parsed && parsed.error) || 'empty report')); continue; }
+      const c = await inv3plCompare(mkt, parsed.rep), diff = c.rows.filter(r => r.matched && r.diff_onhand);
+      const rep = diff.reduce((a, r) => a + r.report_onhand, 0), erp = diff.reduce((a, r) => a + r.erp_onhand, 0), abs = diff.reduce((a, r) => a + Math.abs(r.diff_onhand), 0);
+      if (diff.length || c.unmatched) out.push({ record: '3pl:' + mkt, severity: abs >= 500 ? 'high' : 'amber',
+        title: (cfg.label || mkt + ' 3PL') + ': ' + diff.length + ' SKU' + (diff.length === 1 ? '' : 's') + ' differ from Fulfil on hand (3PL ' + _dhN(rep) + ' vs Fulfil ' + _dhN(erp) + ', ' + _dhN(abs) + ' units apart)' + (c.unmatched ? '; ' + c.unmatched + ' 3PL SKU' + (c.unmatched === 1 ? '' : 's') + ' not in HORIZON' : ''),
+        detail: 'Biggest (3PL vs Fulfil): ' + diff.slice(0, 8).map(r => r.sku + ' ' + r.report_onhand + ' vs ' + r.erp_onhand + (r.recent_pos ? ' (PO due ' + r.recent_pos.map(p => p.po).join('/') + ')' : '')).join(', ') + '. Full list: Manage 3PL.',
+        link: '#/buy-move/inventory/manage3pl/' + mkt.toLowerCase(), sig: diff.length + '|' + abs + '|' + c.unmatched }); }
+    if (errs.length) { const e = new Error('3PL report not read: ' + errs.join('; ')); e.partial = out; throw e; }
+    return out; } },
+  { key: 'fba_vs_fulfil', area: 'inventory', label: 'Amazon FBA report vs Fulfil', live: true, run: async () => {
+    const out = [], stale = [];
+    const ups = {}; (await pool.query(`SELECT market, imported_at, extract(epoch FROM now() - imported_at)/86400 days, report FROM planner.inventory_fba_imports WHERE market = ANY($1::text[])`, [INVFBA_MKTS])).rows.forEach(r => { ups[r.market] = r; });
+    for (const mkt of INVFBA_MKTS) { const u = ups[mkt];
+      if (!u || Number(u.days) > 7) { stale.push(mkt + (u ? ' (' + Math.floor(u.days) + ' days)' : ' (never)')); continue; }
+      const c = await invFbaCompare(mkt, u.report), diff = (c.rows || []).filter(r => r.matched && r.diff), abs = diff.reduce((a, r) => a + Math.abs(r.diff), 0);
+      if (diff.length) out.push({ record: 'fba:' + mkt, severity: abs >= 500 ? 'high' : 'amber', title: 'Amazon FBA ' + mkt + ': ' + diff.length + ' SKU' + (diff.length === 1 ? '' : 's') + ' differ from Fulfil (' + _dhN(abs) + ' units apart; report of ' + _dhD(u.imported_at.toISOString()) + ')',
+        detail: 'Biggest (Amazon vs Fulfil): ' + diff.slice(0, 8).map(r => (r.erp_sku || r.sku) + ' ' + r.report_fba + ' vs ' + r.erp_fba).join(', ') + '. Full list: Manage FBA.', link: '#/buy-move/inventory/managefba/' + mkt.toLowerCase(), sig: diff.length + '|' + abs }); }
+    if (stale.length) out.push({ record: 'fba:stale', severity: 'low', title: 'Amazon FBA stock report not uploaded in the last 7 days: ' + stale.join(', '), detail: 'Upload the FBA inventory report on Manage FBA so this check can compare it with Fulfil.', link: '#/buy-move/inventory/managefba', sig: stale.map(s => s.split(' ')[0]).join(',') });
+    return out; } },
+  { key: 'kit_no_bom', area: 'inventory', label: 'Kits sold with no active BOM in Fulfil', live: true, run: async (ctx) => {   // kits = market-prefixed set SKUs (UK-TOWLB-CAB-XL-4SETK); PP- prepacks are stocked items, not kits
+    const ff = fulfilConfigFor('live'), since = new Date(Date.now() - 14 * 86400e3).toISOString().slice(0, 10), sold = {};
+    for (let off = 0; off < 20000; off += 500) { const rows = (await fulfilFetchCfg(ff, 'PUT', '/model/sale.line/search_read', [[['product.code', 'ilike', '%SET%'], ['sale.sale_date', '>=', since], ['sale.state', 'not in', ['cancel', 'draft', 'failed']]], off, 500, null, ['product', 'product.code', 'quantity', 'sale.number']])) || [];
+      rows.forEach(l => { const id = fulfilUnwrap(l.product); if (!id || !/^(UK|US|EU|AU|CA)-.*SET/i.test(String(l['product.code'] || ''))) return; const s = sold[id] || (sold[id] = { code: l['product.code'], qty: 0, sos: new Set() }); s.qty += Number(fulfilUnwrap(l.quantity)) || 0; if (s.sos.size < 5) s.sos.add(l['sale.number']); });
+      if (rows.length < 500) break; }
+    const ids = Object.keys(sold).map(Number); ctx.meta.kits_sold = ids.length; if (!ids.length) return [];
+    const links = []; for (let i = 0; i < ids.length; i += 100) links.push(...((await fulfilFetchCfg(ff, 'PUT', '/model/product.product-production.bom/search_read', [[['product', 'in', ids.slice(i, i + 100)]], 0, 500, null, ['product', 'bom']])) || []));   // Fulfil pages are 500 max
+    const bomIds = [...new Set(links.map(l => fulfilUnwrap(l.bom)))], active = new Set();
+    for (let i = 0; i < bomIds.length; i += 300) ((await fulfilFetchCfg(ff, 'PUT', '/model/production.bom/search_read', [[['id', 'in', bomIds.slice(i, i + 300)], ['active', '=', true]], 0, 500, null, ['id']])) || []).forEach(b => active.add(b.id));
+    const ok = new Set(links.filter(l => active.has(fulfilUnwrap(l.bom))).map(l => fulfilUnwrap(l.product)));
+    return ids.filter(id => !ok.has(id)).sort((a, b) => sold[b].qty - sold[a].qty).map(id => ({ record: sold[id].code, severity: 'high',
+      title: sold[id].code + ': ' + _dhN(sold[id].qty) + ' sold in the last 14 days but the kit has no active BOM in Fulfil', detail: 'Its components are not taken out of stock. Orders: ' + [...sold[id].sos].join(', '), link: null, sig: 'x' })); } },
+  { key: 'wholesale_no_agent', area: 'sales', label: 'Paid wholesale orders with no agent', live: true, run: async () => {
+    const month = new Date().toISOString().slice(0, 7), v = await cmEngine(month, { xero: false });
+    const ex = (v.exceptions || []).filter(e => e.kind === 'no_agent' || e.kind === 'code_vs_customer');
+    return ex.map(e => ({ record: String(e.order_ref || e.customer || '?'), severity: 'amber',
+      title: (e.order_ref || '') + ' (' + (e.customer || '') + '): ' + (e.kind === 'no_agent' ? 'paid this month' + (e.amount != null ? ' (' + (e.currency || '') + ' ' + _dhN(e.amount) + ')' : '') + ' but has no agent' : 'Fulfil agent code and the customer\'s agent disagree'),
+      detail: (e.text || '') + '. Tag it on COMMISSIONS > Orders, or add the customer to an agent.', link: '#/client/commission/orders', sig: e.kind })); } }
+];
+DH_CHECKS.push(...DH_CHECKS_LIVE);
 // Run every check, record findings, optionally email. opts: { by, dry (compute only), email ('cron' = the daily send to everyone, or an
 // address list for a test send) }.
 async function dhRun(opts) {
   opts = opts || {}; const t0 = Date.now();
   const prevRun = (await pool.query(`SELECT meta FROM planner.data_health_runs ORDER BY run_at DESC LIMIT 1`)).rows[0];
   const ctx = { prev: (prevRun && prevRun.meta) || {}, meta: {} }, found = [], okChecks = [], errors = [];
-  for (const c of DH_CHECKS) {
-    try { let rows = await c.run(ctx); if (rows.length > DH_MAX_PER_CHECK) { errors.push({ check: c.key, error: rows.length + ' findings, first ' + DH_MAX_PER_CHECK + ' kept' }); rows = rows.slice(0, DH_MAX_PER_CHECK); }
-      okChecks.push(c.key); rows.forEach(f => found.push(Object.assign({ check_key: c.key, area: c.area }, f, { record: String(f.record).slice(0, 200), sig: String(f.sig == null ? '' : f.sig).slice(0, 500) }))); }
-    catch (e) { errors.push({ check: c.key, error: String(e.message || e).slice(0, 300) }); } }
+  // v28.434: database checks one after another, then the live (API) checks in parallel, each capped at DH_LIVE_MS. A check that throws
+  // with e.partial (some markets read, some not) keeps its partial findings but fixes nothing.
+  const seenKeys = new Set();
+  const keep = (c, rows) => { if (rows.length > DH_MAX_PER_CHECK) { errors.push({ check: c.key, error: rows.length + ' findings, first ' + DH_MAX_PER_CHECK + ' kept' }); rows = rows.slice(0, DH_MAX_PER_CHECK); }
+    rows.forEach(f => { const x = Object.assign({ check_key: c.key, area: c.area }, f, { record: String(f.record).slice(0, 200), sig: String(f.sig == null ? '' : f.sig).slice(0, 500) }), k = x.check_key + '|' + x.record;
+      if (!seenKeys.has(k)) { seenKeys.add(k); found.push(x); } }); };   // one finding per check + record (e.g. an order paid twice)
+  const one = async (c) => { const t1 = Date.now();
+    try { const rows = await (c.live ? Promise.race([c.run(ctx), new Promise((_, rj) => setTimeout(() => rj(new Error('timed out after ' + DH_LIVE_MS / 1000 + ' s')), DH_LIVE_MS))]) : c.run(ctx)); keep(c, rows); okChecks.push(c.key); }
+    catch (e) { if (Array.isArray(e.partial)) keep(c, e.partial); errors.push({ check: c.key, error: String(e.message || e).slice(0, 300) }); }
+    ctx.meta.ms = Object.assign(ctx.meta.ms || {}, { [c.key]: Date.now() - t1 }); };
+  for (const c of DH_CHECKS.filter(c => !c.live)) await one(c);
+  if (!opts.noLive) await Promise.all(DH_CHECKS.filter(c => c.live).map(one));
   if (opts.dry) return { dry_run: true, findings: found, errors, ms: Date.now() - t0 };
   const up = found.length ? (await pool.query(`INSERT INTO planner.data_health_findings AS f (check_key, record, area, severity, title, detail, link, sig)
       SELECT check_key, record, area, severity, title, detail, link, sig FROM json_to_recordset($1::json) AS x(check_key text, record text, area text, severity text, title text, detail text, link text, sig text)
@@ -29235,7 +29311,7 @@ app.get('/api/admin/data-health', async (req, res) => {
       FROM planner.data_health_findings WHERE ($1 = 'all' OR status = $1) AND ($1 <> 'fixed' OR fixed_at > now() - interval '30 days')
       ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, area, first_seen DESC LIMIT 2000`, [stOk])).rows;
     const tallies = (await pool.query(`SELECT status, count(*)::int n FROM planner.data_health_findings WHERE status <> 'fixed' OR fixed_at > now() - interval '30 days' GROUP BY 1`)).rows;
-    const runs = (await pool.query(`SELECT id, run_at, run_by, ms, counts, errors, emailed FROM planner.data_health_runs ORDER BY run_at DESC LIMIT 14`)).rows;
+    const runs = (await pool.query(`SELECT id, run_at, run_by, ms, counts, errors, emailed, meta->'shopify' shopify, meta->'kits_sold' kits_sold FROM planner.data_health_runs ORDER BY run_at DESC LIMIT 14`)).rows;
     res.set('Cache-Control', 'no-store').json({ migration: true, findings, tallies, runs, checks: DH_CHECKS.map(c => ({ key: c.key, area: c.area, label: c.label })), recipients: await dhRecipients() }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
