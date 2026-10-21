@@ -58,10 +58,16 @@ prods = {p["code"]: p for p in f.search_read("product.product", [["code", "in", 
 kit_by_id = {p["id"]: c for c, p in prods.items()}
 links = f.search_read(LINK, [["product", "in", list(kit_by_id)]], ["product", "bom"])
 inputs = f.search_read("production.bom.input", [["bom", "in", [l["bom"] for l in links]]], ["bom", "product"])
+# Classify each kit BOM by its inputs: the "1 x PP" BOM is the one whose only input is the kit's PP
+# SKU. A set like 4 x NAVY also has one input product, so input count alone is not enough.
+pmap = json.load(open(os.path.join(HERE, "prepack_map.json")))
+pp_code_of = {m + "-" + r["set"]: r["pp"] for r in pmap for m in ("UK", "US", "EU", "AU")}
+pp_ids = {p["code"]: p["id"] for p in f.search_read("product.product", [["code", "in", sorted(set(pp_code_of.values()))]], ["code"])}
 comp = {}
 for l in links:
     ins = [i["product"] for i in inputs if i["bom"] == l["bom"]]
-    comp.setdefault(l["product"], {})["pp" if len(ins) == 1 else "singles"] = set(ins)
+    pp_id = pp_ids.get(pp_code_of.get(kit_by_id[l["product"]]))
+    comp.setdefault(l["product"], {})["pp" if ins == [pp_id] else "singles"] = set(ins)
 
 # --since and the saved last_check are local time (this Mac is on AEDT); Fulfil filters in UTC.
 since_utc = datetime.datetime.fromisoformat(since).astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

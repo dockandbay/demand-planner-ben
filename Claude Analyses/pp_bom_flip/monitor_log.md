@@ -43,3 +43,25 @@ Kits monitored: 65. Orders with those kits: 0. ALL AS EXPECTED.
 Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
 
 
+## Check 2026-10-21 20:02:48 (orders since 2026-10-21T07:20:00)
+
+Kits monitored: 66. Orders with those kits: 4. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO68699 | 113-2209149-6746635 | processing | 10-20T20:46 | US-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
+| SO68702 | 205-4791178-9029927 | processing | 10-20T20:49 | UK-TOWLB-CAB-LG-4SETH | 1 | PP | PP | PP move assigned,draft |
+| SO68718 | UK-909415 | processing | 10-20T21:58 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
+| SO68833 | UK-909439 | processing | 10-21T08:17 | UK-TEATWL-MD-5SET-CULDEL | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-21 20:06:50 (orders since 2026-10-21T07:20:00)
+
+Kits monitored: 66. Orders with those kits: 4. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO68699 | 113-2209149-6746635 | processing | 10-20T20:46 | US-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
+| SO68702 | 205-4791178-9029927 | processing | 10-20T20:49 | UK-TOWLB-CAB-LG-4SETH | 1 | PP | PP | PP move assigned,draft |
+| SO68718 | UK-909415 | processing | 10-20T21:58 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
+| SO68833 | UK-909439 | processing | 10-21T08:17 | UK-TEATWL-MD-5SET-CULDEL | 1 | PP | PP | PP move assigned,draft |
+
