@@ -29849,7 +29849,41 @@ app.post('/api/client/commission/customers/sync', async (req, res) => {
         out.agents++; out.customers += rows.length; }
       catch (e) { out.errors.push(g.name + ': ' + e.message); }
     }
+    try { out.statement_emails = await cmFillStatementEmails(); } catch (e) { out.errors.push('statement emails: ' + e.message); }   // v28.422
     await cpAudit(null, 'Commission customers synced from Xero', out.agents + ' agents, ' + out.customers + ' customers', req.me.email); res.json(Object.assign({ ok: !out.errors.length }, out));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.422 (Ben 21-Oct-26: "the statement email for the agent, can you get this from xero contact and if not, we can add it, highlight it as an
+// action in horizon"): an agent with no statement email gets the email address of its Xero bill contact (Xero UK, read only). Never overwrites
+// an email already set. Runs at the end of Sync all agents from Xero and from the Commissions action box.
+async function cmFillStatementEmails() {
+  const G = (await pool.query(`SELECT id, name, xero_contact FROM planner.rep_groups WHERE active AND NOT coalesce(no_commission,false) AND coalesce(xero_contact,'')<>'' AND coalesce(statement_email,'')=''`)).rows;
+  const filled = [], missing = [];
+  for (const g of G) {
+    const xc = await xeroContactLookup('uk', g.xero_contact, { fresh: true });
+    if (!xc.ok) { missing.push({ agent: g.name, why: xc.lookup_failed ? xc.error : 'Xero contact "' + g.xero_contact + '" not found' }); continue; }
+    const j = await xeroFetch('uk', '/api.xro/2.0/Contacts/' + xc.ContactID), c = ((j && j.Contacts) || [])[0] || {};
+    const em = String(c.EmailAddress || '').trim() || ((c.ContactPersons || []).find(p => p && p.IncludeInEmails && p.EmailAddress) || {}).EmailAddress || '';
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { missing.push({ agent: g.name, why: 'no email on Xero contact "' + g.xero_contact + '"' }); continue; }
+    await pool.query(`UPDATE planner.rep_groups SET statement_email=$2 WHERE id=$1 AND coalesce(statement_email,'')=''`, [g.id, em.toLowerCase()]);
+    filled.push({ agent: g.name, email: em.toLowerCase() }); }
+  return { filled, missing };
+}
+app.post('/api/client/commission/statement-emails/fill', async (req, res) => {
+  try { const r = await cmFillStatementEmails(); if (r.filled.length) await cpAudit(null, 'Agent statement emails from Xero', r.filled.map(x => x.agent + ' ' + x.email).join(', '), req.me.email); res.json(Object.assign({ ok: true }, r)); }
+  catch (e) { log500(e); res.status(e.code === 429 ? 429 : 500).json({ error: e.message }); }
+});
+// Agents that need setting up before their bill / statement: every active agent that earns commission and was paid in the last 12 months
+// (paid history) or has a run, missing a statement email, a Xero bill contact or a bill account. Shown as actions on Commissions.
+app.get('/api/client/commission/readiness', async (req, res) => {
+  try { const rows = (await pool.query(`SELECT g.id, g.name, coalesce(g.statement_email,'') statement_email, coalesce(g.xero_contact,'') xero_contact, coalesce(g.xero_account_code,'') xero_account_code,
+        (SELECT c.id FROM planner.clients c WHERE c.rep_group_id=g.id ORDER BY c.id LIMIT 1) client_id
+      FROM planner.rep_groups g WHERE g.active AND NOT coalesce(g.no_commission,false)
+        AND (EXISTS (SELECT 1 FROM planner.commission_runs r WHERE r.rep_group_id=g.id)
+          OR EXISTS (SELECT 1 FROM planner.commission_paid_history h WHERE lower(trim(h.rep_group))=lower(trim(g.name)) AND h.period >= (current_date - interval '12 months')))
+      ORDER BY g.name`)).rows;
+    const actions = rows.map(g => ({ agent: g.name, client_id: g.client_id, missing: [!g.statement_email ? 'statement email' : null, !g.xero_contact ? 'Xero bill contact' : null, !g.xero_account_code ? 'bill account' : null].filter(Boolean) })).filter(a => a.missing.length);
+    res.set('Cache-Control', 'no-store').json({ ok: true, agents: rows.length, actions });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/customers', async (req, res) => {

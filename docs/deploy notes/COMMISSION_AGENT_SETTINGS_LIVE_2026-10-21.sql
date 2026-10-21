@@ -37,7 +37,8 @@ UPDATE planner.rep_groups SET xero_account_code = '312.1a' WHERE name = 'Agent -
 UPDATE planner.rep_groups SET xero_account_code = '312.5a' WHERE name = 'Agent - Spruce';        -- Cost of Sales - CA - Wholesale
 UPDATE planner.rep_groups SET xero_account_code = '312.4e' WHERE name = 'Agent - Evelyne';       -- Cost of Sales - EU - Wholesale (excl. DE, FR, Dist); Ben 21-Oct-26: Switzerland
 
--- 4. Statement emails
--- TODO (Ben): UPDATE planner.rep_groups SET statement_email = '...' WHERE name = '...';
+-- 4. Statement emails: from v28.422 Sync all agents from Xero fills a blank statement email from the agent's Xero bill contact
+--    (sandbox check 21-Oct-26: Ideco and TR Partners filled; Schauben, Harper Group, KathCo, Patrickco, TJ have no email in Xero and
+--    show as actions on Commissions > Monthly run & bills, to be typed on the agent's Commission tab).
 
 COMMIT;
