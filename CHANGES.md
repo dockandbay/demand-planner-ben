@@ -1,3 +1,7 @@
+## v28.423 (21-Oct-26) Client record opens on Account
+- Ben: "when opening an account http://localhost:8124/#/client/clients/17/account can you default to ACCOUNT sub tab, not customers". A direct link already opened Account; opening a client from the Clients list reused the last tab used in that browser (Customers). Now a client always opens on Account unless the link names another tab; the record's own refreshes (user changes) keep the tab you are on.
+- jsdom: with Customers remembered, opening client 17 from the list shows Account (#/client/clients/17/account); switching to Users updates the link. Display only. Buy plan before vs after on the sandbox: identical. No server change, no migration, no env change.
+
 ## v28.422 (21-Oct-26) Commissions: agent statement emails from Xero; set-up actions for missing email / Xero contact / bill account
 - Ben: "the statement email for the agent, can you get this from xero contact and if not, we can add it, highlight it as an action in horizon for missing email".
 - An active earning agent with a Xero bill contact and no statement email now gets the email on that Xero UK contact (EmailAddress, else a contact person marked for emails). Never overwrites an email already set. Runs at the end of Sync all agents from Xero, and from the new Fill statement emails from Xero button.
