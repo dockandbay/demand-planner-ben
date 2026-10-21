@@ -15,8 +15,15 @@ UPDATE planner.clients SET active = false WHERE rep_group_id = (SELECT id FROM p
 UPDATE planner.rep_groups SET xero_contact = 'Appelman Schauben' WHERE name = 'Agent - Schauben';
 -- TODO (Ben): Patrickco, Harper Group, KathCo, Ideco, TJ, TR Partners
 
--- 3. Agent-fees account (proposed 21-Oct-26, to confirm): US agents 430 Agent Fees - US, Ideco 430.1 FR, TJ 430.4 DE, TR Partners 431 UK
--- TODO (Ben confirms): UPDATE planner.rep_groups SET xero_account_code = '430' WHERE name IN (...);
+-- 3. Bill account (Ben 21-Oct-26: "change agent fees to be cost of sales - us - wholesale. and cost of sales - de - wholesale etc"):
+--    the Xero UK "Cost of Sales - <market> - Wholesale" account of the agent's market (codes read from Xero UK 21-Oct-26)
+UPDATE planner.rep_groups SET xero_account_code = '312.2a'   -- Cost of Sales - US - Wholesale
+ WHERE name IN ('Agent - Schauben', 'Agent - Patrickco', 'Agent - Harper Group', 'Agent - KathCo', 'Agent - Ivystone', 'Agent - Roadrunner', 'Agent - Pablo');
+UPDATE planner.rep_groups SET xero_account_code = '312.4b' WHERE name = 'Agent - Ideco';         -- Cost of Sales - FR - Wholesale
+UPDATE planner.rep_groups SET xero_account_code = '312.4j' WHERE name = 'Agent - TJ';            -- Cost of Sales - DE - Wholesale
+UPDATE planner.rep_groups SET xero_account_code = '312.1a' WHERE name = 'Agent - TR Partners';   -- Cost of Sales - UK - Wholesale
+UPDATE planner.rep_groups SET xero_account_code = '312.5a' WHERE name = 'Agent - Spruce';        -- Cost of Sales - CA - Wholesale
+-- TODO (Ben): Agent - Evelyne (market? FR 312.4b / EU excl. DE, FR 312.4e / US 312.2a)
 
 -- 4. Statement emails
 -- TODO (Ben): UPDATE planner.rep_groups SET statement_email = '...' WHERE name = '...';
