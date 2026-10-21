@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.427
+verified_version: v28.428
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -361,3 +361,6 @@ verified_version: v28.427
 - v28.368: scheduled refresh POST /api/cron/dtc2-sync (x-webhook-secret = N8N_WEBHOOK_SECRET; optional n8n daily), same read as Refresh from Fulfil.
 
 - v28.427 (Ben 21-Oct-26): each client PO group expands to its Fulfil client POs (number with a Fulfil link, state, reference, sales order, units) and EVERY SKU: HORIZON qty, Fulfil total and which Fulfil POs carry it ("PO395 462 · PO401 12"), with an empty-order-plan hint (Order plan > Import from Fulfil). An order with a line "no PO created, sales order not processed" shows "Validate sales order", which opens the Validate sales order drawer analysing that order; the tooltip gives the steps (validate, PROCESS the order in Fulfil to create the POs, then Import from Fulfil or link them to a HORIZON PO). (source: server.mjs :: dtc2 groups pos / by_po; inject.html :: renderDtc2, dtc2-sov, openSoValDrawer)
+
+## Approve all partials (PURCHASE ORDERS > PLAN, v28.428)
+- Ben 21-Oct-26: "have a tick box up top approve all partials". Ticking it reads the order plan, takes every unapproved partial-carton line (carton check shows the warning, not yet approved) on POs that are not complete, shipping or delivered (only the chosen supplier when the PLAN Supplier filter is set), asks with the line and PO counts, then sets partial_carton_approved on them in one call (POST /api/supply/po-lines/approve-partials, supply edit or admin) with one PO record of change entry per PO. (source: server.mjs :: po-lines/approve-partials; inject.html :: po-apprpart)

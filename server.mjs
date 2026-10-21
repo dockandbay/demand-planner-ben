@@ -21684,6 +21684,20 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
        .set('Content-Disposition', 'attachment; filename="buy-plan.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
   } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
 });
+// v28.428 (Ben 21-Oct-26: PURCHASE ORDERS > PLAN "Approve all partials"): approve the partial-carton flag on the given order-plan lines in one
+// go (the page sends the unapproved partial lines of open POs). Supply edit or admin; one PO record of change entry per PO.
+app.post('/api/supply/po-lines/approve-partials', async (req, res) => {
+  try { const me = await permsFor(req); if (me.lookupFailed) return res.status(503).json({ error: 'permission check failed, try again' }); if (me.live && !(me.supply_edit || me.is_admin)) return res.status(403).json({ error: 'SUPPLY edit access required' }); } catch (e) { log500(e); return res.status(500).json({ error: e.message }); }
+  const keys = [...new Set(((req.body || {}).po_skus || []).map(String).filter(Boolean))].slice(0, 5000), by = authUser(req) || 'unknown';
+  if (!keys.length) return res.status(400).json({ error: 'no lines' });
+  try { const r = (await pool.query(`UPDATE planner.purchase_order_lines l SET partial_carton_approved=true FROM planner.purchase_orders p
+        WHERE p.po=l.po AND l.po_sku = ANY($1::text[]) AND NOT coalesce(l.partial_carton_approved,false) AND coalesce(p.status,'') !~* '(complete|shipping|deliver)' RETURNING l.po, l.sku`, [keys])).rows;
+    const byPo = {}; r.forEach(x => { (byPo[x.po] = byPo[x.po] || []).push(x.sku); });
+    for (const po of Object.keys(byPo)) await pool.query(`INSERT INTO planner.po_change_log (po, event, detail, changed_by) VALUES ($1,'Order plan: partials approved (all)',$2,$3)`, [po, (byPo[po].length + ' line(s): ' + byPo[po].join(', ')).slice(0, 1000), by]).catch(() => {});
+    try { invalidateSupplyCaches('po'); } catch (_) {}
+    res.json({ ok: true, approved: r.length, pos: Object.keys(byPo).length });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
 // supplier → supplier_risk_approved, discontinue → discontinue_approved.
 app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
@@ -27010,8 +27024,8 @@ async function logPoFieldChanges(po, keys, oldRow, body, by) {
 // row instead of re-pulling all ~1400 POs (multi-MB). Same SQL = zero drift.
 // SELECT + joins for the ORDER PLAN grid (callers append the WHERE + ORDER BY). Shared by the live supplier/
 // archived paths and orderPlanCache (the cached default admin view).
-const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, coalesce(l.erp_qty, el.qty) erp_qty,   -- v28.427: ERP = Fulfil (line erp_qty: mirror / push / import; a client PO group = the sum of its Fulfil POs), else the old pushed snapshot
-          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(l.erp_qty, el.qty, 0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
+const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, coalesce(pol.erp_qty, el.qty) erp_qty,   -- v28.427: ERP = Fulfil (line erp_qty: mirror / push / import; a client PO group = the sum of its Fulfil POs), else the old pushed snapshot
+          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(pol.erp_qty, el.qty, 0)) pending,   -- v28.428: pol (the table); l is the view, which has no erp_qty to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
           pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
