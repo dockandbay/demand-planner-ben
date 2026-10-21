@@ -2,7 +2,27 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 305 across 5 runs.
+Total changes: 311 across 9 runs.
+
+## Run au-sumsuga-bom-2026-10-21_144922
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 14:49 2026-10-21 | singles BOM for AU-TOWLB-DES-XL-6SET-SUMSUGA (recipe from Horizon set_bom) | production.bom 505 | created | archive BOM (active = false) |
+| 14:49 2026-10-21 | link singles BOM to AU-TOWLB-DES-XL-6SET-SUMSUGA | product.product-production.bom 504 | created | delete link |
+
+## Run add-au-pp-cost-2026-10-21_144832
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 14:48 2026-10-21 | previous revalue attempt returned HTTP 500, cost unchanged (0) | product.product 2253 | note:  | n/a |
+| 14:48 2026-10-21 | revaluation retry (plain values), counterpart 9013 [AU]; undo = revalue back to 0 | product.product 2253 | revalue:  | n/a |
+
+## Run add-au-pp-cost-2026-10-21_144811
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 14:48 2026-10-21 | revaluation, counterpart 9013 [AU]; undo = revalue back to 0 | product.product 2253 | revalue:  | n/a |
 
 ## Run add-au-pp-2026-10-21_132127
 
@@ -18,6 +38,15 @@ Total changes: 305 across 5 runs.
 | 13:20 2026-10-21 | create template PP-TOWLB-DES-XL-6SETA (Ben 21-Oct-26) | product.template 1095 | created | delete link |
 | 13:20 2026-10-21 | create product PP-TOWLB-DES-XL-6SETA 3.0 kg | product.product 2253 | created | delete link |
 | 13:20 2026-10-21 | stock count +1 PP-TOWLB-DES-XL-6SETA at AU Coghlans | stock.inventory 794 | created | delete link |
+
+## Run 2026-10-21_144924
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 14:49 2026-10-21 | 1 x PP BOM for AU-TOWLB-DES-XL-6SET-SUMSUGA | production.bom 506 | created | archive BOM (active = false) |
+| 14:49 2026-10-21 | link PP BOM to AU-TOWLB-DES-XL-6SET-SUMSUGA | product.product-production.bom 505 | created | delete link |
+| 14:49 2026-10-21 | AU-TOWLB-DES-XL-6SET-SUMSUGA: PP first (PP avail 1, threshold 1), BOM 506 | product.product-production.bom 505 | `sequence`: `20` -> `10` | set `sequence` back to `20` |
+| 14:49 2026-10-21 | AU-TOWLB-DES-XL-6SET-SUMSUGA: PP first (PP avail 1, threshold 1), BOM 505 | product.product-production.bom 504 | `sequence`: `10` -> `20` | set `sequence` back to `10` |
 
 ## Run 2026-10-21_074325
 
