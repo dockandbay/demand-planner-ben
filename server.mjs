@@ -1456,6 +1456,7 @@ function requiredCap(method, p) {
   if (p === '/api/me/favourites') return null;                // the signed-in user's own favourites
   if (p.startsWith('/api/dev/')) return null;                 // registered only with HZ_HEALTH_TEST=1 off Vercel
   if (p === '/api/health/send-test') return null;             // hzAdminOnly inside the handler
+  if (method === 'POST' && /^\/api\/admin\/data-health\/\d+\/dismiss$/.test(p)) return 'edit';   // v28.432 Data health: the emailed team dismisses findings (any edit right); run / recipients stay admin (default)
   if (p === '/api/storage/sign-upload') return 'edit';        // signed Storage upload URL: any edit right (read-only users could fill the bucket)
   if (p === '/api/export/email-csv') return 'demand';         // emails caller-supplied CSV to the export address
   if (p.startsWith('/api/demand/')) return 'demand';          // stock-cover target, inventory upload, snapshots, anything new under DEMAND
@@ -29050,6 +29051,213 @@ if (process.env.HZ_HEALTH_TEST === '1' && !process.env.VERCEL) {
   app.post('/api/dev/health-claim', async (req, res) => { try { const n = Math.min(10, Number((req.body || {}).n) || 2); const r = await Promise.all(Array.from({ length: n }, () => hzEmailClaim())); res.json({ claims: r, winners: r.filter(Boolean).length }); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.post('/api/dev/health-evaluate', async (req, res) => { try { res.json({ etl: hzEtlEval((req.body || {}).jobs, Number((req.body || {}).now) || Date.now()) }); } catch (e) { res.status(500).json({ error: e.message }); } });
 }
+
+// ── DATA HEALTH (v28.432, Ben 21-Oct-26: "a data quality check, daily, which checks Fulfil for data accuracy across inventory on hand,
+// inbound inventory, actual sales ... review points for action. Email to Ben, Kathryn, Sarah, Diviyaj, Alex. Cron job daily") ──
+// Phase 1: checks of the Fulfil-fed data HORIZON already holds (no extra API calls). Each check returns findings { record, severity,
+// title, detail, link, sig }. Findings persist in planner.data_health_findings (mig 382) across runs: new / still open / fixed; a dismissed
+// finding stays quiet until its numbers (sig) change. A check that errors fixes nothing (its earlier findings stay as they were).
+// Email: one per London day (claimed in app_settings), summary per area + the 10 most serious NEW findings + a link to
+// CONFIG > Admin > Data health. Recipients: app_settings 'data_health_email_to' (comma list), else DH_DEFAULT_TO.
+const DH_DEFAULT_TO = ['ben@dockandbay.com', 'kathryn@dockandbay.com', 'sarah@dockandbay.com', 'diviyaj@dockandbay.com', 'alexandria@dockandbay.com'];
+const DH_MAX_PER_CHECK = 300;
+const DH_STALE_HOURS = 36;
+const DH_SEV_RANK = { high: 0, amber: 1, low: 2 };
+const DH_OPEN_PO = (p) => `coalesce(${p}.status,'') !~* '(complete|delivered|cancel)' AND coalesce(${p}.branch,'') !~* 'manufactur'`;   // Manufacturing = FOB, never in the ERP
+const DH_SERVICE_SKU = /(SHIP|FEE|GIFT|DISCOUNT|DEPOSIT|SERVICE|POSTAGE|FREIGHT|SAMPLE|^CUSTOM-)/i;
+const _dhD = (s) => { s = String(s || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p = s.split('-'); return p[2] + '-' + m[+p[1] - 1] + '-' + p[0].slice(2); };
+const _dhN = (v) => Number(v || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+const _dhPo = (po) => '#/supply/purchase-orders/' + encodeURIComponent(po);
+async function _dhHas(table) { return (await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_schema='planner' AND table_name=$1`, [table])).rowCount > 0; }
+const DH_CHECKS = [
+  // ── inventory on hand (planner.product_inventory, fed from Fulfil) ──
+  { key: 'inv_feed_stale', area: 'inventory', label: 'Inventory feed up to date', run: async () => {
+    const r = (await pool.query(`SELECT max(updated_at) at, extract(epoch FROM now() - max(updated_at))/3600 h FROM planner.product_inventory`)).rows[0] || {};
+    if (r.at && Number(r.h) <= DH_STALE_HOURS) return [];
+    return [{ record: 'product_inventory', severity: 'high', title: r.at ? 'Stock on hand not refreshed for ' + Math.round(r.h) + ' hours (last ' + _dhD(r.at.toISOString()) + ')' : 'Stock on hand has never loaded',
+      detail: 'Every stock figure in HORIZON (buy plan, transfers, cover) uses this feed.', link: '#/buy-move/inventory/status', sig: r.at ? r.at.toISOString().slice(0, 10) : 'never' }]; } },
+  { key: 'inv_negative', area: 'inventory', label: 'Negative stock', run: async () => (await pool.query(`SELECT warehouse, count(*)::int n, sum(available)::int u,
+      (array_agg(sku || ' ' || available ORDER BY available))[1:10] ex FROM planner.product_inventory WHERE available < 0 GROUP BY 1 ORDER BY 1`)).rows
+    .map(r => ({ record: r.warehouse, severity: 'high', title: r.warehouse.toUpperCase().replace('_', ' ') + ': ' + r.n + ' SKU' + (r.n === 1 ? '' : 's') + ' with negative stock (' + _dhN(r.u) + ' units)',
+      detail: 'Most negative: ' + r.ex.join(', '), link: '#/buy-move/inventory/status', sig: r.n + '|' + r.u })) },
+  { key: 'inv_no_cost', area: 'inventory', label: 'Stock with no cost price', run: async () => (await pool.query(`SELECT i.sku, sum(i.available)::int u FROM planner.product_inventory i
+      JOIN planner.products p ON p.sku = i.sku WHERE coalesce(p.cost, 0) = 0 GROUP BY 1 HAVING sum(i.available) > 0 ORDER BY 2 DESC`)).rows
+    .map(r => ({ record: r.sku, severity: 'amber', title: r.sku + ': ' + _dhN(r.u) + ' units on hand with no cost price', detail: 'COGS and stock value read 0 for this SKU. Add the cost in Airtable (products.cost).', link: null, sig: String(r.u) })) },
+  { key: 'inv_unknown_sku', area: 'inventory', label: 'Stock on SKUs not in products', run: async () => (await pool.query(`SELECT i.sku, sum(i.available)::int u, string_agg(DISTINCT i.warehouse, ', ') wh FROM planner.product_inventory i
+      WHERE NOT EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = i.sku) GROUP BY 1 HAVING sum(i.available) > 0 ORDER BY 2 DESC`)).rows
+    .map(r => ({ record: r.sku, severity: 'amber', title: r.sku + ': ' + _dhN(r.u) + ' units on hand (' + r.wh + ') but the SKU is not in HORIZON products', detail: 'Not planned or forecast. Check the SKU in Airtable / Fulfil.', link: null, sig: String(r.u) })) },
+  { key: 'inv_big_move', area: 'inventory', label: 'Large day-on-day stock change', run: async (ctx) => {
+    const cur = {}; (await pool.query(`SELECT warehouse, sum(available)::bigint u FROM planner.product_inventory GROUP BY 1`)).rows.forEach(r => { cur[r.warehouse] = Number(r.u); });
+    ctx.meta.wh_totals = cur; const prev = ctx.prev.wh_totals || {}; const out = [];
+    Object.keys(cur).forEach(w => { if (!(w in prev)) return; const a = Number(prev[w]), b = cur[w], d = b - a;
+      if (Math.abs(d) >= 500 && a > 0 && Math.abs(d) / a >= 0.15) out.push({ record: w, severity: 'amber', title: w.toUpperCase().replace('_', ' ') + ': stock on hand ' + (d > 0 ? 'up' : 'down') + ' ' + Math.round(Math.abs(d) / a * 100) + '% since the last check (' + _dhN(a) + ' to ' + _dhN(b) + ')',
+        detail: 'Check for a receipt, a transfer or a stock count behind it.', link: '#/buy-move/inventory/status', sig: a + '>' + b }); });
+    return out; } },
+  // ── inbound (HORIZON POs vs the Fulfil mirror: purchase_order_lines.erp_qty, fulfil_purchase_orders, shipments) ──
+  { key: 'po_erp_deviation', area: 'inbound', label: 'PO quantities differ from Fulfil', run: async () => (await pool.query(`SELECT l.po, count(*) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty))::int n,
+      sum(coalesce(l.qty, 0))::int hz, sum(coalesce(l.erp_qty, el.qty, 0))::int erp,
+      (array_agg(l.sku || ' ' || coalesce(l.qty, 0) || ' vs ' || coalesce(l.erp_qty, el.qty, 0)) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty)))[1:8] ex
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po = l.po LEFT JOIN planner.erp_purchase_order_lines el ON el.po = l.po AND el.sku = l.sku
+      WHERE ${DH_OPEN_PO('p')} GROUP BY l.po HAVING sum(coalesce(l.erp_qty, el.qty, 0)) > 0 AND count(*) FILTER (WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty)) > 0 ORDER BY 1`)).rows
+    .map(r => ({ record: r.po, severity: 'amber', title: r.po + ': ' + r.n + ' line' + (r.n === 1 ? '' : 's') + ' differ from Fulfil (HORIZON ' + _dhN(r.hz) + ' vs Fulfil ' + _dhN(r.erp) + ' units)',
+      detail: 'HORIZON vs Fulfil: ' + (r.ex || []).join(', '), link: _dhPo(r.po), sig: r.n + '|' + r.hz + '|' + r.erp })) },
+  { key: 'po_not_in_erp', area: 'inbound', label: 'Open PO not in Fulfil', run: async () => (await pool.query(`SELECT l.po, p.status, count(*)::int n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po = l.po
+      LEFT JOIN planner.erp_purchase_order_lines el ON el.po = l.po AND el.sku = l.sku
+      WHERE ${DH_OPEN_PO('p')} AND upper(coalesce(p.status,'')) <> 'FUTURE' AND coalesce(l.qty, 0) <> 0 GROUP BY l.po, p.status HAVING sum(coalesce(l.erp_qty, el.qty, 0)) = 0 ORDER BY 1`)).rows
+    .map(r => ({ record: r.po, severity: 'high', title: r.po + ' (' + (r.status || 'no status') + '): ' + r.n + ' line' + (r.n === 1 ? '' : 's') + ' in HORIZON, none in Fulfil (or all at 0)', detail: 'Push it to Fulfil, or link the Fulfil PO (Import from Fulfil).', link: _dhPo(r.po), sig: String(r.n) })) },
+  { key: 'fulfil_po_unlinked', area: 'inbound', label: 'Fulfil PO with no HORIZON PO', run: async () => (await pool.query(`SELECT f.po, f.state, f.party_name, f.warehouse_code, coalesce(f.line_count, 0)::int lines, f.delivery_date::text dd
+      FROM planner.fulfil_purchase_orders f WHERE f.state IN ('confirmed','processing') AND f.po !~* 'test' AND coalesce(f.party_name,'') !~* 'test'
+        AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.po = f.po OR p.erp_po = f.po)
+        AND NOT EXISTS (SELECT 1 FROM planner.po_links k WHERE k.system = 'fulfil' AND coalesce(k.status,'linked') <> 'removed' AND (k.external_id = f.fulfil_id::text OR k.external_ref = f.po))
+        AND NOT EXISTS (SELECT 1 FROM planner.po_fulfil_group g WHERE g.fulfil_id = f.fulfil_id) ORDER BY f.po`)).rows
+    .map(r => ({ record: r.po, severity: 'amber', title: 'Fulfil ' + r.po + ' (' + r.state + ', ' + (r.party_name || 'no supplier') + ') is not linked to a HORIZON PO',
+      detail: r.lines + ' line' + (r.lines === 1 ? '' : 's') + (r.warehouse_code && !/^\d+$/.test(r.warehouse_code) ? ', into ' + r.warehouse_code : '') + (r.dd ? ', delivery ' + _dhD(r.dd) : '') + '. Its stock is not in the HORIZON inbound pipeline.', link: '#/supply/purchase-orders/plan', sig: r.state + '|' + r.lines })) },
+  { key: 'shipment_overdue', area: 'inbound', label: 'Shipment past its date, not received', run: async () => (await pool.query(`SELECT s.shipment_ref, coalesce(s.delivery_date, s.landing_date)::text due, (current_date - coalesce(s.delivery_date, s.landing_date))::int late,
+      string_agg(p.po, ', ' ORDER BY p.po) pos FROM planner.shipments s JOIN planner.purchase_orders p ON p.shipment_ref = s.shipment_ref AND ${DH_OPEN_PO('p')}
+      WHERE coalesce(s.status,'') !~* 'complete' AND coalesce(s.delivery_date, s.landing_date) < current_date - 7 GROUP BY 1, 2, 3 ORDER BY 3 DESC`)).rows
+    .map(r => ({ record: r.shipment_ref, severity: 'high', title: 'Shipment ' + r.shipment_ref + ' due ' + _dhD(r.due) + ' (' + r.late + ' days ago), not received', detail: 'POs: ' + r.pos + '. Receive it in Fulfil, or update the dates.', link: '#/supply/purchase-orders/shipments/' + encodeURIComponent(r.shipment_ref), sig: r.due })) },
+  { key: 'po_line_no_cost', area: 'inbound', label: 'Open PO lines with no cost', run: async () => (await pool.query(`SELECT l.po, count(*)::int n, sum(l.qty)::int u, (array_agg(l.sku ORDER BY l.sku))[1:8] ex FROM planner.purchase_order_lines l
+      JOIN planner.purchase_orders p ON p.po = l.po WHERE ${DH_OPEN_PO('p')} AND upper(coalesce(p.status,'')) <> 'FUTURE' AND coalesce(l.qty, 0) > 0 AND coalesce(l.cost_price, 0) = 0 GROUP BY 1 ORDER BY 1`)).rows
+    .map(r => ({ record: r.po, severity: 'amber', title: r.po + ': ' + r.n + ' line' + (r.n === 1 ? '' : 's') + ' (' + _dhN(r.u) + ' units) with no cost price', detail: r.ex.join(', '), link: _dhPo(r.po), sig: r.n + '|' + r.u })) },
+  { key: 'po_no_supplier', area: 'inbound', label: 'Open PO with no supplier', run: async () => (await pool.query(`SELECT p.po, p.status FROM planner.purchase_orders p WHERE ${DH_OPEN_PO('p')} AND coalesce(trim(p.supplier_name),'') = '' ORDER BY 1`)).rows
+    .map(r => ({ record: r.po, severity: 'amber', title: r.po + ' (' + (r.status || 'no status') + ') has no supplier', detail: 'Deposits, payments and the supplier portal need one.', link: _dhPo(r.po), sig: 'x' })) },
+  // ── actual sales (planner.order_lines from the Fulfil order sync, mig 377; DTC mismatch 2.0 snapshot) ──
+  { key: 'sales_feed_stale', area: 'sales', label: 'Sales order feed up to date', run: async () => {
+    if (!(await _dhHas('order_lines'))) return [{ record: 'order_lines', severity: 'high', title: 'Fulfil order lines are not set up (migration 377)', detail: 'Sales checks are skipped until it is.', link: null, sig: 'nomig' }];
+    const r = (await pool.query(`SELECT max(synced_at) at, extract(epoch FROM now() - max(synced_at))/3600 h FROM planner.order_lines`)).rows[0] || {};
+    if (r.at && Number(r.h) <= DH_STALE_HOURS) return [];
+    return [{ record: 'order_lines', severity: 'high', title: r.at ? 'Fulfil order lines not synced for ' + Math.round(r.h) + ' hours (last ' + _dhD(r.at.toISOString()) + ')' : 'Fulfil order lines have never synced',
+      detail: 'Weekly actuals and these sales checks read this sync (DEMAND > Inputs > Weekly switch-over > Read Fulfil orders now).', link: null, sig: r.at ? r.at.toISOString().slice(0, 10) : 'never' }]; } },
+  { key: 'sale_unmapped_sku', area: 'sales', label: 'Sold SKUs not in products', run: async () => { if (!(await _dhHas('order_lines'))) return [];
+    return (await pool.query(`SELECT l.sku, sum(l.qty)::int u, count(DISTINCT l.sale_id)::int orders, (array_agg(DISTINCT l.so_number))[1:5] ex FROM planner.order_lines l
+      WHERE l.order_date >= current_date - 30 AND l.sale_state NOT IN ('draft','quotation','cancel','cancelled')
+        AND NOT EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = l.sku OR p.sku = regexp_replace(l.sku, '^(UK|US|EU|AU|CA)-', '')) GROUP BY 1 ORDER BY 2 DESC`)).rows
+      .filter(r => !DH_SERVICE_SKU.test(r.sku) && !DTC2_IGNORE_SKUS.has(String(r.sku).toUpperCase()))
+      .map(r => ({ record: r.sku, severity: 'amber', title: r.sku + ': ' + _dhN(r.u) + ' units sold in the last 30 days (' + r.orders + ' order' + (r.orders === 1 ? '' : 's') + ') but not in HORIZON products',
+        detail: 'Missing from actuals and the forecast. Orders: ' + r.ex.join(', '), link: null, sig: String(r.u) })); } },
+  { key: 'sale_no_market', area: 'sales', label: 'Orders with no market or channel', run: async () => { if (!(await _dhHas('order_lines'))) return [];
+    return (await pool.query(`SELECT max(so_number) so, sale_id, max(fulfil_channel) ch, max(customer) cust, sum(qty)::int u FROM planner.order_lines
+      WHERE order_date >= current_date - 30 AND sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (country IS NULL OR channel IS NULL) GROUP BY sale_id ORDER BY 1`)).rows
+      .map(r => ({ record: String(r.so || r.sale_id), severity: 'amber', title: (r.so || '#' + r.sale_id) + ' (' + (r.ch || 'no channel') + ', ' + (r.cust || '') + '): no market or channel, so ' + _dhN(r.u) + ' units are missing from actuals',
+        detail: 'Map its Fulfil channel / warehouse in the order sync.', link: null, sig: String(r.u) })); } },
+  { key: 'sale_stuck', area: 'sales', label: 'Orders stuck in processing', run: async () => { if (!(await _dhHas('order_lines'))) return [];
+    return (await pool.query(`SELECT max(so_number) so, sale_id, max(customer) cust, max(fulfil_channel) ch, bool_or(is_wholesale) ws, min(demand_date)::text dd, (current_date - min(demand_date))::int days, sum(qty)::int u
+      FROM planner.order_lines WHERE sale_state = 'processing' AND NOT is_key_account GROUP BY sale_id
+      HAVING min(demand_date) < current_date - CASE WHEN bool_or(is_wholesale) THEN 30 ELSE 7 END ORDER BY 7 DESC`)).rows
+      .map(r => ({ record: String(r.so || r.sale_id), severity: r.days > 30 ? 'high' : 'amber', title: (r.so || '#' + r.sale_id) + ' (' + (r.cust || '') + ', ' + (r.ch || '') + '): processing for ' + r.days + ' days, not shipped',
+        detail: _dhN(r.u) + ' units, since ' + _dhD(r.dd) + '. Ship it, or cancel it in Fulfil.', link: null, sig: 'x' })); } },
+  { key: 'sale_old_draft', area: 'sales', label: 'Old draft / quotation orders', run: async () => { if (!(await _dhHas('order_lines'))) return [];
+    return (await pool.query(`SELECT coalesce(max(so_number), max(reference)) so, sale_id, max(sale_state) st, max(customer) cust, min(order_date)::text od, sum(qty)::int u FROM planner.order_lines
+      WHERE sale_state IN ('draft','quotation') GROUP BY sale_id HAVING min(order_date) < current_date - 14 ORDER BY 5`)).rows
+      .map(r => ({ record: String(r.so || r.sale_id), severity: 'low', title: (r.so || '#' + r.sale_id) + ' (' + (r.cust || '') + '): ' + r.st + ' since ' + _dhD(r.od), detail: _dhN(r.u) + ' units. Confirm or cancel it in Fulfil.', link: null, sig: r.st })); } },
+  { key: 'dtc2_issue', area: 'sales', label: 'DTC mismatch 2.0 issues', run: async () => {
+    if (!(await _dhHas('dtc2_snapshot'))) return [];
+    const d = await dtc2Build(pool); const out = [];
+    const h = d.synced_at ? (Date.now() - new Date(d.synced_at).getTime()) / 3600000 : null;
+    if (h == null || h > DH_STALE_HOURS) out.push({ record: 'dtc2_snapshot', severity: 'high', title: d.synced_at ? 'DTC mismatch 2.0 not refreshed for ' + Math.round(h) + ' hours (last ' + _dhD(new Date(d.synced_at).toISOString()) + ')' : 'DTC mismatch 2.0 has never been refreshed',
+      detail: 'The issues below may be out of date. Refresh it on the DTC mismatch 2.0 page.', link: '#/supply/reports/dtc2', sig: d.synced_at ? new Date(d.synced_at).toISOString().slice(0, 10) : 'never' });
+    (d.orders || []).filter(o => o.issues && !o.accepted).forEach(o => out.push({ record: o.so, severity: 'amber', title: o.so + ' (' + (o.customer || '') + '): ' + o.issues + ' line' + (o.issues === 1 ? '' : 's') + ' where the sales order, Fulfil PO and HORIZON PO disagree',
+      detail: (o.rows || []).filter(r => r.issue !== 'ok').slice(0, 6).map(r => r.sku + ' ' + r.issue).join(', '), link: '#/supply/reports/dtc2', sig: (o.rows || []).filter(r => r.issue !== 'ok').map(r => r.sku + ':' + r.issue).join(',') }));
+    (d.groups || []).filter(g => g.issues).forEach(g => out.push({ record: 'group:' + g.po, severity: 'amber', title: 'Client PO group ' + g.po + ': HORIZON ' + _dhN(g.hz_qty) + ' vs Fulfil ' + _dhN(g.fulfil_qty) + ' units (' + g.issues + ' SKU' + (g.issues === 1 ? '' : 's') + ')',
+      detail: g.rows.filter(r => r.issue !== 'ok').slice(0, 6).map(r => r.sku + ' ' + r.issue).join(', '), link: '#/supply/reports/dtc2', sig: g.hz_qty + '|' + g.fulfil_qty }));
+    return out; } },
+];
+// Run every check, record findings, optionally email. opts: { by, dry (compute only), email ('cron' = the daily send to everyone, or an
+// address list for a test send) }.
+async function dhRun(opts) {
+  opts = opts || {}; const t0 = Date.now();
+  const prevRun = (await pool.query(`SELECT meta FROM planner.data_health_runs ORDER BY run_at DESC LIMIT 1`)).rows[0];
+  const ctx = { prev: (prevRun && prevRun.meta) || {}, meta: {} }, found = [], okChecks = [], errors = [];
+  for (const c of DH_CHECKS) {
+    try { let rows = await c.run(ctx); if (rows.length > DH_MAX_PER_CHECK) { errors.push({ check: c.key, error: rows.length + ' findings, first ' + DH_MAX_PER_CHECK + ' kept' }); rows = rows.slice(0, DH_MAX_PER_CHECK); }
+      okChecks.push(c.key); rows.forEach(f => found.push(Object.assign({ check_key: c.key, area: c.area }, f, { record: String(f.record).slice(0, 200), sig: String(f.sig == null ? '' : f.sig).slice(0, 500) }))); }
+    catch (e) { errors.push({ check: c.key, error: String(e.message || e).slice(0, 300) }); } }
+  if (opts.dry) return { dry_run: true, findings: found, errors, ms: Date.now() - t0 };
+  const up = found.length ? (await pool.query(`INSERT INTO planner.data_health_findings AS f (check_key, record, area, severity, title, detail, link, sig)
+      SELECT check_key, record, area, severity, title, detail, link, sig FROM json_to_recordset($1::json) AS x(check_key text, record text, area text, severity text, title text, detail text, link text, sig text)
+      ON CONFLICT (check_key, record) DO UPDATE SET area = excluded.area, severity = excluded.severity, title = excluded.title, detail = excluded.detail, link = excluded.link, sig = excluded.sig, last_seen = now(), fixed_at = NULL,
+        first_seen = CASE WHEN f.status = 'fixed' OR (f.status = 'dismissed' AND f.dismissed_sig IS DISTINCT FROM excluded.sig) THEN now() ELSE f.first_seen END,
+        status = CASE WHEN f.status = 'fixed' OR (f.status = 'dismissed' AND f.dismissed_sig IS DISTINCT FROM excluded.sig) THEN 'open' ELSE f.status END
+      RETURNING id, check_key, record, area, severity, title, status, first_seen = now() is_new`, [JSON.stringify(found)])).rows : [];
+  const fixed = (await pool.query(`UPDATE planner.data_health_findings SET status = 'fixed', fixed_at = now() WHERE status IN ('open','dismissed') AND check_key = ANY($1::text[])
+      AND NOT ((check_key || '|' || record) = ANY($2::text[])) RETURNING area, check_key, record, title`, [okChecks, found.map(f => f.check_key + '|' + f.record)])).rows;
+  const counts = {}; ['inventory', 'inbound', 'sales'].forEach(a => { counts[a] = { new: 0, open: 0, fixed: 0 }; });
+  up.forEach(r => { const c = counts[r.area]; if (!c || r.status !== 'open') return; c.open++; if (r.is_new) c.new++; });
+  fixed.forEach(r => { if (counts[r.area]) counts[r.area].fixed++; });
+  const run = (await pool.query(`INSERT INTO planner.data_health_runs (run_by, ms, counts, errors, meta) VALUES ($1,$2,$3,$4,$5) RETURNING id, run_at`,
+    [opts.by || 'cron', Date.now() - t0, JSON.stringify(counts), JSON.stringify(errors), JSON.stringify(ctx.meta)])).rows[0];
+  const out = { ok: true, run_id: run.id, counts, errors, findings: found.length, ms: Date.now() - t0 };
+  if (opts.email) { try { out.emailed = await dhEmail(opts.email, counts, up.filter(r => r.is_new && r.status === 'open'), errors); } catch (e) { out.email_error = e.message; }
+    await pool.query(`UPDATE planner.data_health_runs SET emailed=$2 WHERE id=$1`, [run.id, out.emailed ? String(out.emailed).slice(0, 500) : (out.email_error ? 'error: ' + out.email_error : null)]); }
+  return out;
+}
+async function dhRecipients() {
+  const v = ((await pool.query(`SELECT value FROM planner.app_settings WHERE key='data_health_email_to'`).catch(() => ({ rows: [] }))).rows[0] || {}).value;
+  const list = String(v || '').split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(x => /@/.test(x)); return list.length ? list : DH_DEFAULT_TO; }
+// to = 'cron' (once per London day, to dhRecipients) or an array (a test send, not claimed).
+async function dhEmail(to, counts, fresh, errors) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  let list = Array.isArray(to) ? to : null;
+  if (!list) { const claim = await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('data_health_emailed', $1, 'data-health', now())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now() WHERE planner.app_settings.value <> EXCLUDED.value RETURNING key`, [today]);
+    if (!claim.rowCount) return null; list = await dhRecipients(); }
+  const tot = k => Object.values(counts).reduce((a, c) => a + c[k], 0), E = escHtml;
+  const base = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, ''), page = base + '/#/config/admin/data-health';
+  const top = fresh.slice().sort((a, b) => (DH_SEV_RANK[a.severity] - DH_SEV_RANK[b.severity]) || a.area.localeCompare(b.area)).slice(0, 10);
+  const td = 'padding:4px 12px 4px 0;text-align:left', AREA = { inventory: 'Inventory on hand', inbound: 'Inbound', sales: 'Sales' };
+  const html = '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#0f172a">'
+    + '<p style="margin:0 0 10px">HORIZON checked the Fulfil data it holds (stock on hand, inbound and sales) on ' + _dhD(today) + '.</p>'
+    + '<table style="border-collapse:collapse;margin-bottom:14px"><tr><th style="' + td + '"></th><th style="' + td + '">New</th><th style="' + td + '">Open</th><th style="' + td + '">Fixed</th></tr>'
+    + Object.keys(counts).map(a => '<tr><td style="' + td + '"><b>' + AREA[a] + '</b></td><td style="' + td + ';color:' + (counts[a].new ? '#b91c1c' : '#0f172a') + '">' + counts[a].new + '</td><td style="' + td + '">' + counts[a].open + '</td><td style="' + td + ';color:#15803d">' + counts[a].fixed + '</td></tr>').join('') + '</table>'
+    + (top.length ? '<p style="margin:0 0 6px"><b>New today' + (fresh.length > 10 ? ' (10 most serious of ' + fresh.length + ')' : '') + '</b></p><ul style="margin:0 0 14px;padding-left:18px">'
+      + top.map(f => '<li style="margin-bottom:4px">' + (f.severity === 'high' ? '<b style="color:#b91c1c">!</b> ' : '') + '<span style="color:#64748b">' + E(AREA[f.area]) + ':</span> ' + E(f.title) + '</li>').join('') + '</ul>'
+      : '<p style="margin:0 0 14px">Nothing new today.</p>')
+    + (errors.length ? '<p style="margin:0 0 14px;color:#b45309">' + errors.length + ' check' + (errors.length === 1 ? '' : 's') + ' could not run: ' + E(errors.map(e => e.check).join(', ')) + '.</p>' : '')
+    + '<p><a href="' + E(page) + '" style="display:inline-block;background:#0f172a;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none">Open Data health</a></p>'
+    + '<p style="color:#64748b;font-size:12px">Sent daily by HORIZON. A dismissed finding stays quiet unless its numbers change.</p></div>';
+  await sendResendEmail({ to: list, subject: 'HORIZON data check ' + _dhD(today) + ': ' + tot('new') + ' new, ' + tot('open') + ' open, ' + tot('fixed') + ' fixed', html, kind: 'data-health', ref: 'data-health:' + today });
+  return list.join(', ');
+}
+// POST /api/cron/data-health (x-webhook-secret): the daily run + email. { dry_run: true } computes only (no writes, no email).
+app.post('/api/cron/data-health', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  try { const b = req.body || {}, dry = b.dry_run === true || b.dry_run === 'true'; res.json(await dhRun({ by: 'cron', dry, email: dry ? null : 'cron' })); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Signed-in staff (the email goes to non-admins too): the findings, the last run, the checks, the recipients.
+app.get('/api/admin/data-health', async (req, res) => {
+  try { if (!(await _dhHas('data_health_findings'))) return res.json({ migration: false, findings: [], runs: [] });
+    const st = String(req.query.status || 'open'), stOk = ['open', 'dismissed', 'fixed', 'all'].includes(st) ? st : 'open';
+    const findings = (await pool.query(`SELECT id, check_key, record, area, severity, title, detail, link, status, first_seen, last_seen, fixed_at, dismissed_by, dismissed_at, dismiss_reason
+      FROM planner.data_health_findings WHERE ($1 = 'all' OR status = $1) AND ($1 <> 'fixed' OR fixed_at > now() - interval '30 days')
+      ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, area, first_seen DESC LIMIT 2000`, [stOk])).rows;
+    const tallies = (await pool.query(`SELECT status, count(*)::int n FROM planner.data_health_findings WHERE status <> 'fixed' OR fixed_at > now() - interval '30 days' GROUP BY 1`)).rows;
+    const runs = (await pool.query(`SELECT id, run_at, run_by, ms, counts, errors, emailed FROM planner.data_health_runs ORDER BY run_at DESC LIMIT 14`)).rows;
+    res.set('Cache-Control', 'no-store').json({ migration: true, findings, tallies, runs, checks: DH_CHECKS.map(c => ({ key: c.key, area: c.area, label: c.label })), recipients: await dhRecipients() }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/data-health/:id/dismiss', async (req, res) => {
+  try { const b = req.body || {}, undo = b.undo === true, reason = String(b.reason || '').trim().slice(0, 300);
+    if (!undo && !reason) return res.status(400).json({ error: 'A reason is needed to dismiss' });
+    const r = undo ? await pool.query(`UPDATE planner.data_health_findings SET status = 'open', dismissed_by = NULL, dismissed_at = NULL, dismiss_reason = NULL, dismissed_sig = NULL WHERE id = $1 AND status = 'dismissed' RETURNING id`, [req.params.id])
+      : await pool.query(`UPDATE planner.data_health_findings SET status = 'dismissed', dismissed_by = $2, dismissed_at = now(), dismiss_reason = $3, dismissed_sig = sig WHERE id = $1 AND status = 'open' RETURNING id`, [req.params.id, authUser(req) || 'unknown', reason]);
+    if (!r.rowCount) return res.status(409).json({ error: 'That finding has changed; reload' }); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Admin: run now (no email), or run now + send the summary to me only (test).
+app.post('/api/admin/data-health/run', async (req, res) => {
+  try { const me = await hzAdminOnly(req, res); if (!me) return; const b = req.body || {}, email = me.email || authUser(req);
+    if (b.test_email && !email) return res.status(400).json({ error: 'No signed-in email to send to' });
+    res.json(await dhRun({ by: email || 'admin', email: b.test_email ? [String(email).toLowerCase()] : null })); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/admin/data-health/recipients', async (req, res) => {
+  try { const me = await hzAdminOnly(req, res); if (!me) return;
+    const list = String((req.body || {}).to || '').split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+    if (!list.length) return res.status(400).json({ error: 'Enter at least one email address' });
+    await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('data_health_email_to', $1, $2, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`, [list.join(','), me.email || authUser(req) || 'admin']);
+    res.json({ ok: true, recipients: list }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 
 // ── config (portal-wide settings live in app_settings under cp_*) ──
 const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to', 'cp_auto_push_fulfil', 'cp_sales_team_emails'];

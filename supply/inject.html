@@ -8603,19 +8603,19 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','ask-feedback'];   // v28.141: + Ask Claude feedback. v28.159: + Health log
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','ask-feedback':'Ask Claude feedback'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log','app-health','health-log','data-health','ask-feedback']; if(!(ME&&ME.is_admin))ADM_KEYS=[];   // v28.432: + Data health (non-admins reach it as its own tab, below)   // v28.141: + Ask Claude feedback. v28.159: + Health log
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
     if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['onboarding','Onboarding'],['warehouse','Warehouse rules'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; if(ME&&ME.is_admin)L2.push(['xero','Xero']); }   // flat (Supply chain group removed); Ben's order + duty/consignees appended; Xero finance config admin-only
-    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
+    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); else L2.unshift(['data-health','Data health']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     // v28.138: a deep link to an admin-only tab can land BEFORE /api/me has loaded (ME===null). The guards below treated
     // "not loaded yet" as "not admin" and bounced an admin to Suppliers / Exports. Wait for ME, then render once.
-    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback','health-log'].indexOf(CONFIG_SUB)>=0){
+    if(ME===null && ['xero','email-notifications','permissions','email-log','admin-general','exchange-rates','channels','ask-feedback','health-log','data-health'].indexOf(CONFIG_SUB)>=0){
       c.innerHTML='<div class="count">Loading…</div>'; fetchMe(function(){ if(current==='config')renderConfig(d); }); return; }
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels'||CONFIG_SUB==='ask-feedback'||CONFIG_SUB==='health-log')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     if(CONFIG_SUB==='xero'&&!(ME&&ME.is_admin))CONFIG_SUB='suppliers';   // Xero finance config is admin-only
@@ -9787,6 +9787,64 @@
       // v28.159 (Ben): CONFIG ▸ Admin ▸ Health log. The persistent log behind the weekly health email (migration 328): server 5xx +
       // slow requests and browser errors + slow views, aggregated by GET /api/health/weekly?days=N. Download the .md for Claude Code,
       // or email it to yourself (admin only, only to the signed-in address). Tables are sortable (click a header), sticky headers.
+      // v28.432 (Ben 21-Oct-26): CONFIG ▸ Admin ▸ Data health. Daily check of the Fulfil-fed data in HORIZON (stock on hand, inbound, sales):
+      // review points with Dismiss (reason; reopens when the numbers change). Open to every signed-in user (the daily email goes to
+      // non-admins too); Run now, Send test and the recipient list are admin only. GET /api/admin/data-health.
+      SUBS['data-health']=function(){
+        var st={area:'',status:'open',q:''}, D=null, isAdm=!!(ME&&ME.is_admin), AREA={inventory:'Inventory on hand',inbound:'Inbound',sales:'Sales'};
+        function dtm(s){ s=String(s||''); return s?fd(s.slice(0,10))+(s.length>15?' '+new Date(s).toTimeString().slice(0,5):''):''; }
+        function sevB(s){ return s==='high'?'<span class="tool-badge bg-red">High</span>':s==='low'?'<span class="tool-badge">Low</span>':'<span class="tool-badge bg-amber">Check</span>'; }
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Data health.</b> Every morning HORIZON checks the Fulfil data it holds (stock on hand, inbound POs and shipments, sales orders) and lists what needs a look. The summary is emailed daily. <b>Dismiss</b> a finding with a reason and it stays quiet until its numbers change.</div>'
+          +'<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="pill-lbl">Area</span><select class="flt" id="dh-area" style="width:170px"><option value="">All areas</option><option value="inventory">Inventory on hand</option><option value="inbound">Inbound</option><option value="sales">Sales</option></select>'
+          +'<span class="pill-lbl">Status</span><select class="flt" id="dh-st" style="width:150px"><option value="open">Open</option><option value="dismissed">Dismissed</option><option value="fixed">Fixed (30 days)</option><option value="all">All</option></select>'
+          +'<input class="fci txt" id="dh-q" placeholder="Search SKU, PO, SO…" style="width:200px">'
+          +(isAdm?'<button class="save-btn light" id="dh-run">Run now</button><button class="save-btn light" id="dh-test" title="Runs the checks and emails the summary to you only">✉ Send test (to me)</button>':'')
+          +'<span class="count" id="dh-status" style="align-self:center"></span></div><div id="dh-body"><div class="count">Loading…</div></div>';
+        var stat=document.getElementById('dh-status');
+        function load(){ document.getElementById('dh-body').innerHTML='<div class="count">Loading…</div>';
+          fetch('/api/admin/data-health?status='+st.status).then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error){ document.getElementById('dh-body').innerHTML='<div class="count" style="color:var(--neg)">'+esc((d&&d.error)||'failed')+'</div>'; return; } D=d; draw(); })
+            .catch(function(e){ document.getElementById('dh-body').innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
+        function draw(){ var d=D, body=document.getElementById('dh-body'); if(!d.migration){ body.innerHTML='<div class="count">Data health needs migration 382.</div>'; return; }
+          var run=(d.runs||[])[0], c=(run&&run.counts)||{}; stat.textContent=run?'Last run '+dtm(run.run_at)+' ('+Math.round((run.ms||0)/1000)+' s)'+(run.errors&&run.errors.length?' · '+run.errors.length+' check(s) failed':''):'Not run yet';
+          var tiles='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0">'+['inventory','inbound','sales'].map(function(a){ var x=c[a]||{new:0,open:0,fixed:0};
+            return '<div class="dh-tile" data-a="'+a+'" style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--card);cursor:pointer'+(st.area===a?';outline:2px solid var(--blue)':'')+'"><div class="mut tiny">'+esc(AREA[a])+'</div><b style="font-size:22px;color:'+(x.open?'var(--amber)':'var(--pos)')+'">'+x.open+'</b> <span class="mut tiny">open</span>'
+              +'<div class="tiny"><span style="color:'+(x.new?'var(--neg)':'var(--mut)')+'">'+x.new+' new</span> · <span style="color:var(--pos)">'+x.fixed+' fixed</span> <span class="mut">at the last run</span></div></div>'; }).join('')+'</div>';
+          var q=st.q.toLowerCase(), rows=(d.findings||[]).filter(function(f){ return (!st.area||f.area===st.area)&&(!q||(f.record+' '+f.title+' '+(f.detail||'')).toLowerCase().indexOf(q)>=0); });
+          var th='position:sticky;top:0;background:var(--band);z-index:2;text-align:left;white-space:nowrap';
+          var tbl=rows.length?'<div class="tw" style="max-height:62vh;overflow:auto"><table class="pay-tbl" style="width:100%;font-size:12px;border-collapse:separate;border-spacing:0"><thead><tr><th class="l" style="'+th+'"></th><th class="l" style="'+th+'">Area</th><th class="l" style="'+th+'">Finding</th><th class="l" style="'+th+'">Since</th><th class="l" style="'+th+'"></th></tr></thead><tbody>'
+            +rows.map(function(f){ var act=f.status==='open'?'<span class="lnk-btn dh-dis" data-id="'+f.id+'">Dismiss</span>':f.status==='dismissed'?'<span class="lnk-btn dh-undo" data-id="'+f.id+'">Undo dismiss</span>':'';
+              return '<tr><td class="l" style="vertical-align:top">'+sevB(f.severity)+'</td><td class="l mut tiny" style="vertical-align:top;white-space:nowrap">'+esc(AREA[f.area]||f.area)+'</td>'
+                +'<td class="l" style="vertical-align:top">'+(f.link?'<a href="'+esc(f.link)+'"'+(/^https?:/.test(f.link)?' target="_blank" rel="noopener"':'')+'>'+esc(f.title)+'</a>':esc(f.title))+(f.detail?'<div class="mut tiny" style="white-space:normal">'+esc(f.detail)+'</div>':'')
+                +(f.status==='dismissed'?'<div class="tiny" style="color:var(--amber)">Dismissed by '+esc(String(f.dismissed_by||'').replace(/@.*$/,'@'))+' '+esc(dtm(f.dismissed_at))+': '+esc(f.dismiss_reason||'')+'</div>':'')
+                +(f.status==='fixed'?'<div class="tiny" style="color:var(--pos)">Fixed '+esc(dtm(f.fixed_at))+'</div>':'')+'</td>'
+                +'<td class="l tiny" style="vertical-align:top;white-space:nowrap">'+esc(fd(String(f.first_seen||'').slice(0,10)))+'</td><td class="l" style="vertical-align:top;white-space:nowrap" id="dh-a'+f.id+'">'+act+'</td></tr>'; }).join('')+'</tbody></table></div>'
+            :'<div class="mut tiny" style="padding:8px 0">'+(st.status==='open'?'Nothing open'+(st.area?' in '+esc(AREA[st.area]):'')+'. All clear.':'None.')+'</div>';
+          var foot='<div class="sect-h" style="margin-top:16px">Checks <span class="mut tiny">('+(d.checks||[]).length+')</span></div><div class="tiny mut">'+['inventory','inbound','sales'].map(function(a){ return '<b>'+esc(AREA[a])+':</b> '+(d.checks||[]).filter(function(k){ return k.area===a; }).map(function(k){ return esc(k.label); }).join(' · '); }).join('<br>')+'</div>'
+            +'<div class="sect-h" style="margin-top:14px">Daily email</div><div class="tiny">'+(isAdm?'<input class="fci txt" id="dh-to" style="width:min(100%,560px)" value="'+esc((d.recipients||[]).join(', '))+'"> <button class="save-btn light" id="dh-to-save">Save</button>':esc((d.recipients||[]).join(', ')))+'</div>'
+            +'<div class="sect-h" style="margin-top:14px">Recent runs</div><div class="tiny mut">'+((d.runs||[]).map(function(r){ var t=r.counts||{}, n=function(k){ return ['inventory','inbound','sales'].reduce(function(s,a){ return s+((t[a]||{})[k]||0); },0); };
+              return esc(dtm(r.run_at))+' · '+esc(String(r.run_by||'').replace(/@.*$/,'@'))+' · '+n('new')+' new, '+n('open')+' open, '+n('fixed')+' fixed'+(r.emailed?' · emailed '+esc(r.emailed.length>60?r.emailed.slice(0,60)+'…':r.emailed):'')+((r.errors||[]).length?' · <span style="color:var(--neg)">'+esc(r.errors.map(function(e){ return e.check+': '+e.error; }).join('; '))+'</span>':''); }).join('<br>')||'None yet.')+'</div>';
+          body.innerHTML=tiles+tbl+foot;
+          body.querySelectorAll('.dh-tile').forEach(function(t){ t.onclick=function(){ st.area=st.area===t.dataset.a?'':t.dataset.a; document.getElementById('dh-area').value=st.area; draw(); }; });
+          body.querySelectorAll('.dh-dis').forEach(function(x){ x.onclick=function(){ var cell=document.getElementById('dh-a'+x.dataset.id);
+            cell.innerHTML='<input class="fci txt" placeholder="Reason" style="width:160px"> <span class="save-btn" style="padding:2px 8px">Dismiss</span> <span class="lnk-btn">Cancel</span>';
+            var inp=cell.querySelector('input'), ok=cell.querySelector('.save-btn'), cn=cell.querySelector('.lnk-btn'); inp.focus();
+            cn.onclick=function(){ draw(); };
+            function go(){ var r=inp.value.trim(); if(!r){ inp.style.borderColor='var(--neg)'; inp.focus(); return; } ok.textContent='…';
+              fetch('/api/admin/data-health/'+x.dataset.id+'/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:r})}).then(function(r){ return r.json(); }).then(function(j){ if(j&&j.error){ ok.textContent='Dismiss'; cell.insertAdjacentHTML('beforeend','<div class="tiny" style="color:var(--neg)">'+esc(j.error)+'</div>'); return; } load(); }); }
+            ok.onclick=go; inp.onkeydown=function(e){ if(e.key==='Enter')go(); if(e.key==='Escape')draw(); }; }; });
+          body.querySelectorAll('.dh-undo').forEach(function(x){ x.onclick=function(){ x.textContent='…'; fetch('/api/admin/data-health/'+x.dataset.id+'/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({undo:true})}).then(function(r){ return r.json(); }).then(function(){ load(); }); }; });
+          var ts=document.getElementById('dh-to-save'); if(ts)ts.onclick=function(){ ts.textContent='Saving…'; fetch('/api/admin/data-health/recipients',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:document.getElementById('dh-to').value})}).then(function(r){ return r.json(); }).then(function(j){ ts.textContent=j&&j.error?j.error:'Saved'; if(j&&j.recipients){ D.recipients=j.recipients; document.getElementById('dh-to').value=j.recipients.join(', '); } }); };
+        }
+        document.getElementById('dh-area').onchange=function(){ st.area=this.value; if(D)draw(); };
+        document.getElementById('dh-st').onchange=function(){ st.status=this.value; load(); };
+        var _qt; document.getElementById('dh-q').oninput=function(){ var v=this.value; clearTimeout(_qt); _qt=setTimeout(function(){ st.q=v.trim(); if(D)draw(); },150); };
+        function runBtn(id,body,label){ var btn=document.getElementById(id); if(!btn)return; btn.onclick=function(){ btn.disabled=true; stat.textContent='Running the checks (about 20 s)…';
+          fetch('/api/admin/data-health/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.json(); }).then(function(j){ btn.disabled=false;
+            if(!j||j.error){ stat.textContent=(j&&j.error)||'failed'; return; } load(); setTimeout(function(){ stat.textContent=label(j)+' · '+stat.textContent; },400); }).catch(function(e){ btn.disabled=false; stat.textContent=e.message; }); }; }
+        runBtn('dh-run',{},function(j){ return j.findings+' findings'; });
+        runBtn('dh-test',{test_email:true},function(j){ return j.emailed?'Sent to '+j.emailed:(j.email_error?'Email failed: '+j.email_error:'Not sent'); });
+        load();
+      };
       SUBS['health-log']=function(){
         var st={days:7}, D=null, SORT={};
         function shortU(e){ return String(e||'').replace(/@.*$/,'@'); }
@@ -13975,7 +14033,7 @@
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0?[poSub==='paydue'?'payments-due':poSub]:[]));   // v28.129 (Ben): the default sub-page gets its own deep link too (#/supply/payments/payments-due)
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
-      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','ask-feedback','health-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','ask-feedback','health-log','data-health'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
     }
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
@@ -21384,7 +21442,7 @@
       SECTIONS.forEach(function(t){ if(['purchase-orders','reports','payments','config'].indexOf(t[0])<0)add('Supply ▸ '+tc(t[1]),'#/supply/'+t[0]); }); }catch(e){}
     var SCL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes',keyaccounts:'Key accounts',portalusers:'Portal users',portal:'Portal',onboarding:'Onboarding',warehouse:'Warehouse rules',xero:'Xero'};
     Object.keys(SCL).forEach(function(k){ add('Supply ▸ Config ▸ '+SCL[k],'#/supply/config/'+k); });
-    var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','ask-feedback':'Ask Claude feedback'};
+    var ADL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log','app-health':'App health','health-log':'Health log','data-health':'Data health','ask-feedback':'Ask Claude feedback'};
     Object.keys(ADL).forEach(function(k){ add('Config ▸ Admin ▸ '+ADL[k],'#/config/admin/'+k); });
     var DML={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     Object.keys(DML).forEach(function(k){ add('Config ▸ Demand ▸ '+DML[k],'#/config/demand/'+k); });
