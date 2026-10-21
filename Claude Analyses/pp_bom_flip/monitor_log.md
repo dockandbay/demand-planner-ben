@@ -65,3 +65,38 @@ Kits monitored: 66. Orders with those kits: 4. ALL AS EXPECTED.
 | SO68718 | UK-909415 | processing | 10-20T21:58 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
 | SO68833 | UK-909439 | processing | 10-21T08:17 | UK-TEATWL-MD-5SET-CULDEL | 1 | PP | PP | PP move assigned,draft |
 
+## Check 2026-10-21 21:47:06 (orders since 2026-10-21T18:47:05)
+
+Kits monitored: 66. Orders with those kits: 3. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO68870 | UK-909438 | processing | 10-21T08:07 | UK-TEATWL-MD-5SET-CULDEL | 1 | PP | PP | PP move draft |
+| SO68833 | UK-909439 | processing | 10-21T08:17 | UK-TEATWL-MD-5SET-CULDEL | 1 | PP | PP | PP move assigned,draft |
+| SO68888 | UK-909468 | processing | 10-21T10:12 | UK-TOWLB-CAB-LG-4SETN | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-22 00:47:06 (orders since 2026-10-21T21:47:06)
+
+Kits monitored: 66. Orders with those kits: 4. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO68957 | UK-909495 | processing | 10-21T11:51 | UK-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
+| SO68950 | UK-909510 | processing | 10-21T12:43 | UK-TOWLB-CAB-LG-6SETI | 1 | PP | PP | PP move assigned,draft |
+| SO68951 | UK-909511 | processing | 10-21T12:44 | UK-TOWLB-CAB-LG-4SETF-R | 1 | PP | PP | PP move assigned,draft |
+| SO68977 | UK-909525 | processing | 10-21T13:44 | UK-TOWLB-CAB-XL-4SETF-R | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-22 03:47:06 (orders since 2026-10-22T00:47:06)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-22 06:47:08 (orders since 2026-10-22T03:47:06)
+
+Kits monitored: 66. Orders with those kits: 2. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO69039 | UK-909549 | processing | 10-21T17:37 | UK-TOWLB-CAB-XL-4SETA-R | 1 | PP | PP | PP move assigned,draft |
+| SO69025 | UK-909550 | processing | 10-21T17:38 | UK-TOWLB-CAB-XL-4SETA-R | 1 | PP | PP | PP move assigned,draft |
+
