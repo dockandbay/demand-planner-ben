@@ -29426,7 +29426,7 @@ async function cpRunSummary(runId) {
 }
 app.get('/api/client/commission/runs', async (req, res) => {
   try { const month = String(req.query.month || '').trim(); const params = []; let w = '1=1'; if (/^\d{4}-\d{2}$/.test(month)) { params.push(month); w = 'r.month=$1'; }
-    const runs = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id) rows, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id AND x.status='exception') exceptions FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE ${w} ORDER BY r.month DESC, g.name`, params)).rows;
+    const runs = (await pool.query(`SELECT r.*, g.name group_name, g.default_rate, g.sort_order, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id) rows, (SELECT count(*)::int FROM planner.commission_rows x WHERE x.run_id=r.id AND x.status='exception') exceptions FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE ${w} ORDER BY r.month DESC, g.name`, params)).rows;
     const months = (await pool.query(`SELECT DISTINCT month FROM planner.commission_runs ORDER BY month DESC LIMIT 24`)).rows.map(x => x.month);
     res.set('Cache-Control', 'no-store').json({ runs, months }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -29463,6 +29463,14 @@ const _CM_SHIP_RE = /\b(ship|shipping|freight|postage|delivery|carriage|courier)
 const _cmIsProductLine = l => { const ic = String(l.ItemCode || '').trim().toUpperCase(); return (!!ic && ic !== 'CUSTOM' && !_CM_SHIP_RE.test(ic)) || /\(([A-Z0-9]+-)+[A-Z0-9]+\)\s*$/.test(String(l.Description || '').trim()); };
 const _cmIsFaireX = v => ((v && v.LineItems) || []).some(l => /\bfaire\b/i.test(String(l.Description || '')));   // Faire commission / fee lines = a Faire order
 function _cmShipX(v) { return ((v && v.LineItems) || []).reduce((a, l) => a + (_cmIsProductLine(l) ? 0 : (Number(l.LineAmount) || 0)), 0); }
+// v28.430 (Ben 21-Oct-26: "show the client PO number as well which is an important field they like to show"): the customer's own PO number.
+// Fulfil: the Shopify order metafield global.po_number (else the PO inside global.xero_reference); Xero: the PO inside the invoice reference,
+// e.g. "Markettime WRAP-0201 [ID: 32766988]" -> WRAP-0201.
+function _cmClientPo(meta, xref) {
+  const mf = (meta && meta.metafields) || {}; const po = String(mf['global.po_number'] || '').trim(); if (po) return po.slice(0, 80);
+  const r = String(xref || mf['global.xero_reference'] || '').trim(); if (!r) return null;
+  const m = /^(?:markettime|brandwise|nuorder|faire|joor|repspark)?\s*([A-Za-z0-9][\w\-\/.&#]*)\s*\[ID:/i.exec(r); return m ? m[1].slice(0, 80) : null;
+}
 async function cmEngine(month, opts) { opts = opts || {};
   if (!/^\d{4}-\d{2}$/.test(String(month || ''))) throw Object.assign(new Error('month (YYYY-MM) required'), { status: 400 });
   const env = opts.env === 'live' ? 'live' : await activeFulfilEnv(), key = month + '|' + env + '|' + (opts.xero === false ? 'nox' : 'x') + (opts.debug ? '|d' : '');
@@ -29522,7 +29530,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     if (ov && ov.rate != null && ov.rate !== '') { rate = Number(ov.rate); rateSrc = 'override'; }
     if (g.no_commission) { rate = 0; rateSrc = 'no commission'; }
     const commissionable = cv ? _cmR2(cv.v) : null;
-    rows.push({ source: o.source, agent_id: gid, agent: g.name, currency: ccy, order_ref: o.order_ref, invoice_ref: o.invoice_ref, customer: o.customer, invoice_date: o.invoice_date, pay_date: o.pay_date,
+    rows.push({ source: o.source, agent_id: gid, agent: g.name, currency: ccy, order_ref: o.order_ref, invoice_ref: o.invoice_ref, client_po: o.client_po || null, customer: o.customer, invoice_date: o.invoice_date, pay_date: o.pay_date,
       earn_date: o.invoice_date && o.invoice_date > o.pay_date ? o.invoice_date : o.pay_date, currency_src: o.currency_src, amount_src: _cmR2(o.amount_src), fx_rate: cv ? cv.r : null, commissionable,
       rate, rate_source: rateSrc, agent_source: agentSrc, commission: commissionable == null ? null : _cmR2(commissionable * rate / 100), override: ov ? { amount: ov.commissionable_amount, reason: ov.reason } : null,
       status: (commissionable == null || decide) ? 'exception' : (rate === 0 ? 'zero' : 'ok'), decide: decide || undefined,
@@ -29549,7 +29557,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     const shipF = {}; for (let i = 0; i < invs.length; i += 200) (await fAll('account.invoice.line', [['invoice', 'in', invs.slice(i, i + 200).map(x => x.id)], ['type', '=', 'line']], ['invoice', 'amount', 'description', 'product.code']))
       .forEach(l => { if (!String(l['product.code'] || '').trim() || _CM_SHIP_RE.test(String(l['product.code'] || ''))) shipF[l.invoice] = (shipF[l.invoice] || 0) + _cmNum(l.amount); });   // lines with no product (shipping) are not commissionable
     const saleIds = [...new Set(invs.flatMap(i => i.sales || []))]; const sales = {};
-    for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name'])).forEach(s => { sales[s.id] = s; });
+    for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name', 'metadata'])).forEach(s => { sales[s.id] = s; });   // v28.430: + metadata (client PO number)
     const codes = {}; try { const def = (await ff('PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']]) || [])[0];
       if (def) for (let i = 0; i < saleIds.length; i += 300) (await fAll('metafield.value', [['field', '=', def.id], ['resource', 'in', saleIds.slice(i, i + 300).map(x => 'sale.sale,' + x)]], ['resource', 'value_char']))
         .forEach(v => { const sid = Number(String(v.resource).split(',')[1]); if (v.value_char) codes[sid] = String(v.value_char).trim().toLowerCase(); }); } catch (e) { notes.push('Fulfil agent codes not read: ' + e.message); }
@@ -29558,7 +29566,7 @@ async function cmEngine(month, opts) { opts = opts || {};
       const total = _cmNum(inv.total_amount), ratio = total ? (_cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0)) / total : 1;
       const ref = s.reference || s.number || inv.number; seen.add(String(inv.number || '').toUpperCase()); if (s.reference) seen.add(String(s.reference).toUpperCase()); if (inv.reference) seen.add(String(inv.reference).toUpperCase());
       if (total < 0) {   // a credit note: one negative row in its own month, at the order's agent and rate (product lines, ex tax)
-        if (invDate >= ms && invDate <= me) add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '',
+        if (invDate >= ms && invDate <= me) add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata),
           invoice_date: invDate, pay_date: invDate, amount_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0), currency_src: ccy, credit_note: true, quiet: true });
         continue; }
       const apps = ((inv.payment_applications_data || {}).rows || []).map(r => Object.assign({}, r.values || {}, { _ref: ((r.actions || {}).reference) || {} }));
@@ -29567,7 +29575,7 @@ async function cmEngine(month, opts) { opts = opts || {};
         const amt = ccy === compCcy ? _cmNum(a.applied_amount) : (a.applied_amount_second_currency != null && a.applied_amount_second_currency !== '' ? _cmNum(a.applied_amount_second_currency) : null);
         if (amt == null || !amt) continue;   // FX difference lines (no invoice-currency amount)
         const earn = invDate && invDate > d ? invDate : d; if (earn < ms || earn > me) continue;
-        add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '',
+        add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata),
           invoice_date: invDate, pay_date: d, amount_src: amt * ratio, currency_src: ccy, deposit: invDate && d < invDate }); } }
     notes.push('Fulfil ' + env + ': ' + invs.length + ' invoices read');
   } catch (e) { fulfilOk = false; notes.push('Fulfil not read: ' + e.message); } }
@@ -29585,7 +29593,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     for (const p of mine) { const v = xi[(p.Invoice || {}).InvoiceID] || p.Invoice || {}; const no = String(v.InvoiceNumber || '').toUpperCase(), rf = String(v.Reference || '').toUpperCase();
       if ((no && seen.has(no)) || (rf && seen.has(rf))) { dup++; continue; }
       const tot = Number(v.Total) || 0, shipX = _cmShipX(v), ratio = tot ? ((Number(v.SubTotal) || 0) - shipX) / tot : 1, c = v.Contact || (p.Invoice || {}).Contact || {};   // shipping is not commissionable (as the paid sheet)
-      add({ source: 'xero ' + org, order_ref: v.Reference || v.InvoiceNumber, invoice_ref: v.InvoiceNumber, customer: c.Name, xid: c.ContactID, org, channel: _cmIsFaireX(v) ? 'Faire' : '', invoice_date: _cmXeroDate(v.DateString || v.Date),
+      add({ source: 'xero ' + org, order_ref: v.Reference || v.InvoiceNumber, invoice_ref: v.InvoiceNumber, client_po: _cmClientPo(null, v.Reference), customer: c.Name, xid: c.ContactID, org, channel: _cmIsFaireX(v) ? 'Faire' : '', invoice_date: _cmXeroDate(v.DateString || v.Date),
         pay_date: _cmXeroDate(p.DateString || p.Date), amount_src: (Number(p.Amount) || 0) * ratio, currency_src: String(v.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() });
       if (opts.debug && rows.length) rows[rows.length - 1].debug_lines = (v.LineItems || []).map(l => [l.ItemCode, l.Description, l.AccountCode, l.LineAmount]).slice(0, 40); }
     // customer credit notes dated in the month take commission back (ex tax, shipping excluded)
@@ -29594,7 +29602,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     for (const cn of cns) { const c = cn.Contact || {}; if (!(byXid[org + '|' + c.ContactID] || byName[String(c.Name || '').trim().toLowerCase()])) continue; const no = String(cn.CreditNoteNumber || '').toUpperCase(), rf = String(cn.Reference || '').toUpperCase();
       if ((no && seen.has(no)) || (rf && seen.has(rf))) continue;
       if (no && cnPaid.has(no)) { cnDone++; continue; } cnMine++;
-      add({ source: 'xero ' + org, order_ref: cn.Reference || cn.CreditNoteNumber, invoice_ref: cn.CreditNoteNumber, customer: c.Name, xid: c.ContactID, org, channel: '', credit_note: true,
+      add({ source: 'xero ' + org, order_ref: cn.Reference || cn.CreditNoteNumber, invoice_ref: cn.CreditNoteNumber, client_po: _cmClientPo(null, cn.Reference), customer: c.Name, xid: c.ContactID, org, channel: '', credit_note: true,
         alloc: [...new Set((cn.Allocations || []).map(a => String(((a.Invoice || {}).InvoiceNumber) || '').toUpperCase()).filter(Boolean))],
         invoice_date: _cmXeroDate(cn.DateString || cn.Date), pay_date: _cmXeroDate(cn.DateString || cn.Date), amount_src: -((Number(cn.SubTotal) || 0) - _cmShipX(cn)), currency_src: String(cn.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() }); }
     notes.push('Xero ' + org.toUpperCase() + ': ' + pays.length + ' payments, ' + mine.length + ' for agents\' customers' + (dup ? ', ' + dup + ' already in Fulfil' : '') + (cnMine ? ', ' + cnMine + ' credit notes' : '') + (cnDone ? ' (' + cnDone + ' already deducted in paid history)' : ''));
@@ -29640,6 +29648,26 @@ app.get('/api/client/commission/missed', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, months, rows: out, notes, total_by_agent: Object.values(out.reduce((a, r) => { const k = r.agent_id; a[k] = a[k] || { agent_id: k, agent: r.agent, currency: r.currency, rows: 0, commission: 0 }; a[k].rows++; a[k].commission = Math.round((a[k].commission + r.commission) * 100) / 100; return a; }, {})) });
   } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
+// v28.430 (Ben 21-Oct-26: "september run should show any past payments not yet paid as well"; 6 months back): Import data > Find unpaid
+// earlier commission calls /missed one month at a time for the 6 months before the run month, then saves what it found here (new items are
+// added; items found earlier stay, since a Build puts them in a run and a new scan no longer sees them). Build / refresh adds them to that month's runs as catch-up rows.
+app.post('/api/client/commission/catchup/save', async (req, res) => {
+  const b = req.body || {}, month = String(b.month || ''), rows = Array.isArray(b.rows) ? b.rows.slice(0, 3000) : [], by = (req.me && req.me.email) || null;
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+    // merge, never replace: items already found stay (once a Build has put them in a run, a new scan no longer sees them as unpaid)
+    const key = (g, inv, ord, pd, c) => [g, String(inv || ord || '').toUpperCase(), String(pd || '').slice(0, 10), (Math.round((Number(c) || 0) * 100) / 100).toFixed(2)].join('|');
+    const have = new Set((await client.query(`SELECT rep_group_id, invoice_ref, order_ref, to_char(pay_date,'YYYY-MM-DD') pd, commission FROM planner.commission_catchup WHERE run_month=$1`, [month])).rows.map(r => key(r.rep_group_id, r.invoice_ref, r.order_ref, r.pd, r.commission)));
+    let n = 0; for (const r of rows) { if (!r || !r.agent_id || !(Number(r.commission) || 0) || !/^\d{4}-\d{2}$/.test(String(r.earned_month || '')) || String(r.earned_month) >= month) continue;
+      const k = key(r.agent_id, r.invoice_ref, r.order_ref, r.pay_date, r.commission); if (have.has(k)) continue; have.add(k);
+      await client.query(`INSERT INTO planner.commission_catchup (run_month, earned_month, rep_group_id, order_ref, invoice_ref, client_po, customer, invoice_date, pay_date, currency, currency_src, amount_src, fx_rate, commissionable, rate, commission, rate_source, agent_source, source, note, found_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`, [month, r.earned_month, r.agent_id, r.order_ref || null, r.invoice_ref || null, r.client_po || null, r.customer || null, r.invoice_date || null, r.pay_date || null,
+        r.currency || null, r.currency_src || null, r.amount_src == null ? null : r.amount_src, r.fx_rate == null ? null : r.fx_rate, r.commissionable == null ? null : r.commissionable, r.rate == null ? null : r.rate, r.commission, r.rate_source || null, r.agent_source || null, r.source || null, r.note || null, by]); n++; }
+    await client.query(`INSERT INTO planner.app_settings (key, value) VALUES ('commission_last_catchup',$1) ON CONFLICT (key) DO UPDATE SET value=$1`, [JSON.stringify({ month, at: new Date().toISOString(), by, rows: n, from: b.from || null, to: b.to || null })]);
+    await client.query('COMMIT'); res.json({ ok: true, month, saved: n });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); } finally { client.release(); }
+});
 app.post('/api/client/commission/runs/add-missed', async (req, res) => {   // add missed rows to the agent's OPEN run for a month (made if absent)
   const b = req.body || {}, month = String(b.month || ''), gid = parseInt(b.rep_group_id, 10), rows = Array.isArray(b.rows) ? b.rows.slice(0, 500) : [];
   if (!/^\d{4}-\d{2}$/.test(month) || !gid || !rows.length) return res.status(400).json({ error: 'month, rep_group_id and rows required' });
@@ -29657,26 +29685,58 @@ app.post('/api/client/commission/runs/add-missed', async (req, res) => {   // ad
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.421: one agent's run from an engine pass (calculated rows rebuilt; imported / hand rows stay). Throws 409 when the run is not open.
+// v28.421: one agent's run from an engine pass (calculated rows rebuilt; imported / hand rows stay). Throws 409 when the run is not open.
+// v28.430 (Ben 21-Oct-26): a row's remove button DEFERS it (status deferred, net 0: not paid this month) and a rebuild keeps that; deferred rows
+// of the agent's earlier runs are carried into this run (source 'carried', carried_from = the deferred row) until a run pays them; earlier
+// commission found earned but never paid (Import data > Find unpaid earlier commission) is added as catch-up rows; every row has the client PO.
 async function cmBuildRun(month, g, v, by) { const gid = g.id;
     const run = (await pool.query(`INSERT INTO planner.commission_runs (month, rep_group_id) VALUES ($1,$2) ON CONFLICT (month, rep_group_id) DO UPDATE SET month=excluded.month RETURNING *`, [month, gid])).rows[0];
     if (run.status !== 'open') { const e = new Error('run is ' + run.status + ': reopen it first'); e.status = 409; e.run = run; throw e; }
     const mine = v.rows.filter(r => r.agent_id === gid);
-    const client = await pool.connect(); let added = 0;
+    const client = await pool.connect(); let added = 0, carried = 0, catchup = 0;
+    const _mLbl = m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m ? M[+String(m).slice(5, 7) - 1] + '-' + String(m).slice(2, 4) : ''; };
     try { await client.query('BEGIN');
-      await client.query(`DELETE FROM planner.commission_rows WHERE run_id=$1 AND (source='fulfil' OR source LIKE 'engine%')`, [run.id]);   // calculated rows are rebuilt; imported / hand rows stay
+      // rows deferred in THIS run (kept through the rebuild): calculated / catch-up by order + invoice + paid date + commission; carried by origin
+      const dk = new Set(), dc = new Set();
+      (await client.query(`SELECT order_ref, invoice_ref, to_char(paid_date,'YYYY-MM-DD') pd, round(coalesce(commission,0),2)::text c, carried_from, source FROM planner.commission_rows WHERE run_id=$1 AND status='deferred'`, [run.id])).rows
+        .forEach(r => { if (r.carried_from) dc.add(String(r.carried_from)); else dk.add([r.order_ref || '', r.invoice_ref || '', r.pd || '', r.c].join('|')); });
+      await client.query(`DELETE FROM planner.commission_rows WHERE run_id=$1 AND (source='fulfil' OR source LIKE 'engine%' OR source IN ('carried','catch-up (auto)'))`, [run.id]);   // calculated rows are rebuilt; imported / hand rows stay
       if (mine.length) { const col = k => mine.map(r => r[k] == null ? null : r[k]);
         added = (await client.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source,
-            currency, currency_src, amount_src, fx_rate, invoice_date, earn_date, rate_source, agent_source)
-          SELECT $1, u.ref, u.inv, u.cust, u.paid, u.amt, u.rate, u.com, CASE WHEN u.st='exception' THEN 0 ELSE u.com END, $2, u.st, u.note, 'engine ' || u.src, $3, u.csrc, u.asrc, u.fx, u.idate, u.edate, u.rsrc, u.gsrc
-          FROM unnest($4::text[], $5::text[], $6::text[], $7::date[], $8::numeric[], $9::numeric[], $10::numeric[], $11::text[], $12::text[], $13::text[], $14::text[], $15::numeric[], $16::numeric[], $17::date[], $18::date[], $19::text[], $20::text[])
-            AS u(ref, inv, cust, paid, amt, rate, com, st, note, src, csrc, asrc, fx, idate, edate, rsrc, gsrc)`,
+            currency, currency_src, amount_src, fx_rate, invoice_date, earn_date, rate_source, agent_source, client_po)
+          SELECT $1, u.ref, u.inv, u.cust, u.paid, u.amt, u.rate, u.com, CASE WHEN u.st='exception' THEN 0 ELSE u.com END, $2, u.st, u.note, 'engine ' || u.src, $3, u.csrc, u.asrc, u.fx, u.idate, u.edate, u.rsrc, u.gsrc, u.cpo
+          FROM unnest($4::text[], $5::text[], $6::text[], $7::date[], $8::numeric[], $9::numeric[], $10::numeric[], $11::text[], $12::text[], $13::text[], $14::text[], $15::numeric[], $16::numeric[], $17::date[], $18::date[], $19::text[], $20::text[], $21::text[])
+            AS u(ref, inv, cust, paid, amt, rate, com, st, note, src, csrc, asrc, fx, idate, edate, rsrc, gsrc, cpo)`,
           [run.id, month + ' ' + g.name, String(mine[0].currency || g.currency || 'USD'), col('order_ref'), col('invoice_ref'), col('customer'), col('pay_date'), col('commissionable'), col('rate'), col('commission'),
-           mine.map(r => r.status === 'exception' ? 'exception' : 'pending'), col('note'), col('source'), col('currency_src'), col('amount_src'), col('fx_rate'), col('invoice_date'), col('earn_date'), col('rate_source'), col('agent_source')])).rowCount; }
+           mine.map(r => r.status === 'exception' ? 'exception' : 'pending'), col('note'), col('source'), col('currency_src'), col('amount_src'), col('fx_rate'), col('invoice_date'), col('earn_date'), col('rate_source'), col('agent_source'), col('client_po')])).rowCount; }
+      // carried forward: deferred rows of this agent's EARLIER runs not yet carried into another earlier run (the latest deferral is the one carried)
+      const cf = (await client.query(`SELECT r.*, x.month FROM planner.commission_rows r JOIN planner.commission_runs x ON x.id=r.run_id
+          WHERE x.rep_group_id=$1 AND x.month < $2 AND r.status='deferred'
+            AND NOT EXISTS (SELECT 1 FROM planner.commission_rows c JOIN planner.commission_runs y ON y.id=c.run_id WHERE c.carried_from=r.id AND y.month < $2)`, [gid, month])).rows;
+      for (const r of cf) {
+        await client.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note, source,
+            currency, currency_src, amount_src, fx_rate, invoice_date, earn_date, rate_source, agent_source, client_po, carried_from)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,'carried',$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+          [run.id, r.order_ref, r.invoice_ref, r.customer, r.paid_date, r.commissionable, r.rate, r.commission, r.credit_note_ref, r.credit_adj, Math.round(((Number(r.commission) || 0) + (Number(r.credit_adj) || 0)) * 100) / 100,
+           month + ' ' + g.name, ('carried forward from ' + _mLbl(r.month) + (r.note ? ' · ' + r.note : '')).slice(0, 500), r.currency, r.currency_src, r.amount_src, r.fx_rate, r.invoice_date, r.earn_date, r.rate_source, r.agent_source, r.client_po, r.id]);
+        carried++; }
+      // catch-up: earlier commission found earned but never paid (Import data > Find unpaid earlier commission, for this run month)
+      const cu = (await client.query(`SELECT * FROM planner.commission_catchup WHERE run_month=$1 AND rep_group_id=$2`, [month, gid]).catch(() => ({ rows: [] }))).rows;
+      for (const r of cu) {
+        await client.query(`INSERT INTO planner.commission_rows (run_id, order_ref, invoice_ref, customer, paid_date, commissionable, rate, commission, net, payment_code, status, note, source,
+            currency, currency_src, amount_src, fx_rate, invoice_date, earn_date, rate_source, agent_source, client_po)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,'pending',$10,'catch-up (auto)',$11,$12,$13,$14,$15,$5,$16,$17,$18)`,
+          [run.id, r.order_ref, r.invoice_ref, r.customer, r.pay_date, r.commissionable, r.rate, r.commission, month + ' ' + g.name, ('catch-up: earned ' + _mLbl(r.earned_month) + ', never paid' + (r.note ? ' · ' + r.note : '')).slice(0, 500),
+           r.currency, r.currency_src, r.amount_src, r.fx_rate, r.invoice_date, r.rate_source, r.agent_source, r.client_po]);
+        catchup++; }
+      // re-apply this run's deferrals
+      if (dk.size || dc.size) await client.query(`UPDATE planner.commission_rows SET status='deferred', net=0 WHERE run_id=$1 AND status<>'exception' AND (carried_from::text = ANY($2::text[])
+          OR (carried_from IS NULL AND (coalesce(order_ref,'')||'|'||coalesce(invoice_ref,'')||'|'||coalesce(to_char(paid_date,'YYYY-MM-DD'),'')||'|'||round(coalesce(commission,0),2)::text) = ANY($3::text[])))`, [run.id, [...dc], [...dk]]);
       await client.query(`UPDATE planner.commission_runs SET currency=$2, built_at=now() WHERE id=$1`, [run.id, String((mine[0] && mine[0].currency) || g.currency || 'USD')]);
       await client.query('COMMIT'); } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
   const sum = await cpRunSummary(run.id);
-  await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · ' + added + ' payments', by);
-  return Object.assign({ run_id: run.id, added }, sum);
+  await cpAudit(null, 'Commission run built', month + ' · ' + g.name + ' · ' + added + ' payments' + (carried ? ', ' + carried + ' carried forward' : '') + (catchup ? ', ' + catchup + ' catch-up' : ''), by);
+  return Object.assign({ run_id: run.id, added, carried, catchup }, sum);
 }
 app.post('/api/client/commission/runs/build', async (req, res) => {   // v28.332: from the stage 2 engine (cmEngine); one run per agent and month
   const b = req.body || {}; const month = String(b.month || '').trim(); const gid = parseInt(b.rep_group_id, 10);
@@ -29700,6 +29760,9 @@ app.post('/api/client/commission/runs/build-all', async (req, res) => {
     if (!v.fulfil_read) return res.status(503).json({ error: 'Fulfil could not be read (' + v.notes.join('; ') + '): nothing changed.' });
     const G = (await pool.query(`SELECT * FROM planner.rep_groups WHERE active AND NOT coalesce(no_commission,false) ORDER BY name`)).rows;
     const hasRun = new Set((await pool.query(`SELECT rep_group_id FROM planner.commission_runs WHERE month=$1`, [month])).rows.map(r => r.rep_group_id));
+    // v28.430: an agent with only catch-up items for this month, or rows deferred in an earlier run, still gets a run
+    (await pool.query(`SELECT DISTINCT rep_group_id FROM planner.commission_catchup WHERE run_month=$1`, [month]).catch(() => ({ rows: [] }))).rows.forEach(r => hasRun.add(r.rep_group_id));
+    (await pool.query(`SELECT DISTINCT x.rep_group_id FROM planner.commission_rows r JOIN planner.commission_runs x ON x.id=r.run_id WHERE x.month < $1 AND r.status='deferred'`, [month])).rows.forEach(r => hasRun.add(r.rep_group_id));
     const built = [], skipped = [];
     for (const g of G) { if (!v.rows.some(r => r.agent_id === g.id) && !hasRun.has(g.id)) continue;
       try { const r = await cmBuildRun(month, g, v, req.me.email); built.push(Object.assign({ agent: g.name, currency: g.currency || 'USD' }, r)); }
@@ -29716,7 +29779,9 @@ app.get('/api/client/commission/import-status', async (req, res) => {
     const li = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='commission_last_import'`)).rows[0];
     let last = null; try { last = li ? JSON.parse(li.value) : null; } catch (_) {}
     const months = {}; (await pool.query(`SELECT month, max(built_at) at, count(*)::int runs FROM planner.commission_runs WHERE built_at IS NOT NULL GROUP BY month`)).rows.forEach(r => { months[r.month] = { at: r.at, runs: r.runs }; });
-    res.set('Cache-Control', 'no-store').json({ ok: true, customers: { n: cu.n || 0, at: cu.at || null }, last_import: last, months });
+    const lc = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='commission_last_catchup'`)).rows[0]; let lastCu = null; try { lastCu = lc ? JSON.parse(lc.value) : null; } catch (_) {}   // v28.430
+    const catchup = {}; (await pool.query(`SELECT run_month, count(*)::int n, max(found_at) at FROM planner.commission_catchup GROUP BY run_month`).catch(() => ({ rows: [] }))).rows.forEach(r => { catchup[r.run_month] = { n: r.n, at: r.at }; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, customers: { n: cu.n || 0, at: cu.at || null }, last_import: last, months, last_catchup: lastCu, catchup });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.421 (Ben 21-Oct-26): POST /api/client/commission/runs/:id/import-paid (paste a Xero export CSV) removed: the engine reads Xero and Fulfil itself.
@@ -29728,23 +29793,34 @@ app.post('/api/client/commission/rows/:id', async (req, res) => {
     await pool.query(`UPDATE planner.commission_rows SET commission = round(commissionable * rate) / 100, net = round(commissionable * rate) / 100 + credit_adj WHERE id=$1 AND credit_note_ref IS NULL`, [req.params.id]);
     const r = (await pool.query(`SELECT run_id FROM planner.commission_rows WHERE id=$1`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.430 (Ben 21-Oct-26, "if you remove an order from a run, what does that mean"; chose "defer to next run"): the run's remove button defers a
+// row: not paid in this run (net 0, greyed), kept through rebuilds, and carried into the agent's next run until a run pays it. Open runs only.
+app.post('/api/client/commission/rows/:id/defer', async (req, res) => {
+  try { const on = (req.body || {}).deferred !== false;
+    const r = (await pool.query(`SELECT w.id, w.run_id, w.status, x.status run_status FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id WHERE w.id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'row not found' }); if (r.run_status !== 'open') return res.status(409).json({ error: 'the run is ' + r.run_status + ': reopen it first' });
+    if (r.status === 'exception') return res.status(409).json({ error: 'resolve the exception first' });
+    await pool.query(on ? `UPDATE planner.commission_rows SET status='deferred', net=0 WHERE id=$1` : `UPDATE planner.commission_rows SET status='pending', net=round(coalesce(commission,0)+coalesce(credit_adj,0),2) WHERE id=$1`, [r.id]);
+    const sum = await cpRunSummary(r.run_id); res.json(Object.assign({ ok: true, deferred: on }, sum));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/client/commission/rows/:id/delete', async (req, res) => { try { const r = (await pool.query(`DELETE FROM planner.commission_rows WHERE id=$1 RETURNING run_id`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/client/commission/runs/:id/status', async (req, res) => {
   const st = String((req.body || {}).status || ''); if (!['open', 'finalised', 'paid'].includes(st)) return res.status(400).json({ error: 'status open|finalised|paid' });
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
     if (st === 'finalised') { const ex = (await pool.query(`SELECT count(*)::int n FROM planner.commission_rows WHERE run_id=$1 AND status='exception'`, [req.params.id])).rows[0].n; if (ex && !(req.body || {}).force) return res.status(409).json({ error: ex + ' exception row(s) still open — resolve them or finalise with force' });
       await pool.query(`UPDATE planner.commission_runs SET status='finalised', finalised_at=now(), finalised_by=$2 WHERE id=$1`, [req.params.id, req.me.email || null]); }
-    else if (st === 'paid') { await pool.query(`UPDATE planner.commission_runs SET status='paid', paid_at=now(), paid_ref=$2 WHERE id=$1`, [req.params.id, (req.body || {}).paid_ref || null]); await pool.query(`UPDATE planner.commission_rows SET status='paid' WHERE run_id=$1 AND status<>'exception'`, [req.params.id]); }
+    else if (st === 'paid') { await pool.query(`UPDATE planner.commission_runs SET status='paid', paid_at=now(), paid_ref=$2 WHERE id=$1`, [req.params.id, (req.body || {}).paid_ref || null]); await pool.query(`UPDATE planner.commission_rows SET status='paid' WHERE run_id=$1 AND status NOT IN ('exception','deferred')`, [req.params.id]); }   // v28.430: deferred rows stay deferred (carried into the next run)
     else await pool.query(`UPDATE planner.commission_runs SET status='open', finalised_at=NULL, finalised_by=NULL WHERE id=$1`, [req.params.id]);
     // v28.322 (Ben 13-Oct-26: "after we pay commissions we record them here"): a run marked Paid writes its rows to the paid history
     // (migration 363), replacing any earlier copy of the same run; reopening the run takes them out again. Before migration 363: skipped.
     let hist = null;
     try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]);   // v28.429: paid history cache
       if (st === 'paid') hist = (await pool.query(`INSERT INTO planner.commission_paid_history (period, period_label, rep_group, customer, invoice_no, po_no, commissionable, rate_pct, commission_due, credit_note, status, paid_amount, notes, payment_code, source, run_id, created_by)
-          SELECT to_date(r.month || '-01','YYYY-MM-DD'), to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY'), g.name, cr.customer, coalesce(cr.invoice_ref, cr.order_ref), cr.order_ref, cr.commissionable, cr.rate, cr.commission, cr.credit_note_ref, 'paid', cr.net, cr.note,
+          SELECT to_date(r.month || '-01','YYYY-MM-DD'), to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY'), g.name, cr.customer, coalesce(cr.invoice_ref, cr.order_ref), coalesce(cr.client_po, cr.order_ref), cr.commissionable, cr.rate, cr.commission, cr.credit_note_ref, 'paid', cr.net, cr.note,
                  coalesce(cr.payment_code, to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY') || ' ' || g.name), 'horizon', r.id, $2
             FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id JOIN planner.commission_rows cr ON cr.run_id=r.id
-           WHERE r.id=$1 AND cr.status <> 'exception'`, [req.params.id, req.me.email || null])).rowCount; }
+           WHERE r.id=$1 AND cr.status NOT IN ('exception','deferred')`, [req.params.id, req.me.email || null])).rowCount; }
     catch (e) { if (!/does not exist/.test(e.message)) log500(e); }
     await cpAudit(null, 'Commission run ' + st, run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); res.json({ ok: true, history_rows: hist });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -29802,9 +29878,9 @@ app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
 });
 app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).send('not found');
-    const rows = (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [req.params.id])).rows;
+    const rows = (await pool.query(`SELECT order_ref, invoice_ref, client_po, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, payment_code, status, note FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [req.params.id])).rows;   // v28.430: + client PO, note (deferred rows show as status deferred)
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
-    const csv = ['Month,Rep group,Order,Invoice,Customer,Paid date,Commissionable,Rate %,Commission,Credit note,Credit adj,Net,Payment code,Status'].concat(rows.map(r => [run.month, run.group_name, r.order_ref, r.invoice_ref, r.customer, r.paid, r.commissionable, r.rate, r.commission, r.credit_note_ref, r.credit_adj, r.net, r.payment_code, r.status].map(esc).join(','))).join('\n');
+    const csv = ['Month,Rep group,Order,Invoice,Client PO,Customer,Paid date,Commissionable,Rate %,Commission,Credit note,Credit adj,Net,Payment code,Status,Note'].concat(rows.map(r => [run.month, run.group_name, r.order_ref, r.invoice_ref, r.client_po, r.customer, r.paid, r.commissionable, r.rate, r.commission, r.credit_note_ref, r.credit_adj, r.net, r.payment_code, r.status, r.note].map(esc).join(','))).join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="commission-' + run.month + '-' + cpSlug(run.group_name) + '.csv"'); res.send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -29903,6 +29979,15 @@ app.post('/api/client/commission/statement-emails/fill', async (req, res) => {
 });
 // Agents that need setting up before their bill / statement: every active agent that earns commission and was paid in the last 12 months
 // (paid history) or has a run, missing a statement email, a Xero bill contact or a bill account. Shown as actions on Commissions.
+// v28.430 (Ben 21-Oct-26: "in client > config can we have a sort order for showing agency groups in the monthly run tabs ... drag and drop"):
+// rep_groups.sort_order, set from CLIENT > Config (drag and drop). Agents without one follow, by name.
+app.post('/api/client/commission/groups/order', async (req, res) => {
+  try { const ids = ((req.body || {}).ids || []).map(Number).filter(n => n > 0).slice(0, 500);
+    if (!ids.length) return res.status(400).json({ error: 'ids required' });
+    await pool.query(`UPDATE planner.rep_groups g SET sort_order = u.ord FROM unnest($1::int[]) WITH ORDINALITY u(id, ord) WHERE g.id = u.id`, [ids]);
+    await cpAudit(null, 'Agent order changed', ids.length + ' agents', req.me.email); res.json({ ok: true, n: ids.length });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/client/commission/readiness', async (req, res) => {
   try { const rows = (await pool.query(`SELECT g.id, g.name, coalesce(g.statement_email,'') statement_email, coalesce(g.xero_contact,'') xero_contact, coalesce(g.xero_account_code,'') xero_account_code,
         (SELECT c.id FROM planner.clients c WHERE c.rep_group_id=g.id ORDER BY c.id LIMIT 1) client_id
@@ -29981,14 +30066,14 @@ async function cmStatementPdf(runId) {
   {
     const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.default_rate, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [runId])).rows[0];
     if (!run) return null;
-    const rows = (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net FROM planner.commission_rows WHERE run_id=$1 ORDER BY paid_date, order_ref`, [runId])).rows;
+    const rows = (await pool.query(`SELECT order_ref, invoice_ref, client_po, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net FROM planner.commission_rows WHERE run_id=$1 AND status<>'deferred' ORDER BY paid_date, order_ref`, [runId])).rows;   // v28.430: deferred rows are not on the statement; + client PO
     const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
     const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
     const ink = rgb(0.09, 0.13, 0.18), mut = rgb(0.42, 0.46, 0.52), line = rgb(0.85, 0.87, 0.9), accent = rgb(1, 0.34, 0.19);
     const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const W = 595.28, H = 841.89, ML = 40, MR = 40; let page, y;
     // columns: order/invoice, customer, paid, commissionable, rate, commission, net
-    const cols = [{ x: ML, w: 96, l: 'Order / invoice', a: 'l' }, { x: ML + 96, w: 120, l: 'Customer', a: 'l' }, { x: ML + 216, w: 66, l: 'Paid', a: 'l' }, { x: ML + 282, w: 70, l: 'Commissionable', a: 'r' }, { x: ML + 352, w: 36, l: 'Rate', a: 'r' }, { x: ML + 388, w: 62, l: 'Commission', a: 'r' }, { x: ML + 450, w: 65, l: 'Net', a: 'r' }];
+    const cols = [{ x: ML, w: 96, l: 'Order / invoice', a: 'l' }, { x: ML + 96, w: 64, l: 'Client PO', a: 'l' }, { x: ML + 160, w: 86, l: 'Customer', a: 'l' }, { x: ML + 246, w: 52, l: 'Paid', a: 'l' }, { x: ML + 298, w: 64, l: 'Commissionable', a: 'r' }, { x: ML + 362, w: 32, l: 'Rate', a: 'r' }, { x: ML + 394, w: 58, l: 'Commission', a: 'r' }, { x: ML + 452, w: 63, l: 'Net', a: 'r' }];   // v28.430: + Client PO
     const draw = (t, x, yy, f, sz, col, a, w) => { t = String(t == null ? '' : t); const tw = f.widthOfTextAtSize(t, sz); page.drawText(t, { x: a === 'r' ? x + (w || 0) - tw : x, y: yy, size: sz, font: f, color: col || ink }); };
     function header() {
       page = doc.addPage([W, H]); y = H - 46;
@@ -30005,17 +30090,18 @@ async function cmStatementPdf(runId) {
       if (y < 70) { header(); }
       const ref = r.order_ref + (r.invoice_ref ? ' / ' + r.invoice_ref : '') + (r.credit_note_ref ? ' (CN ' + r.credit_note_ref + ')' : '');
       draw(ref.slice(0, 26), cols[0].x, y, F, 7.5, ink, 'l');
-      draw(String(r.customer || '').slice(0, 26), cols[1].x, y, F, 7.5, ink, 'l');
-      draw(r.paid ? ddMonYy(r.paid) : '', cols[2].x, y, F, 7.5, ink, 'l');
-      draw(money(r.commissionable), cols[3].x, y, F, 7.5, ink, 'r', cols[3].w);
-      draw(r.rate + '%', cols[4].x, y, F, 7.5, ink, 'r', cols[4].w);
-      draw(money(r.commission), cols[5].x, y, F, 7.5, ink, 'r', cols[5].w);
-      draw(money(r.net), cols[6].x, y, B, 7.5, ink, 'r', cols[6].w);
+      draw(String(r.client_po || '').slice(0, 14), cols[1].x, y, F, 7.5, ink, 'l');
+      draw(String(r.customer || '').slice(0, 19), cols[2].x, y, F, 7.5, ink, 'l');
+      draw(r.paid ? ddMonYy(r.paid) : '', cols[3].x, y, F, 7.5, ink, 'l');
+      draw(money(r.commissionable), cols[4].x, y, F, 7.5, ink, 'r', cols[4].w);
+      draw(r.rate + '%', cols[5].x, y, F, 7.5, ink, 'r', cols[5].w);
+      draw(money(r.commission), cols[6].x, y, F, 7.5, ink, 'r', cols[6].w);
+      draw(money(r.net), cols[7].x, y, B, 7.5, ink, 'r', cols[7].w);
       totC += Number(r.commission) || 0; totN += Number(r.net) || 0; y -= 14;
     }
     y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 15;
     draw('Total commission owed (' + run.ccy + ')', cols[3].x - 60, y, B, 9, ink, 'l');
-    draw(money(totN), cols[6].x, y, B, 11, accent, 'r', cols[6].w);
+    draw(money(totN), cols[7].x, y, B, 11, accent, 'r', cols[7].w);
     y -= 26; draw('Commission on cash received in the month for shipped orders, on product sales ex tax and ex shipping, in ' + run.ccy + '. A deposit counts when the order ships.', ML, y, F, 7, mut, 'l');
     y -= 10; draw('Credit notes in the month reduce commission at the order rate.', ML, y, F, 7, mut, 'l');
     if (run.xero_contact) { y -= 12; draw('Xero contact: ' + run.xero_contact, ML, y, F, 7, mut, 'l'); }
