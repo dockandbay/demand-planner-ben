@@ -63,7 +63,8 @@ for l in links:
     ins = [i["product"] for i in inputs if i["bom"] == l["bom"]]
     comp.setdefault(l["product"], {})["pp" if len(ins) == 1 else "singles"] = set(ins)
 
-since_utc = (datetime.datetime.fromisoformat(since) - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+# --since and the saved last_check are local time (this Mac is on AEDT); Fulfil filters in UTC.
+since_utc = datetime.datetime.fromisoformat(since).astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 kit_lines = f.search_read("sale.line", [["product", "in", list(kit_by_id)], ["create_date", ">=", since_utc]],
                           ["sale", "product", "quantity"])
 sales = {s["id"]: s for s in f.search_read("sale.sale", [["id", "in", list({l["sale"] for l in kit_lines})]],
