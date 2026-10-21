@@ -2,7 +2,7 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 311 across 9 runs.
+Total changes: 315 across 10 runs.
 
 ## Run au-sumsuga-bom-2026-10-21_144922
 
@@ -38,6 +38,15 @@ Total changes: 311 across 9 runs.
 | 13:20 2026-10-21 | create template PP-TOWLB-DES-XL-6SETA (Ben 21-Oct-26) | product.template 1095 | created | delete link |
 | 13:20 2026-10-21 | create product PP-TOWLB-DES-XL-6SETA 3.0 kg | product.product 2253 | created | delete link |
 | 13:20 2026-10-21 | stock count +1 PP-TOWLB-DES-XL-6SETA at AU Coghlans | stock.inventory 794 | created | delete link |
+
+## Run 2026-10-21_144958
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 14:50 2026-10-21 | UK-TOWLB-CAB-LG-4SETH: singles first (PP avail 0, threshold 1), BOM 486 | product.product-production.bom 485 | `sequence`: `10` -> `20` | set `sequence` back to `10` |
+| 14:50 2026-10-21 | UK-TOWLB-CAB-LG-4SETH: singles first (PP avail 0, threshold 1), BOM 249 | product.product-production.bom 249 | `sequence`: `20` -> `10` | set `sequence` back to `20` |
+| 14:50 2026-10-21 | US-TOWLB-CAB-XL-4SETG: singles first (PP avail 0, threshold 1), BOM 492 | product.product-production.bom 491 | `sequence`: `10` -> `20` | set `sequence` back to `10` |
+| 14:50 2026-10-21 | US-TOWLB-CAB-XL-4SETG: singles first (PP avail 0, threshold 1), BOM 322 | product.product-production.bom 322 | `sequence`: `20` -> `10` | set `sequence` back to `20` |
 
 ## Run 2026-10-21_144924
 
