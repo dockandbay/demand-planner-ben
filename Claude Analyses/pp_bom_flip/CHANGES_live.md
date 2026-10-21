@@ -2,7 +2,22 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 301 across 3 runs.
+Total changes: 305 across 5 runs.
+
+## Run add-au-pp-2026-10-21_132127
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 13:21 2026-10-21 | set warehouse AUCOGHLANS on count 794 (needed for cost) | stock.inventory 794 | `warehouse`: `None` -> `28` | set `warehouse` back to `None` |
+| 13:21 2026-10-21 | count 794 confirm -> state done | stock.inventory 794 | note:  | n/a |
+
+## Run add-au-pp-2026-10-21_132054
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 13:20 2026-10-21 | create template PP-TOWLB-DES-XL-6SETA (Ben 21-Oct-26) | product.template 1095 | created | delete link |
+| 13:20 2026-10-21 | create product PP-TOWLB-DES-XL-6SETA 3.0 kg | product.product 2253 | created | delete link |
+| 13:20 2026-10-21 | stock count +1 PP-TOWLB-DES-XL-6SETA at AU Coghlans | stock.inventory 794 | created | delete link |
 
 ## Run 2026-10-21_074325
 
