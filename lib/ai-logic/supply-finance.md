@@ -9,6 +9,9 @@ sources:
   - server.mjs :: _tplFulfilShipLookup, _tplRefOverride
   - server.mjs :: /api/hz-search (global search: POs, sales orders, shipments, SKUs, suppliers, samples)
   - supply/inject.html :: runCmd, gotoPO, gotoPOFilter, hzCmdPages, fillErpFulfil
+  - server.mjs :: /api/client/commission/orders/search
+  - server.mjs :: /api/client/commission/orders/fulfil-tag
+  - supply/inject.html :: commTagSearch
   - server.mjs :: accountsGate, /api/accounts/payables (ACCOUNTS > Payables)
   - server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun (ACCOUNTS bills from accounts@ receipts)
   - supply/inject.html :: acRenderPayables, accountsCan, acRenderConfig, acCfReload, acInLinesHtml, acDrOpen, acDrPaint, acRenderStmt, acRenderAgeing, acComboWire, acPdfRender, acMetricsHtml
@@ -58,6 +61,9 @@ fingerprints:
   supply/inject.html::gotoPOFilter: 0775f59112be
   supply/inject.html::hzCmdPages: 728ba2e66007
   supply/inject.html::fillErpFulfil: 6c4f114920f4
+  server.mjs::/api/client/commission/orders/search: dff873219789
+  server.mjs::/api/client/commission/orders/fulfil-tag: 237f8471b12a
+  supply/inject.html::commTagSearch: 4079b612849f
   server.mjs::accountsGate: 411b546d3732
   server.mjs::/api/accounts/payables: fdbef5a26279
   server.mjs::accBillCandidates: 5109d0e573f9
@@ -211,7 +217,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.432
+verified_version: v28.433
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -492,6 +498,7 @@ verified_version: v28.432
 - Defer, carry forward and catch-up (v28.430, Ben 21-Oct-26: "if you remove an order from a run, what does that mean? september run should show any past payments not yet paid as well"; chose defer to next run, 6 months back): a run row's remove button defers it (status deferred, net 0, greyed; Undo defer brings it back); a rebuild keeps the deferral; deferred rows are never marked paid, never on the statement and never written to the paid history. Building a month carries every row deferred in the agent's earlier runs (the latest deferral of each) into the run as 'carried forward from <month>' (carried_from = the deferred row), until a run pays it. Import data > Find unpaid commission (6 months before) runs the missed-commission check one month at a time (commission earned in the month, not in the paid history, not in any run) and saves what it finds for the run month (planner.commission_catchup, migration 380; new items are added, earlier ones kept); Build / refresh adds them as 'catch-up: earned <month>, never paid' rows. An agent with only carried or catch-up items still gets a run. Sandbox check (live Fulfil / Xero reads): Schauben Sep-26 row EC-7095695 deferred (2,237.49 -> 2,203.42), kept through a rebuild, carried into Oct-26; Aug-26 check found 6 unpaid (Schauben 5, TR Partners 30.74), all added to Sep-26.
 - Client PO number (v28.430, Ben: "an important field they like to show"): every run row carries the customer's own PO number: Fulfil = the Shopify order metafield global.po_number (else the PO in global.xero_reference); Xero = the PO inside the reference ("Markettime WRAP-0201 [ID: 32766988]" -> WRAP-0201). Shown in the run, the statement PDF and CSV; the paid history PO column takes it when a run is paid. Sandbox: 11 of Schauben's 14 Sep-26 rows have one.
 - Agent order (v28.430): CLIENT > Config > Agent order (drag and drop, Save) sets rep_groups.sort_order; the monthly run tabs follow it, then name. (source: server.mjs :: _cmClientPo, cmEngine, cmBuildRun, rows/:id/defer, catchup/save, runs/build-all, runs/:id/status, groups/order, cmStatementPdf, statement.csv; inject.html :: cpRunDetail, commImport, commReport, cpAgentOrder)
+- Tag an order to an agent (v28.433, Ben 21-Oct-26: "search fulfil for a sales order to add to an agent ... Tag it ... in orders"; chose HORIZON tag + optional write to Fulfil): COMMISSIONS > Orders > Tag an order to an agent. Search Fulfil sale orders (read only, not cancelled, newest first, 40 max) by SO number, order reference or customer; each hit shows its client PO, the Fulfil agent code (metafield agent_code on sale.sale, type char, value_char; 145 live orders tagged 21-Oct-26, all written by the Shopify sync bot: appelman, ideco, harpergroup, TJ, patrick, roadrunners, harpers) mapped to the agent by rep_groups.fulfil_codes, and any HORIZON tag. Save tag = a commission order override on the order's reference, else its SO number (the key cmEngine matches): it credits that agent in runs and makes a custom / co-brand order count in weekly demand. Also set in Fulfil (own click, then an inline confirm naming the code, the order and live Fulfil) writes agent_code = the agent's FIRST Fulfil code on the sale order (update the value row, else create one), reads it back (ok only when it matches), sets order_lines.agent_code for that order and logs a client audit row; refused when the agent has no Fulfil code (e.g. TR Partners, 21-Oct-26). (source: server.mjs :: /api/client/commission/orders/search, /api/client/commission/orders/fulfil-tag; supply/inject.html :: commTagSearch)
 
 - Commission month-end and Fulfil write-back (v28.334, Ben 13-Oct-26): a Faire-channel order of a customer on an EARNING agent's list is a month-end decision, not an automatic exclusion: it sits on that agent as an exception row at zero (not in the agent's total, counted on the Orders tile as "Faire orders to decide"), listed on Exceptions with Include (order override to that agent) or Exclude (order override to the Faire agent). Push to Fulfil (finalised / paid run; Fulfil writes gated by FULFIL_LIVE_WRITES on live): sale metafield COMMISSIONS_ACTUAL (Number / Decimal on sale.sale, created 13-Oct-26: live metafield.field 98, sandbox 99) = the order's commission actually paid: the sum of net over every finalised / paid run of that agent; one metafield.value per sale (updated, never duplicated); orders not in Fulfil (Xero-era) are skipped; the run shows the push status. (source: server.mjs :: cmEngine (decide), /api/client/commission/runs/:id/push-fulfil; supply/inject.html :: commExceptions cx-fd)
 

@@ -19899,7 +19899,11 @@ const OL_SKU = `(CASE WHEN l.sku ~ '^(UK|US|EU|AU|CA)-' AND NOT EXISTS (SELECT 1
 // Lines that count as demand: live orders (not draft / quotation / cancelled), mapped market + channel, real products (a SKU in
 // planner.products: no SHIPPING / service / gift-card lines), not key accounts or custom / co-brand (as the monthly actuals), dated today or
 // earlier (future preorders are order book, not actuals), and not the over-threshold lines of excluded orders.
-const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND (NOT l.is_custom OR coalesce(l.agent_code,'')<>'')
+// v28.433 (Ben: tag an order to an agent from COMMISSIONS > Orders): a custom order also counts when HORIZON has it tagged to a commission agent
+// (planner.commission_overrides on its reference or SO number, an agent that is not "no commission"), before the tag reaches Fulfil.
+const OL_HZ_TAGGED = `EXISTS (SELECT 1 FROM planner.commission_overrides co JOIN planner.rep_groups cg ON cg.id = co.rep_group_id WHERE NOT coalesce(cg.no_commission, false)
+  AND upper(trim(co.order_ref)) IN (upper(coalesce(l.reference,'')), upper(coalesce(l.so_number,''))))`;
+const OL_LIVE_SQL = (thr) => `l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND l.country IS NOT NULL AND l.channel IS NOT NULL AND NOT l.is_key_account AND (NOT l.is_custom OR coalesce(l.agent_code,'')<>'' OR ${OL_HZ_TAGGED})
   AND l.demand_date <= current_date AND EXISTS (SELECT 1 FROM planner.products p WHERE p.sku = ${OL_SKU} AND coalesce(p.category_name_final,'') <> '')
   AND NOT (l.qty > ${Number(thr)} AND EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id = l.sale_id AND x.excluded))`;
 // Cut per market x channel: the Fulfil cut-over month, or none (monthly spread throughout) for the monthly-only channels.
@@ -20067,7 +20071,7 @@ app.get('/api/demand/weekly-impact', async (req, res) => {
     const unm = (await pool.query(`SELECT fulfil_channel, count(*)::int lines, sum(qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.country IS NULL OR l.channel IS NULL) GROUP BY 1 ORDER BY 3 DESC`)).rows;
     const flags = (await pool.query(`SELECT count(DISTINCT sale_id)::int orders, count(*)::int lines, coalesce(sum(qty),0)::int units, count(DISTINCT sale_id) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded))::int excluded_orders,
         coalesce(sum(qty) FILTER (WHERE EXISTS (SELECT 1 FROM planner.order_exclusions x WHERE x.sale_id=l.sale_id AND x.excluded)),0)::int excluded_units FROM planner.order_lines l WHERE l.qty > $1 AND l.sale_state NOT IN ('draft','quotation','cancel','cancelled')`, [thr])).rows[0];
-    const ka = (await pool.query(`SELECT l.country, l.channel, to_char(date_trunc('month', l.demand_date),'YYYY-MM') ym, sum(l.qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.is_key_account OR (l.is_custom AND coalesce(l.agent_code,'')='')) AND l.demand_date >= $1 AND l.demand_date <= current_date GROUP BY 1,2,3 ORDER BY 1,2,3`, [from])).rows;
+    const ka = (await pool.query(`SELECT l.country, l.channel, to_char(date_trunc('month', l.demand_date),'YYYY-MM') ym, sum(l.qty)::int units FROM planner.order_lines l WHERE l.sale_state NOT IN ('draft','quotation','cancel','cancelled') AND (l.is_key_account OR (l.is_custom AND coalesce(l.agent_code,'')='' AND NOT ${OL_HZ_TAGGED})) AND l.demand_date >= $1 AND l.demand_date <= current_date GROUP BY 1,2,3 ORDER BY 1,2,3`, [from])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, from: from.slice(0, 7), fulfil_from: cutInfo.from.slice(0, 7), monthly_only: cutInfo.monthly_only, imported: imp, threshold: thr, cuts: cutInfo.cuts, key_custom: ka, by_market_month: mc, top_sku_moves: sku, unmapped_channels: unm, exclusions: flags });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -29645,6 +29649,57 @@ app.post('/api/client/commission/overrides', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.commission_overrides WHERE order_ref=$1 AND rep_group_id<>$2`, [ref, b.rep_group_id]);
     await pool.query(`INSERT INTO planner.commission_overrides (order_ref, rep_group_id, rate, commissionable_amount, reason, created_by) VALUES ($1,$2,$3,$6,$4,$5) ON CONFLICT (order_ref, rep_group_id) DO UPDATE SET rate=excluded.rate, commissionable_amount=excluded.commissionable_amount, reason=excluded.reason, created_by=excluded.created_by, created_at=now()`, [ref, b.rep_group_id, _num(b.rate), b.reason || null, req.me.email, _num(b.commissionable_amount)]);
     await cpAudit(null, 'Commission override', ref + ' @ ' + (_num(b.rate) == null ? 'agent rate' : _num(b.rate) + '%'), req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.433 (Ben 21-Oct-26: "Is there an ability to search fulfil for a sales order to add to an agent? Tag it? We should have that ability
+// in orders"; chose: HORIZON tag + optional write to Fulfil). COMMISSIONS > Orders > Tag an order to an agent:
+//  - search Fulfil sale orders (read only) by SO number, Shopify / order reference or customer; each hit shows its client PO, the agent code
+//    Fulfil holds (metafield agent_code, field type char, value_char) and any HORIZON tag;
+//  - Save tag = a commission order override (planner.commission_overrides on the order's reference, else its SO number, as the engine
+//    matches it): it credits that agent in commission runs and counts a custom / co-brand order in weekly demand (OL_HZ_TAGGED);
+//  - "Also set agent code in Fulfil" writes metafield agent_code = the agent's first Fulfil code on that sale order. A LIVE Fulfil write,
+//    only on its own click + confirm (confirm:true), one order at a time.
+async function _cmAgentCodeDef(cfg) { return ((await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']])) || [])[0] || null; }
+app.get('/api/client/commission/orders/search', async (req, res) => {
+  try { const q = String(req.query.q || '').trim().slice(0, 60); if (q.length < 3) return res.json({ orders: [], note: 'Type at least 3 characters' });
+    const env = req.query.env === 'live' ? 'live' : req.query.env === 'sandbox' ? 'sandbox' : await activeFulfilEnv(), cfg = fulfilConfigFor(env), like = '%' + q + '%';
+    const raw = await fulfilFetchCfg(cfg, 'PUT', '/model/sale.sale/search_read', [[['state', 'not in', ['cancel', 'cancelled']], ['OR', [['number', 'ilike', like]], [['reference', 'ilike', like]], [['party.name', 'ilike', like]]]],
+      0, 40, [['sale_date', 'DESC']], ['id', 'number', 'reference', 'state', 'sale_date', 'party.name', 'channel.name', 'total_amount', 'currency.code', 'metadata']]);
+    const orders = (Array.isArray(raw) ? raw : []).map(r => { const o = {}; Object.keys(r).forEach(k => { o[k] = fulfilUnwrap(r[k]); });
+      return { sale_id: o.id, number: o.number || '', reference: o.reference || '', order_ref: o.reference || o.number || '', state: o.state, sale_date: o.sale_date || null, customer: o['party.name'] || '', channel: o['channel.name'] || '',
+        total: Number(o.total_amount) || 0, currency: o['currency.code'] || '', client_po: _cmClientPo(o.metadata) || null }; });
+    const codes = {}; if (orders.length) { const def = await _cmAgentCodeDef(cfg);
+      if (def) ((await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', 'in', orders.map(o => 'sale.sale,' + o.sale_id)]], 0, 100, null, ['resource', 'value_char']])) || [])
+        .forEach(v => { const sid = Number(String(v.resource).split(',')[1]); if (v.value_char && String(v.value_char).trim()) codes[sid] = String(v.value_char).trim(); }); }
+    const groups = (await pool.query(`SELECT id, name, coalesce(to_jsonb(g)->'fulfil_codes','[]'::jsonb) codes, coalesce((to_jsonb(g)->>'no_commission')::boolean, false) no_commission FROM planner.rep_groups g`)).rows;
+    const byCode = {}; groups.forEach(g => (g.codes || []).forEach(c => { byCode[String(c).toLowerCase()] = g; }));
+    const refs = orders.flatMap(o => [o.reference, o.number]).filter(Boolean).map(x => x.toUpperCase());
+    const tags = {}; if (refs.length) (await pool.query(`SELECT o.id, upper(trim(o.order_ref)) k, o.rep_group_id, o.rate, o.reason, o.created_by, g.name FROM planner.commission_overrides o LEFT JOIN planner.rep_groups g ON g.id = o.rep_group_id WHERE upper(trim(o.order_ref)) = ANY($1::text[])`, [refs])).rows.forEach(t => { tags[t.k] = t; });
+    orders.forEach(o => { const c = codes[o.sale_id] || null, g = c ? byCode[c.toLowerCase()] : null; o.fulfil_code = c; o.fulfil_agent = g ? g.name : null; o.fulfil_agent_id = g ? g.id : null;
+      const t = tags[String(o.reference).toUpperCase()] || tags[String(o.number).toUpperCase()] || null; o.hz_tag = t ? { id: t.id, order_ref: t.k, rep_group_id: t.rep_group_id, agent: t.name, rate: t.rate, reason: t.reason, by: t.created_by } : null; });
+    res.set('Cache-Control', 'no-store').json({ env, orders });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/commission/orders/fulfil-tag', async (req, res) => {
+  const b = req.body || {};
+  try { if (b.confirm !== true) return res.status(400).json({ error: 'Confirm the Fulfil write first' });
+    const saleId = Number(b.sale_id), gid = Number(b.rep_group_id); if (!saleId || !gid) return res.status(400).json({ error: 'sale_id and rep_group_id required' });
+    const g = (await pool.query(`SELECT id, name, coalesce(to_jsonb(g)->'fulfil_codes','[]'::jsonb) codes FROM planner.rep_groups g WHERE id=$1`, [gid])).rows[0];
+    if (!g) return res.status(404).json({ error: 'Agent not found' });
+    const code = String((g.codes || [])[0] || '').trim(); if (!code) return res.status(400).json({ error: g.name + ' has no Fulfil agent code yet. Add it on the agent\'s Commission tab first.' });
+    const env = b.env === 'live' ? 'live' : b.env === 'sandbox' ? 'sandbox' : await activeFulfilEnv(), cfg = fulfilConfigFor(env);
+    const so = ((await fulfilFetchCfg(cfg, 'PUT', '/model/sale.sale/search_read', [[['id', '=', saleId]], 0, 1, null, ['id', 'number', 'reference']])) || [])[0];
+    if (!so) return res.status(404).json({ error: 'Sale order not found in Fulfil ' + env });
+    const def = await _cmAgentCodeDef(cfg); if (!def) return res.status(400).json({ error: 'Fulfil ' + env + ' has no agent_code metafield on sale orders' });
+    const resource = 'sale.sale,' + saleId, cur = ((await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', '=', resource]], 0, 1, null, ['id', 'value_char']])) || [])[0];
+    const before = cur ? (cur.value_char || '') : null;
+    if (cur) await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.value/' + cur.id, { value_char: code });
+    else await fulfilFetchCfg(cfg, 'POST', '/model/metafield.value', [{ field: def.id, resource, value_char: code }]);
+    const after = (((await fulfilFetchCfg(cfg, 'PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', '=', resource]], 0, 1, null, ['value_char']])) || [])[0] || {}).value_char || null;   // read back
+    try { await pool.query(`UPDATE planner.order_lines SET agent_code=$2, agent_checked=true WHERE sale_id=$1`, [saleId, code.toLowerCase()]); } catch (_) {}   // weekly demand sees it before the next sync
+    try { _cmCache.clear(); } catch (_) {}
+    const by = authUser(req) || 'unknown'; await cpAudit(null, 'Fulfil agent code set', (so.number || saleId) + ': ' + (before == null ? '(none)' : before || '(blank)') + ' -> ' + code + ' (' + env + ')', by);
+    res.json({ ok: after === code, env, number: so.number, before, after, code, agent: g.name });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/commission/overrides/:id/delete', async (req, res) => { try { await pool.query(`DELETE FROM planner.commission_overrides WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 async function cpRunSummary(runId) {
