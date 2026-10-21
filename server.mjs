@@ -11470,8 +11470,8 @@ async function buildActionsRows() {
             FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             JOIN planner.purchase_orders p ON p.po=l.po AND coalesce(p.status,'') NOT ILIKE '%complete%'  -- ignore COMPLETE POs
               AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → no ERP deviation exception
-            WHERE l.qty IS DISTINCT FROM el.qty  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel)
-            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)>0  -- has ≥1 line in the ERP mirror (else "not in ERP" below)
+            WHERE l.qty IS DISTINCT FROM coalesce(l.erp_qty, el.qty)  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel); v28.427: ERP = Fulfil (line erp_qty) else the old snapshot
+            GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty, el.qty) IS NOT NULL)>0  -- has ≥1 line in the ERP (else "not in ERP" below)
           UNION ALL
           SELECT 'high','PO not in ERP', l.po,
             count(*)||' line(s) exist but none are mirrored from the ERP (never pushed)', 'upload','po','', l.po
@@ -11480,7 +11480,7 @@ async function buildActionsRows() {
             LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
               AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → not an exception
-            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)=0
+            GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty, el.qty) IS NOT NULL)=0   -- v28.427: a client PO group / Fulfil-linked PO is in the ERP
           -- (removed) "Production check-in" time-based nag — supplier production status is now a field on
           -- PO ▸ PLAN ▸ DATES + the supplier portal, with a logic-based exception flagged there (not here).
           UNION ALL
@@ -19718,7 +19718,7 @@ async function dtc2Build(db) {
     const hzFl = new Map(); hz.forEach(p => { const ids = new Set(), refs = new Set(); (p.links || []).forEach(l => { if (l.id) ids.add(String(l.id)); if (l.ref) refs.add(_dtc2Key(l.ref)); }); if (p.fulfil_id) ids.add(String(p.fulfil_id)); if (ids.size || refs.size) hzFl.set(p.po, { ids, refs }); });
     // v28.374 (Ben 15-Oct-26, Dillard's): client PO groups. A Fulfil PO in a group maps to its HORIZON PO; on each SO card the group PO counts
     // only the SKUs/qty of THIS card's member Fulfil POs (one HORIZON PO covers many SOs), and the group as a whole is reconciled in groups[].
-    const grp = (await db.query(`SELECT fulfil_id::text id, po, number, state, lines FROM planner.po_fulfil_group`).catch(() => ({ rows: [] }))).rows;
+    const grp = (await db.query(`SELECT fulfil_id::text id, po, number, state, lines, reference, sale_number, supplier, units FROM planner.po_fulfil_group`).catch(() => ({ rows: [] }))).rows;   // v28.427: + reference / SO / supplier / units for the expandable group
     const grpOf = new Map(grp.map(g => [g.id, g.po])), grpPos = new Set(grp.map(g => g.po));
     grp.forEach(g => add(byFulfilId, g.id, { po: g.po }));
     const rv = new Map((await db.query(`SELECT so_number, note, accepted, accepted_by FROM planner.dtc2_review`)).rows.map(r => [r.so_number, r]));
@@ -19760,11 +19760,12 @@ async function dtc2Build(db) {
     // v28.374: each client PO group reconciled as a whole: HORIZON PO qty vs the SUM of all its Fulfil client POs (open or shipped, not cancelled)
     const groups = [...grpPos].sort().map(po => { const mem = grp.filter(g => g.po === po), live = mem.filter(g => !/^cancel/.test(g.state || '')), sk = {};
       (hzLines.get(po) || []).forEach(l => { (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }).hz += l.qty; });
-      live.forEach(g => (g.lines || []).forEach(l => { (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }).fulfil += Number(l.qty) || 0; }));
+      live.forEach(g => (g.lines || []).forEach(l => { const r = (sk[l.sku] = sk[l.sku] || { sku: l.sku, hz: 0, fulfil: 0 }); r.fulfil += Number(l.qty) || 0; const k = g.number || ('#' + g.id); r.by_po = r.by_po || {}; r.by_po[k] = (r.by_po[k] || 0) + (Number(l.qty) || 0); }));   // v28.427 (Ben): which Fulfil POs carry each SKU
       const rows = Object.values(sk).filter(r => !DTC2_IGNORE_SKUS.has(String(r.sku || '').toUpperCase())).map(r => Object.assign(r, { issue: r.hz === r.fulfil ? 'ok' : !r.hz ? 'SKU not in HORIZON order plan' : !r.fulfil ? 'HORIZON only' : 'HORIZON ' + (r.hz - r.fulfil > 0 ? '+' : '') + (r.hz - r.fulfil) }))
         .sort((a, b) => (a.issue === 'ok') - (b.issue === 'ok') || a.sku.localeCompare(b.sku));
       const p = hzByPo.get(po) || {};
       return { po, status: p.status, supplier: p.supplier_name, branch: p.branch, members: mem.length, cancelled: mem.length - live.length, open_sos: orders.filter(o => o.hz_pos.some(h => h.po === po)).length,
+        pos: mem.map(g => ({ number: g.number, id: g.id, state: g.state, reference: g.reference || '', so: g.sale_number || '', supplier: g.supplier || '', units: Number(g.units) || (g.lines || []).reduce((a, l) => a + (Number(l.qty) || 0), 0) })).sort((a, b) => String(a.number || '').localeCompare(String(b.number || ''), undefined, { numeric: true })),   // v28.427 (Ben): expand to see the POs
         hz_qty: rows.reduce((a, r) => a + r.hz, 0), fulfil_qty: rows.reduce((a, r) => a + r.fulfil, 0), issues: rows.filter(r => r.issue !== 'ok').length, rows }; });
     counts.group_issues = groups.filter(g => g.issues).length;
     return { groups, synced_at: snap.synced_at, synced_by: snap.synced_by, fulfil_base: 'https://' + (fulfilConfigFor('live').subdomain || 'dockandbay') + '.fulfil.io', orders, counts };
@@ -20686,7 +20687,7 @@ async function computeOpenActions() {
           OR (trim(coalesce(p.crossdock_skus,''))='' AND ${XDOCK_3PL_SQL('p.po', 'p.branch', 'p.dtc_key_account', "coalesce(nullif(p.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=p.po LIMIT 1))")} IS NOT NULL)
           OR ${FULFIL_LINK_NEEDED_SQL('p.po', 'p.branch', 'p.dtc_key_account')})`),   // v28.207: + Link Fulfil PO
     one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-      LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(el.qty,0) IS DISTINCT FROM coalesce(l.qty,0)`),
+      LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(l.erp_qty, el.qty, 0) IS DISTINCT FROM coalesce(l.qty,0)`),   // v28.427: ERP = Fulfil
     one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
         AND (p.status ILIKE '%production%' OR p.status ILIKE '%ready to ship%') AND coalesce(p.end_production_overide, current_date) <= current_date + interval '21 days' AND ${hasLines}`),
     (async () => { try { return (await manufacturingActions()).length; } catch (e) { return 0; } })(),
@@ -23016,8 +23017,8 @@ app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
 // table missing pre-migration, an unusual PO ref) the legacy per-query path runs with its original per-query fallbacks.
 const _PO_DETAIL_Q = [
   ["lines", `SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
-                    el.qty erp_qty, el.cost erp_cost,
-                    (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
+                    coalesce(pol.erp_qty, el.qty) erp_qty, el.cost erp_cost,   -- v28.427: ERP qty = Fulfil (line erp_qty), else the old pushed snapshot
+                    (coalesce(l.qty,0) IS DISTINCT FROM coalesce(pol.erp_qty, el.qty, 0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
                     (l.cost_price IS DISTINCT FROM el.cost) cost_pending,
                     -- EXCEPTION: SKU not RELEASED in this PO's market. Uses available_no_disc (the raw channel
                     -- availability flag, IGNORING the discontinue date) — so a SKU that WAS released in the market
@@ -27009,8 +27010,8 @@ async function logPoFieldChanges(po, keys, oldRow, body, by) {
 // row instead of re-pulling all ~1400 POs (multi-MB). Same SQL = zero drift.
 // SELECT + joins for the ORDER PLAN grid (callers append the WHERE + ORDER BY). Shared by the live supplier/
 // archived paths and orderPlanCache (the cached default admin view).
-const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
-          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
+const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, coalesce(l.erp_qty, el.qty) erp_qty,   -- v28.427: ERP = Fulfil (line erp_qty: mirror / push / import; a client PO group = the sum of its Fulfil POs), else the old pushed snapshot
+          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(l.erp_qty, el.qty, 0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
           pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
@@ -27208,6 +27209,7 @@ const PO_ROWS_SQL = `
             ${XDOCK_3PL_SQL('calc4.po', 'calc4.branch', 'calc4.dtc_key_account', "coalesce(nullif(calc4.shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1))")} xdock_3pl,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
             ${FULFIL_LINK_NEEDED_SQL('calc4.po', 'calc4.branch', 'calc4.dtc_key_account')} fulfil_link_needed,   -- v28.207 -> PO_ACTCOND.fulfil_link
+            (SELECT count(*)::int FROM planner.po_fulfil_group fgn WHERE fgn.po = calc4.po) fulfil_group_n,   -- v28.427: client PO group (number of linked Fulfil POs)
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
             (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) master_po,                        -- master-PO grouping: a CHILD carries its master's po (filtered out of the grid in poRowsCache)
             (SELECT coalesce(po3.is_master,false) FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) is_master,        -- true on the consolidated MASTER row (shows the 'master' badge)
@@ -27246,8 +27248,8 @@ const PO_ROWS_SQL = `
             -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
             (CASE WHEN coalesce(status,'') ILIKE '%complete%' OR coalesce(branch,'') ILIKE '%manufactur%' THEN 0 ELSE  -- Manufacturing = FOB → no ERP deviation
               (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) END)::int erp_pending,   -- 0 plan == absent from ERP (both nothing) → not a deviation
-            (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
+                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(l.erp_qty, el.qty, 0)) END)::int erp_pending,   -- v28.427: ERP = Fulfil (line erp_qty) else the old snapshot   -- 0 plan == absent from ERP (both nothing) → not a deviation
+            (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po AND coalesce(l.erp_qty, el.qty) IS NOT NULL)::int erp_in,   -- v28.427
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
             -- ERP's final delivery date. 1 = differs MATERIALLY. Materiality = the day gap as a fraction of how

@@ -54,12 +54,12 @@ fingerprints:
   artifact_v16.7.html::daSkuInsights: fb55471971c2
   artifact_v16.7.html::scanBIPatterns: d2ea6bd0080c
   artifact_v16.7.html::scanAnomalyAlerts: 371e8b968fc6
-  server.mjs::dtc2Build: bdc612fefcdc
+  server.mjs::dtc2Build: 31e1ef7bb3f1
   server.mjs::/api/supply/client-orders: 2047e1aec2db
   server.mjs::/api/supply/client-orders/add: 89a56a724486
   server.mjs::_fgGroupLines: 401878c07394
   supply/inject.html::openAddSalesOrders: d98be5bcfa32
-  supply/inject.html::renderDtc2: cb5744635888
+  supply/inject.html::renderDtc2: f94fc74da7c3
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
   supply/inject.html::PO_ACTCOND: c295b79fd5d6
   supply/inject.html::cfUnpaidActions: fe40096c76b7
@@ -67,7 +67,7 @@ fingerprints:
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
   server.mjs::/api/demand-actions: e3aa609539b5
   server.mjs::/api/demand-actions/state: 97d6e71ada2a
-  server.mjs::buildActionsRows: 87b583bee037
+  server.mjs::buildActionsRows: cd22857b63aa
   server.mjs::expediteActions: 2357d115088a
   server.mjs::polybagActions: 055d78eb6800
   server.mjs::submissionActions: 645a4102e9a0
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.417
+verified_version: v28.427
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -359,3 +359,5 @@ verified_version: v28.417
 - v28.374 (Ben 15-Oct-26, Dillard's): CLIENT PO GROUPS. One HORIZON client PO (Direct to Client / B2B JLEW / B2B NEXT / key account, same set as the push guard) can stand for many Fulfil client POs (Fulfil makes one PO per client order and per supplier: each Dillard's order is split XR Textile / Lixin / Weierken). Linked on the PO drawer > Master & Docs > Linked records > Client POs in Fulfil: paste Fulfil PO numbers, client references or SO numbers, Check (live Fulfil, read only; other suppliers, cancelled POs and POs already in this group are skipped; a PO in another group moves only on confirm), Link. Stored in planner.po_fulfil_group (mig 373). On each DTC 2.0 SO card the group PO counts only that card's member Fulfil POs; a Client PO groups panel reconciles the whole group (HORIZON qty vs the sum of all its client POs). The Fulfil mirror row of a grouped PO is the group sum, so ERP qty compares the plan with all its client POs; a grouped PO no longer shows the Link Fulfil PO action. The Fulfil PO import refreshes member lines every run. (source: server.mjs :: _fgResolve, _fgCurrent, _fgMirrorRow, /api/supply/po/:po/fulfil-group*, dtc2Build, _fulfilImportPOsRun, FULFIL_LINK_NEEDED_SQL; supply/inject.html :: fgRender, renderDtc2)
 - v28.417 (Ben 20-Oct-26, SO56618): a HORIZON PO that is already linked to Fulfil PO(s) (po_links, the PO mirror's fulfil_id) matches an SO by its sales order ref ONLY when one of those linked Fulfil POs belongs to that SO; otherwise the card lists it under "not matched" (ref names this SO but its Fulfil PO is another order's) so the stale ref can be fixed. POs with no Fulfil link, and client PO group masters, still match by ref.
 - v28.368: scheduled refresh POST /api/cron/dtc2-sync (x-webhook-secret = N8N_WEBHOOK_SECRET; optional n8n daily), same read as Refresh from Fulfil.
+
+- v28.427 (Ben 21-Oct-26): each client PO group expands to its Fulfil client POs (number with a Fulfil link, state, reference, sales order, units) and EVERY SKU: HORIZON qty, Fulfil total and which Fulfil POs carry it ("PO395 462 · PO401 12"), with an empty-order-plan hint (Order plan > Import from Fulfil). An order with a line "no PO created, sales order not processed" shows "Validate sales order", which opens the Validate sales order drawer analysing that order; the tooltip gives the steps (validate, PROCESS the order in Fulfil to create the POs, then Import from Fulfil or link them to a HORIZON PO). (source: server.mjs :: dtc2 groups pos / by_po; inject.html :: renderDtc2, dtc2-sov, openSoValDrawer)

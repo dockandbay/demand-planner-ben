@@ -49,7 +49,7 @@ sources:
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
-  server.mjs::PO_ROWS_SQL: cbab4f9d8e7a
+  server.mjs::PO_ROWS_SQL: 646839c138a1
   server.mjs::_tplFulfilShipLookup: a90edcb58d76
   server.mjs::_tplRefOverride: 292f4d59386e
   server.mjs::/api/hz-search: 73ad48851aa1
@@ -211,7 +211,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.426
+verified_version: v28.427
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -558,6 +558,7 @@ verified_version: v28.426
 - "Use Fulfil qty" (ERP deviations box on a PO): the plan takes the Fulfil qty on every line that differs (a SKU missing in Fulfil becomes 0); logged in the PO change log. The other choice is to change Fulfil to match the plan (normal POs: push).
 - Schedule: Diviyaj runs POST /api/supply/fulfil/import-pos (x-webhook-secret) every 3 hours. (source: server.mjs :: _fulfilImportPOsRun, fulfilErpQtyFromMirror, po/:po/use-erp-qty; inject.html :: op-use-erp)
 
+- v28.427 (Ben 21-Oct-26: "54 -> not in ERP doesnt make sense when there are multiple POs linked; the only thing for ERP deviation is if the sum of all grouped POs doesnt match the order plan"): every plan-vs-ERP comparison now reads the ERP qty as the line's Fulfil qty (purchase_order_lines.erp_qty: the Fulfil mirror, pushes and imports; for a client PO group the SUM of all its Fulfil POs), falling back to the old pushed snapshot (erp_purchase_order_lines, Cin7 era) only when that is blank. Was: the old snapshot only, so a client PO / group never pushed from HORIZON showed every line as "not in ERP". Applies to the order plan feed and its ERP deviations box, the PO detail lines, the PO grid ERP badges (erp_pending, erp_in), SUPPLY Actions ("Order-plan change pending ERP push", "PO not in ERP") and the open-actions metric. The deviations box reads "differ from Fulfil" (no Cin7). A client PO group (any PO with po_fulfil_group links; PO feed field fulfil_group_n) has no Push to Fulfil and no Upload to ERP: its Order plan shows "Import all N linked Fulfil POs" (the total of the group). (source: server.mjs :: ORDER_PLAN_SELECT, purchase-orders feed, actions exceptions; inject.html :: order plan opBtns, ERP deviations box)
 ## PO Export XLSX (v28.363)
 - PURCHASE ORDERS > Import/Export > Export XLSX. Tick statuses (default = the open ones: FUTURE to SHIPPING), the server builds one workbook (GET /api/supply/po-export.xlsx?status=A,B). Read only.
 - Sheet "POs": one row per PO: status, supplier (code, currency), branch, country, production / batch, client / client PO / sales order, start / end production, shipment (carrier, mode, tracking, export port, departure, landing, arrival, delivery), lines, units, cartons, CBM, gross kg, order value, Fulfil PO (hyperlink), Xero, Flexport, DHL, deposit ref, delivery address.
