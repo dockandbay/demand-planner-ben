@@ -13,7 +13,9 @@ UPDATE planner.clients SET active = false WHERE rep_group_id = (SELECT id FROM p
 -- 2. Xero bill contact (Xero UK contact name, looked up by exact name when the bill is created)
 -- Ben 21-Oct-26: Schauben = Xero contact 5ecaed54-94f9-4bc3-ae50-c334673d94c7 "Appelman Schauben"
 UPDATE planner.rep_groups SET xero_contact = 'Appelman Schauben' WHERE name = 'Agent - Schauben';
--- TODO (Ben): Patrickco, Harper Group, KathCo, Ideco, TJ, TR Partners
+-- Ben 21-Oct-26: Ideco = Xero contact 729ae19f-c83a-4f79-9a4a-5dec3ceb736e "IDECO" (the only contact with that name)
+UPDATE planner.rep_groups SET xero_contact = 'IDECO' WHERE name = 'Agent - Ideco';
+-- TODO (Ben): Patrickco, Harper Group, KathCo, TJ, TR Partners
 
 -- 3. Bill account (Ben 21-Oct-26: "change agent fees to be cost of sales - us - wholesale. and cost of sales - de - wholesale etc"):
 --    the Xero UK "Cost of Sales - <market> - Wholesale" account of the agent's market (codes read from Xero UK 21-Oct-26)
