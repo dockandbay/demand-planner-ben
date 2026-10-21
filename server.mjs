@@ -12541,7 +12541,7 @@ supplySectionHandler = async (req, res, next) => {
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
             d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status,
-            to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id, to_jsonb(d)->>'doc_landed_cost_id' doc_landed_cost_id,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365) to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+            to_jsonb(d)->>'doc_system' doc_system, to_jsonb(d)->>'doc_org' doc_org, to_jsonb(d)->>'doc_number' doc_number, to_jsonb(d)->>'doc_url' doc_url, to_jsonb(d)->>'doc_status' doc_status, to_jsonb(d)->>'doc_error' doc_error, to_jsonb(d)->>'doc_id' doc_id, to_jsonb(d)->>'sample_bill_id' sample_bill_id, to_jsonb(d)->>'doc_landed_cost_id' doc_landed_cost_id, to_char(d.date_paid,'YYYY-MM-DD') date_paid,   -- v28.327: the sample bill's Fulfil invoice / Xero bill (to_jsonb: safe before mig 365); v28.426: date_paid was inside this comment (Payments Due showed paid Other payments and deposits as unpaid)
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
             -- BLANK deposit (no entered amount, real row, not NO DEPOSIT) → its amount/remaining are the estimated total.

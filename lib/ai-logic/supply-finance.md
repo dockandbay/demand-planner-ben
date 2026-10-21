@@ -89,7 +89,7 @@ fingerprints:
   server.mjs::case 'shipments': 9847bbee0f5b
   server.mjs::poShipObj: bff1ca67664d
   server.mjs::upsertTracking: aaba6026cb4a
-  server.mjs::case 'deposits': f63ce674dd6b
+  server.mjs::case 'deposits': 987dc1c07280
   server.mjs::case 'productions': 535e6383bf1d
   server.mjs::case 'payments-report': e30568f69d63
   server.mjs::PAY_REGION_SPLIT_FROM: dc36a85b870b
@@ -211,7 +211,7 @@ fingerprints:
   supply/inject.html::xeroBillPicker: 28bae78ad4bb
   supply/inject.html::xbsVisit: 129907732732
   supply/inject.html::xbsSync: 81f17c7b7d33
-verified_version: v28.425
+verified_version: v28.426
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -281,6 +281,7 @@ verified_version: v28.425
 - A PO balance counts as paid only when balance payment 1 + balance payment 2 cover the whole balance owing (remaining = balance_owing − balance_1_amount − balance_2_amount ≤ 0.009). Any part payment leaves the rest due. (source: supply/inject.html :: balRemaining, buildPaymentsDue)
 - A part-paid balance shows as a paid "Balance" row (payment 1), a paid "Balance 2" row if payment 2 exists, and an unpaid "Balance (remaining)" row for what is still owed, due on the balance due date. Marking that row paid records balance payment 2 = existing payment 2 + the remaining amount. (source: supply/inject.html :: buildPaymentsDue)
 - The SUPPLY nav overdue badge and the App health "payments overdue" count use the same rule. (source: supply/inject.html :: paymentsDueOverdueCount; server.mjs :: payments_overdue)
+- Deposits and other payments are paid when they have a paid date (deposits.date_paid, sent by GET /api/supply/deposits). v28.426 (Ben 21-Oct-26: "lots of old shipments without payments" on live): from v28.327 a SQL comment on the same line hid date_paid from that feed, so Payments Due, Other Payments and the Deposits register showed paid rows as unpaid (live 21-Oct-26: 52 rows, 20 deposits + 32 other). The stored dates were never lost. (source: server.mjs :: /api/supply/deposits; inject.html :: buildPaymentsDue, renderOtherPayments, reloadDeps)
 
 ## Deposits, productions, prod_no
 - deposit_ref links a PO to the deposits register (deposits.reference). All deposit money keys off deposit_ref, not prod_no. (source: v_po_finance :: da)
