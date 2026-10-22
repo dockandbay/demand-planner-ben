@@ -17,7 +17,7 @@ sources:
   - artifact_v16.7.html :: bpBuildFeedAsync
   - server.mjs :: buildPROD_CONST
   - server.mjs :: buildSKURAW
-verified_version: v28.246
+verified_version: v28.443
 fingerprints:
   artifact_v16.7.html::project: cee6e7ab0a38
   artifact_v16.7.html::getBuyQtys: 9ec1b000ecae
@@ -32,7 +32,7 @@ fingerprints:
   artifact_v16.7.html::_hzDemandGen: e2a62173559a
   artifact_v16.7.html::bpBuildFeedAsync: 92861a0bf15d
   server.mjs::buildPROD_CONST: b8b131b6ad8b
-  server.mjs::buildSKURAW: 3fa61dca6e8a
+  server.mjs::buildSKURAW: 267a18235f46
 ---
 
 # Buy plan rules
@@ -84,6 +84,7 @@ fingerprints:
 ## Inbound and stock
 - Stock on hand = v_product_inventory.available for <mkt>_3pl and <mkt>_fba (can be negative). [buildSKURAW]
 - On-order = open inbound shipments (quantity minus received) plus open POs not yet in the inbound feed (not complete, not child POs). All of it is treated as arriving: "on-order = shipped". [buildSKURAW, buildLiveBpOverlay]
+- v28.443: the SKU master (buildSKURAW) also carries the colourway (products.colour_long, field cw) for the Stock Availability report. Display only; no buy-plan number uses it. [buildSKURAW]
 - Arrival month = shipment ETA if in the future; else the PO-grid landing date if in the future; else this month. Unshipped POs land at the calculated landing (production end + 7 days + branch sea transit). [project]
 - An open line with no ETA and no landing date is NOT counted in the projection (it still shows in on_order), so it does not reduce the buy. [project]
 

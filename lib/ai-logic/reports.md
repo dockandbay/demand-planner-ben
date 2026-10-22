@@ -16,6 +16,8 @@ sources:
   - artifact_v16.7.html :: renderOtbReport
   - artifact_v16.7.html :: renderStockAvailability
   - artifact_v16.7.html :: saInbound
+  - artifact_v16.7.html :: saStatusBadge
+  - artifact_v16.7.html :: saEnsureDrawer
   - artifact_v16.7.html :: renderInvStatus
   - artifact_v16.7.html :: statusMetrics
   - artifact_v16.7.html :: renderTrendsView
@@ -58,8 +60,10 @@ fingerprints:
   artifact_v16.7.html::renderSlowMovingReport: 44d0a2dbe4dd
   artifact_v16.7.html::renderMarkdownEosReport: 4b5928c38f67
   artifact_v16.7.html::renderOtbReport: 3d410f502fdd
-  artifact_v16.7.html::renderStockAvailability: 72547dd888db
+  artifact_v16.7.html::renderStockAvailability: 850a1230d744
   artifact_v16.7.html::saInbound: 2bdaef711165
+  artifact_v16.7.html::saStatusBadge: 0d601ebb76f3
+  artifact_v16.7.html::saEnsureDrawer: d8f99f0c13fb
   artifact_v16.7.html::renderInvStatus: ba1fccbb71eb
   artifact_v16.7.html::statusMetrics: aad255d3ba05
   artifact_v16.7.html::renderTrendsView: ba92239c7585
@@ -95,7 +99,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.440
+verified_version: v28.443
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -445,7 +449,8 @@ verified_version: v28.440
 **Q:** Is the £ value on these reports exact GBP? **A:** Treat it as indicative. Most server reports multiply units by PO cost_price or product cost without FX conversion.
 **Q:** What forecast does Accuracy compare against? **A:** The locked forecast: the latest saved snapshot taken before each month started. Forecast trend anomalies uses today's forecast instead.
 
-## Stock Availability description column (v28.222, SUG-0043)
+## Stock Availability description column (v28.222, SUG-0043; replaced by Colourway in v28.443)
+- v28.443 (Ben 22-Oct-26: "stock availability is very squashed"): the Description column is replaced by Colourway (products.colour_long, sent with the SKU master as cw); the product name shows when hovering the SKU, and phone cards show the colourway under the SKU. The filter still searches SKU, product name and now colourway. Status badges: DISC light orange (amber), FUTURE light purple (violet), CLOSED red, ACTIVE green. Column headers wrap when there is not enough room and are centred vertically. The SA drawer opens at 60% of the screen width (at least 400 px). (source: artifact_v16.7.html :: saRows, saTableHTML, saStatusBadge, saEnsureDrawer)
 - REPORTS ▸ Stock Availability and the SA drawer show a Description column (the product name) next to the SKU, and on phone cards under the SKU. The filter box accepts SKU codes (any word containing a hyphen keeps the old "any of these SKUs" match) or plain words, which must all appear in the SKU or the description ("whitsunday large"). Display only. (source: saRows, saTableHTML, saRowMatch)
 
 ## Intake deadlines (DEMAND ▸ Analysis ▸ Intake deadlines, v28.224/225, SUG-0045)

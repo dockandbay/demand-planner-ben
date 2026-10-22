@@ -576,7 +576,7 @@ async function buildSKURAW() {
     : `nullif(trim(p.replacement_sku),'')`;
   const _fiJoin = _hasFcInherit ? 'LEFT JOIN planner.forecast_inheritance fi ON fi.new_sku=p.sku' : '';
   const [prods, pcs, inv, avail, oo, sales, inbound, openpo, lyo] = await Promise.all([
-    pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp,   /* v28.005: parent_p1 → searchable + calendar grouping */
+    pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp, nullif(trim(p.colour_long),'') cw,   /* v28.443: colourway (Stock Availability) */   /* v28.005: parent_p1 → searchable + calendar grouping */
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
@@ -672,7 +672,7 @@ async function buildSKURAW() {
     // LAST-YEAR-ONLY rows (Ben, v27.473): CLOSED / out-of-scope SKUs that still sold in the last 36 months. The plan shows them
     // under their sub-category for context (sub-cat numbers = ALL sales, open or closed) and counts their set explosion.
     // Tagged lyo:true with NO availability, so buy / smoothing / transfer / availability logic never sees them.
-    pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp,   /* v28.005: parent_p1 → searchable + calendar grouping */
+    pool.query(`SELECT p.sku, p.product_name n, nullif(trim(p.parent_p1),'') pp, nullif(trim(p.colour_long),'') cw,   /* v28.443: colourway (Stock Availability) */   /* v28.005: parent_p1 → searchable + calendar grouping */
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, upper(coalesce(nullif(btrim(p.status),''),'')) st,
@@ -685,7 +685,7 @@ async function buildSKURAW() {
   ]);
   const p = {};
   for (const r of prods.rows)
-    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C',
+    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cw: r.cw || '', cs: r.cs === 'Seasonal' ? 'S' : 'C',
                  csf: r.cs || '', // full core/seasonal classification (Core | Seasonal | Non-Core) for the BUY filter
                  rw: r.rw || '',  // release window (season) — shown on the BUY/FBA/Transfer grid after Type
                  rep: r.rep || '',  // replacement_sku (predecessor) — new SKU inherits its sales history as the forecast basis
@@ -701,7 +701,7 @@ async function buildSKURAW() {
   for (const r of inv.rows) if (p[r.sku]) p[r.sku].inv[r.wh] = r.qty;
   for (const r of oo.rows) if (p[r.sku] && r.oo > 0) p[r.sku].oo[r.wh] = r.oo;
   for (const r of lyo.rows) if (!p[r.sku])   // last-year-only closed SKUs (never overwrite an in-scope entry)
-    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C', csf: r.cs || '', rw: '', rep: '', img: r.img || '', sw: r.sw || '',
+    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cw: r.cw || '', cs: r.cs === 'Seasonal' ? 'S' : 'C', csf: r.cs || '', rw: '', rep: '', img: r.img || '', sw: r.sw || '',
                  st: r.st || '', vt: r.vt || 'MASTER', pp: r.pp || '', lyo: true, dsc: r.dsc || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
 
   const s = {};
@@ -731,7 +731,7 @@ async function buildSKURAW() {
 // we only need to supply the product meta + SOH + launch/disc here.
 async function buildSAEXTRA() {
   const [prods, inv, pcs, inbSkus, poSkus] = await Promise.all([
-    pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs,
+    pool.query(`SELECT sku, product_name n, nullif(trim(colour_long),'') cw, subcategory s, category c, market_tier ti, core_seasonal cs,
                        upper(coalesce(nullif(btrim(status),''),'')) st
                 FROM planner.products WHERE NOT in_planning_scope AND sku NOT IN (${NON_SKU_LIST})`),
     pool.query(`SELECT sku, warehouse wh, available::int qty FROM planner.v_product_inventory WHERE available <> 0`),
@@ -758,7 +758,7 @@ async function buildSAEXTRA() {
   const p = {};
   for (const r of prods.rows) {
     if (!signal.has(r.sku)) continue;
-    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C',
+    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cw: r.cw || '', cs: r.cs === 'Seasonal' ? 'S' : 'C',
                  csf: r.cs || '', rep: r.rep || '', st: r.st || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {}, oos: true };
   }
   for (const r of inv.rows) if (p[r.sku]) p[r.sku].inv[r.wh] = r.qty;

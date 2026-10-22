@@ -85,7 +85,7 @@ fingerprints:
   artifact_v16.7.html::renderWeeklySwitchView: 49e8a5577a49
   migrations/248_planning_scope_status_gate.sql::set_in_planning_scope: b1b7fa248f49
   server.mjs::buildDATA: b1b365e09434
-  server.mjs::buildSKURAW: 3fa61dca6e8a
+  server.mjs::buildSKURAW: 267a18235f46
   server.mjs::buildFC_CURRENT: 9396b5f52559
   server.mjs::buildFC_OUTPUTS: 8fd6e8cafb46
   server.mjs::computeAutoForecastFromFeed: 81f1aadccc9e
@@ -153,7 +153,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.433
+verified_version: v28.443
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)
@@ -163,6 +163,7 @@ verified_version: v28.433
 - Launch and discontinue dates come from `planner.products` per country: UK `launch_date_uk_final` else `launch_date_uk`, disc `discontinue_date_final`; US `launch_date_us`, disc `discontinue_date_final`; EU `launch_date_eu`, disc `discontinue_date_final`; AU `launch_date_au_final` else `launch_date_au`, disc `discontinue_date_au_final`; CA `launch_date_ca_retail`, disc `discontinue_date_ca`. (source: buildSKURAW)
 - Pre-launch zeroing: a month is forecast 0 when the 1st of that month is before the launch date. So the launch month itself is 0 unless the launch date is the 1st (launch 10-Nov-26 means Nov-26 is 0 and Dec-26 is the first forecast month). (source: buildLiveDemand, insertInlineSkuRows)
 - CLOSED / out-of-scope SKUs that sold in the last 36 months are loaded as "last-year-only" (lyo) rows: they show in their subcategory for history context only (when they sold in a displayed month), always forecast 0, never enter the buy plan, smoothing or run-off pools. (source: buildSKURAW, filteredSkus, buildLiveBpOverlay, insertInlineSkuRows)
+- v28.443: the SKU master also carries the colourway (products.colour_long, field cw), in-scope and last-year-only rows alike, for Stock Availability. Not used by any forecast or demand number. (source: server.mjs :: buildSKURAW)
 - A discontinued SKU with no stock, no inbound and no positive saved forecast in that country is hidden from the plan permanently (it can never sell). (source: skuHasAnyActivity, filteredSkus)
 - SET SKUs are planned in DEMAND but never get their own buy line; their demand explodes into components. (source: buildLiveBpOverlay)
 

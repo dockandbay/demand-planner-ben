@@ -1,3 +1,9 @@
+## v28.443 (22-Oct-26) Stock Availability: Colourway instead of Description, wider drawer, clearer status colours
+- Ben: "stock availability is very squashed on, remove DESCRIPTION. add COLOUR WAY. make this popout 60% of screen so more space. DISC can be light orange colour. FUTURE can be light purple. headers can wrap if not enough room and be centred vertically".
+- Description column removed; Colourway added after SKU (products.colour_long, now sent with the SKU master as `cw`; 1,994 of 2,092 sandbox SKUs have one). Product name shows on hovering the SKU; phone cards show the colourway under the SKU. The filter also searches colourway.
+- Status badges: DISC light orange, FUTURE light purple (was amber), CLOSED red, ACTIVE green. Headers wrap and are centred vertically. The SA drawer opens at 60% of the screen width (at least 400 px; was half, capped at 900 px). Applies to REPORTS > Stock Availability and the SA drawer (one component).
+- Sandbox (jsdom, full page): drawer columns SKU, Colourway, Status, Type, Launch, Disc, SOH 3PL, SOH FBA, Next inbound 3PL, 2nd inbound 3PL, Next inbound FBA; GIFT-BOX-BEAUTY-SEASOIR shows "Seashell Soiree". Buy plan identical. No migration, no env, no routes.
+
 ## v28.442 (22-Oct-26) Commissions: agent rules + Unassigned tab (paid wholesale orders with no agent, "could be <agent>")
 - Ben: "not every wholesale order has an agent, but we can create some rules to surface reports in horizon > client > commission to check orders without agents that meet conditions like 'country US, state FL, no agent - could be appelman'". Ben chose layout A and all four condition types.
 - CLIENT > Config > Agent rules: ordered rules (Name, Country, State / province, ZIP / postcode starts, Channel, Customer name has, Email domain, Could be <agent>, On; move up / down, delete). First active rule whose filled conditions all match wins; comma lists match any value; empty = any. Saved in app_settings `cm_agent_rules`; no migration.
