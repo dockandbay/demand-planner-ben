@@ -78,9 +78,11 @@
 #client-root .cph-tw{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:64vh;background:var(--card)}
 #client-root .cph-tw table th{position:sticky;top:0;z-index:1;background:var(--hdr-tint,var(--band));border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
 #client-root .cph-tw table th:hover{color:var(--ink)}
-#client-root .cph-tw table th.r,#client-root .cph-tw table td.r{text-align:right}
+#client-root .cph-tw table th.r,#client-root .cph-tw table td.r{text-align:left}   /* v28.450 (Ben): data left aligned */
+#client-root .cph-tw table{width:100%;min-width:1100px;table-layout:auto}   /* v28.450: columns size to their content (CLIENT tables are fixed-width with hidden overflow, which clipped customer names) */
+#client-root .cph-tw table td,#client-root .cph-tw table th{overflow:visible;text-overflow:clip}
 #client-root .cph-tw table td{padding:5px 10px;white-space:nowrap;vertical-align:middle}
-#client-root .cph-tw table td.w{white-space:normal;min-width:16ch;max-width:32ch}
+#client-root .cph-tw table td.w{white-space:nowrap}   /* v28.450 (Ben): one line per row, the table is wider instead */
 #client-root .cph-tw tbody tr:nth-child(even) td{background:var(--row-alt)}
 #client-root .cph-tw tbody tr:hover td{background:var(--blue-soft)}
 #client-root .cph-tw mark{background:var(--amber-bg);color:inherit;border-radius:2px;padding:0 1px}
@@ -21452,7 +21454,7 @@
         var C=d.cols; CPH_D=(d.rows||[]).map(function(a){ var o={}; C.forEach(function(c,i){ o[c]=a[i]; }); o._s=[o.customer,o.invoice_no,o.po_no,o.credit_note,o.rep_group,o.notes].join(' ').toLowerCase(); return o; }); CPH_AT=Date.now(); cphDraw(); })
       .catch(function(e){ box.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
     var CPH_SYM={USD:'$',EUR:'€',GBP:'£',CAD:'C$',AUD:'A$'};
-    function cphMoney(n,c){ return (c?(CPH_SYM[c]||c+' '):'')+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function cphMoney(n,c){ n=Number(n||0); return (n<0?'-':'')+(c?(CPH_SYM[c]||c+' '):'')+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }   // v28.451: -C$2.00, not C$-2.00
     function cphK(n,c){ n=Number(n)||0; return (c?(CPH_SYM[c]||''):'')+(Math.abs(n)>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':String(Math.round(n))); }
     function cphMl(p){ return p?hzTrkDate(p+'-01').replace(/^01-/,''):'—'; }
     function cphRows(skip){ var q=String(CPH.q||'').trim().toLowerCase(), L=CPH_D||[], maxP=L.reduce(function(m,r){ return r.period&&r.period>m?r.period:m; },''), cut='';
@@ -21460,7 +21462,7 @@
       return L.filter(function(r){
         if(skip!=='agent'&&CPH.agent&&r.rep_group!==CPH.agent)return false;
         if(skip!=='status'&&CPH.status!=='all'&&r.status!==CPH.status)return false;
-        if(CPH.month){ if(skip!=='month'&&r.period!==CPH.month)return false; } else if(skip!=='period'&&cut&&!(r.period&&r.period>=cut))return false;
+        if(CPH.month){ if(skip!=='month'&&r.period!==CPH.month)return false; } else if(skip!=='period'&&skip!=='month'&&cut&&!(r.period&&r.period>=cut))return false;   /* v28.450: the month summary lists every month */
         if(CPH.year&&String(r.period||'').slice(0,4)!==String(CPH.year))return false;
         if(CPH.ccy&&r.ccy!==CPH.ccy)return false;
         if(q&&r._s.indexOf(q)<0)return false; return true; }); }
@@ -21484,8 +21486,8 @@
         +'<label class="cph-search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke-width="1.6"/><path d="M11 11l3.5 3.5" stroke-width="1.6" stroke-linecap="round"/></svg><input id="cph-q" placeholder="Search customer, invoice, PO, credit note" value="'+esc(CPH.q)+'" autocomplete="off" aria-label="Search paid history"><kbd>/</kbd></label>'
         +'<select class="flt" id="cph-y" aria-label="Year"><option value="">All years</option>'+years.map(function(y){ return '<option'+(String(CPH.year)===y?' selected':'')+'>'+y+'</option>'; }).join('')+'</select>'
         +'<select class="flt" id="cph-c" aria-label="Currency"><option value="">All currencies</option>'+ccys.map(function(c){ return '<option'+(CPH.ccy===c?' selected':'')+'>'+c+'</option>'; }).join('')+'</select>'
-        +'<span class="cph-sum"><span>'+L.length.toLocaleString()+' row'+(L.length===1?'':'s')+'</span>'+Object.keys(byC).sort().map(function(c){ return '<b>'+cphMoney(byC[c],c)+'</b>'; }).join(' · ')
-        +'<button class="cph-btn" id="cph-sum" title="By agent and by month paid">Summary ›</button></span></div>';
+        +'<button class="cph-btn" id="cph-sum" title="Paid by month and by agent">Month summary ›</button>'
+        +'<span class="cph-sum"><span>'+L.length.toLocaleString()+' row'+(L.length===1?'':'s')+'</span>'+Object.keys(byC).sort().map(function(c){ return '<b>'+cphMoney(byC[c],c)+'</b>'; }).join(' · ')+'</span></div>';
       // grid
       var one=!!CPH.agent, COLS=[['period','Month'],['rep_group','Agent'],['customer','Customer'],['invoice_no','Invoice'],['po_no','PO'],['invoice_date','Invoice date'],['comm','Commissionable',1],['rate','Rate',1],['paid','Paid',1],['credit_note','Credit note'],['status','Status'],['source','Source']].filter(function(c){ return !(one&&c[0]==='rep_group'); });
       var f=CPH.sort, dir=CPH.dir, num={comm:1,rate:1,paid:1};
@@ -21521,24 +21523,39 @@
       var dw=document.getElementById('cph-drawer'); if(dw&&dw.style.display!=='none')cphDrawer();
       if(!window.__cphSlash){ window.__cphSlash=1; document.addEventListener('keydown',function(e){ var q2=document.getElementById('cph-q'); if(e.key==='/'&&q2&&q2.offsetParent!==null&&!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement||{}).tagName||'')){ e.preventDefault(); q2.focus(); } }); }
     }
+    // v28.450 (Ben 22-Oct-26: "MONTH SUMMARY button next to ALL CURRENCIES and improve the table to fill the drawer and look cleaner ... left align
+    // the data and make the table wider"): a wider drawer with By month / By agent switch, one column per currency, left aligned, full width.
+    var CPH_DV='month';
     function cphDrawer(){ var dw=document.getElementById('cph-drawer'), bk=document.getElementById('cph-drawer-bk');
       if(!dw){ bk=document.createElement('div'); bk.id='cph-drawer-bk'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:5900';
-        dw=document.createElement('div'); dw.id='cph-drawer'; dw.setAttribute('role','dialog'); dw.setAttribute('aria-label','Paid history summary'); dw.style.cssText='position:fixed;top:0;right:0;height:100%;width:min(460px,100vw);background:var(--card);box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;display:flex;flex-direction:column';
-        document.body.appendChild(bk); document.body.appendChild(dw); }
+        dw=document.createElement('div'); dw.id='cph-drawer'; dw.setAttribute('role','dialog'); dw.setAttribute('aria-label','Paid history summary');
+        var st=document.createElement('style'); st.textContent='#cph-drawer{position:fixed;top:0;right:0;height:100%;width:min(720px,100vw);background:var(--card);color:var(--ink);box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;display:flex;flex-direction:column;font-size:12px;font-variant-numeric:tabular-nums}'
+          +'#cph-drawer .hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 18px 10px;border-bottom:1px solid var(--line)}#cph-drawer .hd b{font-size:15px}#cph-drawer .sc{color:var(--muted);font-size:11.5px;margin-top:2px}'
+          +'#cph-drawer .x{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;width:30px;height:30px;cursor:pointer}#cph-drawer .x:hover{background:var(--hover)}'
+          +'#cph-drawer .sw{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:12px 18px 8px}#cph-drawer .sw button{font:inherit;font-weight:600;border:0;border-right:1px solid var(--line);background:var(--card);color:var(--muted);padding:6px 14px;cursor:pointer}#cph-drawer .sw button:last-child{border-right:0}#cph-drawer .sw button.on{background:var(--nav);color:#fff}'
+          +'#cph-drawer .bd{flex:1;overflow:auto;padding:0 18px 18px}#cph-drawer table{width:100%;border-collapse:separate;border-spacing:0}'
+          +'#cph-drawer th{position:sticky;top:0;background:var(--hdr-tint,var(--hover));color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}'
+          +'#cph-drawer td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}#cph-drawer tbody tr{cursor:pointer}#cph-drawer tbody tr:hover td{background:var(--blue-soft)}#cph-drawer tbody tr.on td{background:var(--blue-soft);font-weight:700}'
+          +'#cph-drawer td.nm{color:var(--blue-ink);font-weight:600}#cph-drawer td.z{color:var(--faint)}#cph-drawer tfoot td{position:sticky;bottom:0;background:var(--hdr-tint,var(--hover));font-weight:800;border-top:1px solid var(--line);border-bottom:0}'
+          +'#cph-drawer .ft{color:var(--muted);font-size:11px;padding:8px 18px 12px;border-top:1px solid var(--line)}';
+        document.head.appendChild(st); document.body.appendChild(bk); document.body.appendChild(dw); }
       var close=function(){ dw.style.display='none'; bk.style.display='none'; }; dw.style.display='flex'; bk.style.display=''; bk.onclick=close;
-      var LG=cphRows('agent'), LM=cphRows('month'), bg={}, bm={};
-      LG.forEach(function(r){ var k=r.rep_group||'—', o=bg[k]=bg[k]||{n:0,c:{}}; o.n++; o.c[r.ccy]=(o.c[r.ccy]||0)+(Number(r.paid)||0); });
-      LM.forEach(function(r){ var k=r.period||'', o=bm[k]=bm[k]||{n:0,c:{}}; o.n++; o.c[r.ccy]=(o.c[r.ccy]||0)+(Number(r.paid)||0); });
-      var amt=function(o){ return Object.keys(o.c).sort().map(function(c){ return cphMoney(o.c[c],c); }).join('<br>'); };
-      var tot=function(o){ return Object.keys(o.c).reduce(function(a,c){ return a+o.c[c]; },0); };
-      var scope=[CPH.agent?cmShort(CPH.agent):'All agents',CPH.year||'',CPH.ccy||'',CPH.status==='all'?'all statuses':String(CPH.status).replace('_',' '),CPH.q?'"'+CPH.q+'"':''].filter(Boolean).join(' · ');
-      dw.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)"><div><b style="font-size:14px">Paid history summary</b><div class="mut tiny">'+esc(scope)+'</div></div><button class="save-btn light" id="cph-x" title="Close">✕</button></div>'
-        +'<div style="flex:1;overflow:auto;padding:10px 16px">'
-        +'<div class="sect-h">By agent <span class="mut tiny">click to open the agent\'s tab</span></div><div class="tw"><table><thead><tr><th class="l">Agent</th><th class="l">Rows</th><th class="l" style="text-align:right">Paid</th></tr></thead><tbody>'+(Object.keys(bg).sort(function(a,b){ return tot(bg[b])-tot(bg[a]); }).map(function(k){ return '<tr class="cph-dg" data-g="'+esc(k)+'" style="cursor:pointer'+(CPH.agent===k?';background:var(--blue-soft)':'')+'"><td class="l"><a href="#" style="color:var(--blue)">'+esc(cmShort(k))+'</a></td><td class="l">'+bg[k].n+'</td><td class="l" style="text-align:right;white-space:nowrap">'+amt(bg[k])+'</td></tr>'; }).join('')||'<tr><td class="l mut" colspan="3">None.</td></tr>')+'</tbody></table></div>'
-        +'<div class="sect-h" style="margin-top:14px">By month paid <span class="mut tiny">click to show only that month</span></div><div class="tw"><table><thead><tr><th class="l">Month</th><th class="l">Rows</th><th class="l" style="text-align:right">Paid</th></tr></thead><tbody>'+(Object.keys(bm).sort().reverse().map(function(k){ return '<tr class="cph-mo" data-m="'+esc(k)+'" style="cursor:pointer'+(CPH.month===k?';background:var(--blue-soft)':'')+'"><td class="l"><a href="#" style="color:var(--blue)">'+esc(cphMl(k))+'</a></td><td class="l">'+bm[k].n+'</td><td class="l" style="text-align:right;white-space:nowrap">'+amt(bm[k])+'</td></tr>'; }).join('')||'<tr><td class="l mut" colspan="3">None.</td></tr>')+'</tbody></table></div></div>';
+      var byMonth=CPH_DV==='month', L=cphRows(byMonth?'month':'agent'), grp={}, ccys=[];
+      L.forEach(function(r){ var k=byMonth?(r.period||''):(r.rep_group||'—'), o=grp[k]=grp[k]||{n:0,c:{},t:0}; o.n++; var v=Number(r.paid)||0; o.c[r.ccy]=(o.c[r.ccy]||0)+v; o.t+=v; if(ccys.indexOf(r.ccy)<0)ccys.push(r.ccy); });
+      ccys.sort(function(a,b){ return a==='USD'?-1:b==='USD'?1:a<b?-1:1; });
+      var keys=Object.keys(grp).sort(byMonth?function(a,b){ return a<b?1:-1; }:function(a,b){ return grp[b].t-grp[a].t; });
+      var tot={n:0,c:{}}; keys.forEach(function(k){ tot.n+=grp[k].n; ccys.forEach(function(c){ tot.c[c]=(tot.c[c]||0)+(grp[k].c[c]||0); }); });
+      var cur=byMonth?CPH.month:CPH.agent;
+      var scope=[byMonth?(CPH.agent?cmShort(CPH.agent):'All agents'):'All agents',CPH.year||'',CPH.ccy||'',CPH.status==='all'?'all statuses':String(CPH.status).replace('_',' '),CPH.q?'"'+CPH.q+'"':''].filter(Boolean).join(' · ');
+      dw.innerHTML='<div class="hd"><div><b>Paid summary</b><div class="sc">'+esc(scope)+'</div></div><button class="x" id="cph-x" title="Close" aria-label="Close">✕</button></div>'
+        +'<div><span class="sw" role="tablist"><button data-v="month" class="'+(byMonth?'on':'')+'">By month</button><button data-v="agent" class="'+(byMonth?'':'on')+'">By agent</button></span></div>'
+        +'<div class="bd">'+(keys.length?'<table><thead><tr><th>'+(byMonth?'Month':'Agent')+'</th><th>Rows</th>'+ccys.map(function(c){ return '<th>Paid '+esc(c)+'</th>'; }).join('')+'</tr></thead><tbody>'
+          +keys.map(function(k){ var o=grp[k]; return '<tr data-k="'+esc(k)+'" class="'+(cur===k?'on':'')+'" title="'+(byMonth?'Show only this month':'Open this agent\'s tab')+'"><td class="nm">'+esc(byMonth?cphMl(k):cmShort(k))+'</td><td>'+o.n.toLocaleString()+'</td>'+ccys.map(function(c){ return o.c[c]?'<td>'+cphMoney(o.c[c],c)+'</td>':'<td class="z">—</td>'; }).join('')+'</tr>'; }).join('')
+          +'</tbody><tfoot><tr><td>Total</td><td>'+tot.n.toLocaleString()+'</td>'+ccys.map(function(c){ return '<td>'+cphMoney(tot.c[c]||0,c)+'</td>'; }).join('')+'</tr></tfoot></table>':'<div class="sc" style="padding:14px 0">Nothing matches these filters.</div>')+'</div>'
+        +'<div class="ft">'+(byMonth?'Click a month to show only that month in the table (click again to clear).':'Click an agent to open their tab.')+' Each currency has its own column.</div>';
       document.getElementById('cph-x').onclick=close;
-      dw.querySelectorAll('.cph-mo').forEach(function(t){ t.onclick=function(e){ e.preventDefault(); CPH.month=(CPH.month===t.dataset.m)?'':t.dataset.m; CPH.all=false; cphDraw(); }; });
-      dw.querySelectorAll('.cph-dg').forEach(function(t){ t.onclick=function(e){ e.preventDefault(); CPH.agent=t.dataset.g; CPH.all=false; cphDraw(); }; }); }
+      dw.querySelectorAll('.sw button').forEach(function(b){ b.onclick=function(){ CPH_DV=b.dataset.v; cphDrawer(); }; });
+      dw.querySelectorAll('tbody tr[data-k]').forEach(function(t){ t.onclick=function(){ if(byMonth)CPH.month=(CPH.month===t.dataset.k)?'':t.dataset.k; else CPH.agent=t.dataset.k; CPH.all=false; cphDraw(); }; }); }
   }
   function cmShort(n){ return String(n||'').replace(/^\s*agent\s*-+\s*/i,'').trim()||String(n||''); }   // v28.425: "Agent - Schauben" -> "Schauben"
   function cpRunDetail(box,id,b){ box.innerHTML='<div class="count">Loading run…</div>'; try{ if(CLIENT_SUB==='commission')writeHash(['client','commission','run',String(id)]); }catch(e){}

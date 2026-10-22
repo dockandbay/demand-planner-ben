@@ -1,3 +1,11 @@
+## v28.451 (22-Oct-26) Paid history: Month summary next to the filters, cleaner drawer, left-aligned wider grid (includes v28.450)
+- Ben: "on paid history can you put MONTH SUMMARY button next to ALL CURRENCIES and improve the table to fill the drawer and look cleaner" and "left align the data and make table more width".
+- "Month summary ›" now sits right after the Currency dropdown.
+- Drawer: 720 px wide, By month / By agent switch, one Paid column per currency (USD, CAD, EUR, GBP), left aligned, full width, sticky header and Total row; By month lists every month (the period pills no longer cut it to 3 months; other filters still apply). The drawer has its own styles (it sits outside the CLIENT page, so it had none).
+- Grid: data left aligned; each column sizes to its content on one line (CLIENT tables are fixed-width with hidden overflow, which cut customer names short); table fills the width and scrolls sideways on small screens.
+- Negative amounts read -C$2,374.50 (was C$-2,374.50).
+- Checked in Chrome on the sandbox (grid and drawer: 8,165 paid rows, $751,815.06 · C$79,757.43 · €156,284.02 · £4,269.42). v28.450 was a cache-busting version for that check, not shipped separately. Display only; buy plan identical.
+
 ## v28.449 (22-Oct-26) Paid history styled as the approved mockup
 - Ben (screenshot): "the ui is not as per the artifact". CLIENT only styles its own menu tab row, so v28.448's agent tabs, search box and dropdowns rendered as plain browser controls.
 - Paid history now has its own scoped styles copied from the mockup: agent tabs in a light-blue row with the active tab raised (totals in grey), status / period pills with counts, search box with icon and "/" hint and a focus ring, styled Year / Currency dropdowns (dark when set), row count and per-currency totals with the Summary button on the right, grid in a bordered box with a sticky header and alternating rows.
