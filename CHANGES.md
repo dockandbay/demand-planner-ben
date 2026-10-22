@@ -1,3 +1,7 @@
+## v28.461 (22-Oct-26) Product Samples tab: "Create sample versions"
+- Ben: change the terminology on PRODUCT ▸ product ▸ Samples to "create sample versions".
+- The button now reads "+ Create sample versions" (was "+ Add to new sample request"); the hint reads "opens a new sample request pre-linked to this product". Same action as before (a SUPPLY sample request with this product's supplier). Label only; the Master data tab button is unchanged.
+
 ## v28.460 (22-Oct-26) Sample requests: Draft → Sent (MIGRATION 383)
 - Ben: "on sample requests, when we create a request initially have it in a status 'draft' (orange), then user can change it to 'sent' (green) and only on sent can supplier portal see this and they get notified in app of new sample request" + "default all current to DRAFT".
 - PRODUCT ▸ Sampling grid and the product's Requests tab: a Draft / Sent pill-select on each development (sample) request. "Awaiting accept" only shows once Sent.
