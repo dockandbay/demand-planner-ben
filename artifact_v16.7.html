@@ -16753,7 +16753,9 @@ function saSkuMatch(sku,q){ if(!q)return true; var toks=q.split(/[\s,]+/).filter
 function saRowMatch(r,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,]+/).filter(Boolean); if(!toks.length)return true;
   if(toks.some(function(t){ return t.indexOf('-')>=0; }))return saSkuMatch(r.sku,q);
   var hay=(r.sku+' '+(r.nm||'')).toLowerCase(); return toks.every(function(t){ return hay.indexOf(t)>=0; }); }
-function saInbound(sku,mkt){ var whs=[SA_WH3[mkt],SA_WHF[mkt]].filter(Boolean),out=[];
+// v28.440 (Ben 22-Oct-26, GIFT-BOX-BEAUTY-SEASOIR UK: "2nd inbound" was a UK FBA delivery under a 3PL heading): 3PL and FBA
+// inbounds are listed apart: Next inbound 3PL, 2nd inbound 3PL, Next inbound FBA. saInbound(sku, mkt, '3pl' | 'fba').
+function saInbound(sku,mkt,kind){ var whs=[kind==='fba'?SA_WHF[mkt]:SA_WH3[mkt]].filter(Boolean),out=[];
   whs.forEach(function(wh){ var k=sku+'|'+wh;
     var inb=(typeof SKUI!=='undefined')?SKUI[k]:null; if(inb){ (Array.isArray(inb)?inb:[inb]).forEach(function(x){ if(x&&(Number(x.qty)||x.eta))out.push({qty:Number(x.qty)||0,eta:x.eta||null,ref:x.ref||''}); }); }
     var op=(typeof SKUOI!=='undefined')?SKUOI[k]:null; if(op&&op.length)op.forEach(function(x){ out.push({qty:Number(x.qty)||0,eta:x.eta||null,ref:x.ref||''}); }); });
@@ -16767,10 +16769,10 @@ function saRows(mkt){ var co=mkt.toLowerCase(),wh3=SA_WH3[mkt],whF=SA_WHF[mkt],r
   keys.forEach(function(sku){ var p=SK[sku]||EX[sku]; if(!p)return;
     var av=(p.av||{})[co]||'',inv=p.inv||{};
     var s3=wh3?(inv[wh3]||0):0,sf=whF?(inv[whF]||0):0,aw=(mkt==='US'&&typeof awdOf==='function')?(awdOf(sku,mkt)||0):0;
-    var inb=saInbound(sku,mkt);
-    if(!av && !(s3||sf||aw) && !inb.length)return;   // not present in this market
+    var inb=saInbound(sku,mkt,'3pl'),inbF=saInbound(sku,mkt,'fba');
+    if(!av && !(s3||sf||aw) && !inb.length && !inbF.length)return;   // not present in this market
     var lch=(p.lch||{})[co]||'',disc=(p.disc||{})[co]||'';
-    rows.push({sku:sku,nm:p.n||'',cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc,p.st),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb}); });
+    rows.push({sku:sku,nm:p.n||'',cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc,p.st),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb,inbF:inbF}); });
   rows.sort(function(a,b){ return a.cat<b.cat?-1:a.cat>b.cat?1:(a.sku<b.sku?-1:1); });
   return rows; }
 function saStatusBadge(st){ var c=st==='DISC'?['var(--hover)','var(--muted)']:st==='CLOSED'?['var(--neg-bg)','var(--neg)']:st==='FUTURE'?['var(--amber-bg)','var(--amber)']:['var(--pos-bg)','var(--pos)']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">'+st+'</span>'; }
@@ -16779,12 +16781,12 @@ function saInbCell(x){ if(!x)return '<td class="sa-inb" style="text-align:right;
     +'<div style="font-weight:700">'+saFmt(x.qty)+'</div>'
     +'<div style="font-size:9.5px;color:var(--muted)">'+(x.eta?saDate(x.eta):'no date')+'</div>'
     +'<div style="font-size:9.5px">'+(x.ref?'<a class="sa-poref" data-po="'+saEsc(x.ref)+'" title="Open '+saEsc(x.ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer">'+saEsc(x.ref)+'</a>':'<span style="color:var(--faint)">—</span>')+'</div></td>'; }
-function saTableHTML(rows,awCol){ var ncols=awCol?11:10;   // v28.222 (SUG-0043): + Description
+function saTableHTML(rows,awCol){ var ncols=awCol?12:11;   // v28.222 (SUG-0043): + Description
   if(!rows.length)return '<div class="count" style="padding:10px;color:var(--faint)">No SKUs match.</div>';
   var h='<table><thead><tr>'
     +'<th class="l sku">SKU</th><th class="l sa-desc">Description</th><th class="l">Status</th><th class="l">Type</th><th class="l">Launch</th><th class="l">Disc</th>'
     +'<th class="soh">SOH 3PL</th><th class="soh">SOH FBA</th>'+(awCol?'<th class="soh">SOH AWD</th>':'')
-    +'<th>Next inbound</th><th>2nd inbound</th></tr></thead><tbody>';
+    +'<th>Next inbound 3PL</th><th>2nd inbound 3PL</th><th>Next inbound FBA</th></tr></thead><tbody>';
   var cur=null;
   rows.forEach(function(r){ if(r.cat!==cur){ cur=r.cat; h+='<tr class="sa-cat"><td colspan="'+ncols+'">'+saEsc(r.cat)+'</td></tr>'; }
     h+='<tr><td class="l sku"><b>'+saEsc(r.sku)+'</b></td><td class="l sa-desc">'+(r.nm?saEsc(r.nm):'<span style="color:var(--faint)">—</span>')+'</td>'
@@ -16792,7 +16794,7 @@ function saTableHTML(rows,awCol){ var ncols=awCol?11:10;   // v28.222 (SUG-0043)
       +'<td class="l">'+saEsc(r.cs||'—')+(r.ti?' <span style="color:var(--faint);font-size:9px">'+saEsc(r.ti)+'</span>':'')+'</td>'
       +'<td class="l">'+(r.lch?saDate(r.lch):'—')+'</td><td class="l">'+(r.disc?saDate(r.disc):'—')+'</td>'
       +'<td class="soh">'+saFmt(r.s3)+'</td><td class="soh">'+saFmt(r.sf)+'</td>'+(awCol?'<td class="soh">'+(r.aw?saFmt(r.aw):'—')+'</td>':'')
-      +saInbCell(r.inb[0])+saInbCell(r.inb[1])+'</tr>'; });
+      +saInbCell(r.inb[0])+saInbCell(r.inb[1])+saInbCell(r.inbF[0])+'</tr>'; });
   return h+'</tbody></table>'; }
 // Mobile: compact cards in a responsive multi-column grid per category (a wide table squashes on a phone).
 function saCardsHTML(rows,awCol){
@@ -16810,7 +16812,7 @@ function saCardsHTML(rows,awCol){
       +'<div style="font-size:9.5px;color:var(--muted);margin-bottom:6px">'+saEsc(r.cs||'—')+(r.ti?' · '+saEsc(r.ti):'')+' · L '+(r.lch?saDate(r.lch):'—')+' · D '+(r.disc?saDate(r.disc):'—')+'</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:7px 4px;border-top:1px solid var(--line2);padding-top:5px">'
         +cell('SOH 3PL',saFmt(r.s3))+cell('SOH FBA',saFmt(r.sf))+(awCol?cell('SOH AWD',r.aw?saFmt(r.aw):'—'):'')
-        +inb('Next inbound',r.inb[0])+inb('2nd inbound',r.inb[1])
+        +inb('Next inbound 3PL',r.inb[0])+inb('2nd inbound 3PL',r.inb[1])+inb('Next inbound FBA',r.inbF[0])
       +'</div></div>'; });
   if(open)h+='</div>';
   return h; }

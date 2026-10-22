@@ -1,3 +1,8 @@
+## v28.440 (22-Oct-26) Stock Availability: 3PL and FBA inbounds in their own columns
+- Ben: GIFT-BOX-BEAUTY-SEASOIR in UK had a wrong "2nd inbound": the inbound columns read as 3PL but that one was a UK FBA delivery. The report merged the market's 3PL and FBA inbounds and showed the first two by date.
+- Now three columns, as Ben suggested: Next inbound 3PL, 2nd inbound 3PL, Next inbound FBA (each qty, date, PO link). Phone cards show the same three. A SKU with only an FBA inbound still appears.
+- Sandbox (06-Oct data): UK 1,002 rows, 198 with an FBA inbound now shown apart. Display only; buy plan identical. No migration, no new routes, no new env.
+
 ## v28.439 (22-Oct-26) COGS: Airtable email address is a CONFIG setting; CA Propack column removed
 - Ben: "email to airtable variable should be under config > export + uploads . email in this data field here, not on server". CONFIG > Exports & uploads has a new "COGS to Airtable" box (app_settings `cogs_airtable_email`, saved on leaving the box). COGS > Email to Airtable sends to it; the old `COGS_AIRTABLE_EMAIL` env var is only a fallback and no longer needs setting on live. With neither set the button stays disabled and the tooltip points to CONFIG.
 - Ben: "on cogs remove CA PROPACK". The CA Propack column is gone from Analyse, the CSV and the email (CA is decommissioned). CA FBA stays (kept only). A saved older Analyse drops the column when opened. Stored CA Propack values in planner.cogs_values are left as they are.

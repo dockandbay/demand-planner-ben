@@ -15,6 +15,7 @@ sources:
   - artifact_v16.7.html :: renderMarkdownEosReport
   - artifact_v16.7.html :: renderOtbReport
   - artifact_v16.7.html :: renderStockAvailability
+  - artifact_v16.7.html :: saInbound
   - artifact_v16.7.html :: renderInvStatus
   - artifact_v16.7.html :: statusMetrics
   - artifact_v16.7.html :: renderTrendsView
@@ -58,6 +59,7 @@ fingerprints:
   artifact_v16.7.html::renderMarkdownEosReport: 4b5928c38f67
   artifact_v16.7.html::renderOtbReport: 3d410f502fdd
   artifact_v16.7.html::renderStockAvailability: 72547dd888db
+  artifact_v16.7.html::saInbound: 2bdaef711165
   artifact_v16.7.html::renderInvStatus: ba1fccbb71eb
   artifact_v16.7.html::statusMetrics: aad255d3ba05
   artifact_v16.7.html::renderTrendsView: ba92239c7585
@@ -93,7 +95,7 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.437
+verified_version: v28.440
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -252,9 +254,9 @@ verified_version: v28.437
 
 ## Stock Availability (3PL & Invoicing moved to ACCOUNTS)
 - Stock Availability is built client-side from SKUM, plus out-of-scope SKUs that still hold stock.
-  - Columns: SOH 3PL, FBA, AWD (US only), and the next 2 inbounds.
+  - Columns: SOH 3PL, FBA, AWD (US only), then Next inbound 3PL, 2nd inbound 3PL and Next inbound FBA (v28.440, Ben 22-Oct-26: GIFT-BOX-BEAUTY-SEASOIR UK showed a UK FBA delivery as its "2nd inbound"; until then the 3PL and FBA inbounds were merged and the first two by date shown). Each inbound is qty, date and PO; 3PL = the market 3PL warehouse, FBA = the market FBA warehouse (CA has no 3PL). Phone cards show the same three.
   - Status: DISC if the discontinue date is on or before today, else CLOSED, else FUTURE if launch is after today, else ACTIVE.
-  (source: artifact_v16.7.html :: renderStockAvailability, saRows)
+  (source: artifact_v16.7.html :: renderStockAvailability, saRows, saInbound)
 - 3PL & Invoicing moved to ACCOUNTS > 3PL invoicing in v28.247 (old REPORTS links redirect); see the supply-finance topic. It is no longer a REPORTS tab.
 
 ## Inventory Status Report (BUY & MOVE > INVENTORY > Status Report)
