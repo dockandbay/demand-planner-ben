@@ -52,7 +52,7 @@ All behind the existing auth: staff routes need CLIENT / PRODUCT access as noted
 
 ## Smoke checks after deploy
 1. `/api/version` = v28.466.
-2. PRODUCT ▸ Sampling: requests show an orange Draft pill; set one to Sent and back (portal note appears on Sent).
+2. PRODUCT ▸ Sampling: the 2 Lixin requests show an orange Draft pill. Look only: don't set one to Sent as a test, it notifies Lixin on the portal (Libby will send them when ready).
 3. PRODUCT ▸ Reports: Sample costs and Approval stats load (empty is expected: live has no sample charges or sample versions yet).
 4. CLIENT ▸ Portal preview: preview a client; with `view_images` on for that client, "Image gallery" shows and lists the shared gallery (Highlights, 50 images); without it, no menu item.
 5. CLIENT ▸ Commissions ▸ Paid history and Unassigned load.
