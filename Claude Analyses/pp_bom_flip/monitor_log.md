@@ -152,3 +152,11 @@ Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
 |---|---|---|---|---|---|---|---|---|
 | SO69769 | UK-909733 | processing | 10-22T19:24 | UK-TEATWL-MD-6SET-AFTPTY | 1 | PP | PP | PP move assigned,draft |
 
+## Check 2026-10-23 09:47:07 (orders since 2026-10-23T06:47:07)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO69818 | UK-909751 | processing | 10-22T21:45 | UK-TEATWL-MD-3SET-KTCHDISC | 1 | PP | PP | PP move assigned,draft |
+
