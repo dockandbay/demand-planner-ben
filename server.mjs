@@ -30270,22 +30270,32 @@ app.post('/api/client/commission/rows/:id/defer', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/client/commission/rows/:id/delete', async (req, res) => { try { const r = (await pool.query(`DELETE FROM planner.commission_rows WHERE id=$1 RETURNING run_id`, [req.params.id])).rows[0]; if (r) await cpRunSummary(r.run_id); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.444 (Ben 22-Oct-26: Mark paid "only needs to mark these orders as paid in the paid history, assume once bill is created it will be paid"):
+// marking a run paid is HORIZON-only (no Xero payment, nothing in Fulfil): run + rows status paid, rows copied to the paid history (migration 363;
+// replaces an earlier copy of the run). Creating the Xero bill does this too. Returns the paid-history row count (null before migration 363).
+async function cmMarkRunPaid(runId, paidRef, by) {
+  await pool.query(`UPDATE planner.commission_runs SET status='paid', paid_at=now(), paid_ref=coalesce($2, paid_ref) WHERE id=$1`, [runId, paidRef]);
+  await pool.query(`UPDATE planner.commission_rows SET status='paid' WHERE run_id=$1 AND status NOT IN ('exception','deferred')`, [runId]);   // v28.430: deferred rows stay deferred
+  try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [runId]);
+    return (await pool.query(`INSERT INTO planner.commission_paid_history (period, period_label, rep_group, customer, invoice_no, po_no, commissionable, rate_pct, commission_due, credit_note, status, paid_amount, notes, payment_code, source, run_id, created_by)
+          SELECT to_date(r.month || '-01','YYYY-MM-DD'), to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY'), g.name, cr.customer, coalesce(cr.invoice_ref, cr.order_ref), coalesce(cr.client_po, cr.order_ref), cr.commissionable, cr.rate, cr.commission, cr.credit_note_ref, 'paid', cr.net, cr.note,
+                 coalesce(cr.payment_code, to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY') || ' ' || g.name), 'horizon', r.id, $2
+            FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id JOIN planner.commission_rows cr ON cr.run_id=r.id
+           WHERE r.id=$1 AND cr.status NOT IN ('exception','deferred')`, [runId, by])).rowCount; }
+  catch (e) { if (!/does not exist/.test(e.message)) log500(e); return null; }
+}
 app.post('/api/client/commission/runs/:id/status', async (req, res) => {
   const st = String((req.body || {}).status || ''); if (!['open', 'finalised', 'paid'].includes(st)) return res.status(400).json({ error: 'status open|finalised|paid' });
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
     if (st === 'finalised') { const ex = (await pool.query(`SELECT count(*)::int n FROM planner.commission_rows WHERE run_id=$1 AND status='exception'`, [req.params.id])).rows[0].n; if (ex && !(req.body || {}).force) return res.status(409).json({ error: ex + ' exception row(s) still open — resolve them or finalise with force' });
       await pool.query(`UPDATE planner.commission_runs SET status='finalised', finalised_at=now(), finalised_by=$2 WHERE id=$1`, [req.params.id, req.me.email || null]); }
-    else if (st === 'paid') { await pool.query(`UPDATE planner.commission_runs SET status='paid', paid_at=now(), paid_ref=$2 WHERE id=$1`, [req.params.id, (req.body || {}).paid_ref || null]); await pool.query(`UPDATE planner.commission_rows SET status='paid' WHERE run_id=$1 AND status NOT IN ('exception','deferred')`, [req.params.id]); }   // v28.430: deferred rows stay deferred (carried into the next run)
+    else if (st === 'paid') { const hist = await cmMarkRunPaid(req.params.id, (req.body || {}).paid_ref || null, req.me.email || null);
+      await cpAudit(null, 'Commission run paid', run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); return res.json({ ok: true, history_rows: hist }); }   // v28.430: deferred rows stay deferred (carried into the next run)
     else await pool.query(`UPDATE planner.commission_runs SET status='open', finalised_at=NULL, finalised_by=NULL WHERE id=$1`, [req.params.id]);
     // v28.322 (Ben 13-Oct-26: "after we pay commissions we record them here"): a run marked Paid writes its rows to the paid history
     // (migration 363), replacing any earlier copy of the same run; reopening the run takes them out again. Before migration 363: skipped.
-    let hist = null;
-    try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]);   // v28.429: paid history cache
-      if (st === 'paid') hist = (await pool.query(`INSERT INTO planner.commission_paid_history (period, period_label, rep_group, customer, invoice_no, po_no, commissionable, rate_pct, commission_due, credit_note, status, paid_amount, notes, payment_code, source, run_id, created_by)
-          SELECT to_date(r.month || '-01','YYYY-MM-DD'), to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY'), g.name, cr.customer, coalesce(cr.invoice_ref, cr.order_ref), coalesce(cr.client_po, cr.order_ref), cr.commissionable, cr.rate, cr.commission, cr.credit_note_ref, 'paid', cr.net, cr.note,
-                 coalesce(cr.payment_code, to_char(to_date(r.month || '-01','YYYY-MM-DD'),'Mon-YY') || ' ' || g.name), 'horizon', r.id, $2
-            FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id JOIN planner.commission_rows cr ON cr.run_id=r.id
-           WHERE r.id=$1 AND cr.status NOT IN ('exception','deferred')`, [req.params.id, req.me.email || null])).rowCount; }
+    let hist = null;   // v28.444: reopen / finalise take the run out of the paid history; marking paid is cmMarkRunPaid
+    try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]); }
     catch (e) { if (!/does not exist/.test(e.message)) log500(e); }
     await cpAudit(null, 'Commission run ' + st, run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); res.json({ ok: true, history_rows: hist });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -30338,7 +30348,9 @@ app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
     const url = 'https://go.xero.com/AccountsPayable/' + (String(binv.Status) === 'DRAFT' ? 'Edit' : 'View') + '.aspx?InvoiceID=' + binv.InvoiceID;
     await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2, xero_bill_id=$3, xero_bill_url=$4, xero_bill_status=$5 WHERE id=$1`, [req.params.id, inv, binv.InvoiceID, url, String(binv.Status || billStatus).toLowerCase()]);
     await cpAudit(null, 'Commission bill ' + (linked ? 'linked' : 'created') + ' in Xero', inv + ' · ' + run.ccy + ' ' + total, req.me && req.me.email);
-    res.json({ ok: true, linked, attached, status: binv.Status, reference: inv, contact: xc.Name, total, currency: run.ccy, xero_id: binv.InvoiceID, url });
+    // v28.444 (Ben): a bill means it will be paid, so the run is marked paid and its orders go to the paid history (HORIZON only)
+    let paidHist = null; if (run.status !== 'paid') { paidHist = await cmMarkRunPaid(req.params.id, inv, (req.me && req.me.email) || null); await cpAudit(null, 'Commission run paid', run.month + ' · ' + run.group_name + ' · on Xero bill ' + inv + (paidHist != null ? ' · ' + paidHist + ' row(s) to paid history' : ''), req.me && req.me.email); }
+    res.json({ ok: true, marked_paid: run.status !== 'paid', history_rows: paidHist, linked, attached, status: binv.Status, reference: inv, contact: xc.Name, total, currency: run.ccy, xero_id: binv.InvoiceID, url });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
@@ -30599,6 +30611,18 @@ app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
   } catch (e) { log500(e); res.status(500).send('statement error: ' + e.message); }
 });
 
+// v28.444 (Ben 22-Oct-26: "we need to know which items are not in Fulfil, and would be good to have a link to the Fulfil order in this view"):
+// the run's orders looked up in the ACTIVE Fulfil (the one Push to Fulfil writes to) by sale reference, then by SO number. Read only.
+app.get('/api/client/commission/runs/:id/fulfil-orders', async (req, res) => {
+  try { const refs = [...new Set((await pool.query(`SELECT DISTINCT order_ref FROM planner.commission_rows WHERE run_id=$1 AND coalesce(order_ref,'')<>''`, [req.params.id])).rows.map(r => r.order_ref))];
+    const env = await activeFulfilEnv(), cfg = fulfilConfigFor(env); if (!cfg.configured) return res.json({ env, configured: false, orders: {}, missing: refs });
+    const found = {}, F = ['id', 'number', 'reference', 'state'];
+    for (let i = 0; i < refs.length; i += 200) (await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['reference', 'in', refs.slice(i, i + 200)]], 0, 500, null, F]) || []).forEach(x => { if (x.reference && !found[x.reference]) found[x.reference] = x; });
+    const rest = refs.filter(r => !found[r]); for (let i = 0; i < rest.length; i += 200) (await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['number', 'in', rest.slice(i, i + 200)]], 0, 500, null, F]) || []).forEach(x => { if (x.number && !found[x.number]) found[x.number] = x; });
+    const base = 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/sale.sale/', orders = {};
+    Object.keys(found).forEach(k => { const x = found[k]; orders[k] = { id: x.id, number: x.number, state: x.state, url: base + x.id }; });
+    res.set('Cache-Control', 'no-store').json({ env, configured: true, orders, missing: refs.filter(r => !orders[r]) });
+  } catch (e) { log500(e); res.status(502).json({ error: 'Fulfil not read: ' + e.message }); } });
 // v28.334 (Ben 13-Oct-26): write the commission back to Fulfil. Sale metafield COMMISSIONS_ACTUAL (Number / Decimal; created 13-Oct-26: live
 // metafield.field 98, sandbox 99) = the commission actually paid on that order: the sum of its net across every FINALISED / PAID run (agent
 // currency). Upserts one metafield.value per sale (resource sale.sale,<id>); orders not in Fulfil (Xero-era) are skipped. {dry:true} = plan only.

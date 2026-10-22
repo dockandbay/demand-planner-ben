@@ -68,6 +68,8 @@ sources:
   - server.mjs :: /api/client/commission/unassigned
   - supply/inject.html :: cpAgentRules
   - supply/inject.html :: commUnassigned
+  - server.mjs :: cmMarkRunPaid
+  - server.mjs :: /api/client/commission/runs/:id/fulfil-orders
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
@@ -194,7 +196,7 @@ fingerprints:
   server.mjs::cpSalesTeam: fc161fffe290
   server.mjs::/api/client/portal-orders/:id: f994a90fd00a
   server.mjs::/api/client/commission/runs/build: e7e271814b3f
-  server.mjs::/api/client/commission/runs/:id/xero-bill: ffa5ae146511
+  server.mjs::/api/client/commission/runs/:id/xero-bill: 22dcf3a3b99a
   server.mjs::cpAllowedOrderKeys: b6d23180e894
   server.mjs::cpPortalThreads: 84a27797a150
   server.mjs::cpOrderThreadFind: 00c107366099
@@ -256,7 +258,9 @@ fingerprints:
   server.mjs::/api/client/commission/unassigned: 8d9427736bc0
   supply/inject.html::cpAgentRules: 91d0ee7d05ee
   supply/inject.html::commUnassigned: bb2bb4e07711
-verified_version: v28.442
+  server.mjs::cmMarkRunPaid: 36b858da84b5
+  server.mjs::/api/client/commission/runs/:id/fulfil-orders: 0ed862a0ad83
+verified_version: v28.444
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -541,6 +545,10 @@ verified_version: v28.442
 - Tag an order to an agent (v28.433, Ben 21-Oct-26: "search fulfil for a sales order to add to an agent ... Tag it ... in orders"; chose HORIZON tag + optional write to Fulfil): COMMISSIONS > Orders > Tag an order to an agent. Search Fulfil sale orders (read only, not cancelled, newest first, 40 max) by SO number, order reference or customer; each hit shows its client PO, the Fulfil agent code (metafield agent_code on sale.sale, type char, value_char; 145 live orders tagged 21-Oct-26, all written by the Shopify sync bot: appelman, ideco, harpergroup, TJ, patrick, roadrunners, harpers) mapped to the agent by rep_groups.fulfil_codes, and any HORIZON tag. Save tag = a commission order override on the order's reference, else its SO number (the key cmEngine matches): it credits that agent in runs and makes a custom / co-brand order count in weekly demand. Also set in Fulfil (own click, then an inline confirm naming the code, the order and live Fulfil) writes agent_code = the agent's FIRST Fulfil code on the sale order (update the value row, else create one), reads it back (ok only when it matches), sets order_lines.agent_code for that order and logs a client audit row; refused when the agent has no Fulfil code (e.g. TR Partners, 21-Oct-26). (source: server.mjs :: /api/client/commission/orders/search, /api/client/commission/orders/fulfil-tag; supply/inject.html :: commTagSearch)
 
 - Commission month-end and Fulfil write-back (v28.334, Ben 13-Oct-26): a Faire-channel order of a customer on an EARNING agent's list is a month-end decision, not an automatic exclusion: it sits on that agent as an exception row at zero (not in the agent's total, counted on the Orders tile as "Faire orders to decide"), listed on Exceptions with Include (order override to that agent) or Exclude (order override to the Faire agent). Push to Fulfil (finalised / paid run; Fulfil writes gated by FULFIL_LIVE_WRITES on live): sale metafield COMMISSIONS_ACTUAL (Number / Decimal on sale.sale, created 13-Oct-26: live metafield.field 98, sandbox 99) = the order's commission actually paid: the sum of net over every finalised / paid run of that agent; one metafield.value per sale (updated, never duplicated); orders not in Fulfil (Xero-era) are skipped; the run shows the push status. (source: server.mjs :: cmEngine (decide), /api/client/commission/runs/:id/push-fulfil; supply/inject.html :: commExceptions cx-fd)
+
+## Commission run paid status and Fulfil links (v28.444)
+- Ben 22-Oct-26: Mark paid "only needs to mark these orders as paid in the paid history, assume once bill is created it will be paid". Mark paid is HORIZON only: the run and its rows become paid and the rows are copied to the paid history (replacing an earlier copy of the run); nothing is paid or changed in Xero. Creating the commission bill in Xero (draft or approved) now does the same straight away, with the bill number as the paid reference. Reopening or re-finalising a run takes it out of the paid history. Deferred and exception rows are never marked paid. (source: server.mjs :: cmMarkRunPaid, /api/client/commission/runs/:id/status, /api/client/commission/runs/:id/xero-bill)
+- Ben: "we need to know which items are not in Fulfil and would be good to have a link to the Fulfil order in this view". The run shows a Fulfil column: each order looked up in the active Fulfil (the one Push to Fulfil writes to; sandbox on the sandbox) by sale reference, then SO number, as a link to the sales order, or "not in Fulfil" (Xero-era or Markettime orders, which Push to Fulfil skips). After a push the message lists the orders not in Fulfil. (source: server.mjs :: /api/client/commission/runs/:id/fulfil-orders)
 
 ## Agent rules and unassigned orders (v28.442)
 - Ben 22-Oct-26: "not every wholesale order has an agent, but we can create some rules to surface reports in horizon > client > commission to check orders without agents that meet conditions like 'country US, state FL, no agent - could be appelman'". Layout A chosen: CLIENT > Commissions > Unassigned plus CLIENT > Config > Agent rules; conditions: country + state, channel / store, ZIP / postcode prefix, customer name / email domain.
