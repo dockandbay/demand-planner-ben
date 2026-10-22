@@ -1,0 +1,639 @@
+{
+ "updatedAt": "2026-09-30T11:20:39.201Z",
+ "createdAt": "2026-09-29T11:22:13.190Z",
+ "id": "lztERpCZ72lSQx6V",
+ "name": "Fulfil | Request (sub-workflow)",
+ "description": "Shared Fulfil caller: routes to PROD or SANDBOX credential by tenant name, blocks any PROD write unless allow_prod_write=true, retries and fails loudly.",
+ "active": true,
+ "isArchived": false,
+ "nodes": [
+  {
+   "id": "1aaef65f-1c8e-4303-9361-23e5449d96c6",
+   "name": "Fulfil request input",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    300
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "tenant",
+       "type": "string"
+      },
+      {
+       "name": "method",
+       "type": "string"
+      },
+      {
+       "name": "path",
+       "type": "string"
+      },
+      {
+       "name": "body",
+       "type": "any"
+      },
+      {
+       "name": "allow_prod_write",
+       "type": "boolean"
+      },
+      {
+       "name": "tag",
+       "type": "any"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "eec14487-31d9-4a07-bd4a-b6a07094f082",
+   "name": "Validate + write guard",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    300
+   ],
+   "parameters": {
+    "mode": "runOnceForEachItem",
+    "language": "javaScript",
+    "jsCode": "const tenant = String($json.tenant || '').toUpperCase();\nif (!['PROD', 'SANDBOX'].includes(tenant)) throw new Error('tenant must be PROD or SANDBOX (got \"' + $json.tenant + '\")');\nconst method = String($json.method || '').toUpperCase();\nif (!['PUT', 'POST'].includes(method)) throw new Error('method must be PUT or POST (got \"' + method + '\")');\nconst path = String($json.path || '');\nif (!path.startsWith('/model/')) throw new Error('path must start with /model/ (got \"' + path + '\")');\n// In Fulfil, PUT .../search_read and .../fields_get are READS. Everything else writes.\nconst isRead = method === 'PUT' && /\\/(search_read|fields_get)$/.test(path);\nif (tenant === 'PROD' && !isRead && $json.allow_prod_write !== true) {\n  throw new Error('Blocked: PROD write ' + method + ' ' + path + ' without allow_prod_write=true');\n}\nreturn { json: { tenant, method, path, body: $json.body === undefined ? [] : $json.body, isRead, tag: $json.tag ?? null } };"
+   }
+  },
+  {
+   "id": "29a76a56-ec69-430c-a9e6-8850689cd6f7",
+   "name": "Route by tenant",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.4,
+   "position": [
+    480,
+    300
+   ],
+   "parameters": {
+    "mode": "rules",
+    "rules": {
+     "values": [
+      {
+       "outputKey": "PROD",
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.tenant }}",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          },
+          "rightValue": "PROD"
+         }
+        ],
+        "combinator": "and"
+       }
+      },
+      {
+       "outputKey": "SANDBOX",
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.tenant }}",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          },
+          "rightValue": "SANDBOX"
+         }
+        ],
+        "combinator": "and"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "d799fecc-e349-458d-bc8b-99acb851f93a",
+   "name": "Fulfil PROD (dockandbay.fulfil.io)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    720,
+    200
+   ],
+   "parameters": {
+    "method": "={{ $json.method }}",
+    "url": "=https://dockandbay.fulfil.io/api/v2{{ $json.path }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "response": {
+      "response": {
+       "fullResponse": true
+      }
+     },
+     "batching": {
+      "batch": {
+       "batchSize": 3,
+       "batchInterval": 1000
+      }
+     },
+     "timeout": 120000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "retryOnFail": false,
+   "notes": "No auto-retry (30 Sept 2026): a retry re-sent POST writes that had already landed. A failed call stops the run; the next run is idempotent."
+  },
+  {
+   "id": "991491f1-ca2e-4e31-853c-ca352daf3257",
+   "name": "Shape response",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    960,
+    300
+   ],
+   "parameters": {
+    "mode": "runOnceForEachItem",
+    "language": "javaScript",
+    "jsCode": "const req = $('Validate + write guard').item.json;\nreturn { json: { ok: true, status: $json.statusCode, tenant: req.tenant, method: req.method, path: req.path, tag: req.tag, data: $json.body } };"
+   }
+  },
+  {
+   "id": "c0412e77-0e67-42be-a0b6-470ce65f4698",
+   "name": "Fulfil SANDBOX (dockandbay-sandbox.fulfil.io)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    720,
+    400
+   ],
+   "parameters": {
+    "method": "={{ $json.method }}",
+    "url": "=https://dockandbay-sandbox.fulfil.io/api/v2{{ $json.path }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}",
+    "options": {
+     "response": {
+      "response": {
+       "fullResponse": true
+      }
+     },
+     "batching": {
+      "batch": {
+       "batchSize": 3,
+       "batchInterval": 1000
+      }
+     },
+     "timeout": 120000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000
+  }
+ ],
+ "connections": {
+  "Fulfil request input": {
+   "main": [
+    [
+     {
+      "node": "Validate + write guard",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Validate + write guard": {
+   "main": [
+    [
+     {
+      "node": "Route by tenant",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Route by tenant": {
+   "main": [
+    [
+     {
+      "node": "Fulfil PROD (dockandbay.fulfil.io)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Fulfil SANDBOX (dockandbay-sandbox.fulfil.io)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fulfil PROD (dockandbay.fulfil.io)": {
+   "main": [
+    [
+     {
+      "node": "Shape response",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fulfil SANDBOX (dockandbay-sandbox.fulfil.io)": {
+   "main": [
+    [
+     {
+      "node": "Shape response",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "availableInMCP": true,
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7",
+  "saveDataSuccessExecution": "none",
+  "saveManualExecutions": false,
+  "saveDataErrorExecution": "all"
+ },
+ "staticData": null,
+ "meta": {
+  "aiBuilderAssisted": true,
+  "builderVariant": "mcp"
+ },
+ "nodeGroups": [],
+ "pinData": null,
+ "versionId": "4f00a4c3-8c22-4f9a-b8ba-9b57950cc022",
+ "activeVersionId": "4f00a4c3-8c22-4f9a-b8ba-9b57950cc022",
+ "versionCounter": 3,
+ "triggerCount": 0,
+ "shared": [
+  {
+   "updatedAt": "2026-09-29T11:22:13.190Z",
+   "createdAt": "2026-09-29T11:22:13.190Z",
+   "role": "workflow:owner",
+   "workflowId": "lztERpCZ72lSQx6V",
+   "projectId": "LKxlGONeBBGweZ8v",
+   "project": {
+    "updatedAt": "2026-06-02T22:14:29.148Z",
+    "createdAt": "2026-06-02T22:06:04.720Z",
+    "id": "LKxlGONeBBGweZ8v",
+    "name": "Diviyaj Ayengia <ops@dockandbay.com>",
+    "type": "personal",
+    "icon": null,
+    "description": null,
+    "creatorId": "f63d6529-519b-468a-b221-33a86d9fd6fd"
+   }
+  }
+ ],
+ "tags": [],
+ "activeVersion": {
+  "updatedAt": "2026-09-30T11:20:39.202Z",
+  "createdAt": "2026-09-30T11:20:39.202Z",
+  "versionId": "4f00a4c3-8c22-4f9a-b8ba-9b57950cc022",
+  "workflowId": "lztERpCZ72lSQx6V",
+  "nodes": [
+   {
+    "id": "1aaef65f-1c8e-4303-9361-23e5449d96c6",
+    "name": "Fulfil request input",
+    "type": "n8n-nodes-base.executeWorkflowTrigger",
+    "typeVersion": 1.2,
+    "position": [
+     0,
+     300
+    ],
+    "parameters": {
+     "inputSource": "workflowInputs",
+     "workflowInputs": {
+      "values": [
+       {
+        "name": "tenant",
+        "type": "string"
+       },
+       {
+        "name": "method",
+        "type": "string"
+       },
+       {
+        "name": "path",
+        "type": "string"
+       },
+       {
+        "name": "body",
+        "type": "any"
+       },
+       {
+        "name": "allow_prod_write",
+        "type": "boolean"
+       },
+       {
+        "name": "tag",
+        "type": "any"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "eec14487-31d9-4a07-bd4a-b6a07094f082",
+    "name": "Validate + write guard",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     240,
+     300
+    ],
+    "parameters": {
+     "mode": "runOnceForEachItem",
+     "language": "javaScript",
+     "jsCode": "const tenant = String($json.tenant || '').toUpperCase();\nif (!['PROD', 'SANDBOX'].includes(tenant)) throw new Error('tenant must be PROD or SANDBOX (got \"' + $json.tenant + '\")');\nconst method = String($json.method || '').toUpperCase();\nif (!['PUT', 'POST'].includes(method)) throw new Error('method must be PUT or POST (got \"' + method + '\")');\nconst path = String($json.path || '');\nif (!path.startsWith('/model/')) throw new Error('path must start with /model/ (got \"' + path + '\")');\n// In Fulfil, PUT .../search_read and .../fields_get are READS. Everything else writes.\nconst isRead = method === 'PUT' && /\\/(search_read|fields_get)$/.test(path);\nif (tenant === 'PROD' && !isRead && $json.allow_prod_write !== true) {\n  throw new Error('Blocked: PROD write ' + method + ' ' + path + ' without allow_prod_write=true');\n}\nreturn { json: { tenant, method, path, body: $json.body === undefined ? [] : $json.body, isRead, tag: $json.tag ?? null } };"
+    }
+   },
+   {
+    "id": "29a76a56-ec69-430c-a9e6-8850689cd6f7",
+    "name": "Route by tenant",
+    "type": "n8n-nodes-base.switch",
+    "typeVersion": 3.4,
+    "position": [
+     480,
+     300
+    ],
+    "parameters": {
+     "mode": "rules",
+     "rules": {
+      "values": [
+       {
+        "outputKey": "PROD",
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "strict"
+         },
+         "conditions": [
+          {
+           "leftValue": "={{ $json.tenant }}",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           },
+           "rightValue": "PROD"
+          }
+         ],
+         "combinator": "and"
+        }
+       },
+       {
+        "outputKey": "SANDBOX",
+        "conditions": {
+         "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "strict"
+         },
+         "conditions": [
+          {
+           "leftValue": "={{ $json.tenant }}",
+           "operator": {
+            "type": "string",
+            "operation": "equals"
+           },
+           "rightValue": "SANDBOX"
+          }
+         ],
+         "combinator": "and"
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "d799fecc-e349-458d-bc8b-99acb851f93a",
+    "name": "Fulfil PROD (dockandbay.fulfil.io)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.4,
+    "position": [
+     720,
+     200
+    ],
+    "parameters": {
+     "method": "={{ $json.method }}",
+     "url": "=https://dockandbay.fulfil.io/api/v2{{ $json.path }}",
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "contentType": "json",
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.body) }}",
+     "options": {
+      "response": {
+       "response": {
+        "fullResponse": true
+       }
+      },
+      "batching": {
+       "batch": {
+        "batchSize": 3,
+        "batchInterval": 1000
+       }
+      },
+      "timeout": 120000
+     }
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "j9m8FVwKL7nvn8Lk",
+      "name": "Fulfil PROD"
+     }
+    },
+    "retryOnFail": false,
+    "notes": "No auto-retry (30 Sept 2026): a retry re-sent POST writes that had already landed. A failed call stops the run; the next run is idempotent."
+   },
+   {
+    "id": "991491f1-ca2e-4e31-853c-ca352daf3257",
+    "name": "Shape response",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     960,
+     300
+    ],
+    "parameters": {
+     "mode": "runOnceForEachItem",
+     "language": "javaScript",
+     "jsCode": "const req = $('Validate + write guard').item.json;\nreturn { json: { ok: true, status: $json.statusCode, tenant: req.tenant, method: req.method, path: req.path, tag: req.tag, data: $json.body } };"
+    }
+   },
+   {
+    "id": "c0412e77-0e67-42be-a0b6-470ce65f4698",
+    "name": "Fulfil SANDBOX (dockandbay-sandbox.fulfil.io)",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.4,
+    "position": [
+     720,
+     400
+    ],
+    "parameters": {
+     "method": "={{ $json.method }}",
+     "url": "=https://dockandbay-sandbox.fulfil.io/api/v2{{ $json.path }}",
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendBody": true,
+     "contentType": "json",
+     "specifyBody": "json",
+     "jsonBody": "={{ JSON.stringify($json.body) }}",
+     "options": {
+      "response": {
+       "response": {
+        "fullResponse": true
+       }
+      },
+      "batching": {
+       "batch": {
+        "batchSize": 3,
+        "batchInterval": 1000
+       }
+      },
+      "timeout": 120000
+     }
+    },
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "EDrfRZJRHfhBe2fB",
+      "name": "Fulfil SANDBOX"
+     }
+    },
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000
+   }
+  ],
+  "connections": {
+   "Fulfil request input": {
+    "main": [
+     [
+      {
+       "node": "Validate + write guard",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Validate + write guard": {
+    "main": [
+     [
+      {
+       "node": "Route by tenant",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Route by tenant": {
+    "main": [
+     [
+      {
+       "node": "Fulfil PROD (dockandbay.fulfil.io)",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     [
+      {
+       "node": "Fulfil SANDBOX (dockandbay-sandbox.fulfil.io)",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Fulfil PROD (dockandbay.fulfil.io)": {
+    "main": [
+     [
+      {
+       "node": "Shape response",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Fulfil SANDBOX (dockandbay-sandbox.fulfil.io)": {
+    "main": [
+     [
+      {
+       "node": "Shape response",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "nodeGroups": [],
+  "authors": "Diviyaj Ayengia",
+  "name": null,
+  "description": null,
+  "autosaved": false,
+  "workflowPublishHistory": [
+   {
+    "createdAt": "2026-09-30T11:20:39.236Z",
+    "id": 261,
+    "workflowId": "lztERpCZ72lSQx6V",
+    "versionId": "4f00a4c3-8c22-4f9a-b8ba-9b57950cc022",
+    "event": "deactivated",
+    "userId": "f63d6529-519b-468a-b221-33a86d9fd6fd"
+   },
+   {
+    "createdAt": "2026-09-30T11:20:39.250Z",
+    "id": 262,
+    "workflowId": "lztERpCZ72lSQx6V",
+    "versionId": "4f00a4c3-8c22-4f9a-b8ba-9b57950cc022",
+    "event": "activated",
+    "userId": "f63d6529-519b-468a-b221-33a86d9fd6fd"
+   }
+  ]
+ }
+}

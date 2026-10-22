@@ -1,0 +1,81 @@
+{
+ "workflowId": {
+  "__rl": true,
+  "mode": "id",
+  "value": "lztERpCZ72lSQx6V",
+  "cachedResultName": "Fulfil | Request (sub-workflow)"
+ },
+ "workflowInputs": {
+  "mappingMode": "defineBelow",
+  "matchingColumns": [],
+  "attemptToConvertTypes": false,
+  "convertFieldsToString": false,
+  "schema": [
+   {
+    "id": "tenant",
+    "displayName": "tenant",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "canBeUsedToMatch": true,
+    "type": "string"
+   },
+   {
+    "id": "method",
+    "displayName": "method",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "canBeUsedToMatch": true,
+    "type": "string"
+   },
+   {
+    "id": "path",
+    "displayName": "path",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "canBeUsedToMatch": true,
+    "type": "string"
+   },
+   {
+    "id": "body",
+    "displayName": "body",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "canBeUsedToMatch": true,
+    "type": "any"
+   },
+   {
+    "id": "allow_prod_write",
+    "displayName": "allow_prod_write",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "canBeUsedToMatch": true,
+    "type": "boolean"
+   },
+   {
+    "id": "tag",
+    "displayName": "tag",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "canBeUsedToMatch": true,
+    "type": "any"
+   }
+  ],
+  "value": {
+   "tenant": "={{ $json.tenant }}",
+   "method": "={{ $json.method }}",
+   "path": "={{ $json.path }}",
+   "body": "={{ $json.body }}",
+   "allow_prod_write": "={{ $json.allow_prod_write }}",
+   "tag": "={{ $json.tag }}"
+  }
+ },
+ "options": {
+  "waitForSubWorkflow": true
+ }
+}

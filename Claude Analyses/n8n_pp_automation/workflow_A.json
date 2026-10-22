@@ -1,0 +1,447 @@
+{
+ "name": "Ops | Order health check (hourly) [SANDBOX]",
+ "nodes": [
+  {
+   "id": "8ac638a5-aa67-52ca-af4f-6608fc3d74fd",
+   "name": "About",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -40,
+    -300
+   ],
+   "parameters": {
+    "content": "## Order health check (hourly)\nRead only. Flags orders on integrated channels (Shopify, Amazon, Faire, TikTok) older than `graceMinutes` that are draft / quotation / failed, confirmed with no shipment, or carry an open exception. Emails only NEW problems (static data remembers what was sent).\n\nBuilt by Claude for Ben 23-Oct-26. Starts on SANDBOX. To go live: Settings tenant/baseUrl = PROD and switch the 3 read nodes to the Fulfil PROD credential.",
+    "width": 520,
+    "height": 300
+   }
+  },
+  {
+   "id": "03fbd56d-d392-51e1-8820-5847966ca3ba",
+   "name": "Hourly (:52)",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "52 * * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "93b1be6c-e332-5d6e-955a-f770e364d649",
+   "name": "Settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "raw",
+    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"lookbackHours\": 48,\n  \"graceMinutes\": 30,\n  \"integratedSources\": [\n    \"cms_shopify\",\n    \"amazon_mws\",\n    \"faire\",\n    \"tiktok\"\n  ],\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"emailWhenClean\": false\n}",
+    "options": {}
+   }
+  },
+  {
+   "id": "c7d43b0d-6dd4-5711-8007-d1141b96f78d",
+   "name": "Read channels",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/sale.channel",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "name,source"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "e6445fe2-aada-5a83-acfe-588fc1e68544",
+   "name": "Read recent orders",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/sale.sale",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "number,reference,state,channel,create_date,shipments"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({hours: $('Settings').first().json.lookbackHours}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')],[\"state\",\"in\",[\"draft\",\"quotation\",\"failed\",\"confirmed\"]]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "58e23747-f137-56fe-85d5-7ef8af5c236e",
+   "name": "Read open exceptions",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    880,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/channel.exception",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "sale,log"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({hours: $('Settings').first().json.lookbackHours}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')],[\"is_resolved\",\"=\",false]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "97c540ae-1c5b-5c84-badb-ee51f997b4f4",
+   "name": "Find problems",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1100,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst channels = {};\nfor (const c of $('Read channels').all()) channels[c.json.id] = c.json;\nconst excBySale = {};\nfor (const e of $('Read open exceptions').all()) {\n  if (!e.json.sale) continue;\n  (excBySale[e.json.sale] = excBySale[e.json.sale] || []).push(String(e.json.log || e.json.rec_name || '').slice(0, 160));\n}\nconst now = Date.now();\nconst graceMs = S.graceMinutes * 60000;\nconst problems = [];\nfor (const it of $('Read recent orders').all()) {\n  const s = it.json;\n  const ch = channels[s.channel] || {};\n  if (!S.integratedSources.includes(ch.source)) continue;\n  const created = Date.parse(String(s.create_date && s.create_date.iso_string || s.create_date) + 'Z');\n  if (isNaN(created) || now - created < graceMs) continue;\n  let reason = null;\n  if (['draft', 'quotation', 'failed'].includes(s.state)) reason = s.state;\n  else if (s.state === 'confirmed' && !(s.shipments || []).length) reason = 'confirmed, no shipment';\n  if (excBySale[s.id] && !reason) reason = 'open exception';\n  if (!reason) continue;\n  problems.push({ id: s.id, number: s.number || '', reference: s.reference || '', channel: ch.name || String(s.channel),\n                  state: s.state, reason, created: new Date(created).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',\n                  exception: (excBySale[s.id] || []).join(' | ') });\n}\n// Email only problems not already emailed (kept in workflow static data; resolved ones drop out).\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst current = {};\nconst fresh = [];\nfor (const p of problems) {\n  current[p.id] = store.seen[p.id] || new Date().toISOString();\n  if (!store.seen[p.id]) fresh.push(p);\n}\nstore.seen = current;\nreturn [{ json: { tenant: S.tenant, fresh, outstanding: problems.length, sendEmail: fresh.length > 0 || S.emailWhenClean,\n                  scanned: $('Read recent orders').all().length } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "ae4b6315-27ad-5b04-b97c-fdb3159a9ec1",
+   "name": "New problems?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1320,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "abee5c25-341e-54da-b786-9096b786db58",
+       "leftValue": "={{ $json.sendEmail }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "9c2a7a8f-797c-5f57-a40d-63347e2bfd42",
+   "name": "Build email",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1540,
+    -100
+   ],
+   "parameters": {
+    "jsCode": "\nconst d = $json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\nconst rows = d.fresh.map(p => `<tr><td>${esc(p.number)}</td><td>${esc(p.reference)}</td><td>${esc(p.channel)}</td><td>${esc(p.reason)}</td><td>${esc(p.created)}</td><td>${esc(p.exception)}</td></tr>`).join('');\nconst html = `<p><b>${d.fresh.length} new order(s) not processed</b> (${d.outstanding} outstanding in total, tenant ${esc(d.tenant)}). Orders older than the grace period on integrated channels that are draft, quotation, failed, confirmed without a shipment, or carrying an open exception.</p>\n<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:12px\"><tr><th>Order</th><th>Reference</th><th>Channel</th><th>Problem</th><th>Created</th><th>Exception</th></tr>${rows}</table>`;\nreturn [{ json: { subject: `Orders not processed (${d.tenant}): ${d.fresh.length} new, ${d.outstanding} outstanding`, html } }];\n"
+   }
+  },
+  {
+   "id": "da771cab-ad8b-5dfd-96f3-cf58d599dcb5",
+   "name": "Email unprocessed orders",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.2,
+   "position": [
+    1760,
+    -100
+   ],
+   "parameters": {
+    "sendTo": "={{ $('Settings').first().json.alertEmailTo }}",
+    "subject": "={{ $json.subject }}",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "gmailOAuth2": {
+     "id": "G2zKu9oStGcK5OKK",
+     "name": "OPS Email"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Hourly (:52)": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Settings": {
+   "main": [
+    [
+     {
+      "node": "Read channels",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read channels": {
+   "main": [
+    [
+     {
+      "node": "Read recent orders",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read recent orders": {
+   "main": [
+    [
+     {
+      "node": "Read open exceptions",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read open exceptions": {
+   "main": [
+    [
+     {
+      "node": "Find problems",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Find problems": {
+   "main": [
+    [
+     {
+      "node": "New problems?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "New problems?": {
+   "main": [
+    [
+     {
+      "node": "Build email",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Build email": {
+   "main": [
+    [
+     {
+      "node": "Email unprocessed orders",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7"
+ }
+}

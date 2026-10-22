@@ -1,0 +1,988 @@
+{
+ "name": "Fulfil | PP prepack BOM flip (hourly) [SANDBOX]",
+ "nodes": [
+  {
+   "id": "8ac638a5-aa67-52ca-af4f-6608fc3d74fd",
+   "name": "About",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -40,
+    -360
+   ],
+   "parameters": {
+    "content": "## PP prepack BOM flip (hourly)\nFulfil always explodes a kit with its lowest-sequence BOM, so each kit has a '1 x PP' BOM and a singles BOM; this sets which one is sequence 10 from PP stock at the kit's market warehouse (min `minPP`). Stock is derived from stock moves (live location-context quantities read 0 over the API).\n\nSafety: `dryRun` true = preview email only. Writes go through 'Fulfil | Request (sub-workflow)', which blocks PROD writes unless `allowProdWrite` is true. Every write is read back and emailed with old/new sequence (the revert record). One-time setup of new kits is NOT done here (reported only).\n\nBuilt by Claude for Ben 23-Oct-26, replaces the local pp_bom_flip.py run. Starts on SANDBOX. Go-live (Diviyaj): Settings tenant/baseUrl = PROD, read nodes to Fulfil PROD credential, dryRun false, allowProdWrite true.",
+    "width": 600,
+    "height": 360
+   }
+  },
+  {
+   "id": "eb730fa3-0433-5536-a8c0-0614dff6bbb9",
+   "name": "Hourly (:47)",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "47 * * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "93b1be6c-e332-5d6e-955a-f770e364d649",
+   "name": "Settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "raw",
+    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"dryRun\": true,\n  \"allowProdWrite\": false,\n  \"minPP\": 1,\n  \"markets\": {\n    \"UK\": [\n      \"UKILG\"\n    ],\n    \"US\": [\n      \"USGENEVA_STD\",\n      \"USGENEVA-STD\"\n    ],\n    \"EU\": [\n      \"EUIFUL\"\n    ],\n    \"AU\": [\n      \"AUCOGHLANS\"\n    ]\n  },\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"alwaysEmailPreview\": false\n}",
+    "options": {}
+   }
+  },
+  {
+   "id": "2c670e09-4fda-5da2-836f-be8bb189e75e",
+   "name": "Prepack map",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "jsCode": "const map = [{\"pp\": \"PP-TEATWL-MD-3SET-FINDIN\", \"set\": \"TEATWL-MD-3SET-FINDIN\"}, {\"pp\": \"PP-TEATWL-MD-3SET-KTCHDISC\", \"set\": \"TEATWL-MD-3SET-KTCHDISC\"}, {\"pp\": \"PP-TEATWL-MD-3SET-STRAWFZ\", \"set\": \"TEATWL-MD-3SET-STRAWFZ\"}, {\"pp\": \"PP-TEATWL-MD-3SET-TART\", \"set\": \"TEATWL-MD-3SET-TART\"}, {\"pp\": \"PP-TEATWL-MD-5SET-CULDEL\", \"set\": \"TEATWL-MD-5SET-CULDEL\"}, {\"pp\": \"PP-TEATWL-MD-5SET-HOST\", \"set\": \"TEATWL-MD-5SET-HOST\"}, {\"pp\": \"PP-TEATWL-MD-5SET-PICKY\", \"set\": \"TEATWL-MD-5SET-PICKY\"}, {\"pp\": \"PP-TEATWL-MD-6SET-AFTPTY\", \"set\": \"TEATWL-MD-6SET-AFTPTY\"}, {\"pp\": \"PP-TEATWL-MD-6SET-FRTCTL\", \"set\": \"TEATWL-MD-6SET-FRTCTL\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SET-BLUE\", \"set\": \"TOWLB-CAB-LG-4SET-BLUE\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SET-ORANGE\", \"set\": \"TOWLB-CAB-LG-4SET-ORANGE\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SET-PINK\", \"set\": \"TOWLB-CAB-LG-4SET-PINK\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETA-R\", \"set\": \"TOWLB-CAB-LG-4SETA-R\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETE-R\", \"set\": \"TOWLB-CAB-LG-4SETE-R\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETF-R\", \"set\": \"TOWLB-CAB-LG-4SETF-R\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETG\", \"set\": \"TOWLB-CAB-LG-4SETG\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETH\", \"set\": \"TOWLB-CAB-LG-4SETH\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETK\", \"set\": \"TOWLB-CAB-LG-4SETK\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETL\", \"set\": \"TOWLB-CAB-LG-4SETL\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETM\", \"set\": \"TOWLB-CAB-LG-4SETM\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETN\", \"set\": \"TOWLB-CAB-LG-4SETN\"}, {\"pp\": \"PP-TOWLB-CAB-LG-4SETO\", \"set\": \"TOWLB-CAB-LG-4SETO\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SET-BLUE\", \"set\": \"TOWLB-CAB-LG-6SET-BLUE\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SET-PINK\", \"set\": \"TOWLB-CAB-LG-6SET-PINK\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SET-R\", \"set\": \"TOWLB-CAB-LG-6SET-R\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SETI\", \"set\": \"TOWLB-CAB-LG-6SETI\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SETJ\", \"set\": \"TOWLB-CAB-LG-6SETJ\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SETK\", \"set\": \"TOWLB-CAB-LG-6SETK\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SETL\", \"set\": \"TOWLB-CAB-LG-6SETL\"}, {\"pp\": \"PP-TOWLB-CAB-LG-6SETM\", \"set\": \"TOWLB-CAB-LG-6SETM\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SET-BLUE\", \"set\": \"TOWLB-CAB-XL-4SET-BLUE\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SET-ORANGE\", \"set\": \"TOWLB-CAB-XL-4SET-ORANGE\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SET-PINK\", \"set\": \"TOWLB-CAB-XL-4SET-PINK\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETA-R\", \"set\": \"TOWLB-CAB-XL-4SETA-R\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETE-R\", \"set\": \"TOWLB-CAB-XL-4SETE-R\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETF-R\", \"set\": \"TOWLB-CAB-XL-4SETF-R\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETG\", \"set\": \"TOWLB-CAB-XL-4SETG\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETH\", \"set\": \"TOWLB-CAB-XL-4SETH\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETK\", \"set\": \"TOWLB-CAB-XL-4SETK\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETL\", \"set\": \"TOWLB-CAB-XL-4SETL\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETM\", \"set\": \"TOWLB-CAB-XL-4SETM\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETN\", \"set\": \"TOWLB-CAB-XL-4SETN\"}, {\"pp\": \"PP-TOWLB-CAB-XL-4SETO\", \"set\": \"TOWLB-CAB-XL-4SETO\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SET-BLUE\", \"set\": \"TOWLB-CAB-XL-6SET-BLUE\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SET-PINK\", \"set\": \"TOWLB-CAB-XL-6SET-PINK\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SET-R\", \"set\": \"TOWLB-CAB-XL-6SET-R\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SETI\", \"set\": \"TOWLB-CAB-XL-6SETI\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SETJ\", \"set\": \"TOWLB-CAB-XL-6SETJ\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SETK\", \"set\": \"TOWLB-CAB-XL-6SETK\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SETL\", \"set\": \"TOWLB-CAB-XL-6SETL\"}, {\"pp\": \"PP-TOWLB-CAB-XL-6SETM\", \"set\": \"TOWLB-CAB-XL-6SETM\"}, {\"pp\": \"PP-TOWLB-DES-LG-4SETA\", \"set\": \"TOWLB-DES-LG-4SET-SUNBLVD\"}, {\"pp\": \"PP-TOWLB-DES-LG-4SETE\", \"set\": \"TOWLB-DES-LG-4SET-TANGGRN\"}, {\"pp\": \"PP-TOWLB-DES-LG-6SETA\", \"set\": \"TOWLB-DES-LG-6SET-SUMSUGA\"}, {\"pp\": \"PP-TOWLB-DES-XL-4SETA\", \"set\": \"TOWLB-DES-XL-4SET-SUNBLVD\"}, {\"pp\": \"PP-TOWLB-DES-XL-4SETE\", \"set\": \"TOWLB-DES-XL-4SET-TANGGRN\"}, {\"pp\": \"PP-TOWLB-DES-XL-6SETA\", \"set\": \"TOWLB-DES-XL-6SET-SUMSUGA\"}, {\"pp\": \"PP-TOWLB-SUM-LG-6SETA\", \"set\": \"TOWLB-SUM-LG-6SET-RAINSHRS\"}, {\"pp\": \"PP-TOWLB-SUM-XL-6SETA\", \"set\": \"TOWLB-SUM-XL-6SET-RAINSHRS\"}];\nconst S = $('Settings').first().json;\nconst markets = Object.keys(S.markets);\nconst kits = [];\nfor (const r of map) for (const m of markets) kits.push({ kit: m + '-' + r.set, pp: r.pp, market: m });\nconst codes = Array.from(new Set(map.map(r => r.pp).concat(kits.map(k => k.kit))));\nreturn [{ json: { kits, codes } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "243b66e6-dcf6-5512-9fe7-7a6ea469f814",
+   "name": "Read products",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/product.product/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"code\",\"in\",$('Prepack map').first().json.codes]],0,500,null,[\"code\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "0e29680f-341e-5d7b-8da8-53b2adc59d54",
+   "name": "Read locations",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    880,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.location",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "parent,code,type"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "fd4370f8-d730-5874-a1ae-2c8bc30731b5",
+   "name": "Read BOM links",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1100,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/product.product-production.bom",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "product,bom,sequence"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"product\",\"in\",$('Read products').all().map(i => i.json.id)]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "5cf89ea5-7fd1-59f3-a675-116a21382cf0",
+   "name": "Read BOMs",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1320,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/production.bom",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "active,is_built_on_the_fly"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"id\",\"in\",Array.from(new Set($('Read BOM links').all().map(i => i.json.bom)))],[\"active\",\"in\",[true,false]]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "d4b037ad-f0c7-5191-aa6b-cc68ffccbaf0",
+   "name": "Read BOM inputs",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1540,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/production.bom.input",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "bom,product,quantity"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"bom\",\"in\",Array.from(new Set($('Read BOM links').all().map(i => i.json.bom)))]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "7f587fb6-c5f8-54ef-8305-bc7d82e314e6",
+   "name": "Read PP moves",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1760,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.move",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "product,quantity,state,from_location,to_location"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"product\",\"in\",$('Read products').all().filter(i => i.json.code.startsWith('PP-')).map(i => i.json.id)],[\"state\",\"in\",[\"done\",\"draft\",\"waiting\",\"assigned\"]]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "bc7980d8-5f3b-5270-ba9a-fc444ced3733",
+   "name": "Decide changes",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1980,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst kits = $('Prepack map').first().json.kits;\nconst all = n => $(n).all().map(i => i.json);\nconst locs = all('Read locations'), prods = all('Read products'), links = all('Read BOM links');\nconst boms = {}; for (const b of all('Read BOMs')) boms[b.id] = b;\nconst inputs = {}; for (const i of all('Read BOM inputs')) (inputs[i.bom] = inputs[i.bom] || []).push(i);\nconst moves = all('Read PP moves');\nconst byCode = {}; for (const p of prods) byCode[p.code] = p;\n\n// Market warehouses and their location subtrees\nconst children = {};\nfor (const l of locs) if (l.parent) (children[l.parent] = children[l.parent] || []).push(l.id);\nconst subtree = id => { const out = new Set([id]); const st = [id];\n  while (st.length) { const x = st.pop(); for (const c of (children[x] || [])) if (!out.has(c)) { out.add(c); st.push(c); } } return out; };\nconst wh = {};\nfor (const m of Object.keys(S.markets)) { const w = locs.find(l => l.type === 'warehouse' && S.markets[m].includes(l.code)); if (w) wh[m] = subtree(w.id); }\n\n// PP available per market = done in - done out - open outgoing (live's location-context quantity reads 0 over the API)\nconst avail = {};\nfor (const mv of moves) {\n  for (const m of Object.keys(wh)) {\n    const T = wh[m], inTo = T.has(mv.to_location), inFrom = T.has(mv.from_location);\n    let q = 0;\n    if (mv.state === 'done' && inTo && !inFrom) q = mv.quantity;\n    else if (mv.state === 'done' && inFrom && !inTo) q = -mv.quantity;\n    else if (['draft', 'waiting', 'assigned'].includes(mv.state) && inFrom && !inTo) q = -mv.quantity;\n    if (q) { const k = m + '|' + mv.product; avail[k] = (avail[k] || 0) + q; }\n  }\n}\n\nconst changes = [], needsSetup = [], rows = [];\nfor (const k of kits) {\n  const kit = byCode[k.kit], pp = byCode[k.pp];\n  if (!kit || !pp || !wh[k.market]) continue;\n  const kitLinks = links.filter(l => l.product === kit.id && boms[l.bom] && boms[l.bom].active);\n  const ppLink = kitLinks.find(l => { const ins = inputs[l.bom] || []; return ins.length === 1 && ins[0].product === pp.id && Number(ins[0].quantity) === 1; });\n  const singles = kitLinks.filter(l => l !== ppLink);\n  if (!singles.length) continue;\n  const ppOwnActive = links.some(l => l.product === pp.id && boms[l.bom] && boms[l.bom].active && boms[l.bom].is_built_on_the_fly);\n  const a = avail[k.market + '|' + pp.id] || 0;\n  let wantPP = a >= S.minPP;\n  if (wantPP && (!ppLink || ppOwnActive)) { needsSetup.push({ kit: k.kit, pp: k.pp, ppAvailable: a, missing: !ppLink ? \"'1 x PP' BOM\" : 'PP own BOM still active' }); wantPP = false; }\n  rows.push({ kit: k.kit, ppAvailable: a, first: wantPP ? 'PP' : 'singles' });\n  if (!ppLink) continue;\n  const first = wantPP ? ppLink : singles[0];\n  for (const l of [ppLink].concat(singles)) {\n    const target = l === first ? 10 : 20;\n    if (l.sequence !== target) changes.push({ linkId: l.id, kit: k.kit, bom: l.bom, isPP: l === ppLink, oldSequence: l.sequence, newSequence: target,\n                                               ppAvailable: a, direction: wantPP ? 'PP first' : 'singles first' });\n  }\n}\nconst truncated = ['Read PP moves', 'Read BOM inputs', 'Read BOM links', 'Read locations'].filter(n => all(n).length >= 50000);\nreturn [{ json: { tenant: S.tenant, dryRun: S.dryRun, changes, needsSetup, truncated,\n                  ppFirst: rows.filter(r => r.first === 'PP').length, singlesFirst: rows.filter(r => r.first === 'singles').length,\n                  sendPreview: changes.length > 0 || S.alwaysEmailPreview } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "6bdf731b-6679-53bb-8b29-7ceb896ef0fe",
+   "name": "Dry run?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2200,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c05d9f55-be13-5633-ac8c-9faac809b4e9",
+       "leftValue": "={{ $json.dryRun }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "cc395512-9dfd-5b87-bfee-f1c0271045f7",
+   "name": "Anything to preview?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2420,
+    -160
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "1bf129c5-8578-5f8a-9c73-bc94240faef2",
+       "leftValue": "={{ $json.sendPreview }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "787bfd25-e663-5cec-8cef-dac2f0146ca7",
+   "name": "Build preview",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2640,
+    -160
+   ],
+   "parameters": {
+    "jsCode": "\nconst d = $json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\nconst rows = d.changes.map(c => `<tr><td>${esc(c.kit)}</td><td>${c.ppAvailable}</td><td>${esc(c.direction)}</td><td>BOM ${c.bom}${c.isPP ? ' (PP)' : ''}</td><td>${c.oldSequence} &rarr; ${c.newSequence}</td><td>${c.linkId}</td></tr>`).join('');\nconst setup = d.needsSetup.map(s => `<li>${esc(s.kit)}: ${s.ppAvailable} PP available, needs ${esc(s.missing)}</li>`).join('');\nconst html = `<p><b>DRY RUN, nothing written</b> (tenant ${esc(d.tenant)}). ${d.ppFirst} kits PP first, ${d.singlesFirst} singles first.</p>\n<p>${d.changes.length} sequence change(s) this run would make:</p>\n<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:12px\"><tr><th>Kit</th><th>PP available</th><th>Direction</th><th>BOM</th><th>Sequence</th><th>Link id</th></tr>${rows}</table>\n${setup ? '<p>Needs one-time setup (left on singles):</p><ul>' + setup + '</ul>' : ''}${d.truncated.length ? '<p><b>WARNING: reads may be truncated: ' + d.truncated.join(', ') + '</b></p>' : ''}`;\nreturn [{ json: { subject: `PP BOM flip PREVIEW (${d.tenant}): ${d.changes.length} change(s)`, html } }];\n"
+   }
+  },
+  {
+   "id": "7b886d7a-9a0d-5130-99b0-d2edee56b956",
+   "name": "Email preview",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.2,
+   "position": [
+    2860,
+    -160
+   ],
+   "parameters": {
+    "sendTo": "={{ $('Settings').first().json.alertEmailTo }}",
+    "subject": "={{ $json.subject }}",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "gmailOAuth2": {
+     "id": "G2zKu9oStGcK5OKK",
+     "name": "OPS Email"
+    }
+   }
+  },
+  {
+   "id": "7e6818a9-6307-546e-91bc-c6ffc3eeab58",
+   "name": "Split changes",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2420,
+    160
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nreturn $json.changes.map(c => ({ json: { tenant: S.tenant, method: 'PUT', path: '/model/product.product-production.bom/write',\n  body: [[c.linkId], { sequence: c.newSequence }], allow_prod_write: S.allowProdWrite === true, tag: c } }));\n"
+   }
+  },
+  {
+   "id": "12aee003-19d3-5f6d-8c49-c824c2c0277d",
+   "name": "Write sequence (guarded)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.3,
+   "position": [
+    2640,
+    160
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "lztERpCZ72lSQx6V",
+     "cachedResultName": "Fulfil | Request (sub-workflow)"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "matchingColumns": [],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false,
+     "schema": [
+      {
+       "id": "tenant",
+       "displayName": "tenant",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "method",
+       "displayName": "method",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "path",
+       "displayName": "path",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "body",
+       "displayName": "body",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      },
+      {
+       "id": "allow_prod_write",
+       "displayName": "allow_prod_write",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "boolean"
+      },
+      {
+       "id": "tag",
+       "displayName": "tag",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      }
+     ],
+     "value": {
+      "tenant": "={{ $json.tenant }}",
+      "method": "={{ $json.method }}",
+      "path": "={{ $json.path }}",
+      "body": "={{ $json.body }}",
+      "allow_prod_write": "={{ $json.allow_prod_write }}",
+      "tag": "={{ $json.tag }}"
+     }
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "dd87172e-5ad2-52bd-9fe8-e35bd48e287a",
+   "name": "Read back links",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2860,
+    160
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/product.product-production.bom",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "sequence"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"id\",\"in\",$('Split changes').all().map(i => i.json.tag.linkId)]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "EDrfRZJRHfhBe2fB",
+     "name": "Fulfil SANDBOX"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "1f8e4968-f56f-51f9-a312-aadc10890766",
+   "name": "Build report",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3080,
+    160
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\nconst after = {}; for (const l of $('Read back links').all()) after[l.json.id] = l.json.sequence;\nconst changes = $('Split changes').all().map(i => i.json.tag);\nconst rows = changes.map(c => { const ok = after[c.linkId] === c.newSequence;\n  return `<tr><td>${esc(c.kit)}</td><td>${c.ppAvailable}</td><td>${esc(c.direction)}</td><td>BOM ${c.bom}${c.isPP ? ' (PP)' : ''}</td><td>${c.oldSequence} &rarr; ${c.newSequence}</td><td>${c.linkId}</td><td>${ok ? 'verified' : '<b>NOT VERIFIED (now ' + after[c.linkId] + ')</b>'}</td></tr>`; }).join('');\nconst failed = changes.filter(c => after[c.linkId] !== c.newSequence).length;\nconst html = `<p><b>${changes.length} sequence change(s) written</b> (tenant ${esc(S.tenant)}), ${failed} not verified.</p>\n<p>To undo a change, set the link's sequence back to the old value (Products &gt; kit &gt; Bill of Materials).</p>\n<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:12px\"><tr><th>Kit</th><th>PP available</th><th>Direction</th><th>BOM</th><th>Sequence old &rarr; new</th><th>Link id</th><th>Check</th></tr>${rows}</table>`;\nreturn [{ json: { subject: `PP BOM flip (${S.tenant}): ${changes.length} change(s)${failed ? ', ' + failed + ' NOT VERIFIED' : ''}`, html } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "58e2aa2c-573d-5b8d-8225-5a5b2b28b9d7",
+   "name": "Email report",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.2,
+   "position": [
+    3300,
+    160
+   ],
+   "parameters": {
+    "sendTo": "={{ $('Settings').first().json.alertEmailTo }}",
+    "subject": "={{ $json.subject }}",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "gmailOAuth2": {
+     "id": "G2zKu9oStGcK5OKK",
+     "name": "OPS Email"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Hourly (:47)": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Settings": {
+   "main": [
+    [
+     {
+      "node": "Prepack map",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Prepack map": {
+   "main": [
+    [
+     {
+      "node": "Read products",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read products": {
+   "main": [
+    [
+     {
+      "node": "Read locations",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read locations": {
+   "main": [
+    [
+     {
+      "node": "Read BOM links",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read BOM links": {
+   "main": [
+    [
+     {
+      "node": "Read BOMs",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read BOMs": {
+   "main": [
+    [
+     {
+      "node": "Read BOM inputs",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read BOM inputs": {
+   "main": [
+    [
+     {
+      "node": "Read PP moves",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read PP moves": {
+   "main": [
+    [
+     {
+      "node": "Decide changes",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Decide changes": {
+   "main": [
+    [
+     {
+      "node": "Dry run?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Dry run?": {
+   "main": [
+    [
+     {
+      "node": "Anything to preview?",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Split changes",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Anything to preview?": {
+   "main": [
+    [
+     {
+      "node": "Build preview",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Build preview": {
+   "main": [
+    [
+     {
+      "node": "Email preview",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Split changes": {
+   "main": [
+    [
+     {
+      "node": "Write sequence (guarded)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Write sequence (guarded)": {
+   "main": [
+    [
+     {
+      "node": "Read back links",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read back links": {
+   "main": [
+    [
+     {
+      "node": "Build report",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build report": {
+   "main": [
+    [
+     {
+      "node": "Email report",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7"
+ }
+}

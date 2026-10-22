@@ -1,0 +1,967 @@
+{
+ "updatedAt": "2026-10-12T11:39:01.953Z",
+ "createdAt": "2026-10-12T11:39:01.953Z",
+ "id": "FdkorO51fA3dAG6e",
+ "name": "Ops Hub - Purchasing (Fulfil)",
+ "description": null,
+ "active": true,
+ "isArchived": false,
+ "nodes": [
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "10 * * * *"
+      }
+     ]
+    }
+   },
+   "name": "Hourly (:10)",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    -1120,
+    300
+   ],
+   "id": "sched-purch"
+  },
+  {
+   "parameters": {
+    "jsCode": "return [{ json: { runStartedAt: new Date().toISOString() } }];"
+   },
+   "name": "Run config",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -900,
+    300
+   ],
+   "id": "runcfg-purch"
+  },
+  {
+   "parameters": {
+    "url": "https://dockandbay.fulfil.io/api/v2/model/purchase_order",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "id,number,reference,state,shipment_state,invoice_state,delivery_date,requested_shipping_date,purchase_date,party.rec_name,company.rec_name"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "[[\"state\",\"in\",[\"confirmed\",\"processing\"]],[\"shipment_state\",\"!=\",\"received\"]]"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 60,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "name": "Fulfil open purchase orders",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    -680,
+    200
+   ],
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "alwaysOutputData": true,
+   "id": "fulfil-open-purchase-orders",
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "url": "https://dockandbay.fulfil.io/api/v2/model/purchase_order",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "id,number,reference,state,shipment_state,invoice_state,delivery_date,requested_shipping_date,purchase_date,party.rec_name,company.rec_name"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "[[\"shipment_state\",\"=\",\"received\"],[\"invoice_state\",\"in\",[\"none\",\"waiting\"]],[\"state\",\"in\",[\"confirmed\",\"processing\",\"done\"]]]"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 60,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "name": "Fulfil POs received not invoiced",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    -680,
+    400
+   ],
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "alwaysOutputData": true,
+   "id": "fulfil-pos-received-not-invoic",
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// Purchasing exceptions for the Ops Hub, from Fulfil PROD (read-only feed).\n// Two reports from two reads, so a reader of the hub sees the same rows the Monday email sends:\n//   po-past-etd    tabs 'past'  = open PO whose delivery_date has gone by\n//                       'noetd' = open PO with no delivery_date on file at all (it can never go past)\n//   po-no-invoice  tab  'main'  = goods received, invoice still none/waiting\n// Emits ONE item: { ok, tabs, runStartedAt, checkedAtIso, records[], summaries[], feed{} }.\n// ok=false when either read failed: nothing is upserted or auto-cleared then, so a bad run\n// leaves yesterday's good rows in place rather than blanking the report.\nconst BASE = 'https://dockandbay.fulfil.io/client/#/model/';\nconst runStartedAt = $('Run config').first().json.runStartedAt;\nconst now = new Date();\nconst checkedAtIso = now.toISOString();\nconst checkedAt = checkedAtIso.slice(0, 16).replace('T', ' ') + ' UTC';\nconst today = checkedAtIso.slice(0, 10);\n\nfunction rows(name) {\n  try { return $(name).all().map(i => i.json).filter(j => j && j.id != null); } catch (e) { return null; }\n}\nconst open = rows('Fulfil open purchase orders');\nconst noinv = rows('Fulfil POs received not invoiced');\n// An empty not-invoiced list is a legitimate result (nothing outstanding); an empty open-PO list is not.\nconst ok = !!(open && open.length && noinv);\n\nconst iso = d => (d && typeof d === 'object') ? String(d.iso_string || '').slice(0, 10) : String(d || '').slice(0, 10);\nconst dayDiff = (a, b) => Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86400000);\nconst txt = v => (v === null || v === undefined || v === '') ? null : String(v);\n\nconst records = [];\nconst counts = { past: {rows:0, breach:0, dropship:0}, noetd: {rows:0, breach:0, dropship:0}, main: {rows:0, breach:0, dropship:0} };\n\nfunction push(reportId, tab, ref, payload, severity, why) {\n  records.push({ report_id: reportId, tab, ref, payload, severity, severity_why: why, updated_at: runStartedAt });\n  counts[tab].rows += 1;\n}\n\n// ---- po-past-etd -----------------------------------------------------------\nfor (const p of (open || [])) {\n  const etd = iso(p.delivery_date);\n  const raised = iso(p.purchase_date);\n  const age = raised ? dayDiff(today, raised) : null;\n  const late = etd ? dayDiff(today, etd) : null;\n  const tab = etd ? (late > 0 ? 'past' : null) : 'noetd';\n  if (!tab) continue;                                   // due in future, not an exception\n  const payload = {\n    po: p.number, link: BASE + 'purchase.purchase/' + p.id,\n    reference: txt(p.reference),                        // Ben 12 Oct: the reference is what Ops recognises\n    supplier: txt(p['party.rec_name']),\n    company: txt(p['company.rec_name']),\n    etd: etd || null, lateDays: late, raised: raised || null, ageDays: age,\n    requested: iso(p.requested_shipping_date) || null,\n    state: p.state, goods: p.shipment_state, invoice: p.invoice_state,\n  };\n  if (tab === 'past') {\n    const s = Math.min(99, 50 + Math.max(0, late));\n    counts.past.breach += late >= 30 ? 1 : 0;\n    push('po-past-etd', 'past', p.number, payload, s, late + 'd past the delivery date on the PO');\n  } else {\n    const s = age === null ? null : Math.min(80, 30 + Math.round(age / 7));\n    push('po-past-etd', 'noetd', p.number, payload, s,\n         'no delivery date on file' + (age === null ? '' : ', raised ' + age + 'd ago'));\n  }\n}\n\n// ---- po-no-invoice ---------------------------------------------------------\nfor (const p of (noinv || [])) {\n  const raised = iso(p.purchase_date);\n  const age = raised ? dayDiff(today, raised) : null;\n  const payload = {\n    po: p.number, link: BASE + 'purchase.purchase/' + p.id,\n    reference: txt(p.reference),\n    supplier: txt(p['party.rec_name']),\n    company: txt(p['company.rec_name']),\n    raised: raised || null, ageDays: age,\n    invoice: p.invoice_state, goods: p.shipment_state, state: p.state,\n  };\n  const s = age === null ? null : Math.min(99, 45 + Math.round(age / 3));\n  if (age !== null && age >= 60) counts.main.breach += 1;\n  push('po-no-invoice', 'main', p.number, payload, s,\n       'goods received, invoice ' + p.invoice_state + (age === null ? '' : ', raised ' + age + 'd ago'));\n}\n\nconst sources = [\n  { source: 'Fulfil: open purchase orders',      status: open  && open.length ? 'OK' : 'FAILED', rows: open  ? open.length  : 0 },\n  { source: 'Fulfil: POs received not invoiced', status: noinv ? 'OK' : 'FAILED',                rows: noinv ? noinv.length : 0 },\n];\nconst common = { source: 'Fulfil PROD', ok, checkedAt, checkedAtIso, sources,\n                 workflowId: $workflow.id, executionId: $execution.id, runStartedAt };\nconst summaries = [\n  { report_id: 'po-past-etd',   tab: 'past',  checked_at: checkedAtIso, payload: Object.assign({ kind: 'purchasing', counts: counts.past  }, common) },\n  { report_id: 'po-past-etd',   tab: 'noetd', checked_at: checkedAtIso, payload: Object.assign({ kind: 'purchasing', counts: counts.noetd }, common) },\n  { report_id: 'po-no-invoice', tab: 'main',  checked_at: checkedAtIso, payload: Object.assign({ kind: 'purchasing', counts: counts.main  }, common) },\n];\nconst feed = { report: 'Purchasing (Fulfil)', workbook: 'n8n ' + $workflow.id, schedule: 'hourly',\n               last_run: checkedAt, result: ok ? 'ok' : 'error',\n               duration_ms: Math.max(0, now - Date.parse(runStartedAt)) || null, checked_at: checkedAtIso };\n\nreturn [{ json: { ok, report_ids: ['po-past-etd', 'po-no-invoice'], tabs: ['past', 'noetd', 'main'],\n                  runStartedAt, checkedAtIso, records, summaries, feed, counts, total: records.length } }];\n"
+   },
+   "name": "Build hub rows",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -440,
+    300
+   ],
+   "id": "buildrows-purch"
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": true,
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "name": "Sources OK?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    -220,
+    300
+   ],
+   "id": "srcok-purch"
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "insert into ops_records (report_id, tab, ref, payload, severity, severity_why, updated_at)\nselect x.report_id, x.tab, x.ref, x.payload, x.severity, x.severity_why, x.updated_at::timestamptz\nfrom jsonb_to_recordset($1::jsonb)\n  as x(report_id text, tab text, ref text, payload jsonb, severity numeric, severity_why text, updated_at text)\non conflict (report_id, tab, ref) do update set\n  payload      = excluded.payload,\n  severity     = excluded.severity,\n  severity_why = excluded.severity_why,\n  updated_at   = excluded.updated_at,\n  -- a row the feed itself cleared earlier comes back when it is seen again; a human clear sticks\n  cleared_at   = case when ops_records.cleared_by = 'feed' then null else ops_records.cleared_at end,\n  cleared_by   = case when ops_records.cleared_by = 'feed' then null else ops_records.cleared_by end",
+    "options": {
+     "connectionTimeout": 60,
+     "queryBatching": "single",
+     "queryReplacement": "={{ JSON.stringify($('Build hub rows').first().json.records) }}"
+    }
+   },
+   "name": "Hub: upsert records",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    0,
+    120
+   ],
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "alwaysOutputData": true,
+   "id": "hub-upsert-records",
+   "credentials": {
+    "postgres": {
+     "id": "RZeLZv9HKuINA1vz",
+     "name": "Supabase taskboard - Ops Hub writer (pg)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "update ops_records\n   set cleared_at = ($1::jsonb->>'checkedAtIso')::timestamptz, cleared_by = 'feed', updated_at = now()\n where report_id in (select jsonb_array_elements_text($1::jsonb->'report_ids'))\n   and tab in (select jsonb_array_elements_text($1::jsonb->'tabs'))\n   and cleared_at is null\n   and updated_at < ($1::jsonb->>'runStartedAt')::timestamptz",
+    "options": {
+     "connectionTimeout": 60,
+     "queryBatching": "single",
+     "queryReplacement": "={{ JSON.stringify({report_ids: $('Build hub rows').first().json.report_ids, tabs: $('Build hub rows').first().json.tabs, runStartedAt: $('Build hub rows').first().json.runStartedAt, checkedAtIso: $('Build hub rows').first().json.checkedAtIso}) }}"
+    }
+   },
+   "name": "Hub: auto-clear stale",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    0,
+    300
+   ],
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "alwaysOutputData": true,
+   "id": "hub-auto-clear-stale",
+   "credentials": {
+    "postgres": {
+     "id": "RZeLZv9HKuINA1vz",
+     "name": "Supabase taskboard - Ops Hub writer (pg)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "insert into ops_summary (report_id, tab, checked_at, payload)\nselect x.report_id, x.tab, x.checked_at::timestamptz, x.payload\nfrom jsonb_to_recordset($1::jsonb) as x(report_id text, tab text, checked_at text, payload jsonb)\non conflict (report_id, tab) do update set checked_at = excluded.checked_at, payload = excluded.payload",
+    "options": {
+     "connectionTimeout": 60,
+     "queryBatching": "single",
+     "queryReplacement": "={{ JSON.stringify($('Build hub rows').first().json.summaries) }}"
+    }
+   },
+   "name": "Hub: write summaries",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    0,
+    480
+   ],
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "alwaysOutputData": true,
+   "id": "hub-write-summaries",
+   "credentials": {
+    "postgres": {
+     "id": "RZeLZv9HKuINA1vz",
+     "name": "Supabase taskboard - Ops Hub writer (pg)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "insert into ops_feed_runs (report, workbook, schedule, last_run, result, duration_ms, checked_at)\nvalues ($1::jsonb->>'report', $1::jsonb->>'workbook', $1::jsonb->>'schedule', $1::jsonb->>'last_run',\n        $1::jsonb->>'result', ($1::jsonb->>'duration_ms')::int, ($1::jsonb->>'checked_at')::timestamptz)\non conflict (report) do update set workbook = excluded.workbook, schedule = excluded.schedule,\n  last_run = excluded.last_run, result = excluded.result, duration_ms = excluded.duration_ms,\n  checked_at = excluded.checked_at",
+    "options": {
+     "connectionTimeout": 60,
+     "queryBatching": "single",
+     "queryReplacement": "={{ JSON.stringify($('Build hub rows').first().json.feed) }}"
+    }
+   },
+   "name": "Hub: log feed run",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    220,
+    300
+   ],
+   "executeOnce": true,
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 5000,
+   "alwaysOutputData": true,
+   "id": "hub-log-feed-run",
+   "credentials": {
+    "postgres": {
+     "id": "RZeLZv9HKuINA1vz",
+     "name": "Supabase taskboard - Ops Hub writer (pg)"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Hourly (:10)": {
+   "main": [
+    [
+     {
+      "node": "Run config",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run config": {
+   "main": [
+    [
+     {
+      "node": "Fulfil open purchase orders",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Fulfil POs received not invoiced",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fulfil open purchase orders": {
+   "main": [
+    [
+     {
+      "node": "Build hub rows",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fulfil POs received not invoiced": {
+   "main": [
+    [
+     {
+      "node": "Build hub rows",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build hub rows": {
+   "main": [
+    [
+     {
+      "node": "Sources OK?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sources OK?": {
+   "main": [
+    [
+     {
+      "node": "Hub: upsert records",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Hub: auto-clear stale",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Hub: write summaries",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Hub: upsert records": {
+   "main": [
+    [
+     {
+      "node": "Hub: log feed run",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "availableInMCP": true,
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7"
+ },
+ "staticData": {
+  "node:Hourly (:10)": {
+   "recurrenceRules": []
+  }
+ },
+ "meta": null,
+ "nodeGroups": [],
+ "pinData": null,
+ "versionId": "23826416-a7de-4e95-8550-b27a87a0645c",
+ "activeVersionId": "23826416-a7de-4e95-8550-b27a87a0645c",
+ "versionCounter": 1,
+ "triggerCount": 1,
+ "shared": [
+  {
+   "updatedAt": "2026-10-12T11:39:01.953Z",
+   "createdAt": "2026-10-12T11:39:01.953Z",
+   "role": "workflow:owner",
+   "workflowId": "FdkorO51fA3dAG6e",
+   "projectId": "LKxlGONeBBGweZ8v",
+   "project": {
+    "updatedAt": "2026-06-02T22:14:29.148Z",
+    "createdAt": "2026-06-02T22:06:04.720Z",
+    "id": "LKxlGONeBBGweZ8v",
+    "name": "Diviyaj Ayengia <ops@dockandbay.com>",
+    "type": "personal",
+    "icon": null,
+    "description": null,
+    "creatorId": "f63d6529-519b-468a-b221-33a86d9fd6fd"
+   }
+  }
+ ],
+ "tags": [],
+ "activeVersion": {
+  "updatedAt": "2026-10-12T11:39:01.953Z",
+  "createdAt": "2026-10-12T11:39:01.953Z",
+  "versionId": "23826416-a7de-4e95-8550-b27a87a0645c",
+  "workflowId": "FdkorO51fA3dAG6e",
+  "nodes": [
+   {
+    "parameters": {
+     "rule": {
+      "interval": [
+       {
+        "field": "cronExpression",
+        "expression": "10 * * * *"
+       }
+      ]
+     }
+    },
+    "name": "Hourly (:10)",
+    "type": "n8n-nodes-base.scheduleTrigger",
+    "typeVersion": 1.2,
+    "position": [
+     -1120,
+     300
+    ],
+    "id": "sched-purch"
+   },
+   {
+    "parameters": {
+     "jsCode": "return [{ json: { runStartedAt: new Date().toISOString() } }];"
+    },
+    "name": "Run config",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     -900,
+     300
+    ],
+    "id": "runcfg-purch"
+   },
+   {
+    "parameters": {
+     "url": "https://dockandbay.fulfil.io/api/v2/model/purchase_order",
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendQuery": true,
+     "queryParameters": {
+      "parameters": [
+       {
+        "name": "fields",
+        "value": "id,number,reference,state,shipment_state,invoice_state,delivery_date,requested_shipping_date,purchase_date,party.rec_name,company.rec_name"
+       },
+       {
+        "name": "per_page",
+        "value": "500"
+       },
+       {
+        "name": "page",
+        "value": "1"
+       },
+       {
+        "name": "filter",
+        "value": "[[\"state\",\"in\",[\"confirmed\",\"processing\"]],[\"shipment_state\",\"!=\",\"received\"]]"
+       }
+      ]
+     },
+     "sendHeaders": true,
+     "headerParameters": {
+      "parameters": [
+       {
+        "name": "Accept",
+        "value": "application/json"
+       }
+      ]
+     },
+     "options": {
+      "pagination": {
+       "pagination": {
+        "parameters": {
+         "parameters": [
+          {
+           "name": "page",
+           "value": "={{ $pageCount + 1 }}"
+          }
+         ]
+        },
+        "paginationCompleteWhen": "other",
+        "completeExpression": "={{ $response.body.length < 500 }}",
+        "limitPagesFetched": true,
+        "maxRequests": 60,
+        "requestInterval": 250
+       }
+      },
+      "timeout": 60000
+     }
+    },
+    "name": "Fulfil open purchase orders",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.4,
+    "position": [
+     -680,
+     200
+    ],
+    "executeOnce": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "alwaysOutputData": true,
+    "id": "fulfil-open-purchase-orders",
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "j9m8FVwKL7nvn8Lk",
+      "name": "Fulfil PROD"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "parameters": {
+     "url": "https://dockandbay.fulfil.io/api/v2/model/purchase_order",
+     "authentication": "genericCredentialType",
+     "genericAuthType": "httpHeaderAuth",
+     "sendQuery": true,
+     "queryParameters": {
+      "parameters": [
+       {
+        "name": "fields",
+        "value": "id,number,reference,state,shipment_state,invoice_state,delivery_date,requested_shipping_date,purchase_date,party.rec_name,company.rec_name"
+       },
+       {
+        "name": "per_page",
+        "value": "500"
+       },
+       {
+        "name": "page",
+        "value": "1"
+       },
+       {
+        "name": "filter",
+        "value": "[[\"shipment_state\",\"=\",\"received\"],[\"invoice_state\",\"in\",[\"none\",\"waiting\"]],[\"state\",\"in\",[\"confirmed\",\"processing\",\"done\"]]]"
+       }
+      ]
+     },
+     "sendHeaders": true,
+     "headerParameters": {
+      "parameters": [
+       {
+        "name": "Accept",
+        "value": "application/json"
+       }
+      ]
+     },
+     "options": {
+      "pagination": {
+       "pagination": {
+        "parameters": {
+         "parameters": [
+          {
+           "name": "page",
+           "value": "={{ $pageCount + 1 }}"
+          }
+         ]
+        },
+        "paginationCompleteWhen": "other",
+        "completeExpression": "={{ $response.body.length < 500 }}",
+        "limitPagesFetched": true,
+        "maxRequests": 60,
+        "requestInterval": 250
+       }
+      },
+      "timeout": 60000
+     }
+    },
+    "name": "Fulfil POs received not invoiced",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4.4,
+    "position": [
+     -680,
+     400
+    ],
+    "executeOnce": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "alwaysOutputData": true,
+    "id": "fulfil-pos-received-not-invoic",
+    "credentials": {
+     "httpHeaderAuth": {
+      "id": "j9m8FVwKL7nvn8Lk",
+      "name": "Fulfil PROD"
+     }
+    },
+    "onError": "continueRegularOutput"
+   },
+   {
+    "parameters": {
+     "jsCode": "// Purchasing exceptions for the Ops Hub, from Fulfil PROD (read-only feed).\n// Two reports from two reads, so a reader of the hub sees the same rows the Monday email sends:\n//   po-past-etd    tabs 'past'  = open PO whose delivery_date has gone by\n//                       'noetd' = open PO with no delivery_date on file at all (it can never go past)\n//   po-no-invoice  tab  'main'  = goods received, invoice still none/waiting\n// Emits ONE item: { ok, tabs, runStartedAt, checkedAtIso, records[], summaries[], feed{} }.\n// ok=false when either read failed: nothing is upserted or auto-cleared then, so a bad run\n// leaves yesterday's good rows in place rather than blanking the report.\nconst BASE = 'https://dockandbay.fulfil.io/client/#/model/';\nconst runStartedAt = $('Run config').first().json.runStartedAt;\nconst now = new Date();\nconst checkedAtIso = now.toISOString();\nconst checkedAt = checkedAtIso.slice(0, 16).replace('T', ' ') + ' UTC';\nconst today = checkedAtIso.slice(0, 10);\n\nfunction rows(name) {\n  try { return $(name).all().map(i => i.json).filter(j => j && j.id != null); } catch (e) { return null; }\n}\nconst open = rows('Fulfil open purchase orders');\nconst noinv = rows('Fulfil POs received not invoiced');\n// An empty not-invoiced list is a legitimate result (nothing outstanding); an empty open-PO list is not.\nconst ok = !!(open && open.length && noinv);\n\nconst iso = d => (d && typeof d === 'object') ? String(d.iso_string || '').slice(0, 10) : String(d || '').slice(0, 10);\nconst dayDiff = (a, b) => Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86400000);\nconst txt = v => (v === null || v === undefined || v === '') ? null : String(v);\n\nconst records = [];\nconst counts = { past: {rows:0, breach:0, dropship:0}, noetd: {rows:0, breach:0, dropship:0}, main: {rows:0, breach:0, dropship:0} };\n\nfunction push(reportId, tab, ref, payload, severity, why) {\n  records.push({ report_id: reportId, tab, ref, payload, severity, severity_why: why, updated_at: runStartedAt });\n  counts[tab].rows += 1;\n}\n\n// ---- po-past-etd -----------------------------------------------------------\nfor (const p of (open || [])) {\n  const etd = iso(p.delivery_date);\n  const raised = iso(p.purchase_date);\n  const age = raised ? dayDiff(today, raised) : null;\n  const late = etd ? dayDiff(today, etd) : null;\n  const tab = etd ? (late > 0 ? 'past' : null) : 'noetd';\n  if (!tab) continue;                                   // due in future, not an exception\n  const payload = {\n    po: p.number, link: BASE + 'purchase.purchase/' + p.id,\n    reference: txt(p.reference),                        // Ben 12 Oct: the reference is what Ops recognises\n    supplier: txt(p['party.rec_name']),\n    company: txt(p['company.rec_name']),\n    etd: etd || null, lateDays: late, raised: raised || null, ageDays: age,\n    requested: iso(p.requested_shipping_date) || null,\n    state: p.state, goods: p.shipment_state, invoice: p.invoice_state,\n  };\n  if (tab === 'past') {\n    const s = Math.min(99, 50 + Math.max(0, late));\n    counts.past.breach += late >= 30 ? 1 : 0;\n    push('po-past-etd', 'past', p.number, payload, s, late + 'd past the delivery date on the PO');\n  } else {\n    const s = age === null ? null : Math.min(80, 30 + Math.round(age / 7));\n    push('po-past-etd', 'noetd', p.number, payload, s,\n         'no delivery date on file' + (age === null ? '' : ', raised ' + age + 'd ago'));\n  }\n}\n\n// ---- po-no-invoice ---------------------------------------------------------\nfor (const p of (noinv || [])) {\n  const raised = iso(p.purchase_date);\n  const age = raised ? dayDiff(today, raised) : null;\n  const payload = {\n    po: p.number, link: BASE + 'purchase.purchase/' + p.id,\n    reference: txt(p.reference),\n    supplier: txt(p['party.rec_name']),\n    company: txt(p['company.rec_name']),\n    raised: raised || null, ageDays: age,\n    invoice: p.invoice_state, goods: p.shipment_state, state: p.state,\n  };\n  const s = age === null ? null : Math.min(99, 45 + Math.round(age / 3));\n  if (age !== null && age >= 60) counts.main.breach += 1;\n  push('po-no-invoice', 'main', p.number, payload, s,\n       'goods received, invoice ' + p.invoice_state + (age === null ? '' : ', raised ' + age + 'd ago'));\n}\n\nconst sources = [\n  { source: 'Fulfil: open purchase orders',      status: open  && open.length ? 'OK' : 'FAILED', rows: open  ? open.length  : 0 },\n  { source: 'Fulfil: POs received not invoiced', status: noinv ? 'OK' : 'FAILED',                rows: noinv ? noinv.length : 0 },\n];\nconst common = { source: 'Fulfil PROD', ok, checkedAt, checkedAtIso, sources,\n                 workflowId: $workflow.id, executionId: $execution.id, runStartedAt };\nconst summaries = [\n  { report_id: 'po-past-etd',   tab: 'past',  checked_at: checkedAtIso, payload: Object.assign({ kind: 'purchasing', counts: counts.past  }, common) },\n  { report_id: 'po-past-etd',   tab: 'noetd', checked_at: checkedAtIso, payload: Object.assign({ kind: 'purchasing', counts: counts.noetd }, common) },\n  { report_id: 'po-no-invoice', tab: 'main',  checked_at: checkedAtIso, payload: Object.assign({ kind: 'purchasing', counts: counts.main  }, common) },\n];\nconst feed = { report: 'Purchasing (Fulfil)', workbook: 'n8n ' + $workflow.id, schedule: 'hourly',\n               last_run: checkedAt, result: ok ? 'ok' : 'error',\n               duration_ms: Math.max(0, now - Date.parse(runStartedAt)) || null, checked_at: checkedAtIso };\n\nreturn [{ json: { ok, report_ids: ['po-past-etd', 'po-no-invoice'], tabs: ['past', 'noetd', 'main'],\n                  runStartedAt, checkedAtIso, records, summaries, feed, counts, total: records.length } }];\n"
+    },
+    "name": "Build hub rows",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+     -440,
+     300
+    ],
+    "id": "buildrows-purch"
+   },
+   {
+    "parameters": {
+     "conditions": {
+      "options": {
+       "caseSensitive": true,
+       "leftValue": "",
+       "typeValidation": "loose",
+       "version": 2
+      },
+      "conditions": [
+       {
+        "leftValue": "={{ $json.ok }}",
+        "rightValue": true,
+        "operator": {
+         "type": "boolean",
+         "operation": "true",
+         "singleValue": true
+        }
+       }
+      ],
+      "combinator": "and"
+     },
+     "options": {}
+    },
+    "name": "Sources OK?",
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [
+     -220,
+     300
+    ],
+    "id": "srcok-purch"
+   },
+   {
+    "parameters": {
+     "operation": "executeQuery",
+     "query": "insert into ops_records (report_id, tab, ref, payload, severity, severity_why, updated_at)\nselect x.report_id, x.tab, x.ref, x.payload, x.severity, x.severity_why, x.updated_at::timestamptz\nfrom jsonb_to_recordset($1::jsonb)\n  as x(report_id text, tab text, ref text, payload jsonb, severity numeric, severity_why text, updated_at text)\non conflict (report_id, tab, ref) do update set\n  payload      = excluded.payload,\n  severity     = excluded.severity,\n  severity_why = excluded.severity_why,\n  updated_at   = excluded.updated_at,\n  -- a row the feed itself cleared earlier comes back when it is seen again; a human clear sticks\n  cleared_at   = case when ops_records.cleared_by = 'feed' then null else ops_records.cleared_at end,\n  cleared_by   = case when ops_records.cleared_by = 'feed' then null else ops_records.cleared_by end",
+     "options": {
+      "connectionTimeout": 60,
+      "queryBatching": "single",
+      "queryReplacement": "={{ JSON.stringify($('Build hub rows').first().json.records) }}"
+     }
+    },
+    "name": "Hub: upsert records",
+    "type": "n8n-nodes-base.postgres",
+    "typeVersion": 2.6,
+    "position": [
+     0,
+     120
+    ],
+    "executeOnce": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "alwaysOutputData": true,
+    "id": "hub-upsert-records",
+    "credentials": {
+     "postgres": {
+      "id": "RZeLZv9HKuINA1vz",
+      "name": "Supabase taskboard - Ops Hub writer (pg)"
+     }
+    }
+   },
+   {
+    "parameters": {
+     "operation": "executeQuery",
+     "query": "update ops_records\n   set cleared_at = ($1::jsonb->>'checkedAtIso')::timestamptz, cleared_by = 'feed', updated_at = now()\n where report_id in (select jsonb_array_elements_text($1::jsonb->'report_ids'))\n   and tab in (select jsonb_array_elements_text($1::jsonb->'tabs'))\n   and cleared_at is null\n   and updated_at < ($1::jsonb->>'runStartedAt')::timestamptz",
+     "options": {
+      "connectionTimeout": 60,
+      "queryBatching": "single",
+      "queryReplacement": "={{ JSON.stringify({report_ids: $('Build hub rows').first().json.report_ids, tabs: $('Build hub rows').first().json.tabs, runStartedAt: $('Build hub rows').first().json.runStartedAt, checkedAtIso: $('Build hub rows').first().json.checkedAtIso}) }}"
+     }
+    },
+    "name": "Hub: auto-clear stale",
+    "type": "n8n-nodes-base.postgres",
+    "typeVersion": 2.6,
+    "position": [
+     0,
+     300
+    ],
+    "executeOnce": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "alwaysOutputData": true,
+    "id": "hub-auto-clear-stale",
+    "credentials": {
+     "postgres": {
+      "id": "RZeLZv9HKuINA1vz",
+      "name": "Supabase taskboard - Ops Hub writer (pg)"
+     }
+    }
+   },
+   {
+    "parameters": {
+     "operation": "executeQuery",
+     "query": "insert into ops_summary (report_id, tab, checked_at, payload)\nselect x.report_id, x.tab, x.checked_at::timestamptz, x.payload\nfrom jsonb_to_recordset($1::jsonb) as x(report_id text, tab text, checked_at text, payload jsonb)\non conflict (report_id, tab) do update set checked_at = excluded.checked_at, payload = excluded.payload",
+     "options": {
+      "connectionTimeout": 60,
+      "queryBatching": "single",
+      "queryReplacement": "={{ JSON.stringify($('Build hub rows').first().json.summaries) }}"
+     }
+    },
+    "name": "Hub: write summaries",
+    "type": "n8n-nodes-base.postgres",
+    "typeVersion": 2.6,
+    "position": [
+     0,
+     480
+    ],
+    "executeOnce": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "alwaysOutputData": true,
+    "id": "hub-write-summaries",
+    "credentials": {
+     "postgres": {
+      "id": "RZeLZv9HKuINA1vz",
+      "name": "Supabase taskboard - Ops Hub writer (pg)"
+     }
+    }
+   },
+   {
+    "parameters": {
+     "operation": "executeQuery",
+     "query": "insert into ops_feed_runs (report, workbook, schedule, last_run, result, duration_ms, checked_at)\nvalues ($1::jsonb->>'report', $1::jsonb->>'workbook', $1::jsonb->>'schedule', $1::jsonb->>'last_run',\n        $1::jsonb->>'result', ($1::jsonb->>'duration_ms')::int, ($1::jsonb->>'checked_at')::timestamptz)\non conflict (report) do update set workbook = excluded.workbook, schedule = excluded.schedule,\n  last_run = excluded.last_run, result = excluded.result, duration_ms = excluded.duration_ms,\n  checked_at = excluded.checked_at",
+     "options": {
+      "connectionTimeout": 60,
+      "queryBatching": "single",
+      "queryReplacement": "={{ JSON.stringify($('Build hub rows').first().json.feed) }}"
+     }
+    },
+    "name": "Hub: log feed run",
+    "type": "n8n-nodes-base.postgres",
+    "typeVersion": 2.6,
+    "position": [
+     220,
+     300
+    ],
+    "executeOnce": true,
+    "retryOnFail": true,
+    "maxTries": 3,
+    "waitBetweenTries": 5000,
+    "alwaysOutputData": true,
+    "id": "hub-log-feed-run",
+    "credentials": {
+     "postgres": {
+      "id": "RZeLZv9HKuINA1vz",
+      "name": "Supabase taskboard - Ops Hub writer (pg)"
+     }
+    }
+   }
+  ],
+  "connections": {
+   "Hourly (:10)": {
+    "main": [
+     [
+      {
+       "node": "Run config",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Run config": {
+    "main": [
+     [
+      {
+       "node": "Fulfil open purchase orders",
+       "type": "main",
+       "index": 0
+      },
+      {
+       "node": "Fulfil POs received not invoiced",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Fulfil open purchase orders": {
+    "main": [
+     [
+      {
+       "node": "Build hub rows",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Fulfil POs received not invoiced": {
+    "main": [
+     [
+      {
+       "node": "Build hub rows",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Build hub rows": {
+    "main": [
+     [
+      {
+       "node": "Sources OK?",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   },
+   "Sources OK?": {
+    "main": [
+     [
+      {
+       "node": "Hub: upsert records",
+       "type": "main",
+       "index": 0
+      },
+      {
+       "node": "Hub: auto-clear stale",
+       "type": "main",
+       "index": 0
+      },
+      {
+       "node": "Hub: write summaries",
+       "type": "main",
+       "index": 0
+      }
+     ],
+     []
+    ]
+   },
+   "Hub: upsert records": {
+    "main": [
+     [
+      {
+       "node": "Hub: log feed run",
+       "type": "main",
+       "index": 0
+      }
+     ]
+    ]
+   }
+  },
+  "nodeGroups": [],
+  "authors": "Diviyaj Ayengia",
+  "name": null,
+  "description": null,
+  "autosaved": false,
+  "workflowPublishHistory": [
+   {
+    "createdAt": "2026-10-12T13:03:00.271Z",
+    "id": 347,
+    "workflowId": "FdkorO51fA3dAG6e",
+    "versionId": "23826416-a7de-4e95-8550-b27a87a0645c",
+    "event": "activated",
+    "userId": "f63d6529-519b-468a-b221-33a86d9fd6fd"
+   }
+  ]
+ }
+}
