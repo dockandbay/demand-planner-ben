@@ -1,7 +1,7 @@
 ---
 topic: supply-finance
 title: Supply chain and finance
-covers: PO lifecycle and date chain, shipments, on-order vs inbound, order plan, PO payments and deposits, cash flow, Payments Report and Xero posting, 3PL invoices, Fulfil push and drift, supplier and client portals, commissions, sample charges, barcodes, EDI labels (Dillards SSCC labels and packing lists)
+covers: PO lifecycle and date chain, shipments, on-order vs inbound, order plan, PO payments and deposits, cash flow, Payments Report and Xero posting, 3PL invoices, Fulfil push and drift, supplier and client portals (incl. ImageBank image galleries), commissions, sample charges, barcodes, EDI labels (Dillards SSCC labels and packing lists)
 sources:
   - migrations/322_v_po_finance_setbased.sql :: planner.v_po_finance (canonical PO date + payment calc)
   - migrations/213_vpol_carton_from_products.sql :: planner.v_purchase_order_lines (full/partial carton check)
@@ -53,6 +53,15 @@ sources:
   - server.mjs :: _ediPreview
   - server.mjs :: /api/supply/edi-labels/generate
   - supply/inject.html :: _ediDupes
+  - server.mjs :: ibCall
+  - server.mjs :: cpGalleryRule
+  - server.mjs :: /api/cp/galleries
+  - server.mjs :: /api/cp/galleries/:id/download/:vid
+  - server.mjs :: /api/client/galleries
+  - supply/client-view.js :: vImages
+  - supply/client-view.js :: vGallery
+  - supply/inject.html :: cpGalleryDefault
+  - supply/inject.html :: cpGalleryClient
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
@@ -226,7 +235,16 @@ fingerprints:
   server.mjs::_ediPreview: a0d388561acf
   server.mjs::/api/supply/edi-labels/generate: 632b2d3ed286
   supply/inject.html::_ediDupes: 2bd1091bdf39
-verified_version: v28.439
+  server.mjs::ibCall: 4d1c770caec7
+  server.mjs::cpGalleryRule: ea2be00c6a4b
+  server.mjs::/api/cp/galleries: 3dae21c4b8bb
+  server.mjs::/api/cp/galleries/:id/download/:vid: 04a0a349f73c
+  server.mjs::/api/client/galleries: 7e7fafe2d837
+  supply/client-view.js::vImages: 3de87179aa8f
+  supply/client-view.js::vGallery: 8de460ecc675
+  supply/inject.html::cpGalleryDefault: caa0ec212ab6
+  supply/inject.html::cpGalleryClient: 70c04636fb79
+verified_version: v28.441
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -511,6 +529,15 @@ verified_version: v28.439
 - Tag an order to an agent (v28.433, Ben 21-Oct-26: "search fulfil for a sales order to add to an agent ... Tag it ... in orders"; chose HORIZON tag + optional write to Fulfil): COMMISSIONS > Orders > Tag an order to an agent. Search Fulfil sale orders (read only, not cancelled, newest first, 40 max) by SO number, order reference or customer; each hit shows its client PO, the Fulfil agent code (metafield agent_code on sale.sale, type char, value_char; 145 live orders tagged 21-Oct-26, all written by the Shopify sync bot: appelman, ideco, harpergroup, TJ, patrick, roadrunners, harpers) mapped to the agent by rep_groups.fulfil_codes, and any HORIZON tag. Save tag = a commission order override on the order's reference, else its SO number (the key cmEngine matches): it credits that agent in runs and makes a custom / co-brand order count in weekly demand. Also set in Fulfil (own click, then an inline confirm naming the code, the order and live Fulfil) writes agent_code = the agent's FIRST Fulfil code on the sale order (update the value row, else create one), reads it back (ok only when it matches), sets order_lines.agent_code for that order and logs a client audit row; refused when the agent has no Fulfil code (e.g. TR Partners, 21-Oct-26). (source: server.mjs :: /api/client/commission/orders/search, /api/client/commission/orders/fulfil-tag; supply/inject.html :: commTagSearch)
 
 - Commission month-end and Fulfil write-back (v28.334, Ben 13-Oct-26): a Faire-channel order of a customer on an EARNING agent's list is a month-end decision, not an automatic exclusion: it sits on that agent as an exception row at zero (not in the agent's total, counted on the Orders tile as "Faire orders to decide"), listed on Exceptions with Include (order override to that agent) or Exclude (order override to the Faire agent). Push to Fulfil (finalised / paid run; Fulfil writes gated by FULFIL_LIVE_WRITES on live): sale metafield COMMISSIONS_ACTUAL (Number / Decimal on sale.sale, created 13-Oct-26: live metafield.field 98, sandbox 99) = the order's commission actually paid: the sum of net over every finalised / paid run of that agent; one metafield.value per sale (updated, never duplicated); orders not in Fulfil (Xero-era) are skipped; the run shows the push status. (source: server.mjs :: cmEngine (decide), /api/client/commission/runs/:id/push-fulfil; supply/inject.html :: commExceptions cx-fd)
+
+## Client portal image galleries (ImageBank, v28.441)
+- Ben 22-Oct-26: "build the client portal image galleries: galleries page, gallery page with search and sort, image lightbox with download". Spec: docs/integrations/imagebank-client-portal.md. Portal: Catalogue > Images (a third tab next to Line sheet and Stock availability; Ben picked "inside Catalogue"). A client with neither line sheet nor stock lands on Images. (source: supply/client-view.js :: vImages, vGallery)
+- Data: ImageBank's portal API (/api/v1/portal), called only by HORIZON's server with IMAGEBANK_API_KEY (bearer; server env, never sent to a browser, URL or log; IMAGEBANK_URL is the ImageBank address). Without both env vars the portal says "Image galleries are not connected yet" and the settings say ImageBank is not connected. Gallery responses are cached 60 s on the server; download links never. (source: server.mjs :: ibCall)
+- Which galleries a client sees (Ben: "select specific galleries in settings to show to everyone then on client account have ability to select specific galleries to override ALL"): only galleries ImageBank shares with the portal; of those, the default for every client in CLIENT > Config > Image galleries (All shared galleries, or Only these), and per client on its Access tab (Use the default, or Only these galleries, which overrides the default). Stored in app_settings cp_galleries_default {mode, ids} and cp_galleries_client_<client id> {ids}; saved on each tick and written to the client audit. Feature toggle Image galleries (view_images, default on). (source: server.mjs :: cpGalleryRule, /api/client/galleries; supply/inject.html :: cpGalleryDefault, cpGalleryClient)
+- Galleries page: cards (cover, title, description, image count, shared dd-mmm-yy), search (ImageBank matches title and description, 300 ms after typing stops) and sort Recently shared / Name A to Z / Recently updated. Empty: "No galleries have been shared yet." or "No galleries match "...".".
+- Gallery page: title, description, image count (matching the search), search inside the gallery (file name, title, caption, product code, name, colourway), sort Dock & Bay order / Newest / Oldest / Name A to Z, optional product filter (?product=<code>, shown as a chip to clear). 60 thumbnails per page, the next page as the customer scrolls (Load more button as a fallback). Search, sort and product stay in the portal URL (#/catalogue/images/<id>?q=&sort=&product=). A gallery the client may not see answers "Gallery not found".
+- Lightbox: the large preview, title or file name, capture date, pixel size, linked products (code, name, colourway), previous / next (arrow keys, Esc closes) and a Download list of the versions (label, format, pixel size, file size; default first). Each click goes to HORIZON's download route, which checks the client may see that gallery (and, for a client limited to some galleries, that the version belongs to it), asks ImageBank for a fresh link with X-Portal-Customer = the HORIZON client id (never an email) and redirects to it. (source: server.mjs :: /api/cp/galleries/:id/download/:vid)
+- Not built: download several at once, product pages calling the product filter (the filter works from a URL), search across all galleries (not in ImageBank v1).
 
 ## Samples and barcodes (number-producing parts only)
 - An accepted supplier charge (sample or shipment) becomes one Other payment = freight + product cost. The Payments Report Xero download splits a sample charge evenly across the sample's purposes, using sample_purpose_accounts. (source: server.mjs :: charge/:id/accept, payments-report _sampleSplit)

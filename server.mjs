@@ -27936,7 +27936,7 @@ app.get('/api/scenario/buy-plan/feed/status', async (req, res) => {
 // Portal auth = magic link → httpOnly cookie `csid` (same mechanism as the supplier portal, separate tables).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 const CP_TYPES = ['key_account', 'distributor', 'agent', 'direct_wholesale'];
-const CP_FEATURE_DEFAULTS = { order_placement: true, sample_requests: true, view_stock: true, view_line_sheet: true, view_commission: false, messaging: true };
+const CP_FEATURE_DEFAULTS = { order_placement: true, sample_requests: true, view_stock: true, view_line_sheet: true, view_commission: false, messaging: true, view_images: true };   // v28.441: + image galleries
 const CP_WAREHOUSES = { uk_3pl: 'UK ILG', us_3pl: 'US Geneva', eu_3pl: 'EU iFulfilment (Bocholt)', au_3pl: 'AU Coghlans', uk_fba: 'UK Amazon FBA', us_fba: 'US Amazon FBA', eu_fba: 'EU Amazon FBA', au_fba: 'AU Amazon FBA', ca_fba: 'CA Amazon FBA' };
 const CP_MARKETS = { UK: { currency: 'GBP', wh: 'uk_3pl', dims: 'uk', hs: 'hscode_uk' }, US: { currency: 'USD', wh: 'us_3pl', dims: 'us', hs: 'hscode_us' }, EU: { currency: 'EUR', wh: 'eu_3pl', dims: 'uk', hs: 'hscode_eu' }, AU: { currency: 'AUD', wh: 'au_3pl', dims: 'uk', hs: 'hscode_au' }, CA: { currency: 'CAD', wh: 'ca_fba', dims: 'us', hs: 'hscode_ca' } };
 const CP_FULFIL_WH = { uk_3pl: 'ILG', eu_3pl: 'EUIFUL', us_3pl: 'USGENEVA_STD', au_3pl: 'AUCOGHLANS' };   // Horizon warehouse code → Fulfil stock.location code
@@ -29381,6 +29381,26 @@ app.get('/api/client/config', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL', cp_auto_push_fulfil: 'false' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.441 Image galleries settings (CLIENT > Config > Image galleries; client record > Access). Lists ImageBank's shared galleries, the default
+// rule for every client and, with ?client=<id>, that client's own choice (null = uses the default).
+app.get('/api/client/galleries', async (req, res) => {
+  try { const def = cpJson(await cpSetting('cp_galleries_default', ''), null) || { mode: 'all', ids: [] };
+    const own = req.query.client ? cpJson(await cpSetting('cp_galleries_client_' + (parseInt(req.query.client, 10) || 0), ''), null) : null;
+    if (!ibConfigured()) return res.json({ connected: false, galleries: [], default: def, client: own });
+    const j = await ibCall('/galleries?sort=name', { cache: true });
+    res.set('Cache-Control', 'no-store').json({ connected: true, galleries: (j.galleries || []).map(g => ({ id: g.id, title: g.title, imageCount: g.imageCount, sharedAt: g.sharedAt, coverUrl: g.coverUrl })), default: def, client: own });
+  } catch (e) { res.status(502).json({ error: 'ImageBank: ' + e.message }); } });
+app.post('/api/client/galleries/default', async (req, res) => {
+  const b = req.body || {}; const v = { mode: b.mode === 'selected' ? 'selected' : 'all', ids: Array.isArray(b.ids) ? [...new Set(b.ids.map(String))].slice(0, 500) : [] };
+  try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cp_galleries_default',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(v), req.me.email || null]);
+    await cpAudit(null, 'Image galleries default', v.mode === 'all' ? 'all shared galleries' : v.ids.length + ' selected', req.me.email); res.json({ ok: true, default: v });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/galleries/client/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10); if (!id) return res.status(400).json({ error: 'client id required' });
+  const b = req.body || {}; const v = Array.isArray(b.ids) ? { ids: [...new Set(b.ids.map(String))].slice(0, 500) } : null;   // ids null = use the default
+  try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, ['cp_galleries_client_' + id, v ? JSON.stringify(v) : '', req.me.email || null]);
+    await cpAudit(id, 'Image galleries', v ? v.ids.length + ' selected (overrides the default)' : 'uses the default', req.me.email); res.json({ ok: true, client: v });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/client/config', async (req, res) => {
   const b = req.body || {}; const key = String(b.key || ''); if (!CP_SETTINGS.includes(key)) return res.status(400).json({ error: 'unknown setting' });
   try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, String(b.value == null ? '' : b.value), req.me.email || null]);
@@ -30937,6 +30957,59 @@ app.get('/api/cp/line-sheet', cpAuth, async (req, res) => { try { if (!req.cp.cl
 app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.features.view_stock) return res.status(403).json({ error: 'stock availability not enabled for this account' }); const r = await cpProductsMemo(req.cp.client, { stockOnly: true });
   const v = _cpMemo('stock|' + _cpSig(req.cp.client.market, req.cp.client.currency, req.cp.client.type, req.cp.client.warehouse_code || null, req.cp.client.stock_scope || null, !!req.cp.client.features.view_stock), [r], () => Object.assign({}, r, { products: r.products.filter(p => p.stock != null) }));   // copy: the memoised line-sheet object is never mutated
   sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// ── Image galleries (v28.441, Ben 22-Oct-26: "build the client portal image galleries ... Use the HORIZON UI kit") ─────────────────
+// ImageBank shares galleries with the portal (docs/integrations/imagebank-client-portal.md). HORIZON's server calls its API with
+// IMAGEBANK_API_KEY (server env only: never sent to a browser, a URL or a log). Which shared galleries a client sees (Ben: "select specific
+// galleries in settings to show to everyone then on client account ... select specific galleries to override ALL"):
+//   app_settings 'cp_galleries_default' {mode:'all'|'selected', ids:[...]} (CLIENT > Config > Image galleries; unset = every shared gallery),
+//   overridden per client by 'cp_galleries_client_<id>' {ids:[...]} (client record > Access; unset = the default). Feature view_images (on).
+function ibConfigured() { return !!(String(process.env.IMAGEBANK_URL || '').trim() && String(process.env.IMAGEBANK_API_KEY || '').trim()); }
+const _ibMemo = new Map();   // gallery JSON for 60 s (ImageBank allows up to 60 s; its signed URLs last 1 h). Download links are never cached.
+async function ibCall(path, { customerId, cache } = {}) {
+  if (!ibConfigured()) { const e = new Error('Image galleries are not connected yet'); e.status = 503; e.code = 'NO_IMAGEBANK'; throw e; }
+  if (cache) { const h = _ibMemo.get(path); if (h && Date.now() - h.t < 60000) return h.v; }
+  const base = String(process.env.IMAGEBANK_URL).trim().replace(/\/+$/, '') + '/api/v1/portal';
+  const r = await _fetchT(base + path, { headers: Object.assign({ Authorization: 'Bearer ' + String(process.env.IMAGEBANK_API_KEY).trim() }, customerId ? { 'X-Portal-Customer': String(customerId) } : {}) }, 20000);
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) { const e = new Error((j && j.error && j.error.message) || ('ImageBank ' + r.status)); e.status = r.status; throw e; }
+  if (cache) { if (_ibMemo.size > 300) _ibMemo.clear(); _ibMemo.set(path, { t: Date.now(), v: j }); }
+  return j;
+}
+const _ibQs = o => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
+async function cpGalleryRule(clientId) {   // null = every shared gallery, else the Set of gallery ids this client may see
+  const own = cpJson(await cpSetting('cp_galleries_client_' + clientId, ''), null);
+  if (own && Array.isArray(own.ids)) return new Set(own.ids.map(String));
+  const def = cpJson(await cpSetting('cp_galleries_default', ''), null);
+  if (def && def.mode === 'selected' && Array.isArray(def.ids)) return new Set(def.ids.map(String));
+  return null;
+}
+const _ibVer = new Map();   // version id -> gallery id, from gallery pages served (so a download is checked against the client's galleries)
+function _ibNoteVersions(gid, j) { (j && j.images || []).forEach(im => (im.versions || []).forEach(v => { if (v && v.id) _ibVer.set(String(v.id), String(gid)); })); if (_ibVer.size > 50000) _ibVer.clear(); }
+function cpImagesOk(req, res) { if (req.cp.client.features.view_images === false) { res.status(403).json({ error: 'image galleries are not enabled for this account' }); return false; } return true; }
+function _ibErr(res, e, what) { if (e.code !== 'NO_IMAGEBANK' && e.status !== 404) console.warn('[imagebank] ' + what + ': ' + (e && e.message));
+  res.status(e.code === 'NO_IMAGEBANK' ? 503 : e.status === 404 ? 404 : 502).json({ error: e.code === 'NO_IMAGEBANK' ? e.message : e.status === 404 ? 'Gallery not found' : 'Image galleries are unavailable right now, try again shortly' }); }
+const IB_GAL_SORTS = ['shared', 'name', 'updated'], IB_IMG_SORTS = ['gallery', 'newest', 'oldest', 'name'];
+app.get('/api/cp/galleries', cpAuth, async (req, res) => { if (!cpImagesOk(req, res)) return;
+  try { const sort = IB_GAL_SORTS.includes(req.query.sort) ? req.query.sort : 'shared', q = String(req.query.q || '').trim().slice(0, 100);
+    const [j, allow] = await Promise.all([ibCall('/galleries?' + _ibQs({ q, sort }), { cache: true }), cpGalleryRule(req.cp.client.id)]);
+    res.set('Cache-Control', 'private, no-store').json({ galleries: (j.galleries || []).filter(g => !allow || allow.has(String(g.id))), q, sort });
+  } catch (e) { _ibErr(res, e, 'galleries'); } });
+app.get('/api/cp/galleries/:id', cpAuth, async (req, res) => { if (!cpImagesOk(req, res)) return;
+  try { const id = String(req.params.id), allow = await cpGalleryRule(req.cp.client.id); if (allow && !allow.has(id)) return res.status(404).json({ error: 'Gallery not found' });
+    const sort = IB_IMG_SORTS.includes(req.query.sort) ? req.query.sort : 'gallery';
+    const j = await ibCall('/galleries/' + encodeURIComponent(id) + '?' + _ibQs({ limit: 60, offset: Math.max(0, parseInt(req.query.offset, 10) || 0), q: String(req.query.q || '').trim().slice(0, 100), sort, product: String(req.query.product || '').trim().slice(0, 60) }), { cache: true });
+    _ibNoteVersions(id, j); res.set('Cache-Control', 'private, no-store').json(j);
+  } catch (e) { _ibErr(res, e, 'gallery'); } });
+// The customer clicks Download: a fresh ImageBank link (X-Portal-Customer = the HORIZON client id, never an email), then a redirect to it.
+app.get('/api/cp/galleries/:id/download/:vid', cpAuth, async (req, res) => { if (!cpImagesOk(req, res)) return;
+  try { const id = String(req.params.id), vid = String(req.params.vid), allow = await cpGalleryRule(req.cp.client.id);
+    if (allow && !allow.has(id)) return res.status(404).send('Download unavailable');
+    if (allow && _ibVer.get(vid) !== id) {   // restricted client and a version this instance has not served: look for it in that gallery
+      let found = false; for (let off = 0, n = 0; n < 5 && off != null; n++) { const j = await ibCall('/galleries/' + encodeURIComponent(id) + '?' + _ibQs({ limit: 200, offset: off }), { cache: true }); _ibNoteVersions(id, j); if (_ibVer.get(vid) === id) { found = true; break; } off = j.page && j.page.nextOffset; }
+      if (!found) return res.status(404).send('Download unavailable'); }
+    const d = await ibCall('/images/' + encodeURIComponent(vid) + '/download', { customerId: req.cp.client.id });
+    res.set('Cache-Control', 'no-store').redirect(302, d.url);
+  } catch (e) { if (e.code !== 'NO_IMAGEBANK' && e.status !== 404) console.warn('[imagebank] download: ' + (e && e.message)); res.status(e.status === 404 ? 404 : 502).set('Cache-Control', 'no-store').send('Download unavailable, please try again'); } });
 app.get('/api/cp/prices', cpAuth, async (req, res) => {
   try { const c = req.cp.client;
     // v28.102 (Ben): computed tier pricing — when the client has a price_tier, price every SKU from the product retail
