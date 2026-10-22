@@ -34,3 +34,9 @@ Live: not run. Pointing it at live needs Ben's go-ahead (and the live items alre
 ## Design PDFs (22-Oct-26, sandbox)
 `tt_files.cjs` copies each design PDF from monday (asset → 1-hour signed link from the monday connector's get_assets, put in column 7 of the TSV at run time; links are not kept in the repo) into Supabase Storage (bucket horizon-uploads, `product/<yyyy-mm>/<uuid>-<name>`) and `planner.portal_attachments` (category 'product', po = product ref, uploaded_by "monday import (<who>)", uploaded_at = monday upload time), and links it as the attachment of the timeline note it was posted with.
 Result: 18 PDFs uploaded (0.2 to 39 MB), 18 notes linked. The two Garden Prep Tomatoes PDFs (217 MB each) exceed the 50 MB storage limit, so Hot Off The Vine got a timeline note pointing to them on monday instead. `tt_assets_manifest.tsv` lists the assets (no links). Checked: /api/product/doc/<id> serves the PDF.
+
+## Fix 23-Oct-26 (Ben: duplicated / wrong comments, same-date versions)
+- Pantry Party's swatch is the pink retro groceries print, so only RETRO SUPER MARKET FOODS PINK + FOODS BLUE (its colourway) belong to it. RETRO SUPER MARKET CHECK and BASKET are now their own items: AW27-TEATO-RETROCHECK and AW27-TEATO-RETROBASKET (each with a Draft Lixin request and its own PDF).
+- Sample versions: one per sample date per item, colourways listed together (Pantry Party, Hot Off The Vine, Morning Matcha Club, Good To Grow each had 2 to 4 same-date versions; now 1).
+- Timeline: a message posted on two colourways of one item (same author, same text apart from the PDF name) is one note naming both designs and listing both PDFs.
+- `tt_fix_2026-10-23.cjs` (sandbox only) cleared the old samples / notes of those 4 items and moved the 2 PDFs; then tt_import.cjs + tt_files.cjs were re-run. Sandbox now: 17 items, 17 requests, 12 sample versions. For live, only the fixed tt_import.cjs + tt_files.cjs are needed (no fix script).

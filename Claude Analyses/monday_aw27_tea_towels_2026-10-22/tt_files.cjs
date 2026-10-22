@@ -12,7 +12,7 @@ const enc = p => p.split('/').map(encodeURIComponent).join('/');
   const q = (s, p) => c.query(s, p).then(r => r.rows);
   const n = { uploaded: 0, skipped: 0, too_big: 0, linked: 0 };
   for (const r of rows) {
-    const note = (await q(`SELECT id, po, attachment_id FROM planner.supplier_notes WHERE body LIKE '%(monday #'||$1||')' LIMIT 1`, [r.upd]))[0];
+    const note = (await q(`SELECT id, po, attachment_id FROM planner.supplier_notes WHERE body LIKE '%(monday #'||$1||')%' LIMIT 1`, [r.upd]))[0];
     if (!note) { console.log('no note for update', r.upd, r.name); continue; }
     if (r.url === 'TOO_BIG' || r.size > MAX) {
       const tag = '(monday file #' + r.asset + ')';

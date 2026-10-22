@@ -16,7 +16,8 @@ const LIVE_ITEMS = [  // copied from live (read-only query 22-Oct-26)
   ['TEATWL-MD-MATCLB','MORNING MATCHA CLUB','MORNING MATCHA CLUB','TEA TOWEL COLLAB',8,'sofia@dockandbay.com'],
   ['TEATWL-MD-RASPRIPLE','RASPBERRY RIPPLE','RASPBERRY RIPPLE','STRIPE TEA TOWEL CORE',5,'sofia@dockandbay.com'],
 ];
-const NEW_NAMES = { 'AW27-TEATO-DUOBLUGRNCHK':'DUO BLUE/GREEN CHECK','AW27-TEATO-DUOPNKYELCHK':'DUO PINK/YELLOW CHECK','AW27-TEATO-NEONCHKRED':'NEON CHECK RED','AW27-TEATO-NEONCHKPINK':'NEON CHECK PINK','AW27-TEATO-GRNPNKSTRIPE':'GREEN/PINK STRIPE','AW27-TEATO-GRNBLUSTRIPE':'GREEN/BLUE STRIPE' };
+const NEW_NAMES = { 'AW27-TEATO-DUOBLUGRNCHK':'DUO BLUE/GREEN CHECK','AW27-TEATO-DUOPNKYELCHK':'DUO PINK/YELLOW CHECK','AW27-TEATO-NEONCHKRED':'NEON CHECK RED','AW27-TEATO-NEONCHKPINK':'NEON CHECK PINK','AW27-TEATO-GRNPNKSTRIPE':'GREEN/PINK STRIPE','AW27-TEATO-GRNBLUSTRIPE':'GREEN/BLUE STRIPE',
+  'AW27-TEATO-RETROCHECK':'RETRO SUPER MARKET CHECK','AW27-TEATO-RETROBASKET':'RETRO SUPER MARKET BASKET' };   // 23-Oct: own items (Pantry Party = Foods Pink / Blue)
 const EMAIL = { 'Sofia Jahn':'sofia@dockandbay.com', 'Libby Allen':'libby@dockandbay.com', jack:'jack.zhang@lixintex.com.cn' };
 const STAGE = s => s === 'In Review' ? 'sample_in_review' : 'sample_development';
 const RANK = { sample_development: 0, sample_in_review: 1 };
@@ -55,26 +56,33 @@ const RANK = { sample_development: 0, sample_in_review: 1 };
           VALUES ($1,$2,$3,'Lixin',$4,$5,'samples',$6,$7::date,$8,'monday import','draft') RETURNING id`,
           [rref, items[ref], sup.id, sup.code || 'LX', stage, ukau ? 'UK,AU' : 'UK', devStart, designs.length ? 'Imported from monday.com (Supplier - Lixin board, AW27 > Tea Towels): ' + designs.map(d => d.name).join(', ') : null]))[0]; n.reqs++; }
       await q(`INSERT INTO planner.product_dev_request_components (request_id, component_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [rq.id, comp.id]);
-      // 4) sample versions: one per design that has a sample date (ordered by date, then name)
+      // 4) sample versions: ONE per sample date (23-Oct, Ben: same-date versions are one sample round; colourways listed together)
       const withSample = designs.filter(d => d.sample_date).sort((a, b) => a.sample_date.localeCompare(b.sample_date) || a.name.localeCompare(b.name));
+      const rounds = []; withSample.forEach(d => { const r = rounds.find(x => x.date === d.sample_date); if (r) r.ds.push(d); else rounds.push({ date: d.sample_date, ds: [d] }); });
       let ver = (await q(`SELECT coalesce(max(version),0) v FROM planner.product_dev_samples WHERE item_ref=$1`, [ref]))[0].v;
-      for (const d of withSample) {
-        const tag = '(monday #' + d.monday_id + ')';
-        if ((await q(`SELECT 1 FROM planner.product_dev_samples WHERE item_ref=$1 AND description LIKE '%'||$2||'%'`, [ref, tag])).length) continue;
-        const asparagus = /ASPARAGUS/.test(d.name);
-        const received = d.status === 'In Review' ? d.sample_date : (asparagus ? '2026-10-20' : null);
+      for (const r of rounds) {
+        if ((await q(`SELECT 1 FROM planner.product_dev_samples WHERE item_ref=$1 AND description LIKE '%(monday #'||$2||')%'`, [ref, r.ds[0].monday_id])).length) continue;
+        const asparagus = r.ds.some(d => /ASPARAGUS/.test(d.name));
+        const received = r.ds.some(d => d.status === 'In Review') ? r.date : (asparagus ? '2026-10-20' : null);
         await q(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, description, dimension, sample_sizes, request_id, received_at, supplier_status, created_by)
           VALUES ($1,$2,$3::date,$4,'product','{}',$5,$6::timestamptz,'in_development','monday import')`,
-          [ref, ++ver, d.sample_date, d.name + (asparagus ? ' (sent in the 12-Oct DHL parcel 55 5591 5875; Libby confirmed received 20-Oct)' : '') + ' ' + tag, rq.id, received]);
+          [ref, ++ver, r.date, r.ds.map(d => d.name).join(' + ') + (asparagus ? ' (sent in the 12-Oct DHL parcel 55 5591 5875; Libby confirmed received 20-Oct)' : '') + ' ' + r.ds.map(d => '(monday #' + d.monday_id + ')').join(' '), rq.id, received]);
         n.samples++;
       }
-      // 5) timeline: every monday update + reply, original author and time, already read (history, not new actions)
+      // 5) timeline: every monday update + reply, original author and time, already read (history, not new actions).
+      // 23-Oct (Ben: comments duplicated): the same message posted on two colourways of one item (same author, same text apart from
+      // the design PDF name) is ONE note naming both designs and listing both PDFs, at the earliest time.
+      const PDF = /AW27_TEATWL-[^\n]*?\.pdf/g, notesBy = [];
       for (const d of designs) for (const u of d.updates) for (const m of [u].concat(u.replies || [])) {
-        const tag = '(monday #' + m.id + ')';
-        if ((await q(`SELECT 1 FROM planner.supplier_notes WHERE po=$1 AND body LIKE '%'||$2`, [ref, tag])).length) continue;
-        const kind = m.who === 'jack' ? 'supplier' : 'internal';
+        const key = m.who + '|' + m.text.replace(PDF, '{pdf}').replace(/\s+/g, ' ').trim();
+        let g = notesBy.find(x => x.key === key); if (!g) notesBy.push(g = { key, who: m.who, text: m.text.trim(), at: m.at, names: [], ids: [], pdfs: [] });
+        if (!g.names.includes(d.name)) g.names.push(d.name); g.ids.push(m.id); (m.text.match(PDF) || []).forEach(p => { if (!g.pdfs.includes(p)) g.pdfs.push(p); }); if (m.at < g.at) g.at = m.at; }
+      for (const g of notesBy) {
+        if ((await q(`SELECT 1 FROM planner.supplier_notes WHERE po=$1 AND body LIKE '%(monday #'||$2||')%'`, [ref, g.ids[0]])).length) continue;
+        const kind = g.who === 'jack' ? 'supplier' : 'internal';
+        const text = g.pdfs.length > 1 ? g.text.replace(PDF, '\u0000').replace('\u0000', g.pdfs.join('\n')).replace(/\u0000/g, '') : g.text;
         await q(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, created_at, read_at) VALUES ($1,$2,$3,$4,$5,$6::timestamptz,now())`,
-          [ref, sup.id, EMAIL[m.who] || null, kind, '[monday · ' + d.name + '] ' + m.text.trim() + '\n' + tag, m.at]);
+          [ref, sup.id, EMAIL[g.who] || null, kind, '[monday · ' + g.names.join(', ') + '] ' + text + '\n' + g.ids.map(i => '(monday #' + i + ')').join(' '), g.at]);
         n.notes++;
       }
     }
