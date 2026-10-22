@@ -1,3 +1,10 @@
+## v28.464 (22-Oct-26) Client portal: "Image gallery" in the top menu, approved clients only
+- Ben: "images in top menu as 'image gallery', only visible if approved to view content".
+- Portal menu gains "Image gallery" (#/images; old #/catalogue/images links redirect); Catalogue no longer has an Images tab.
+- Approval = the client's images feature (CLIENT ▸ client ▸ Access ▸ Feature toggles). It is now OFF by default (was on); the menu item hides and the gallery routes return 403 unless it is on. Live has no client with it stored, so nobody sees galleries until approved.
+- Config ▸ Image galleries hint updated. Sandbox: Dillard's (TEST) approved for the check (menu shows, 50-image gallery); Nordic Living (TEST) not approved (no menu, API 403).
+- Buy plan unaffected.
+
 ## v28.463 (22-Oct-26) CLIENT: Portal preview is its own tab, deep links, left-menu level 3, dark filter stays dark
 - Ben: "portal preview needs a deep link and level 3 menu on the left navigation. also the agent selection goes white when changing while selected, click away it goes black" + "can portal be brought out of client>config and under client".
 - New CLIENT tab PORTAL PREVIEW (between Messages and Config), removed from Config. Deep link #/client/portal/<client id>/<user id> preselects the client and user (picking a client updates the URL); the old #/client/config/preview link redirects.

@@ -28093,7 +28093,7 @@ app.get('/api/scenario/buy-plan/feed/status', async (req, res) => {
 // Portal auth = magic link → httpOnly cookie `csid` (same mechanism as the supplier portal, separate tables).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 const CP_TYPES = ['key_account', 'distributor', 'agent', 'direct_wholesale'];
-const CP_FEATURE_DEFAULTS = { order_placement: true, sample_requests: true, view_stock: true, view_line_sheet: true, view_commission: false, messaging: true, view_images: true };   // v28.441: + image galleries
+const CP_FEATURE_DEFAULTS = { order_placement: true, sample_requests: true, view_stock: true, view_line_sheet: true, view_commission: false, messaging: true, view_images: false };   // v28.464 (Ben): image gallery only when the client is approved (opt-in)   // v28.441: + image galleries
 const CP_WAREHOUSES = { uk_3pl: 'UK ILG', us_3pl: 'US Geneva', eu_3pl: 'EU iFulfilment (Bocholt)', au_3pl: 'AU Coghlans', uk_fba: 'UK Amazon FBA', us_fba: 'US Amazon FBA', eu_fba: 'EU Amazon FBA', au_fba: 'AU Amazon FBA', ca_fba: 'CA Amazon FBA' };
 const CP_MARKETS = { UK: { currency: 'GBP', wh: 'uk_3pl', dims: 'uk', hs: 'hscode_uk' }, US: { currency: 'USD', wh: 'us_3pl', dims: 'us', hs: 'hscode_us' }, EU: { currency: 'EUR', wh: 'eu_3pl', dims: 'uk', hs: 'hscode_eu' }, AU: { currency: 'AUD', wh: 'au_3pl', dims: 'uk', hs: 'hscode_au' }, CA: { currency: 'CAD', wh: 'ca_fba', dims: 'us', hs: 'hscode_ca' } };
 const CP_FULFIL_WH = { uk_3pl: 'ILG', eu_3pl: 'EUIFUL', us_3pl: 'USGENEVA_STD', au_3pl: 'AUCOGHLANS' };   // Horizon warehouse code → Fulfil stock.location code
@@ -31218,7 +31218,7 @@ app.get('/api/cp/stock', cpAuth, async (req, res) => { try { if (!req.cp.client.
 // IMAGEBANK_API_KEY (server env only: never sent to a browser, a URL or a log). Which shared galleries a client sees (Ben: "select specific
 // galleries in settings to show to everyone then on client account ... select specific galleries to override ALL"):
 //   app_settings 'cp_galleries_default' {mode:'all'|'selected', ids:[...]} (CLIENT > Config > Image galleries; unset = every shared gallery),
-//   overridden per client by 'cp_galleries_client_<id>' {ids:[...]} (client record > Access; unset = the default). Feature view_images (on).
+//   overridden per client by 'cp_galleries_client_<id>' {ids:[...]} (client record > Access; unset = the default). Feature view_images (off by default since v28.464: approve per client).
 function ibConfigured() { return !!(String(process.env.IMAGEBANK_URL || '').trim() && String(process.env.IMAGEBANK_API_KEY || '').trim()); }
 const _ibMemo = new Map();   // gallery JSON for 60 s (ImageBank allows up to 60 s; its signed URLs last 1 h). Download links are never cached.
 async function ibCall(path, { customerId, cache } = {}) {
@@ -31241,7 +31241,7 @@ async function cpGalleryRule(clientId) {   // null = every shared gallery, else 
 }
 const _ibVer = new Map();   // version id -> gallery id, from gallery pages served (so a download is checked against the client's galleries)
 function _ibNoteVersions(gid, j) { (j && j.images || []).forEach(im => (im.versions || []).forEach(v => { if (v && v.id) _ibVer.set(String(v.id), String(gid)); })); if (_ibVer.size > 50000) _ibVer.clear(); }
-function cpImagesOk(req, res) { if (req.cp.client.features.view_images === false) { res.status(403).json({ error: 'image galleries are not enabled for this account' }); return false; } return true; }
+function cpImagesOk(req, res) { if (req.cp.client.features.view_images !== true) { res.status(403).json({ error: 'image galleries are not enabled for this account' }); return false; } return true; }
 function _ibErr(res, e, what) { if (e.code !== 'NO_IMAGEBANK' && e.status !== 404) console.warn('[imagebank] ' + what + ': ' + (e && e.message));
   res.status(e.code === 'NO_IMAGEBANK' ? 503 : e.status === 404 ? 404 : 502).json({ error: e.code === 'NO_IMAGEBANK' ? e.message : e.status === 404 ? 'Gallery not found' : 'Image galleries are unavailable right now, try again shortly' }); }
 const IB_GAL_SORTS = ['shared', 'name', 'updated'], IB_IMG_SORTS = ['gallery', 'newest', 'oldest', 'name'];
