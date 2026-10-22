@@ -15808,7 +15808,7 @@
     b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rush rate is an editable USD $/kg (£ equivalent from the settings USD→GBP rate).',
     finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.',
     postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a <b>production</b> PO (not yet shipped) to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.',
-    salesplan:'<b>SCENARIO ▸ Sales Planning.</b> For a chosen <b>country</b>, <b>channel</b> and <b>month</b> (every SKU sold there, plus any with stock or inbound, so Phase Out / Last Season stock is listed too): current on-hand, the <b>projected stock at the start of that month</b> (on-hand + inbound landing before then − forecast sell-through), <b>weeks of cover</b> at that date, and whether the SKU is <b>discontinued</b> by then. FBA cover uses FBA + AWD (US); <b>3PL is a separate column</b> (stock you could transfer to FBA), not in the cover. Also flags <b>Slow moving</b> (>26wk trailing cover / no recent sales) and <b>Rec. clearance</b> (discontinued with stock left, or a badly overstocked slow mover). Forecast = latest committed run. Sort by on-hand or weeks; group by discontinued; filter to slow-moving / clearance; export to CSV.'};
+    salesplan:'<b>SCENARIO ▸ Sales Planning.</b> For a chosen <b>country</b>, <b>channel</b> and <b>month</b> (every SKU sold there, plus any with stock or inbound; Phase Out / Last Season SKUs are hidden until you untick <b>Hide discontinued</b>): current on-hand, the <b>projected stock at the start of that month</b> (on-hand + inbound landing before then − forecast sell-through), <b>weeks of cover</b> at that date, and whether the SKU is <b>discontinued</b> by then. FBA cover uses FBA + AWD (US); <b>3PL is a separate column</b> (stock you could transfer to FBA), not in the cover. Also flags <b>Slow moving</b> (>26wk trailing cover / no recent sales) and <b>Rec. clearance</b> (discontinued with stock left, or a badly overstocked slow mover). Forecast = latest committed run. Sort by on-hand or weeks; group by discontinued; filter to slow-moving / clearance; export to CSV.'};
   function scenAnnot(k){return SCEN_ANNOT[k]?'<div class="annot">'+SCEN_ANNOT[k]+'</div>':'';}
   function scenSelect(key){ scenCurrent=key; writeHash(['scenario',key]);
     document.querySelectorAll('#scenario-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
@@ -15897,7 +15897,7 @@
   function spMonthList(){ var out=[], d=new Date(); d.setDate(1); for(var i=0;i<18;i++){ var y=d.getFullYear(), m=d.getMonth()+1; out.push(y+'-'+(m<10?'0':'')+m); d.setMonth(d.getMonth()+1); } return out; }
   function spMonthLabel(ym){ var p=String(ym||'').split('-'); if(p.length<2)return ym||''; var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (mn[(+p[1])-1]||'')+' '+p[0]; }
   function renderSalesPlan(c){
-    if(!SP_STATE){ SP_STATE={co:'UK',ch:'3pl',month:spMonthList()[0],sort:'weeks',group:'none',slow:false,clr:false,skuq:'',data:null}; }
+    if(!SP_STATE){ SP_STATE={co:'UK',ch:'3pl',month:spMonthList()[0],sort:'weeks',group:'none',slow:false,clr:false,hidedisc:true,skuq:'',data:null}; }   // v28.470 (Ben): Hide discontinued, ticked by default
     var months=spMonthList(); if(months.indexOf(SP_STATE.month)<0)SP_STATE.month=months[0];
     var COS=['UK','US','EU','AU','CA'];
     c.innerHTML=scenAnnot('salesplan')
@@ -15907,6 +15907,7 @@
       +'<div class="bar"><span class="pill-lbl">Sort</span><span class="pill'+(SP_STATE.sort==='oh'?' active':'')+'" data-sp-sort="oh">On hand</span><span class="pill'+(SP_STATE.sort==='weeks'?' active':'')+'" data-sp-sort="weeks">Weeks cover</span>'
       +'<span class="pill-lbl" style="margin-left:10px">Group</span><span class="pill'+(SP_STATE.group==='none'?' active':'')+'" data-sp-grp="none">By SKU</span><span class="pill'+(SP_STATE.group==='disc'?' active':'')+'" data-sp-grp="disc">Discontinued status</span>'
       +'<span class="pill-lbl" style="margin-left:10px">Only</span><span class="pill'+(SP_STATE.slow?' active':'')+'" data-sp-f="slow">Slow moving</span><span class="pill'+(SP_STATE.clr?' active':'')+'" data-sp-f="clr">Rec. clearance</span>'
+      +'<label style="display:inline-flex;align-items:center;gap:5px;margin-left:10px;font-size:12px;cursor:pointer;white-space:nowrap" title="Untick to list Phase Out / Last Season SKUs (discontinued by the selected month) for clearance planning"><input type="checkbox" id="sp-hidedisc"'+(SP_STATE.hidedisc?' checked':'')+'> Hide discontinued</label>'
       +'<span class="count" id="sp-count" style="margin-left:10px"></span>'
       +'<button class="pill" id="sp-csv" style="margin-left:auto">⬇ Export CSV</button></div>'
       +'<div class="bar" style="align-items:flex-start"><span class="pill-lbl" style="margin-top:7px">Filter SKUs</span>'
@@ -15920,6 +15921,7 @@
     c.querySelectorAll('[data-sp-grp]').forEach(function(p){p.onclick=function(){SP_STATE.group=p.dataset.spGrp;draw();paintPills();};});
     c.querySelectorAll('[data-sp-f]').forEach(function(p){p.onclick=function(){var k=p.dataset.spF; SP_STATE[k]=!SP_STATE[k]; draw();paintPills();};});
     c.querySelector('#sp-csv').onclick=spExport;
+    c.querySelector('#sp-hidedisc').onchange=function(){ SP_STATE.hidedisc=this.checked; draw(); };
     var spSkuq=c.querySelector('#sp-skuq'); if(spSkuq){ spSkuq.oninput=function(){ SP_STATE.skuq=this.value; if(spSkuq._dt)clearTimeout(spSkuq._dt); spSkuq._dt=setTimeout(draw,250); }; }
     var spSkuClr=c.querySelector('#sp-skuclr'); if(spSkuClr){ spSkuClr.onclick=function(){ SP_STATE.skuq=''; if(spSkuq)spSkuq.value=''; draw(); }; }
     function paintPills(){ c.querySelectorAll('[data-sp-co]').forEach(function(p){p.classList.toggle('active',p.dataset.spCo===SP_STATE.co);});
@@ -15952,10 +15954,11 @@
       return '<div class="tw"><table><thead><tr>'+headCols()+'</tr></thead><tbody>'
         +(rows.length?rows.map(function(r){return '<tr>'+rowCells(r)+'</tr>';}).join(''):'<tr><td colspan="'+cc+'" class="l mut">No SKUs.</td></tr>')+'</tbody></table></div>'; }
     function spFilt(rows){ var toks=(SP_STATE.skuq||'').toUpperCase().split(/[\s,]+/).filter(Boolean);
-      return rows.filter(function(r){ return (!SP_STATE.slow||r.slow_moving) && (!SP_STATE.clr||r.rec_clearance)
+      return rows.filter(function(r){ return (!SP_STATE.hidedisc||!r.discontinued) && (!SP_STATE.slow||r.slow_moving) && (!SP_STATE.clr||r.rec_clearance)
         && (!toks.length || toks.some(function(t){ return String(r.sku||'').toUpperCase().indexOf(t)>=0; })); }); }
     function draw(){ var g=document.getElementById('sp-grid'); if(!g||!SP_STATE.data)return; var rows=spFilt(SP_STATE.data.rows||[]);
-      var cnt=document.getElementById('sp-count'); if(cnt)cnt.textContent=rows.length+' SKU'+(rows.length!==1?'s':'')+((SP_STATE.slow||SP_STATE.clr||(SP_STATE.skuq||'').trim())?' (filtered)':'');
+      var cnt=document.getElementById('sp-count'); if(cnt){ var nHid=SP_STATE.hidedisc?(SP_STATE.data.rows||[]).filter(function(r){return r.discontinued;}).length:0;
+        cnt.textContent=rows.length+' SKU'+(rows.length!==1?'s':'')+((SP_STATE.slow||SP_STATE.clr||(SP_STATE.skuq||'').trim())?' (filtered)':'')+(nHid?' · '+nHid+' discontinued hidden':''); }
       if(SP_STATE.group==='disc'){ var live=sortRows(rows.filter(function(r){return !r.discontinued;})), dead=sortRows(rows.filter(function(r){return r.discontinued;}));
         g.innerHTML='<div class="sect-h">Active ('+live.length+')</div>'+tableFor(live)+'<div class="sect-h" style="margin-top:12px">Discontinued by '+esc(spMonthLabel(SP_STATE.month))+' ('+dead.length+')</div>'+tableFor(dead); }
       else g.innerHTML=tableFor(sortRows(rows)); }

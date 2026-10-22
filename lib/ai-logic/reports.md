@@ -109,7 +109,7 @@ fingerprints:
   supply/inject.html::renderSampleCosts: 833d3b116dec
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
   supply/inject.html::renderApprovalStats: 10496a60e5d1
-verified_version: v28.469
+verified_version: v28.470
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -226,6 +226,7 @@ verified_version: v28.469
 - For a country, channel (3PL or FBA) and month: on-hand, projected stock at the start of the month (on-hand + inbound landing before it - forecast sell-through from the latest SKU run), weeks of cover at that month's forecast rate, Discontinued, Slow moving and Rec. clearance flags.
 - 3PL view: pool = {country}_3pl, demand channels DTC + B2B + TIK. FBA view: pool = {country}_fba plus AWD for US; 3PL stock shows as a separate transferable column, not in the cover.
 - SKU list (v28.452): every SKU available in that country and channel (v_product_availability.is_available), PLUS any in-planning-scope SKU with stock in the pool or inbound landing before the month. The availability check drops SKUs past their discontinue date, so without the second part Phase Out / Last Season stock was hidden (Sarah, EOSS planning, 22-Oct-26).
+- Hide discontinued tick box (v28.470), ticked by default: hides rows with Discontinued = yes (grid, groups, count and CSV); untick to see Phase Out / Last Season stock.
 - Discontinued = discontinue date (AU / CA have their own columns) before the selected month. Rec. clearance = discontinued with projected stock left, or a slow mover with over 52 weeks trailing cover (or no sales in 13 weeks).
 (source: server.mjs :: /api/scenario/sales-planning; supply/inject.html :: renderSalesPlan)
 

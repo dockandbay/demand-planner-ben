@@ -1,3 +1,8 @@
+## v28.470 (23-Oct-26) Scenario > Sales Planning: "Hide discontinued" tick box, ticked by default
+- Ben: "add the hide discontinued tickbox default on" (Diviyaj's question on Sarah's "Horizon Stock Scenarios" email).
+- New tick box beside the Only filters. Ticked (default) hides SKUs discontinued by the selected month, so the everyday view is as before v28.452; the count shows "· N discontinued hidden". Untick to list Phase Out / Last Season stock for EOSS / clearance planning (Group by Discontinued status, Rec. clearance and CSV export follow the tick box).
+- Display only; no server, migration or env change. Buy plan identical.
+
 ## v28.469 (23-Oct-26) SUPPLY sample requests: Draft → Sent
 - Ben: "7. Yes" (Draft → Sent should also apply to SUPPLY ▸ Samples requests SR-n, as for PRODUCT development requests in v28.460).
 - A new sample request is Draft (amber, D&B only). Set it to Sent (green) on the Samples grid, mobile card or the request's "Portal" row: it appears on the supplier portal and the supplier gets an in-app note to review and accept. Back to Draft hides it again.
