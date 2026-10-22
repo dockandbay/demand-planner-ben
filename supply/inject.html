@@ -18447,7 +18447,7 @@
   // v28.458 (Ben): PRODUCT ▸ product ▸ Size & variants ▸ "⤓ Download barcodes" — a modal over the drawer: tick sizes (only
   // those with a barcode), PNG / JPG, pixel width, and file name (barcode / SKU / size), then one image per size, rendered by
   // the same EAN-13 renderer as Config ▸ Workshop barcodes. Files are staggered so the browser keeps them all.
-  function prodSizeBarcodeModal(ref,sizes){ var old=document.getElementById('szbc-modal'); if(old)old.remove();
+  function prodSizeBarcodeModal(ref,sizes,onlyId){ var old=document.getElementById('szbc-modal'); if(old)old.remove();
     var list=(sizes||[]).filter(function(s){ return String(s.barcode||'').trim(); });
     var wrap=document.createElement('div'); wrap.id='szbc-modal';
     wrap.style.cssText='position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:72px 16px;overflow:auto';
@@ -18455,7 +18455,7 @@
     wrap.innerHTML='<div style="background:var(--card);color:var(--ink);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.3);width:560px;max-width:100%;padding:18px 20px" role="dialog" aria-label="Download barcodes">'
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:16px">Download barcodes</b><span class="mut tiny">'+esc(ref)+'</span><a class="szbc-x" style="margin-left:auto;cursor:pointer;font-size:18px;color:var(--muted)" title="close">✕</a></div>'
       +(list.length?'<div class="mut tiny" style="margin-bottom:10px">One image per size (EAN-13 bars + digits).</div>'
-        +'<div style="border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto">'+list.map(function(s){ return '<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line2);cursor:pointer"><input type="checkbox" class="szbc-ck" value="'+s.id+'" checked>'
+        +'<div style="border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto">'+list.map(function(s){ return '<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line2);cursor:pointer"><input type="checkbox" class="szbc-ck" value="'+s.id+'"'+(!onlyId||String(onlyId)===String(s.id)?' checked':'')+'>'
           +'<span style="flex:1;min-width:0"><b>'+esc(s.size_label||'—')+'</b><span class="mut tiny" style="display:block;font-family:ui-monospace,Menlo,monospace">'+esc(s.barcode)+(s.mapped_sku||s.working_sku?' · '+esc(s.mapped_sku||s.working_sku):'')+'</span></span>'
           +'<img src="data:image/svg+xml;charset=utf-8,'+encodeURIComponent(eanBarcodeSVG(s.barcode)||'')+'" style="width:120px;height:36px;object-fit:contain;background:#fff;border:1px solid var(--line2);border-radius:4px" alt=""></label>'; }).join('')+'</div>'
         +'<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;margin-top:12px;font-size:12px">'
@@ -19646,7 +19646,7 @@
       var bcSel=function(s){ var cur=s.barcode||''; return '<button class="cell-pick szm-bc" data-id="'+s.id+'" data-cur="'+esc(cur)+'" title="assign a workshop barcode from the pool">'+(cur?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(cur)+'</b> <span class="mut">▾</span>':'<span class="mut">assign ▾</span>')+'</button>'; };   // v28.154 (Ben): searchable picker (openBarcodePick) replaces the plain select
       var rows=sizes.map(function(s){ return '<tr>'
         +'<td style="padding:4px 8px"><input class="fci szm-lbl" data-id="'+s.id+'" value="'+esc(s.size_label||'')+'" placeholder="e.g. Large (Age 3 to 5) 66x49cm" style="width:100%;min-width:280px;box-sizing:border-box;font-weight:700"></td>'   /* v27.837 (Ben): border-box so the input isn’t clipped in its column */
-        +'<td style="padding:4px 8px">'+bcSel(s)+'</td>'
+        +'<td style="padding:4px 8px;white-space:nowrap">'+bcSel(s)+(s.barcode?' <button class="szm-bcdl1" data-id="'+s.id+'" title="download this barcode (PNG / JPG)" style="border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;padding:1px 6px;font-size:12px;cursor:pointer;vertical-align:middle">⤓</button>':'')+'</td>'   /* v28.466 (Ben): small per-barcode download */
         +'<td style="padding:4px 8px"><button class="cell-pick szm-sku" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map to a real planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— pick ▾</span>')+'</button></td>'
         +'<td style="padding:4px 8px"><input class="fci szm-wsku" data-id="'+s.id+'" value="'+esc(s.working_sku||'')+'" placeholder="working sku…" style="width:150px;font-family:ui-monospace,Menlo,monospace;font-size:11px"></td>'
         +'<td style="padding:4px 8px">'+apSel(s)+'</td>'
@@ -19655,8 +19655,7 @@
       host.innerHTML='<div style="display:flex;align-items:center;gap:6px;margin:0 0 6px;flex-wrap:wrap">'
         +'<span style="font-weight:700;font-size:13px">Sizes</span>'
         +'<span class="hz-i" title="Add a size, assign a workshop barcode, then map a real planner SKU or set a working SKU.">i</span>'
-        +'<button class="save-btn light szm-bcdl" style="margin-left:auto" title="download this product&rsquo;s size barcodes as images">⤓ Download barcodes</button>'   /* v28.458 (Ben) */
-        +'<span style="position:relative;display:inline-block"><button class="save-btn szm-addbtn" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Add size</button>'
+        +'<span style="margin-left:auto;position:relative;display:inline-block"><button class="save-btn szm-addbtn" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Add size</button>'
           +'<div class="szm-addpop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.16);padding:12px;min-width:300px;text-align:left">'
             +'<div class="mut tiny" style="margin-bottom:5px">New size label</div><input class="fci szm-newsz" placeholder="e.g. Large (Age 3 to 5) 66x49cm" style="width:100%;box-sizing:border-box">'
             +'<div style="display:flex;gap:8px;margin-top:10px"><button class="save-btn szm-addgo" style="background:var(--blue);color:#fff;border-color:var(--blue)">Add size</button><button class="save-btn light szm-addcancel">Cancel</button></div></div></span>'
@@ -19670,7 +19669,7 @@
         if(cancel)cancel.onclick=function(){ pop.style.display='none'; };
         var doAdd=function(){ var v=(inp.value||'').trim(); if(!v)return; go.disabled=true; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(j){ go.disabled=false; if(j&&j.error){alert('Failed: '+j.error);return;} pop.style.display='none'; reloadTab(); }); };
         if(go)go.onclick=doAdd; if(inp)inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } }; })();
-      var _bcdl=host.querySelector('.szm-bcdl'); if(_bcdl)_bcdl.onclick=function(){ prodSizeBarcodeModal(it.ref,d.sizes||[]); };   // v28.458 (Ben)
+      host.querySelectorAll('.szm-bcdl1').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); prodSizeBarcodeModal(it.ref,d.sizes||[],b.dataset.id); }; });   // v28.466 (Ben): per-barcode ⤓ (that size ticked; others can be added)
       host.querySelectorAll('.szm-lbl').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{size_label:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.size_label=el.value; reRender(); }); }; });
       host.querySelectorAll('.szm-ap').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{approval_status:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.approval_status=el.value; el.setAttribute('style',szApprovalStyle(el.value)); reRender(); }); }; });
       host.querySelectorAll('.szm-wsku').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{working_sku:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.working_sku=el.value; reRender(); }); }; });

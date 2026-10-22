@@ -1,3 +1,8 @@
+## v28.466 (22-Oct-26) Size & variants: small download button beside each barcode
+- Ben: "can the download barcode be a small download button next to the selected barcode".
+- Each assigned barcode in the Sizes grid now has a small ⤓ right beside it; it opens the same download options (PNG / JPG, width, file name) with just that size ticked (others can be ticked). The big "⤓ Download barcodes" button above the grid is gone.
+- Checked in Chrome on the sandbox (SS27-HAIRW-LOVELYHAIR: ⤓ on Medium opens with Medium only ticked).
+
 ## v28.465 (22-Oct-26) Client portal Image gallery: select and download several
 - Ben chose option A: let clients download selected images or all of them.
 - Gallery page: "Select" button turns on tick mode (tiles get a tick circle; clicking ticks instead of opening). Selection bar: "n selected", Select all (every image matching the search, up to 100), Clear, size (Default size / Largest available), "⤓ Download selected (n)" with progress ("Downloading 3 of 12…"); first time the browser may ask to allow multiple downloads.
