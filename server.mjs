@@ -11140,7 +11140,8 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       coalesce(region_2,'') region_2, coalesce(postcode_2,'') postcode_2, coalesce(country_2,'') country_2, coalesce(phone_2,'') phone_2,
       coalesce(tracking_code_2,'') tracking_code_2, coalesce(carrier_2,'') carrier_2,
       to_char(created_at,'YYYY-MM-DD') created_at
-      FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
+      , coalesce(to_jsonb(sr)->>'send_status','sent') send_status, to_jsonb(sr)->>'sent_at' sent_at, to_jsonb(sr)->>'sent_by' sent_by   -- v28.469
+      FROM planner.sample_requests sr WHERE id=$1::bigint`, [id])).rows[0];
     if (!s) return res.status(404).json({ error: 'sample not found' });
     const lines = (await pool.query(`SELECT l.id, l.sku, l.qty,
       EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref = l.sku) dev
@@ -12221,7 +12222,8 @@ supplySectionHandler = async (req, res, next) => {
           CASE WHEN s.status ILIKE 'cancel%' THEN 'CANCELLED'
                WHEN s.status ILIKE 'complete%' OR s.status ILIKE 'receiv%' THEN 'COMPLETED'
                WHEN s.status ILIKE 'ship%' THEN 'SHIPPED'
-               ELSE 'PLANNED' END status_calc
+               ELSE 'PLANNED' END status_calc,
+          coalesce(to_jsonb(s)->>'send_status','sent') send_status, to_jsonb(s)->>'sent_at' sent_at, to_jsonb(s)->>'sent_by' sent_by   -- v28.469
           FROM planner.sample_requests s ORDER BY s.created_at DESC`));
       case 'suppliers': {
         const suppliers = await q(`SELECT id,code,name,kind,default_currency, coalesce(active,true) active,
@@ -25258,6 +25260,24 @@ async function maybeShippedNote(sampleId, body, authorKind, email){
   if(body.tracking_code!==undefined && String(body.tracking_code||'').trim() && String(body.tracking_code||'').trim()!==cur.tc) await note(body.tracking_code, body.carrier, false);
   if(body.tracking_code_2!==undefined && String(body.tracking_code_2||'').trim() && String(body.tracking_code_2||'').trim()!==cur.tc2) await note(body.tracking_code_2, body.carrier_2, true);
 }
+// v28.469 (Ben 23-Oct-26: Draft → Sent also for SUPPLY sample requests): a new request is DRAFT (D&B only); SENT shows it on the supplier
+// portal and posts a D&B note on its timeline, which is the supplier's in-app notification (portal inbox). Back to draft hides it again.
+// Warehouse / PO-fulfilled requests never show on the portal, so they are never sent. Body {status:'sent'|'draft'}.
+app.post('/api/supply/sample/:id/send', async (req, res) => {
+  const id = Number(req.params.id), st = (req.body || {}).status === 'draft' ? 'draft' : 'sent'; if (!id) return res.status(400).json({ error: 'bad id' });
+  try { const sr = (await pool.query(`SELECT id, ref, send_status, coalesce(supplier_name,'') supplier_name, coalesce(fulfilment_source,'supplier') src FROM planner.sample_requests WHERE id=$1`, [id])).rows[0];
+    if (!sr) return res.status(404).json({ error: 'not found' });
+    if (st === 'sent' && sr.src !== 'supplier') return res.status(409).json({ error: 'This request is fulfilled from the ' + (sr.src === 'po' ? 'PO' : 'warehouse') + ', not by the supplier: it is never sent to the supplier portal.' });
+    if (st === 'sent' && !sr.supplier_name) return res.status(400).json({ error: 'Set the supplier first.' });
+    if ((sr.send_status || 'draft') === st) return res.json({ ok: true, unchanged: true, send_status: st });
+    const by = authUser(req) || 'Dock & Bay', who = shortUser(by) || 'Dock & Bay';
+    await pool.query(`UPDATE planner.sample_requests SET send_status=$2, sent_at=CASE WHEN $2='sent' THEN now() ELSE sent_at END, sent_by=CASE WHEN $2='sent' THEN $3 ELSE sent_by END WHERE id=$1`, [id, st, by]);
+    if (st === 'sent') await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
+      [id, authUser(req) || null, '📨 New sample request ' + sr.ref + ' sent to ' + sr.supplier_name + ' by ' + who + '. Please review and accept.']);
+    invalidateSupplyCaches('sample'); try { portalCacheMarkStale(sr.supplier_name); } catch (e) {}
+    res.json({ ok: true, send_status: st });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/sample-create', async (req, res) => {
   const b = req.body || {};
   // Who created it: prefer a real supplied user, else the authenticated session user. NEVER the literal 'planner'
@@ -32554,7 +32574,7 @@ function portalSamplesQ(names, ids) { return names.length ? pool.query(`SELECT s
         coalesce((SELECT json_agg(json_build_object('id',a.id,'filename',a.filename) ORDER BY a.uploaded_at) FROM planner.portal_attachments a WHERE a.category='sample' AND a.po=s.ref),'[]') attachments
         FROM planner.sample_requests s
         WHERE (coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2))
-          AND upper(coalesce(s.status,'')) <> 'FUTURE'   -- FUTURE samples are D&B-only; the supplier sees it once it moves to PRODUCTION
+          AND coalesce(to_jsonb(s)->>'send_status','sent')='sent'   -- v28.469 (Ben): Draft → Sent decides what the supplier sees (was: status FUTURE hidden; migration 385 makes FUTURE requests draft)
           AND coalesce(s.fulfilment_source,'supplier') NOT IN ('warehouse','po')   -- v27.692 (Ben): warehouse/PO-fulfilled samples are internal-only, hidden from the supplier portal
         ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]).then(r => r.rows) : Promise.resolve([]); }
 function portalSupSkusQ(names) { return pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') product_name, coalesce(product_ean,'') ean,
@@ -32808,7 +32828,7 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
                           AND po.supplier_name = ANY($1)
                           AND (po.status ILIKE 'production%' OR po.status ILIKE 'ready%' OR po.status ILIKE 'shipping%'))${payUnion}
         UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
-          FROM planner.sample_requests WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
+          FROM planner.sample_requests s WHERE created_at IS NOT NULL AND supplier_name = ANY($1) AND coalesce(to_jsonb(s)->>'send_status','sent')='sent'
       ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names, req.portal.email])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -32836,7 +32856,7 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
         UNION ALL
         SELECT 'sample', sr.ref, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id
-          WHERE n.author_kind='internal' AND n.read_at IS NULL AND sr.supplier_name = ANY($1)
+          WHERE n.author_kind='internal' AND n.read_at IS NULL AND sr.supplier_name = ANY($1) AND coalesce(to_jsonb(sr)->>'send_status','sent')='sent'
         UNION ALL
         SELECT 'product', n.po, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
@@ -32986,13 +33006,13 @@ app.get('/api/portal/sample/:id/contents', portalAuth, async (req, res) => {
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id||!/^\d{1,18}$/.test(String(id).trim()))return null;   // v28.191 (Ben, M6): a malformed id is "not yours" (403), not a database error (500)
-  const r = await pool.query(`SELECT id, ref, coalesce(supplier_name,'') supplier_name, supplier_id, status FROM planner.sample_requests WHERE id=$1::bigint`, [id]);
+  const r = await pool.query(`SELECT id, ref, coalesce(supplier_name,'') supplier_name, supplier_id, status FROM planner.sample_requests s WHERE id=$1::bigint AND coalesce(to_jsonb(s)->>'send_status','sent')='sent'`, [id]);   // v28.469: a DRAFT request is not the supplier's yet
   const s = r.rows[0]; if(!s) return null;
   const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
   if ((s.supplier_name && names.indexOf(s.supplier_name)>=0) || (s.supplier_id!=null && ids.indexOf(Number(s.supplier_id))>=0)) return s;
   return null; }
 async function portalOwnsSampleRef(req, ref){ if(!ref) return false;
-  const r = await pool.query(`SELECT supplier_name, supplier_id FROM planner.sample_requests WHERE ref=$1`, [ref]); const s = r.rows[0]; if(!s) return false;
+  const r = await pool.query(`SELECT supplier_name, supplier_id FROM planner.sample_requests s WHERE ref=$1 AND coalesce(to_jsonb(s)->>'send_status','sent')='sent'`, [ref]); const s = r.rows[0]; if(!s) return false;   // v28.469
   const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
   return (s.supplier_name && names.indexOf(s.supplier_name)>=0) || (s.supplier_id!=null && ids.indexOf(Number(s.supplier_id))>=0); }
 app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   // supplier uploads an attachment to a sample
@@ -33029,7 +33049,7 @@ app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
     res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {   // supplier marks a D&B (internal) note read/unread
-  try { const n = (await pool.query(`SELECT sr.supplier_name, sr.supplier_id, n.author_kind FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id WHERE n.id=$1::bigint`, [req.params.id])).rows[0];
+  try { const n = (await pool.query(`SELECT sr.supplier_name, sr.supplier_id, n.author_kind FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id WHERE n.id=$1::bigint AND coalesce(to_jsonb(sr)->>'send_status','sent')='sent'`, [req.params.id])).rows[0];
     if(!n) return res.status(404).json({ error: 'not found' });
     const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
     if(!((n.supplier_name && names.indexOf(n.supplier_name)>=0) || (n.supplier_id!=null && ids.indexOf(Number(n.supplier_id))>=0))) return res.status(403).json({ error: 'not your note' });
@@ -33118,6 +33138,7 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now(), $17, $18) RETURNING id`,
       [supId, supName, b.recipient_company||null, b.first_name||null, b.last_name||null, b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, (b.country||'').toUpperCase()||null, b.phone||null, b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, req.portal.email||'supplier', (b.production_status||'not_started'), b.supplier_expected_completion||null]);
     const id = ins.rows[0].id, ref = 'SR-'+id; await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
+    await client.query(`SAVEPOINT sr_send`); try { await client.query(`UPDATE planner.sample_requests SET send_status='sent', sent_at=now(), sent_by=$2 WHERE id=$1`, [id, req.portal.email || null]); } catch (e) { await client.query(`ROLLBACK TO SAVEPOINT sr_send`); }   // v28.469: the supplier made it, so it is already sent (before migration 385 there is no column)
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if(!l||!l.sku) continue; await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`, [id, String(l.sku).trim(), qtyOrOne(l.qty)]); }
     for (const d of (Array.isArray(b.dev_samples)?b.dev_samples:[])) { const did=(d&&typeof d==='object')?d.id:d; if(!did) continue; if(!(await portalOwnsProductSample(req, did))) { await _rollback(client); return res.status(403).json({ error: 'not your sample' }); }   /* v28.262 (S1) */ await client.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [id, did, qtyOrOne(d&&typeof d==='object'?d.qty:1), req.portal.email||null]); }
     // timeline entry: created by the supplier → author_kind 'supplier' = shows as an UNREAD note for Dock & Bay on the admin side

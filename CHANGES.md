@@ -1,3 +1,10 @@
+## v28.469 (23-Oct-26) SUPPLY sample requests: Draft → Sent
+- Ben: "7. Yes" (Draft → Sent should also apply to SUPPLY ▸ Samples requests SR-n, as for PRODUCT development requests in v28.460).
+- A new sample request is Draft (amber, D&B only). Set it to Sent (green) on the Samples grid, mobile card or the request's "Portal" row: it appears on the supplier portal and the supplier gets an in-app note to review and accept. Back to Draft hides it again.
+- Send status now decides what the supplier sees (it replaces the old "FUTURE is hidden" rule). Every supplier route that reads a request by id, notes, attachments, recent activity and the unread inbox respect it. Supplier-created requests are Sent at once. Warehouse / PO-fulfilled requests have no pill (never on the portal).
+- Migration 385_sample_request_send_status.sql: send_status (default draft, check draft|sent), sent_at, sent_by. Existing FUTURE requests become Draft, every other existing request Sent (live 23-Oct: 9 requests, all Shipped / Completed, so all stay Sent and suppliers see no change). Applied (twice, idempotent) on the sandbox.
+- Checked on the sandbox with a temporary ACME portal session (deleted after): draft SR-28 not in the list and 403 by id; Sent → in the list, 200, note "📨 New sample request SR-28 sent to ACME Ltd by ben@ ..."; back to Draft → 403 again; PO-fulfilled request refused. Chrome: 11 pills on the grid, send / back to draft restyle, detail shows the Portal row.
+
 ## v28.468 (23-Oct-26) Commission runs: send the DRAFT statement to the agency for review
 - Ben: "statement needs a draft send as well, draft review is with the agency".
 - In review: new "✉ Send draft statement". Emails the agent "DRAFT for review: Dock & Bay commission statement ..." with the PDF + XLSX marked DRAFT and asks them to reply with any missing or incorrect orders. The run shows "draft sent dd-mmm-yy to ...". Changes: Back to draft, edit, Finalise, send again.

@@ -15010,6 +15010,20 @@
   // shared status-chip renderer — one consistent look (size/radius/weight) across Samples + Product
   function hzChip(bg,fg,t){ return '<span style="display:inline-block;font-size:10px;font-weight:700;color:'+fg+';background:'+bg+';border-radius:4px;padding:1px 7px;white-space:nowrap">'+t+'</span>'; }
   function _sampNormStatus(v){ v=String(v||'').toLowerCase(); return /cancel/.test(v)?'CANCELLED':(/complete|receiv/.test(v)?'COMPLETED':(/^ship|shipped/.test(v)?'SHIPPED':(/production|planned/.test(v)?'PRODUCTION':'FUTURE'))); }   // D&B status → FUTURE/PRODUCTION/SHIPPED/COMPLETED/CANCELLED (SHIPPED = in transit; COMPLETED = received; planned/open legacy → their new equivalent)
+  // v28.469 (Ben 23-Oct-26: Draft → Sent also for SUPPLY sample requests): Draft (amber) = D&B only; Sent (green) = on the supplier portal + in-app note.
+  // Warehouse / PO-fulfilled requests are never on the portal, so they get no pill.
+  function srSendStyle(st){ return st==='sent'?'background:var(--pos-bg);color:var(--pos);border-color:var(--pos)':'background:var(--amber-bg);color:var(--amber);border-color:var(--amber)'; }
+  function srSendSel(r){ if((r.fulfilment_source||'supplier')!=='supplier')return ''; var st=(r.send_status||'draft')==='sent'?'sent':'draft';
+    return '<select class="fci sr-send" data-sid="'+r.id+'" onclick="event.stopPropagation()" title="'+(st==='sent'?'Sent to the supplier'+(r.sent_at?' on '+esc(fd(String(r.sent_at).slice(0,10))):'')+(r.sent_by?' by '+esc(shortUser(r.sent_by)):'')+'. Set back to Draft to hide it from the portal.':'Draft: the supplier cannot see this request yet. Set to Sent to show it on their portal and notify them.')+'" style="width:auto;min-width:0;font-size:11px;font-weight:800;padding:2px 6px;border-radius:999px;'+srSendStyle(st)+'"><option value="draft"'+(st==='draft'?' selected':'')+'>Draft</option><option value="sent"'+(st==='sent'?' selected':'')+'>Sent</option></select>'; }
+  document.addEventListener('change',function(e){ var el=e.target; if(!el.classList||!el.classList.contains('sr-send'))return;
+    var sid=el.dataset.sid, v=el.value, prev=v==='sent'?'draft':'sent';
+    if(v==='sent'&&!confirm('Send this sample request to the supplier?\n\nIt appears on their portal and they get an in-app note to review and accept it.')){ el.value=prev; return; }
+    el.disabled=true;
+    shipPost('/api/supply/sample/'+encodeURIComponent(sid)+'/send',{status:v},function(j){ el.disabled=false;
+      if(!j||j.error){ alert('Could not update: '+((j&&j.error)||'error')); el.value=prev; return; }
+      el.setAttribute('style',el.getAttribute('style').replace(/background:[^;]*;color:[^;]*;border-color:[^;]*/,srSendStyle(v)));
+      document.querySelectorAll('.sr-send[data-sid="'+sid+'"]').forEach(function(o){ if(o!==el){ o.value=v; o.setAttribute('style',el.getAttribute('style')); } });
+      try{ hzqStale(/^\/api\/supply\/sample/); }catch(_){} }); });
   function sampleStatusChip(s){ var m={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#ffedd5','var(--amber)'],'COMPLETED':['var(--pos-bg)','var(--pos)'],'PLANNED':['var(--blue-soft)','var(--blue)'],'SHIPPED':['var(--blue-soft)','var(--blue-ink)'],'CANCELLED':['var(--hover)','var(--faint)'],'Awaiting supplier':['var(--amber-bg)','#92710a'],'Change requested':['var(--neg-bg)','var(--neg)'],'In production':['var(--blue-soft)','var(--blue)'],'Charge to review':['var(--neg-bg)','var(--neg)'],'Shipped':['var(--pos-bg)','var(--pos)'],'Complete':['var(--line)','var(--muted)'],'Cancelled':['var(--hover)','var(--faint)']};
     var col=m[s]||['var(--line)','var(--muted)']; return hzChip(col[0],col[1],esc(s||'')); }
   function sampleChargeChip(s){ var m={pending:['var(--amber-bg)','#92710a'],accepted:['var(--pos-bg)','var(--pos)'],rejected:['var(--hover)','var(--faint)']}; var c=m[s]||['var(--line)','var(--muted)']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
@@ -15080,7 +15094,7 @@
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:var(--neg);font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
       return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-ref="'+esc(r.ref||'')+'" data-i="'+i+'">PLAN</button>'+actFlag+'</td>'
         +'<td class="l"><b>'+esc(r.ref||'')+'</b>'+(r.fulfilment_source==='warehouse'?' <span class="tool-badge" style="background:var(--l3-bg);color:var(--blue-ink);font-size:9px" title="fulfilled from warehouse — not on the supplier portal">🏭 warehouse</span>':(r.fulfilment_source==='po'?' <span class="tool-badge inb-po" data-po="'+esc(r.fulfilment_po||'')+'" style="background:var(--l3-bg);color:var(--blue-ink);font-size:9px;cursor:'+(r.fulfilment_po?'pointer':'default')+'" title="fulfilled via a Direct-to-Client PO — not on the supplier portal">📦 '+esc(r.fulfilment_po||'PO')+'</span>':''))+'</td>'
-        +'<td class="l">'+sampleStatusChip(_sampNormStatus(r.status))+(r.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
+        +'<td class="l">'+sampleStatusChip(_sampNormStatus(r.status))+(srSendSel(r)?' '+srSendSel(r):'')+(r.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
         +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
         +'<td class="l">'+esc(r.recipient_company||'')+(r.recipient_name?' <span class="mut tiny">'+esc(r.recipient_name)+'</span>':'')+'</td>'
         +'<td class="l">'+esc([r.city,r.country].filter(Boolean).join(', ')||'—')+'</td>'
@@ -15103,7 +15117,7 @@
           var trk=r.tracking_code?((tu?'<a href="'+tu+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut tiny">no tracking</span>';
           var to=esc(r.recipient_company||r.recipient_name||[r.city,r.country].filter(Boolean).join(', ')||'—');
           return '<div class="samp-arr-open" data-ref="'+esc(r.ref||'')+'" style="cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin-bottom:6px;background:var(--card);display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
-            +'<b style="min-width:78px">'+esc(r.ref||'')+'</b><span>'+sampleStatusChip(_sampNormStatus(r.status))+'</span>'
+            +'<b style="min-width:78px">'+esc(r.ref||'')+'</b><span>'+sampleStatusChip(_sampNormStatus(r.status))+(srSendSel(r)?' '+srSendSel(r):'')+'</span>'
             +'<span style="min-width:120px">'+esc(r.supplier_name||'—')+'</span><span class="mut tiny" style="min-width:120px">→ '+to+'</span>'
             +'<span>'+trk+'</span><span class="mut tiny">'+(r.units||0)+' u'+(samps?' · '+samps:'')+'</span></div>';
         }).join('');
@@ -15389,7 +15403,7 @@
                 return '<div class="cli-row"><div class="cli-lbl">Supplier approval</div><div class="cli-val">'+b+'</div></div>'; })()
             +'<div class="cli-row"><div class="cli-lbl">Supplier expected</div><div class="cli-val">'+supExp+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val">'+(function(){ var _ps=s.production_status?prodStatusLabel(s.production_status):''; if(!_ps)return '<span class="mut">—</span>'; var _c=/ship/i.test(_ps)?['var(--pos-bg)','var(--pos)']:/plan|produc/i.test(_ps)?['#ffedd5','var(--amber)']:['var(--hover)','var(--muted)']; return '<span style="font-size:13px;font-weight:700;padding:3px 13px;border-radius:12px;background:'+_c[0]+';color:'+_c[1]+'">'+esc(_ps)+'</span>'; })()+'</div></div>'
-            +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+_sMk('supplier_shipped')+'</div></div>'
+            +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+_sMk('supplier_shipped')+'</div></div>'+(srSendSel(s)?'<div class="cli-row"><div class="cli-lbl" title="Draft: D&amp;B only. Sent: on the supplier portal.">Portal</div><div class="cli-val">'+srSendSel(s)+'</div></div>':'')
             +(setShip?'<div>'+setShip+'</div>':'')
             +(dateExc?'<div style="color:var(--neg);font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed'+_sMk('date_overdue')+'</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:var(--neg)">Delete</button></div></div>'
