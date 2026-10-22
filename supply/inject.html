@@ -25,6 +25,8 @@
 /* v28.008 (Ben): CLIENT top tab root — same chrome rules as PRODUCT */
 #client-root{display:none;font-size:12px;color:var(--ink);padding-top:4px}
 #client-root,#client-root th,#client-root td,#client-root input,#client-root select,#client-root textarea{text-align:left}
+#client-root select.hz-set{background:var(--ink);color:var(--card);border-color:var(--ink);font-weight:600}   /* v28.446 (Ben): a filter set to anything but its default (All ...) is black with white text */
+#client-root select.hz-set option{background:var(--card);color:var(--ink);font-weight:400}
 #app.client-active > *:not(#dab-navwrap):not(#client-root):not(.hz-drawer-overlay){display:none!important}
 #app.client-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.client-active #view-tabs-row .tool-bar{display:none!important}
@@ -19790,7 +19792,13 @@
     document.body.classList.add('supply-on'); var r=document.getElementById('client-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');}); var pb=document.getElementById('client-btn'); if(pb)pb.classList.add('active'); try{ hzSyncDemandPills(); }catch(e){} }
   function hideClient(){ var app=document.getElementById('app'); if(app)app.classList.remove('client-active'); document.body.classList.remove('supply-on'); var r=document.getElementById('client-root'); if(r)r.style.display='none'; var pb=document.getElementById('client-btn'); if(pb)pb.classList.remove('active'); }
-  function selectClientSub(k){ if(k==='commission'&&!clientCommCan())k='clients'; CLIENT_SUB=k; document.querySelectorAll('#client-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); b.style.display=(b.dataset.k==='commission'&&!clientCommCan())?'none':''; });
+  // v28.446 (Ben 22-Oct-26: "when a dropdown has a selection that isn't all it is black with white text"; all CLIENT filters): a filter is a
+  // dropdown in a filter bar (.bar) or with class flt; it is "set" when it is not on its first option (All agents, All years, the default).
+  function cpMarkFilters(){ var root=document.getElementById('client-root'); if(!root)return; root.querySelectorAll('select').forEach(function(s){ if(!(s.classList.contains('flt')||s.closest('.bar')))return; var on=s.selectedIndex>0; if(s.classList.contains('hz-set')!==on)s.classList.toggle('hz-set',on); }); }
+  var _cpMfT=null; function cpMarkFiltersSoon(){ clearTimeout(_cpMfT); _cpMfT=setTimeout(cpMarkFilters,30); }
+  function cpMfHook(){ var root=document.getElementById('client-root'); if(!root||root.__hzMf)return !!root; root.__hzMf=1; root.addEventListener('change',function(e){ if(e.target&&e.target.tagName==='SELECT')cpMarkFilters(); },true); try{ new MutationObserver(cpMarkFiltersSoon).observe(root,{childList:true,subtree:true}); }catch(e){} cpMarkFilters(); return true; }
+  (function(){ if(!cpMfHook()){ var n=0, iv=setInterval(function(){ if(cpMfHook()||++n>120)clearInterval(iv); },500); } })();
+  function selectClientSub(k){ try{ cpMfHook(); }catch(e){} if(k==='commission'&&!clientCommCan())k='clients'; CLIENT_SUB=k; document.querySelectorAll('#client-subnav .stab').forEach(function(b){ b.classList.toggle('active',b.dataset.k===k); b.style.display=(b.dataset.k==='commission'&&!clientCommCan())?'none':''; });
     try{ writeHash(['client',k].concat(_cpPending&&_cpPending.sub===k?[String(_cpPending.id)].concat(_cpPending.tab?[String(_cpPending.tab)]:[]):[])); }catch(e){}
     var b=document.getElementById('client-body'); if(!b)return; b.innerHTML='<div class="count">Loading…</div>';
     ({clients:cpRenderClients,orders:cpRenderOrders,commission:cpRenderCommission,messages:cpRenderMessages,config:cpRenderConfig})[k](b); }
@@ -21149,7 +21157,7 @@
   // ── COMMISSIONS ──
   var _cpComm={month:'',group:'',run:null,tab:'report'};
   var _cpMsg={client:'',thread:null,kind:''};   // v28.200 (Ben): + kind ('' | 'order' | 'general')   // v28.086 (Ben): MESSAGES sub-tab state — was never declared, so clicking MESSAGES threw "ReferenceError: _cpMsg is not defined" and the page never rendered
-  function cpRenderCommission(b){ var S=_cpComm;
+  function cpRenderCommission(b){ var S=_cpComm; var _cdw=document.getElementById('cph-drawer'); if(_cdw&&S.tab!=='paid'){ _cdw.style.display='none'; var _cbk=document.getElementById('cph-drawer-bk'); if(_cbk)_cbk.style.display='none'; }   // v28.446: the Paid history drawer belongs to that tab
     // v28.331 (Ben): level 3 deep links #/client/commission/<orders|exceptions|run|paid>[/<run id>] (old #/client/commission/<run id> still opens the run)
     if(_cpPending&&_cpPending.sub==='commission'){ var _pi=String(_cpPending.id||''), _pt=String(_cpPending.tab||''); _cpPending=null;
       if(/^\d+$/.test(_pi)){ S.tab='run'; S.run=_pi; } else { S.tab=_pi; if(_pi==='run'&&/^\d+$/.test(_pt))S.run=_pt; } }
@@ -21396,36 +21404,57 @@
       box.querySelectorAll('.cov-del').forEach(function(a){ a.onclick=function(){ cpPost('/api/client/commission/overrides/'+a.dataset.id+'/delete').then(function(){ commOverrides(box); }); }; });
     }).catch(function(e){ box.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
     var CPH=window.CPH||(window.CPH={group:'',year:'',q:'',status:'paid',range:'recent',month:''});   // v28.429: restored (lost in v28.326, so Paid history never loaded) + range / month
+    // v28.446 (Ben 22-Oct-26: "i do not like the agent and month summary as is ... agent and month summaries can be visible on a popout drawer.
+    // the table could be tabbed by ALL then by AGENT"): tabs All + one per agent (paid total for the year / status chosen), filters on one bar,
+    // the By agent / By month summaries in a right-hand drawer (Summary). Month folders stay; a month in the drawer opens that month only.
     function commPaid(){ CPH=window.CPH||(window.CPH={group:'',year:'',q:'',status:'paid',range:'recent',month:''}); if(CPH.range==null)CPH.range='recent';   /* set here too: the tab can open before the declaration above runs */ var qs='?group='+encodeURIComponent(CPH.group)+'&year='+encodeURIComponent(CPH.year)+'&q='+encodeURIComponent(CPH.q)+'&status='+encodeURIComponent(CPH.status)+'&range='+encodeURIComponent(CPH.range)+'&month='+encodeURIComponent(CPH.month||'');
       box.innerHTML='<div class="count">Loading paid history…</div>';
       cpGet('/api/client/commission/history'+qs).then(function(d){ var money=function(n){ return n==null?'':Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+        var kfmt=function(n){ n=Number(n)||0; return Math.abs(n)>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':String(Math.round(n)); };
         if(d.missing){ box.innerHTML='<div class="annot">The paid history needs migration 363 (planner.commission_paid_history).</div>'; return; }
         var sel=function(id,opts,v,all){ return '<select class="flt" id="'+id+'" style="width:auto"><option value="">'+all+'</option>'+opts.map(function(o){ return '<option value="'+esc(o)+'"'+(String(o)===String(v)?' selected':'')+'>'+esc(o)+'</option>'; }).join('')+'</select>'; };
         var ym=function(p){ return p?hzTrkDate(p+'-01').replace(/^01-/,''):'—'; };
-        box.innerHTML='<div class="annot" style="margin-bottom:10px">Every commission paid to an agent: the history sheet from Jan-22, then every run marked <b>Paid</b> here (added automatically).</div>'
-          +'<div class="bar">'+sel('cph-g',d.groups||[],CPH.group,'All agents')+sel('cph-y',d.years||[],CPH.year,'All years')
+        var TT={}; (d.tabs||[]).forEach(function(t){ TT[t.rep_group]=t; }); var tabG=(d.groups||[]).filter(function(g){ return TT[g]||g===CPH.group; }).sort(function(a,b){ return ((TT[b]||{}).paid||0)-((TT[a]||{}).paid||0); });
+        var tab=function(g,lbl,t){ var on=String(CPH.group||'')===String(g); return '<button class="rtab cph-tab'+(on?' active':'')+'" data-g="'+esc(g)+'" title="'+esc(g||'All agents')+(t?' · '+t.n+' rows · paid '+money(t.paid):'')+'">'+esc(lbl)+(t?' <span class="mut tiny" style="font-weight:400">'+kfmt(t.paid)+'</span>':'')+'</button>'; };
+        var allT=(d.tabs||[]).reduce(function(a,t){ return {n:a.n+t.n,paid:a.paid+(t.paid||0)}; },{n:0,paid:0});
+        box.innerHTML='<div class="annot" style="margin-bottom:8px">Every commission paid to an agent: the history sheet from Jan-22, then every run marked <b>Paid</b> here (added automatically; creating a run\'s Xero bill marks it paid).</div>'
+          +'<div id="cph-tabs" style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:8px">'+tab('','All',allT.n?allT:null)+tabG.map(function(g){ return tab(g,cmShort(g),TT[g]); }).join('')+'</div>'
+          +'<div class="bar">'+sel('cph-y',d.years||[],CPH.year,'All years')
           +'<select class="flt" id="cph-s" style="width:auto">'+[['paid','Paid'],['duplicate','Duplicate'],['not_paid','Not paid'],['cancelled','Cancelled'],['all','All statuses']].map(function(o){ return '<option value="'+o[0]+'"'+(CPH.status===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'
-          +'<select class="flt" id="cph-r" style="width:auto" title="Last 3 months loads fastest; any agent, year or search looks at every month">'+[['recent','Last 3 months'],['all','All months']].map(function(o){ return '<option value="'+o[0]+'"'+((CPH.range||'recent')===o[0]&&!CPH.month?' selected':'')+'>'+o[1]+'</option>'; }).join('')+(CPH.month?'<option value="month" selected>'+esc(ym(CPH.month))+' only</option>':'')+'</select>'
+          +'<select class="flt" id="cph-r" style="width:auto" title="Last 3 months loads fastest; an agent tab, a year or a search looks at every month">'+[['recent','Last 3 months'],['all','All months']].map(function(o){ return '<option value="'+o[0]+'"'+((CPH.range||'recent')===o[0]&&!CPH.month?' selected':'')+'>'+o[1]+'</option>'; }).join('')+(CPH.month?'<option value="month" selected>'+esc(ym(CPH.month))+' only</option>':'')+'</select>'
           +'<input class="flt" id="cph-q" placeholder="Invoice, PO, customer, credit note" style="width:240px" value="'+esc(CPH.q)+'">'
-          +'<span class="count" style="margin-left:auto">'+(d.total.n||0)+' rows · paid <b>'+money(d.total.paid)+'</b></span></div>'
-          +'<div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1fr);gap:14px;margin:8px 0 14px;align-items:start">'
-          +'<div><div class="sect-h">By agent</div><div class="tw" style="max-height:300px;overflow:auto"><table><thead><tr><th class="l">Agent</th><th class="l">Rows</th><th class="l">Paid</th></tr></thead><tbody>'+(d.by_group||[]).map(function(x){ return '<tr><td class="l">'+esc(x.rep_group||'—')+'</td><td class="l">'+x.n+'</td><td class="l">'+money(x.paid)+'</td></tr>'; }).join('')+'</tbody></table></div></div>'
-          +'<div><div class="sect-h">By month paid</div><div class="tw" style="max-height:300px;overflow:auto"><table><thead><tr><th class="l">Month</th><th class="l">Rows</th><th class="l">Paid</th></tr></thead><tbody>'+(d.by_month||[]).map(function(x){ return '<tr class="cph-mo" data-m="'+esc(x.period||'')+'" style="cursor:pointer'+(CPH.month===x.period?';background:var(--blue-soft)':'')+'" title="Open this month"><td class="l"><a href="#" style="color:var(--blue)">'+esc(ym(x.period))+'</a></td><td class="l">'+x.n+'</td><td class="l">'+money(x.paid)+'</td></tr>'; }).join('')+'</tbody></table></div></div></div>'
+          +'<span class="count" style="margin-left:auto">'+(d.total.n||0)+' rows · paid <b>'+money(d.total.paid)+'</b></span><button class="save-btn light" id="cph-sum" title="By agent and by month paid">Summary ›</button></div>'
           +(function(){ var R=d.rows||[], byP={}, order=[]; R.forEach(function(x){ var k=x.period||''; if(!byP[k]){ byP[k]=[]; order.push(k); } byP[k].push(x); });   // v28.429 (Ben): month folders, newest first
-            var head='<tr><th class="l">Agent</th><th class="l">Customer</th><th class="l">Invoice</th><th class="l">PO</th><th class="l">Invoice date</th><th class="l">Commissionable</th><th class="l">Rate</th><th class="l">Paid</th><th class="l">Credit note</th><th class="l">Status</th><th class="l">Source</th></tr>';
-            var row=function(x){ return '<tr><td class="l">'+esc(x.rep_group||'')+'</td><td class="l">'+esc(x.customer||'')+'</td><td class="l">'+esc(x.invoice_no||'')+'</td><td class="l tiny">'+esc(x.po_no||'')+'</td><td class="l">'+esc(x.invoice_date?hzTrkDate(x.invoice_date):'')+'</td><td class="l">'+(x.currency==='EUR'?'€':'')+money(x.commissionable)+'</td><td class="l">'+(x.rate_pct!=null?esc(x.rate_pct)+'%':'')+'</td><td class="l"><b>'+(x.currency==='EUR'?'€':'')+money(x.paid_amount)+'</b></td><td class="l tiny">'+esc(x.credit_note||'')+'</td><td class="l tiny">'+esc(x.status||'')+'</td><td class="l tiny">'+(x.source==='horizon'?'HORIZON run '+esc(x.run_id):'sheet')+(x.notes?' · <span title="'+esc(x.notes)+'">note</span>':'')+'</td></tr>'; };
-            return '<div class="sect-h">Rows <span class="mut tiny">'+(CPH.month?esc(ym(CPH.month))+' only':((d.range==='recent')?'last 3 months; pick All months, a month on the left, or search for older':''))+' · '+R.length+(R.length>=1000?' (newest 1,000; filter to narrow)':'')+'</span></div>'
+            var one=!!CPH.group;   // an agent tab: no Agent column
+            var head='<tr>'+(one?'':'<th class="l">Agent</th>')+'<th class="l">Customer</th><th class="l">Invoice</th><th class="l">PO</th><th class="l">Invoice date</th><th class="l">Commissionable</th><th class="l">Rate</th><th class="l">Paid</th><th class="l">Credit note</th><th class="l">Status</th><th class="l">Source</th></tr>';
+            var row=function(x){ return '<tr>'+(one?'':'<td class="l">'+esc(cmShort(x.rep_group||''))+'</td>')+'<td class="l">'+esc(x.customer||'')+'</td><td class="l">'+esc(x.invoice_no||'')+'</td><td class="l tiny">'+esc(x.po_no||'')+'</td><td class="l">'+esc(x.invoice_date?hzTrkDate(x.invoice_date):'')+'</td><td class="l">'+(x.currency==='EUR'?'€':'')+money(x.commissionable)+'</td><td class="l">'+(x.rate_pct!=null?esc(x.rate_pct)+'%':'')+'</td><td class="l"><b>'+(x.currency==='EUR'?'€':'')+money(x.paid_amount)+'</b></td><td class="l tiny">'+esc(x.credit_note||'')+'</td><td class="l tiny">'+esc(x.status||'')+'</td><td class="l tiny">'+(x.source==='horizon'?'HORIZON run '+esc(x.run_id):'sheet')+(x.notes?' · <span class="mut">'+esc(x.notes)+'</span>':'')+'</td></tr>'; };
+            return '<div class="mut tiny" style="margin:4px 0 6px">'+(CPH.month?esc(ym(CPH.month))+' only':((d.range==='recent')?'Last 3 months: pick All months, an agent, a month in Summary, or search for older':''))+' · '+R.length+' row'+(R.length===1?'':'s')+(R.length>=1000?' (newest 1,000; filter to narrow)':'')+'</div>'
               +(order.length?order.map(function(k,ix){ var L=byP[k], tot=L.reduce(function(a,x){ return a+(Number(x.paid_amount)||0); },0);
                   return '<details class="cph-fold"'+(ix<3?' open':'')+' style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:var(--card)"><summary style="cursor:pointer;padding:7px 10px;font-weight:700">'+esc(ym(k)||'(no month)')+' <span class="mut tiny" style="font-weight:400">'+L.length+' row'+(L.length===1?'':'s')+' · paid '+money(tot)+'</span></summary><div class="tw"><table><thead>'+head+'</thead><tbody>'+L.map(row).join('')+'</tbody></table></div></details>'; }).join('')
                 :'<div class="count">No rows match.</div>'); })();
         var go=function(){ commPaid(); };
-        var g=document.getElementById('cph-g'); if(g)g.onchange=function(){ CPH.group=g.value; go(); };
+        box.querySelectorAll('.cph-tab').forEach(function(t){ t.onclick=function(){ CPH.group=t.dataset.g; CPH.month=''; go(); }; });
         var y=document.getElementById('cph-y'); if(y)y.onchange=function(){ CPH.year=y.value; go(); };
         var s2=document.getElementById('cph-s'); if(s2)s2.onchange=function(){ CPH.status=s2.value; go(); };
         var r2=document.getElementById('cph-r'); if(r2)r2.onchange=function(){ if(r2.value==='month')return; CPH.range=r2.value; CPH.month=''; go(); };   // v28.429
-        box.querySelectorAll('.cph-mo').forEach(function(t){ t.onclick=function(e){ e.preventDefault(); CPH.month=(CPH.month===t.dataset.m)?'':t.dataset.m; go(); }; });
         var qi=document.getElementById('cph-q'); if(qi)qi.onchange=function(){ CPH.q=qi.value.trim(); go(); };
+        document.getElementById('cph-sum').onclick=function(){ cphDrawer(d,money,ym,go); };
+        var dw=document.getElementById('cph-drawer'); if(dw&&dw.style.display!=='none')cphDrawer(d,money,ym,go);   // keep an open drawer in step with the filters
       }).catch(function(e){ box.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
+    function cphDrawer(d,money,ym,go){ var dw=document.getElementById('cph-drawer'), bk=document.getElementById('cph-drawer-bk');
+      if(!dw){ bk=document.createElement('div'); bk.id='cph-drawer-bk'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:5900';
+        dw=document.createElement('div'); dw.id='cph-drawer'; dw.setAttribute('role','dialog'); dw.setAttribute('aria-label','Paid history summary'); dw.style.cssText='position:fixed;top:0;right:0;height:100%;width:min(460px,100vw);background:var(--card);box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;display:flex;flex-direction:column';
+        document.body.appendChild(bk); document.body.appendChild(dw); }
+      var close=function(){ dw.style.display='none'; bk.style.display='none'; }; dw.style.display='flex'; bk.style.display=''; bk.onclick=close;
+      var scope=[CPH.group?cmShort(CPH.group):'All agents',CPH.year||'all years',CPH.status==='all'?'all statuses':CPH.status.replace('_',' '),CPH.q?'"'+CPH.q+'"':''].filter(Boolean).join(' · ');
+      dw.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)"><div><b style="font-size:14px">Paid history summary</b><div class="mut tiny">'+esc(scope)+'</div></div><button class="save-btn light" id="cph-x" title="Close">✕</button></div>'
+        +'<div style="flex:1;overflow:auto;padding:10px 16px">'
+        +'<div class="sect-h">By agent</div><div class="tw"><table><thead><tr><th class="l">Agent</th><th class="l">Rows</th><th class="l">Paid</th></tr></thead><tbody>'+((d.by_group||[]).map(function(x){ return '<tr class="cph-dg" data-g="'+esc(x.rep_group||'')+'" style="cursor:pointer" title="Open this agent\'s tab"><td class="l"><a href="#" style="color:var(--blue)">'+esc(cmShort(x.rep_group||'—'))+'</a></td><td class="l">'+x.n+'</td><td class="l">'+money(x.paid)+'</td></tr>'; }).join('')||'<tr><td class="l mut" colspan="3">None.</td></tr>')+'</tbody></table></div>'
+        +'<div class="sect-h" style="margin-top:14px">By month paid <span class="mut tiny">click a month to show only that month</span></div><div class="tw"><table><thead><tr><th class="l">Month</th><th class="l">Rows</th><th class="l">Paid</th></tr></thead><tbody>'+((d.by_month||[]).map(function(x){ return '<tr class="cph-mo" data-m="'+esc(x.period||'')+'" style="cursor:pointer'+(CPH.month===x.period?';background:var(--blue-soft)':'')+'"><td class="l"><a href="#" style="color:var(--blue)">'+esc(ym(x.period))+'</a></td><td class="l">'+x.n+'</td><td class="l">'+money(x.paid)+'</td></tr>'; }).join('')||'<tr><td class="l mut" colspan="3">None.</td></tr>')+'</tbody></table></div>'
+        +'<div class="mut tiny" style="margin-top:10px">Totals add amounts as recorded (agents are paid in their own currency).</div></div>';
+      document.getElementById('cph-x').onclick=close;
+      dw.querySelectorAll('.cph-mo').forEach(function(t){ t.onclick=function(e){ e.preventDefault(); CPH.month=(CPH.month===t.dataset.m)?'':t.dataset.m; go(); }; });
+      dw.querySelectorAll('.cph-dg').forEach(function(t){ t.onclick=function(e){ e.preventDefault(); CPH.group=t.dataset.g; CPH.month=''; go(); }; }); }
   }
   function cmShort(n){ return String(n||'').replace(/^\s*agent\s*-+\s*/i,'').trim()||String(n||''); }   // v28.425: "Agent - Schauben" -> "Schauben"
   function cpRunDetail(box,id,b){ box.innerHTML='<div class="count">Loading run…</div>'; try{ if(CLIENT_SUB==='commission')writeHash(['client','commission','run',String(id)]); }catch(e){}

@@ -70,6 +70,9 @@ sources:
   - supply/inject.html :: commUnassigned
   - server.mjs :: cmMarkRunPaid
   - server.mjs :: /api/client/commission/runs/:id/fulfil-orders
+  - supply/inject.html :: commPaid
+  - supply/inject.html :: cphDrawer
+  - supply/inject.html :: cpMarkFilters
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
@@ -260,7 +263,10 @@ fingerprints:
   supply/inject.html::commUnassigned: bb2bb4e07711
   server.mjs::cmMarkRunPaid: 36b858da84b5
   server.mjs::/api/client/commission/runs/:id/fulfil-orders: 0ed862a0ad83
-verified_version: v28.445
+  supply/inject.html::commPaid: 29fede319f89
+  supply/inject.html::cphDrawer: 850b7ded9c8a
+  supply/inject.html::cpMarkFilters: 21aa36b3e8f2
+verified_version: v28.446
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -548,6 +554,8 @@ verified_version: v28.445
 
 ## Commission run paid status and Fulfil links (v28.444)
 - Ben 22-Oct-26: Mark paid "only needs to mark these orders as paid in the paid history, assume once bill is created it will be paid". Mark paid is HORIZON only: the run and its rows become paid and the rows are copied to the paid history (replacing an earlier copy of the run); nothing is paid or changed in Xero. Creating the commission bill in Xero (draft or approved) now does the same straight away, with the bill number as the paid reference. Reopening or re-finalising a run takes it out of the paid history. Deferred and exception rows are never marked paid. (source: server.mjs :: cmMarkRunPaid, /api/client/commission/runs/:id/status, /api/client/commission/runs/:id/xero-bill)
+- Paid history layout (v28.446, Ben 22-Oct-26: "i do not like the agent and month summary as is ... summaries can be visible on a popout drawer. the table could be tabbed by ALL then by AGENT"): tabs All plus one per agent (each with its paid total under the year / search / status filters, biggest first; an agent tab drops the Agent column and looks at every month); filters Year, Status, Last 3 months / All months, search; Summary opens a right-hand drawer with By agent (click = that agent's tab) and By month paid (click = that month only). Totals add amounts as recorded (mixed currencies in All). (source: server.mjs :: /api/client/commission/history; supply/inject.html :: commPaid, cphDrawer)
+- CLIENT filters (v28.446, Ben: "when a dropdown has a selection that isn't all it is black with white text"; all CLIENT filters): a dropdown in a filter bar (or class flt) that is not on its first option (All agents, All years or the default) shows dark with light text. (source: supply/inject.html :: cpMarkFilters)
 - v28.445 (Ben: "can paid be a green badge on the commission run"): run status badges (Paid green with the date as dd-mmm-yy, Finalised blue, Open amber) and every other badge in CLIENT now show in colour; CLIENT had no badge styles, so they showed as plain text.
 - Ben: "we need to know which items are not in Fulfil and would be good to have a link to the Fulfil order in this view". The run shows a Fulfil column: each order looked up in the active Fulfil (the one Push to Fulfil writes to; sandbox on the sandbox) by sale reference, then SO number, as a link to the sales order, or "not in Fulfil" (Xero-era or Markettime orders, which Push to Fulfil skips). After a push the message lists the orders not in Fulfil. (source: server.mjs :: /api/client/commission/runs/:id/fulfil-orders)
 

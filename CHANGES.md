@@ -1,3 +1,10 @@
+## v28.446 (22-Oct-26) Commissions Paid history: agent tabs + summary drawer; CLIENT filters highlighted when set
+- Ben: "#/client/commission/paid needs some work. i do not like the agent and month summary as is ... agent and month summaries can be visible on a popout drawer. the table could be tabbed by ALL then by AGENT". Layout confirmed from a mockup.
+- Tabs: All, then one per agent (biggest paid total first; each shows its total under the Year / Status / search filters). An agent tab drops the Agent column and covers every month. The Agent dropdown is replaced by the tabs.
+- Summary › opens a right-hand drawer: By agent (click opens that agent's tab) and By month paid (click shows that month only). The drawer follows the filters and closes when you leave Paid history. Month folders stay.
+- Ben: "when a dropdown has a selection that isn't all it is black with white text" (chosen: all CLIENT filters). Any filter dropdown in CLIENT that is not on its first option (All ..., or the default) is dark with light text (theme ink / card colours, so it also works in dark mode).
+- Sandbox (jsdom, full page): tabs All 992k, Schauben 498k, Ideco 101.7k, ...; Year set -> highlighted, Status on its default -> not; drawer 7 agents / 9 months for 2026; agent click -> Schauben tab, Customer first column; drawer hidden on Orders. Buy plan identical. No env, no migration; the history endpoint adds per-agent tab totals.
+
 ## v28.445 (22-Oct-26) CLIENT: badges in colour (commission run Paid = green)
 - Ben: "can paid be a green badge on the commission run". The run already used badge markup, but the badge styles only covered SUPPLY and the scenario pages, so every badge in CLIENT (Paid, Finalised, Open, exception counts, Active, Draft in Fulfil, ...) showed as plain text. CLIENT now uses the same badge styles: Paid green, Finalised blue, Open amber, exceptions red.
 - The Paid badge on the run header shows its date as dd-mmm-yy (was YYYY-MM-DD).

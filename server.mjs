@@ -30520,19 +30520,23 @@ app.get('/api/client/commission/history', async (req, res) => {
     if (y > 2000) { p.push(y); w.push('extract(year from period)=$' + p.length); }
     if (q) { p.push('%' + q.toLowerCase() + '%'); w.push(`(lower(coalesce(invoice_no,'')) LIKE $${p.length} OR lower(coalesce(po_no,'')) LIKE $${p.length} OR lower(coalesce(customer,'')) LIKE $${p.length} OR lower(coalesce(credit_note,'')) LIKE $${p.length})`); }
     if (st !== 'all') { p.push(st); w.push('coalesce(status,\'\')=$' + p.length); }
+    // v28.446: the agent tabs: every agent's total under the year / search / status filters (not the agent, month or 3-month window)
+    const wt = [], pt = []; if (y > 2000) { pt.push(y); wt.push('extract(year from period)=$' + pt.length); } if (q) { pt.push('%' + q.toLowerCase() + '%'); wt.push(`(lower(coalesce(invoice_no,'')) LIKE $${pt.length} OR lower(coalesce(po_no,'')) LIKE $${pt.length} OR lower(coalesce(customer,'')) LIKE $${pt.length} OR lower(coalesce(credit_note,'')) LIKE $${pt.length})`); } if (st !== 'all') { pt.push(st); wt.push(`coalesce(status,'')=$${pt.length}`); }
+    const Wtab = wt.length ? 'WHERE ' + wt.join(' AND ') : '';
     const Wall = w.length ? 'WHERE ' + w.join(' AND ') : '';   // the month folders list counts every month (so older folders can be opened)
     const pAll = p.slice();   // parameters of Wall (before the month filter)
     if (mo) { p.push(mo); w.push(`to_char(period,'YYYY-MM')=$` + p.length); }
     if (recent) w.push(`period >= (SELECT date_trunc('month', max(period)) - interval '2 months' FROM planner.commission_paid_history ${Wall})`);
     const W = w.length ? 'WHERE ' + w.join(' AND ') : '';
-    const [rows, byMonth, byGroup, groups, years, tot] = await Promise.all([
+    const [rows, byMonth, byGroup, groups, years, tot, tabs] = await Promise.all([
       pool.query(`SELECT id, to_char(period,'YYYY-MM') period, period_label, rep_group, customer, invoice_no, po_no, to_char(invoice_date,'YYYY-MM-DD') invoice_date, currency, commissionable::float8 commissionable, rate_pct::float8 rate_pct, commission_due::float8 commission_due, credit_note, status, paid_amount::float8 paid_amount, coalesce(notes, notes2) notes, payment_code, source, run_id FROM planner.commission_paid_history ${W} ORDER BY period DESC NULLS LAST, rep_group, invoice_no LIMIT 1000`, p),
       pool.query(`SELECT to_char(period,'YYYY-MM') period, count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${Wall} GROUP BY 1 ORDER BY 1 DESC NULLS LAST LIMIT 60`, pAll),   // Wall's parameters (the 3-month condition adds none)
       pool.query(`SELECT rep_group, count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W} GROUP BY 1 ORDER BY 3 DESC NULLS LAST`, p),
       pool.query(`SELECT DISTINCT rep_group FROM planner.commission_paid_history WHERE rep_group IS NOT NULL ORDER BY 1`),
       pool.query(`SELECT DISTINCT extract(year from period)::int y FROM planner.commission_paid_history WHERE period IS NOT NULL ORDER BY 1 DESC`),
-      pool.query(`SELECT count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W}`, p)]);
-    const v = { rows: rows.rows, by_month: byMonth.rows, by_group: byGroup.rows, groups: groups.rows.map(r => r.rep_group), years: years.rows.map(r => r.y), total: tot.rows[0], range: recent ? 'recent' : 'all' };
+      pool.query(`SELECT count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${W}`, p),
+      pool.query(`SELECT rep_group, count(*)::int n, round(sum(paid_amount),2)::float8 paid FROM planner.commission_paid_history ${Wtab} GROUP BY 1`, pt)]);
+    const v = { rows: rows.rows, by_month: byMonth.rows, by_group: byGroup.rows, groups: groups.rows.map(r => r.rep_group), years: years.rows.map(r => r.y), total: tot.rows[0], tabs: tabs.rows, range: recent ? 'recent' : 'all' };
     _cphMemo.set(_ck, { at: Date.now(), v }); if (_cphMemo.size > 100) _cphMemo.delete(_cphMemo.keys().next().value);
     res.set('Cache-Control', 'no-store').json(v);
   } catch (e) { if (/does not exist/.test(e.message)) return res.json({ rows: [], by_month: [], by_group: [], groups: [], years: [], total: { n: 0, paid: 0 }, missing: true }); log500(e); res.status(500).json({ error: e.message }); }
