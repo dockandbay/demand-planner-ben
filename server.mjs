@@ -14862,6 +14862,67 @@ app.get('/api/product/reports/sampling', async (_req, res) => {
     res.json({ big, typeSeason: { seasons, types, cells }, supplierSeason, detail });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.453 (Ben): PRODUCT ▸ Reports ▸ Sample costs. One row per sample-request line (SKU lines + linked development
+// samples), costed in GBP so the client can filter and group instantly. Per request: product cost (supplier charges'
+// product_cost + courier-bill 'product' lines) is spread per unit; freight (charges' freight_cost + every other
+// courier-bill line on that SR ref) is split by weight (qty x product unit weight; a line with no weight uses the
+// request's average, and with no weights at all it splits by units). Rejected charges and cancelled requests are left
+// out. Charges are in the supplier's currency (USD when unset, as the Other Payment labels them); converted with
+// CONFIG fx_rates for the request's FY (local per GBP).
+app.get('/api/product/reports/sample-costs', async (_req, res) => {
+  try {
+    let fx = {}; try { const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; fx = fr && fr.value ? JSON.parse(fr.value) || {} : {}; } catch (e) {}
+    const fyKeys = Object.keys(fx).sort();
+    const rateFor = (ccy, d) => { ccy = String(ccy || 'USD').toUpperCase(); if (ccy === 'GBP') return 1;
+      const dt = d ? new Date(d) : new Date(), fy = String(dt.getMonth() + 1 >= 3 ? dt.getFullYear() : dt.getFullYear() - 1);
+      const o = fx[fy] || fx[fyKeys[fyKeys.length - 1]] || {}; return Number(o[ccy]) > 0 ? Number(o[ccy]) : ({ USD: 1.34, EUR: 1.15, AUD: 1.9, CAD: 1.85 }[ccy] || 1); };
+    const reqs = (await pool.query(`SELECT r.id, r.ref, coalesce(nullif(r.supplier_name,''),'—') supplier, coalesce(nullif(s.default_currency,''),'USD') ccy,
+        to_char(r.created_at,'YYYY-MM-DD') d
+      FROM planner.sample_requests r LEFT JOIN planner.suppliers s ON s.id=r.supplier_id
+      WHERE coalesce(r.status,'') NOT ILIKE 'cancel%'`)).rows;
+    if (!reqs.length) return res.json({ rows: [] });
+    const ids = reqs.map(r => r.id), refs = reqs.map(r => r.ref);
+    const lines = (await pool.query(`
+      SELECT l.sample_id rid, l.sku, coalesce(l.qty,0)::int qty, nullif(p.category,'') pcat,
+        coalesce(nullif(p.prod_weight_uk::text,'')::numeric, nullif(p.uk_prod_weight::text,'')::numeric, nullif(p.us_prod_weight::text,'')::numeric) w,
+        (SELECT nullif(i.season,'') FROM planner.product_dev_sizes z JOIN planner.product_dev_items i ON i.id=z.item_id
+          WHERE z.mapped_sku=l.sku OR z.working_sku=l.sku LIMIT 1) dseason,
+        (SELECT nullif(i.category,'') FROM planner.product_dev_sizes z JOIN planner.product_dev_items i ON i.id=z.item_id
+          WHERE z.mapped_sku=l.sku OR z.working_sku=l.sku LIMIT 1) dcat
+      FROM planner.sample_request_lines l LEFT JOIN planner.products p ON p.sku=l.sku
+      WHERE l.sample_id = ANY($1) AND coalesce(l.qty,0) > 0
+      UNION ALL
+      SELECT x.sample_request_id, ds.item_ref, coalesce(x.qty,1)::int, NULL, NULL, nullif(i.season,''), nullif(i.category,'')
+      FROM planner.sample_request_dev_samples x JOIN planner.product_dev_samples ds ON ds.id=x.dev_sample_id
+      LEFT JOIN planner.product_dev_items i ON i.ref=ds.item_ref
+      WHERE x.sample_request_id = ANY($1)`, [ids])).rows;
+    const chg = {}; const addC = (ref, prod, frt) => { const c = chg[ref] || (chg[ref] = { p: 0, f: 0 }); c.p += prod; c.f += frt; };
+    (await pool.query(`SELECT source_ref, coalesce(product_cost,0)::numeric p, coalesce(freight_cost,0)::numeric f FROM planner.supplier_charges
+      WHERE source_type='sample' AND coalesce(status,'') <> 'rejected' AND source_ref = ANY($1)`, [refs])).rows
+      .forEach(c => addC(c.source_ref, Number(c.p) || 0, Number(c.f) || 0));
+    const billAdj = {};   // courier bills carry their own currency
+    (await pool.query(`SELECT bl.sample_ref, bl.charge, bl.amount, b.currency FROM planner.sample_bill_lines bl JOIN planner.sample_bills b ON b.id=bl.bill_id
+      WHERE bl.sample_ref = ANY($1)`, [refs])).rows.forEach(b => { const a = billAdj[b.sample_ref] || (billAdj[b.sample_ref] = []); a.push(b); });
+    const byReq = {}; lines.forEach(l => { (byReq[l.rid] || (byReq[l.rid] = [])).push(l); });
+    const seasonOf = (sku, ds) => ds || ((/^((?:SS|AW)\d{2})-/i.exec(String(sku || '')) || [])[1] || '').toUpperCase() || '—';
+    const rows = [];
+    for (const r of reqs) {
+      const ls = byReq[r.id] || []; if (!ls.length) continue;
+      const rate = rateFor(r.ccy, r.d), c = chg[r.ref] || { p: 0, f: 0 };
+      let prodGbp = c.p / rate, frtGbp = c.f / rate;
+      (billAdj[r.ref] || []).forEach(b => { const v = (Number(b.amount) || 0) / rateFor(b.currency, r.d); if (String(b.charge) === 'product') prodGbp += v; else frtGbp += v; });
+      const units = ls.reduce((a, l) => a + l.qty, 0);
+      const known = ls.filter(l => Number(l.w) > 0), avgW = known.length ? known.reduce((a, l) => a + Number(l.w), 0) / known.length : 0;
+      const wt = l => avgW > 0 ? l.qty * (Number(l.w) > 0 ? Number(l.w) : avgW) : l.qty, wSum = ls.reduce((a, l) => a + wt(l), 0);
+      for (const l of ls) rows.push({ ref: r.ref, d: r.d, supplier: r.supplier, sku: l.sku, season: seasonOf(l.sku, l.dseason),
+        category: l.pcat || l.dcat || '—', qty: l.qty,
+        cost: units ? Math.round(prodGbp * l.qty / units * 100) / 100 : 0,
+        freight: wSum ? Math.round(frtGbp * wt(l) / wSum * 100) / 100 : 0,
+        by_weight: avgW > 0 && ls.length > 1 });
+    }
+    res.set('Cache-Control', 'no-store').json({ rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product SIZE (barcodes live on sizes, mig 294): season /
 // ref / product type / colour way / size / SKU / EAN / components / stage. Items with no sizes still get one blank-size
 // row so the catalogue is complete. Season and colour way fall back to the ref segments (SEASON-TYPE-COLOURWAY) when the

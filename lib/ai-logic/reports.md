@@ -49,6 +49,8 @@ sources:
   - server.mjs :: /api/demand/forecast-anomalies
   - server.mjs :: /api/demand/stock-cover
   - server.mjs :: /api/product/reports/sampling, /api/product/reports/catalogue, /api/product/pim-waiting-room
+  - server.mjs :: /api/product/reports/sample-costs
+  - supply/inject.html :: renderSampleCosts
 fingerprints:
   artifact_v16.7.html::renderReportView: d295c42ef5f0
   artifact_v16.7.html::renderExecView: 255e38a51f5e
@@ -101,7 +103,9 @@ fingerprints:
   server.mjs::/api/product/reports/sampling: 509061cede41
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
-verified_version: v28.452
+  server.mjs::/api/product/reports/sample-costs: cb55e12aee72
+  supply/inject.html::renderSampleCosts: 48858dc1df2a
+verified_version: v28.455
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -441,6 +445,15 @@ verified_version: v28.452
     - Type x Season.
     - Supplier x Season, with average samples per request, to approve (status approved) and to reject (status dropped).
   (source: server.mjs :: /api/product/reports/sampling; supply/inject.html :: renderProductReports)
+- Sample costs (v28.455, Ben's screenshot spec):
+  - Rows: one per SUPPLY sample-request line (SKU lines, plus development samples linked to the request, shown by item ref). Cancelled requests are left out.
+  - Per request: product cost = non-rejected supplier charges' product_cost + courier-bill lines on that SR ref with charge 'product'; freight = charges' freight_cost + every other courier-bill line on that ref.
+  - Product cost is spread per unit (cost per sample). Freight is split by weight: qty x product unit weight (prod_weight_uk, else uk / us prod weight); a line with no weight uses the request's average weight; with no weights at all it splits by units.
+  - Currency: charges are in the supplier's default currency (USD when unset, matching the "$" Other Payment label); courier bills in their own currency. Converted to GBP with CONFIG fx_rates (local per GBP) for the request's FY.
+  - Season: the development item's season (via the size's mapped or working SKU), else an SS27- / AW27- prefix on the SKU, else "—". Category: products.category, else the development item's category.
+  - Filters (multi-select "is" popovers, none ticked = any, all in the browser): Season, Category, SKU, Supplier, Date range (request month), Traffic light. Traffic light is on the SKU's total samples in the selection: 1-2 green, 3 amber, 4+ red.
+  - Tiles: Samples, Sample cost, Freight, Total cost. Breakdown per SKU: samples, cost per sample (sample cost / samples), freight, total, sorted by total. Download = CSV of the breakdown with the filter line.
+  (source: server.mjs :: /api/product/reports/sample-costs; supply/inject.html :: renderSampleCosts)
 - Approved products: a staging list of working SKUs with status waiting / in_pim / dropped (waiting first). Marking "in PIM" does not write to Airtable. (source: server.mjs :: /api/product/pim-waiting-room; renderPimWaitingRoom)
 - Catalogue: one row per product size.
   - Fallbacks:

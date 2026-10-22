@@ -18144,15 +18144,106 @@
   // (avg samples/request, avg samples to approve / to reject) with a per-supplier detail popout + PDF.
   // v27.808 (Ben): PRODUCT ▸ REPORTS now has a sub-nav — Sampling (existing) + PIM waiting room (new). The dispatcher
   // renders the tabs into `c` and delegates the body to the right renderer, so the existing sampling report is untouched.
-  function renderProductReportsTab(c){ var rt=window._prodRepTab; if(rt==='waiting')rt='approved-products'; if(rt!=='approved-products'&&rt!=='catalogue')rt='sampling'; window._prodRepTab=rt;   // v28.154 (Ben): + catalogue
+  function renderProductReportsTab(c){ var rt=window._prodRepTab; if(rt==='waiting')rt='approved-products'; if(rt!=='approved-products'&&rt!=='catalogue'&&rt!=='sample-costs')rt='sampling'; window._prodRepTab=rt;   // v28.154 (Ben): + catalogue; v28.453: + sample-costs
     // v27.811 (Ben): standard blue L3 sub-nav (reuses #pcfg-subs-l3 theme styling) + deep links.
-    var TABS=[['sampling','Sampling'],['approved-products','Approved products'],['catalogue','Catalogue']];
+    var TABS=[['sampling','Sampling'],['sample-costs','Sample costs'],['approved-products','Approved products'],['catalogue','Catalogue']];
     c.innerHTML='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab prodrep-tab'+(t[0]===rt?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div><div id="prodrep-body"></div>';
     c.querySelectorAll('.prodrep-tab').forEach(function(t){ t.onclick=function(){ window._prodRepTab=t.dataset.k; try{ writeHash(['product','reports',t.dataset.k]); }catch(e){} renderProductReportsTab(c); }; });
     var body=c.querySelector('#prodrep-body');
     if(rt==='approved-products') return renderPimWaitingRoom(body);
     if(rt==='catalogue') return renderProductCatalogue(body);   // v28.154 (Ben)
+    if(rt==='sample-costs') return renderSampleCosts(body);   // v28.453 (Ben)
     return renderProductReports(body);
+  }
+  // v28.453 (Ben, screenshot spec): PRODUCT ▸ Reports ▸ Sample costs. Rows from /api/product/reports/sample-costs (one per
+  // sample-request line, £). Six "is" filters, each a multi-select popover (none ticked = any); everything filters in the
+  // browser. Overview tiles + per-SKU breakdown (samples pill coloured by count: 1-2 green, 3 amber, 4+ red) + CSV.
+  var _sc={f:{season:[],category:[],sku:[],supplier:[],month:[],light:[]},rows:null,open:''};
+  var _SC_F=[['season','Season'],['category','Category'],['sku','SKU'],['supplier','Supplier'],['month','Date range'],['light','Traffic light']];
+  var _SC_LIGHT=[['g','1 to 2 samples'],['a','3 samples'],['r','4+ samples']];
+  function _scMon(ym){ var p=String(ym||'').split('-'); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return p.length<2?ym:(mn[(+p[1])-1]||'')+' '+p[0]; }
+  function _scGbp(v){ v=Math.round((Number(v)||0)*100)/100; return '£'+v.toLocaleString(undefined,{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2}); }
+  function _scLight(n){ return n>=4?'r':n===3?'a':'g'; }
+  function _scOpts(k){ var rows=_sc.rows||[], seen={};
+    if(k==='light') return _SC_LIGHT.map(function(x){return {v:x[0],l:x[1]};});
+    rows.forEach(function(r){ var v=k==='month'?String(r.d||'').slice(0,7):r[k]; if(v)seen[v]=1; });
+    var vs=Object.keys(seen).sort(function(a,b){ return k==='month'||k==='season'?b.localeCompare(a):a.localeCompare(b,undefined,{numeric:true}); });
+    return vs.map(function(v){ return {v:v,l:k==='month'?_scMon(v):v}; }); }
+  function _scLabel(k){ var sel=_sc.f[k]; if(!sel.length)return 'is any';
+    var o=_scOpts(k), first=(o.filter(function(x){return x.v===sel[0];})[0]||{l:sel[0]}).l;
+    return 'is '+first+(sel.length>1?' +'+(sel.length-1):''); }
+  function _scAgg(){ var f=_sc.f, by={}, order=[];
+    (_sc.rows||[]).forEach(function(r){
+      if(f.season.length&&f.season.indexOf(r.season)<0)return; if(f.category.length&&f.category.indexOf(r.category)<0)return;
+      if(f.sku.length&&f.sku.indexOf(r.sku)<0)return; if(f.supplier.length&&f.supplier.indexOf(r.supplier)<0)return;
+      if(f.month.length&&f.month.indexOf(String(r.d||'').slice(0,7))<0)return;
+      var g=by[r.sku]; if(!g){ g=by[r.sku]={sku:r.sku,qty:0,cost:0,freight:0}; order.push(g); }
+      g.qty+=Number(r.qty)||0; g.cost+=Number(r.cost)||0; g.freight+=Number(r.freight)||0; });
+    var out=order.filter(function(g){ return !f.light.length||f.light.indexOf(_scLight(g.qty))>=0; });
+    out.forEach(function(g){ g.total=g.cost+g.freight; g.per=g.qty?g.cost/g.qty:0; });
+    return out.sort(function(a,b){ return b.total-a.total||a.sku.localeCompare(b.sku); }); }
+  function renderSampleCosts(c){
+    if(!document.getElementById('sc-style')){ var st=document.createElement('style'); st.id='sc-style'; st.textContent=
+      '.sc-card{border:2px solid var(--blue);border-radius:14px;padding:18px 20px;background:var(--card);max-width:1180px}'
+      +'.sc-hd{display:flex;align-items:center;gap:14px;margin-bottom:12px}.sc-hd h2{margin:0;font-size:19px;font-weight:800;color:var(--ink)}'
+      +'.sc-dl{margin-left:auto;background:var(--blue-soft);border:1.5px solid var(--blue);color:var(--ink);border-radius:10px;padding:7px 16px;font-weight:800;font-size:14px;cursor:pointer}'
+      +'.sc-fb{display:flex;align-items:stretch;gap:10px;background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:12px;padding:8px 10px;flex-wrap:wrap}'
+      +'.sc-fb>b{align-self:center;font-size:14px;padding:0 10px 0 6px;color:var(--ink)}'
+      +'.sc-chip{position:relative;flex:1 1 130px;min-width:120px;border:1.5px solid color-mix(in srgb,var(--faint) 55%,transparent);border-radius:10px;background:var(--blue-soft);padding:6px 10px;text-align:center;cursor:pointer;user-select:none}'
+      +'.sc-chip:hover{border-color:var(--blue)}.sc-chip.on{border-color:var(--blue)}'
+      +'.sc-chip .t{font-size:12px;color:var(--muted)}.sc-chip .v{font-size:13px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      +'.sc-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:50;min-width:220px;max-width:320px;background:var(--card);border:1px solid var(--line2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;text-align:left;cursor:default}'
+      +'.sc-pop input[type=search]{width:100%;box-sizing:border-box;font-size:12px;padding:5px 8px;border:1px solid var(--line2);border-radius:6px;margin-bottom:6px;background:var(--card);color:var(--ink)}'
+      +'.sc-pop .ls{max-height:260px;overflow:auto}.sc-pop label{display:flex;align-items:center;gap:7px;font-size:12px;padding:4px 4px;border-radius:5px;cursor:pointer;color:var(--ink)}.sc-pop label:hover{background:var(--hover)}'
+      +'.sc-pop .ft{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px;font-size:12px}.sc-pop .ft a{color:var(--blue);cursor:pointer}'
+      +'.sc-h3{font-size:16px;font-weight:800;color:var(--ink);margin:18px 0 10px}'
+      +'.sc-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}@media(max-width:760px){.sc-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+      +'.sc-tile{background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:12px;padding:12px 16px}.sc-tile .l{font-size:13px;color:var(--muted)}.sc-tile.tot .l{color:var(--ink);font-weight:800}'
+      +'.sc-tile .n{font-size:22px;font-weight:800;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums}'
+      +'.sc-bh{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.sc-bh .sc-h3{margin-right:auto}.sc-lg{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}.sc-lg i{width:14px;height:14px;border-radius:3px;display:inline-block}'
+      +'.sc-g{background:color-mix(in srgb,var(--pos) 26%,var(--card))}.sc-a{background:color-mix(in srgb,var(--amber) 28%,var(--card))}.sc-r{background:color-mix(in srgb,var(--neg) 24%,var(--card))}'
+      +'.sc-tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.sc-tbl th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--line)}'
+      +'.sc-tbl th.k{color:var(--ink);font-weight:800}.sc-tbl td{text-align:left;padding:5px 8px;font-size:14px;color:var(--ink)}.sc-tbl td.k{font-weight:800}.sc-tbl tbody tr:last-child td{padding-bottom:10px}'
+      +'.sc-pill{display:inline-block;min-width:64px;border-radius:6px;padding:3px 10px;font-weight:600;color:var(--ink)}'
+      +'.sc-note{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:6px}';
+      document.head.appendChild(st); }
+    c.innerHTML='<div class="sc-card"><div class="sc-hd"><h2>Sample costs</h2><button class="sc-dl" id="sc-dl">⤓ Download report</button></div>'
+      +'<div class="sc-fb" id="sc-fb"><b>Filters</b></div><div id="sc-body"><div class="hz-skel" aria-label="Loading" style="margin-top:14px"><i></i><i></i><i></i></div></div></div>';
+    var fb=c.querySelector('#sc-fb'), body=c.querySelector('#sc-body');
+    function chips(){ fb.innerHTML='<b>Filters</b>'+_SC_F.map(function(x){ return '<div class="sc-chip'+(_sc.f[x[0]].length?' on':'')+'" data-k="'+x[0]+'"><div class="t">'+esc(x[1])+'</div><div class="v">'+esc(_scLabel(x[0]))+' ▾</div>'+(_sc.open===x[0]?pop(x[0]):'')+'</div>'; }).join('');
+      fb.querySelectorAll('.sc-chip').forEach(function(ch){ ch.onclick=function(e){ if(e.target.closest('.sc-pop'))return; _sc.open=_sc.open===ch.dataset.k?'':ch.dataset.k; chips(); var s=fb.querySelector('.sc-pop input[type=search]'); if(s)s.focus(); }; });
+      var p=fb.querySelector('.sc-pop'); if(!p)return; var k=_sc.open;
+      p.querySelectorAll('input[type=checkbox]').forEach(function(cb){ cb.onchange=function(){ var a=_sc.f[k], i=a.indexOf(cb.value); if(cb.checked&&i<0)a.push(cb.value); if(!cb.checked&&i>=0)a.splice(i,1); refresh(); }; });
+      var q=p.querySelector('input[type=search]'); if(q)q.oninput=function(){ var t=q.value.trim().toLowerCase(); p.querySelectorAll('label').forEach(function(l){ l.hidden=!!t&&l.textContent.toLowerCase().indexOf(t)<0; }); };
+      var any=p.querySelector('[data-any]'); if(any)any.onclick=function(){ _sc.f[k]=[]; refresh(); };
+      var done=p.querySelector('[data-done]'); if(done)done.onclick=function(){ _sc.open=''; chips(); }; }
+    function pop(k){ var o=_scOpts(k), sel=_sc.f[k];
+      return '<div class="sc-pop">'+(o.length>8?'<input type="search" placeholder="search…">':'')+'<div class="ls">'
+        +(o.length?o.map(function(x){ return '<label><input type="checkbox" value="'+esc(x.v)+'"'+(sel.indexOf(x.v)>=0?' checked':'')+'>'+(k==='light'?'<i class="sc-'+x.v+'" style="width:12px;height:12px;border-radius:3px;display:inline-block"></i>':'')+esc(x.l)+'</label>'; }).join(''):'<div class="mut tiny" style="padding:4px">No values.</div>')
+        +'</div><div class="ft"><a data-any>Any</a><a data-done>Done</a></div></div>'; }
+    function refresh(){ var keep=_sc.open; chips(); _sc.open=keep; draw(); }
+    function draw(){ var g=_scAgg(), n=0, cost=0, fr=0; g.forEach(function(x){ n+=x.qty; cost+=x.cost; fr+=x.freight; });
+      var tile=function(l,v,cls){ return '<div class="sc-tile'+(cls||'')+'"><div class="l">'+l+'</div><div class="n">'+v+'</div></div>'; };
+      body.innerHTML='<div class="sc-h3">Selection Overview</div><div class="sc-tiles">'+tile('Samples',n.toLocaleString())+tile('Sample cost',_scGbp(cost))+tile('Freight',_scGbp(fr))+tile('Total cost',_scGbp(cost+fr),' tot')+'</div>'
+        +'<div class="sc-bh"><div class="sc-h3">Selection Breakdown</div>'+_SC_LIGHT.map(function(x){ return '<span class="sc-lg"><i class="sc-'+x[0]+'"></i>'+x[1]+'</span>'; }).join('')+'</div>'
+        +'<div style="overflow-x:auto"><table class="sc-tbl"><colgroup><col style="width:36%"><col style="width:14%"><col style="width:18%"><col style="width:15%"><col></colgroup>'
+        +'<thead><tr><th>SKU</th><th>Samples</th><th>Cost per sample</th><th>Freight</th><th class="k">Total cost</th></tr></thead><tbody>'
+        +(g.length?g.map(function(x){ return '<tr><td>'+esc(x.sku)+'</td><td><span class="sc-pill sc-'+_scLight(x.qty)+'">'+x.qty+'</span></td><td>'+_scGbp(x.per)+'</td><td>'+_scGbp(x.freight)+'</td><td class="k">'+_scGbp(x.total)+'</td></tr>'; }).join('')
+          :'<tr><td colspan="5" class="mut">No samples match these filters.</td></tr>')
+        +'</tbody></table></div>'
+        +'<div class="sc-note">Each row: samples × cost per sample + freight = total cost. Bundled freight is split by weight.'
+        +'<div class="tiny" style="margin-top:4px">From SUPPLY sample requests (cancelled left out) and their charges (rejected left out) plus courier bills on the request; supplier currency converted to £ at the CONFIG rates.</div></div>'; }
+    c.querySelector('#sc-dl').onclick=function(){ var g=_scAgg(); if(!g.length){ alert('Nothing to download for these filters.'); return; }
+      var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      var r2=function(v){ return (Math.round(v*100)/100).toFixed(2); };
+      var filt=_SC_F.map(function(x){ return x[1]+' '+_scLabel(x[0]); }).join(' · ');
+      var csv='﻿'+cell('Sample costs · '+filt)+'\n'+['SKU','Samples','Cost per sample (GBP)','Sample cost (GBP)','Freight (GBP)','Total cost (GBP)'].join(',')+'\n'
+        +g.map(function(x){ return [cell(x.sku),x.qty,r2(x.per),r2(x.cost),r2(x.freight),r2(x.total)].join(','); }).join('\n')+'\n';
+      var b=new Blob([csv],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(b), a=document.createElement('a'); a.href=u; a.download='sample_costs_'+fd(new Date().toISOString().slice(0,10))+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
+    if(!window._scDocClick){ window._scDocClick=1; document.addEventListener('click',function(e){ if(_sc.open&&document.contains(e.target)&&!e.target.closest('#sc-fb')){ _sc.open=''; var f=document.getElementById('sc-fb'); if(f&&f._chips)f._chips(); } }); }
+    fb._chips=chips; chips();
+    fetch('/api/product/reports/sample-costs').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)throw new Error((d&&d.error)||'error'); _sc.rows=d.rows||[]; chips(); draw(); })
+      .catch(function(e){ body.innerHTML='<div style="color:var(--neg);margin-top:12px">Failed: '+esc(e.message||e)+'</div>'; });
   }
   // v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product size (SKU / colour way / size / product type /
   // barcode) from /api/product/reports/catalogue. Season filter (server-side), multi-term search (tokMatch, same as the

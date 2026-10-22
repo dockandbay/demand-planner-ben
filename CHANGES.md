@@ -1,3 +1,12 @@
+## v28.455 (22-Oct-26) PRODUCT > Reports > Sample costs (includes v28.453-454)
+- Ben (screenshot): "in product > reports we want a sample costs report which looks exactly like this with filters, including the 'is' in the dropdown which can be multi select".
+- New tab PRODUCT > Reports > Sample costs (#/product/reports/sample-costs), new read-only route GET /api/product/reports/sample-costs.
+- Filters bar: Season, Category, SKU, Supplier, Date range (month), Traffic light; each opens a multi-select list (search when long, Any, Done) and reads "is AW27", "is Towels +1" or "is any".
+- Selection Overview tiles (Samples, Sample cost, Freight, Total cost) and Selection Breakdown per SKU (samples pill: 1-2 green, 3 amber, 4+ red; cost per sample; freight; total), Download report = CSV.
+- Costs come from SUPPLY sample requests and their charges (rejected left out) plus courier bills on the request, in £ at the CONFIG rates; bundled freight split by product weight.
+- Live has 9 sample requests and no sample charges yet, so the report will show samples with £0 until charges are entered. Sandbox checked in Chrome (ACME + Lixin: 307 samples, £196.86 + £1,228.34 = £1,425.20).
+- No migration or env var. Buy plan identical. v28.453-454 were cache-busting versions for the Chrome check.
+
 ## v28.452 (22-Oct-26) Scenario > Sales Planning lists Phase Out / Last Season SKUs that still have stock
 - Sarah (email "Horizon Stock Scenarios"): planning the December EOSS sale, most Phase Out and Last Season SKUs were missing, e.g. TOWLB-COLLAB-LG-UNO.
 - Cause: the tab only listed SKUs "available" in the country and channel, and that check drops any SKU past its discontinue date even with stock left. Live had 142 such SKUs in UK 3PL alone (102,793 units), 218 in US 3PL, 189 in EU 3PL, 162 in AU 3PL.
