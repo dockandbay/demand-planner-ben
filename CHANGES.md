@@ -1,3 +1,12 @@
+## v28.463 (22-Oct-26) CLIENT: Portal preview is its own tab, deep links, left-menu level 3, dark filter stays dark
+- Ben: "portal preview needs a deep link and level 3 menu on the left navigation. also the agent selection goes white when changing while selected, click away it goes black" + "can portal be brought out of client>config and under client".
+- New CLIENT tab PORTAL PREVIEW (between Messages and Config), removed from Config. Deep link #/client/portal/<client id>/<user id> preselects the client and user (picking a client updates the URL); the old #/client/config/preview link redirects.
+- CLIENT ▸ Config tabs now deep link (#/client/config/settings | import | prices | galleries | agent-rules).
+- Left menu: CLIENT now shows its level 3 (Config tabs; Commissions tabs) under the active section, like PRODUCT and SUPPLY; the in-page tab row hides when mirrored.
+- A set (black) CLIENT dropdown no longer turns white while it has focus: the global #app .fci:focus rule forced a white background; a more specific rule keeps it dark.
+- Image galleries in the preview: they're there, under Catalogue ▸ Images (checked: Dillard's preview shows Highlights, 50 images).
+- Checked in Chrome on the sandbox. UI only; buy plan unaffected.
+
 ## v28.462 (22-Oct-26) "Sample versions" wording: hint + Master data button
 - Ben: "rename hint text and the master data tab to sample versions".
 - PRODUCT ▸ product ▸ Samples hint now reads "creates sample versions pre-linked to this product"; the Master data tab button reads "+ Create sample versions" (was "+ Add to new sample request"). Labels only.

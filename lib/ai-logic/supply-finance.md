@@ -280,7 +280,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.460
+verified_version: v28.463
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -586,6 +586,7 @@ verified_version: v28.460
 - Live check 22-Oct-26 (read only, sandbox with test rules): Sep-26 had 3 no-agent orders, all US FL (USWS-19318 / 19330 / 19332), so a US + FL + USWS rule suggests Schauben (Appelman) for all three; Oct-26 had 5 (EUWS-3323 FR, UKWS-7026 / 7029 GB, USWS-19334 AL, USWS-19345 IN).
 
 ## Client portal image galleries (ImageBank, v28.441)
+- Where it shows: the portal's Catalogue ▸ Images tab (next to Line sheet and Stock availability), not a top-level portal menu item. Portal preview (v28.463) is its own CLIENT tab, CLIENT ▸ Portal preview, deep link #/client/portal/<client id>/<user id> (preselects, Open preview stays a click); CLIENT ▸ Config tabs deep link as #/client/config/<settings|import|prices|galleries|agent-rules>.
 - Ben 22-Oct-26: "build the client portal image galleries: galleries page, gallery page with search and sort, image lightbox with download". Spec: docs/integrations/imagebank-client-portal.md. Portal: Catalogue > Images (a third tab next to Line sheet and Stock availability; Ben picked "inside Catalogue"). A client with neither line sheet nor stock lands on Images. (source: supply/client-view.js :: vImages, vGallery)
 - Data: ImageBank's portal API (/api/v1/portal), called only by HORIZON's server with IMAGEBANK_API_KEY (bearer; server env, never sent to a browser, URL or log; IMAGEBANK_URL is the ImageBank address). Without both env vars the portal says "Image galleries are not connected yet" and the settings say ImageBank is not connected. Gallery responses are cached 60 s on the server; download links never. (source: server.mjs :: ibCall)
 - Which galleries a client sees (Ben: "select specific galleries in settings to show to everyone then on client account have ability to select specific galleries to override ALL"): only galleries ImageBank shares with the portal; of those, the default for every client in CLIENT > Config > Image galleries (All shared galleries, or Only these), and per client on its Access tab (Use the default, or Only these galleries, which overrides the default). Stored in app_settings cp_galleries_default {mode, ids} and cp_galleries_client_<client id> {ids}; saved on each tick and written to the client audit. Feature toggle Image galleries (view_images, default on). (source: server.mjs :: cpGalleryRule, /api/client/galleries; supply/inject.html :: cpGalleryDefault, cpGalleryClient)
