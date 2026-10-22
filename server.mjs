@@ -30510,6 +30510,18 @@ app.get('/api/client/commission/customers/fulfil-unmatched', async (req, res) =>
 // and date folders"): range=recent (default) = the 3 latest paid months; any agent / year / search filter, or range=all, searches everything.
 // Answers are kept 2 minutes per query (cleared when a run is marked paid or reopened, which rewrites the history).
 const _cphMemo = new Map();
+// v28.448 (Ben 22-Oct-26: Paid history "look like horizon PO grid. fast search and filters and tabs and pills", option A): every paid-history
+// row in one compact payload (about 8,400 rows), so search, tabs, pills and sorting run in the browser with no reload. Currency is the row's,
+// else its agent's (the history sheet rows have none). Cached 2 min with the other paid-history reads (cleared when a run is marked paid).
+app.get('/api/client/commission/history-all', async (req, res) => {
+  const hit = _cphMemo.get('all'); if (hit && Date.now() - hit.at < 120e3) return res.set('Cache-Control', 'no-store').json(hit.v);
+  try { const r = await pool.query(`SELECT h.id, to_char(h.period,'YYYY-MM') period, h.rep_group, h.customer, h.invoice_no, h.po_no, to_char(h.invoice_date,'YYYY-MM-DD') invoice_date,
+        upper(coalesce(nullif(trim(h.currency),''), g.currency, 'USD')) ccy, h.commissionable::float8 comm, h.rate_pct::float8 rate, h.paid_amount::float8 paid, h.credit_note, coalesce(nullif(h.status,''),'paid') status, h.source, h.run_id, h.notes
+      FROM planner.commission_paid_history h LEFT JOIN planner.rep_groups g ON lower(g.name)=lower(h.rep_group) ORDER BY h.period DESC NULLS LAST, h.id DESC`);
+    const cols = ['id', 'period', 'rep_group', 'customer', 'invoice_no', 'po_no', 'invoice_date', 'ccy', 'comm', 'rate', 'paid', 'credit_note', 'status', 'source', 'run_id', 'notes'];
+    const v = { cols, rows: r.rows.map(x => cols.map(c => x[c] == null ? null : x[c])), at: new Date().toISOString() };
+    _cphMemo.set('all', { at: Date.now(), v }); res.set('Cache-Control', 'no-store').json(v);
+  } catch (e) { if (/does not exist/.test(e.message)) return res.json({ cols: [], rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/client/commission/history', async (req, res) => {
   const _ck = JSON.stringify([req.query.group, req.query.year, req.query.q, req.query.status, req.query.range, req.query.month]), _ch = _cphMemo.get(_ck);
   if (_ch && Date.now() - _ch.at < 120e3) return res.set('Cache-Control', 'no-store').json(Object.assign({ cached: true }, _ch.v));

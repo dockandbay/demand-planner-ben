@@ -1,3 +1,10 @@
+## v28.448 (22-Oct-26) Commissions Paid history rebuilt like the PO grid (option A)
+- Ben: "improve paid history UI to look like horizon PO grid. fast search and filters and tabs and pills"; picked option A ("po grid") from three mockups (artifact).
+- All rows load once (new `GET /api/client/commission/history-all`, about 8,400 rows, cached 2 min and cleared when a run is marked paid); everything else is instant in the browser, no reload: agent tabs with totals in the agent's currency, status pills (Paid / Not paid / Duplicate / Cancelled / All) and period pills (Last 3 months / this year to date / All months) with live counts, search as you type (highlighted, "/" to focus), Year and Currency filters (dark when set), one flat grid sortable by any header (Month newest first; first 400 rows then Show all), totals per currency. Month folders are gone (Month is a column).
+- Currency: history sheet rows have none, so the agent's currency is used (sandbox: USD 6,803, EUR 966, CAD 613, GBP 35 rows). Totals and the Summary drawer show each currency separately instead of one mixed sum.
+- Summary › drawer as before (by agent, by month), now per currency; a month opens as an "Oct-26 only ✕" pill.
+- Sandbox (jsdom, full page): tabs All 34, Ideco €2k, TJ €1.5k, Schauben $859, ...; All months 8,165 rows (400 shown + Show all); EUR filter 966 rows €156,284.02 and dark; agent tab drops the Agent column; drawer and month pill work. Buy plan identical. No env, no migration.
+
 ## v28.447 (22-Oct-26) Commissions: Monthly run & bills opens on last month
 - Ben: "#/client/commission/run mid month always default to LAST month". It opened on the newest month with runs (Oct-26 after a test run). Now Monthly run & bills, Unassigned and Exceptions all open on last month; a run link or a month picked in the session still wins.
 - Sandbox (jsdom): /#/client/commission/run opens on Sep-26 (All Sep-26 7, TJ, Schauben, ...). Buy plan identical. Display only.
