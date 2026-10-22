@@ -18443,6 +18443,46 @@
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   var _pgTab={season:'__all__',type:''}, _pgTree={season:null,type:null};   // v27.766/775 (Ben): PRODUCTS grid tabs/tree state; season tabs default to ALL
   var _prodCfgTab='season';   // PRODUCT ▸ Config active L3 sub-tab: season | cats | tags | phrases
+  // v28.458 (Ben): PRODUCT ▸ product ▸ Size & variants ▸ "⤓ Download barcodes" — a modal over the drawer: tick sizes (only
+  // those with a barcode), PNG / JPG, pixel width, and file name (barcode / SKU / size), then one image per size, rendered by
+  // the same EAN-13 renderer as Config ▸ Workshop barcodes. Files are staggered so the browser keeps them all.
+  function prodSizeBarcodeModal(ref,sizes){ var old=document.getElementById('szbc-modal'); if(old)old.remove();
+    var list=(sizes||[]).filter(function(s){ return String(s.barcode||'').trim(); });
+    var wrap=document.createElement('div'); wrap.id='szbc-modal';
+    wrap.style.cssText='position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:72px 16px;overflow:auto';
+    var nameOf=function(s,k){ var raw=k==='sku'?(s.mapped_sku||s.working_sku||s.barcode):k==='size'?(ref+'_'+(s.size_label||s.barcode)):s.barcode; return String(raw).replace(/[^A-Za-z0-9._-]+/g,'_'); };
+    wrap.innerHTML='<div style="background:var(--card);color:var(--ink);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.3);width:560px;max-width:100%;padding:18px 20px" role="dialog" aria-label="Download barcodes">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:16px">Download barcodes</b><span class="mut tiny">'+esc(ref)+'</span><a class="szbc-x" style="margin-left:auto;cursor:pointer;font-size:18px;color:var(--muted)" title="close">✕</a></div>'
+      +(list.length?'<div class="mut tiny" style="margin-bottom:10px">One image per size (EAN-13 bars + digits).</div>'
+        +'<div style="border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto">'+list.map(function(s){ return '<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line2);cursor:pointer"><input type="checkbox" class="szbc-ck" value="'+s.id+'" checked>'
+          +'<span style="flex:1;min-width:0"><b>'+esc(s.size_label||'—')+'</b><span class="mut tiny" style="display:block;font-family:ui-monospace,Menlo,monospace">'+esc(s.barcode)+(s.mapped_sku||s.working_sku?' · '+esc(s.mapped_sku||s.working_sku):'')+'</span></span>'
+          +'<img src="data:image/svg+xml;charset=utf-8,'+encodeURIComponent(eanBarcodeSVG(s.barcode)||'')+'" style="width:120px;height:36px;object-fit:contain;background:#fff;border:1px solid var(--line2);border-radius:4px" alt=""></label>'; }).join('')+'</div>'
+        +'<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;margin-top:12px;font-size:12px">'
+          +'<span class="mut">Format</span><span><label><input type="radio" name="szbc-fmt" value="png" checked> PNG</label> &nbsp; <label><input type="radio" name="szbc-fmt" value="jpg"> JPG</label></span>'
+          +'<span class="mut">Width</span><span><select class="fci szbc-w" style="width:auto;text-align:left"><option value="452">452 px</option><option value="678" selected>678 px</option><option value="1000">1000 px</option><option value="1500">1500 px</option></select></span>'
+          +'<span class="mut">File name</span><span><select class="fci szbc-nm" style="width:auto;text-align:left"><option value="barcode">Barcode number</option><option value="sku">SKU (real, else working)</option><option value="size">Product ref + size</option></select></span></div>'
+        +'<div style="display:flex;align-items:center;gap:8px;margin-top:14px"><a class="szbc-all" style="cursor:pointer;color:var(--blue);font-size:12px">Select all / none</a><span class="szbc-msg mut tiny" style="margin-left:auto"></span>'
+          +'<button class="save-btn light szbc-cancel">Cancel</button><button class="save-btn szbc-go" style="background:var(--blue);color:#fff;border-color:var(--blue)">⤓ Download</button></div>'
+       :'<div class="mut" style="padding:14px 0">No size has a barcode yet. Assign one in the Barcode column first.</div><div style="text-align:right"><button class="save-btn light szbc-cancel">Close</button></div>')
+      +'</div>';
+    document.body.appendChild(wrap);
+    var close=function(){ wrap.remove(); document.removeEventListener('keydown',esc_); }, esc_=function(e){ if(e.key==='Escape')close(); };
+    document.addEventListener('keydown',esc_);
+    wrap.onclick=function(e){ if(e.target===wrap)close(); };
+    wrap.querySelectorAll('.szbc-x,.szbc-cancel').forEach(function(b){ b.onclick=close; });
+    var all=wrap.querySelector('.szbc-all'); if(all)all.onclick=function(){ var cks=[].slice.call(wrap.querySelectorAll('.szbc-ck')), on=!cks.every(function(c){return c.checked;}); cks.forEach(function(c){ c.checked=on; }); };
+    var go=wrap.querySelector('.szbc-go'); if(!go)return;
+    go.onclick=function(){ var ids=[].slice.call(wrap.querySelectorAll('.szbc-ck:checked')).map(function(c){return c.value;}), msg=wrap.querySelector('.szbc-msg');
+      var picks=list.filter(function(s){ return ids.indexOf(String(s.id))>=0; }); if(!picks.length){ msg.textContent='Tick at least one size.'; return; }
+      var fmt=(wrap.querySelector('input[name=szbc-fmt]:checked')||{}).value==='jpg'?{mime:'image/jpeg',ext:'jpg'}:{mime:'image/png',ext:'png'};
+      var w=parseInt(wrap.querySelector('.szbc-w').value,10)||678, nk=wrap.querySelector('.szbc-nm').value, used={};
+      go.disabled=true; msg.textContent='Rendering '+picks.length+'…'+(picks.length>1?' (your browser may ask to allow multiple downloads)':'');
+      var items=[]; Promise.all(picks.map(function(s){ return new Promise(function(res){ var svg=eanBarcodeSVG(s.barcode); if(!svg)return res(); svgToImg(svg,w,fmt.mime,function(bl){ if(bl){ var nm=nameOf(s,nk); used[nm]=(used[nm]||0)+1; items.push({name:nm+(used[nm]>1?'_'+used[nm]:'')+'.'+fmt.ext,blob:bl}); } res(); }); }); }))
+        .then(function(){ if(!items.length){ msg.textContent='Nothing to download.'; go.disabled=false; return; }
+          var i=0; (function next(){ if(i>=items.length){ msg.textContent='Downloaded '+items.length+' '+fmt.ext.toUpperCase()+' file'+(items.length===1?'':'s')+' at '+w+' px.'; go.disabled=false; return; }
+            var it=items[i++], a=document.createElement('a'); a.href=URL.createObjectURL(it.blob); a.download=it.name; document.body.appendChild(a); a.click();
+            setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1500); setTimeout(next,250); })(); }); };
+  }
   // v27.803 (Ben): PRODUCT ▸ CONFIG ▸ Workshop barcodes — a fixed pool of real GS1 EAN-13s for the design team. Lists the
   // pool with a live barcode preview + free/assigned status, and prints any selection as a zip (reusing the barcode-gen
   // EAN-13 SVG renderer). Assignment to a product size happens on the Sizes grid (phase 2); this screen is view + print.
@@ -19599,7 +19639,8 @@
       host.innerHTML='<div style="display:flex;align-items:center;gap:6px;margin:0 0 6px;flex-wrap:wrap">'
         +'<span style="font-weight:700;font-size:13px">Sizes</span>'
         +'<span class="hz-i" title="Add a size, assign a workshop barcode, then map a real planner SKU or set a working SKU.">i</span>'
-        +'<span style="margin-left:auto;position:relative;display:inline-block"><button class="save-btn szm-addbtn" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Add size</button>'
+        +'<button class="save-btn light szm-bcdl" style="margin-left:auto" title="download this product&rsquo;s size barcodes as images">⤓ Download barcodes</button>'   /* v28.458 (Ben) */
+        +'<span style="position:relative;display:inline-block"><button class="save-btn szm-addbtn" style="background:var(--blue);color:#fff;border-color:var(--blue)">＋ Add size</button>'
           +'<div class="szm-addpop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.16);padding:12px;min-width:300px;text-align:left">'
             +'<div class="mut tiny" style="margin-bottom:5px">New size label</div><input class="fci szm-newsz" placeholder="e.g. Large (Age 3 to 5) 66x49cm" style="width:100%;box-sizing:border-box">'
             +'<div style="display:flex;gap:8px;margin-top:10px"><button class="save-btn szm-addgo" style="background:var(--blue);color:#fff;border-color:var(--blue)">Add size</button><button class="save-btn light szm-addcancel">Cancel</button></div></div></span>'
@@ -19613,6 +19654,7 @@
         if(cancel)cancel.onclick=function(){ pop.style.display='none'; };
         var doAdd=function(){ var v=(inp.value||'').trim(); if(!v)return; go.disabled=true; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(j){ go.disabled=false; if(j&&j.error){alert('Failed: '+j.error);return;} pop.style.display='none'; reloadTab(); }); };
         if(go)go.onclick=doAdd; if(inp)inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } }; })();
+      var _bcdl=host.querySelector('.szm-bcdl'); if(_bcdl)_bcdl.onclick=function(){ prodSizeBarcodeModal(it.ref,d.sizes||[]); };   // v28.458 (Ben)
       host.querySelectorAll('.szm-lbl').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{size_label:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.size_label=el.value; reRender(); }); }; });
       host.querySelectorAll('.szm-ap').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{approval_status:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.approval_status=el.value; el.setAttribute('style',szApprovalStyle(el.value)); reRender(); }); }; });
       host.querySelectorAll('.szm-wsku').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/size/'+el.dataset.id,{working_sku:el.value},function(j){ if(j&&j.error){alert(j.error);return;} var so=szObj(el.dataset.id); if(so)so.working_sku=el.value; reRender(); }); }; });

@@ -1,3 +1,9 @@
+## v28.458 (22-Oct-26) Size & variants: Download barcodes
+- Ben: "in size and variants, we can assign barcode. can you also have the download barcode button here, it can popup options in a modal".
+- PRODUCT ▸ product ▸ Size & variants: "⤓ Download barcodes" next to "＋ Add size" opens a modal: the sizes with a barcode (preview, ticked), Format PNG / JPG, Width 452 / 678 / 1000 / 1500 px, File name = barcode number / SKU / product ref + size, Select all / none, Download. Same EAN-13 images as Config ▸ Workshop barcodes.
+- Checked in Chrome on the sandbox (SS27-HAIRW-LOVELYHAIR: Large + Medium → WORK-HAIR-001.png, XXX.png at 678 px).
+- Browser only; no server change. Buy plan unaffected.
+
 ## v28.457 (22-Oct-26) Reject reasons: "Add new" under the ticks, and saved reasons now show ticked
 - Ben: "can we have the 'add new' for reject reasons below the current items" (the Colour issue / Finishing / Packing ticks under "Rejected, new sample").
 - Sample review (PRODUCT > Sampling expander, Manage panel, sample card): an "Add new reason…" box + "+ Add" sits under the reason ticks. It creates the reason (it appears in PRODUCT > Config > Reject reasons and the Approval stats report), adds it ticked and saves the decision. Typing an existing reason just ticks it.
