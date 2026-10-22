@@ -1,3 +1,8 @@
+## v28.445 (22-Oct-26) CLIENT: badges in colour (commission run Paid = green)
+- Ben: "can paid be a green badge on the commission run". The run already used badge markup, but the badge styles only covered SUPPLY and the scenario pages, so every badge in CLIENT (Paid, Finalised, Open, exception counts, Active, Draft in Fulfil, ...) showed as plain text. CLIENT now uses the same badge styles: Paid green, Finalised blue, Open amber, exceptions red.
+- The Paid badge on the run header shows its date as dd-mmm-yy (was YYYY-MM-DD).
+- Display only. Buy plan identical. No routes, env or migration.
+
 ## v28.444 (22-Oct-26) Commissions: a Xero bill marks the run paid; Fulfil links and "not in Fulfil" on the run
 - Ben: "what is MARK PAID mean ... it only needs to mark these orders as paid in the paid history, assume once bill is created it will be paid". Mark paid was already HORIZON-only (run + rows paid, rows copied to Paid history; nothing paid in Xero). Now creating the commission bill in Xero marks the run paid in the same step (paid reference = the bill number). Mark paid stays for runs with no bill; its tooltip and confirm say what it does (the old payment-reference prompt is gone). One shared function (cmMarkRunPaid) for both.
 - Ben: "pushed 3/3 · 2 not in Fulfil: we need to know which items are not in Fulfil, and a link to the Fulfil order in this view". New Fulfil column on the run: link to the Fulfil sales order (by reference, else SO number, in the Fulfil that Push to Fulfil writes to) or "not in Fulfil". The push message now lists the orders not in Fulfil.
