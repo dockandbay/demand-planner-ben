@@ -128,3 +128,27 @@ Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
 Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
 
 
+## Check 2026-10-23 00:47:06 (orders since 2026-10-22T21:47:07)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO69685 | UK-909680 | processing | 10-22T13:26 | UK-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-23 03:47:09 (orders since 2026-10-23T00:47:06)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO69720 | UK-909704 | processing | 10-22T16:12 | UK-TEATWL-MD-5SET-PICKY | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-23 06:47:07 (orders since 2026-10-23T03:47:09)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO69769 | UK-909733 | processing | 10-22T19:24 | UK-TEATWL-MD-6SET-AFTPTY | 1 | PP | PP | PP move assigned,draft |
+
