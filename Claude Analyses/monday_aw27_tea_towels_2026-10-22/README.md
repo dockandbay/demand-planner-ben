@@ -30,3 +30,7 @@ Result 22-Oct-26 (sandbox): 15 items, 15 components, 15 requests, 16 sample vers
 
 Run: `NODE_PATH=$PWD/node_modules node "Claude Analyses/monday_aw27_tea_towels_2026-10-22/tt_import.cjs" "Claude Analyses/monday_aw27_tea_towels_2026-10-22/tt_data.json" [--dry]`
 Live: not run. Pointing it at live needs Ben's go-ahead (and the live items already exist, so only requests / samples / notes would be added).
+
+## Design PDFs (22-Oct-26, sandbox)
+`tt_files.cjs` copies each design PDF from monday (asset → 1-hour signed link from the monday connector's get_assets, put in column 7 of the TSV at run time; links are not kept in the repo) into Supabase Storage (bucket horizon-uploads, `product/<yyyy-mm>/<uuid>-<name>`) and `planner.portal_attachments` (category 'product', po = product ref, uploaded_by "monday import (<who>)", uploaded_at = monday upload time), and links it as the attachment of the timeline note it was posted with.
+Result: 18 PDFs uploaded (0.2 to 39 MB), 18 notes linked. The two Garden Prep Tomatoes PDFs (217 MB each) exceed the 50 MB storage limit, so Hot Off The Vine got a timeline note pointing to them on monday instead. `tt_assets_manifest.tsv` lists the assets (no links). Checked: /api/product/doc/<id> serves the PDF.
