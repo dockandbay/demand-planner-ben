@@ -21174,7 +21174,7 @@
     // ── Exceptions (v28.331): what needs a person before a run is right. Stage 2 adds the order-level ones (no agent, Fulfil code vs Xero group, Faire). ──
     // ── Unassigned (v28.442, Ben 22-Oct-26): paid wholesale orders with no agent, with the agent a rule says it could be (CLIENT ▸ Config ▸ Agent rules).
     // Nothing is assigned until Tag (an order override, this order only) or Add customer (the customer goes on the agent's list for future orders).
-    function commUnassigned(){ if(!S.umonth)S.umonth=new Date().toISOString().slice(0,7); if(!S.ufilter)S.ufilter='all';
+    function commUnassigned(){ if(!S.umonth)S.umonth=cmPrevMonth();   /* v28.447: last month, like the other commission tabs */ if(!S.ufilter)S.ufilter='all';
       box.innerHTML='<div class="annot" style="margin-bottom:10px">Paid wholesale orders that have no agent (no Fulfil agent code, customer on no agent\'s list). <b>Could be</b> comes from the first matching rule in <a id="un-rules" style="cursor:pointer;color:var(--blue)">CLIENT ▸ Config ▸ Agent rules ▸</a>. <b>Tag</b> credits this order to the agent; <b>Add customer</b> puts the customer on the agent\'s list so later orders follow; <b>✕</b> = not this agent for this order. Customers on the "No Agent" list never show here.</div>'
         +'<div class="bar" style="gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="pill-lbl">Paid in</span><input class="fci txt" id="un-m" type="month" value="'+esc(S.umonth)+'" style="width:140px">'
         +[['all','All'],['sug','Could be an agent'],['none','No rule']].map(function(f){ return '<button class="pill un-f'+(S.ufilter===f[0]?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</button>'; }).join('')
@@ -21301,8 +21301,7 @@
     // one month at a time; tabs = All (every agent's run that month) + one tab per agent (short name, "Agent - " dropped); the agent tab is its run.
     function commReport(){ cpGet('/api/client/commission/runs').then(function(r){ var all=r.runs||[];
       if(S.run){ var _r=all.filter(function(x){ return String(x.id)===String(S.run); })[0]; if(_r)S.month=_r.month; else S.run=null; }
-      var mList=all.map(function(x){ return x.month; }).filter(function(v,k,a){ return a.indexOf(v)===k; }).sort().reverse();
-      if(!S.month)S.month=mList[0]||cmPrevMonth();
+      if(!S.month)S.month=cmPrevMonth();   // v28.447 (Ben 22-Oct-26: "mid month always default to LAST month"): opens on last month, not the newest month with runs; a run link or a picked month still wins
       var _so=function(x){ return x.sort_order==null?99999:Number(x.sort_order); };   // v28.430: agent order from CLIENT > Config (drag and drop), then name
       var runs=all.filter(function(x){ return x.month===S.month; }).sort(function(a,c){ return (_so(a)-_so(c))||cmShort(a.group_name).localeCompare(cmShort(c.group_name)); });
       var stB=function(st){ return st==='paid'?'<span class="tool-badge bg-green">Paid</span>':st==='finalised'?'<span class="tool-badge bg-blue">Finalised</span>':'<span class="tool-badge bg-amber">Open</span>'; };

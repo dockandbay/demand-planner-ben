@@ -1,3 +1,7 @@
+## v28.447 (22-Oct-26) Commissions: Monthly run & bills opens on last month
+- Ben: "#/client/commission/run mid month always default to LAST month". It opened on the newest month with runs (Oct-26 after a test run). Now Monthly run & bills, Unassigned and Exceptions all open on last month; a run link or a month picked in the session still wins.
+- Sandbox (jsdom): /#/client/commission/run opens on Sep-26 (All Sep-26 7, TJ, Schauben, ...). Buy plan identical. Display only.
+
 ## v28.446 (22-Oct-26) Commissions Paid history: agent tabs + summary drawer; CLIENT filters highlighted when set
 - Ben: "#/client/commission/paid needs some work. i do not like the agent and month summary as is ... agent and month summaries can be visible on a popout drawer. the table could be tabbed by ALL then by AGENT". Layout confirmed from a mockup.
 - Tabs: All, then one per agent (biggest paid total first; each shows its total under the Year / Status / search filters). An agent tab drops the Agent column and covers every month. The Agent dropdown is replaced by the tabs.
