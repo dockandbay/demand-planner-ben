@@ -1,3 +1,10 @@
+## v28.472 (23-Oct-26) Commission runs never pay an invoice twice
+- Ben: "do not double pay, we never double pay, a commissions run is only for unpaid commissions regardless of order month".
+- Rule: an agent is never paid more on one invoice than the commission on its whole value (product lines ex tax and shipping x rate). Already paid = imported paid history (Paid, by agent + invoice number) + rows in any other month's run (not deferred / exception) + earlier rows this month. A payment that would go over is cut to what is left (0 if none), with the note "already paid X on this invoice (where); invoice commission Y: only Z left to pay". A cap, not a deduction, so a deposit in one month and the balance in another both pay.
+- Matched by document number only (USWS-19093, INV-9558, EUWS-3156); generic references such as "Shopify Payment" never match. Order overrides with a commissionable amount and credit notes are left alone.
+- Sandbox vs live Xero + Fulfil, Sep-26: Schauben USWS-19093 134.10 -> 0 (paid May-26), USWS-18345 520.81 -> 517.50 (40.50 paid Apr-26, invoice commission 558.00), Harper USWS-18334 unchanged (paid then reversed = 0 net), Ideco EUWS-3156 unchanged (balance after a deposit, within the total). Oct-26: no repeats.
+- No migration. Buy plan identical.
+
 ## v28.471 (23-Oct-26) Commission credit notes take back only the paid part (Xero and Fulfil)
 - Ben: "Can you confirm the process for commissions handling credit notes for both Xero and fulfil" then "yes. proceed" on the fix.
 - Rule: a credit note takes back only what comes out of money already paid on the invoice it credits. Per allocation: max(0, amount applied - the invoice's unpaid balance just before it). A credit on an unpaid invoice takes back nothing (the customer pays less, so the cash and commission are already lower); a fully paid invoice (refund, or the credit used on another order) takes back all of it; part paid takes back only the excess. The amount comes off ex tax and shipping in proportion.

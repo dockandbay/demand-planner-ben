@@ -30135,6 +30135,16 @@ async function cmEngine(month, opts) { opts = opts || {};
   // a credit note only takes commission back when the invoice it credits was commissioned (paid history, any run, or paid in this month)
   const histInv = new Set((await pool.query(`SELECT DISTINCT lower(trim(rep_group)) g, upper(trim(invoice_no)) i FROM planner.commission_paid_history WHERE coalesce(invoice_no,'')<>''`).catch(() => ({ rows: [] }))).rows.map(r => r.g + '|' + r.i));
   const runInv = new Set((await pool.query(`SELECT x.rep_group_id g, upper(coalesce(w.invoice_ref,'')) i FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id WHERE coalesce(w.commission,0) > 0`).catch(() => ({ rows: [] }))).rows.map(r => r.g + '|' + r.i));
+  // v28.472 (Ben 23-Oct-26: "do not double pay, we never double pay, a commissions run is only for unpaid commissions regardless of order month"):
+  // commission already paid or in another month's run on the same invoice / order. Paid history = imported rows (run_id null) Paid or blank,
+  // since a paid run's rows are counted from the run itself; deferred / exception run rows are not paid. Keyed by document number so a
+  // generic reference ("Shopify Payment") never matches.
+  const _cmDocKey = x => { x = String(x || '').trim().toUpperCase(); return /^[A-Z0-9][A-Z0-9\-\/_.#]{2,40}$/.test(x) && /\d{3}/.test(x) ? x : ''; };
+  const prevE = [], prevBy = {}; const prevAdd = (k, e) => { if (k) (prevBy[k] = prevBy[k] || []).push(e); };
+  (await pool.query(`SELECT lower(trim(rep_group)) g, invoice_no i, period, coalesce(commission_due,0)::float8 c FROM planner.commission_paid_history WHERE run_id IS NULL AND coalesce(status,'paid')='paid' AND coalesce(invoice_no,'')<>''`).catch(() => ({ rows: [] }))).rows
+    .forEach(r => { const k = _cmDocKey(r.i); if (!k) return; const e = { n: prevE.length, c: Number(r.c) || 0, where: 'paid history ' + (r.period ? new Date(r.period).toISOString().slice(0, 7) : '') }; prevE.push(e); prevAdd('n|' + r.g + '|' + k, e); });
+  (await pool.query(`SELECT x.rep_group_id g, x.month, w.order_ref, w.invoice_ref, coalesce(w.commission,0)::float8 c FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id WHERE x.month<>$1 AND coalesce(w.status,'') NOT IN ('exception','deferred')`, [month]).catch(() => ({ rows: [] }))).rows
+    .forEach(r => { const e = { n: prevE.length, c: Number(r.c) || 0, where: r.month + ' run' }; prevE.push(e); new Set([_cmDocKey(r.order_ref), _cmDocKey(r.invoice_ref)]).forEach(k => prevAdd('g|' + r.g + '|' + k, e)); });
   const rows = [], exceptions = [], seen = new Set(), seenCn = new Set(), notes = [];
   const exc = (kind, o) => exceptions.push(Object.assign({ kind }, o));
   // FX: Fulfil daily rates, units per GBP; rate on/before the date
@@ -30181,13 +30191,24 @@ async function cmEngine(month, opts) { opts = opts || {};
     const own = ownRate[String(o.customer || '').trim().toLowerCase()]; if (own != null && Number.isFinite(own)) { rate = own; rateSrc = 'customer'; }
     if (ov && ov.rate != null && ov.rate !== '') { rate = Number(ov.rate); rateSrc = 'override'; }
     if (g.no_commission) { rate = 0; rateSrc = 'no commission'; }
-    const commissionable = cv ? _cmR2(cv.v) : null;
+    let commissionable = cv ? _cmR2(cv.v) : null, capNote = null, already = null;
+    // v28.472: never pay more on one invoice than the commission on its whole value (deposit + balance in different months is fine)
+    if (commissionable != null && commissionable > 0 && rate > 0 && !o.credit_note && !(ov && ov.commissionable_amount != null && ov.commissionable_amount !== '')) {
+      const keys = [...new Set([_cmDocKey(o.order_ref), _cmDocKey(o.invoice_ref)])].filter(Boolean), gn = String(g.name).trim().toLowerCase(), hit = new Map();
+      keys.forEach(k => { (prevBy['n|' + gn + '|' + k] || []).concat(prevBy['g|' + gid + '|' + k] || []).forEach(e => hit.set(e.n, e)); });
+      let prior = [...hit.values()].reduce((a, e) => a + e.c, 0), inMonth = 0;
+      rows.forEach(r => { if (r.agent_id === gid && !r.credit_note && (r.commission || 0) > 0 && keys.some(k => k === _cmDocKey(r.order_ref) || k === _cmDocKey(r.invoice_ref))) { prior += r.commission; inMonth++; } });
+      if (prior > 0.005) { already = _cmR2(prior);
+        const cap = o.inv_value_src != null ? _cmR2(o.inv_value_src * cv.r * rate / 100) : null, want = commissionable * rate / 100;
+        if (cap != null && prior + want > cap + 0.05) { const allow = Math.max(0, cap - prior); commissionable = _cmR2(allow / rate * 100);
+          const where = [...new Set([...hit.values()].map(e => e.where))]; if (inMonth) where.push('earlier this month');
+          capNote = 'already paid ' + already.toFixed(2) + ' on this invoice (' + where.join(', ') + '); invoice commission ' + cap.toFixed(2) + ': ' + (allow > 0 ? 'only ' + allow.toFixed(2) + ' left to pay' : 'nothing left to pay'); } } }
     rows.push({ source: o.source, agent_id: gid, agent: g.name, currency: ccy, order_ref: o.order_ref, invoice_ref: o.invoice_ref, client_po: o.client_po || null, customer: o.customer, invoice_date: o.invoice_date, pay_date: o.pay_date,
       earn_date: o.invoice_date && o.invoice_date > o.pay_date ? o.invoice_date : o.pay_date, currency_src: o.currency_src, amount_src: _cmR2(o.amount_src), fx_rate: cv ? cv.r : null, commissionable,
       rate, rate_source: rateSrc, agent_source: agentSrc, commission: commissionable == null ? null : _cmR2(commissionable * rate / 100), override: ov ? { amount: ov.commissionable_amount, reason: ov.reason } : null,
       status: (commissionable == null || decide) ? 'exception' : (rate === 0 ? 'zero' : 'ok'), decide: decide || undefined,
-      cn_alloc: opts.debug && o.allocAmts ? o.allocAmts : undefined,
-      note: commissionable == null ? 'no FX rate ' + o.currency_src + '->' + ccy + ' on ' + o.pay_date : decide ? 'Faire order: include or exclude (Exceptions)' : (o.credit_note ? (o.cn_note || 'credit note') : o.deposit ? 'deposit, earns at shipping' : null) });
+      cn_alloc: opts.debug && o.allocAmts ? o.allocAmts : undefined, already_paid: already || undefined, credit_note: o.credit_note || undefined,
+      note: capNote ? capNote : commissionable == null ? 'no FX rate ' + o.currency_src + '->' + ccy + ' on ' + o.pay_date : decide ? 'Faire order: include or exclude (Exceptions)' : (o.credit_note ? (o.cn_note || 'credit note') : o.deposit ? 'deposit, earns at shipping' : null) });
   };
   // ── Fulfil ──
   let fulfilOk = cfg.configured;
@@ -30238,7 +30259,7 @@ async function cmEngine(month, opts) { opts = opts || {};
         if (amt == null || !amt) continue;   // FX difference lines (no invoice-currency amount)
         const earn = invDate && invDate > d ? invDate : d; if (earn < ms || earn > me) continue;
         add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
-          invoice_date: invDate, pay_date: d, amount_src: amt * ratio, currency_src: ccy, deposit: invDate && d < invDate }); } }
+          invoice_date: invDate, pay_date: d, amount_src: amt * ratio, currency_src: ccy, deposit: invDate && d < invDate, inv_value_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0) }); } }
     cnLater.forEach(add);   // after the invoices, so a credit note sees this month's commission on the invoice it credits
     notes.push('Fulfil ' + env + ': ' + invs.length + ' invoices read');
   } catch (e) { fulfilOk = false; notes.push('Fulfil not read: ' + e.message); } }
@@ -30257,7 +30278,7 @@ async function cmEngine(month, opts) { opts = opts || {};
       if ((no && seen.has(no)) || (rf && seen.has(rf))) { dup++; continue; }
       const tot = Number(v.Total) || 0, shipX = _cmShipX(v), ratio = tot ? ((Number(v.SubTotal) || 0) - shipX) / tot : 1, c = v.Contact || (p.Invoice || {}).Contact || {};   // shipping is not commissionable (as the paid sheet)
       add({ source: 'xero ' + org, order_ref: v.Reference || v.InvoiceNumber, invoice_ref: v.InvoiceNumber, client_po: _cmClientPo(null, v.Reference), customer: c.Name, xid: c.ContactID, org, channel: _cmIsFaireX(v) ? 'Faire' : '', invoice_date: _cmXeroDate(v.DateString || v.Date),
-        pay_date: _cmXeroDate(p.DateString || p.Date), amount_src: (Number(p.Amount) || 0) * ratio, currency_src: String(v.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() });
+        pay_date: _cmXeroDate(p.DateString || p.Date), amount_src: (Number(p.Amount) || 0) * ratio, inv_value_src: (Number(v.SubTotal) || 0) - shipX, currency_src: String(v.CurrencyCode || (org === 'au' ? 'AUD' : 'GBP')).toUpperCase() });
       if (opts.debug && rows.length) rows[rows.length - 1].debug_lines = (v.LineItems || []).map(l => [l.ItemCode, l.Description, l.AccountCode, l.LineAmount]).slice(0, 40); }
     // customer credit notes dated in the month take commission back (ex tax, shipping excluded)
     let cns = []; try { cns = await upfxPaged('/api.xro/2.0/CreditNotes?where=' + encodeURIComponent('Type=="ACCRECCREDIT" AND (Status=="AUTHORISED" OR Status=="PAID") AND Date>=DateTime(' + y + ',' + m + ',1) AND Date<=DateTime(' + y + ',' + m + ',' + last + ')'), 'CreditNotes', org); } catch (e) { notes.push('Xero ' + org.toUpperCase() + ' credit notes not read: ' + e.message); }
