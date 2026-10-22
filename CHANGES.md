@@ -1,3 +1,13 @@
+## v28.471 (23-Oct-26) Commission credit notes take back only the paid part (Xero and Fulfil)
+- Ben: "Can you confirm the process for commissions handling credit notes for both Xero and fulfil" then "yes. proceed" on the fix.
+- Rule: a credit note takes back only what comes out of money already paid on the invoice it credits. Per allocation: max(0, amount applied - the invoice's unpaid balance just before it). A credit on an unpaid invoice takes back nothing (the customer pays less, so the cash and commission are already lower); a fully paid invoice (refund, or the credit used on another order) takes back all of it; part paid takes back only the excess. The amount comes off ex tax and shipping in proportion.
+- Before: the whole credit came off, so a credit applied before payment was deducted twice (lower cash AND a negative row).
+- The paid part must have been commissioned to that agent (paid history, any run, or this month), else Exception "never commissioned" for that part. A credit not allocated to any invoice stays an Exception ("refund?"). Nothing to take back = a zero row with the note "applied while the invoice was unpaid", for the audit trail.
+- Xero: unpaid balance from the credited invoice (payments up to the allocation date, other credit notes and prepayments / overpayments before it). A Xero credit note whose reference is a Fulfil order is now counted (was skipped silently); only a Fulfil credit note synced to Xero is skipped.
+- Fulfil: the credited invoice found from its payment applications (the credit note's move line); credit notes are processed after the month's invoices.
+- Checked on the sandbox against live Xero + Fulfil, Aug to Oct-26: all 14 agent credit notes were applied to unpaid invoices, so 0 taken back (the old rule deducted them or raised an exception); 8 unallocated credit notes stay Exceptions. Live Fulfil has never had a credit note, so the Fulfil path is untested on real data.
+- No migration. Buy plan identical.
+
 ## v28.470 (23-Oct-26) Scenario > Sales Planning: "Hide discontinued" tick box, ticked by default
 - Ben: "add the hide discontinued tickbox default on" (Diviyaj's question on Sarah's "Horizon Stock Scenarios" email).
 - New tick box beside the Only filters. Ticked (default) hides SKUs discontinued by the selected month, so the everyday view is as before v28.452; the count shows "· N discontinued hidden". Untick to list Phase Out / Last Season stock for EOSS / clearance planning (Group by Discontinued status, Rec. clearance and CSV export follow the tick box).
