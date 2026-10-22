@@ -209,7 +209,7 @@ fingerprints:
   server.mjs::cpSalesTeam: fc161fffe290
   server.mjs::/api/client/portal-orders/:id: f994a90fd00a
   server.mjs::/api/client/commission/runs/build: e7e271814b3f
-  server.mjs::/api/client/commission/runs/:id/xero-bill: 22dcf3a3b99a
+  server.mjs::/api/client/commission/runs/:id/xero-bill: 2d0d149c51a8
   server.mjs::cpAllowedOrderKeys: b6d23180e894
   server.mjs::cpPortalThreads: 84a27797a150
   server.mjs::cpOrderThreadFind: 00c107366099
@@ -272,15 +272,15 @@ fingerprints:
   supply/inject.html::cpAgentRules: 91d0ee7d05ee
   supply/inject.html::commUnassigned: d1a3c4ef9126
   server.mjs::cmMarkRunPaid: 36b858da84b5
-  server.mjs::/api/client/commission/runs/:id/fulfil-orders: 0ed862a0ad83
+  server.mjs::/api/client/commission/runs/:id/fulfil-orders: ad220174ac56
   supply/inject.html::commPaid: 9d1bc72e24d6
   supply/inject.html::cphDrawer: 6ad794ff9408
   supply/inject.html::cpMarkFilters: 21aa36b3e8f2
-  supply/inject.html::commReport: 6d9478ef950b
+  supply/inject.html::commReport: 5ae4a47da84e
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.466
+verified_version: v28.467
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -566,6 +566,16 @@ verified_version: v28.466
 - Tag an order to an agent (v28.433, Ben 21-Oct-26: "search fulfil for a sales order to add to an agent ... Tag it ... in orders"; chose HORIZON tag + optional write to Fulfil): COMMISSIONS > Orders > Tag an order to an agent. Search Fulfil sale orders (read only, not cancelled, newest first, 40 max) by SO number, order reference or customer; each hit shows its client PO, the Fulfil agent code (metafield agent_code on sale.sale, type char, value_char; 145 live orders tagged 21-Oct-26, all written by the Shopify sync bot: appelman, ideco, harpergroup, TJ, patrick, roadrunners, harpers) mapped to the agent by rep_groups.fulfil_codes, and any HORIZON tag. Save tag = a commission order override on the order's reference, else its SO number (the key cmEngine matches): it credits that agent in runs and makes a custom / co-brand order count in weekly demand. Also set in Fulfil (own click, then an inline confirm naming the code, the order and live Fulfil) writes agent_code = the agent's FIRST Fulfil code on the sale order (update the value row, else create one), reads it back (ok only when it matches), sets order_lines.agent_code for that order and logs a client audit row; refused when the agent has no Fulfil code (e.g. TR Partners, 21-Oct-26). (source: server.mjs :: /api/client/commission/orders/search, /api/client/commission/orders/fulfil-tag; supply/inject.html :: commTagSearch)
 
 - Commission month-end and Fulfil write-back (v28.334, Ben 13-Oct-26): a Faire-channel order of a customer on an EARNING agent's list is a month-end decision, not an automatic exclusion: it sits on that agent as an exception row at zero (not in the agent's total, counted on the Orders tile as "Faire orders to decide"), listed on Exceptions with Include (order override to that agent) or Exclude (order override to the Faire agent). Push to Fulfil (finalised / paid run; Fulfil writes gated by FULFIL_LIVE_WRITES on live): sale metafield COMMISSIONS_ACTUAL (Number / Decimal on sale.sale, created 13-Oct-26: live metafield.field 98, sandbox 99) = the order's commission actually paid: the sum of net over every finalised / paid run of that agent; one metafield.value per sale (updated, never duplicated); orders not in Fulfil (Xero-era) are skipped; the run shows the push status. (source: server.mjs :: cmEngine (decide), /api/client/commission/runs/:id/push-fulfil; supply/inject.html :: commExceptions cx-fd)
+
+## Commission run workflow: Draft, In review, Approved (v28.467)
+- Ben 23-Oct-26: "can we have a workflow on finalise run where first it goes into review status. Then next step is approve and that marks it as paid and allows push to Xero and fulfil. Things can still be added and changed in draft status and can revert draft status to make changes."
+- Stored status values are unchanged; only the labels and the gates changed: open = Draft, finalised = In review, paid = Approved. The run header shows the trail Draft › In review › Approved.
+- Draft: rows can be edited, deferred and added (add-missed only adds to a draft run). "Finalise run" sends it to review (exceptions still block unless forced).
+- In review: locked. "✓ Approve" marks it paid (cmMarkRunPaid: rows paid, copied to Paid history). "↩ Back to draft" reopens it. Approve is refused from any other status.
+- Approved: the only status that allows the Xero bill (create or CSV), Push to Fulfil and the statement email. The agent portal shows approved runs only (it used to show finalised too). Creating the Xero bill no longer marks the run paid (it already is); it sets paid_ref to the bill number if empty.
+- Back to draft from Approved takes the run out of Paid history and the portal, and is refused while a Xero bill is linked (void it in Xero first). The confirm says if the statement was already emailed.
+- Push to Fulfil (COMMISSIONS_ACTUAL) now sums net over the agent's APPROVED runs only, deferred rows left out (it used to include finalised runs).
+- Statement XLSX (Ben: "send statement to client can that be xlsx format as well"): cmStatementXlsx builds the same rows as the PDF (deferred rows left out): order, invoice, client PO, customer, customer paid (dd-mmm-yy), commissionable, rate, commission, credit note, credit adj, net, plus a total row. Download "⬇ Statement XLSX" at any status; the statement email attaches both PDF and XLSX. The PDF status label reads DRAFT / IN REVIEW / APPROVED <date>. (source: server.mjs /api/client/commission/runs/:id/status, /statement.xlsx, /email-statement, /xero-bill, /push-fulfil; supply/inject.html cpRunDetail)
 
 ## Commission run paid status and Fulfil links (v28.444)
 - Ben 22-Oct-26: Mark paid "only needs to mark these orders as paid in the paid history, assume once bill is created it will be paid". Mark paid is HORIZON only: the run and its rows become paid and the rows are copied to the paid history (replacing an earlier copy of the run); nothing is paid or changed in Xero. Creating the commission bill in Xero (draft or approved) now does the same straight away, with the bill number as the paid reference. Reopening or re-finalising a run takes it out of the paid history. Deferred and exception rows are never marked paid. (source: server.mjs :: cmMarkRunPaid, /api/client/commission/runs/:id/status, /api/client/commission/runs/:id/xero-bill)

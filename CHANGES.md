@@ -1,3 +1,13 @@
+## v28.467 (23-Oct-26) Commission runs: Draft → In review → Approved, statement as XLSX
+- Ben: "send statement to client can that be xlsx format as well" and "a workflow on finalise run where first it goes into review status. Then next step is approve and that marks it as paid and allows push to Xero and fulfil. Things can still be added and changed in draft status and can revert draft status to make changes."
+- Run statuses now read Draft (amber, editable) → In review (blue, locked) → Approved (green, paid). No migration: the stored values open / finalised / paid are kept.
+- Finalise run sends a draft for review. In review: ✓ Approve (marks paid, rows to Paid history) or ↩ Back to draft.
+- Xero bill (create and CSV), Push to Fulfil and Email statement only on an approved run. Creating the Xero bill no longer marks the run paid itself.
+- Back to draft from Approved is allowed until a Xero bill is linked; it takes the run out of Paid history.
+- Agent portal shows approved statements only (was finalised and paid). Push to Fulfil sums approved runs only.
+- New ⬇ Statement XLSX download (`GET /api/client/commission/runs/:id/statement.xlsx`); the statement email attaches the XLSX next to the PDF.
+- Checked on the sandbox: every gate via the API (draft blocks bill / Fulfil / email / approve; review blocks a second finalise; approve twice refused), the XLSX contents (858.75 total matches the run), and the run screen in Chrome through Draft → In review → Approved → Back to draft (run 48 left as Draft). Live has 7 runs, all Draft, so nothing changes there.
+
 ## v28.466 (22-Oct-26) Size & variants: small download button beside each barcode
 - Ben: "can the download barcode be a small download button next to the selected barcode".
 - Each assigned barcode in the Sizes grid now has a small ⤓ right beside it; it opens the same download options (PNG / JPG, width, file name) with just that size ticked (others can be ticked). The big "⤓ Download barcodes" button above the grid is gone.

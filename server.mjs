@@ -30444,17 +30444,23 @@ async function cmMarkRunPaid(runId, paidRef, by) {
 app.post('/api/client/commission/runs/:id/status', async (req, res) => {
   const st = String((req.body || {}).status || ''); if (!['open', 'finalised', 'paid'].includes(st)) return res.status(400).json({ error: 'status open|finalised|paid' });
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0]; if (!run) return res.status(404).json({ error: 'not found' });
+    // v28.467 (Ben 23-Oct-26: "finalise run ... first it goes into review status. Then next step is approve and that marks it as paid and allows push to Xero and
+    // fulfil ... can revert draft status to make changes"): open = Draft (editable) → finalised = In review (locked) → paid = Approved. Approve only from review;
+    // back to draft from review, or from approved while no Xero bill exists (a bill is in Xero: void it there first).
+    if (st === 'finalised' && run.status !== 'open') return res.status(409).json({ error: 'Only a draft run can be sent for review (this run is ' + cmStatusLbl(run.status) + ').' });
+    if (st === 'paid' && run.status !== 'finalised') return res.status(409).json({ error: run.status === 'paid' ? 'This run is already approved.' : 'Finalise the run first: a run is approved from review.' });
+    if (st === 'open' && run.status === 'paid' && to_jsonb_safe(run, 'xero_bill_id')) return res.status(409).json({ error: 'This run has its Xero bill (' + (run.xero_bill_ref || '') + '): void the bill in Xero and clear it here before moving the run back to draft.' });
     if (st === 'finalised') { const ex = (await pool.query(`SELECT count(*)::int n FROM planner.commission_rows WHERE run_id=$1 AND status='exception'`, [req.params.id])).rows[0].n; if (ex && !(req.body || {}).force) return res.status(409).json({ error: ex + ' exception row(s) still open — resolve them or finalise with force' });
       await pool.query(`UPDATE planner.commission_runs SET status='finalised', finalised_at=now(), finalised_by=$2 WHERE id=$1`, [req.params.id, req.me.email || null]); }
     else if (st === 'paid') { const hist = await cmMarkRunPaid(req.params.id, (req.body || {}).paid_ref || null, req.me.email || null);
-      await cpAudit(null, 'Commission run paid', run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); return res.json({ ok: true, history_rows: hist }); }   // v28.430: deferred rows stay deferred (carried into the next run)
+      await cpAudit(null, 'Commission run approved (paid)', run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); return res.json({ ok: true, history_rows: hist }); }   // v28.430: deferred rows stay deferred (carried into the next run)
     else await pool.query(`UPDATE planner.commission_runs SET status='open', finalised_at=NULL, finalised_by=NULL WHERE id=$1`, [req.params.id]);
     // v28.322 (Ben 13-Oct-26: "after we pay commissions we record them here"): a run marked Paid writes its rows to the paid history
     // (migration 363), replacing any earlier copy of the same run; reopening the run takes them out again. Before migration 363: skipped.
     let hist = null;   // v28.444: reopen / finalise take the run out of the paid history; marking paid is cmMarkRunPaid
     try { _cphMemo.clear(); await pool.query(`DELETE FROM planner.commission_paid_history WHERE run_id=$1 AND source='horizon'`, [req.params.id]); }
     catch (e) { if (!/does not exist/.test(e.message)) log500(e); }
-    await cpAudit(null, 'Commission run ' + st, run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); res.json({ ok: true, history_rows: hist });
+    await cpAudit(null, 'Commission run ' + (st === 'open' ? 'back to draft' : 'sent for review'), run.month + ' · ' + run.group_name + (hist != null ? ' · ' + hist + ' row(s) to paid history' : ''), req.me.email); res.json({ ok: true, history_rows: hist });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/runs/:id/xero-bill.csv', async (req, res) => {
@@ -30479,7 +30485,7 @@ app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
   try {
     const run = (await pool.query(`SELECT r.*, g.name group_name, g.xero_contact, g.xero_account_code, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
     if (!run) return res.status(404).json({ error: 'run not found' });
-    if (run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the bill is made from a finalised run.' });
+    if (run.status !== 'paid') return res.status(409).json({ error: 'Approve the run first: the Xero bill is made from an approved run.' });   // v28.467
     if (to_jsonb_safe(run, 'xero_bill_id')) return res.status(409).json({ error: 'This run already has its Xero bill (' + (run.xero_bill_ref || '') + ').', url: run.xero_bill_url || null });
     if (!run.xero_contact) return res.status(400).json({ error: 'This rep group has no Xero contact set — add it on the agent’s account (CLIENT ▸ Clients & agents ▸ Commission).' });
     if (!run.xero_account_code) return res.status(400).json({ error: 'This rep group has no Xero account code set — add it on the agent’s account.' });
@@ -30505,9 +30511,9 @@ app.post('/api/client/commission/runs/:id/xero-bill', async (req, res) => {
     const url = 'https://go.xero.com/AccountsPayable/' + (String(binv.Status) === 'DRAFT' ? 'Edit' : 'View') + '.aspx?InvoiceID=' + binv.InvoiceID;
     await pool.query(`UPDATE planner.commission_runs SET xero_bill_ref=$2, xero_bill_id=$3, xero_bill_url=$4, xero_bill_status=$5 WHERE id=$1`, [req.params.id, inv, binv.InvoiceID, url, String(binv.Status || billStatus).toLowerCase()]);
     await cpAudit(null, 'Commission bill ' + (linked ? 'linked' : 'created') + ' in Xero', inv + ' · ' + run.ccy + ' ' + total, req.me && req.me.email);
-    // v28.444 (Ben): a bill means it will be paid, so the run is marked paid and its orders go to the paid history (HORIZON only)
-    let paidHist = null; if (run.status !== 'paid') { paidHist = await cmMarkRunPaid(req.params.id, inv, (req.me && req.me.email) || null); await cpAudit(null, 'Commission run paid', run.month + ' · ' + run.group_name + ' · on Xero bill ' + inv + (paidHist != null ? ' · ' + paidHist + ' row(s) to paid history' : ''), req.me && req.me.email); }
-    res.json({ ok: true, marked_paid: run.status !== 'paid', history_rows: paidHist, linked, attached, status: binv.Status, reference: inv, contact: xc.Name, total, currency: run.ccy, xero_id: binv.InvoiceID, url });
+    // v28.467: the run is already approved (= paid, in Paid history) before its bill can be made; record the bill as its paid reference
+    await pool.query(`UPDATE planner.commission_runs SET paid_ref=coalesce(paid_ref, $2) WHERE id=$1`, [req.params.id, inv]);
+    res.json({ ok: true, linked, attached, status: binv.Status, reference: inv, contact: xc.Name, total, currency: run.ccy, xero_id: binv.InvoiceID, url });
   } catch (e) { log500(e); res.status(e.code === 503 ? 503 : 500).json({ error: e.message }); }
 });
 app.get('/api/client/commission/runs/:id/statement.csv', async (req, res) => {
@@ -30730,7 +30736,7 @@ async function cmStatementPdf(runId) {
       draw('Dock & Bay', ML, y, B, 18, ink); draw('COMMISSION STATEMENT', W - MR - B.widthOfTextAtSize('COMMISSION STATEMENT', 10), y + 3, B, 10, accent);
       y -= 22; const _ml = (m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4); })(run.month);
       draw(run.group_name + '  ·  ' + _ml + '  ·  ' + run.ccy, ML, y, F, 11, mut);
-      draw((run.status === 'paid' ? 'PAID' + (run.paid_at ? ' ' + ddMonYy(new Date(run.paid_at).toISOString().slice(0, 10)) : '') : run.status === 'finalised' ? 'FINALISED' : 'OPEN'), W - MR - F.widthOfTextAtSize((run.status || '').toUpperCase(), 9), y, F, 9, mut);
+      const _sl = run.status === 'paid' ? 'APPROVED' + (run.paid_at ? ' ' + ddMonYy(new Date(run.paid_at).toISOString().slice(0, 10)) : '') : cmStatusLbl(run.status).toUpperCase(); draw(_sl, W - MR - F.widthOfTextAtSize(_sl, 9), y, F, 9, mut);
       y -= 8; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 1, color: accent }); y -= 16;
       cols.forEach(c => draw(c.l, c.x, y, B, 7.5, mut, c.a, c.w)); y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 13;
     }
@@ -30762,21 +30768,51 @@ async function cmStatementPdf(runId) {
 // v28.333 (Ben): email the statement PDF to the agent's statement address (agent record ▸ Commission ▸ Statement to). Finalised / paid runs only.
 app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => {
   try { const p = await cmStatementPdf(req.params.id); if (!p) return res.status(404).json({ error: 'run not found' });
-    if (p.run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the statement is sent from a finalised run.' });
+    if (p.run.status !== 'paid') return res.status(409).json({ error: 'Approve the run first: the statement is sent from an approved run.' });   // v28.467
     const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
     const to = String((req.body && req.body.to) || g.email || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
     if (!to.length) return res.status(400).json({ error: 'No statement email for ' + (g.name || 'this agent') + ': set "Statement to" on the agent (CLIENT ▸ Clients ▸ ' + (g.name || 'agent') + ' ▸ Commission).' });
     const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = M[+p.run.month.slice(5, 7) - 1] + '-' + p.run.month.slice(2, 4);
-    const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); const xl = await cmStatementXlsx(p.run.id);
     const html = '<p>Hello,</p><p>Please find attached your Dock &amp; Bay commission statement for <b>' + ml + '</b>: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p>'
       + '<p>Commission is on cash received in the month for shipped orders, on product sales ex tax and ex shipping. Credit notes in the month reduce it.</p>'
       + (p.run.xero_bill_ref ? '<p>Our reference: ' + p.run.xero_bill_ref + '</p>' : '') + '<p>Kind regards,<br>Dock &amp; Bay</p>';
-    const r = await sendResendEmail({ to, subject: 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', attachments: [{ filename: p.filename, content: p.buf.toString('base64') }] });
+    const r = await sendResendEmail({ to, subject: 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
     if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
     await pool.query(`UPDATE planner.commission_runs SET statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3 WHERE id=$1`, [p.run.id, to.join(', '), req.me && req.me.email]);
     await cpAudit(null, 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', '), req.me && req.me.email);
     res.json({ ok: true, to });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.467 (Ben 23-Oct-26: "send statement to client can that be xlsx format as well"): the same statement as an xlsx (same rows as the PDF:
+// deferred rows left out), used by the download and attached to the statement email next to the PDF.
+const cmStatusLbl = s => s === 'paid' ? 'Approved' : s === 'finalised' ? 'In review' : 'Draft';
+async function cmStatementXlsx(runId) {
+  const run = (await pool.query(`SELECT r.*, g.name group_name, coalesce(r.currency, to_jsonb(g)->>'currency', 'USD') ccy FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [runId])).rows[0];
+  if (!run) return null;
+  const rows = (await pool.query(`SELECT order_ref, invoice_ref, client_po, customer, paid_date, commissionable, rate, commission, credit_note_ref, credit_adj, net FROM planner.commission_rows WHERE run_id=$1 AND status<>'deferred' ORDER BY paid_date, order_ref`, [runId])).rows;
+  const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
+  const ws = wb.addWorksheet('Statement'); const ml = (m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4); })(run.month);
+  const N = v => v == null || v === '' ? null : Math.round(Number(v) * 100) / 100;
+  ws.addRow(['Dock & Bay commission statement']).font = { bold: true, size: 14 };
+  ws.addRow([run.group_name + ' · ' + ml + ' · ' + run.ccy + ' · ' + cmStatusLbl(run.status)]);
+  ws.addRow([]);
+  const H = ['Order', 'Invoice', 'Client PO', 'Customer', 'Customer paid', 'Commissionable', 'Rate %', 'Commission', 'Credit note', 'Credit adj', 'Net (' + run.ccy + ')'];
+  const hr = ws.addRow(H); hr.font = { bold: true }; hr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF1F5' } }; });
+  let tot = 0; rows.forEach(r => { tot += Number(r.net) || 0;
+    ws.addRow([r.order_ref || '', r.invoice_ref || '', r.client_po || '', r.customer || '', r.paid_date ? new Date(Date.UTC(r.paid_date.getFullYear(), r.paid_date.getMonth(), r.paid_date.getDate())) : null, N(r.commissionable), N(r.rate), N(r.commission), r.credit_note_ref || '', N(r.credit_adj), N(r.net)]); });
+  const tr = ws.addRow(['Total commission owed', '', '', '', '', '', '', '', '', '', Math.round(tot * 100) / 100]); tr.font = { bold: true };
+  ws.addRow([]); ws.addRow(['Commission on cash received in the month for shipped orders, on product sales ex tax and ex shipping, in ' + run.ccy + '. Credit notes in the month reduce commission at the order rate.']).font = { italic: true, color: { argb: 'FF6B7280' } };
+  [16, 16, 16, 30, 13, 15, 8, 13, 14, 12, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  ws.getColumn(5).numFmt = 'dd-mmm-yy'; [6, 8, 10, 11].forEach(i => { ws.getColumn(i).numFmt = '#,##0.00'; });
+  ws.eachRow(r => r.eachCell(c => { c.alignment = { horizontal: 'left' }; }));
+  ws.views = [{ state: 'frozen', ySplit: 4 }];
+  return { buf: Buffer.from(await wb.xlsx.writeBuffer()), run, filename: 'commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.xlsx' };
+}
+app.get('/api/client/commission/runs/:id/statement.xlsx', async (req, res) => {
+  try { const x = await cmStatementXlsx(req.params.id); if (!x) return res.status(404).send('not found');
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').set('Content-Disposition', 'attachment; filename="' + x.filename + '"').set('Cache-Control', 'no-store').send(x.buf);
+  } catch (e) { log500(e); res.status(500).send('statement error: ' + e.message); }
 });
 app.get('/api/client/commission/runs/:id/statement.pdf', async (req, res) => {
   try { const p = await cmStatementPdf(req.params.id); if (!p) return res.status(404).send('not found');
@@ -30802,11 +30838,11 @@ app.get('/api/client/commission/runs/:id/fulfil-orders', async (req, res) => {
 app.post('/api/client/commission/runs/:id/push-fulfil', async (req, res) => {
   try { const run = (await pool.query(`SELECT r.*, g.name group_name FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.id=$1`, [req.params.id])).rows[0];
     if (!run) return res.status(404).json({ error: 'run not found' });
-    if (run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: only finalised commission is written to Fulfil.' });
+    if (run.status !== 'paid') return res.status(409).json({ error: 'Approve the run first: only approved commission is written to Fulfil.' });   // v28.467
     const refs = [...new Set((await pool.query(`SELECT DISTINCT order_ref FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' AND coalesce(order_ref,'')<>''`, [run.id])).rows.map(r => r.order_ref))];
     if (!refs.length) return res.json({ ok: true, written: 0, reason: 'no orders in this run' });
     const tot = {}; (await pool.query(`SELECT w.order_ref, round(sum(coalesce(w.net,0)),2) net FROM planner.commission_rows w JOIN planner.commission_runs x ON x.id=w.run_id
-        WHERE x.rep_group_id=$1 AND x.status IN ('finalised','paid') AND w.status<>'exception' AND w.order_ref = ANY($2::text[]) GROUP BY 1`, [run.rep_group_id, refs])).rows.forEach(r => { tot[r.order_ref] = Number(r.net); });
+        WHERE x.rep_group_id=$1 AND x.status='paid' AND w.status NOT IN ('exception','deferred') AND w.order_ref = ANY($2::text[]) GROUP BY 1`, [run.rep_group_id, refs])).rows.forEach(r => { tot[r.order_ref] = Number(r.net); });
     const cfg = fulfilConfigFor(await activeFulfilEnv());
     if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured: nothing written.' });
     const def = await fulfilSearchOne('metafield.field', [['code', '=', 'COMMISSIONS_ACTUAL'], ['model_name', '=', 'sale.sale']], ['id']);
@@ -31388,7 +31424,7 @@ async function cpCommPortalGate(c) {
   return g && g.on ? null : 'Commission statements are not switched on for this account yet.'; }
 app.get('/api/cp/commission/statement.pdf', cpAuth, async (req, res) => {
   try { const c = req.cp.client; if (!c.features.view_commission || !c.rep_group_id) return res.status(403).send('not enabled'); const g = await cpCommPortalGate(c); if (g) return res.status(403).send(g);
-    const run = (await pool.query(`SELECT id FROM planner.commission_runs WHERE rep_group_id=$1 AND month=$2 AND status IN ('finalised','paid')`, [c.rep_group_id, String(req.query.month || '')])).rows[0];
+    const run = (await pool.query(`SELECT id FROM planner.commission_runs WHERE rep_group_id=$1 AND month=$2 AND status='paid'`, [c.rep_group_id, String(req.query.month || '')])).rows[0];
     if (!run) return res.status(404).send('no finalised statement for that month');
     const p = await cmStatementPdf(run.id); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="' + p.filename + '"'); res.send(p.buf);
   } catch (e) { log500(e); res.status(500).send('statement error'); }
@@ -31399,7 +31435,7 @@ app.get('/api/cp/commission', cpAuth, async (req, res) => {
     // v28.175 (Ben): per rep group + month cache (finalised / paid runs only change through CLIENT-module admin writes → 'client').
     const qm = String(req.query.month || ''), gid = c.rep_group_id;
     const base = await _lcGet(_cpCache('cpu:comm:' + gid + ':' + _cpHash(qm), CP_TTL.comm, 10 * 60000, async () => {
-      const runs = (await pool.query(`SELECT r.id, r.month, r.status, r.total, to_char(r.finalised_at,'YYYY-MM-DD') finalised_at, to_char(r.paid_at,'YYYY-MM-DD') paid_at, coalesce(to_jsonb(r)->>'currency', to_jsonb(g)->>'currency') currency FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.rep_group_id=$1 AND r.status IN ('finalised','paid') ORDER BY r.month DESC LIMIT 24`, [gid])).rows;
+      const runs = (await pool.query(`SELECT r.id, r.month, r.status, r.total, to_char(r.finalised_at,'YYYY-MM-DD') finalised_at, to_char(r.paid_at,'YYYY-MM-DD') paid_at, coalesce(to_jsonb(r)->>'currency', to_jsonb(g)->>'currency') currency FROM planner.commission_runs r JOIN planner.rep_groups g ON g.id=r.rep_group_id WHERE r.rep_group_id=$1 AND r.status='paid' ORDER BY r.month DESC LIMIT 24`, [gid])).rows;
       const month = qm || (runs[0] && runs[0].month); const run = runs.find(r => r.month === month);
       const rows = run ? (await pool.query(`SELECT order_ref, invoice_ref, customer, to_char(paid_date,'YYYY-MM-DD') paid, commissionable, rate, commission, credit_note_ref, credit_adj, net, status FROM planner.commission_rows WHERE run_id=$1 AND status<>'exception' ORDER BY paid_date, order_ref`, [run.id])).rows : [];
       return { runs, month, run, rows }; }));
