@@ -62,6 +62,12 @@ sources:
   - supply/client-view.js :: vGallery
   - supply/inject.html :: cpGalleryDefault
   - supply/inject.html :: cpGalleryClient
+  - server.mjs :: _cmShip
+  - server.mjs :: cmRuleMatch
+  - server.mjs :: /api/client/commission/rules
+  - server.mjs :: /api/client/commission/unassigned
+  - supply/inject.html :: cpAgentRules
+  - supply/inject.html :: commUnassigned
 fingerprints:
   migrations/322_v_po_finance_setbased.sql::planner.v_po_finance: 92613409dead
   migrations/213_vpol_carton_from_products.sql::planner.v_purchase_order_lines: bdf4fc99b74a
@@ -244,7 +250,13 @@ fingerprints:
   supply/client-view.js::vGallery: 8de460ecc675
   supply/inject.html::cpGalleryDefault: caa0ec212ab6
   supply/inject.html::cpGalleryClient: 70c04636fb79
-verified_version: v28.441
+  server.mjs::_cmShip: 5b189c6cc3e3
+  server.mjs::cmRuleMatch: dee123ff85ed
+  server.mjs::/api/client/commission/rules: d9d943cf8f39
+  server.mjs::/api/client/commission/unassigned: 8d9427736bc0
+  supply/inject.html::cpAgentRules: 91d0ee7d05ee
+  supply/inject.html::commUnassigned: bb2bb4e07711
+verified_version: v28.442
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -529,6 +541,13 @@ verified_version: v28.441
 - Tag an order to an agent (v28.433, Ben 21-Oct-26: "search fulfil for a sales order to add to an agent ... Tag it ... in orders"; chose HORIZON tag + optional write to Fulfil): COMMISSIONS > Orders > Tag an order to an agent. Search Fulfil sale orders (read only, not cancelled, newest first, 40 max) by SO number, order reference or customer; each hit shows its client PO, the Fulfil agent code (metafield agent_code on sale.sale, type char, value_char; 145 live orders tagged 21-Oct-26, all written by the Shopify sync bot: appelman, ideco, harpergroup, TJ, patrick, roadrunners, harpers) mapped to the agent by rep_groups.fulfil_codes, and any HORIZON tag. Save tag = a commission order override on the order's reference, else its SO number (the key cmEngine matches): it credits that agent in runs and makes a custom / co-brand order count in weekly demand. Also set in Fulfil (own click, then an inline confirm naming the code, the order and live Fulfil) writes agent_code = the agent's FIRST Fulfil code on the sale order (update the value row, else create one), reads it back (ok only when it matches), sets order_lines.agent_code for that order and logs a client audit row; refused when the agent has no Fulfil code (e.g. TR Partners, 21-Oct-26). (source: server.mjs :: /api/client/commission/orders/search, /api/client/commission/orders/fulfil-tag; supply/inject.html :: commTagSearch)
 
 - Commission month-end and Fulfil write-back (v28.334, Ben 13-Oct-26): a Faire-channel order of a customer on an EARNING agent's list is a month-end decision, not an automatic exclusion: it sits on that agent as an exception row at zero (not in the agent's total, counted on the Orders tile as "Faire orders to decide"), listed on Exceptions with Include (order override to that agent) or Exclude (order override to the Faire agent). Push to Fulfil (finalised / paid run; Fulfil writes gated by FULFIL_LIVE_WRITES on live): sale metafield COMMISSIONS_ACTUAL (Number / Decimal on sale.sale, created 13-Oct-26: live metafield.field 98, sandbox 99) = the order's commission actually paid: the sum of net over every finalised / paid run of that agent; one metafield.value per sale (updated, never duplicated); orders not in Fulfil (Xero-era) are skipped; the run shows the push status. (source: server.mjs :: cmEngine (decide), /api/client/commission/runs/:id/push-fulfil; supply/inject.html :: commExceptions cx-fd)
+
+## Agent rules and unassigned orders (v28.442)
+- Ben 22-Oct-26: "not every wholesale order has an agent, but we can create some rules to surface reports in horizon > client > commission to check orders without agents that meet conditions like 'country US, state FL, no agent - could be appelman'". Layout A chosen: CLIENT > Commissions > Unassigned plus CLIENT > Config > Agent rules; conditions: country + state, channel / store, ZIP / postcode prefix, customer name / email domain.
+- Unassigned = the engine's no-agent orders for the month (paid Fulfil wholesale invoices with no override, no Fulfil agent code and a customer on no agent's list, Xero not read), one row per order with payments summed, the ship-to (Fulfil shipment address: country, state from the subdivision code US-FL -> FL, ZIP), channel, amount and last paid date. Customers on the "No Agent" list are already assigned (to No Agent) so never show. (source: server.mjs :: /api/client/commission/unassigned, _cmShip, cmEngine)
+- Rules (app_settings cm_agent_rules, an ordered list): the first active rule whose filled conditions ALL match gives "Could be <agent>". In a condition any listed value matches; empty = any. Country by ISO code; state by code (FL) or name (Florida); ZIP / postcode by prefix, spaces ignored; channel by store code (USWS, EUWS, UKWS, AUWS, US, EU, UK, AU = that Fulfil channel) or part of the Fulfil channel name; customer by part of the name; email by domain (nordstrom.com) or part of the address. A rule needs an agent and at least one condition. (source: server.mjs :: cmRuleMatch, /api/client/commission/rules; supply/inject.html :: cpAgentRules)
+- Rules only suggest. Tag = an order override for that order at the agent's rate (reason "Agent rule: <rule>"); Add customer = the customer goes on the agent's list (later orders follow); ✕ = not this agent for this order (app_settings cm_unassigned_dismissed), so the next matching rule, if any, is shown. (source: supply/inject.html :: commUnassigned)
+- Live check 22-Oct-26 (read only, sandbox with test rules): Sep-26 had 3 no-agent orders, all US FL (USWS-19318 / 19330 / 19332), so a US + FL + USWS rule suggests Schauben (Appelman) for all three; Oct-26 had 5 (EUWS-3323 FR, UKWS-7026 / 7029 GB, USWS-19334 AL, USWS-19345 IN).
 
 ## Client portal image galleries (ImageBank, v28.441)
 - Ben 22-Oct-26: "build the client portal image galleries: galleries page, gallery page with search and sort, image lightbox with download". Spec: docs/integrations/imagebank-client-portal.md. Portal: Catalogue > Images (a third tab next to Line sheet and Stock availability; Ben picked "inside Catalogue"). A client with neither line sheet nor stock lands on Images. (source: supply/client-view.js :: vImages, vGallery)

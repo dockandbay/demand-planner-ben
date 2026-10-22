@@ -29774,6 +29774,62 @@ app.post('/api/client/commission/overrides', async (req, res) => {
     await pool.query(`INSERT INTO planner.commission_overrides (order_ref, rep_group_id, rate, commissionable_amount, reason, created_by) VALUES ($1,$2,$3,$6,$4,$5) ON CONFLICT (order_ref, rep_group_id) DO UPDATE SET rate=excluded.rate, commissionable_amount=excluded.commissionable_amount, reason=excluded.reason, created_by=excluded.created_by, created_at=now()`, [ref, b.rep_group_id, _num(b.rate), b.reason || null, req.me.email, _num(b.commissionable_amount)]);
     await cpAudit(null, 'Commission override', ref + ' @ ' + (_num(b.rate) == null ? 'agent rate' : _num(b.rate) + '%'), req.me.email); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── Agent rules (v28.442, Ben 22-Oct-26: "not every wholesale order has an agent, but we can create some rules to surface reports in horizon >
+// client > commission to check orders without agents that meet conditions like 'country US, state FL, no agent - could be appelman'").
+// Rules SUGGEST an agent for a paid wholesale order with no agent; nothing is assigned until someone presses Tag (an order override) or adds
+// the customer to the agent's list. app_settings 'cm_agent_rules' = [{id, name, countries[], states[], zips[], channels[], customers[], emails[],
+// rep_group_id, active}] in order: the first active rule whose filled conditions ALL match wins (a list matches if ANY value matches; an empty
+// list is "any"). States match the code (FL) or the name (Florida); ZIP / postcode by prefix (spaces ignored); channel by the store code (USWS)
+// or part of the Fulfil channel name; customer by part of the name; email by domain (nordstrom.com) or part of the address.
+// "Not this agent" is remembered per order in app_settings 'cm_unassigned_dismissed' {ORDER_REF: [rep_group_id, ...]}.
+const _cmList = v => (Array.isArray(v) ? v : String(v || '').split(/[,;\n]+/)).map(x => String(x).trim()).filter(Boolean).slice(0, 200);
+function cmCleanRule(r, i) { r = r || {};
+  return { id: String(r.id || ('r' + Date.now().toString(36) + i)), name: String(r.name || '').trim().slice(0, 80), countries: _cmList(r.countries).map(x => x.toUpperCase()), states: _cmList(r.states),
+    zips: _cmList(r.zips).map(x => x.toUpperCase().replace(/\s+/g, '')), channels: _cmList(r.channels), customers: _cmList(r.customers), emails: _cmList(r.emails).map(x => x.toLowerCase().replace(/^@/, '')),
+    rep_group_id: r.rep_group_id ? Number(r.rep_group_id) : null, active: r.active !== false }; }
+function cmRuleMatch(r, o) {
+  if (!r.active || !r.rep_group_id) return false;
+  const sh = o.ship || {}, low = x => String(x || '').toLowerCase();
+  if (r.countries.length && !r.countries.includes(String(sh.country || '').toUpperCase())) return false;
+  if (r.states.length && !r.states.some(x => { const u = x.toUpperCase().replace(/^[A-Z]{2}-/, ''); return u === String(sh.state || '').toUpperCase() || low(x) === low(sh.state_name); })) return false;
+  if (r.zips.length) { const z = String(sh.zip || '').toUpperCase().replace(/\s+/g, ''); if (!z || !r.zips.some(x => z.startsWith(x))) return false; }
+  if (r.channels.length) { const ch = low(o.channel); if (!ch || !r.channels.some(x => { const a = CP_CHANNEL_ALIAS[x.toUpperCase().replace(/[\s_-]+/g, '')]; return a ? ch === a : ch.includes(low(x)); })) return false; }
+  if (r.customers.length && !r.customers.some(x => low(o.customer).includes(low(x)))) return false;
+  if (r.emails.length) { const e = low(o.email); if (!e || !r.emails.some(x => x.includes('@') ? e.includes(x) : (e.endsWith('@' + x) || e.endsWith('.' + x)))) return false; }
+  return true;
+}
+async function cmRules() { const v = cpJson(await cpSetting('cm_agent_rules', ''), []); return (Array.isArray(v) ? v : []).map(cmCleanRule); }
+app.get('/api/client/commission/rules', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ rules: await cmRules(), groups: (await pool.query(`SELECT id, name, active, coalesce((to_jsonb(g)->>'no_commission')::boolean,false) no_commission FROM planner.rep_groups g ORDER BY sort_order NULLS LAST, name`)).rows }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/client/commission/rules', async (req, res) => {
+  const rules = (Array.isArray((req.body || {}).rules) ? req.body.rules : []).slice(0, 200).map(cmCleanRule);
+  const bad = rules.find(r => !r.rep_group_id); if (bad) return res.status(400).json({ error: 'Every rule needs an agent' + (bad.name ? ' (' + bad.name + ')' : '') });
+  const empty = rules.find(r => !(r.countries.length || r.states.length || r.zips.length || r.channels.length || r.customers.length || r.emails.length)); if (empty) return res.status(400).json({ error: 'Every rule needs at least one condition' + (empty.name ? ' (' + empty.name + ')' : '') });
+  try { await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_agent_rules',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(rules), req.me.email || null]);
+    await cpAudit(null, 'Agent rules', rules.length + ' rule' + (rules.length === 1 ? '' : 's') + ' saved', req.me.email); res.json({ ok: true, rules });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// Unassigned orders for a month: the engine's paid wholesale orders with no agent (Fulfil; Xero not needed: a Xero payment only counts for a
+// customer already on an agent's list), one row per order (payments summed), with the first matching rule's agent unless dismissed.
+app.get('/api/client/commission/unassigned', async (req, res) => {
+  try { const v = await cmEngine(String(req.query.month || ''), { env: req.query.env, fresh: req.query.fresh === '1', xero: false });
+    const [rules, dis] = await Promise.all([cmRules(), cpSetting('cm_unassigned_dismissed', '').then(x => cpJson(x, {}) || {})]);
+    const gn = {}; (await pool.query(`SELECT id, name FROM planner.rep_groups`)).rows.forEach(g => { gn[g.id] = g.name; });
+    const by = {}; (v.exceptions || []).filter(e => e.kind === 'no_agent').forEach(e => { const k = String(e.order_ref || '').toUpperCase();
+      const o = by[k] = by[k] || { order_ref: e.order_ref, customer: e.customer, email: e.email || '', channel: e.channel || '', ship: e.ship || null, currency: e.currency, amount: 0, pay_date: e.pay_date || null, source: e.source };
+      o.amount = _cmR2(o.amount + (Number(e.amount) || 0)); if (e.pay_date && (!o.pay_date || e.pay_date > o.pay_date)) o.pay_date = e.pay_date; });
+    const rows = Object.values(by).map(o => { const no = (dis[String(o.order_ref || '').toUpperCase()] || []).map(Number);
+      const hit = rules.find(r => cmRuleMatch(r, o) && !no.includes(r.rep_group_id));
+      return Object.assign(o, { suggest: hit ? { rule_id: hit.id, rule: hit.name || cmRuleLabel(hit), rep_group_id: hit.rep_group_id, agent: gn[hit.rep_group_id] || ('#' + hit.rep_group_id) } : null, dismissed: no }); })
+      .sort((a, b) => (b.suggest ? 1 : 0) - (a.suggest ? 1 : 0) || String(a.order_ref).localeCompare(String(b.order_ref)));
+    res.set('Cache-Control', 'no-store').json({ month: v.month, rows, rules: rules.length, notes: v.notes || [] });
+  } catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); } });
+function cmRuleLabel(r) { return [r.countries.join('/'), r.states.join('/'), r.zips.length ? 'ZIP ' + r.zips.join('/') : '', r.channels.join('/'), r.customers.length ? 'name ' + r.customers.join('/') : '', r.emails.length ? '@' + r.emails.join('/') : ''].filter(Boolean).join(' · '); }
+app.post('/api/client/commission/unassigned/dismiss', async (req, res) => {
+  const b = req.body || {}, ref = String(b.order_ref || '').trim().toUpperCase(), gid = Number(b.rep_group_id); if (!ref || !gid) return res.status(400).json({ error: 'order_ref and rep_group_id required' });
+  try { const dis = cpJson(await cpSetting('cm_unassigned_dismissed', ''), {}) || {}; dis[ref] = [...new Set((dis[ref] || []).map(Number).concat(gid))];
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('cm_unassigned_dismissed',$1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(dis), req.me.email || null]);
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // v28.433 (Ben 21-Oct-26: "Is there an ability to search fulfil for a sales order to add to an agent? Tag it? We should have that ability
 // in orders"; chose: HORIZON tag + optional write to Fulfil). COMMISSIONS > Orders > Tag an order to an agent:
 //  - search Fulfil sale orders (read only) by SO number, Shopify / order reference or customer; each hit shows its client PO, the agent code
@@ -29872,6 +29928,9 @@ function _cmShipX(v) { return ((v && v.LineItems) || []).reduce((a, l) => a + (_
 // v28.430 (Ben 21-Oct-26: "show the client PO number as well which is an important field they like to show"): the customer's own PO number.
 // Fulfil: the Shopify order metafield global.po_number (else the PO inside global.xero_reference); Xero: the PO inside the invoice reference,
 // e.g. "Markettime WRAP-0201 [ID: 32766988]" -> WRAP-0201.
+// v28.442: the Fulfil order's ship-to, for agent rules ({country 'US', state 'FL' (from 'US-FL'), state_name 'Florida', zip '33122-1515'})
+function _cmShip(s) { if (!s) return null; const c = String(s['shipment_address.country.code'] || '').toUpperCase(), sc = String(s['shipment_address.subdivision.code'] || '').toUpperCase();
+  return (c || sc || s['shipment_address.zip']) ? { country: c, state: sc.includes('-') ? sc.split('-').slice(1).join('-') : sc, state_name: s['shipment_address.subdivision.name'] || '', zip: String(s['shipment_address.zip'] || '').trim() } : null; }
 function _cmClientPo(meta, xref) {
   const mf = (meta && meta.metafields) || {}; const po = String(mf['global.po_number'] || '').trim(); if (po) return po.slice(0, 80);
   const r = String(xref || mf['global.xero_reference'] || '').trim(); if (!r) return null;
@@ -29924,7 +29983,7 @@ async function cmEngine(month, opts) { opts = opts || {};
         exc('faire', { order_ref: o.order_ref, customer: o.customer, agent_id: gid, agent: gBy[gid].name, faire_id: faire[0] || null, amount: _cmR2(o.amount_src), currency: o.currency_src, text: 'customer of ' + gBy[gid].name + ' ordered via Faire: include or exclude for commission' }); }
       else { gid = faire[0] || null; agentSrc = 'Faire channel'; } }
     if (!gid && o.quiet) return;   // a credit note of a customer with no agent: nothing to take back
-    if (!gid) { exc('no_agent', { order_ref: o.order_ref, customer: o.customer, email: o.email, amount: _cmR2(o.amount_src), currency: o.currency_src, source: o.source, text: 'no agent: no Fulfil code and the customer is on no agent\'s list' }); return; }
+    if (!gid) { exc('no_agent', { order_ref: o.order_ref, customer: o.customer, email: o.email, amount: _cmR2(o.amount_src), currency: o.currency_src, source: o.source, channel: o.channel || '', ship: o.ship || null, pay_date: o.pay_date || null, text: 'no agent: no Fulfil code and the customer is on no agent\'s list' }); return; }
     const g = gBy[gid]; const ccy = String(g.currency || 'USD').toUpperCase();
     if (o.credit_note && Array.isArray(o.alloc) && !g.no_commission) {
       const gn = String(g.name).trim().toLowerCase(), done = o.alloc.filter(i => histInv.has(gn + '|' + i) || runInv.has(gid + '|' + i) || rows.some(r => r.agent_id === gid && String(r.invoice_ref || '').toUpperCase() === i && (r.commission || 0) > 0));
@@ -29963,7 +30022,7 @@ async function cmEngine(month, opts) { opts = opts || {};
     const shipF = {}; for (let i = 0; i < invs.length; i += 200) (await fAll('account.invoice.line', [['invoice', 'in', invs.slice(i, i + 200).map(x => x.id)], ['type', '=', 'line']], ['invoice', 'amount', 'description', 'product.code']))
       .forEach(l => { if (!String(l['product.code'] || '').trim() || _CM_SHIP_RE.test(String(l['product.code'] || ''))) shipF[l.invoice] = (shipF[l.invoice] || 0) + _cmNum(l.amount); });   // lines with no product (shipping) are not commissionable
     const saleIds = [...new Set(invs.flatMap(i => i.sales || []))]; const sales = {};
-    for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name', 'metadata'])).forEach(s => { sales[s.id] = s; });   // v28.430: + metadata (client PO number)
+    for (let i = 0; i < saleIds.length; i += 300) (await fAll('sale.sale', [['id', 'in', saleIds.slice(i, i + 300)]], ['id', 'reference', 'number', 'channel.name', 'metadata', 'shipment_address.country.code', 'shipment_address.subdivision.code', 'shipment_address.subdivision.name', 'shipment_address.zip'])).forEach(s => { sales[s.id] = s; });   // v28.430: + metadata (client PO number); v28.442: + ship-to (agent rules)
     const codes = {}; try { const def = (await ff('PUT', '/model/metafield.field/search_read', [[['code', '=', 'agent_code'], ['model_name', '=', 'sale.sale']], 0, 1, null, ['id']]) || [])[0];
       if (def) for (let i = 0; i < saleIds.length; i += 300) (await fAll('metafield.value', [['field', '=', def.id], ['resource', 'in', saleIds.slice(i, i + 300).map(x => 'sale.sale,' + x)]], ['resource', 'value_char']))
         .forEach(v => { const sid = Number(String(v.resource).split(',')[1]); if (v.value_char) codes[sid] = String(v.value_char).trim().toLowerCase(); }); } catch (e) { notes.push('Fulfil agent codes not read: ' + e.message); }
@@ -29972,7 +30031,7 @@ async function cmEngine(month, opts) { opts = opts || {};
       const total = _cmNum(inv.total_amount), ratio = total ? (_cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0)) / total : 1;
       const ref = s.reference || s.number || inv.number; seen.add(String(inv.number || '').toUpperCase()); if (s.reference) seen.add(String(s.reference).toUpperCase()); if (inv.reference) seen.add(String(inv.reference).toUpperCase());
       if (total < 0) {   // a credit note: one negative row in its own month, at the order's agent and rate (product lines, ex tax)
-        if (invDate >= ms && invDate <= me) add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata),
+        if (invDate >= ms && invDate <= me) add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
           invoice_date: invDate, pay_date: invDate, amount_src: _cmNum(inv.untaxed_amount) - (shipF[inv.id] || 0), currency_src: ccy, credit_note: true, quiet: true });
         continue; }
       const apps = ((inv.payment_applications_data || {}).rows || []).map(r => Object.assign({}, r.values || {}, { _ref: ((r.actions || {}).reference) || {} }));
@@ -29981,7 +30040,7 @@ async function cmEngine(month, opts) { opts = opts || {};
         const amt = ccy === compCcy ? _cmNum(a.applied_amount) : (a.applied_amount_second_currency != null && a.applied_amount_second_currency !== '' ? _cmNum(a.applied_amount_second_currency) : null);
         if (amt == null || !amt) continue;   // FX difference lines (no invoice-currency amount)
         const earn = invDate && invDate > d ? invDate : d; if (earn < ms || earn > me) continue;
-        add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata),
+        add({ source: 'fulfil', order_ref: ref, invoice_ref: inv.number, customer: inv['party.name'], email: String(inv['party.email'] || '').trim().toLowerCase(), code: codes[s.id] || null, channel: s['channel.name'] || '', client_po: _cmClientPo(s.metadata), ship: _cmShip(s),
           invoice_date: invDate, pay_date: d, amount_src: amt * ratio, currency_src: ccy, deposit: invDate && d < invDate }); } }
     notes.push('Fulfil ' + env + ': ' + invs.length + ' invoices read');
   } catch (e) { fulfilOk = false; notes.push('Fulfil not read: ' + e.message); } }

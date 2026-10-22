@@ -19742,6 +19742,28 @@
         cpPost('/api/client/galleries/client/'+cid,{ids:ids}).then(function(){ msg.style.color='var(--pos)'; msg.textContent='Saved ✓ '+(ids?ids.length+' galler'+(ids.length===1?'y':'ies')+' for this client':'uses the default'); }).catch(function(e){ msg.style.color='var(--neg)'; msg.textContent=e.message; }); }
       box.querySelectorAll('input[name="ce-gal-m"],.ce-gal').forEach(function(x){ x.onchange=save; });
     }).catch(function(e){ box.innerHTML='<div class="tiny" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
+  // v28.442 Agent rules editor (CLIENT ▸ Config ▸ Agent rules): rules suggest an agent for paid wholesale orders with no agent (Commissions ▸ Unassigned).
+  function cpAgentRules(box){ box.innerHTML='<div class="count">Loading rules…</div>';
+    cpGet('/api/client/commission/rules').then(function(j){ var R=(j.rules||[]).map(function(r){ return Object.assign({},r); }), G=(j.groups||[]).filter(function(g){ return g.active; });
+      var F=[['countries','Country','US'],['states','State / province','FL, GA'],['zips','ZIP / postcode starts','32, 33, 34'],['channels','Channel','USWS'],['customers','Customer name has',''],['emails','Email domain','nordstrom.com']];
+      function draw(){ box.innerHTML='<div class="tiny mut" style="margin-bottom:8px;max-width:980px">A rule says which agent a paid wholesale order with <b>no agent</b> could belong to. Orders are checked against the rules top to bottom; the <b>first</b> active rule whose filled boxes all match wins. In a box, separate values with commas (any of them matches); an empty box means any. Rules only suggest: the order is credited when someone presses Tag in <a id="ar-un" style="cursor:pointer;color:var(--blue)">Commissions ▸ Unassigned ▸</a>. Channel: a store code (USWS, EUWS, UKWS, AUWS) or part of the Fulfil channel name.</div>'
+          +'<div class="tw"><table><thead><tr><th class="l">#</th><th class="l">Name</th>'+F.map(function(f){ return '<th class="l">'+f[1]+'</th>'; }).join('')+'<th class="l">Could be</th><th class="l">On</th><th class="l"></th></tr></thead><tbody>'
+          +(R.length?R.map(function(r,i){ return '<tr data-i="'+i+'"><td class="l tiny">'+(i+1)+'</td><td class="l"><input class="fci txt ar" data-k="name" value="'+esc(r.name||'')+'" placeholder="e.g. Florida" style="width:110px"></td>'
+              +F.map(function(f){ return '<td class="l"><input class="fci txt ar" data-k="'+f[0]+'" value="'+esc((r[f[0]]||[]).join(', '))+'" placeholder="'+esc(f[2]||'any')+'" style="width:'+(f[0]==='customers'||f[0]==='emails'?'130':'90')+'px"></td>'; }).join('')
+              +'<td class="l"><select class="fci ar" data-k="rep_group_id"><option value="">— agent —</option>'+G.map(function(g){ return '<option value="'+g.id+'"'+(String(r.rep_group_id||'')===String(g.id)?' selected':'')+'>'+esc(g.name)+'</option>'; }).join('')+'</select></td>'
+              +'<td class="l"><input type="checkbox" class="ar" data-k="active"'+(r.active!==false?' checked':'')+'></td>'
+              +'<td class="l" style="white-space:nowrap"><button class="save-btn light ar-mv" data-d="-1" style="padding:1px 6px"'+(i?'':' disabled')+' title="Move up">↑</button><button class="save-btn light ar-mv" data-d="1" style="padding:1px 6px"'+(i<R.length-1?'':' disabled')+' title="Move down">↓</button> <button class="save-btn light ar-del" style="padding:1px 6px;color:var(--neg)" title="Delete rule">✕</button></td></tr>'; }).join('')
+            :'<tr><td class="l mut tiny" colspan="'+(F.length+5)+'">No rules yet. Example: Country US, State FL, Channel USWS → Agent - Schauben.</td></tr>')
+          +'</tbody></table></div><div class="bar" style="gap:8px;margin-top:10px"><button class="save-btn light" id="ar-add">+ Add rule</button><button class="save-btn" id="ar-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Save rules</button><span class="tiny" id="ar-msg"></span></div>';
+        function read(){ box.querySelectorAll('tbody tr[data-i]').forEach(function(tr){ var r=R[+tr.dataset.i]; tr.querySelectorAll('.ar').forEach(function(el){ var k=el.dataset.k; r[k]=k==='active'?el.checked:k==='rep_group_id'||k==='name'?el.value:el.value.split(',').map(function(x){return x.trim();}).filter(Boolean); }); }); }
+        document.getElementById('ar-un').onclick=function(){ _cpComm.tab='unassigned'; selectClientSub('commission'); };
+        document.getElementById('ar-add').onclick=function(){ read(); R.push({name:'',countries:[],states:[],zips:[],channels:[],customers:[],emails:[],rep_group_id:'',active:true}); draw(); };
+        box.querySelectorAll('.ar-mv').forEach(function(b){ b.onclick=function(){ read(); var i=+b.closest('tr').dataset.i, j2=i+Number(b.dataset.d), t=R[i]; R[i]=R[j2]; R[j2]=t; draw(); }; });
+        box.querySelectorAll('.ar-del').forEach(function(b){ b.onclick=function(){ read(); R.splice(+b.closest('tr').dataset.i,1); draw(); }; });
+        box.querySelectorAll('.ar').forEach(function(el){ el.addEventListener('change',function(){ var m=document.getElementById('ar-msg'); m.style.color='var(--amber)'; m.textContent='Unsaved changes'; }); });
+        document.getElementById('ar-save').onclick=function(){ read(); var m=document.getElementById('ar-msg'); m.style.color='var(--muted)'; m.textContent='Saving…';
+          cpPost('/api/client/commission/rules',{rules:R}).then(function(r){ R=(r.rules||[]).map(function(x){ return Object.assign({},x); }); draw(); var m2=document.getElementById('ar-msg'); m2.style.color='var(--pos)'; m2.textContent='Saved ✓ '+R.length+' rule'+(R.length===1?'':'s'); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=e.message; }); }; }
+      draw(); }).catch(function(e){ box.innerHTML='<div class="tiny" style="color:var(--neg)">'+esc(e.message)+'</div>'; }); }
   function cpGalleryDefault(box){ if(!box)return; box.innerHTML='<div class="count">Loading galleries from ImageBank…</div>'; cpGet('/api/client/galleries').then(function(j){
       if(!j.connected){ box.innerHTML=cpGalNotConnected(); return; }
       var def=j.default||{mode:'all',ids:[]}, sel=(def.ids||[]).map(String), gs=j.galleries||[];
@@ -21133,15 +21155,48 @@
       if(/^\d+$/.test(_pi)){ S.tab='run'; S.run=_pi; } else { S.tab=_pi; if(_pi==='run'&&/^\d+$/.test(_pt))S.run=_pt; } }
     var money=function(n){ return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
     // v28.331 (Ben): Commissions is the WORK only. Agent settings, customers and customer rates moved to the client record (CLIENT ▸ Clients ▸ <agent>).
-    var TABS=[['orders','Orders'],['exceptions','Exceptions'],['import','Import data'],['run','Monthly run & bills'],['paid','Paid history']];   // v28.425 (Ben): Import data separate from Monthly run & bills
+    var TABS=[['orders','Orders'],['unassigned','Unassigned'],['exceptions','Exceptions'],['import','Import data'],['run','Monthly run & bills'],['paid','Paid history']];   // v28.425 (Ben): Import data separate from Monthly run & bills
     S.tab=({report:'run',overrides:'orders',agents:'orders',customers:'exceptions',rates:'orders'})[S.tab]||S.tab; if(!TABS.some(function(t){ return t[0]===S.tab; }))S.tab='orders';
     try{ if(CLIENT_SUB==='commission')writeHash(['client','commission',S.tab].concat(S.tab==='run'&&S.run?[String(S.run)]:[])); }catch(e){}
     b.innerHTML='<div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===S.tab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="comm-body"><div class="count">Loading…</div></div>';
     b.querySelectorAll('#client-l3 .rtab').forEach(function(x){ x.onclick=function(){ S.tab=x.dataset.t; if(S.tab!=='run')S.run=null; cpRenderCommission(b); }; });
     var box=document.getElementById('comm-body');
-    if(S.tab==='orders') commOrders(); else if(S.tab==='paid') commPaid(); else if(S.tab==='exceptions') commExceptions(); else if(S.tab==='import') commImport(); else commReport();
+    if(S.tab==='orders') commOrders(); else if(S.tab==='unassigned') commUnassigned(); else if(S.tab==='paid') commPaid(); else if(S.tab==='exceptions') commExceptions(); else if(S.tab==='import') commImport(); else commReport();
     var CUR3=['USD','EUR','GBP','CAD','AUD'];
     // ── Exceptions (v28.331): what needs a person before a run is right. Stage 2 adds the order-level ones (no agent, Fulfil code vs Xero group, Faire). ──
+    // ── Unassigned (v28.442, Ben 22-Oct-26): paid wholesale orders with no agent, with the agent a rule says it could be (CLIENT ▸ Config ▸ Agent rules).
+    // Nothing is assigned until Tag (an order override, this order only) or Add customer (the customer goes on the agent's list for future orders).
+    function commUnassigned(){ if(!S.umonth)S.umonth=new Date().toISOString().slice(0,7); if(!S.ufilter)S.ufilter='all';
+      box.innerHTML='<div class="annot" style="margin-bottom:10px">Paid wholesale orders that have no agent (no Fulfil agent code, customer on no agent\'s list). <b>Could be</b> comes from the first matching rule in <a id="un-rules" style="cursor:pointer;color:var(--blue)">CLIENT ▸ Config ▸ Agent rules ▸</a>. <b>Tag</b> credits this order to the agent; <b>Add customer</b> puts the customer on the agent\'s list so later orders follow; <b>✕</b> = not this agent for this order. Customers on the "No Agent" list never show here.</div>'
+        +'<div class="bar" style="gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="pill-lbl">Paid in</span><input class="fci txt" id="un-m" type="month" value="'+esc(S.umonth)+'" style="width:140px">'
+        +[['all','All'],['sug','Could be an agent'],['none','No rule']].map(function(f){ return '<button class="pill un-f'+(S.ufilter===f[0]?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</button>'; }).join('')
+        +'<button class="save-btn light" id="un-re" style="padding:3px 10px;font-size:11px">↻ Re-read Fulfil</button><span class="mut tiny" id="un-msg">Reading paid orders from Fulfil…</span></div><div id="un-out"></div>';
+      document.getElementById('un-rules').onclick=function(){ _cpCfgTab='agent-rules'; selectClientSub('config'); };
+      document.getElementById('un-m').onchange=function(){ S.umonth=this.value; commUnassigned(); };
+      box.querySelectorAll('.un-f').forEach(function(x){ x.onclick=function(){ S.ufilter=x.dataset.f; commUnassigned(); }; });
+      document.getElementById('un-re').onclick=function(){ load(true); };
+      var G=[]; function load(fresh){ var msg=document.getElementById('un-msg'); msg.style.color='var(--muted)'; msg.textContent='Reading paid orders from Fulfil… (first read of a month takes up to a minute)';
+        Promise.all([cpGet('/api/client/commission/unassigned?month='+encodeURIComponent(S.umonth)+(CM_ENV?'&env='+CM_ENV:'')+(fresh?'&fresh=1':'')),cpGet('/api/client/commission/rules')]).then(function(r){ var j=r[0]; G=(r[1].groups||[]).filter(function(g){ return g.active; });
+          var R=j.rows||[], nS=R.filter(function(x){return x.suggest;}).length, show=R.filter(function(x){ return S.ufilter==='sug'?x.suggest:S.ufilter==='none'?!x.suggest:true; });
+          if(!document.getElementById('un-out'))return;
+          msg.textContent=R.length+' order'+(R.length===1?'':'s')+' with no agent in '+cmMonthLbl(j.month)+' · '+nS+' could be an agent'+(j.rules?'':' · no rules yet');
+          var o=document.getElementById('un-out'); if(!show.length){ o.innerHTML='<div class="mut tiny">'+(R.length?'None in this filter.':'No paid wholesale orders without an agent in '+esc(cmMonthLbl(j.month))+'.')+'</div>'; return; }
+          var opts=function(sel){ return '<option value="">— agent —</option>'+G.map(function(g){ return '<option value="'+g.id+'"'+(String(sel||'')===String(g.id)?' selected':'')+'>'+esc(g.name)+'</option>'; }).join(''); };
+          o.innerHTML='<div class="tw" style="max-height:62vh;overflow:auto"><table><thead><tr><th class="l">Order</th><th class="l">Customer</th><th class="l">Ship to</th><th class="l">Channel</th><th class="l">Paid</th><th class="l">Could be</th><th class="l"></th></tr></thead><tbody>'
+            +show.map(function(x){ var i=R.indexOf(x), sh=x.ship||{};
+              return '<tr data-i="'+i+'"><td class="l"><b>'+esc(x.order_ref||'')+'</b></td><td class="l">'+esc(x.customer||'')+(x.email?'<div class="mut tiny">'+esc(x.email)+'</div>':'')+'</td>'
+                +'<td class="l tiny">'+(sh.country?esc(sh.country)+(sh.state?' · '+esc(sh.state):'')+(sh.zip?'<div class="mut">'+esc(sh.zip)+'</div>':''):'<span class="mut">—</span>')+'</td><td class="l tiny">'+esc(String(x.channel||'').replace(/^dockandbay-/,''))+'</td>'
+                +'<td class="l" style="white-space:nowrap">'+esc(x.currency||'')+' '+money(x.amount)+(x.pay_date?'<div class="mut tiny">'+esc(fd(x.pay_date))+'</div>':'')+'</td>'
+                +'<td class="l">'+(x.suggest?'<b>'+esc(x.suggest.agent)+'</b><div class="mut tiny">rule: '+esc(x.suggest.rule)+'</div>':'<span class="mut tiny">no rule</span>')+'</td>'
+                +'<td class="l un-act" style="white-space:nowrap"><select class="fci un-g" style="font-size:11px;max-width:150px">'+opts(x.suggest&&x.suggest.rep_group_id)+'</select> <button class="save-btn un-tag" style="padding:2px 8px;font-size:11px" title="Credit this order to the agent (order override)">Tag</button> <button class="save-btn light un-cust" style="padding:2px 8px;font-size:11px" title="Put the customer on the agent\'s list, so later orders follow">Add customer</button>'+(x.suggest?' <button class="save-btn light un-x" style="padding:2px 7px;font-size:11px" title="Not this agent for this order">✕</button>':'')+'</td></tr>'; }).join('')+'</tbody></table></div>';
+          var row=function(b){ return R[+b.closest('tr').dataset.i]; }, gsel=function(b){ return b.closest('td').querySelector('.un-g'); }, done=function(b,t){ b.closest('td').innerHTML='<span class="tiny" style="color:var(--pos)">✓ '+esc(t)+'</span>'; };
+          o.querySelectorAll('.un-tag').forEach(function(b){ b.onclick=function(){ var x=row(b), g=gsel(b); if(!g.value){ alert('Pick an agent first.'); return; } var nm=g.options[g.selectedIndex].text; b.disabled=true;
+            cpPost('/api/client/commission/overrides',{order_ref:x.order_ref,rep_group_id:g.value,rate:'',commissionable_amount:'',reason:(x.suggest&&String(x.suggest.rep_group_id)===g.value?'Agent rule: '+x.suggest.rule:'Unassigned order tagged')+' ('+cmMonthLbl(S.umonth)+')'}).then(function(){ done(b,'tagged to '+nm); }).catch(function(e){ b.disabled=false; alert(e.message); }); }; });
+          o.querySelectorAll('.un-cust').forEach(function(b){ b.onclick=function(){ var x=row(b), g=gsel(b); if(!g.value){ alert('Pick an agent first.'); return; } var nm=g.options[g.selectedIndex].text; b.disabled=true;
+            cpPost('/api/client/commission/customers/assign',{customer_name:x.customer,email:x.email,rep_group_id:g.value}).then(function(){ done(b,x.customer+' added to '+nm+'\'s customers'); }).catch(function(e){ b.disabled=false; alert(e.message); }); }; });
+          o.querySelectorAll('.un-x').forEach(function(b){ b.onclick=function(){ var x=row(b); b.disabled=true; cpPost('/api/client/commission/unassigned/dismiss',{order_ref:x.order_ref,rep_group_id:x.suggest.rep_group_id}).then(function(){ load(false); }).catch(function(e){ b.disabled=false; alert(e.message); }); }; });
+        }).catch(function(e){ var m=document.getElementById('un-msg'); if(m){ m.style.color='var(--neg)'; m.textContent=e.message; } }); }
+      load(false); }
     function commExceptions(){ box.innerHTML='<div class="count">Loading…</div>';
       Promise.all([cpGet('/api/client/commission/groups'),cpGet('/api/client/clients')]).then(function(r){ var G=r[0].groups||[], CL=r[1].clients||[];
         var agentClient=function(gid){ return CL.filter(function(x){ return x.type==='agent'&&String(x.rep_group_id)===String(gid); })[0]; };
@@ -21446,12 +21501,12 @@
       var row=function(k,l,inp,help){ return '<tr><td class="l" style="width:230px"><b>'+l+'</b>'+(help?'<div class="mut tiny">'+help+'</div>':'')+'</td><td class="l">'+inp+'</td></tr>'; };
       var txt=function(k,w,ph){ return '<input class="fci txt cfg" data-k="'+k+'" value="'+esc(val(k))+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||'260px')+'">'; };
       var tog=function(k){ return '<label class="tiny"><input type="checkbox" class="cfg" data-k="'+k+'"'+(String(val(k))==='true'?' checked':'')+'> on</label>'; };
-      var TABS=[['settings','Settings'],['import','Order import'],['prices','Price lists'],['galleries','Image galleries'],['preview','Portal preview']];
+      var TABS=[['settings','Settings'],['import','Order import'],['prices','Price lists'],['galleries','Image galleries'],['agent-rules','Agent rules'],['preview','Portal preview']];
       b.innerHTML='<div id="client-l3">'+TABS.map(function(t){return '<button class="rtab'+(t[0]===_cpCfgTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="cfg-body"></div>';
       b.querySelectorAll('#client-l3 .rtab').forEach(function(x){ x.onclick=function(){ if(_cpCfgTab!==x.dataset.t)_cpBands=null; _cpCfgTab=x.dataset.t; cpRenderConfig(b); }; });
       var box=document.getElementById('cfg-body');
       function wire(){ box.querySelectorAll('.cfg').forEach(function(el){ el.onchange=function(){ cpPost('/api/client/config',{key:el.dataset.k,value:el.type==='checkbox'?(el.checked?'true':'false'):el.value}).then(function(){ el.style.outline='2px solid var(--pos)'; setTimeout(function(){ el.style.outline=''; },800); }).catch(function(e){ alert(e.message); }); }; }); }
-      if(_cpCfgTab==='import') cfgImport(); else if(_cpCfgTab==='prices') cfgPrices(); else if(_cpCfgTab==='galleries') cpGalleryDefault(box); else if(_cpCfgTab==='preview') cfgPreview(); else cfgSettings();
+      if(_cpCfgTab==='import') cfgImport(); else if(_cpCfgTab==='prices') cfgPrices(); else if(_cpCfgTab==='galleries') cpGalleryDefault(box); else if(_cpCfgTab==='agent-rules') cpAgentRules(box); else if(_cpCfgTab==='preview') cfgPreview(); else cfgSettings();
 
       function cfgSettings(){
         if(!_cpBands)_cpBands=cpParseBandsUI(val('cp_stock_bands'));
