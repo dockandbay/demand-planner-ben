@@ -106,10 +106,10 @@ fingerprints:
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
   server.mjs::/api/product/reports/sample-costs: cb55e12aee72
-  supply/inject.html::renderSampleCosts: e1f7ba761997
+  supply/inject.html::renderSampleCosts: 91579b008523
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
-  supply/inject.html::renderApprovalStats: 2b27c7a0f979
-verified_version: v28.456
+  supply/inject.html::renderApprovalStats: b37b4dddcde3
+verified_version: v28.457
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -466,6 +466,7 @@ verified_version: v28.456
   - Days to approve: first covering sample date to the approval (decision time, else item approved_at, else that sample's received date).
   - Hit rate = approved samples / sample versions. Moving to bulk = approved and the SKU (mapped or working) is on a purchase order.
   - Reasons for resampling = reject reasons logged on the covering samples (sample_reject_reasons: Colour issue, Finishing, Packing); the row shows the most frequent; the Total shows the reason on most SKUs with its SKU count.
+  - Reasons are tagged in the sample review when a decision is Rejected, new sample / Stop development (at least one required). Since v28.457 the review lists the saved reasons ticked, and an "Add new reason" row under the ticks creates a reason (added to PRODUCT ▸ Config ▸ Reject reasons) and ticks it.
   - Same multi-select "is" filters as Sample costs; Date range matches any covering sample's month; Traffic light is on samples to approve (or so far).
   - Totals: suppliers, versions, approved samples, avg samples to approve and avg days (approved SKUs only), hit rate, % moving to bulk (of approved SKUs).
   (source: server.mjs :: /api/product/reports/approval-stats; supply/inject.html :: renderApprovalStats)

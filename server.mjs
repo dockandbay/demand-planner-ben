@@ -14563,7 +14563,8 @@ async function productItemPayload(ref, supplierScope) {
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
         coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
-          FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
+          FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
+        coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect) FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons   -- v28.457: reviews pre-tick saved reasons
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1
           AND ($2::text[] IS NULL OR lower(coalesce((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),''))=ANY($2))
         ORDER BY ps.dimension, ps.version`, [ref, _scope]),
@@ -14667,7 +14668,8 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
         coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
-          FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
+          FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
+        coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect) FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons   -- v28.457: reviews pre-tick saved reasons
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
     ]);
     const sizes = sizesR.rows, samples = samplesR.rows;
@@ -16173,6 +16175,7 @@ async function sampleScanPayload(code, ctx) {
       coalesce(ps.description,'') description, ps.request_id,
       coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',coalesce(af.feedback,''),'decision',coalesce(af.decision,''),'awc_comment',coalesce(af.awc_comment,'')) ORDER BY af.aspect)
         FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
+      coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect) FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons,   -- v28.457
       coalesce((SELECT json_agg(json_build_object('id',a.id,'filename',coalesce(a.filename,''),'aspect',coalesce(a.aspect,'')) ORDER BY a.uploaded_at)
         FROM planner.portal_attachments a WHERE a.po=('PSAMPLE-'||ps.id) AND a.category='product_sample'),'[]'::json) photos
     FROM planner.product_dev_samples ps WHERE ps.short_code=$1`, [c])).rows[0];

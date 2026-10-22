@@ -1,3 +1,10 @@
+## v28.457 (22-Oct-26) Reject reasons: "Add new" under the ticks, and saved reasons now show ticked
+- Ben: "can we have the 'add new' for reject reasons below the current items" (the Colour issue / Finishing / Packing ticks under "Rejected, new sample").
+- Sample review (PRODUCT > Sampling expander, Manage panel, sample card): an "Add new reason…" box + "+ Add" sits under the reason ticks. It creates the reason (it appears in PRODUCT > Config > Reject reasons and the Approval stats report), adds it ticked and saves the decision. Typing an existing reason just ticks it.
+- Bug fixed on the way: the review's data (/api/product/item/:ref, and the other two sample lists) never returned the saved reject reasons, so saved reasons showed unticked; re-saving a rejected aspect then either asked for a reason again or replaced the saved ones. Those queries now return reject_reasons, so saved reasons show ticked.
+- Checked in Chrome on the sandbox (SS27-TOWEL-CLASSICBLUE v1: Colour issue now ticked; add-new created, ticked and saved; test reason removed afterwards).
+- No migration. Buy plan identical.
+
 ## v28.456 (22-Oct-26) PRODUCT > Reports > Approval stats
 - Ben (screenshot): "approval stats report, make exactly this report for samples approve and sample versions etc. under product"; reasons = the "Rejected, new sample" list (Colour issue, Finishing, Packing).
 - New tab PRODUCT > Reports > Approval stats (#/product/reports/approval-stats), new read-only route GET /api/product/reports/approval-stats.
