@@ -117,13 +117,14 @@
     document.getElementById('ig-q').oninput=function(){ var v=this.value; clearTimeout(tmr); tmr=setTimeout(function(){ st.q=v.trim(); load(); },300); };
     document.getElementById('ig-sort').onchange=function(){ st.sort=this.value; load(); };
     load(); }
-  function vGallery(gid){ var m=main(), qp=imgQp(), st={q:qp.q||'',sort:['gallery','newest','oldest','name'].indexOf(qp.sort)>=0?qp.sort:'gallery',product:qp.product||''}, tok=0, tmr=null, imgs=[], next=0, busy=false, obs=null;
+  function vGallery(gid){ var m=main(), qp=imgQp(), st={q:qp.q||'',sort:['gallery','newest','oldest','name'].indexOf(qp.sort)>=0?qp.sort:'gallery',product:qp.product||''}, tok=0, tmr=null, imgs=[], next=0, busy=false, obs=null, total=0;
+    var SEL={on:false,ids:{},size:'default',dl:false}, SEL_MAX=100;   // v28.465 (Ben): tick images, download selected / select all
     m.innerHTML='<div class="tiny" style="margin-bottom:6px"><a href="#/images" style="color:var(--blue)">‹ All galleries</a></div><h1 class="cp-h" id="gl-t">Gallery</h1><p class="cp-lead" id="gl-d">Loading…</p>'
       +'<div class="cp-bar">'+'<input class="cp-in" id="gl-q" placeholder="Search this gallery: product, colour, file name" value="'+esc(st.q)+'" style="width:300px"><select class="cp-in" id="gl-sort">'+[['gallery','Dock & Bay order'],['newest','Newest'],['oldest','Oldest'],['name','Name A to Z']].map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===st.sort?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')+'</select>'
-      +(st.product?'<span class="cp-chip active" id="gl-prod" title="Show all images">Product '+esc(st.product)+' ✕</span>':'')+'<span class="tiny mut" id="gl-n" style="margin-left:auto"></span></div><div id="gl-res"></div><div id="gl-more" style="text-align:center;padding:14px"></div>';
+      +(st.product?'<span class="cp-chip active" id="gl-prod" title="Show all images">Product '+esc(st.product)+' ✕</span>':'')+'<span class="tiny mut" id="gl-n" style="margin-left:auto"></span><button class="cp-btn sm" id="gl-selbtn">Select</button></div><div class="ig-selbar" id="gl-selbar" hidden></div><div id="gl-res"></div><div id="gl-more" style="text-align:center;padding:14px"></div>';
     wireCatSeg(m);
     function url(off){ return '/api/cp/galleries/'+encodeURIComponent(gid)+'?offset='+off+'&q='+encodeURIComponent(st.q)+'&sort='+st.sort+(st.product?'&product='+encodeURIComponent(st.product):''); }
-    function tile(im,i){ return '<button class="ig-tile" data-i="'+i+'" title="'+esc(im.title||im.filename||'')+'">'+(im.thumbUrl?'<img src="'+esc(im.thumbUrl)+'" alt="'+esc(im.title||im.filename||'')+'" loading="lazy">':'<span class="tiny mut">Processing…</span>')+'</button>'; }
+    function tile(im,i){ return '<button class="ig-tile'+(SEL.ids[im.id]?' sel':'')+'" data-i="'+i+'" title="'+esc(im.title||im.filename||'')+'"><span class="ig-ck" aria-hidden="true">✓</span>'+(im.thumbUrl?'<img src="'+esc(im.thumbUrl)+'" alt="'+esc(im.title||im.filename||'')+'" loading="lazy">':'<span class="tiny mut">Processing…</span>')+'</button>'; }
     function more(){ var box=document.getElementById('gl-more'); if(!box)return; if(obs){ obs.disconnect(); obs=null; }
       if(next==null){ box.innerHTML=''; return; } box.innerHTML='<button class="cp-btn" id="gl-mb">Load more</button>'; document.getElementById('gl-mb').onclick=page;
       if(typeof window.IntersectionObserver==='function'){ obs=new IntersectionObserver(function(es){ if(es.some(function(e){return e.isIntersecting;}))page(); },{rootMargin:'600px'}); obs.observe(box); } }
@@ -131,19 +132,47 @@
       api(url(off)).then(function(j){ busy=false; if(my!==tok||!document.getElementById('gl-res'))return; var g=j.gallery||{}, pg=j.page||{};
         if(!off){ document.getElementById('gl-t').textContent=g.title||'Gallery'; document.getElementById('gl-d').textContent=g.description||''; document.title=(g.title||'Images')+' · Dock & Bay'; }
         var start=imgs.length; imgs=imgs.concat(j.images||[]); next=pg.nextOffset==null?null:pg.nextOffset;
-        document.getElementById('gl-n').textContent=(Number(pg.total)||0).toLocaleString()+' image'+(pg.total===1?'':'s');
+        total=Number(pg.total)||0; document.getElementById('gl-n').textContent=total.toLocaleString()+' image'+(total===1?'':'s');
         var res=document.getElementById('gl-res');
         if(!imgs.length){ res.innerHTML='<div class="cp-card" style="color:var(--muted)">'+(st.q?'No images match "'+esc(st.q)+'" in this gallery. <a href="#" id="gl-clr" style="color:var(--blue)">Clear search</a>':st.product?'No images of '+esc(st.product)+' in this gallery.':'This gallery has no images yet.')+'</div>';
           var c=document.getElementById('gl-clr'); if(c)c.onclick=function(e){ e.preventDefault(); document.getElementById('gl-q').value=''; st.q=''; reset(); }; more(); return; }
         if(!start)res.innerHTML='<div class="ig-grid" id="gl-grid"></div>';
         document.getElementById('gl-grid').insertAdjacentHTML('beforeend',(j.images||[]).map(function(im,k){ return tile(im,start+k); }).join(''));
-        res.querySelectorAll('.ig-tile:not([data-w])').forEach(function(b){ b.setAttribute('data-w','1'); b.onclick=function(){ lightbox(Number(b.dataset.i)); }; });
+        var _gg=document.getElementById('gl-grid'); if(_gg)_gg.classList.toggle('selecting',SEL.on);
+        res.querySelectorAll('.ig-tile:not([data-w])').forEach(function(b){ b.setAttribute('data-w','1'); b.onclick=function(){ var ix=Number(b.dataset.i); if(SEL.on){ toggle(ix); return; } lightbox(ix); }; });
         more(); })
       .catch(function(e){ busy=false; if(my!==tok)return; var res=document.getElementById('gl-res'); if(!res)return; if(!off){ document.getElementById('gl-d').textContent=''; res.innerHTML=imgErr(e); } else { var box=document.getElementById('gl-more'); if(box)box.innerHTML='<button class="cp-btn" id="gl-mb">Try again</button>'; var b2=document.getElementById('gl-mb'); if(b2)b2.onclick=page; } }); }
     function reset(){ tok++; imgs=[]; next=0; busy=false; imgSetUrl(encodeURIComponent(gid),{q:st.q,sort:st.sort==='gallery'?'':st.sort,product:st.product}); document.getElementById('gl-res').innerHTML='<p class="cp-lead">Loading…</p>'; page(); }
     document.getElementById('gl-q').oninput=function(){ var v=this.value; clearTimeout(tmr); tmr=setTimeout(function(){ st.q=v.trim(); reset(); },300); };
     document.getElementById('gl-sort').onchange=function(){ st.sort=this.value; reset(); };
     var pr=document.getElementById('gl-prod'); if(pr)pr.onclick=function(){ st.product=''; pr.remove(); reset(); };
+    // v28.465 (Ben): select + download. Tick mode toggles a tile instead of opening it; Select all loads pages until every match
+    // (up to 100) is in and ticks them; Download saves the chosen version of each ticked image one after another through the same
+    // signed route as the lightbox (a hidden frame per file; ImageBank's link is an attachment, so the page stays put).
+    function verOf(im){ var vs=im.versions||[]; if(!vs.length)return null; if(SEL.size==='largest')return vs.slice().sort(function(a,b){ return ((b.width||0)*(b.height||0)||(b.bytes||0))-((a.width||0)*(a.height||0)||(a.bytes||0)); })[0];
+      return vs.filter(function(v){return v.isDefault;})[0]||vs[0]; }
+    function nSel(){ return Object.keys(SEL.ids).length; }
+    function paintSel(){ var bar=document.getElementById('gl-selbar'), btn=document.getElementById('gl-selbtn'); if(!bar)return;
+      btn.textContent=SEL.on?'Done':'Select'; btn.classList.toggle('on',SEL.on); bar.hidden=!SEL.on; var g=document.getElementById('gl-grid'); if(g)g.classList.toggle('selecting',SEL.on);
+      document.querySelectorAll('#gl-grid .ig-tile').forEach(function(t){ var im=imgs[Number(t.dataset.i)]; t.classList.toggle('sel',!!(im&&SEL.ids[im.id])); });
+      if(!SEL.on)return; var n=nSel();
+      bar.innerHTML='<b>'+n+' selected</b><button class="cp-btn sm" id="gl-sall">Select all'+(total>SEL_MAX?' (first '+SEL_MAX+')':'')+'</button>'+(n?'<button class="cp-btn sm" id="gl-sclr">Clear</button>':'')
+        +'<select class="cp-in" id="gl-size" title="which version of each image"><option value="default"'+(SEL.size==='default'?' selected':'')+'>Default size</option><option value="largest"'+(SEL.size==='largest'?' selected':'')+'>Largest available</option></select>'
+        +'<button class="cp-btn ink" id="gl-dl"'+(n&&!SEL.dl?'':' disabled')+'>⤓ Download selected'+(n?' ('+n+')':'')+'</button><span class="tiny mut" id="gl-dlmsg"></span>';
+      document.getElementById('gl-sall').onclick=selectAll; var c=document.getElementById('gl-sclr'); if(c)c.onclick=function(){ SEL.ids={}; paintSel(); };
+      document.getElementById('gl-size').onchange=function(){ SEL.size=this.value; };
+      document.getElementById('gl-dl').onclick=download; }
+    function toggle(ix){ var im=imgs[ix]; if(!im)return; if(SEL.ids[im.id])delete SEL.ids[im.id]; else { if(nSel()>=SEL_MAX){ var mm=document.getElementById('gl-dlmsg'); if(mm)mm.textContent='Up to '+SEL_MAX+' at a time.'; return; } SEL.ids[im.id]=im; } paintSel(); }
+    function selectAll(){ var b=document.getElementById('gl-sall'); if(b){ b.disabled=true; b.textContent='Selecting…'; }
+      (function fill(){ if(imgs.length<Math.min(total,SEL_MAX)&&next!=null){ if(!busy)page(); setTimeout(fill,250); return; }
+        imgs.slice(0,SEL_MAX).forEach(function(im){ if(nSel()<SEL_MAX)SEL.ids[im.id]=im; }); paintSel(); })(); }
+    function download(){ var list=Object.keys(SEL.ids).map(function(k){return SEL.ids[k];}), msg=document.getElementById('gl-dlmsg'), k=0; if(!list.length||SEL.dl)return; SEL.dl=true; paintSel(); msg=document.getElementById('gl-dlmsg');
+      if(list.length>1)msg.textContent='If your browser asks, allow multiple downloads.';
+      (function nx(){ var mm=document.getElementById('gl-dlmsg'); if(k>=list.length){ SEL.dl=false; paintSel(); var m2=document.getElementById('gl-dlmsg'); if(m2)m2.textContent='Started '+list.length+' download'+(list.length===1?'':'s')+'.'; return; }
+        var im=list[k++], v=verOf(im); if(mm)mm.textContent='Downloading '+k+' of '+list.length+'…';
+        if(v){ var f=document.createElement('iframe'); f.style.display='none'; f.src='/api/cp/galleries/'+encodeURIComponent(gid)+'/download/'+encodeURIComponent(v.id); document.body.appendChild(f); setTimeout(function(){ f.remove(); },90000); }
+        setTimeout(nx,900); })(); }
+    document.getElementById('gl-selbtn').onclick=function(){ SEL.on=!SEL.on; paintSel(); };
     function lightbox(i){ var im=imgs[i]; if(!im)return; var old=document.getElementById('ig-lb'); if(old)old.remove();
       var vs=(im.versions||[]).slice().sort(function(a,b){ return (b.isDefault?1:0)-(a.isDefault?1:0); });
       var lb=document.createElement('div'); lb.id='ig-lb'; lb.className='ig-lb'; lb.setAttribute('role','dialog'); lb.setAttribute('aria-modal','true'); lb.setAttribute('aria-label',im.title||im.filename||'Image');
@@ -155,7 +184,7 @@
         +'<div class="tiny mut" style="margin-top:8px">'+(im.capturedAt?'Taken '+fd(im.capturedAt):'')+(im.width&&im.height?(im.capturedAt?' · ':'')+im.width+' × '+im.height+' px':'')+'</div>'
         +((im.products||[]).length?'<div class="ig-sh">Products</div>'+im.products.map(function(p){ return '<div class="tiny" style="margin-bottom:4px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.code)+'</b><br>'+esc(p.name||'')+(p.colourway?' · '+esc(p.colourway):'')+'</div>'; }).join(''):'')
         +'<div class="ig-sh">Download</div>'+(vs.length?vs.map(function(v){ return '<a class="ig-dl'+(v.isDefault?' def':'')+'" href="/api/cp/galleries/'+encodeURIComponent(gid)+'/download/'+encodeURIComponent(v.id)+'" rel="noopener"><b>'+esc(v.label||'Original')+'</b><span>'+esc(String(v.format||'').toUpperCase())+(v.width&&v.height?' · '+v.width+' × '+v.height:'')+(v.bytes?' · '+imgMB(v.bytes):'')+'</span></a>'; }).join(''):'<div class="tiny mut">No downloads for this image.</div>')
-        +'<div class="tiny mut" style="margin-top:8px">One file per click; the link is made fresh each time.</div></aside>';
+        +'<div class="tiny mut" style="margin-top:8px">One file per click; the link is made fresh each time. To download several, close this and use <b>Select</b>.</div></aside>';
       document.body.appendChild(lb); document.body.style.overflow='hidden';
       function close(){ lb.remove(); document.body.style.overflow=''; document.removeEventListener('keydown',key); }
       function go(d){ var j=i+d; if(j>=imgs.length&&next!=null){ page(); return; } if(j>=0&&j<imgs.length){ close(); lightbox(j); } }

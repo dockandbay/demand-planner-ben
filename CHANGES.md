@@ -1,3 +1,9 @@
+## v28.465 (22-Oct-26) Client portal Image gallery: select and download several
+- Ben chose option A: let clients download selected images or all of them.
+- Gallery page: "Select" button turns on tick mode (tiles get a tick circle; clicking ticks instead of opening). Selection bar: "n selected", Select all (every image matching the search, up to 100), Clear, size (Default size / Largest available), "⤓ Download selected (n)" with progress ("Downloading 3 of 12…"); first time the browser may ask to allow multiple downloads.
+- Each file goes through the existing secure per-image download route (fresh link, saved as an attachment), one every 0.9 s; no zip.
+- Checked in Chrome on the sandbox portal preview (Dillard's, Highlights 50 images): tick 2, Select all = 50, download 3 (intercepted, nothing saved), route returns its redirect.
+
 ## v28.464 (22-Oct-26) Client portal: "Image gallery" in the top menu, approved clients only
 - Ben: "images in top menu as 'image gallery', only visible if approved to view content".
 - Portal menu gains "Image gallery" (#/images; old #/catalogue/images links redirect); Catalogue no longer has an Images tab.

@@ -109,7 +109,7 @@ fingerprints:
   supply/inject.html::renderSampleCosts: 1c2dc85196f2
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
   supply/inject.html::renderApprovalStats: 7f9b56c4fe0f
-verified_version: v28.464
+verified_version: v28.465
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)

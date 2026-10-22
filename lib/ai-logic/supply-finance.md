@@ -262,7 +262,7 @@ fingerprints:
   server.mjs::/api/cp/galleries/:id/download/:vid: 04a0a349f73c
   server.mjs::/api/client/galleries: 7e7fafe2d837
   supply/client-view.js::vImages: 3e493123a188
-  supply/client-view.js::vGallery: 1cd61ca41306
+  supply/client-view.js::vGallery: 77f8907976c0
   supply/inject.html::cpGalleryDefault: a6c4e82dfb44
   supply/inject.html::cpGalleryClient: 70c04636fb79
   server.mjs::_cmShip: 5b189c6cc3e3
@@ -280,7 +280,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.464
+verified_version: v28.465
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -586,6 +586,7 @@ verified_version: v28.464
 - Live check 22-Oct-26 (read only, sandbox with test rules): Sep-26 had 3 no-agent orders, all US FL (USWS-19318 / 19330 / 19332), so a US + FL + USWS rule suggests Schauben (Appelman) for all three; Oct-26 had 5 (EUWS-3323 FR, UKWS-7026 / 7029 GB, USWS-19334 AL, USWS-19345 IN).
 
 ## Client portal image galleries (ImageBank, v28.441)
+- Download several (v28.465): on a gallery, Select puts tiles in tick mode (a tick toggles instead of opening the lightbox); Select all loads pages until every match is in and ticks up to 100; Download selected saves the Default (or Largest available, by pixels else bytes) version of each through the same per-image route (/api/cp/galleries/:id/download/:vid, fresh signed link, attachment), one hidden frame every 0.9 s. No zip (ImageBank's API has no multi-file endpoint).
 - Where it shows (v28.464): its own portal menu item "Image gallery" (#/images; old #/catalogue/images links redirect), shown only when the client is approved: feature view_images is OFF by default and must be switched on per client (Access ▸ Feature toggles); the /api/cp/galleries routes refuse (403) unless it is on. Portal preview (v28.463) is its own CLIENT tab, CLIENT ▸ Portal preview, deep link #/client/portal/<client id>/<user id> (preselects, Open preview stays a click); CLIENT ▸ Config tabs deep link as #/client/config/<settings|import|prices|galleries|agent-rules>.
 - Ben 22-Oct-26: "build the client portal image galleries: galleries page, gallery page with search and sort, image lightbox with download". Spec: docs/integrations/imagebank-client-portal.md. Portal: Catalogue > Images (a third tab next to Line sheet and Stock availability; Ben picked "inside Catalogue"). A client with neither line sheet nor stock lands on Images. (source: supply/client-view.js :: vImages, vGallery)
 - Data: ImageBank's portal API (/api/v1/portal), called only by HORIZON's server with IMAGEBANK_API_KEY (bearer; server env, never sent to a browser, URL or log; IMAGEBANK_URL is the ImageBank address). Without both env vars the portal says "Image galleries are not connected yet" and the settings say ImageBank is not connected. Gallery responses are cached 60 s on the server; download links never. (source: server.mjs :: ibCall)
