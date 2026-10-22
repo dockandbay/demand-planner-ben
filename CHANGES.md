@@ -1,3 +1,7 @@
+## v28.462 (22-Oct-26) "Sample versions" wording: hint + Master data button
+- Ben: "rename hint text and the master data tab to sample versions".
+- PRODUCT ▸ product ▸ Samples hint now reads "creates sample versions pre-linked to this product"; the Master data tab button reads "+ Create sample versions" (was "+ Add to new sample request"). Labels only.
+
 ## v28.461 (22-Oct-26) Product Samples tab: "Create sample versions"
 - Ben: change the terminology on PRODUCT ▸ product ▸ Samples to "create sample versions".
 - The button now reads "+ Create sample versions" (was "+ Add to new sample request"); the hint reads "opens a new sample request pre-linked to this product". Same action as before (a SUPPLY sample request with this product's supplier). Label only; the Master data tab button is unchanged.
