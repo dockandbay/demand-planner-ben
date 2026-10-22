@@ -1,3 +1,9 @@
+## v28.449 (22-Oct-26) Paid history styled as the approved mockup
+- Ben (screenshot): "the ui is not as per the artifact". CLIENT only styles its own menu tab row, so v28.448's agent tabs, search box and dropdowns rendered as plain browser controls.
+- Paid history now has its own scoped styles copied from the mockup: agent tabs in a light-blue row with the active tab raised (totals in grey), status / period pills with counts, search box with icon and "/" hint and a focus ring, styled Year / Currency dropdowns (dark when set), row count and per-currency totals with the Summary button on the right, grid in a bordered box with a sticky header and alternating rows.
+- Rows stay one line: run notes ("deposit, earns at shipping", "carried forward") show on hover of a small "i" marker (still searchable, marker tinted when the search matches a note).
+- Checked in Chrome on the sandbox: All months + "bathroom" → 28 paid rows, €6,383.17, matches highlighted. Display only. Buy plan identical.
+
 ## v28.448 (22-Oct-26) Commissions Paid history rebuilt like the PO grid (option A)
 - Ben: "improve paid history UI to look like horizon PO grid. fast search and filters and tabs and pills"; picked option A ("po grid") from three mockups (artifact).
 - All rows load once (new `GET /api/client/commission/history-all`, about 8,400 rows, cached 2 min and cleared when a run is marked paid); everything else is instant in the browser, no reload: agent tabs with totals in the agent's currency, status pills (Paid / Not paid / Duplicate / Cancelled / All) and period pills (Last 3 months / this year to date / All months) with live counts, search as you type (highlighted, "/" to focus), Year and Currency filters (dark when set), one flat grid sortable by any header (Month newest first; first 400 rows then Show all), totals per currency. Month folders are gone (Month is a column).

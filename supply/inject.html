@@ -48,6 +48,43 @@
 #client-root .bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0}
 #client-root .pill{display:inline-block;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:11px;cursor:pointer;color:var(--muted);background:var(--card)}
 #client-root .pill.active{background:var(--nav);color:#fff;border-color:var(--nav)}
+/* v28.449 Paid history, PO-grid layout as the approved mockup (agent tab row, pills, search, filters, grid). Scoped to .cph. */
+#client-root .cph{font-variant-numeric:tabular-nums}
+#client-root .cph-note{color:var(--muted);font-size:11.5px;margin:0 0 10px}
+#client-root .cph-tabs{display:flex;gap:2px;flex-wrap:wrap;padding:4px 6px;background:var(--l3-bg);border:1px solid var(--line);border-radius:10px;margin:0 0 10px}
+#client-root .cph-tab{font:inherit;font-size:12px;font-weight:600;border:0;background:none;color:var(--muted);padding:6px 10px;border-radius:7px;cursor:pointer;white-space:nowrap;display:inline-flex;gap:6px;align-items:baseline}
+#client-root .cph-tab .amt{font-weight:500;color:var(--faint);font-size:11px}
+#client-root .cph-tab:hover{color:var(--ink)}
+#client-root .cph-tab.active{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(16,24,40,.10)}
+#client-root .cph-tab.active .amt{color:var(--muted)}
+#client-root .cph-tab:focus-visible,#client-root .cph .pill:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+#client-root .cph-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}
+#client-root .cph .pill{font-weight:600;color:var(--ink-soft);padding:4px 10px;display:inline-flex;gap:5px;align-items:center;font-size:12px}
+#client-root .cph .pill .n{font-size:10.5px;color:var(--faint);font-weight:500}
+#client-root .cph .pill.active{color:#fff}
+#client-root .cph .pill.active .n{color:rgba(255,255,255,.75)}
+#client-root .cph-sep{width:1px;height:18px;background:var(--line);margin:0 2px}
+#client-root .cph-search{position:relative;flex:1 1 240px;max-width:360px;min-width:180px;display:block}
+#client-root .cph-search input{width:100%;font:inherit;font-size:12px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);padding:0 30px 0 27px;height:30px;box-sizing:border-box}
+#client-root .cph-search input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+#client-root .cph-search svg{position:absolute;left:9px;top:8.5px;width:13px;height:13px;stroke:var(--faint);fill:none}
+#client-root .cph-search kbd{position:absolute;right:7px;top:6.5px;font:600 10px inherit;font-family:inherit;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--card)}
+#client-root .cph select.flt{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);padding:0 8px;height:30px;width:auto;cursor:pointer}
+#client-root .cph select.flt.hz-set{background:var(--ink);color:var(--card);border-color:var(--ink)}
+#client-root .cph-sum{margin-left:auto;display:flex;gap:10px;align-items:center;color:var(--muted);white-space:nowrap;font-size:12px}
+#client-root .cph-sum b{color:var(--ink)}
+#client-root .cph-btn{font:inherit;font-size:12px;font-weight:700;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:0 12px;height:30px;border-radius:7px;cursor:pointer}
+#client-root .cph-btn:hover{background:var(--hover)}
+#client-root .cph-tw{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:64vh;background:var(--card)}
+#client-root .cph-tw table th{position:sticky;top:0;z-index:1;background:var(--hdr-tint,var(--band));border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
+#client-root .cph-tw table th:hover{color:var(--ink)}
+#client-root .cph-tw table th.r,#client-root .cph-tw table td.r{text-align:right}
+#client-root .cph-tw table td{padding:5px 10px;white-space:nowrap;vertical-align:middle}
+#client-root .cph-tw table td.w{white-space:normal;min-width:16ch;max-width:32ch}
+#client-root .cph-tw tbody tr:nth-child(even) td{background:var(--row-alt)}
+#client-root .cph-tw tbody tr:hover td{background:var(--blue-soft)}
+#client-root .cph-tw mark{background:var(--amber-bg);color:inherit;border-radius:2px;padding:0 1px}
+@media (max-width:760px){ #client-root .cph-sum{margin-left:0;flex-wrap:wrap} }
 /* v28.247 ACCOUNTS: same look as CLIENT */
 #accounts-root{display:none;font-size:12px;color:var(--ink);padding-top:4px}
 #accounts-root,#accounts-root th,#accounts-root td,#accounts-root input,#accounts-root select,#accounts-root textarea{text-align:left}
@@ -21432,23 +21469,23 @@
       // agent tabs (totals under every filter except the agent)
       var LA=cphRows('agent'), ta={}, tc={}; LA.forEach(function(r){ var k=r.rep_group||'—'; ta[k]=(ta[k]||0)+(Number(r.paid)||0); tc[k]=r.ccy; });
       var ags=Object.keys(ta).sort(function(a,b){ return ta[b]-ta[a]; }); if(CPH.agent&&ags.indexOf(CPH.agent)<0)ags.push(CPH.agent);
-      var tabs='<div id="cph-tabs" style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:8px">'+'<button class="rtab cph-tab'+(CPH.agent?'':' active')+'" data-g="">All <span class="mut tiny" style="font-weight:400">'+LA.length+'</span></button>'
-        +ags.map(function(g){ return '<button class="rtab cph-tab'+(CPH.agent===g?' active':'')+'" data-g="'+esc(g)+'" title="'+esc(g)+' · '+cphMoney(ta[g]||0,tc[g])+'">'+esc(cmShort(g))+' <span class="mut tiny" style="font-weight:400">'+cphK(ta[g]||0,tc[g])+'</span></button>'; }).join('')+'</div>';
+      var tabs='<div class="cph-tabs" role="tablist" aria-label="Agent">'+'<button class="cph-tab'+(CPH.agent?'':' active')+'" data-g="">All <span class="amt">'+LA.length.toLocaleString()+'</span></button>'
+        +ags.map(function(g){ return '<button class="cph-tab'+(CPH.agent===g?' active':'')+'" data-g="'+esc(g)+'" title="'+esc(g)+' · '+cphMoney(ta[g]||0,tc[g])+'">'+esc(cmShort(g))+' <span class="amt">'+cphK(ta[g]||0,tc[g])+'</span></button>'; }).join('')+'</div>';
       // status + period pills with live counts
       var LS=cphRows('status'), sc={all:LS.length}; LS.forEach(function(r){ sc[r.status]=(sc[r.status]||0)+1; });
       var ST=[['paid','Paid'],['not_paid','Not paid'],['duplicate','Duplicate'],['cancelled','Cancelled'],['all','All']];
-      var pills=ST.map(function(s){ return '<span class="pill cph-st'+(CPH.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' <span class="tiny" style="opacity:.7">'+(sc[s[0]]||0)+'</span></span>'; }).join('')
-        +'<span style="width:1px;height:16px;background:var(--line);margin:0 4px"></span>'
+      var pills=ST.map(function(s){ return '<span class="pill cph-st'+(CPH.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' <span class="n">'+(sc[s[0]]||0).toLocaleString()+'</span></span>'; }).join('')
+        +'<span class="cph-sep"></span>'
         +[['3m','Last 3 months'],['ytd',new Date().getFullYear()+' to date'],['all','All months']].map(function(p){ return '<span class="pill cph-pe'+(CPH.period===p[0]&&!CPH.month?' active':'')+'" data-pe="'+p[0]+'">'+p[1]+'</span>'; }).join('')
         +(CPH.month?'<span class="pill active cph-mclr" title="Showing one month (from Summary): click to clear">'+esc(cphMl(CPH.month))+' only ✕</span>':'');
       var years=[], ccys=[]; (CPH_D||[]).forEach(function(r){ var y=String(r.period||'').slice(0,4); if(y&&years.indexOf(y)<0)years.push(y); if(r.ccy&&ccys.indexOf(r.ccy)<0)ccys.push(r.ccy); }); years.sort().reverse(); ccys.sort();
       var byC={}; L.forEach(function(r){ byC[r.ccy]=(byC[r.ccy]||0)+(Number(r.paid)||0); });
-      var bar='<div class="bar" style="gap:6px;flex-wrap:wrap">'
-        +'<input class="flt" id="cph-q" placeholder="Search customer, invoice, PO, credit note  ( / )" value="'+esc(CPH.q)+'" style="width:280px" autocomplete="off">'
-        +'<select class="flt" id="cph-y" style="width:auto"><option value="">All years</option>'+years.map(function(y){ return '<option'+(String(CPH.year)===y?' selected':'')+'>'+y+'</option>'; }).join('')+'</select>'
-        +'<select class="flt" id="cph-c" style="width:auto"><option value="">All currencies</option>'+ccys.map(function(c){ return '<option'+(CPH.ccy===c?' selected':'')+'>'+c+'</option>'; }).join('')+'</select>'
-        +'<span class="count" style="margin-left:auto">'+L.length+' row'+(L.length===1?'':'s')+(Object.keys(byC).length?' · '+Object.keys(byC).sort().map(function(c){ return '<b>'+cphMoney(byC[c],c)+'</b>'; }).join(' · '):'')+'</span>'
-        +'<button class="save-btn light" id="cph-sum" title="By agent and by month paid">Summary ›</button></div>';
+      var bar='<div class="cph-bar">'
+        +'<label class="cph-search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke-width="1.6"/><path d="M11 11l3.5 3.5" stroke-width="1.6" stroke-linecap="round"/></svg><input id="cph-q" placeholder="Search customer, invoice, PO, credit note" value="'+esc(CPH.q)+'" autocomplete="off" aria-label="Search paid history"><kbd>/</kbd></label>'
+        +'<select class="flt" id="cph-y" aria-label="Year"><option value="">All years</option>'+years.map(function(y){ return '<option'+(String(CPH.year)===y?' selected':'')+'>'+y+'</option>'; }).join('')+'</select>'
+        +'<select class="flt" id="cph-c" aria-label="Currency"><option value="">All currencies</option>'+ccys.map(function(c){ return '<option'+(CPH.ccy===c?' selected':'')+'>'+c+'</option>'; }).join('')+'</select>'
+        +'<span class="cph-sum"><span>'+L.length.toLocaleString()+' row'+(L.length===1?'':'s')+'</span>'+Object.keys(byC).sort().map(function(c){ return '<b>'+cphMoney(byC[c],c)+'</b>'; }).join(' · ')
+        +'<button class="cph-btn" id="cph-sum" title="By agent and by month paid">Summary ›</button></span></div>';
       // grid
       var one=!!CPH.agent, COLS=[['period','Month'],['rep_group','Agent'],['customer','Customer'],['invoice_no','Invoice'],['po_no','PO'],['invoice_date','Invoice date'],['comm','Commissionable',1],['rate','Rate',1],['paid','Paid',1],['credit_note','Credit note'],['status','Status'],['source','Source']].filter(function(c){ return !(one&&c[0]==='rep_group'); });
       var f=CPH.sort, dir=CPH.dir, num={comm:1,rate:1,paid:1};
@@ -21461,13 +21498,14 @@
         if(k==='invoice_date')return r.invoice_date?esc(hzTrkDate(r.invoice_date)):'';
         if(k==='comm')return r.comm==null?'':cphMoney(r.comm,r.ccy); if(k==='rate')return r.rate==null?'':esc(r.rate)+'%'; if(k==='paid')return '<b>'+cphMoney(r.paid,r.ccy)+'</b>';
         if(k==='status')return stB(r.status);
-        return r.source==='horizon'?'<span style="color:var(--blue-ink);font-weight:700">HORIZON run '+esc(r.run_id)+'</span>'+(r.notes?' · <span class="mut">'+hl(r.notes)+'</span>':''):'<span class="mut">sheet</span>'+(r.notes?' · <span class="mut">'+hl(r.notes)+'</span>':''); };
-      var grid=L.length?'<div class="tw" style="max-height:64vh;overflow:auto"><table><thead><tr>'+COLS.map(function(c){ return '<th class="l cph-th" data-k="'+c[0]+'" style="cursor:pointer;'+(c[2]?'text-align:right':'')+'" title="Sort">'+c[1]+(f===c[0]?' <span style="color:var(--blue)">'+(dir<0?'▼':'▲')+'</span>':'')+'</th>'; }).join('')+'</tr></thead><tbody>'
-          +show.map(function(r){ return '<tr>'+COLS.map(function(c){ return '<td class="l'+(c[0]==='po_no'||c[0]==='credit_note'||c[0]==='source'?' tiny':'')+'"'+(c[2]?' style="text-align:right;white-space:nowrap"':'')+'>'+cell(r,c)+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>'
+        var nt=r.notes?' <span title="'+esc(r.notes)+'" style="display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:'+(q&&String(r.notes).toLowerCase().indexOf(q.toLowerCase())>=0?'var(--amber-bg)':'var(--line2)')+';color:var(--muted);font-size:9px;font-weight:700;cursor:help">i</span>':'';   // v28.449: notes on hover, so rows stay one line
+        return (r.source==='horizon'?'<span style="color:var(--blue-ink);font-weight:700">HORIZON run '+esc(r.run_id)+'</span>':'<span class="mut">sheet</span>')+nt; };
+      var grid=L.length?'<div class="cph-tw"><table><thead><tr>'+COLS.map(function(c){ return '<th class="cph-th'+(c[2]?' r':'')+'" data-k="'+c[0]+'" title="Sort">'+c[1]+(f===c[0]?' <span style="color:var(--blue)">'+(dir<0?'▼':'▲')+'</span>':'')+'</th>'; }).join('')+'</tr></thead><tbody>'
+          +show.map(function(r){ return '<tr>'+COLS.map(function(c){ return '<td class="'+(c[2]?'r':(c[0]==='customer'?'w':''))+(c[0]==='credit_note'?' tiny':'')+'">'+cell(r,c)+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>'
           +(SL.length>CAP&&!CPH.all?'<div style="margin-top:6px"><button class="save-btn light" id="cph-more">Show all '+SL.length.toLocaleString()+' rows</button> <span class="mut tiny">showing the first '+CAP+' (sorted); search or a filter narrows instantly</span></div>':'')
         :'<div class="count" style="padding:14px">No rows match'+(q?' "'+esc(q)+'"':'')+'. Clear the search, pick All, or All months.</div>';
       var hadFocus=document.activeElement&&document.activeElement.id==='cph-q', pos=hadFocus?document.activeElement.selectionStart:0;
-      box.innerHTML='<div class="annot" style="margin-bottom:8px">Every commission paid to an agent: the history sheet from Jan-22, then every run marked <b>Paid</b> (creating a run\'s Xero bill marks it paid).</div>'+tabs+'<div class="bar" style="gap:6px;flex-wrap:wrap;margin-bottom:6px">'+pills+'</div>'+bar+grid;
+      box.innerHTML='<div class="cph"><div class="cph-note">Every commission paid to an agent: the history sheet from Jan-22, then every run marked <b>Paid</b> (creating a run\'s Xero bill marks it paid).</div>'+tabs+'<div class="cph-bar">'+pills+'</div>'+bar+grid+'</div>';
       if(hadFocus){ var qi0=document.getElementById('cph-q'); qi0.focus(); try{ qi0.setSelectionRange(pos,pos); }catch(e){} }
       var go=cphDraw;
       box.querySelectorAll('.cph-tab').forEach(function(t){ t.onclick=function(){ CPH.agent=t.dataset.g; CPH.all=false; go(); }; });
