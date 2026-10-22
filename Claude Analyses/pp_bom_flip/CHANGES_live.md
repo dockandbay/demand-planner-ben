@@ -2,7 +2,7 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 322 across 12 runs.
+Total changes: 324 across 13 runs.
 
 ## Run fix-so68870-2026-10-22_122103
 
@@ -15,6 +15,13 @@ Total changes: 322 across 12 runs.
 | 12:21 2026-10-22 | SO68870 add single product 264 @ 9.37 (replaces oversold PP line) | sale.line 608214 | created | delete link |
 | 12:21 2026-10-22 | SO68870 processed to create shipment for singles | sale.sale 300187 | note:  | n/a |
 | 12:21 2026-10-22 | SO68870 cancel oversold PP-TEATWL-MD-5SET-CULDEL line (after singles added) | sale.line 607345 | cancel_line:  | n/a |
+
+## Run faire-release-2026-10-22_161223
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 16:12 2026-10-22 | Rule 68 Wholesale Hold Rule: stop holding Faire US + Faire UK (Ben 22-Oct-26: Faire releases on arrival). Undo = recreate these 2 conditions (type or, channel is 37 / 36) on rule 68 | fulfil.automation.rule.condition [367, 383] | deleted | recreate link [{"rule": 68, "type": "or", "parameter": "channel", "operator": "is", "value_channel": 37, "id": 367, "condition_blurb": {"title": "Channel is Faire US"}}, {"rule": 68, "type": "or", "parameter": "channel", "operator": "is", "value_channel": 36, "id": 383, "condition_blurb": {"title": "Channel is Faire UK"}}] |
+| 16:12 2026-10-22 | release Faire US shipment CS61176 (SO68066), ship-by 22-Oct (Ben 22-Oct-26) | stock.shipment.out 61176 | `on_hold`: `True` -> `False` | set `on_hold` back to `True` |
 
 ## Run au-sumsuga-bom-2026-10-21_144922
 
