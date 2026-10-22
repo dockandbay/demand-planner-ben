@@ -106,10 +106,10 @@ fingerprints:
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
   server.mjs::/api/product/reports/sample-costs: cb55e12aee72
-  supply/inject.html::renderSampleCosts: 0e6b71611652
+  supply/inject.html::renderSampleCosts: 7c889fc9547e
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
-  supply/inject.html::renderApprovalStats: ce216e5ac614
-verified_version: v28.458
+  supply/inject.html::renderApprovalStats: b5530188c216
+verified_version: v28.459
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -470,6 +470,7 @@ verified_version: v28.458
   - Same multi-select "is" filters as Sample costs; Date range matches any covering sample's month; Traffic light is on samples to approve (or so far).
   - Totals: suppliers, versions, approved samples, avg samples to approve and avg days (approved SKUs only), hit rate, % moving to bulk (of approved SKUs).
   (source: server.mjs :: /api/product/reports/approval-stats; supply/inject.html :: renderApprovalStats)
+- Product report (PRODUCT ▸ Products grid, ⤓ Report on a season or season + category header in the inline layout): a printable A4 swatch board grouped by category, leaving out dropped products. Each card: swatch (or "no swatch"), colour name (bulk name, with the development name in brackets underneath), ref and stage pill. v28.459: names no longer print raw HTML, the page has its own light colours, and the browser's date / URL / page-number header and footer are suppressed. (source: supply/inject.html :: _prodGroupPDF)
 - Approved products: a staging list of working SKUs with status waiting / in_pim / dropped (waiting first). Marking "in PIM" does not write to Airtable. (source: server.mjs :: /api/product/pim-waiting-room; renderPimWaitingRoom)
 - Catalogue: one row per product size.
   - Fallbacks:

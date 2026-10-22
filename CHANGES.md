@@ -1,3 +1,10 @@
+## v28.459 (22-Oct-26) Product report PDF fixed
+- Ben: "⤓ Report download has flaw" (Product report · AW27.pdf).
+- Colour names printed raw HTML ("TIGER LILLY <span class=\"mut\" ...>(TIGER LILLY)</span>"): the name was escaped twice. Now the bulk name prints, with the development name in brackets on a smaller grey line underneath.
+- The report window had none of the app's colour tokens, so borders and the stage pill colours didn't print; it now carries its own light palette and prints colours exactly.
+- @page margin 0 (content padded 14 mm) removes the browser's date, "about:blank" and page-number header and footer.
+- Checked in Chrome on the sandbox (SS27 report rendered without the print dialog).
+
 ## v28.458 (22-Oct-26) Size & variants: Download barcodes
 - Ben: "in size and variants, we can assign barcode. can you also have the download barcode button here, it can popup options in a modal".
 - PRODUCT ▸ product ▸ Size & variants: "⤓ Download barcodes" next to "＋ Add size" opens a modal: the sizes with a barcode (preview, ticked), Format PNG / JPG, Width 452 / 678 / 1000 / 1500 px, File name = barcode number / SKU / product ref + size, Select all / none, Download. Same EAN-13 images as Config ▸ Workshop barcodes.
