@@ -14315,6 +14315,7 @@ function deriveProductStage(reqs, override) {
 const REQS_JSON_SQL = `coalesce((SELECT json_agg(json_build_object('id',rq.id,'ref',rq.ref,'supplier_name',rq.supplier_name,'supplier_code',coalesce(rq.supplier_code,''),
       'stage',rq.stage,'approval_method',rq.approval_method,'recipient_countries',coalesce(rq.recipient_countries,''),'recipient_addresses',coalesce(rq.recipient_addresses,'[]'::jsonb),'dev_start',to_char(rq.dev_start,'YYYY-MM-DD'),
       'size_ids',rq.size_ids,'internal_stakeholders',rq.internal_stakeholders,'notify_emails',rq.notify_emails,'notes',coalesce(rq.notes,''),'created_at',to_char(rq.created_at,'YYYY-MM-DD'),
+      'send_status',coalesce(rq.send_status,'draft'),'sent_at',to_char(rq.sent_at,'YYYY-MM-DD'),'sent_by',coalesce(rq.sent_by,''),   -- v28.460
       'components',coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,'')) ORDER BY c.sort,c.id) FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rc.request_id=rq.id),'[]'::json),
       'samples',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id)::int,
       'samples_received',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id AND ps.received_at IS NOT NULL)::int) ORDER BY rq.id)
@@ -14379,6 +14380,24 @@ app.post('/api/product/request', async (req, res) => {
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+// v28.460 (Ben): Draft → Sent. A request is created as DRAFT (internal only); SENT makes it visible on the supplier portal and posts
+// a supplier-scoped D&B note on the product timeline, which is the supplier's in-app notification (portal inbox). Back to draft
+// hides it again. Body {status:'sent'|'draft'}.
+app.post('/api/product/request/:id/send', async (req, res) => {
+  const id = Number(req.params.id), st = (req.body || {}).status === 'draft' ? 'draft' : 'sent'; if (!id) return res.status(400).json({ error: 'bad id' });
+  try {
+    const rq = (await pool.query(`SELECT r.id, r.ref, r.send_status, r.supplier_id, r.supplier_name, i.ref item_ref FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE r.id=$1`, [id])).rows[0];
+    if (!rq) return res.status(404).json({ error: 'not found' });
+    if ((rq.send_status || 'draft') === st) return res.json({ ok: true, unchanged: true, send_status: st });
+    const by = authUser(req) || 'Dock & Bay', who = shortUser(by) || 'Dock & Bay';
+    await pool.query(`UPDATE planner.product_dev_requests SET send_status=$2, sent_at=CASE WHEN $2='sent' THEN now() ELSE sent_at END, sent_by=CASE WHEN $2='sent' THEN $3 ELSE sent_by END, updated_at=now() WHERE id=$1`, [id, st, by]);
+    if (st === 'sent') await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'internal',$4)`,
+      [rq.item_ref, rq.supplier_id || null, authUser(req) || null, '📨 New sample request ' + rq.ref + ' sent to ' + rq.supplier_name + ' by ' + who + '. Please review and accept.']);
+    try { await logProductChange(rq.item_ref, 'Request ' + rq.ref + (st === 'sent' ? ' sent to ' + rq.supplier_name : ' set back to draft (hidden from the supplier)'), null, by); } catch (e) {}
+    try { portalCacheMarkStale(rq.supplier_name); } catch (e) {}
+    res.json({ ok: true, send_status: st });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Update a request: any of ref, stage, approval_method, recipient_countries, dev_start, size_ids, internal_stakeholders, notify_emails, notes, component_ids (replace-all)
 app.post('/api/product/request/:id', async (req, res) => {
   const b = req.body || {}, id = Number(req.params.id); if (!id) return res.status(400).json({ error: 'bad id' });
@@ -14433,6 +14452,7 @@ app.get('/api/product/sampling', async (_req, res) => {
         rq.supplier_name, coalesce(rq.supplier_code,'') supplier_code, rq.stage, rq.approval_method, coalesce(rq.recipient_countries,'') recipient_countries,
         coalesce(rq.action_owner,'') action_owner,   -- v27.815 (Ben): manual action-owner override ('' = auto-derive)
         to_char(rq.supplier_accepted_at,'YYYY-MM-DD') supplier_accepted_at, coalesce(rq.supplier_accepted_by,'') supplier_accepted_by,   -- v27.761: supplieracceptance of the dev request
+        coalesce(rq.send_status,'draft') send_status, to_char(rq.sent_at,'YYYY-MM-DD') sent_at, coalesce(rq.sent_by,'') sent_by,   -- v28.460 (Ben): Draft / Sent
         to_char(rq.dev_start,'YYYY-MM-DD') dev_start, rq.internal_stakeholders, rq.notify_emails, coalesce(rq.notes,'') notes,
         to_char(rq.created_at,'YYYY-MM-DD') created_at, to_char(rq.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id)
@@ -15515,7 +15535,7 @@ async function openSampleCandidates(suppliers) {   // dev-sample versions whose 
   return (await pool.query(`SELECT ps.id, ps.item_ref, (ps.item_ref||'_v'||ps.version) ref, ps.version,
       coalesce(i.colour_name,'') colour_name, coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier
     FROM planner.product_dev_samples ps JOIN planner.product_dev_items i ON i.ref=ps.item_ref
-    WHERE i.status='in_development' ${scoped ? 'AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1))' : ''}
+    WHERE i.status='in_development' ${scoped ? 'AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1) AND r.send_status=\'sent\')' : ''}
     ORDER BY i.updated_at DESC, ps.version DESC`, scoped ? [suppliers] : [])).rows;
 }
 async function supplierSkuCandidates(suppliers, q, includeDev) {   // bulk SKUs, scoped to a supplier via products.supplier_multiple_all; optionally also product-development items
@@ -15528,7 +15548,7 @@ async function supplierSkuCandidates(suppliers, q, includeDev) {   // bulk SKUs,
   if (!includeDev) return skuRows;
   // also search the PRODUCT development grid (planner.product_dev_items) — its ref acts as the "sku"
   const dp = []; const dw = [`coalesce(i.status,'') <> 'dropped'`];
-  if (scoped) { dp.push(suppliers); dw.push(`EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($${dp.length}))`); }
+  if (scoped) { dp.push(suppliers); dw.push(`EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($${dp.length}) AND r.send_status='sent')`); }
   if (q) { dp.push('%' + q + '%'); const p = '$' + dp.length;
     dw.push(`(i.ref ILIKE ${p} OR coalesce(i.colour_name,'') ILIKE ${p} OR coalesce(i.description,'') ILIKE ${p} OR coalesce(i.season,'') ILIKE ${p} OR coalesce(i.category,'') ILIKE ${p})`); }
   const devRows = (await pool.query(`SELECT i.ref sku,
@@ -15564,7 +15584,7 @@ async function unlinkSampleFromShipment(devSampleId, srId) {
 // request (older rows) is the caller's only when the item has no other supplier's request.
 async function portalOwnsProductSample(req, sampleId) {
   const n = Number(sampleId); if (!Number.isSafeInteger(n) || n <= 0) return false;
-  const r = (await pool.query(`SELECT ps.item_ref, (SELECT rq.supplier_name FROM planner.product_dev_requests rq WHERE rq.id=ps.request_id) req_sup,
+  const r = (await pool.query(`SELECT ps.item_ref, (SELECT rq.supplier_name FROM planner.product_dev_requests rq WHERE rq.id=ps.request_id AND rq.send_status='sent') req_sup,
       (SELECT count(*) FROM planner.product_dev_requests r2 JOIN planner.product_dev_items i ON i.id=r2.item_id WHERE i.ref=ps.item_ref AND NOT (r2.supplier_name = ANY($2)))::int others
     FROM planner.product_dev_samples ps WHERE ps.id=$1`, [n, req.portal.suppliers || []])).rows[0];
   if (!r) return false;
@@ -15572,7 +15592,7 @@ async function portalOwnsProductSample(req, sampleId) {
   return r.others === 0 && portalOwnsProduct(req, r.item_ref);
 }
 // v28.191 (Ben, H6): the caller's development request(s) on an item (id + supplier id), and the emails of the caller's people.
-async function portalMyRequests(req, ref) { return (await pool.query(`SELECT r.id, r.supplier_id, r.supplier_name FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND r.supplier_name = ANY($2) ORDER BY r.id`, [ref, req.portal.suppliers || []])).rows; }
+async function portalMyRequests(req, ref) { return (await pool.query(`SELECT r.id, r.supplier_id, r.supplier_name FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND r.supplier_name = ANY($2) AND r.send_status='sent' ORDER BY r.id`, [ref, req.portal.suppliers || []])).rows; }
 async function portalMyNoteSupplierId(req, ref) { const m = await portalMyRequests(req, ref); const sid = m.find(x => x.supplier_id != null); return sid ? sid.supplier_id : ((req.portal.supplierIds || [])[0] || null); }
 async function portalPeopleEmails(req) { if (req._ppEmails) return req._ppEmails;
   const rows = (await pool.query(`SELECT lower(email) e FROM planner.supplier_portal_users WHERE supplier_name = ANY($1) OR supplier_id = ANY($2::bigint[])`, [req.portal.suppliers || [], (req.portal.supplierIds || []).map(Number)])).rows;
@@ -31662,7 +31682,7 @@ async function portalAuth(req, res, next) {
 function portalOwnNames(req, csv) { const mine = new Set((req.portal.suppliers || []).map(n => String(n).toLowerCase().trim()));
   return String(csv || '').split(',').map(x => x.trim()).filter(x => x && mine.has(x.toLowerCase())).join(', '); }
 function portalScopeItem(req, item) { if (!item) return item; const mine = new Set((req.portal.suppliers || []).map(n => String(n).toLowerCase().trim()));
-  if (Array.isArray(item.requests)) item.requests = item.requests.filter(r => mine.has(String(r.supplier_name || '').toLowerCase().trim()))
+  if (Array.isArray(item.requests)) item.requests = item.requests.filter(r => mine.has(String(r.supplier_name || '').toLowerCase().trim()) && (r.send_status || 'draft') === 'sent')   // v28.460: drafts stay internal
     .map(r => { const o = Object.assign({}, r); delete o.internal_stakeholders; delete o.notify_emails; return o; });
   item.supplier = portalOwnNames(req, item.supplier);
   if (Array.isArray(item.requests)) item.supplier_code = [...new Set(item.requests.map(r => r.supplier_code).filter(Boolean))].join(', ');
@@ -31705,7 +31725,7 @@ async function portalCanReadAttachment(req, id) {
     return !u || u.k !== 'supplier' || (await portalPeopleEmails(req)).has(u.b); }
   if (a.category === 'product_sample' && /^PSAMPLE-\d+$/.test(a.po)) {
     const sid = a.po.slice(8);
-    const s = (await pool.query(`SELECT ps.item_ref, (SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id) req_sup FROM planner.product_dev_samples ps WHERE ps.id=$1`, [sid])).rows[0];
+    const s = (await pool.query(`SELECT ps.item_ref, (SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id AND r.send_status='sent') req_sup FROM planner.product_dev_samples ps WHERE ps.id=$1`, [sid])).rows[0];
     if (!s) return false;
     if (s.req_sup) return (req.portal.suppliers || []).includes(s.req_sup);   // request-level: never a competing supplier's sample files
     return portalOwnsProduct(req, s.item_ref);
@@ -32616,7 +32636,7 @@ async function portalBootstrapBuild(names, ids, _inclArch) {
         to_char(r.supplier_accepted_at,'YYYY-MM-DD') dev_accepted_at,
         coalesce(r.supplier_accepted_by,'') dev_accepted_by
       FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id
-      WHERE r.supplier_name = ANY($1) ORDER BY i.created_at DESC, r.id`, [names]) : Promise.resolve([]);
+      WHERE r.supplier_name = ANY($1) AND r.send_status='sent' ORDER BY i.created_at DESC, r.id`, [names]) : Promise.resolve([]);   // v28.460: drafts never reach the portal
     // SUG-0019 P3: specifications relevant to this supplier — directed confirm-specs + specs whose scope covers a product
     // they make. Rows + this supplier's approvals fetched together; scope relevance resolved in parallel (memoised).
     const pSpecs = (async () => {
@@ -32779,14 +32799,14 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
         UNION ALL
         SELECT 'product', n.po, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
-          WHERE n.author_kind='internal' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=pdi.id AND r.supplier_name = ANY($1))
+          WHERE n.author_kind='internal' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=pdi.id AND r.supplier_name = ANY($1) AND r.send_status='sent')
             AND (n.supplier_id IS NULL OR n.supplier_id = ANY($2::bigint[]))   -- v28.191 (Ben, H6): never another supplier's request notes
       ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names, ids])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
 async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
-  return (await pool.query(`SELECT 1 FROM planner.product_dev_items i WHERE i.ref=$1 AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($2))`, [ref, req.portal.suppliers])).rowCount > 0; }   // v27.749 (P5): ownership via development REQUESTS only (item-level supplier column dropped)
+  return (await pool.query(`SELECT 1 FROM planner.product_dev_items i WHERE i.ref=$1 AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($2) AND r.send_status='sent')`, [ref, req.portal.suppliers])).rowCount > 0; }   // v27.749 (P5): ownership via development REQUESTS only (item-level supplier column dropped)
 app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try {
@@ -32819,7 +32839,7 @@ app.post('/api/portal/product-accept', portalAuth, async (req, res) => { const r
     const upd = await pool.query(`UPDATE planner.product_dev_requests r
         SET supplier_accepted_at=now(), supplier_accepted_by=$3, updated_at=now()
         FROM planner.product_dev_items i
-        WHERE r.item_id=i.id AND i.ref=$1 AND r.supplier_name = ANY($2) AND r.supplier_accepted_at IS NULL
+        WHERE r.item_id=i.id AND i.ref=$1 AND r.supplier_name = ANY($2) AND r.supplier_accepted_at IS NULL AND r.send_status='sent'
         RETURNING r.id, r.supplier_name, r.supplier_id`, [ref, req.portal.suppliers, by]);
     if (!upd.rowCount) return res.json({ ok: true, already: true });   // idempotent: nothing left to accept
     const supName = upd.rows[0].supplier_name || (req.portal.suppliers[0] || 'Supplier');
@@ -32836,7 +32856,7 @@ app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { co
 app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase().trim());
-    const prodMine = (await pool.query(`SELECT 1 FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND lower(r.supplier_name)=ANY($2) LIMIT 1`, [ref, sups])).rowCount > 0;   // v27.749 (P5): "my product" = I own a development request on it (item-level supplier dropped)
+    const prodMine = (await pool.query(`SELECT 1 FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND lower(r.supplier_name)=ANY($2) AND r.send_status='sent' LIMIT 1`, [ref, sups])).rowCount > 0;   // v27.749 (P5): "my product" = I own a development request on it (item-level supplier dropped)
     const comps = (await pool.query(`SELECT id, name, coalesce(supplier,'') supplier, dimension, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
     const mine = comps.filter(c => c.sampling_mode !== 'spec_linked' && (c.supplier ? sups.includes(c.supplier.toLowerCase().trim()) : prodMine));
     res.json({ components: mine.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name, dimension: c.dimension || null })), total: comps.length });

@@ -1,3 +1,12 @@
+## v28.460 (22-Oct-26) Sample requests: Draft → Sent (MIGRATION 383)
+- Ben: "on sample requests, when we create a request initially have it in a status 'draft' (orange), then user can change it to 'sent' (green) and only on sent can supplier portal see this and they get notified in app of new sample request" + "default all current to DRAFT".
+- PRODUCT ▸ Sampling grid and the product's Requests tab: a Draft / Sent pill-select on each development (sample) request. "Awaiting accept" only shows once Sent.
+- New route POST /api/product/request/:id/send {status}. Sent stamps sent_at / sent_by and posts a supplier-scoped D&B note "📨 New sample request <ref> sent to <supplier>…", which lands in the supplier's portal inbox (unread messages).
+- Supplier portal sees Sent requests only: product list, product item / notes / samples / swatch / files (portalOwnsProduct), Accept, the caller's requests, the open-sample and SKU pickers, and inbox notes.
+- **MIGRATION 383_dev_request_send_status.sql** (new columns send_status default 'draft', sent_at, sent_by + check). Applying it sets every existing request to Draft, so suppliers stop seeing them until each is set to Sent (as Ben asked). Applied on the sandbox.
+- Checked: Chrome on the sandbox (6 requests Draft; set one to Sent → green, back to Draft → orange); a temporary sandbox portal session for an ACME user: the Sent product returned 200, the Draft one 403, and the inbox showed the new-request note (session deleted afterwards).
+- Buy plan identical.
+
 ## v28.459 (22-Oct-26) Product report PDF fixed
 - Ben: "⤓ Report download has flaw" (Product report · AW27.pdf).
 - Colour names printed raw HTML ("TIGER LILLY <span class=\"mut\" ...>(TIGER LILLY)</span>"): the name was escaped twice. Now the bulk name prints, with the development name in brackets on a smaller grey line underneath.

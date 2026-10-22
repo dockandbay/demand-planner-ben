@@ -38,6 +38,9 @@ sources:
   - server.mjs :: portalPoIsSlim, portalPaymentsTrim, /api/portal/po-detail, /api/portal/shipment-notes-read, shipNoteUnreadSql (portal payload + per-supplier shipment reads)
   - server.mjs :: /api/portal/doc-remove, /api/portal/upload (supplier PO documents)
   - server.mjs :: portalOwnsProductSample (product-dev request-level ownership)
+  - server.mjs :: /api/product/request/:id/send
+  - server.mjs :: portalOwnsProduct
+  - server.mjs :: portalScopeItem
   - server.mjs :: cpTierPrice, /api/cp/prices, /api/cp/order, cpCreateFulfilDraft, cpAutoPush, cpSalesTeam, /api/client/portal-orders/:id (+ /fulfil-options, /push, /cancel)
   - server.mjs :: /api/client/commission/runs/build, /api/client/commission/runs/:id/xero-bill (client commission)
   - server.mjs :: cpAllowedOrderKeys, cpPortalThreads, cpOrderThreadFind, cpOrderClients, /api/cp/order-thread/:key, /api/client/order-thread/:key/post (order messages + documents)
@@ -182,7 +185,7 @@ fingerprints:
   server.mjs::/api/supply/po-line-accept: 073111cc8cb5
   server.mjs::/api/supply/po-line-reject: e6636f5d3d7e
   server.mjs::portalShipmentRole: 745b3171a691
-  server.mjs::portalCanReadAttachment: a712ab0925c2
+  server.mjs::portalCanReadAttachment: 9ddd8551d6f2
   server.mjs::/api/portal/shipment/:ref: f6ee876e945f
   server.mjs::/api/portal/attachment/:id: 386ae75896e8
   server.mjs::staffOnly: 0df84ff342f4
@@ -194,7 +197,10 @@ fingerprints:
   server.mjs::shipNoteUnreadSql: a728facfa589
   server.mjs::/api/portal/doc-remove: 0b42deeb0db0
   server.mjs::/api/portal/upload: 37dcc4894596
-  server.mjs::portalOwnsProductSample: 29dda2af6dd1
+  server.mjs::portalOwnsProductSample: 647f8eca01b8
+  server.mjs::/api/product/request/:id/send: f9859f25798d
+  server.mjs::portalOwnsProduct: 66a5ba1197e6
+  server.mjs::portalScopeItem: a1eed2b11d8c
   server.mjs::cpTierPrice: a2b9b629bb4a
   server.mjs::/api/cp/prices: 1445d08c02f9
   server.mjs::/api/cp/order: 1741c58aa030
@@ -274,7 +280,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.458
+verified_version: v28.460
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -522,6 +528,7 @@ verified_version: v28.458
 - File access in the portal: a file is served when its PO is the supplier's, or it belongs to the supplier's sample request, product development item (sample versions by the supplier's own development request), or it is a shipment timeline file (attached to a note on that shipment, or uploaded by the supplier) on a shipment the supplier is on. Sharing a shipment never opens another supplier's PO documents. A note may only reference a file the supplier can open. Staff file and DTC routes refuse portal sessions; the portal uses its own /api/portal routes. (source: server.mjs :: portalCanReadAttachment, /api/portal/attachment/:id, staffOnly)
 - Sign-in links: valid 24 hours (PORTAL_LINK_HOURS) and single use. Opening the link only shows a "Continue to portal" page; the button redeems it once (atomic), so email scanners cannot use it up. The session lasts 7 days; Sign out deletes it. Link and session tokens (supplier and client portal) are stored only as a SHA-256 hash ('h1:...'), never the raw value, so reading the tables cannot sign anyone in; tokens written raw before v28.210 are still accepted until they expire. Expired links are purged hourly; expired sessions are kept 90 days for the portal activity report (raw ones hashed in place), then purged. (source: server.mjs :: /api/portal/redeem)
 - Portal first load (v28.189): completed POs come as light rows (every list field, no lines / documents / costs / detail-only fields); opening one (MANAGE) or a batch order plan fetches the rest first, so what is shown is unchanged. Payment runs made up only of archived POs' milestones (archive cutoff, same as the PO list) are not sent: the Payments headline still includes them and "Show them" loads them. (source: server.mjs :: portalPoIsSlim, portalPaymentsTrim, /api/portal/po-detail)
+- Sample (development) request Draft / Sent (v28.460, migration 383): a request is created as draft (orange) and only reaches the supplier when set to Sent (green) on PRODUCT ▸ Sampling or the product's Requests tab. Every portal path checks send_status='sent': the portal product list, product ownership (portalOwnsProduct, which gates the item, notes, samples, swatch and files), the caller's requests (portalMyRequests, portalScopeItem), sample-version ownership, Accept, the open-sample and SKU pickers, and the portal inbox. Switching to Sent stamps sent_at / sent_by and posts a supplier-scoped D&B note ("New sample request … sent"), which is the supplier's in-app notification. Back to draft hides it again. Existing requests default to draft (Ben: "default all current to DRAFT"). (source: server.mjs :: /api/product/request/:id/send, portalOwnsProduct, portalScopeItem)
 - Product development with competing suppliers (v28.191): a sample version belongs to the supplier whose development request it was made under; only that supplier can change it, add files to it, or create versions on that request. A supplier's product notes and uploads are tied to its own supplier id, so a competitor on the same item never sees them; a document another supplier uploaded is neither listed nor downloadable; components sampled by another supplier show "another supplier". (source: server.mjs :: portalOwnsProductSample, portalCanReadAttachment)
 - Supplier submissions (completion date, invoice value, tracking, production status, confirmation) are checked before anything is saved; if a later step fails after something was saved, the supplier is told exactly what was saved (409) and the caches are refreshed. (source: server.mjs :: /api/portal/submit)
 - A supplier can remove a PO document it uploaded itself while it is a draft or was rejected; once sent for approval (or approved) it stays. The document type chosen at upload is stored. (source: server.mjs :: /api/portal/doc-remove, /api/portal/upload)
