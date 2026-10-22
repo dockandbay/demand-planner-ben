@@ -1,0 +1,121 @@
+[
+ {
+  "fn": 1,
+  "name": "Personalisation Logic",
+  "version": 1,
+  "channels": [
+   [
+    6,
+    "dockandbay-us",
+    24
+   ]
+  ]
+ },
+ {
+  "fn": 3,
+  "name": "Australia - Personalisation Logic",
+  "version": 76,
+  "channels": [
+   [
+    8,
+    "dockandbay-au",
+    28
+   ]
+  ]
+ },
+ {
+  "fn": 36,
+  "name": "EU Wholesale - Tags to Fields",
+  "version": 42,
+  "channels": [
+   [
+    11,
+    "dockandbay-eu-ws",
+    20
+   ]
+  ]
+ },
+ {
+  "fn": 37,
+  "name": "US Wholesale - Tags to Fields + ignore Faire",
+  "version": 43,
+  "channels": [
+   [
+    10,
+    "dockandbay-us-ws",
+    24
+   ]
+  ]
+ },
+ {
+  "fn": 38,
+  "name": "UK Tax mapping",
+  "version": 73,
+  "channels": [
+   [
+    12,
+    "TikTok UK",
+    16
+   ],
+   [
+    36,
+    "Faire UK",
+    206
+   ]
+  ]
+ },
+ {
+  "fn": 42,
+  "name": "UK Retail - Personalisation + Tax Mapping",
+  "version": 62,
+  "channels": []
+ },
+ {
+  "fn": 43,
+  "name": "AU Tax mapping",
+  "version": 75,
+  "channels": [
+   [
+    15,
+    "Amazon.com.au",
+    28
+   ]
+  ]
+ },
+ {
+  "fn": 44,
+  "name": "UK - Wholesale (UK Tax + Faire Ignore + Tags)",
+  "version": 74,
+  "channels": [
+   [
+    9,
+    "dockandbay-uk-ws",
+    206
+   ]
+  ]
+ },
+ {
+  "fn": 45,
+  "name": "Amazon UK - Tax Mapping",
+  "version": 72,
+  "channels": [
+   [
+    13,
+    "Amazon.co.uk",
+    206
+   ]
+  ]
+ },
+ {
+  "fn": 48,
+  "name": "UK Retail - Personalisation + Tax + Planned Ship Date",
+  "version": 78,
+  "channels": [
+   [
+    5,
+    "dockandbay-uk",
+    206
+   ]
+  ]
+ }
+]

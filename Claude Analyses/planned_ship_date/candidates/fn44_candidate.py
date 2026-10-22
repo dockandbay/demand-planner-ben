@@ -1,0 +1,335 @@
+def order_import(order_data):
+    # Faire already imports via the Faire channel. Shopify sends source_name "Faire"
+    # into channel_segment - ignore so no lines/party/reservation get created.
+    if (order_data.get("channel_segment") or "").strip().lower() == "faire":
+        order_data["status"] = "ignored"
+        order_data["comment"] = "Faire order - imported through the Faire channel, not Shopify"
+        return order_data
+
+    # ---------- Wholesale tags: agent code, payment terms, future ship date ----------
+    NET_TERM_NAMES = {"30": "Net 30", "60": "Net 60", "90": "Net 90"}
+
+    def split_tags(raw):
+        if not raw:
+            return []
+        text = raw if isinstance(raw, str) else str(raw)
+        return [t.strip() for t in text.split(",") if t.strip() != ""]
+
+    metadata = order_data.get("metadata") or {}
+    customer = order_data.get("customer") or {}
+
+    order_tags = split_tags(metadata.get("tags"))
+    customer_tags = split_tags(customer.get("tags") if isinstance(customer, dict) else None)
+
+    agent_code = None
+    term_name = None
+    for tag in order_tags:
+        lowered = tag.lower()
+        if lowered.startswith("agent_") and agent_code is None:
+            agent_code = tag[len("agent_"):].strip()
+        elif lowered.startswith("net") and tag[len("net"):].isdigit():
+            term_name = NET_TERM_NAMES.get(tag[len("net"):])
+
+    if agent_code is None:
+        for tag in customer_tags:
+            if tag.lower().startswith("agent_"):
+                agent_code = tag[len("agent_"):].strip()
+                break
+
+    if agent_code:
+        metafields = list(order_data.get("metafields") or [])
+        metafields.append({"code": "agent_code", "value": agent_code})
+        order_data["metafields"] = metafields
+
+    if term_name:
+        order_data["payment_term"] = term_name
+
+    # Future Ship Date arrives as DD/MM/YYYY. Convert to ISO by hand: Fulfil's own
+    # parser reads DD/MM as MM/DD and gets it wrong.
+    channel_metafields = metadata.get("metafields") or {}
+    raw_value = channel_metafields.get("global.future_ship_date") or metadata.get("Future Ship Date")
+    ship_date_iso = None
+    if raw_value:
+        parts = str(raw_value).strip().split("/")
+        if len(parts) == 3:
+            day_part = parts[0]
+            month_part = parts[1]
+            year_part = parts[2]
+            ship_date_iso = year_part + "-" + month_part.zfill(2) + "-" + day_part.zfill(2)
+
+    if ship_date_iso:
+        order_data["shipping_start_date"] = ship_date_iso
+        for line in order_data.get("sale_lines") or []:
+            line["shipping_date"] = ship_date_iso
+
+    # ---------- Tax mapping: channel tax description -> Fulfil tax (same logic as function 42) ----------
+    #   "2" -> tax 3  UK 20% (VAT on Income)
+    #   "1" -> tax 1  5% UK VAT on income
+    TAX_CODE_BY_DESCRIPTION = {
+        "uk 20% (vat on income)": "2",
+        "gb vat": "2",
+    }
+    UK_VAT_RATES = [
+        (0.20, "UK 20% (VAT on Income)"),
+        (0.05, "5% UK VAT on income"),
+        (0.00, "Zero Rated Income UK"),
+    ]
+    TAX_CODE_BY_RATE_NAME = {
+        "UK 20% (VAT on Income)": "2",
+        "5% UK VAT on income": "1",
+        "Zero Rated Income UK": "4",
+    }
+    RATE_TOLERANCE = 0.015  # absorbs rounding on small-value lines
+
+    def match_uk_tax_name(rate):
+        for target_rate, name in UK_VAT_RATES:
+            if abs(rate - target_rate) <= RATE_TOLERANCE:
+                return name
+        return None
+
+    def apply_uk_tax(line, exceptions, line_label):
+        tax_lines = line.get("tax_lines") or []
+        if not tax_lines:
+            return
+        if line.get("unit_price") is not None and line.get("quantity") is not None:
+            base = float(line["unit_price"]) * float(line["quantity"])
+        else:
+            base = float(line.get("amount") or 0)
+        for tax_line in tax_lines:
+            if tax_line.get("remitter") == "channel":
+                continue
+            rate = tax_line.get("rate")
+            if rate is None:
+                amount = tax_line.get("amount")
+                if not amount or base <= 0:
+                    rate = None
+                else:
+                    rate = float(amount) / base
+            else:
+                rate = float(rate)
+            name_key = (tax_line.get("name") or "").strip().lower()
+            code = TAX_CODE_BY_DESCRIPTION.get(name_key)
+            if code:
+                # Attach the Fulfil tax and keep the channel's description.
+                tax_line["code"] = code
+                continue
+            if rate is None:
+                continue
+            matched_name = match_uk_tax_name(rate)
+            if matched_name is None:
+                exceptions.append({
+                    "message": (
+                        f"Could not match UK VAT rate for {line_label}: "
+                        f"computed rate {rate:.4f} did not match 20%, 5%, or 0%. "
+                        f"Tax left unmapped for manual review."
+                    )
+                })
+                continue
+            tax_line["name"] = matched_name
+            tax_line["code"] = TAX_CODE_BY_RATE_NAME.get(matched_name)
+
+    exceptions = order_data.setdefault("exceptions", [])
+
+    for line in order_data.get("sale_lines") or []:
+        apply_uk_tax(line, exceptions, f"line {line.get('sku') or line.get('channel_identifier') or '?'}")
+
+    for line in order_data.get("shipping_lines") or []:
+        apply_uk_tax(line, exceptions, "shipping line")
+
+
+    # --- Planned ship date (UK wholesale) ---
+    # Generated by Claude Analyses/planned_ship_date/planned_date_block.py; edit there, not here.
+    # +1 business day(s) retail, +5 if any line is personalised, +3 wholesale
+    # (the larger applies), counted from today in Europe/London, skipping weekends and England holidays.
+    # Never blocks the order: on any error dates stay as imported and the error is noted in metadata.
+    try:
+        from datetime import datetime, date, timedelta
+
+        PSD_TZ = "Europe/London"
+        PSD_HOLIDAYS = "England"
+        PSD_RETAIL = 1
+        PSD_PERSONALISED = 5
+        PSD_WHOLESALE = True
+
+        def psd_nth_weekday(year, month, weekday, n):
+            d = date(year, month, 1)
+            while d.weekday() != weekday:
+                d = d + timedelta(days=1)
+            return d + timedelta(days=7 * (n - 1))
+
+        def psd_last_weekday(year, month, weekday):
+            if month == 12:
+                d = date(year, 12, 31)
+            else:
+                d = date(year, month + 1, 1) - timedelta(days=1)
+            while d.weekday() != weekday:
+                d = d - timedelta(days=1)
+            return d
+
+        def psd_easter(year):
+            a = year % 19
+            b = year // 100
+            c = year % 100
+            d = b // 4
+            e = b % 4
+            f = (b + 8) // 25
+            g = (b - f + 1) // 3
+            h = (19 * a + b - d - g + 15) % 30
+            i = c // 4
+            k = c % 4
+            l = (32 + 2 * e + 2 * i - h - k) % 7
+            m = (a + 11 * h + 22 * l) // 451
+            month = (h + l - 7 * m + 114) // 31
+            day = ((h + l - 7 * m + 114) % 31) + 1
+            return date(year, month, day)
+
+        def psd_next_weekday_if_weekend(d):
+            while d.weekday() >= 5:
+                d = d + timedelta(days=1)
+            return d
+
+        def psd_holidays(year):
+            hol = {}
+            easter = psd_easter(year)
+            if PSD_HOLIDAYS == "England":
+                hol[psd_next_weekday_if_weekend(date(year, 1, 1))] = 1
+                hol[easter - timedelta(days=2)] = 1
+                hol[easter + timedelta(days=1)] = 1
+                hol[psd_nth_weekday(year, 5, 0, 1)] = 1
+                hol[psd_last_weekday(year, 5, 0)] = 1
+                hol[psd_last_weekday(year, 8, 0)] = 1
+                xmas = date(year, 12, 25)
+                if xmas.weekday() == 5:
+                    hol[date(year, 12, 27)] = 1
+                    hol[date(year, 12, 28)] = 1
+                elif xmas.weekday() == 6:
+                    hol[date(year, 12, 26)] = 1
+                    hol[date(year, 12, 27)] = 1
+                elif xmas.weekday() == 4:
+                    hol[xmas] = 1
+                    hol[date(year, 12, 28)] = 1
+                else:
+                    hol[xmas] = 1
+                    hol[date(year, 12, 26)] = 1
+            elif PSD_HOLIDAYS == "US carriers":
+                for fixed in (date(year, 1, 1), date(year, 7, 4), date(year, 12, 25)):
+                    if fixed.weekday() == 5:
+                        hol[fixed - timedelta(days=1)] = 1
+                    elif fixed.weekday() == 6:
+                        hol[fixed + timedelta(days=1)] = 1
+                    else:
+                        hol[fixed] = 1
+                hol[psd_last_weekday(year, 5, 0)] = 1
+                hol[psd_nth_weekday(year, 9, 0, 1)] = 1
+                hol[psd_nth_weekday(year, 11, 3, 4)] = 1
+            elif PSD_HOLIDAYS == "AU NSW":
+                hol[psd_next_weekday_if_weekend(date(year, 1, 1))] = 1
+                hol[psd_next_weekday_if_weekend(date(year, 1, 26))] = 1
+                hol[easter - timedelta(days=2)] = 1
+                hol[easter + timedelta(days=1)] = 1
+                hol[date(year, 4, 25)] = 1
+                hol[psd_nth_weekday(year, 6, 0, 2)] = 1
+                hol[psd_nth_weekday(year, 10, 0, 1)] = 1
+                xmas = date(year, 12, 25)
+                if xmas.weekday() == 5:
+                    hol[date(year, 12, 27)] = 1
+                    hol[date(year, 12, 28)] = 1
+                elif xmas.weekday() == 6:
+                    hol[date(year, 12, 26)] = 1
+                    hol[date(year, 12, 27)] = 1
+                elif xmas.weekday() == 4:
+                    hol[xmas] = 1
+                    hol[date(year, 12, 28)] = 1
+                else:
+                    hol[xmas] = 1
+                    hol[date(year, 12, 26)] = 1
+            elif PSD_HOLIDAYS == "Netherlands":
+                hol[date(year, 1, 1)] = 1
+                hol[easter - timedelta(days=2)] = 1
+                hol[easter + timedelta(days=1)] = 1
+                kings = date(year, 4, 27)
+                if kings.weekday() == 6:
+                    kings = date(year, 4, 26)
+                hol[kings] = 1
+                hol[easter + timedelta(days=39)] = 1
+                hol[easter + timedelta(days=50)] = 1
+                hol[date(year, 12, 25)] = 1
+                hol[date(year, 12, 26)] = 1
+            elif PSD_HOLIDAYS == "Germany":
+                hol[date(year, 1, 1)] = 1
+                hol[easter - timedelta(days=2)] = 1
+                hol[easter + timedelta(days=1)] = 1
+                hol[date(year, 5, 1)] = 1
+                hol[easter + timedelta(days=39)] = 1
+                hol[easter + timedelta(days=50)] = 1
+                hol[date(year, 10, 3)] = 1
+                hol[date(year, 12, 25)] = 1
+                hol[date(year, 12, 26)] = 1
+            return hol
+
+        def psd_local_now():
+            now = datetime.utcnow()
+            y = now.year
+            if PSD_TZ == "Europe/London" or PSD_TZ == "Europe/Amsterdam" or PSD_TZ == "Europe/Berlin":
+                base = 0
+                if PSD_TZ != "Europe/London":
+                    base = 1
+                start = datetime.combine(psd_last_weekday(y, 3, 6), datetime.min.time()) + timedelta(hours=1)
+                end = datetime.combine(psd_last_weekday(y, 10, 6), datetime.min.time()) + timedelta(hours=1)
+                if start <= now and now < end:
+                    return now + timedelta(hours=base + 1)
+                return now + timedelta(hours=base)
+            if PSD_TZ == "America/Chicago":
+                start = datetime.combine(psd_nth_weekday(y, 3, 6, 2), datetime.min.time()) + timedelta(hours=8)
+                end = datetime.combine(psd_nth_weekday(y, 11, 6, 1), datetime.min.time()) + timedelta(hours=7)
+                if start <= now and now < end:
+                    return now - timedelta(hours=5)
+                return now - timedelta(hours=6)
+            if PSD_TZ == "Australia/Sydney":
+                end = datetime.combine(psd_nth_weekday(y, 4, 6, 1), datetime.min.time()) - timedelta(hours=8)
+                start = datetime.combine(psd_nth_weekday(y, 10, 6, 1), datetime.min.time()) - timedelta(hours=8)
+                if now < end or start <= now:
+                    return now + timedelta(hours=11)
+                return now + timedelta(hours=10)
+            return now
+
+        def psd_is_business_day(d):
+            if d.weekday() >= 5:
+                return False
+            return d not in psd_holidays(d.year)
+
+        def psd_add_business_days(start, n):
+            d = start
+            if not psd_is_business_day(d):
+                n = n + 1
+            while n > 0:
+                d = d + timedelta(days=1)
+                if psd_is_business_day(d):
+                    n = n - 1
+            return d
+
+        if not order_data.get("shipping_start_date"):
+            psd_lines = order_data.get("sale_lines") or []
+            psd_days = PSD_RETAIL
+            if PSD_WHOLESALE:
+                psd_days = 3
+            for psd_line in psd_lines:
+                for psd_opt in (psd_line.get("product_options") or []):
+                    if psd_opt.get("code") == "personalisation" and PSD_PERSONALISED > psd_days:
+                        psd_days = PSD_PERSONALISED
+            psd_target = psd_add_business_days(psd_local_now().date(), psd_days)
+            for psd_line in psd_lines:
+                psd_existing = psd_line.get("shipping_date")
+                if psd_existing:
+                    try:
+                        if date.fromisoformat(str(psd_existing)[:10]) > psd_target:
+                            continue
+                    except Exception:
+                        pass
+                psd_line["shipping_date"] = psd_target.isoformat()
+    except Exception as psd_exc:
+        psd_meta = order_data.get("metadata") or {}
+        psd_meta["planned_ship_date_error"] = str(psd_exc)[:200]
+        order_data["metadata"] = psd_meta
+
+    return order_data

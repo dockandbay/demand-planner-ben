@@ -2,7 +2,24 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 325 across 18 runs.
+Total changes: 332 across 20 runs.
+
+## Run psd-uk-ws-2026-10-22_232610
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 23:26 2026-10-22 | LIVE UK wholesale planned ship date +3 business days (Ben 22-Oct: put live, revert in 10 min unless confirmed) | dx_function 44 | `code`: `planned_ship_date/live_functions/fn44_v74.py (v74)` -> `planned_ship_date/candidates/fn44_candidate.py` | set `code` back to `planned_ship_date/live_functions/fn44_v74.py (v74)` |
+
+## Run psd-rollout-2026-10-22_233103
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 23:31 2026-10-22 | LIVE US retail planned ship date (Ben 22-Oct go) | dx_function 1 | `code`: `planned_ship_date/live_functions/fn1_v1.py` -> `planned_ship_date/candidates/fn1_candidate.py` | set `code` back to `planned_ship_date/live_functions/fn1_v1.py` |
+| 23:31 2026-10-22 | LIVE AU retail planned ship date (Ben 22-Oct go) | dx_function 3 | `code`: `planned_ship_date/live_functions/fn3_v76.py` -> `planned_ship_date/candidates/fn3_candidate.py` | set `code` back to `planned_ship_date/live_functions/fn3_v76.py` |
+| 23:31 2026-10-22 | LIVE US wholesale planned ship date (Ben 22-Oct go) | dx_function 37 | `code`: `planned_ship_date/live_functions/fn37_v43.py` -> `planned_ship_date/candidates/fn37_candidate.py` | set `code` back to `planned_ship_date/live_functions/fn37_v43.py` |
+| 23:31 2026-10-22 | LIVE EU wholesale planned ship date (Ben 22-Oct go) | dx_function 36 | `code`: `planned_ship_date/live_functions/fn36_v42.py` -> `planned_ship_date/candidates/fn36_candidate.py` | set `code` back to `planned_ship_date/live_functions/fn36_v42.py` |
+| 23:31 2026-10-22 | LIVE new EU retail import function (planned ship date only), Ben 22-Oct | dx_function 49 | created | delete link |
+| 23:31 2026-10-22 | attach EU retail function to dockandbay-eu (was none). Undo = set back to null | sale.channel 7 | `order_customization_function`: `None` -> `49` | set `order_customization_function` back to `None` |
 
 ## Run fn48-retry-2026-10-22_225557
 
