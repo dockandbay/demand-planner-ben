@@ -2,7 +2,19 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 317 across 11 runs.
+Total changes: 322 across 12 runs.
+
+## Run fix-so68870-2026-10-22_122103
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 12:21 2026-10-22 | SO68870 add single product 259 @ 9.38 (replaces oversold PP line) | sale.line 608210 | created | delete link |
+| 12:21 2026-10-22 | SO68870 add single product 260 @ 9.38 (replaces oversold PP line) | sale.line 608211 | created | delete link |
+| 12:21 2026-10-22 | SO68870 add single product 261 @ 9.38 (replaces oversold PP line) | sale.line 608212 | created | delete link |
+| 12:21 2026-10-22 | SO68870 add single product 258 @ 9.37 (replaces oversold PP line) | sale.line 608213 | created | delete link |
+| 12:21 2026-10-22 | SO68870 add single product 264 @ 9.37 (replaces oversold PP line) | sale.line 608214 | created | delete link |
+| 12:21 2026-10-22 | SO68870 processed to create shipment for singles | sale.sale 300187 | note:  | n/a |
+| 12:21 2026-10-22 | SO68870 cancel oversold PP-TEATWL-MD-5SET-CULDEL line (after singles added) | sale.line 607345 | cancel_line:  | n/a |
 
 ## Run au-sumsuga-bom-2026-10-21_144922
 

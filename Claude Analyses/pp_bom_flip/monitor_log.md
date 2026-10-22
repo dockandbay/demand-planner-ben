@@ -100,3 +100,11 @@ Kits monitored: 66. Orders with those kits: 2. ALL AS EXPECTED.
 | SO69039 | UK-909549 | processing | 10-21T17:37 | UK-TOWLB-CAB-XL-4SETA-R | 1 | PP | PP | PP move assigned,draft |
 | SO69025 | UK-909550 | processing | 10-21T17:38 | UK-TOWLB-CAB-XL-4SETA-R | 1 | PP | PP | PP move assigned,draft |
 
+## Check 2026-10-22 09:47:06 (orders since 2026-10-22T06:47:08)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO69079 | 203-1573441-6233137 | processing | 10-21T19:57 | UK-TOWLB-CAB-LG-4SETE-R | 1 | PP | PP | PP move assigned,draft |
+
