@@ -1,3 +1,8 @@
+## v28.439 (22-Oct-26) COGS: Airtable email address is a CONFIG setting; CA Propack column removed
+- Ben: "email to airtable variable should be under config > export + uploads . email in this data field here, not on server". CONFIG > Exports & uploads has a new "COGS to Airtable" box (app_settings `cogs_airtable_email`, saved on leaving the box). COGS > Email to Airtable sends to it; the old `COGS_AIRTABLE_EMAIL` env var is only a fallback and no longer needs setting on live. With neither set the button stays disabled and the tooltip points to CONFIG.
+- Ben: "on cogs remove CA PROPACK". The CA Propack column is gone from Analyse, the CSV and the email (CA is decommissioned). CA FBA stays (kept only). A saved older Analyse drops the column when opened. Stored CA Propack values in planner.cogs_values are left as they are.
+- No migration, no new routes, no new env.
+
 ## v28.438 (22-Oct-26) EDI labels: one SSCC = one carton (Dillards packing list duplicates)
 - Madison / Zera (email "Dillards Packing List Discrepanices"): the Lixin packing list from HORIZON had 8 SSCCs on two rows each (earlier three), all on PO 3242991501 store 342, while ASN v20 has each once (one carton of 6). PO 3242991703 showed 552 units on the packing list against 126 on the PO. Ben: "This is a horizon issue".
 - Cause: the packing list wrote one row per label PAGE, not per carton. The same SSCC label on more than one page (the same label in two of the uploaded PDFs, or a reissued label file) became a second row, a second PDF (_2.pdf) and double the quantity. The ASN itself can't double (it is keyed by SSCC).

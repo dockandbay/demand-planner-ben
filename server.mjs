@@ -6797,13 +6797,13 @@ app.get('/api/supply/fulfil/sales-order/pushes', async (req, res) => {   // audi
 //   2. otherwise (sold out: Fulfil values it at 0) → the last stored value is KEPT, never overwritten;
 //   3. never valued (nothing stored) → supplier cost (planner.products.cost, USD) converted to the column currency.
 // Analyse = preview, writes nothing. Email = rebuild server side, email the CSV (exact Airtable column order) to
-// COGS_AIRTABLE_EMAIL via Resend, then store the values (migration 345). Airtable's email sync replaces the table, so
+// the Airtable address (cogsRecipient) via Resend, then store the values (migration 345). Airtable's email sync replaces the table, so
 // every SKU is sent every time.
+// v28.439 (Ben 22-Oct-26: "on cogs remove CA PROPACK"): CA Propack column dropped (CA decommissioned); CA FBA stays kept-only.
 const COGS_COLS = [
   { col: 'UK ILG',          ccy: 'GBP', co: 1, wh: ['UKILG'] },
   { col: 'AU Coghlans',     ccy: 'AUD', co: 3, wh: ['AUCOGHLANS'] },
-  { col: 'CA Propack',      ccy: 'CAD', co: null, keepOnly: true },   // CA decommissioned: kept as last sent
-  { col: 'US Geneva',       ccy: 'USD', co: 1, wh: ['USGENEVA_STD'] },
+  { col: 'US Geneva',      ccy: 'USD', co: 1, wh: ['USGENEVA_STD'] },
   { col: 'EU iFulfillment', ccy: 'EUR', co: 1, wh: ['EUIFUL'] },
   { col: 'AU FBA',          ccy: 'AUD', co: 3, wh: ['AMZ_FBA_AU'] },
   { col: 'CA FBA',          ccy: 'CAD', co: null, keepOnly: true },
@@ -6872,7 +6872,13 @@ async function cogsBuild() {
   all.filter(s => bom[s]).forEach(s => { rowsBy[s] = one(s, true, byS); });
   const rows = all.map(s => rowsBy[s]);
   return { ok: true, date, env: cfg ? 'live' : 'active', rates: R, columns: COGS_COLS.map(c => ({ col: c.col, ccy: c.ccy, source: c.co ? (c.co === 1 ? 'Fulfil UK ' : 'Fulfil AU ') + c.wh.join(' + ') : (c.keepOnly ? 'kept (decommissioned)' : 'kept / supplier cost') })),
-    rows, stats, stored: storedN, warnings, recipient_set: !!process.env.COGS_AIRTABLE_EMAIL };
+    rows, stats, stored: storedN, warnings, recipient_set: !!(await cogsRecipient()) };
+}
+// v28.439 (Ben 22-Oct-26: "email to airtable variable should be under config > export + uploads ... not on server"): the address is
+// app_settings 'cogs_airtable_email' (CONFIG > Exports & uploads); the old COGS_AIRTABLE_EMAIL env is only a fallback.
+async function cogsRecipient() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='cogs_airtable_email'`)).rows[0]; const v = String((r && r.value) || '').trim(); if (v) return v; } catch (e) {}
+  return String(process.env.COGS_AIRTABLE_EMAIL || '').trim();
 }
 function cogsCsv(b) {
   const q = s => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
@@ -6893,7 +6899,9 @@ app.get('/api/supply/cogs/last', async (req, res) => {   // v28.238: the saved l
   if (!(await cogsAdminOk(req, res))) return;
   try { const r = (await pool.query(`SELECT payload, created_by, to_char(created_at AT TIME ZONE 'Europe/London','YYYY-MM-DD"T"HH24:MI') at FROM planner.cogs_analysis ORDER BY id DESC LIMIT 1`)).rows[0];
     if (!r) return res.json({ ok: true, last: null });
-    res.set('Cache-Control', 'no-store').json({ ok: true, last: Object.assign(r.payload, { analysed_at: r.at, analysed_by: r.created_by }) }); }
+    // v28.439: recipient checked now (it is a setting), and columns no longer sent (CA Propack) are dropped from an older saved result
+    const cols = new Set(COGS_COLS.map(c => c.col)); if (Array.isArray(r.payload.columns)) r.payload.columns = r.payload.columns.filter(c => cols.has(c.col));
+    res.set('Cache-Control', 'no-store').json({ ok: true, last: Object.assign(r.payload, { analysed_at: r.at, analysed_by: r.created_by, recipient_set: !!(await cogsRecipient()) }) }); }
   catch (e) { if (e.code === '42P01') return res.json({ ok: true, last: null }); log500(e); res.status(500).json({ error: String(e.message || e) }); }
 });
 app.get('/api/supply/cogs/csv', async (req, res) => {
@@ -6915,8 +6923,8 @@ async function cogsStore(b, by) {   // upsert every Fulfil / supplier-cost cell;
 }
 app.post('/api/supply/cogs/email', async (req, res) => {
   const me = await cogsAdminOk(req, res); if (!me) return;
-  const to = String(process.env.COGS_AIRTABLE_EMAIL || '').trim();
-  if (!to) return res.status(503).json({ error: 'COGS_AIRTABLE_EMAIL is not set on this server. Nothing sent.' });
+  const to = await cogsRecipient();
+  if (!to) return res.status(503).json({ error: 'No Airtable email address set: add it in CONFIG > Exports & uploads. Nothing sent.' });
   try {
     const b = await cogsBuild(), by = (me && me.email) || authUser(req) || 'admin';
     if (b.warnings.some(w => /not in the/.test(w))) return res.status(409).json({ error: 'Fulfil report is missing a warehouse: ' + b.warnings.join('; ') + '. Nothing sent.' });

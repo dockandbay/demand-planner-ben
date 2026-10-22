@@ -15,7 +15,7 @@ sources:
   - server.mjs :: accountsGate, /api/accounts/payables (ACCOUNTS > Payables)
   - server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun (ACCOUNTS bills from accounts@ receipts)
   - supply/inject.html :: acRenderPayables, accountsCan, acRenderConfig, acCfReload, acInLinesHtml, acDrOpen, acDrPaint, acRenderStmt, acRenderAgeing, acComboWire, acPdfRender, acMetricsHtml
-  - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
+  - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, cogsRecipient, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
   - artifact_v16.7.html :: renderCogs
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
   - server.mjs :: buildDATA (on-order and inbound feeds for DEMAND)
@@ -85,12 +85,13 @@ fingerprints:
   supply/inject.html::acComboWire: 821987bad274
   supply/inject.html::acPdfRender: e969626e19ec
   supply/inject.html::acMetricsHtml: 147a050711a0
-  server.mjs::cogsBuild: 68c9ded1d569
+  server.mjs::cogsBuild: 2fa4f4ad0d15
   server.mjs::cogsValuation: bc96a6558dea
   server.mjs::cogsRates: 1824cafed9b3
   server.mjs::cogsStore: bcd45226f5b0
+  server.mjs::cogsRecipient: 2cca827fa12b
   server.mjs::COGS_COLS: 03fda4554d05
-  artifact_v16.7.html::renderCogs: 0ba77ea1149c
+  artifact_v16.7.html::renderCogs: 5e8d94ddc0c7
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -225,7 +226,7 @@ fingerprints:
   server.mjs::_ediPreview: a0d388561acf
   server.mjs::/api/supply/edi-labels/generate: 632b2d3ed286
   supply/inject.html::_ediDupes: 2bd1091bdf39
-verified_version: v28.438
+verified_version: v28.439
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -533,16 +534,16 @@ verified_version: v28.438
 - On lodging, each PO's IS number is saved (purchase_orders.fulfil_is_number, migration 339). The Flexport import then links an IS-named Flexport shipment to every PO carrying that IS (sets flexport_reference) where the PO has no Flexport link yet, so ETAs and costs keep flowing. (source: server.mjs :: booking-submit, runFlexportImport)
 
 ## COGS per unit for Airtable (v28.235)
-- Where: BUY & MOVE > Inventory > COGS. Analyse previews, Download CSV gives the exact file, Email to Airtable sends it (admin). Columns and order match the Airtable cogs-up import: UK ILG, AU Coghlans, CA Propack, US Geneva, EU iFulfillment, AU FBA, CA FBA, UK FBA, US FBA, EU FBA. (source: server.mjs :: COGS_COLS)
+- Where: BUY & MOVE > Inventory > COGS. Analyse previews, Download CSV gives the exact file, Email to Airtable sends it (admin). Columns and order match the Airtable cogs-up import: UK ILG, AU Coghlans, US Geneva, EU iFulfillment, AU FBA, CA FBA, UK FBA, US FBA, EU FBA. CA Propack was removed in v28.439 (Ben 22-Oct-26, CA decommissioned); an older saved Analyse drops it when opened. (source: server.mjs :: COGS_COLS)
 - Source: LIVE Fulfil "Inventory Valuation" (inventory.valuation.report, generate, by product, per warehouse) for the UK company (GBP: UKILG, USGENEVA_STD, EUIFUL) and the AU company (AUD: AUCOGHLANS, AMZ_FBA_AU). Unit cost per warehouse = Fulfil's own costing (it differs by warehouse). (source: cogsValuation)
 - Currency: converted from the company currency to the column currency at Fulfil's current rates (GBP base: 1 GBP = rate). US Geneva = USD, EU iFulfillment = EUR, AU columns stay AUD, UK ILG stays GBP. (source: cogsRates)
 - Rule per SKU per column (Ben 09-Oct-26):
   1. Stock on hand in Fulfil with a unit cost > 0: the Fulfil value, which replaces the stored one.
   2. Otherwise (sold out: Fulfil values it at 0): the LAST STORED value is kept, never overwritten.
   3. Never valued (nothing stored): supplier cost (planner.products.cost, USD) converted to the column currency. Stored once sent, so it becomes the last known value until Fulfil values the SKU.
-- FBA columns (v28.240, Ben): UK FBA = AMZ_FBA_UK (GBP), US FBA = AMZ_FBA_US (USD; AWD and Geneva FBA prep are separate pools, not included), EU FBA = quantity-weighted across AMZ_FBA_DE, FR, IT, ES, PL, NL, SE, BE and IE (EUR), all from the UK company. CA Propack and CA FBA (decommissioned) are kept only (sets still recomputed from kept components).
+- FBA columns (v28.240, Ben): UK FBA = AMZ_FBA_UK (GBP), US FBA = AMZ_FBA_US (USD; AWD and Geneva FBA prep are separate pools, not included), EU FBA = quantity-weighted across AMZ_FBA_DE, FR, IT, ES, PL, NL, SE, BE and IE (EUR), all from the UK company. CA FBA (decommissioned) is kept only (sets still recomputed from kept components).
 - SKUs = everything stored plus Fulfil products that exist in planner.products (Fulfil test items and packaging codes are left out). Airtable's email sync replaces the table, so every SKU is sent every time.
-- Analyse writes nothing. Email rebuilds on the server, sends (Resend, attachment cogs-up-IMPORT.csv, to COGS_AIRTABLE_EMAIL) and only then stores values (planner.cogs_values) and logs the run (planner.cogs_uploads, migration 345). A missing warehouse in the Fulfil report blocks the send. Load baseline CSV seeds the stored values from an Airtable export (fills only empty cells). (source: cogsStore, /api/supply/cogs/email, /api/supply/cogs/import-baseline)
+- Analyse writes nothing. Email rebuilds on the server, sends (Resend, attachment cogs-up-IMPORT.csv, to the address in CONFIG > Exports & uploads > COGS to Airtable, app_settings cogs_airtable_email, v28.439; the COGS_AIRTABLE_EMAIL env var is only a fallback; with neither the button is disabled; source: cogsRecipient) and only then stores values (planner.cogs_values) and logs the run (planner.cogs_uploads, migration 345). A missing warehouse in the Fulfil report blocks the send. Load baseline CSV seeds the stored values from an Airtable export (fills only empty cells). (source: cogsStore, /api/supply/cogs/email, /api/supply/cogs/import-baseline)
 - Review flags: moves over 25% vs the stored value are shown red (often a Fulfil costing oddity worth checking before sending).
 - Sets / bundles (v28.236): every build-on-the-fly set in planner.set_bom (one level, 311 sets) is costed per column as the sum of its components' values in that column × quantity, using each component's own resolved value (Fulfil, kept or supplier cost). Components are worked out first. If any component has no value in that column, the set falls back to the normal rules (kept, else supplier cost) and the cell lists the missing components. Set values are stored with source set_bom when sent. Set component SKUs are included even if nothing was stored for them. (source: cogsBuild)
 - Filters (v28.236): category (products.category_name_final, else category), status (products.status), search on SKU or product name, and quick filters All / Changed / Big moves / Sets / Supplier cost / Has blanks. History opens in its own modal.
