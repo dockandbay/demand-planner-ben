@@ -18144,16 +18144,115 @@
   // (avg samples/request, avg samples to approve / to reject) with a per-supplier detail popout + PDF.
   // v27.808 (Ben): PRODUCT ▸ REPORTS now has a sub-nav — Sampling (existing) + PIM waiting room (new). The dispatcher
   // renders the tabs into `c` and delegates the body to the right renderer, so the existing sampling report is untouched.
-  function renderProductReportsTab(c){ var rt=window._prodRepTab; if(rt==='waiting')rt='approved-products'; if(rt!=='approved-products'&&rt!=='catalogue'&&rt!=='sample-costs')rt='sampling'; window._prodRepTab=rt;   // v28.154 (Ben): + catalogue; v28.453: + sample-costs
+  function renderProductReportsTab(c){ var rt=window._prodRepTab; if(rt==='waiting')rt='approved-products'; if(rt!=='approved-products'&&rt!=='catalogue'&&rt!=='sample-costs'&&rt!=='approval-stats')rt='sampling'; window._prodRepTab=rt;   // v28.154 (Ben): + catalogue; v28.453: + sample-costs
     // v27.811 (Ben): standard blue L3 sub-nav (reuses #pcfg-subs-l3 theme styling) + deep links.
-    var TABS=[['sampling','Sampling'],['sample-costs','Sample costs'],['approved-products','Approved products'],['catalogue','Catalogue']];
+    var TABS=[['sampling','Sampling'],['sample-costs','Sample costs'],['approval-stats','Approval stats'],['approved-products','Approved products'],['catalogue','Catalogue']];
     c.innerHTML='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab prodrep-tab'+(t[0]===rt?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div><div id="prodrep-body"></div>';
     c.querySelectorAll('.prodrep-tab').forEach(function(t){ t.onclick=function(){ window._prodRepTab=t.dataset.k; try{ writeHash(['product','reports',t.dataset.k]); }catch(e){} renderProductReportsTab(c); }; });
     var body=c.querySelector('#prodrep-body');
     if(rt==='approved-products') return renderPimWaitingRoom(body);
     if(rt==='catalogue') return renderProductCatalogue(body);   // v28.154 (Ben)
     if(rt==='sample-costs') return renderSampleCosts(body);   // v28.453 (Ben)
+    if(rt==='approval-stats') return renderApprovalStats(body);   // v28.456 (Ben)
     return renderProductReports(body);
+  }
+  // v28.456: shared "is" filter bar (Sample costs, Approval stats). cfg = {F:[[key,label]], st:{f:{key:[values]},open}, opts(key)→[{v,l}],
+  // label(key)→'is …', onChange()}. Each chip opens a multi-select popover (search when long, Any, Done); outside click closes.
+  // Returns the render function.
+  function _isBar(fb,cfg){ var st=cfg.st;
+    function render(){ fb.innerHTML='<b>Filters</b>'+cfg.F.map(function(x){ return '<div class="sc-chip'+(st.f[x[0]].length?' on':'')+'" data-k="'+x[0]+'"><div class="t">'+esc(x[1])+'</div><div class="v">'+esc(cfg.label(x[0]))+' ▾</div>'+(st.open===x[0]?pop(x[0]):'')+'</div>'; }).join('');
+      fb.querySelectorAll('.sc-chip').forEach(function(ch){ ch.onclick=function(e){ if(e.target.closest('.sc-pop'))return; st.open=st.open===ch.dataset.k?'':ch.dataset.k; render(); var q=fb.querySelector('.sc-pop input[type=search]'); if(q)q.focus(); }; });
+      var p=fb.querySelector('.sc-pop'); if(!p)return; var k=st.open;
+      p.querySelectorAll('input[type=checkbox]').forEach(function(cb){ cb.onchange=function(){ var a=st.f[k], i=a.indexOf(cb.value); if(cb.checked&&i<0)a.push(cb.value); if(!cb.checked&&i>=0)a.splice(i,1); render(); cfg.onChange(); }; });
+      var q=p.querySelector('input[type=search]'); if(q)q.oninput=function(){ var t=q.value.trim().toLowerCase(); p.querySelectorAll('label').forEach(function(l){ l.hidden=!!t&&l.textContent.toLowerCase().indexOf(t)<0; }); };
+      p.querySelector('[data-any]').onclick=function(){ st.f[k]=[]; render(); cfg.onChange(); };
+      p.querySelector('[data-done]').onclick=function(){ st.open=''; render(); }; }
+    function pop(k){ var o=cfg.opts(k), sel=st.f[k];
+      return '<div class="sc-pop">'+(o.length>8?'<input type="search" placeholder="search…">':'')+'<div class="ls">'
+        +(o.length?o.map(function(x){ return '<label><input type="checkbox" value="'+esc(x.v)+'"'+(sel.indexOf(x.v)>=0?' checked':'')+'>'+(k==='light'?'<i class="sc-'+x.v+'" style="width:12px;height:12px;border-radius:3px;display:inline-block"></i>':'')+esc(x.l)+'</label>'; }).join(''):'<div class="mut tiny" style="padding:4px">No values.</div>')
+        +'</div><div class="ft"><a data-any>Any</a><a data-done>Done</a></div></div>'; }
+    fb._isClose=function(){ if(st.open){ st.open=''; render(); } };
+    if(!window._isBarDoc){ window._isBarDoc=1; document.addEventListener('click',function(e){ if(!document.contains(e.target))return; document.querySelectorAll('.sc-fb').forEach(function(b){ if(b._isClose&&!b.contains(e.target))b._isClose(); }); }); }
+    return render; }
+  function _scCss(){
+    if(!document.getElementById('sc-style')){ var st=document.createElement('style'); st.id='sc-style'; st.textContent=
+      '.sc-card{border:2px solid var(--blue);border-radius:14px;padding:18px 20px;background:var(--card);max-width:1180px}'
+      +'.sc-hd{display:flex;align-items:center;gap:14px;margin-bottom:12px}.sc-hd h2{margin:0;font-size:19px;font-weight:800;color:var(--ink)}'
+      +'.sc-dl{margin-left:auto;background:var(--blue-soft);border:1.5px solid var(--blue);color:var(--ink);border-radius:10px;padding:7px 16px;font-weight:800;font-size:14px;cursor:pointer}'
+      +'.sc-fb{display:flex;align-items:stretch;gap:10px;background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:12px;padding:8px 10px;flex-wrap:wrap}'
+      +'.sc-fb>b{align-self:center;font-size:14px;padding:0 10px 0 6px;color:var(--ink)}'
+      +'.sc-chip{position:relative;flex:1 1 130px;min-width:120px;border:1.5px solid color-mix(in srgb,var(--faint) 55%,transparent);border-radius:10px;background:var(--blue-soft);padding:6px 10px;text-align:center;cursor:pointer;user-select:none}'
+      +'.sc-chip:hover{border-color:var(--blue)}.sc-chip.on{border-color:var(--blue)}'
+      +'.sc-chip .t{font-size:12px;color:var(--muted)}.sc-chip .v{font-size:13px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      +'.sc-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:50;min-width:220px;max-width:320px;background:var(--card);border:1px solid var(--line2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;text-align:left;cursor:default}'
+      +'.sc-pop input[type=search]{width:100%;box-sizing:border-box;font-size:12px;padding:5px 8px;border:1px solid var(--line2);border-radius:6px;margin-bottom:6px;background:var(--card);color:var(--ink)}'
+      +'.sc-pop .ls{max-height:260px;overflow:auto}.sc-pop label{display:flex;align-items:center;gap:7px;font-size:12px;padding:4px 4px;border-radius:5px;cursor:pointer;color:var(--ink)}.sc-pop label:hover{background:var(--hover)}'
+      +'.sc-pop .ft{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px;font-size:12px}.sc-pop .ft a{color:var(--blue);cursor:pointer}'
+      +'.sc-h3{font-size:16px;font-weight:800;color:var(--ink);margin:18px 0 10px}'
+      +'.sc-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}@media(max-width:760px){.sc-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+      +'.sc-tile{background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:12px;padding:12px 16px}.sc-tile .l{font-size:13px;color:var(--muted)}.sc-tile.tot .l{color:var(--ink);font-weight:800}'
+      +'.sc-tile .n{font-size:22px;font-weight:800;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums}'
+      +'.sc-bh{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.sc-bh .sc-h3{margin-right:auto}.sc-lg{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}.sc-lg i{width:14px;height:14px;border-radius:3px;display:inline-block}'
+      +'.sc-g{background:color-mix(in srgb,var(--pos) 26%,var(--card))}.sc-a{background:color-mix(in srgb,var(--amber) 28%,var(--card))}.sc-r{background:color-mix(in srgb,var(--neg) 24%,var(--card))}'
+      +'.sc-tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.sc-tbl th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--line)}'
+      +'.sc-tbl th.k{color:var(--ink);font-weight:800}.sc-tbl td{text-align:left;padding:5px 8px;font-size:14px;color:var(--ink)}.sc-tbl td.k{font-weight:800}.sc-tbl tbody tr:last-child td{padding-bottom:10px}'
+      +'.sc-pill{display:inline-block;min-width:64px;border-radius:6px;padding:3px 10px;font-weight:600;color:var(--ink)}'
+      +'.sc-tiles.f5{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:900px){.sc-tiles.f5{grid-template-columns:repeat(2,minmax(0,1fr))}}.sc-tile .n .s{font-size:14px;font-weight:500;color:var(--muted);margin-left:6px}'
+      +'.sc-tbl th.w{white-space:normal;line-height:1.25;vertical-align:bottom}.sc-tbl tr.tot td{border-top:2px solid var(--ink);font-weight:800;padding-top:10px}.sc-tbl td .mu{color:var(--muted)}'
+      +'.sc-note{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:6px}';
+      document.head.appendChild(st); }
+  }
+  // v28.456 (Ben, screenshot spec): PRODUCT ▸ Reports ▸ Approval stats. Rows from /api/product/reports/approval-stats (one per
+  // development SKU). Same "is" filter bar as Sample costs; traffic light on samples to approve (or so far when unapproved).
+  var _as={f:{season:[],category:[],sku:[],supplier:[],month:[],light:[]},rows:null,open:''};
+  function _asOpts(k){ var seen={};
+    if(k==='light') return _SC_LIGHT.map(function(x){return {v:x[0],l:x[1]};});
+    (_as.rows||[]).forEach(function(r){ (k==='month'?(r.months||[]):[r[k]]).forEach(function(v){ if(v)seen[v]=1; }); });
+    return Object.keys(seen).sort(function(a,b){ return k==='month'||k==='season'?b.localeCompare(a):a.localeCompare(b,undefined,{numeric:true}); }).map(function(v){ return {v:v,l:k==='month'?_scMon(v):v}; }); }
+  function _asLabel(k){ var sel=_as.f[k]; if(!sel.length)return 'is any'; var o=_asOpts(k), first=(o.filter(function(x){return x.v===sel[0];})[0]||{l:sel[0]}).l; return 'is '+first+(sel.length>1?' +'+(sel.length-1):''); }
+  function _asRows(){ var f=_as.f; return (_as.rows||[]).filter(function(r){
+      if(f.season.length&&f.season.indexOf(r.season)<0)return false; if(f.category.length&&f.category.indexOf(r.category)<0)return false;
+      if(f.sku.length&&f.sku.indexOf(r.sku)<0)return false; if(f.supplier.length&&f.supplier.indexOf(r.supplier)<0)return false;
+      if(f.month.length&&!(r.months||[]).some(function(m){return f.month.indexOf(m)>=0;}))return false;
+      if(f.light.length&&f.light.indexOf(_scLight(r.to_approve))<0)return false; return true; }); }
+  function _asTop(rs){ var k=Object.keys(rs||{}); if(!k.length)return ''; k.sort(function(a,b){ return (rs[b]-rs[a])||a.localeCompare(b); }); return k[0]; }
+  function _asPct(a,b){ return b?Math.round(a/b*100)+'%':'—'; }
+  function _asNum(v){ return (Math.round(v*10)/10).toString(); }
+  function _asTotals(g){ var t={skus:g.length,sup:{},v:0,a:0,appr:0,bulk:0,toA:0,days:0,nDays:0,rs:{}};
+    g.forEach(function(r){ t.sup[r.supplier]=1; t.v+=r.versions; t.a+=r.approved_samples; if(r.approved){ t.appr++; t.toA+=r.to_approve; if(r.bulk)t.bulk++; if(r.days!=null){ t.days+=r.days; t.nDays++; } }
+      Object.keys(r.reasons||{}).forEach(function(n){ t.rs[n]=(t.rs[n]||0)+1; }); });
+    t.top=_asTop(t.rs); t.avgTo=t.appr?t.toA/t.appr:null; t.avgDays=t.nDays?Math.round(t.days/t.nDays):null; return t; }
+  function renderApprovalStats(c){ _scCss();
+    c.innerHTML='<div class="sc-card"><div class="sc-hd"><h2>Approval stats</h2><button class="sc-dl" id="as-dl">⤓ Download report</button></div>'
+      +'<div class="sc-fb" id="as-fb"><b>Filters</b></div><div id="as-body"><div class="hz-skel" aria-label="Loading" style="margin-top:14px"><i></i><i></i><i></i></div></div></div>';
+    var fb=c.querySelector('#as-fb'), body=c.querySelector('#as-body');
+    var bar=_isBar(fb,{F:_SC_F,st:_as,opts:_asOpts,label:_asLabel,onChange:function(){ draw(); }});
+    function draw(){ var g=_asRows().sort(function(a,b){ return a.sku.localeCompare(b.sku,undefined,{numeric:true}); }), t=_asTotals(g);
+      var tile=function(l,v,sub){ return '<div class="sc-tile"><div class="l">'+l+'</div><div class="n">'+v+(sub?'<span class="s">'+sub+'</span>':'')+'</div></div>'; };
+      body.innerHTML='<div class="sc-h3">Selection Overview</div><div class="sc-tiles f5">'
+        +tile('Sample versions',t.v.toLocaleString())+tile('Approved',t.appr,'of '+t.skus+' SKU'+(t.skus===1?'':'s'))
+        +tile('Hit rate',_asPct(t.a,t.v),t.a+' of '+t.v+' samples')+tile('% moving to bulk',_asPct(t.bulk,t.appr),t.bulk+' of '+t.appr+' approved')
+        +tile('Avg days to approve',t.avgDays==null?'—':t.avgDays,t.avgDays==null?'none approved':'days')+'</div>'
+        +'<div class="sc-bh"><div class="sc-h3">Selection Breakdown</div>'+_SC_LIGHT.map(function(x){ return '<span class="sc-lg"><i class="sc-'+x[0]+'"></i>'+x[1]+'</span>'; }).join('')+'</div>'
+        +'<div style="overflow-x:auto"><table class="sc-tbl" style="min-width:980px"><colgroup><col style="width:19%"><col style="width:12%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:9%"><col style="width:6%"><col style="width:8%"><col></colgroup>'
+        +'<thead><tr><th class="w">SKU</th><th class="w">Supplier</th><th class="w">Sample versions</th><th class="w">Approved</th><th class="w k">Avg samples to approve</th><th class="w">Avg days to approve</th><th class="w">Hit rate</th><th class="w">% moving to bulk</th><th class="w">Reasons for resampling</th></tr></thead><tbody>'
+        +(g.length?g.map(function(r){ return '<tr><td title="'+esc(r.item_ref)+'">'+esc(r.sku)+'</td><td>'+esc(r.supplier)+'</td><td>'+r.versions+'</td><td>'+r.approved_samples+'</td>'
+          +'<td><span class="sc-pill sc-'+_scLight(r.to_approve)+'" style="min-width:110px">'+r.to_approve+(r.approved?'':' so far')+'</span></td>'
+          +'<td>'+(r.days!=null?r.days:'<span class="mu">None yet</span>')+'</td><td>'+_asPct(r.approved_samples,r.versions)+'</td><td>'+(r.bulk?'Yes':'No')+'</td><td>'+(esc(_asTop(r.reasons))||'<span class="mu">—</span>')+'</td></tr>'; }).join('')
+          +'<tr class="tot"><td>Total</td><td>'+Object.keys(t.sup).length+' supplier'+(Object.keys(t.sup).length===1?'':'s')+'</td><td>'+t.v+'</td><td>'+t.a+'</td><td>'+(t.avgTo==null?'—':_asNum(t.avgTo))+'</td><td>'+(t.avgDays==null?'—':t.avgDays)+'</td><td>'+_asPct(t.a,t.v)+'</td><td>'+_asPct(t.bulk,t.appr)+'</td><td>'+(t.top?esc(t.top)+' ('+t.rs[t.top]+')':'—')+'</td></tr>'
+          :'<tr><td colspan="9" class="mu">No sampled SKUs match these filters.</td></tr>')
+        +'</tbody></table></div>'
+        +'<div class="sc-note">Hit rate = approved samples ÷ samples submitted. Unapproved SKUs show samples so far, so they still get a traffic light.'
+        +'<div class="tiny" style="margin-top:4px">From PRODUCT development samples. Days to approve run from the first sample date to the approval; moving to bulk = approved and on a purchase order; reasons are the reject reasons logged on the samples.</div></div>'; }
+    c.querySelector('#as-dl').onclick=function(){ var g=_asRows(); if(!g.length){ alert('Nothing to download for these filters.'); return; }
+      var cell=function(v){ v=String(v==null?'':v); if(/^[=+\-@\t\r]/.test(v))v="'"+v; return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      var filt=_SC_F.map(function(x){ return x[1]+' '+_asLabel(x[0]); }).join(' · ');
+      var csv='﻿'+cell('Approval stats · '+filt)+'\n'+['SKU','Development ref','Supplier','Season','Category','Sample versions','Approved samples','Approved','Samples to approve (or so far)','Days to approve','Approved on','Hit rate %','Moving to bulk','Reasons for resampling'].join(',')+'\n'
+        +g.map(function(r){ return [cell(r.sku),cell(r.item_ref),cell(r.supplier),cell(r.season),cell(r.category),r.versions,r.approved_samples,r.approved?'Yes':'No',r.to_approve,r.days==null?'':r.days,r.approved_on?fd(r.approved_on):'',r.versions?Math.round(r.approved_samples/r.versions*100):'',r.bulk?'Yes':'No',cell(Object.keys(r.reasons||{}).map(function(n){return n+' ('+r.reasons[n]+')';}).join('; '))].join(','); }).join('\n')+'\n';
+      var b=new Blob([csv],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(b), a=document.createElement('a'); a.href=u; a.download='approval_stats_'+fd(new Date().toISOString().slice(0,10))+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
+    bar();
+    fetch('/api/product/reports/approval-stats').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)throw new Error((d&&d.error)||'error'); _as.rows=d.rows||[]; bar(); draw(); })
+      .catch(function(e){ body.innerHTML='<div style="color:var(--neg);margin-top:12px">Failed: '+esc(e.message||e)+'</div>'; });
   }
   // v28.453 (Ben, screenshot spec): PRODUCT ▸ Reports ▸ Sample costs. Rows from /api/product/reports/sample-costs (one per
   // sample-request line, £). Six "is" filters, each a multi-select popover (none ticked = any); everything filters in the
@@ -18183,45 +18282,11 @@
     out.forEach(function(g){ g.total=g.cost+g.freight; g.per=g.qty?g.cost/g.qty:0; });
     return out.sort(function(a,b){ return b.total-a.total||a.sku.localeCompare(b.sku); }); }
   function renderSampleCosts(c){
-    if(!document.getElementById('sc-style')){ var st=document.createElement('style'); st.id='sc-style'; st.textContent=
-      '.sc-card{border:2px solid var(--blue);border-radius:14px;padding:18px 20px;background:var(--card);max-width:1180px}'
-      +'.sc-hd{display:flex;align-items:center;gap:14px;margin-bottom:12px}.sc-hd h2{margin:0;font-size:19px;font-weight:800;color:var(--ink)}'
-      +'.sc-dl{margin-left:auto;background:var(--blue-soft);border:1.5px solid var(--blue);color:var(--ink);border-radius:10px;padding:7px 16px;font-weight:800;font-size:14px;cursor:pointer}'
-      +'.sc-fb{display:flex;align-items:stretch;gap:10px;background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:12px;padding:8px 10px;flex-wrap:wrap}'
-      +'.sc-fb>b{align-self:center;font-size:14px;padding:0 10px 0 6px;color:var(--ink)}'
-      +'.sc-chip{position:relative;flex:1 1 130px;min-width:120px;border:1.5px solid color-mix(in srgb,var(--faint) 55%,transparent);border-radius:10px;background:var(--blue-soft);padding:6px 10px;text-align:center;cursor:pointer;user-select:none}'
-      +'.sc-chip:hover{border-color:var(--blue)}.sc-chip.on{border-color:var(--blue)}'
-      +'.sc-chip .t{font-size:12px;color:var(--muted)}.sc-chip .v{font-size:13px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-      +'.sc-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:50;min-width:220px;max-width:320px;background:var(--card);border:1px solid var(--line2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;text-align:left;cursor:default}'
-      +'.sc-pop input[type=search]{width:100%;box-sizing:border-box;font-size:12px;padding:5px 8px;border:1px solid var(--line2);border-radius:6px;margin-bottom:6px;background:var(--card);color:var(--ink)}'
-      +'.sc-pop .ls{max-height:260px;overflow:auto}.sc-pop label{display:flex;align-items:center;gap:7px;font-size:12px;padding:4px 4px;border-radius:5px;cursor:pointer;color:var(--ink)}.sc-pop label:hover{background:var(--hover)}'
-      +'.sc-pop .ft{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px;font-size:12px}.sc-pop .ft a{color:var(--blue);cursor:pointer}'
-      +'.sc-h3{font-size:16px;font-weight:800;color:var(--ink);margin:18px 0 10px}'
-      +'.sc-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}@media(max-width:760px){.sc-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-      +'.sc-tile{background:var(--blue-soft);border:1.5px solid var(--blue);border-radius:12px;padding:12px 16px}.sc-tile .l{font-size:13px;color:var(--muted)}.sc-tile.tot .l{color:var(--ink);font-weight:800}'
-      +'.sc-tile .n{font-size:22px;font-weight:800;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums}'
-      +'.sc-bh{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.sc-bh .sc-h3{margin-right:auto}.sc-lg{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}.sc-lg i{width:14px;height:14px;border-radius:3px;display:inline-block}'
-      +'.sc-g{background:color-mix(in srgb,var(--pos) 26%,var(--card))}.sc-a{background:color-mix(in srgb,var(--amber) 28%,var(--card))}.sc-r{background:color-mix(in srgb,var(--neg) 24%,var(--card))}'
-      +'.sc-tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.sc-tbl th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--line)}'
-      +'.sc-tbl th.k{color:var(--ink);font-weight:800}.sc-tbl td{text-align:left;padding:5px 8px;font-size:14px;color:var(--ink)}.sc-tbl td.k{font-weight:800}.sc-tbl tbody tr:last-child td{padding-bottom:10px}'
-      +'.sc-pill{display:inline-block;min-width:64px;border-radius:6px;padding:3px 10px;font-weight:600;color:var(--ink)}'
-      +'.sc-note{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:6px}';
-      document.head.appendChild(st); }
+    _scCss();
     c.innerHTML='<div class="sc-card"><div class="sc-hd"><h2>Sample costs</h2><button class="sc-dl" id="sc-dl">⤓ Download report</button></div>'
       +'<div class="sc-fb" id="sc-fb"><b>Filters</b></div><div id="sc-body"><div class="hz-skel" aria-label="Loading" style="margin-top:14px"><i></i><i></i><i></i></div></div></div>';
     var fb=c.querySelector('#sc-fb'), body=c.querySelector('#sc-body');
-    function chips(){ fb.innerHTML='<b>Filters</b>'+_SC_F.map(function(x){ return '<div class="sc-chip'+(_sc.f[x[0]].length?' on':'')+'" data-k="'+x[0]+'"><div class="t">'+esc(x[1])+'</div><div class="v">'+esc(_scLabel(x[0]))+' ▾</div>'+(_sc.open===x[0]?pop(x[0]):'')+'</div>'; }).join('');
-      fb.querySelectorAll('.sc-chip').forEach(function(ch){ ch.onclick=function(e){ if(e.target.closest('.sc-pop'))return; _sc.open=_sc.open===ch.dataset.k?'':ch.dataset.k; chips(); var s=fb.querySelector('.sc-pop input[type=search]'); if(s)s.focus(); }; });
-      var p=fb.querySelector('.sc-pop'); if(!p)return; var k=_sc.open;
-      p.querySelectorAll('input[type=checkbox]').forEach(function(cb){ cb.onchange=function(){ var a=_sc.f[k], i=a.indexOf(cb.value); if(cb.checked&&i<0)a.push(cb.value); if(!cb.checked&&i>=0)a.splice(i,1); refresh(); }; });
-      var q=p.querySelector('input[type=search]'); if(q)q.oninput=function(){ var t=q.value.trim().toLowerCase(); p.querySelectorAll('label').forEach(function(l){ l.hidden=!!t&&l.textContent.toLowerCase().indexOf(t)<0; }); };
-      var any=p.querySelector('[data-any]'); if(any)any.onclick=function(){ _sc.f[k]=[]; refresh(); };
-      var done=p.querySelector('[data-done]'); if(done)done.onclick=function(){ _sc.open=''; chips(); }; }
-    function pop(k){ var o=_scOpts(k), sel=_sc.f[k];
-      return '<div class="sc-pop">'+(o.length>8?'<input type="search" placeholder="search…">':'')+'<div class="ls">'
-        +(o.length?o.map(function(x){ return '<label><input type="checkbox" value="'+esc(x.v)+'"'+(sel.indexOf(x.v)>=0?' checked':'')+'>'+(k==='light'?'<i class="sc-'+x.v+'" style="width:12px;height:12px;border-radius:3px;display:inline-block"></i>':'')+esc(x.l)+'</label>'; }).join(''):'<div class="mut tiny" style="padding:4px">No values.</div>')
-        +'</div><div class="ft"><a data-any>Any</a><a data-done>Done</a></div></div>'; }
-    function refresh(){ var keep=_sc.open; chips(); _sc.open=keep; draw(); }
+    var bar=_isBar(fb,{F:_SC_F,st:_sc,opts:_scOpts,label:_scLabel,onChange:function(){ draw(); }});
     function draw(){ var g=_scAgg(), n=0, cost=0, fr=0; g.forEach(function(x){ n+=x.qty; cost+=x.cost; fr+=x.freight; });
       var tile=function(l,v,cls){ return '<div class="sc-tile'+(cls||'')+'"><div class="l">'+l+'</div><div class="n">'+v+'</div></div>'; };
       body.innerHTML='<div class="sc-h3">Selection Overview</div><div class="sc-tiles">'+tile('Samples',n.toLocaleString())+tile('Sample cost',_scGbp(cost))+tile('Freight',_scGbp(fr))+tile('Total cost',_scGbp(cost+fr),' tot')+'</div>'
@@ -18240,9 +18305,8 @@
       var csv='﻿'+cell('Sample costs · '+filt)+'\n'+['SKU','Samples','Cost per sample (GBP)','Sample cost (GBP)','Freight (GBP)','Total cost (GBP)'].join(',')+'\n'
         +g.map(function(x){ return [cell(x.sku),x.qty,r2(x.per),r2(x.cost),r2(x.freight),r2(x.total)].join(','); }).join('\n')+'\n';
       var b=new Blob([csv],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(b), a=document.createElement('a'); a.href=u; a.download='sample_costs_'+fd(new Date().toISOString().slice(0,10))+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
-    if(!window._scDocClick){ window._scDocClick=1; document.addEventListener('click',function(e){ if(_sc.open&&document.contains(e.target)&&!e.target.closest('#sc-fb')){ _sc.open=''; var f=document.getElementById('sc-fb'); if(f&&f._chips)f._chips(); } }); }
-    fb._chips=chips; chips();
-    fetch('/api/product/reports/sample-costs').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)throw new Error((d&&d.error)||'error'); _sc.rows=d.rows||[]; chips(); draw(); })
+    bar();
+    fetch('/api/product/reports/sample-costs').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)throw new Error((d&&d.error)||'error'); _sc.rows=d.rows||[]; bar(); draw(); })
       .catch(function(e){ body.innerHTML='<div style="color:var(--neg);margin-top:12px">Failed: '+esc(e.message||e)+'</div>'; });
   }
   // v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product size (SKU / colour way / size / product type /

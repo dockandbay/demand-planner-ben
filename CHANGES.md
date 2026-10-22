@@ -1,3 +1,12 @@
+## v28.456 (22-Oct-26) PRODUCT > Reports > Approval stats
+- Ben (screenshot): "approval stats report, make exactly this report for samples approve and sample versions etc. under product"; reasons = the "Rejected, new sample" list (Colour issue, Finishing, Packing).
+- New tab PRODUCT > Reports > Approval stats (#/product/reports/approval-stats), new read-only route GET /api/product/reports/approval-stats.
+- Same filter bar as Sample costs (Season, Category, SKU, Supplier, Date range, Traffic light; multi-select "is"); the bar is now one shared component.
+- Tiles: Sample versions, Approved (of SKUs), Hit rate (approved of samples), % moving to bulk (of approved), Avg days to approve.
+- Breakdown per development SKU: supplier, sample versions, approved, samples to approve (pill, "so far" when unapproved), days to approve ("None yet"), hit rate, moving to bulk (Yes / No: approved and on a PO), main reason for resampling; bold Total row. Download = CSV.
+- Sandbox checked in Chrome: 12 versions, 5 of 5 SKUs approved, 42% hit rate, 26 days average, Colour issue (2). Live has 25 development items but no samples logged yet, so the report is empty there until samples are recorded.
+- No migration or env var. Buy plan identical.
+
 ## v28.455 (22-Oct-26) PRODUCT > Reports > Sample costs (includes v28.453-454)
 - Ben (screenshot): "in product > reports we want a sample costs report which looks exactly like this with filters, including the 'is' in the dropdown which can be multi select".
 - New tab PRODUCT > Reports > Sample costs (#/product/reports/sample-costs), new read-only route GET /api/product/reports/sample-costs.

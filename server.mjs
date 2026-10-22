@@ -14923,6 +14923,71 @@ app.get('/api/product/reports/sample-costs', async (_req, res) => {
     res.set('Cache-Control', 'no-store').json({ rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.456 (Ben, screenshot spec): PRODUCT ▸ Reports ▸ Approval stats. One row per development SKU (item size: mapped SKU,
+// else working SKU, else "ref size"). A sample covers a size when its sample_sizes is empty, names the size, or names none
+// of the item's sizes (whole-item sample). Approved SKU = item approved (for bulk), or size approval 'approved', or its product dimension approved, or a
+// covering sample with an approved* aspect decision. The approving sample = the size's / dimension's approved_sample_id,
+// else the first covering sample with an approved* decision, else the last covering sample. Samples to approve = its
+// position (by sample date); days to approve = first sample date → approval (decision time, else item approved_at, else
+// that sample's received date). Moving to bulk = approved and the SKU is on a purchase order. Reasons = reject reasons
+// recorded on the covering samples. Read-only.
+app.get('/api/product/reports/approval-stats', async (_req, res) => {
+  try {
+    const [items, sizes, dims, samples, fb, rr, reqs] = await Promise.all([
+      pool.query(`SELECT id, ref, coalesce(nullif(season,''), nullif(split_part(ref,'-',1),''), '—') season, coalesce(nullif(category,''),'—') category,
+          coalesce(status,'in_development') status, approved_at FROM planner.product_dev_items`),
+      pool.query(`SELECT id, item_id, coalesce(size_label,'') size_label, coalesce(approval_status,'') approval_status, nullif(mapped_sku,'') mapped_sku,
+          nullif(working_sku,'') working_sku, approved_sample_id, coalesce(sort,0) sort FROM planner.product_dev_sizes`),
+      pool.query(`SELECT size_id, coalesce(approval_status,'') approval_status, approved_sample_id FROM planner.product_dev_size_dimensions WHERE dimension='product'`),
+      pool.query(`SELECT id, item_ref, version, sample_date, received_at, created_at, coalesce(sample_sizes,'{}') sample_sizes, request_id FROM planner.product_dev_samples`),
+      pool.query(`SELECT sample_id, decision, updated_at FROM planner.product_sample_aspect_feedback WHERE decision ILIKE 'approved%'`),
+      pool.query(`SELECT x.sample_id, r.name FROM planner.product_sample_reject_reasons x JOIN planner.sample_reject_reasons r ON r.id=x.reason_id`),
+      pool.query(`SELECT id, item_id, coalesce(nullif(supplier_name,''),'—') supplier, created_at FROM planner.product_dev_requests`)]);
+    const reqById = {}, reqByItem = {}; reqs.rows.forEach(r => { reqById[r.id] = r; const a = reqByItem[r.item_id]; if (!a || r.created_at > a.created_at) reqByItem[r.item_id] = r; });
+    const apprFb = {}; fb.rows.forEach(f => { const p = apprFb[f.sample_id]; if (!p || f.updated_at < p) apprFb[f.sample_id] = f.updated_at; });
+    const reasons = {}; rr.rows.forEach(r => { (reasons[r.sample_id] || (reasons[r.sample_id] = [])).push(r.name); });
+    const dimBySize = {}; dims.rows.forEach(d => { dimBySize[d.size_id] = d; });
+    const sampByItem = {}; samples.rows.forEach(s => { (sampByItem[s.item_ref] || (sampByItem[s.item_ref] = [])).push(s); });
+    const sizesByItem = {}; sizes.rows.forEach(z => { (sizesByItem[z.item_id] || (sizesByItem[z.item_id] = [])).push(z); });
+    const skus = new Set(); sizes.rows.forEach(z => { if (z.mapped_sku) skus.add(z.mapped_sku); if (z.working_sku) skus.add(z.working_sku); });
+    const onPo = new Set(skus.size ? (await pool.query(`SELECT DISTINCT sku FROM planner.purchase_order_lines WHERE sku = ANY($1)`, [[...skus]])).rows.map(r => r.sku) : []);
+    const dOf = s => s.sample_date || s.received_at || s.created_at, iso = d => d ? new Date(d).toISOString().slice(0, 10) : null;
+    const isAppr = v => /^approved/i.test(String(v || ''));
+    const rows = [];
+    for (const it of items.rows) {
+      const ss = (sampByItem[it.ref] || []).slice().sort((a, b) => (new Date(dOf(a)) - new Date(dOf(b))) || ((a.version || 0) - (b.version || 0)) || (a.id - b.id));
+      if (!ss.length) continue;   // no samples yet → nothing to report
+      const zs = (sizesByItem[it.id] || []).slice().sort((a, b) => a.sort - b.sort || a.id - b.id);
+      const labels = zs.map(z => z.size_label.toLowerCase());
+      const targets = zs.length ? zs : [{ id: null, size_label: '', approval_status: '', mapped_sku: null, working_sku: null, approved_sample_id: null }];
+      for (const z of targets) {
+        const zl = z.size_label.toLowerCase();
+        const cov = ss.filter(s => { const sl = (s.sample_sizes || []).map(x => String(x).toLowerCase()); return !sl.length || !z.id || sl.includes(zl) || !sl.some(x => labels.includes(x)); });
+        if (!cov.length) continue;
+        const dim = dimBySize[z.id] || {};
+        const approved = it.status === 'approved' || isAppr(z.approval_status) || isAppr(dim.approval_status) || cov.some(s => apprFb[s.id]);
+        const apprIds = new Set(cov.filter(s => apprFb[s.id]).map(s => String(s.id)));
+        [z.approved_sample_id, dim.approved_sample_id].forEach(x => { if (x != null && cov.some(s => String(s.id) === String(x))) apprIds.add(String(x)); });
+        let idx = -1, apprAt = null;
+        if (approved) {
+          idx = cov.findIndex(s => apprIds.has(String(s.id))); if (idx < 0) idx = cov.length - 1;
+          const s = cov[idx]; apprAt = apprFb[s.id] || it.approved_at || s.received_at || dOf(s);
+          if (!apprIds.size) apprIds.add(String(s.id));
+        }
+        const first = dOf(cov[0]);
+        const days = approved && first && apprAt ? Math.max(0, Math.round((new Date(apprAt) - new Date(first)) / 864e5)) : null;
+        const sku = z.mapped_sku || z.working_sku || (it.ref + (z.size_label ? ' ' + z.size_label : ''));
+        const last = cov[cov.length - 1], rq = reqById[last.request_id] || reqByItem[it.id] || {};
+        const rs = {}; cov.forEach(s => (reasons[s.id] || []).forEach(n => { rs[n] = (rs[n] || 0) + 1; }));
+        rows.push({ sku, item_ref: it.ref, season: it.season, category: it.category, supplier: rq.supplier || '—',
+          months: [...new Set(cov.map(s => (iso(dOf(s)) || '').slice(0, 7)).filter(Boolean))],
+          versions: cov.length, approved_samples: approved ? apprIds.size : 0, approved, to_approve: approved ? idx + 1 : cov.length,
+          days, approved_on: iso(apprAt), bulk: approved && (onPo.has(z.mapped_sku) || onPo.has(z.working_sku)), reasons: rs });
+      }
+    }
+    res.set('Cache-Control', 'no-store').json({ rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // v28.154 (Ben): PRODUCT ▸ Reports ▸ Catalogue. One row per product SIZE (barcodes live on sizes, mig 294): season /
 // ref / product type / colour way / size / SKU / EAN / components / stage. Items with no sizes still get one blank-size
 // row so the catalogue is complete. Season and colour way fall back to the ref segments (SEASON-TYPE-COLOURWAY) when the

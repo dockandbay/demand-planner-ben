@@ -51,6 +51,8 @@ sources:
   - server.mjs :: /api/product/reports/sampling, /api/product/reports/catalogue, /api/product/pim-waiting-room
   - server.mjs :: /api/product/reports/sample-costs
   - supply/inject.html :: renderSampleCosts
+  - server.mjs :: /api/product/reports/approval-stats
+  - supply/inject.html :: renderApprovalStats
 fingerprints:
   artifact_v16.7.html::renderReportView: d295c42ef5f0
   artifact_v16.7.html::renderExecView: 255e38a51f5e
@@ -104,8 +106,10 @@ fingerprints:
   server.mjs::/api/product/reports/catalogue: d5ebe5a0f0b8
   server.mjs::/api/product/pim-waiting-room: 4a622b24224b
   server.mjs::/api/product/reports/sample-costs: cb55e12aee72
-  supply/inject.html::renderSampleCosts: 48858dc1df2a
-verified_version: v28.455
+  supply/inject.html::renderSampleCosts: e1f7ba761997
+  server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
+  supply/inject.html::renderApprovalStats: 2b27c7a0f979
+verified_version: v28.456
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -454,6 +458,17 @@ verified_version: v28.455
   - Filters (multi-select "is" popovers, none ticked = any, all in the browser): Season, Category, SKU, Supplier, Date range (request month), Traffic light. Traffic light is on the SKU's total samples in the selection: 1-2 green, 3 amber, 4+ red.
   - Tiles: Samples, Sample cost, Freight, Total cost. Breakdown per SKU: samples, cost per sample (sample cost / samples), freight, total, sorted by total. Download = CSV of the breakdown with the filter line.
   (source: server.mjs :: /api/product/reports/sample-costs; supply/inject.html :: renderSampleCosts)
+- Approval stats (v28.456, Ben's screenshot spec):
+  - Rows: one per development SKU (item size: mapped SKU, else working SKU, else "ref size"); items with no samples are left out.
+  - A sample covers a size when its sample_sizes is empty, names that size, or names none of the item's sizes (a whole-item sample).
+  - Approved SKU: the item is approved (for bulk), or the size approval is 'approved', or its product dimension is approved, or a covering sample has an approved / approved_with_comments aspect decision.
+  - Approving sample: the size's or product dimension's approved_sample_id, else the first covering sample with an approved decision, else the last covering sample. Samples to approve = its position by sample date; unapproved SKUs show samples so far.
+  - Days to approve: first covering sample date to the approval (decision time, else item approved_at, else that sample's received date).
+  - Hit rate = approved samples / sample versions. Moving to bulk = approved and the SKU (mapped or working) is on a purchase order.
+  - Reasons for resampling = reject reasons logged on the covering samples (sample_reject_reasons: Colour issue, Finishing, Packing); the row shows the most frequent; the Total shows the reason on most SKUs with its SKU count.
+  - Same multi-select "is" filters as Sample costs; Date range matches any covering sample's month; Traffic light is on samples to approve (or so far).
+  - Totals: suppliers, versions, approved samples, avg samples to approve and avg days (approved SKUs only), hit rate, % moving to bulk (of approved SKUs).
+  (source: server.mjs :: /api/product/reports/approval-stats; supply/inject.html :: renderApprovalStats)
 - Approved products: a staging list of working SKUs with status waiting / in_pim / dropped (waiting first). Marking "in PIM" does not write to Airtable. (source: server.mjs :: /api/product/pim-waiting-room; renderPimWaitingRoom)
 - Catalogue: one row per product size.
   - Fallbacks:
