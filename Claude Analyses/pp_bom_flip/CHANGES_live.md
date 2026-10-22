@@ -2,7 +2,110 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 324 across 13 runs.
+Total changes: 325 across 18 runs.
+
+## Run fn48-retry-2026-10-22_225557
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 22:55 2026-10-22 | retry UK-909588 after exception resolved (fn48 outage) | sale.sale 300563 | retry_order_import:  | n/a |
+
+## Run fn48-retry-2026-10-22_225113
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 22:51 2026-10-22 | retry UK-909588 after fn48 fix | sale.sale 300563 | retry_order_import:  | n/a |
+
+## Run fn48-resolve-all-2026-10-22_230211
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 23:02 2026-10-22 | resolve planned-date exception 4172 on UK-909589 (fn48 outage, Ben 22-Oct) | sale.sale 300564 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4173 on UK-909590 (fn48 outage, Ben 22-Oct) | sale.sale 300567 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4175 on UK-909591 (fn48 outage, Ben 22-Oct) | sale.sale 300569 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4176 on UK-909592 (fn48 outage, Ben 22-Oct) | sale.sale 300570 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4177 on UK-909593 (fn48 outage, Ben 22-Oct) | sale.sale 300574 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4178 on UK-909595 (fn48 outage, Ben 22-Oct) | sale.sale 300579 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4179 on UK-909596 (fn48 outage, Ben 22-Oct) | sale.sale 300580 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4180 on UK-909597 (fn48 outage, Ben 22-Oct) | sale.sale 300581 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4181 on UK-909598 (fn48 outage, Ben 22-Oct) | sale.sale 300583 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4182 on UK-909599 (fn48 outage, Ben 22-Oct) | sale.sale 300584 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4183 on UK-909600 (fn48 outage, Ben 22-Oct) | sale.sale 300586 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4184 on UK-909601 (fn48 outage, Ben 22-Oct) | sale.sale 300587 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4185 on UK-909602 (fn48 outage, Ben 22-Oct) | sale.sale 300588 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4186 on UK-909594 (fn48 outage, Ben 22-Oct) | sale.sale 300577 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4187 on UK-909603 (fn48 outage, Ben 22-Oct) | sale.sale 300589 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4188 on UK-909604 (fn48 outage, Ben 22-Oct) | sale.sale 300590 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4189 on UK-909605 (fn48 outage, Ben 22-Oct) | sale.sale 300591 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4190 on UK-909607 (fn48 outage, Ben 22-Oct) | sale.sale 300594 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4191 on UK-909608 (fn48 outage, Ben 22-Oct) | sale.sale 300595 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4192 on UK-909609 (fn48 outage, Ben 22-Oct) | sale.sale 300596 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4193 on UK-909610 (fn48 outage, Ben 22-Oct) | sale.sale 300598 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4194 on UK-909611 (fn48 outage, Ben 22-Oct) | sale.sale 300599 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4195 on UK-909612 (fn48 outage, Ben 22-Oct) | sale.sale 300600 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4196 on UK-909614 (fn48 outage, Ben 22-Oct) | sale.sale 300602 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4197 on UK-909606 (fn48 outage, Ben 22-Oct) | sale.sale 300592 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4198 on UK-909617 (fn48 outage, Ben 22-Oct) | sale.sale 300606 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4199 on UK-909619 (fn48 outage, Ben 22-Oct) | sale.sale 300608 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4200 on UK-909620 (fn48 outage, Ben 22-Oct) | sale.sale 300609 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4201 on UK-909621 (fn48 outage, Ben 22-Oct) | sale.sale 300610 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4202 on UK-909622 (fn48 outage, Ben 22-Oct) | sale.sale 300611 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4204 on UK-909624 (fn48 outage, Ben 22-Oct) | sale.sale 300613 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4205 on UK-909627 (fn48 outage, Ben 22-Oct) | sale.sale 300619 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4206 on UK-909628 (fn48 outage, Ben 22-Oct) | sale.sale 300620 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4207 on UK-909629 (fn48 outage, Ben 22-Oct) | sale.sale 300621 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4208 on UK-909631 (fn48 outage, Ben 22-Oct) | sale.sale 300622 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4209 on UK-909630 (fn48 outage, Ben 22-Oct) | sale.sale 300623 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4210 on UK-909633 (fn48 outage, Ben 22-Oct) | sale.sale 300625 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4211 on UK-909634 (fn48 outage, Ben 22-Oct) | sale.sale 300626 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4212 on UK-909635 (fn48 outage, Ben 22-Oct) | sale.sale 300627 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4213 on UK-909613 (fn48 outage, Ben 22-Oct) | sale.sale 300601 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4214 on UK-909637 (fn48 outage, Ben 22-Oct) | sale.sale 300630 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4215 on UK-909615 (fn48 outage, Ben 22-Oct) | sale.sale 300604 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4216 on UK-909618 (fn48 outage, Ben 22-Oct) | sale.sale 300607 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4217 on UK-909616 (fn48 outage, Ben 22-Oct) | sale.sale 300605 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4218 on UK-909638 (fn48 outage, Ben 22-Oct) | sale.sale 300633 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4219 on UK-909639 (fn48 outage, Ben 22-Oct) | sale.sale 300634 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4220 on UK-909640 (fn48 outage, Ben 22-Oct) | sale.sale 300635 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4221 on UK-909641 (fn48 outage, Ben 22-Oct) | sale.sale 300636 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4222 on UK-909643 (fn48 outage, Ben 22-Oct) | sale.sale 300639 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4223 on UK-909625 (fn48 outage, Ben 22-Oct) | sale.sale 300617 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4224 on UK-909644 (fn48 outage, Ben 22-Oct) | sale.sale 300643 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4225 on UK-909626 (fn48 outage, Ben 22-Oct) | sale.sale 300618 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4226 on UK-909632 (fn48 outage, Ben 22-Oct) | sale.sale 300624 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4227 on UK-909636 (fn48 outage, Ben 22-Oct) | sale.sale 300628 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4229 on UK-909648 (fn48 outage, Ben 22-Oct) | sale.sale 300647 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4230 on UK-909650 (fn48 outage, Ben 22-Oct) | sale.sale 300650 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4231 on UK-909651 (fn48 outage, Ben 22-Oct) | sale.sale 300651 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4232 on UK-909652 (fn48 outage, Ben 22-Oct) | sale.sale 300652 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4233 on UK-909642 (fn48 outage, Ben 22-Oct) | sale.sale 300637 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4234 on UK-909655 (fn48 outage, Ben 22-Oct) | sale.sale 300659 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4235 on UK-909656 (fn48 outage, Ben 22-Oct) | sale.sale 300660 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4236 on UK-909657 (fn48 outage, Ben 22-Oct) | sale.sale 300661 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4237 on UK-909658 (fn48 outage, Ben 22-Oct) | sale.sale 300670 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4238 on UK-909659 (fn48 outage, Ben 22-Oct) | sale.sale 300672 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4239 on UK-909645 (fn48 outage, Ben 22-Oct) | sale.sale 300644 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4240 on UK-909647 (fn48 outage, Ben 22-Oct) | sale.sale 300646 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4241 on UK-909649 (fn48 outage, Ben 22-Oct) | sale.sale 300648 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4242 on UK-909653 (fn48 outage, Ben 22-Oct) | sale.sale 300653 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4243 on UK-909660 (fn48 outage, Ben 22-Oct) | sale.sale 300676 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4244 on UK-909661 (fn48 outage, Ben 22-Oct) | sale.sale 300677 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4245 on UK-909662 (fn48 outage, Ben 22-Oct) | sale.sale 300681 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4246 on UK-909654 (fn48 outage, Ben 22-Oct) | sale.sale 300658 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4247 on UK-909664 (fn48 outage, Ben 22-Oct) | sale.sale 300683 | resolve_exception:  | n/a |
+| 23:02 2026-10-22 | resolve planned-date exception 4248 on UK-909663 (fn48 outage, Ben 22-Oct) | sale.sale 300684 | resolve_exception:  | n/a |
+
+## Run fn48-resolve-2026-10-22_225339
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 22:53 2026-10-22 | resolve planned-date exception 4174 on UK-909588 (fn48 outage) | sale.sale 300563 | resolve_exception:  | n/a |
+
+## Run fn48-fix-2026-10-22_225055
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 22:50 2026-10-22 | Fix UK retail import outage: any() not in Fulfil runtime -> every UK order draft+exception since 22-Oct 04:00 UTC. Loop instead of any(); fail open (metadata note, no exception). Ben approved 22-Oct. | dx_function 48 | `code`: `function48_v77_live.py (version 77)` -> `function48_v78_fix.py` | set `code` back to `function48_v77_live.py (version 77)` |
 
 ## Run fix-so68870-2026-10-22_122103
 
