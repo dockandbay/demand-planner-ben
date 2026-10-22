@@ -1,3 +1,10 @@
+## v28.452 (22-Oct-26) Scenario > Sales Planning lists Phase Out / Last Season SKUs that still have stock
+- Sarah (email "Horizon Stock Scenarios"): planning the December EOSS sale, most Phase Out and Last Season SKUs were missing, e.g. TOWLB-COLLAB-LG-UNO.
+- Cause: the tab only listed SKUs "available" in the country and channel, and that check drops any SKU past its discontinue date even with stock left. Live had 142 such SKUs in UK 3PL alone (102,793 units), 218 in US 3PL, 189 in EU 3PL, 162 in AU 3PL.
+- Now it lists every available SKU plus any in-scope SKU with stock (3PL; or FBA + AWD for US on the FBA view) or inbound landing before the month. These show as Discontinued and, with projected stock left, Rec. clearance; Group by Discontinued status gives the clearance list.
+- Sandbox, Dec-26: UK 3PL 689 rows (217 discontinued, 370 clearance), US 3PL 806, UK FBA 409, US FBA 425; TOWLB-COLLAB-LG-UNO listed in all four (UK 3PL 1,448 on hand, Discontinued + Clearance).
+- Read-only report; no migration or env var. Buy plan identical.
+
 ## v28.451 (22-Oct-26) Paid history: Month summary next to the filters, cleaner drawer, left-aligned wider grid (includes v28.450)
 - Ben: "on paid history can you put MONTH SUMMARY button next to ALL CURRENCIES and improve the table to fill the drawer and look cleaner" and "left align the data and make table more width".
 - "Month summary ›" now sits right after the Currency dropdown.

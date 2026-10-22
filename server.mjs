@@ -23599,9 +23599,10 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
   try {
     const run = (await pool.query(`SELECT max(run_id) mx FROM planner.forecasts WHERE level='sku'`)).rows[0].mx;
     // SKUs available in this country + channel (3pl ↔ DTC/B2B, fba ↔ FBA)
+    // v28.452: plus any in-scope SKU with stock or inbound in the pool, so Phase Out / Last Season SKUs past their
+    // discontinue date still list (flagged Discontinued / Rec. clearance) instead of silently dropping out.
     const availSkus = (await pool.query(`SELECT DISTINCT sku FROM planner.v_product_availability
         WHERE upper(country)=$1 AND channel = ANY($2) AND is_available`, [country, fchs])).rows.map(r => r.sku);
-    if (!availSkus.length) return res.json({ rows: [], country, channel, month });
     // inventory for the pooled warehouses
     const inv = {}; (await pool.query(`SELECT sku, warehouse, available FROM planner.v_product_inventory WHERE warehouse = ANY($1)`, [[wh3, whF]])).rows
       .forEach(r => { (inv[r.sku] || (inv[r.sku] = {}))[r.warehouse] = Number(r.available) || 0; });
@@ -23642,8 +23643,15 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
         to_char(max(month) FILTER (WHERE units>0),'YYYY-MM-DD') last_m
       FROM planner.sales_actuals WHERE upper(country)=$1 AND channel = ANY($2) GROUP BY sku`, [country, fchs]))
       .rows.forEach(r => { vel[r.sku] = r; });
+    const skuSet = new Set(availSkus);
+    for (const sku of Object.keys(meta)) {
+      if (skuSet.has(sku)) continue;
+      const iv = inv[sku] || {}, stock = channel === 'fba' ? ((iv[whF] || 0) + (isUS ? (meta[sku].awd || 0) : 0)) : (iv[wh3] || 0);
+      if (stock > 0 || (inbBefore[sku] || 0) > 0) skuSet.add(sku);
+    }
+    if (!skuSet.size) return res.json({ rows: [], country, channel, month });
     const nowMs = Date.now();
-    const rows = availSkus.map(sku => {
+    const rows = [...skuSet].map(sku => {
       const m = meta[sku] || {}, iv = inv[sku] || {}, f = fc[sku] || { dem_before: 0, dem_month: 0 }, vv = vel[sku] || {};
       const oh3 = iv[wh3] || 0, ohF = channel === 'fba' ? (iv[whF] || 0) : 0, ohAwd = (channel === 'fba' && isUS) ? (m.awd || 0) : 0;
       const ohTotal = channel === 'fba' ? (ohF + ohAwd) : oh3;   // FBA cover pool = FBA + AWD; 3PL is separate/transferable
