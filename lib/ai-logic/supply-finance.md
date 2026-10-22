@@ -280,7 +280,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.467
+verified_version: v28.468
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -575,6 +575,7 @@ verified_version: v28.467
 - Approved: the only status that allows the Xero bill (create or CSV), Push to Fulfil and the statement email. The agent portal shows approved runs only (it used to show finalised too). Creating the Xero bill no longer marks the run paid (it already is); it sets paid_ref to the bill number if empty.
 - Back to draft from Approved takes the run out of Paid history and the portal, and is refused while a Xero bill is linked (void it in Xero first). The confirm says if the statement was already emailed.
 - Push to Fulfil (COMMISSIONS_ACTUAL) now sums net over the agent's APPROVED runs only, deferred rows left out (it used to include finalised runs).
+- Draft statement to the agency (v28.468, Ben 23-Oct-26: "statement needs a draft send as well, draft review is with the agency"): on an In review run the email button is "✉ Send draft statement". It emails the agent's statement address with subject "DRAFT for review: ...", a body asking them to reply with missing or incorrect orders, and the PDF + XLSX marked DRAFT (title, status "DRAFT FOR REVIEW", file names prefixed DRAFT-). It records draft_sent_at / _to / _by (migration 384; before it, the send is only in the audit log) and the run shows "draft sent <date> to <address>". It can be sent again after changes (back to draft, finalise, send). A draft run sends nothing; an approved run sends the final statement as before. Downloads of a draft or in review run are also marked DRAFT.
 - Statement XLSX (Ben: "send statement to client can that be xlsx format as well"): cmStatementXlsx builds the same rows as the PDF (deferred rows left out): order, invoice, client PO, customer, customer paid (dd-mmm-yy), commissionable, rate, commission, credit note, credit adj, net, plus a total row. Download "⬇ Statement XLSX" at any status; the statement email attaches both PDF and XLSX. The PDF status label reads DRAFT / IN REVIEW / APPROVED <date>. (source: server.mjs /api/client/commission/runs/:id/status, /statement.xlsx, /email-statement, /xero-bill, /push-fulfil; supply/inject.html cpRunDetail)
 
 ## Commission run paid status and Fulfil links (v28.444)

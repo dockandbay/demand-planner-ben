@@ -1,3 +1,11 @@
+## v28.468 (23-Oct-26) Commission runs: send the DRAFT statement to the agency for review
+- Ben: "statement needs a draft send as well, draft review is with the agency".
+- In review: new "✉ Send draft statement". Emails the agent "DRAFT for review: Dock & Bay commission statement ..." with the PDF + XLSX marked DRAFT and asks them to reply with any missing or incorrect orders. The run shows "draft sent dd-mmm-yy to ...". Changes: Back to draft, edit, Finalise, send again.
+- Approved: "✉ Email statement" sends the final statement as before. Draft runs send nothing.
+- Statement PDF / XLSX of a run not yet approved are marked DRAFT (title, status DRAFT FOR REVIEW, file name DRAFT-...).
+- Migration 384_commission_draft_statement.sql: draft_sent_at / draft_sent_to / draft_sent_by on planner.commission_runs (additive; code works without it, the send is then only in the audit log). Applied on the sandbox.
+- Checked on the sandbox: draft run refuses the send; review run files are DRAFT-labelled; Chrome shows Send draft statement only in review. No real email sent in testing.
+
 ## v28.467 (23-Oct-26) Commission runs: Draft → In review → Approved, statement as XLSX
 - Ben: "send statement to client can that be xlsx format as well" and "a workflow on finalise run where first it goes into review status. Then next step is approve and that marks it as paid and allows push to Xero and fulfil. Things can still be added and changed in draft status and can revert draft status to make changes."
 - Run statuses now read Draft (amber, editable) → In review (blue, locked) → Approved (green, paid). No migration: the stored values open / finalised / paid are kept.

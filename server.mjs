@@ -30736,7 +30736,7 @@ async function cmStatementPdf(runId) {
       draw('Dock & Bay', ML, y, B, 18, ink); draw('COMMISSION STATEMENT', W - MR - B.widthOfTextAtSize('COMMISSION STATEMENT', 10), y + 3, B, 10, accent);
       y -= 22; const _ml = (m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4); })(run.month);
       draw(run.group_name + '  ·  ' + _ml + '  ·  ' + run.ccy, ML, y, F, 11, mut);
-      const _sl = run.status === 'paid' ? 'APPROVED' + (run.paid_at ? ' ' + ddMonYy(new Date(run.paid_at).toISOString().slice(0, 10)) : '') : cmStatusLbl(run.status).toUpperCase(); draw(_sl, W - MR - F.widthOfTextAtSize(_sl, 9), y, F, 9, mut);
+      const _sl = run.status === 'paid' ? 'APPROVED' + (run.paid_at ? ' ' + ddMonYy(new Date(run.paid_at).toISOString().slice(0, 10)) : '') : (run.status === 'finalised' ? 'DRAFT FOR REVIEW' : 'DRAFT'); draw(_sl, W - MR - F.widthOfTextAtSize(_sl, 9), y, F, 9, mut);
       y -= 8; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 1, color: accent }); y -= 16;
       cols.forEach(c => draw(c.l, c.x, y, B, 7.5, mut, c.a, c.w)); y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.5, color: line }); y -= 13;
     }
@@ -30762,25 +30762,30 @@ async function cmStatementPdf(runId) {
     y -= 10; draw('Credit notes in the month reduce commission at the order rate.', ML, y, F, 7, mut, 'l');
     if (run.xero_contact) { y -= 12; draw('Xero contact: ' + run.xero_contact, ML, y, F, 7, mut, 'l'); }
     const bytes = await doc.save();
-    return { buf: Buffer.from(bytes), run, total: Math.round(totN * 100) / 100, rows: rows.length, filename: 'commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.pdf' };
+    return { buf: Buffer.from(bytes), run, total: Math.round(totN * 100) / 100, rows: rows.length, filename: (run.status === 'paid' ? '' : 'DRAFT-') + 'commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.pdf' };
   }
 }
 // v28.333 (Ben): email the statement PDF to the agent's statement address (agent record ▸ Commission ▸ Statement to). Finalised / paid runs only.
 app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => {
   try { const p = await cmStatementPdf(req.params.id); if (!p) return res.status(404).json({ error: 'run not found' });
-    if (p.run.status !== 'paid') return res.status(409).json({ error: 'Approve the run first: the statement is sent from an approved run.' });   // v28.467
+    // v28.468 (Ben 23-Oct-26: "statement needs a draft send as well, draft review is with the agency"): In review sends the DRAFT statement for the
+    // agent to check (they reply by email); Approved sends the final one. A draft run sends nothing.
+    if (p.run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the draft statement is sent from review, the final one once approved.' });
+    const draft = p.run.status === 'finalised';
     const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
     const to = String((req.body && req.body.to) || g.email || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
     if (!to.length) return res.status(400).json({ error: 'No statement email for ' + (g.name || 'this agent') + ': set "Statement to" on the agent (CLIENT ▸ Clients ▸ ' + (g.name || 'agent') + ' ▸ Commission).' });
     const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = M[+p.run.month.slice(5, 7) - 1] + '-' + p.run.month.slice(2, 4);
     const money = n => (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); const xl = await cmStatementXlsx(p.run.id);
-    const html = '<p>Hello,</p><p>Please find attached your Dock &amp; Bay commission statement for <b>' + ml + '</b>: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p>'
+    const html = '<p>Hello,</p>' + (draft ? '<p>Please find attached your <b>DRAFT</b> Dock &amp; Bay commission statement for <b>' + ml + '</b> for your review: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p><p>Please check it and reply to this email with any missing or incorrect orders. Once agreed we will approve it and send the final statement.</p>'
+        : '<p>Please find attached your Dock &amp; Bay commission statement for <b>' + ml + '</b>: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p>')
       + '<p>Commission is on cash received in the month for shipped orders, on product sales ex tax and ex shipping. Credit notes in the month reduce it.</p>'
       + (p.run.xero_bill_ref ? '<p>Our reference: ' + p.run.xero_bill_ref + '</p>' : '') + '<p>Kind regards,<br>Dock &amp; Bay</p>';
-    const r = await sendResendEmail({ to, subject: 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
+    const r = await sendResendEmail({ to, subject: (draft ? 'DRAFT for review: ' : '') + 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
     if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
-    await pool.query(`UPDATE planner.commission_runs SET statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3 WHERE id=$1`, [p.run.id, to.join(', '), req.me && req.me.email]);
-    await cpAudit(null, 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', '), req.me && req.me.email);
+    try { await pool.query(`UPDATE planner.commission_runs SET ${draft ? 'draft_sent_at=now(), draft_sent_to=$2, draft_sent_by=$3' : 'statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3'} WHERE id=$1`, [p.run.id, to.join(', '), req.me && req.me.email]); }
+    catch (e) { if (!/does not exist/.test(e.message)) throw e; }   // before migration 384 the draft send is only in the audit log
+    await cpAudit(null, draft ? 'Commission DRAFT statement emailed for review' : 'Commission statement emailed', ml + ' · ' + g.name + ' → ' + to.join(', '), req.me && req.me.email);
     res.json({ ok: true, to });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -30794,8 +30799,8 @@ async function cmStatementXlsx(runId) {
   const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
   const ws = wb.addWorksheet('Statement'); const ml = (m => { const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+m.slice(5, 7) - 1] + '-' + m.slice(2, 4); })(run.month);
   const N = v => v == null || v === '' ? null : Math.round(Number(v) * 100) / 100;
-  ws.addRow(['Dock & Bay commission statement']).font = { bold: true, size: 14 };
-  ws.addRow([run.group_name + ' · ' + ml + ' · ' + run.ccy + ' · ' + cmStatusLbl(run.status)]);
+  ws.addRow([(run.status === 'paid' ? '' : 'DRAFT ') + 'Dock & Bay commission statement']).font = { bold: true, size: 14 };
+  ws.addRow([run.group_name + ' · ' + ml + ' · ' + run.ccy + ' · ' + (run.status === 'finalised' ? 'Draft for review' : cmStatusLbl(run.status))]);
   ws.addRow([]);
   const H = ['Order', 'Invoice', 'Client PO', 'Customer', 'Customer paid', 'Commissionable', 'Rate %', 'Commission', 'Credit note', 'Credit adj', 'Net (' + run.ccy + ')'];
   const hr = ws.addRow(H); hr.font = { bold: true }; hr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF1F5' } }; });
@@ -30807,7 +30812,7 @@ async function cmStatementXlsx(runId) {
   ws.getColumn(5).numFmt = 'dd-mmm-yy'; [6, 8, 10, 11].forEach(i => { ws.getColumn(i).numFmt = '#,##0.00'; });
   ws.eachRow(r => r.eachCell(c => { c.alignment = { horizontal: 'left' }; }));
   ws.views = [{ state: 'frozen', ySplit: 4 }];
-  return { buf: Buffer.from(await wb.xlsx.writeBuffer()), run, filename: 'commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.xlsx' };
+  return { buf: Buffer.from(await wb.xlsx.writeBuffer()), run, filename: (run.status === 'paid' ? '' : 'DRAFT-') + 'commission-statement-' + run.month + '-' + cpSlug(run.group_name) + '.xlsx' };
 }
 app.get('/api/client/commission/runs/:id/statement.xlsx', async (req, res) => {
   try { const x = await cmStatementXlsx(req.params.id); if (!x) return res.status(404).send('not found');
