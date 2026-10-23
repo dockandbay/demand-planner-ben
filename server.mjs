@@ -29618,7 +29618,7 @@ async function fulfilImportSales(days) {
   const lineIds = [], shipIds = []; sales.forEach(s => { (s.lines || []).forEach(i => lineIds.push(i)); (s.shipments || []).forEach(i => shipIds.push(i)); });
   const linesById = {}, shipsById = {};
   for (let i = 0; i < lineIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['id', 'in', lineIds.slice(i, i + 400)]], 0, 500, null, ['id', 'sale', 'product.code', 'quantity', 'unit_price', 'amount']]); (rows || []).forEach(l => { linesById[l.id] = l; }); }
-  for (let i = 0; i < shipIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/stock.shipment.out/search_read', [[['id', 'in', shipIds.slice(i, i + 400)]], 0, 500, null, ['id', 'number', 'state', 'tracking_number', 'carrier.rec_name', 'effective_date', 'planned_date']]); (rows || []).forEach(s => { shipsById[s.id] = s; }); }
+  for (let i = 0; i < shipIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/stock.shipment.out/search_read', [[['id', 'in', shipIds.slice(i, i + 400)]], 0, 500, null, ['id', 'number', 'state', 'tracking_number.rec_name', 'tracking_number.tracking_url', 'carrier.rec_name', 'effective_date', 'planned_date']]); (rows || []).forEach(s => { shipsById[s.id] = s; }); }
   // v28.008: multi-row upsert in chunks (one round trip per 150 sales instead of one per sale)
   // v28.204 (Ben): the rep group = metafield agent_code on sale.sale (metafield.value rows; read only). Skipped until migration 337.
   const agentBy = {}; const withAgent = await cpCheckAgentCol();
@@ -29630,7 +29630,7 @@ async function fulfilImportSales(days) {
   const CAST = { shipments: '::jsonb', lines: '::jsonb', metadata: '::jsonb', tags: '::text[]', sale_date: '::date', fulfil_created: '::timestamptz', total: '::numeric', untaxed: '::numeric', fulfil_id: '::bigint' };
   const rowOf = (s) => {
     const lines = (s.lines || []).map(i => linesById[i]).filter(Boolean).map(l => ({ sku: l['product.code'] || null, qty: Number(l.quantity) || 0, price: _fulfilNum(l.unit_price), amount: _fulfilNum(l.amount) }));
-    const ships = (s.shipments || []).map(i => shipsById[i]).filter(Boolean).map(x => ({ number: x.number, state: x.state, tracking: x.tracking_number || null, carrier: x['carrier.rec_name'] || null, date: fulfilUnwrap(x.effective_date) || fulfilUnwrap(x.planned_date) || null }));
+    const ships = (s.shipments || []).map(i => shipsById[i]).filter(Boolean).map(x => ({ number: x.number, state: x.state, tracking: x['tracking_number.rec_name'] || null, tracking_url: /^https?:\/\//i.test(x['tracking_number.tracking_url'] || '') ? x['tracking_number.tracking_url'] : null, carrier: x['carrier.rec_name'] || null, date: fulfilUnwrap(x.effective_date) || fulfilUnwrap(x.planned_date) || null }));
     const meta = (s.metadata && typeof s.metadata === 'object') ? s.metadata : null;
     return [s.id, s.number || null, s.reference || null, s.state || null, s['party.name'] || null, s['party.email'] || null, s['shipment_address.name'] || null, s['invoice_address.name'] || null, s['channel.name'] || null, s['channel.source'] || null, s['warehouse.code'] || null, s['shipment_address.country.code'] || null, s['currency.code'] || null, _fulfilNum(s.total_amount), _fulfilNum(s.untaxed_amount), s.invoice_state || null, s.shipment_state || null, fulfilUnwrap(s.sale_date) || null, fulfilUnwrap(s.create_date) || null, s['carrier.rec_name'] || null, JSON.stringify(ships), JSON.stringify(lines), meta ? JSON.stringify(meta) : null, cpTagsFromMeta(meta), s.comment || null].concat(withAgent ? [agentBy[String(s.id)] || null] : []);
   };
@@ -29778,6 +29778,8 @@ let _cpAgentColAt = 0;
 async function cpCheckAgentCol() { if (_cpAgentCol || (_cpAgentColAt && Date.now() - _cpAgentColAt < 10 * 60000)) return _cpAgentCol;
   try { _cpAgentCol = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='fulfil_sales' AND column_name='agent_code'`)).rowCount > 0; _cpAgentColAt = Date.now(); } catch (e) {} return _cpAgentCol; }
 cpCheckAgentCol();
+// v28.475: sale.sale invoice_state values that mean a customer invoice is posted (the portal then offers the PDF download)
+const CP_INVOICED = ['waiting', 'paid', 'partially_paid', 'exception'];
 async function cpOrders(opts) {
   const { client, user, q, from, to, status } = opts || {};
   const rule = await cpOriginRule(!!(opts && opts.cachedRule)); const params = []; const where = [];
@@ -29799,8 +29801,8 @@ async function cpOrders(opts) {
     let bucket = 'open'; if (fulfilled) bucket = 'fulfilled'; if (r.state === 'draft' || r.state === 'quotation') bucket = 'draft';
     const unpaid = fulfilled && r.invoice_state && r.invoice_state !== 'paid' && r.invoice_state !== 'none';
     return { id: r.fulfil_id, okey: 'F' + r.fulfil_id, ref: r.reference || r.number, number: r.number, origin, state: r.state, bucket, unpaid: !!unpaid, company: r.party_name, customer: r.ship_name || r.party_name, email: r.party_email, channel: r.channel, country: r.country_code, currency: r.currency, amount: Number(r.total) || 0, net: Number(r.untaxed) || 0,
-      created: d, days, fulfilled_date: last ? last.date : null, tracking: last ? last.tracking : null, carrier: last ? (last.carrier || r.carrier) : r.carrier, shipment: last ? last.number : null, invoice_state: r.invoice_state, shipment_state: r.shipment_state,
-      document: origin === 'cin7' ? { kind: 'xero', label: 'Xero invoice', url: null, note: 'Xero link: pending the Xero mirror (Diviyaj)' } : { kind: 'fulfil', label: 'Fulfil document', url: null },
+      created: d, days, fulfilled_date: last ? last.date : null, tracking: last ? last.tracking : null, tracking_url: last ? (last.tracking_url || null) : null, carrier: last ? (last.carrier || r.carrier) : r.carrier, shipment: last ? last.number : null, invoice_state: r.invoice_state, shipment_state: r.shipment_state,
+      document: origin === 'cin7' ? { kind: 'xero', label: 'Xero invoice', url: null, note: 'Xero link: pending the Xero mirror (Diviyaj)' } : { kind: 'fulfil', label: CP_INVOICED.includes(r.invoice_state) ? 'Invoice' : 'Fulfil document', url: null, invoiced: CP_INVOICED.includes(r.invoice_state) },
       lines: cpJson(r.lines, []) };
   });
   // portal-submitted orders not yet in the mirror (drafts waiting on Ops) — shown at the top
@@ -31412,6 +31414,37 @@ app.get('/api/cp/orders', cpAuth, async (req, res) => { try {
   const orders = await _lcGet(_cpCache(key, CP_TTL.orders, 3 * 60000, () => cpOrders(opts)));
   const v = _cpMemo('orders|' + key, [orders], () => ({ orders }));
   sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v28.475 (Ben 23-Oct-26: "can the client download the Fulfil invoice", "just the invoice download"): an order's posted customer
+// invoices are read live from Fulfil (so one posted after the last sales sync still shows) and the PDF comes from Fulfil's own Invoice
+// print template (report account.invoice.html → short-lived file URL), streamed through HORIZON so the client never sees a Fulfil link.
+// The order must be visible to the signed-in user (same visibility SQL as My orders). Cin7-era orders (Xero invoices): not yet.
+async function cpOrderInvoices(req, okey) {
+  const m = /^F(\d+)$/.exec(String(okey || '')); if (!m) return null;
+  const params = [m[1]]; const vis = cpVisibilitySql(req.cp.client, req.cp.user, params);
+  const s = (await pool.query(`SELECT s.fulfil_id, s.number, s.reference FROM planner.fulfil_sales s WHERE s.fulfil_id=$1::bigint AND ${vis}`, params)).rows[0];
+  if (!s) return null;
+  const sale = (await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['id', '=', Number(s.fulfil_id)]], 0, 1, null, ['id', 'invoices']]))[0];
+  const ids = (sale && sale.invoices) || []; if (!ids.length) return { sale: s, invoices: [] };
+  const inv = await fulfilFetch('PUT', '/model/account.invoice/search_read', [[['id', 'in', ids], ['type', '=', 'out'], ['state', 'in', ['posted', 'paid']]], 0, 50, null, ['id', 'number', 'state', 'total_amount', 'invoice_date', 'currency.code']]);
+  return { sale: s, invoices: (inv || []).map(i => { const t = _fulfilNum(i.total_amount); return { id: i.id, number: i.number || null, state: i.state, total: t, date: fulfilUnwrap(i.invoice_date) || null, currency: i['currency.code'] || null, credit: t < 0 }; })
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id) };
+}
+app.get('/api/cp/orders/:okey/invoices', cpAuth, async (req, res) => { try {
+  const r = await cpOrderInvoices(req, req.params.okey); if (!r) return res.status(404).json({ error: 'order not found' });
+  res.set('Cache-Control', 'no-store').json({ invoices: r.invoices }); } catch (e) { log500(e); res.status(502).json({ error: 'Invoices are unavailable right now, please try again' }); } });
+// ?id=<invoice id> picks one of the order's invoices; without it, the latest (the My orders row link)
+app.get('/api/cp/orders/:okey/invoice.pdf', cpAuth, async (req, res) => {
+  const fail = (code, msg) => res.status(code).set('Cache-Control', 'no-store').type('html').send('<!doctype html><meta charset="utf-8"><p style="font:14px system-ui;padding:24px">' + msg + '</p>');
+  try { const r = await cpOrderInvoices(req, req.params.okey); if (!r) return fail(404, 'Order not found.');
+    const inv = req.query.id ? r.invoices.find(i => String(i.id) === String(req.query.id)) : r.invoices[0];
+    if (!inv) return fail(404, 'There is no invoice for this order yet.');
+    const rep = await fulfilFetch('PUT', '/report/account.invoice.html', { objects: [inv.id], data: {} });
+    if (!rep || !rep.url) throw new Error('Fulfil returned no invoice file');
+    const f = await _fetchT(rep.url, {}, 30000); if (!f.ok) throw new Error('invoice file HTTP ' + f.status);
+    const buf = Buffer.from(await f.arrayBuffer());
+    const name = 'Dock-and-Bay-' + (inv.credit ? 'credit-note' : 'invoice') + '-' + String(inv.number || inv.id).replace(/[^A-Za-z0-9_-]+/g, '') + '.pdf';
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="' + name + '"', 'Cache-Control': 'no-store' }).send(buf);
+  } catch (e) { log500(e); fail(502, 'The invoice is unavailable right now, please try again in a minute.'); } });
 // Order submission: validate (unknown / closed SKUs, partial cartons) → record → Fulfil draft (gated) → two emails.
 // v28.227 (Ben): the draft also carries what staff set in CLIENT ▸ Orders review: order.carrier_id / carrier_service_id
 // (Fulfil carrier + carrier.service ids) and per line mode 'ship' | 'backorder' | 'dropship' (= sale.line.delivery_mode) with

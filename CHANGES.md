@@ -1,3 +1,12 @@
+## v28.475 (23-Oct-26) Client portal: invoice PDF download and carrier tracking links in My orders
+- Ben: "can the client download the Fulfil invoice (or Xero invoice)", "Not pay now. Just the invoice download." and "the shipment tracking with dynamic link to carrier is included in my orders page?"
+- My orders: invoiced Fulfil orders show "⬇ Invoice" (latest posted invoice). The order detail lists every posted invoice and credit note with date, amount and paid. The PDF is Fulfil's own Invoice template, read live from Fulfil and streamed by HORIZON (the client never sees a Fulfil link), named Dock-and-Bay-invoice-<number>.pdf.
+- Security: the order must be visible to the signed-in user (same rules as My orders); an invoice from another order or client returns not found.
+- Tracking: now a link to the carrier. Fixed the sales sync, which stored Fulfil's tracking record id instead of the tracking number; it now also stores Fulfil's tracking URL. Without one, the link is built from the carrier name (UPS, FedEx, DHL, USPS, Royal Mail, Parcelforce, DPD, Evri, Australia Post, StarTrack, Sendle).
+- Not yet: Cin7-era orders (Xero invoices) still show "Xero invoice" with no download.
+- Live note: My orders only lists Fulfil orders once the order import is switched on (cp_sales_import_enabled, off on live). No migration, no new env.
+- Verified on the sandbox against the Fulfil sandbox: invoice 9999 (SO13136) downloads as a PDF; other client's order 404; foreign invoice id 404; no session 401; list and detail render in Chrome.
+
 ## v28.474 (23-Oct-26) PO grid and Shipments: PLAN opens in a 70% drawer instead of expanding under the row
 - Ben: "update the PO grid to po out the PLAN in 70% screen DRAW instead of the popdown expand. this would be the same for shipments tab".
 - Desktop: the PLAN button (PO grid) and the shipment expand (Shipments) open the same detail in a right-hand drawer, 70% of the screen wide, over a dimmed grid. Header shows the PO / shipment reference and "✕ Close"; Esc or a click on the dimmed grid also closes it. The grid row stays collapsed underneath. Deep links (#/supply/purchase-orders/<PO>/<tab>, shipments/<ref>) open the drawer.
