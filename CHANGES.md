@@ -1,3 +1,8 @@
+## v28.476 (24-Oct-26) Supplier payment email: no Xero bank warning
+- Ben: "Remove warning to [pay] from home bank on top of this email which goes to supplier. No need in email".
+- The "Payment <amount> made to <supplier>" email no longer starts with the red "THIS MUST BE PAID FROM A BANK LINKED TO XERO <org>" banner. It was internal guidance (v28.106) leaking to the supplier. The banner stays on the payment run screen in HORIZON, where the payer needs it.
+- No migration, no new env.
+
 ## v28.475 (23-Oct-26) Client portal: invoice PDF download and carrier tracking links in My orders
 - Ben: "can the client download the Fulfil invoice (or Xero invoice)", "Not pay now. Just the invoice download." and "the shipment tracking with dynamic link to carrier is included in my orders page?"
 - My orders: invoiced Fulfil orders show "⬇ Invoice" (latest posted invoice). The order detail lists every posted invoice and credit note with date, amount and paid. The PDF is Fulfil's own Invoice template, read live from Fulfil and streamed by HORIZON (the client never sees a Fulfil link), named Dock-and-Bay-invoice-<number>.pdf.

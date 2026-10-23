@@ -280,7 +280,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.475
+verified_version: v28.476
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -468,6 +468,7 @@ verified_version: v28.475
 
 ## 3PL invoices
 - Four 3PLs: uk_ilg, us_geneva, eu_ifulfilment, au_coghlans. Bill number: FULFILLMENT-<region>-<period end>. For Coghlans the bill date is the file's period end and the invoice number is added. (source: server.mjs :: TPL_KEYS, tpl/xero-bill)
+- Payment confirmed email (v28.476, Ben 24-Oct-26: "Remove warning ... on top of this email which goes to supplier. No need in email"): the supplier's "Payment <amount> made to <supplier>" email no longer opens with the red "THIS MUST BE PAID FROM A BANK LINKED TO XERO <org>" banner (added v28.106). That warning is for whoever pays, so it stays on the payment run screen in HORIZON only. (source: server.mjs :: emailPaymentConfirmed)
 - Payments Report paid and Xero (v28.305, Ben 13-Oct-26: "should only be admin or accounts permissions"): marking a supplier payment run paid (bank amount and currency, which also emails the supplier), Create in Xero (the supplier payment bill) and paying it in Xero need the ACCOUNTS grant or admin. Before, marking paid was open to any SUPPLY editor and the two Xero steps were admin only. The dry run / preview stays open. (source: server.mjs :: /api/supply/payments/pay)
 - Who may create Xero bills (v28.301, Ben 13-Oct-26): the 3PL invoicing bill needs the ACCOUNTS grant or admin (the preview, which writes nothing, also allows SUPPLY edit); the commission bill needs the CLIENT grant or admin. Both still need the confirm step. If the permission lookup fails the answer is 503 try again. (source: server.mjs :: /api/client/commission/runs/:id/xero-bill)
 - Cost-type accounts (storage, returns, inbound, other) are stored per 3PL in tpl_cost_accounts. Per-order freight and fulfilment go to the "region - channel" account map (tpl_account_map). Unmapped amounts appear as UNMAPPED lines. (source: server.mjs :: tpl/xero-bill)

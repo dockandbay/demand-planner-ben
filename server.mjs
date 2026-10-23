@@ -13863,21 +13863,9 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy, region
   const cell = 'border:1px solid #cccccc;padding:4px 8px', hcell = cell + ';background:#f2f2f2;text-align:left;font-weight:bold';
   const rowsHtml = run.lines.map(l => `<tr><td style="${cell};text-align:left">${escHtml(l.reference || '')}</td><td style="${cell};text-align:right">${fmtMoney2(l.amount)}</td><td style="${cell}">${escHtml(l.type || '')}</td><td style="${cell}">${escHtml(l.prod_no || '')}</td><td style="${cell}">${escHtml(l.deposit_ref || '')}</td></tr>`).join('');
   const greet = (us.find(u => u.contact_name) || {}).contact_name || supplier;
-  // v28.106 (Ben): when the run has DEPOSITS, warn at the top which Xero org's bank it must be paid from — deposits
-  // settle only in their home org (never cross-org). Derive the home org(s) from the run's PO references.
-  let depWarn = '';
-  try {
-    const depLines = (run.lines || []).filter(l => /deposit/i.test(String(l.type || '')));
-    if (depLines.length) {
-      const refs = [...new Set((run.lines || []).map(l => String(l.reference || '')).filter(Boolean))];
-      const pr = refs.length ? (await pool.query(`SELECT po, upper(coalesce(country_code,'')) cc, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [refs])).rows : [];
-      const orgs = [...new Set(pr.map(p => _poXeroRegion(p.cc, p.branch)))];
-      const orgTxt = orgs.length === 1 ? ('XERO ' + orgs[0].toUpperCase()) : (orgs.length > 1 ? ('XERO ' + orgs.map(o => o.toUpperCase()).join(' & ') + ' (split — deposits from two orgs cannot be in one run)') : 'the deposit’s home Xero org');
-      depWarn = `<p style="margin:0 0 12px;padding:10px 12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;color:#b91c1c;font-weight:bold;font-size:13px">THIS MUST BE PAID FROM A BANK LINKED TO ${escHtml(orgTxt)}</p>`;
-    }
-  } catch (e) {}
+  // v28.476 (Ben): the v28.106 "must be paid from a bank linked to Xero …" banner is no longer in this email (it goes to the
+  // supplier). The payer still sees it on the payment run screen.
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">`
-    + depWarn
     + `<p style="margin:0 0 10px">Dear ${escHtml(greet)},</p>`
     + `<p style="margin:0 0 10px">Please see below details as confirmed for the recent payment made to <b>${escHtml(supplier)}</b> for <b>${escHtml(payAmt)}</b>.</p>`
     + `<p style="margin:0 0 10px"><b>Supplier:</b> ${escHtml(supplier)}<br><b>Payment amount:</b> ${escHtml(payAmt)}<br><b>Payment reference:</b> ${escHtml(inv)}</p>`
