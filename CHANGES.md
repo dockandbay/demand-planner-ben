@@ -1,3 +1,10 @@
+## v28.474 (23-Oct-26) PO grid and Shipments: PLAN opens in a 70% drawer instead of expanding under the row
+- Ben: "update the PO grid to po out the PLAN in 70% screen DRAW instead of the popdown expand. this would be the same for shipments tab".
+- Desktop: the PLAN button (PO grid) and the shipment expand (Shipments) open the same detail in a right-hand drawer, 70% of the screen wide, over a dimmed grid. Header shows the PO / shipment reference and "✕ Close"; Esc or a click on the dimmed grid also closes it. The grid row stays collapsed underneath. Deep links (#/supply/purchase-orders/<PO>/<tab>, shipments/<ref>) open the drawer.
+- Phones: unchanged (full-screen sheet). The phone-only field stacking no longer applies inside the desktop drawer.
+- Same mechanism as the phone sheet (the detail node is moved, not re-rendered), so every tab, save, upload and button inside works as before.
+- Checked in Chrome on the sandbox: PO-60UKBE1 (drawer 1,210 of 1,728 px, all 7 tabs, tab switch, Esc and backdrop close, content back in the row, URL back to the grid; reopen), shipment PO-55EUFF2. Display only; buy plan identical.
+
 ## v28.473 (23-Oct-26) Client portal: Commission page error fixed; line sheet dimensions as separate fields
 - Ben: "client portal error on commission page syntax error at or near "on"". The agent gate query named a column `on` (a reserved word), so every portal Commission page load failed (since v28.333). Renamed; the page loads again.
 - Ben: "line sheet MATERIAL column is way too wide, should wrap. also the carton dims should be split into each column and product dims are missing include weight, should be individual fields. carton weight is blank on everything".

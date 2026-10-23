@@ -749,7 +749,7 @@
 #supply-root tr.exp-row table td:first-child,#supply-root tr.exp-row table th:first-child{white-space:nowrap;min-width:240px;padding-right:16px}
 #supply-root .pay-tbl td:first-child,#supply-root .pay-tbl th:first-child{white-space:nowrap;min-width:330px}
 /* Mobile (full-screen PO sheet): the 330px column-1 floor above is far too wide on a phone — let it wrap and shrink. */
-#mob-sheet-ov .pay-tbl td:first-child,#mob-sheet-ov .pay-tbl th:first-child{min-width:150px;white-space:normal}
+#mob-sheet-ov:not(.as-drawer) .pay-tbl td:first-child,#mob-sheet-ov:not(.as-drawer) .pay-tbl th:first-child{min-width:150px;white-space:normal}
 #supply-root .payin.pdis,#supply-root .payin:disabled{background:var(--line2);color:var(--faint);cursor:not-allowed;border-color:var(--line2)}
 #supply-root .payin{text-align:left}   /* PAYMENTS panel: left-align the amount inputs */
 #sup-grid td .act-wrap{display:flex;align-items:center;gap:4px;margin-top:3px;white-space:nowrap}   /* v28.321 (Ben): PO grid action marker + SNOOZE under the date, not beside it */
@@ -935,6 +935,15 @@
 #supply-root .opappr:hover .opundo,#supply-root .opappr:hover .oprisk-undo{display:flex}
 /* mobile full-screen sheet for an opened PO / shipment (applied via JS only on phones) */
 #mob-sheet-ov{display:none;position:fixed;inset:0;z-index:6000;background:var(--card);overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;box-sizing:border-box}
+/* v28.474: desktop = 70% right-hand drawer (phones keep the full-screen sheet) */
+#mob-sheet-ov.as-drawer{background:rgba(15,23,42,.38);overflow:hidden}
+#mob-sheet-ov.as-drawer .mob-drawer{position:absolute;top:0;right:0;bottom:0;width:70vw;max-width:100%;background:var(--card);box-shadow:-10px 0 28px rgba(15,23,42,.22);overflow-y:auto;overflow-x:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;animation:mobDrawerIn .16s ease-out}
+@keyframes mobDrawerIn{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+#mob-sheet-ov.as-drawer .mob-back{position:sticky;top:0;left:0;padding:11px 16px;font-size:13px}
+#mob-sheet-ov.as-drawer .mob-sheet-body{padding:8px 14px 24px;text-align:left;white-space:normal}
+#mob-sheet-ov.as-drawer .tw>table{width:max-content;min-width:100%}
+#mob-sheet-ov.as-drawer table td:first-child,#mob-sheet-ov.as-drawer table th:first-child{white-space:nowrap}
+#supply-root tr.exp-row.in-drawer{display:none!important}
 #mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid var(--line);background:var(--nav);color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
 #mob-sheet-ov .mob-back .mob-back-ref{font-size:13px;font-weight:700;color:#93c5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
 #mob-sheet-ov .mob-sheet-body{padding:10px 12px 48px;box-sizing:border-box;max-width:100vw}
@@ -948,12 +957,12 @@
 #mob-sheet-ov .po-more-item{display:block;width:100%;text-align:left;background:transparent;border:none;padding:11px 12px;font-size:13px;font-family:inherit;color:var(--ink-soft);cursor:pointer;border-radius:6px}
 #mob-sheet-ov .po-more-item:hover{background:var(--hover)}
 #mob-sheet-ov .po-more-item .ex-badge{margin-left:6px}
-#mob-sheet-ov .cli-row{flex-direction:column;gap:3px;align-items:stretch}
-#mob-sheet-ov .cli-lbl{flex:0 0 auto;width:auto;padding-top:0}
-#mob-sheet-ov .cli-val{width:100%}
-#mob-sheet-ov .cli-val input,#mob-sheet-ov .cli-val textarea,#mob-sheet-ov .cli-val select{width:100%!important;max-width:100%!important;box-sizing:border-box}
-#mob-sheet-ov .cli-val select.boolsel{width:auto!important;min-width:78px;max-width:120px!important;display:inline-block}
-#mob-sheet-ov [style*="min-width:360px"],#mob-sheet-ov [style*="min-width:430px"]{min-width:0!important;flex-basis:100%!important}
+#mob-sheet-ov:not(.as-drawer) .cli-row{flex-direction:column;gap:3px;align-items:stretch}
+#mob-sheet-ov:not(.as-drawer) .cli-lbl{flex:0 0 auto;width:auto;padding-top:0}
+#mob-sheet-ov:not(.as-drawer) .cli-val{width:100%}
+#mob-sheet-ov:not(.as-drawer) .cli-val input,#mob-sheet-ov:not(.as-drawer) .cli-val textarea,#mob-sheet-ov:not(.as-drawer) .cli-val select{width:100%!important;max-width:100%!important;box-sizing:border-box}
+#mob-sheet-ov:not(.as-drawer) .cli-val select.boolsel{width:auto!important;min-width:78px;max-width:120px!important;display:inline-block}
+#mob-sheet-ov:not(.as-drawer) [style*="min-width:360px"],#mob-sheet-ov:not(.as-drawer) [style*="min-width:430px"]{min-width:0!important;flex-basis:100%!important}
 #mob-sheet-ov [style*="max-width:760px"],#mob-sheet-ov [style*="max-width:1340px"]{max-width:100%!important}
 #mob-sheet-ov .tw{max-height:none}
 /* wide tables in the card (payment plan, order plan, landed costs, timeline) size to their columns and scroll sideways instead of squishing; narrow ones still fill width */
@@ -4335,23 +4344,36 @@
   // then move it back on close. getElementById/querySelector on #podet-* still work wherever the node lives.
   var _mobActiveTd=null;
   function restoreMob(td){ if(!td||!td._mobHolder)return; var h=td._mobHolder; while(h.firstChild)td.appendChild(h.firstChild); td._mobHolder=null; }
+  // v28.474 (Ben 23-Oct-26: "po out the PLAN in 70% screen DRAW instead of the popdown expand ... same for shipments tab"): on desktop the
+  // PO / shipment expand opens in a right-hand drawer (70% of the screen) instead of under the row; phones keep the full-screen sheet.
+  // Same move-the-node mechanism, so every #podet-* / #shipdet-* binding works unchanged.
   function applyMobSheet(ex, opening, closeFn, label){ var td=ex&&ex.querySelector('td'); if(!td)return;
     var ov=document.getElementById('mob-sheet-ov');
-    if(opening && isPhone()){
-      if(_mobActiveTd && _mobActiveTd!==td){ restoreMob(_mobActiveTd); }   // only one sheet at a time
+    if(opening){
+      var drawer=!isPhone();
+      if(_mobActiveTd && _mobActiveTd!==td){ var _pex=_mobActiveTd.closest('tr'); restoreMob(_mobActiveTd); if(_pex){ _pex.classList.remove('in-drawer'); if(_pex._closeFn&&_pex.style.display!=='none'){ var _cf=_pex._closeFn; _pex._closeFn=null; _cf(); } } }   // only one sheet at a time
       if(!ov){ ov=document.createElement('div'); ov.id='mob-sheet-ov'; (document.getElementById('supply-root')||document.body).appendChild(ov); }   // inside #supply-root so its CSS still applies
-      ov.innerHTML='';
+      ov.innerHTML=''; ov.classList.toggle('as-drawer',drawer);
+      var host=ov; if(drawer){ host=document.createElement('div'); host.className='mob-drawer'; ov.appendChild(host);
+        var _sb=document.getElementById('sbx-banner'); if(_sb&&_sb.offsetHeight)host.style.top=_sb.offsetHeight+'px';   // below the sandbox-only banner
+        ov.onclick=function(e){ if(e.target===ov)closeFn(); }; }
+      else ov.onclick=null;
       var bk=document.createElement('button'); bk.className='mob-back';
-      bk.innerHTML='<span>← Back to list</span>'+(label?'<span class="mob-back-ref">'+esc(label)+'</span>':'');   // show which PO / shipment this sheet is
-      bk.onclick=function(e){ e.stopPropagation(); closeFn(); }; ov.appendChild(bk);
+      bk.innerHTML=(drawer?'<span class="mob-back-ref">'+esc(label||'')+'</span><span>✕ Close</span>':'<span>← Back to list</span>'+(label?'<span class="mob-back-ref">'+esc(label)+'</span>':''));   // show which PO / shipment this sheet is
+      bk.onclick=function(e){ e.stopPropagation(); closeFn(); }; host.appendChild(bk);
       var holder=document.createElement('div'); holder.className='mob-sheet-body';
       while(td.firstChild){ holder.appendChild(td.firstChild); }   // move #podet-* (and its future innerHTML) into the overlay
-      ov.appendChild(holder); td._mobHolder=holder; _mobActiveTd=td;
-      ov.style.display='block'; ov.scrollTop=0; document.body.style.overflow='hidden'; }
+      host.appendChild(holder); td._mobHolder=holder; _mobActiveTd=td; ex._closeFn=closeFn;
+      if(drawer)ex.classList.add('in-drawer');   // the grid row stays collapsed under the drawer
+      ov.style.display='block'; ov.scrollTop=0; host.scrollTop=0; document.body.style.overflow='hidden'; }
     else {
-      restoreMob(td); if(_mobActiveTd===td)_mobActiveTd=null;
-      if(ov){ ov.style.display='none'; ov.innerHTML=''; }
+      restoreMob(td); if(_mobActiveTd===td)_mobActiveTd=null; ex.classList.remove('in-drawer'); ex._closeFn=null;
+      if(ov){ ov.style.display='none'; ov.innerHTML=''; ov.classList.remove('as-drawer'); }
       document.body.style.overflow=''; } }
+  try{ document.addEventListener('keydown',function(e){ if(e.key!=='Escape')return; var ov=document.getElementById('mob-sheet-ov'); if(!ov||ov.style.display==='none'||!ov.classList.contains('as-drawer'))return;
+    if(document.querySelector('#podrawer-bg.open,#shipdrawer-bg.open,#sampdrawer-bg.open,#erpdrawer-bg.open,#sovdrawer-bg.open'))return;   // another drawer on top closes first
+    var t=e.target; if(t&&/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;
+    var ex=_mobActiveTd&&_mobActiveTd.closest('tr'); if(ex&&ex._closeFn)ex._closeFn(); }); }catch(e){}
   // small floating "Copied to clipboard" tooltip anchored just above a cell (fades out on its own)
   var _copyTip=null,_copyTipT=null;
   function showCopyTip(cell,msg){ if(!cell)return;
