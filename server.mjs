@@ -31497,8 +31497,8 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
 // A key account sitting under an agent never sees the agent's statement. Returns a note when blocked, null when allowed.
 async function cpCommPortalGate(c) {
   if (c.type !== 'agent') return 'Commission statements are for agent accounts.';
-  const g = (await pool.query(`SELECT coalesce((to_jsonb(g)->>'portal_on')::boolean, false) on FROM planner.rep_groups g WHERE id=$1`, [c.rep_group_id])).rows[0];
-  return g && g.on ? null : 'Commission statements are not switched on for this account yet.'; }
+  const g = (await pool.query(`SELECT coalesce((to_jsonb(g)->>'portal_on')::boolean, false) is_on FROM planner.rep_groups g WHERE id=$1`, [c.rep_group_id])).rows[0];   // v28.473: "on" is a reserved word (the page failed with a syntax error)
+  return g && g.is_on ? null : 'Commission statements are not switched on for this account yet.'; }
 app.get('/api/cp/commission/statement.pdf', cpAuth, async (req, res) => {
   try { const c = req.cp.client; if (!c.features.view_commission || !c.rep_group_id) return res.status(403).send('not enabled'); const g = await cpCommPortalGate(c); if (g) return res.status(403).send(g);
     const run = (await pool.query(`SELECT id FROM planner.commission_runs WHERE rep_group_id=$1 AND month=$2 AND status='paid'`, [c.rep_group_id, String(req.query.month || '')])).rows[0];

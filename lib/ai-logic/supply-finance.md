@@ -280,7 +280,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.472
+verified_version: v28.473
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -538,6 +538,7 @@ verified_version: v28.472
 
 ## Client portal pricing, orders, commissions
 - Price tiers by market: rt = products.<mkt>_rt (includes tax). ws = ex-tax retail ÷ 2, where ex-tax = RT ÷ 1.2 (UK, EU), ÷ 1.1 (AU) or ÷ 1.0 (US, CA). dist = ws × (1 − discount %), with the discount taken from distributor_offers by market and method (fob, exw or 3pl). If no discount is set, the price falls back to ws. With no tier set, the legacy client_price_lists is used. (source: server.mjs :: cpTierPrice, /api/cp/prices)
+- Line sheet dimensions (v28.473): carton L / W / H / weight and product L / W / H / weight are separate columns in the table and the XLSX download, in the market's units (cm / kg; in / lb for US and CA dims), from products.<uk|us>_carton_* and _prod_*. (source: supply/client-view.js :: lineTable, csvDownload, DIMC; server.mjs :: cpProdSql)
 - Client orders reject unknown and CLOSED SKUs. Non-whole cartons need explicit acceptance (sample orders are exempt). Samples are priced 0. Stock shows in bands unless exact stock is configured. (source: server.mjs :: /api/cp/order)
 - Order review before Fulfil (v28.227): a submitted portal order goes straight to Fulfil as a draft sale only when auto-post applies: the client's "Portal orders" setting (clients.order_review) is Auto post, or it is Inherit and CLIENT ▸ Config "Post portal orders to Fulfil automatically" (cp_auto_push_fulfil) is on. The default is OFF, so orders are held with status 'review' (Awaiting review). Always review beats the global switch. The override is read fresh at submit time. If an auto-post fails, the order shows "Needs push" with the reason. (source: server.mjs :: cpAutoPush, /api/cp/order)
 - Order emails (v28.227): one email on submit, to the client user, cc the sales team (cp_sales_team_emails, else cp_ops_emails) plus the client's owner. With cp_client_confirm_email off it goes to the sales team only. A failed auto-post also alerts the sales team. (source: server.mjs :: cpSalesTeam, /api/cp/order)

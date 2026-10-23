@@ -1,3 +1,10 @@
+## v28.473 (23-Oct-26) Client portal: Commission page error fixed; line sheet dimensions as separate fields
+- Ben: "client portal error on commission page syntax error at or near "on"". The agent gate query named a column `on` (a reserved word), so every portal Commission page load failed (since v28.333). Renamed; the page loads again.
+- Ben: "line sheet MATERIAL column is way too wide, should wrap. also the carton dims should be split into each column and product dims are missing include weight, should be individual fields. carton weight is blank on everything".
+- Line sheet table: Ctn L, Ctn W, Ctn H, Ctn weight, Prod L, Prod W, Prod H, Prod weight, each its own column with the market's units in the header (cm / kg; in / lb for US and CA). Material wraps (max about 260 px).
+- XLSX line sheet download: the same 8 fields as separate columns (ctn_l_cm ... prod_weight_kg). Carton weight was blank in every download because it read a field the server sends inside the dimensions; fixed. The data is there: 2,011 of 2,929 active live products have a carton weight (812 of 974 in planning scope on the sandbox).
+- Checked in Chrome (Portal preview, Applemna, US): headers and values, e.g. BAGCOOL-MD-DKDIS 21.26 x 17.3 x 15.75 in, 33 lb; product 14.6 x 13 x 7.87 in, 1.3 lb. Commission page loads. Buy plan identical.
+
 ## v28.472 (23-Oct-26) Commission runs never pay an invoice twice
 - Ben: "do not double pay, we never double pay, a commissions run is only for unpaid commissions regardless of order month".
 - Rule: an agent is never paid more on one invoice than the commission on its whole value (product lines ex tax and shipping x rate). Already paid = imported paid history (Paid, by agent + invoice number) + rows in any other month's run (not deferred / exception) + earlier rows this month. A payment that would go over is cut to what is left (0 if none), with the note "already paid X on this invoice (where); invoice commission Y: only Z left to pay". A cap, not a deduction, so a deposit in one month and the balance in another both pay.
