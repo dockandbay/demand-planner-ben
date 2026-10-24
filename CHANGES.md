@@ -1,3 +1,11 @@
+## v28.477 (24-Oct-26) Client portal order import: wholesale channels only, ready for the n8n schedule
+- Ben: "Build the n8n flow to import fulfil orders for commissions and client portal. Yes its every wholesale channel", "Including faire", "And markettime".
+- The Fulfil sales import now pulls only the channels in the new setting cp_import_channels (CLIENT ▸ Config ▸ Order import). Default: the 17 wholesale channels (UK/US/EU WS Shopify stores, which carry MarketTime orders; Faire UK and US; Key Accounts; Custom/Co-Brand; AU Wholesale; International Distributors). Before, it pulled every channel: about 130,000 orders in 120 days on live, 99% retail and Amazon, beyond Vercel's 300 s limit. Live wholesale volume: 883 orders in the same window.
+- Schedule: n8n workflow "Horizon — Client portal order import (every 2h)" POSTs /api/cron/client-sales?days=7 with x-webhook-secret. The Config button backfills 120 days once.
+- Config tab text updated (no longer "not imported yet"); the import result shows the channel count.
+- Sandbox test (Fulfil sandbox): 120-day backfill 348 orders in 8 s, all from WS and Faire channels; 7-day run 51 orders in 4 s.
+- Live switch-on (after deploy): set cp_sales_import_enabled = true, run the 120-day backfill, activate the n8n workflow. No migration, no new env. New cron route: none (/api/cron/client-sales exists since v28.008; Diviyaj's gate exemption must already include it).
+
 ## v28.476 (24-Oct-26) Supplier payment email: no Xero bank warning
 - Ben: "Remove warning to [pay] from home bank on top of this email which goes to supplier. No need in email".
 - The "Payment <amount> made to <supplier>" email no longer starts with the red "THIS MUST BE PAID FROM A BANK LINKED TO XERO <org>" banner. It was internal guidance (v28.106) leaking to the supplier. The banner stays on the payment run screen in HORIZON, where the payer needs it.

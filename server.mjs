@@ -29533,7 +29533,12 @@ app.post('/api/admin/data-health/recipients', async (req, res) => {
 });
 
 // ── config (portal-wide settings live in app_settings under cp_*) ──
-const CP_SETTINGS = ['cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to', 'cp_auto_push_fulfil', 'cp_sales_team_emails'];
+// v28.477 (Ben 24-Oct-26: "every wholesale channel ... including faire ... and markettime"): the order import pulls these Fulfil
+// sale channels only (by name; CLIENT > Config > Order import). MarketTime orders arrive through the wholesale Shopify stores.
+const CP_IMPORT_CHANNELS_DEFAULT = ['dockandbay-uk-ws', 'dockandbay-us-ws', 'dockandbay-eu-ws', 'Faire UK', 'Faire US', 'UK - Key Accounts', 'UK - Custom/Co-Brand',
+  'International Distributor (UK entity)', 'International Distributor (Co Brand - UK entity)', 'AU - Wholesale', 'AU - Custom/Co-Brand', 'International Distributor (AU entity)',
+  'US - Key Accounts', 'US - Custom/Co-Brand', 'EU - Key Accounts', 'EU - Custom/Co-Brand', 'EU - International Distributor'];
+const CP_SETTINGS = ['cp_import_channels', 'cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to', 'cp_auto_push_fulfil', 'cp_sales_team_emails'];
 const CP_REVIEW_MODES = ['inherit', 'review', 'auto'];   // v28.227 clients.order_review
 app.get('/api/client/config', async (req, res) => {
   try {
@@ -29543,7 +29548,7 @@ app.get('/api/client/config', async (req, res) => {
       pool.query(`SELECT code, max(label) label, max(market) market, max(currency) currency, count(*)::int skus, to_char(max(updated_at),'YYYY-MM-DD') updated FROM planner.client_price_lists GROUP BY code ORDER BY code`),
       pool.query(`SELECT count(*)::int n, to_char(max(last_synced_at),'YYYY-MM-DD HH24:MI') synced, min(sale_date) mn, max(sale_date) mx FROM planner.fulfil_sales`),
     ]);
-    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL', cp_auto_push_fulfil: 'false' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
+    res.set('Cache-Control', 'no-store').json({ settings: s, defaults: { cp_import_channels: CP_IMPORT_CHANNELS_DEFAULT.join(', '), cp_cutover_cin7_until: '2026-09-06', cp_cutover_fulfil_from: '2026-10-01', cp_client_confirm_email: 'true', cp_stock_bands: JSON.stringify(CP_BANDS_DEFAULT), cp_hide_discontinued: 'true', cp_default_method: 'Pallet · DHL', cp_auto_push_fulfil: 'false' }, cin7_refs: cin7.rows[0], price_lists: pl.rows, sales_mirror: sales.rows[0], warehouses: CP_WAREHOUSES, fulfil_wh: CP_FULFIL_WH });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v28.441 Image galleries settings (CLIENT > Config > Image galleries; client record > Access). Lists ImageBank's shared galleries, the default
@@ -29602,7 +29607,8 @@ async function fulfilImportSales(days) {
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
   const since = new Date(Date.now() - (Number(days) || 120) * 86400000).toISOString().slice(0, 10);
   const F = ['id', 'number', 'reference', 'state', 'party.name', 'party.email', 'shipment_address.name', 'invoice_address.name', 'channel.name', 'channel.source', 'warehouse.code', 'shipment_address.country.code', 'currency.code', 'total_amount', 'untaxed_amount', 'invoice_state', 'shipment_state', 'sale_date', 'create_date', 'carrier.rec_name', 'metadata', 'shipments', 'lines', 'comment'];
-  const sales = await fulfilSearchAll('sale.sale', ['OR', ['sale_date', '>=', since], ['state', 'in', ['draft', 'quotation', 'confirmed', 'processing']]], F);
+  const chs = String(await cpSetting('cp_import_channels', '')).split(/[,\n]/).map(x => x.trim()).filter(Boolean); const channels = chs.length ? chs : CP_IMPORT_CHANNELS_DEFAULT;   // v28.477
+  const sales = await fulfilSearchAll('sale.sale', [['channel.name', 'in', channels], ['OR', ['sale_date', '>=', since], ['state', 'in', ['draft', 'quotation', 'confirmed', 'processing']]]], F);
   const lineIds = [], shipIds = []; sales.forEach(s => { (s.lines || []).forEach(i => lineIds.push(i)); (s.shipments || []).forEach(i => shipIds.push(i)); });
   const linesById = {}, shipsById = {};
   for (let i = 0; i < lineIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['id', 'in', lineIds.slice(i, i + 400)]], 0, 500, null, ['id', 'sale', 'product.code', 'quantity', 'unit_price', 'amount']]); (rows || []).forEach(l => { linesById[l.id] = l; }); }
@@ -29630,7 +29636,7 @@ async function fulfilImportSales(days) {
       ON CONFLICT (fulfil_id) DO UPDATE SET ${COLS.filter(c => c !== 'fulfil_id').map(c => c + '=excluded.' + c).join(', ')}, last_synced_at=now(), source='cron'`, params);
     n += chunk.length;
   }
-  return { ok: true, env: cfg.env, since, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length, agent_codes: withAgent ? Object.keys(agentBy).length : 'migration 337 not applied' };
+  return { ok: true, env: cfg.env, since, channels: channels.length, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length, agent_codes: withAgent ? Object.keys(agentBy).length : 'migration 337 not applied' };
 }
 app.post('/api/client/fulfil/import-sales', async (req, res) => {
   // v28.008 (Ben, 28-Sep): REAL order data is NOT imported until the import parameters are defined — the route is held behind
