@@ -1,3 +1,11 @@
+## v28.479 (24-Oct-26) Client portal: order number, every shipment and every tracking code
+- Ben: "Can you also show in portal the order number and customer shipment number linked. There could be multiple shipments. and there could be multiple tracking codes."
+- Import: each shipment now carries all its tracking codes. Fulfil keeps one per package (the shipment's own tracking number is only the first); live check: CS59309 has two packages with separate UPS codes.
+- My orders: the Fulfil order number (SO…) shows under the reference; the tracking cell shows the first code with "+N more".
+- Order page: "Order no." in the summary and a Shipments card: shipment number (CS…), status (Preparing / Packed / Shipped), date, carrier, and every tracking code linked to the carrier.
+- CSV: new order_no and shipments columns; tracking lists every code.
+- Verified on the sandbox: import of 64 orders stores the codes; order with 3 shipments (2 codes on one, none yet on one) renders in Chrome. No migration, no new env.
+
 ## v28.478 (24-Oct-26) Client portal order import: recently shipped and updated orders, every 30 minutes
 - Ben: "It also needs to import recently shipped orders. So we need the tracking code importing recently updated orders if possible" and "Can this run every 30 minutes".
 - The import now also pulls any wholesale order changed in the window, and any whose customer shipment changed in it (shipped, tracking added). Before, an order dated more than 7 days back dropped out once it left processing, so its tracking never arrived.
