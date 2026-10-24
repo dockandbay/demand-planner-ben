@@ -1,3 +1,10 @@
+## v28.478 (24-Oct-26) Client portal order import: recently shipped and updated orders, every 30 minutes
+- Ben: "It also needs to import recently shipped orders. So we need the tracking code importing recently updated orders if possible" and "Can this run every 30 minutes".
+- The import now also pulls any wholesale order changed in the window, and any whose customer shipment changed in it (shipped, tracking added). Before, an order dated more than 7 days back dropped out once it left processing, so its tracking never arrived.
+- Live check (read only): 73 wholesale shipments changed in the last 7 days (3,050 on all channels); of the 31 shipped, 30 have a tracking number and 29 a carrier URL.
+- Sandbox: 7-day run 64 orders (19 via shipment updates) in 10 s; older shipped orders back to 17-Sep came in.
+- n8n workflow ujRlaIwO4X9E9eqm now runs at :05 and :35 every hour (still inactive until the deploy). No migration, no new env.
+
 ## v28.477 (24-Oct-26) Client portal order import: wholesale channels only, ready for the n8n schedule
 - Ben: "Build the n8n flow to import fulfil orders for commissions and client portal. Yes its every wholesale channel", "Including faire", "And markettime".
 - The Fulfil sales import now pulls only the channels in the new setting cp_import_channels (CLIENT ▸ Config ▸ Order import). Default: the 17 wholesale channels (UK/US/EU WS Shopify stores, which carry MarketTime orders; Faire UK and US; Key Accounts; Custom/Co-Brand; AU Wholesale; International Distributors). Before, it pulled every channel: about 130,000 orders in 120 days on live, 99% retail and Amazon, beyond Vercel's 300 s limit. Live wholesale volume: 883 orders in the same window.

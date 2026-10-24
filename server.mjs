@@ -29608,7 +29608,12 @@ async function fulfilImportSales(days) {
   const since = new Date(Date.now() - (Number(days) || 120) * 86400000).toISOString().slice(0, 10);
   const F = ['id', 'number', 'reference', 'state', 'party.name', 'party.email', 'shipment_address.name', 'invoice_address.name', 'channel.name', 'channel.source', 'warehouse.code', 'shipment_address.country.code', 'currency.code', 'total_amount', 'untaxed_amount', 'invoice_state', 'shipment_state', 'sale_date', 'create_date', 'carrier.rec_name', 'metadata', 'shipments', 'lines', 'comment'];
   const chs = String(await cpSetting('cp_import_channels', '')).split(/[,\n]/).map(x => x.trim()).filter(Boolean); const channels = chs.length ? chs : CP_IMPORT_CHANNELS_DEFAULT;   // v28.477
-  const sales = await fulfilSearchAll('sale.sale', [['channel.name', 'in', channels], ['OR', ['sale_date', '>=', since], ['state', 'in', ['draft', 'quotation', 'confirmed', 'processing']]]], F);
+  // v28.478 (Ben 24-Oct-26: "It also needs to import recently shipped orders ... the tracking code"): an older order that ships or gets its
+  // tracking inside the window is pulled too: sale.sale write_date in the window, or a customer shipment (wholesale channels) updated in it.
+  const updSince = new Date(Date.now() - (Number(days) || 120) * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const shipSaleIds = [...new Set((await fulfilSearchAll('stock.shipment.out', [['write_date', '>=', updSince], ['sales.channel.name', 'in', channels]], ['id', 'sales'])).flatMap(x => x.sales || []))];
+  const orDom = ['OR', ['sale_date', '>=', since], ['state', 'in', ['draft', 'quotation', 'confirmed', 'processing']], ['write_date', '>=', updSince]]; if (shipSaleIds.length) orDom.push(['id', 'in', shipSaleIds]);
+  const sales = await fulfilSearchAll('sale.sale', [['channel.name', 'in', channels], orDom], F);
   const lineIds = [], shipIds = []; sales.forEach(s => { (s.lines || []).forEach(i => lineIds.push(i)); (s.shipments || []).forEach(i => shipIds.push(i)); });
   const linesById = {}, shipsById = {};
   for (let i = 0; i < lineIds.length; i += 400) { const rows = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['id', 'in', lineIds.slice(i, i + 400)]], 0, 500, null, ['id', 'sale', 'product.code', 'quantity', 'unit_price', 'amount']]); (rows || []).forEach(l => { linesById[l.id] = l; }); }
@@ -29636,7 +29641,7 @@ async function fulfilImportSales(days) {
       ON CONFLICT (fulfil_id) DO UPDATE SET ${COLS.filter(c => c !== 'fulfil_id').map(c => c + '=excluded.' + c).join(', ')}, last_synced_at=now(), source='cron'`, params);
     n += chunk.length;
   }
-  return { ok: true, env: cfg.env, since, channels: channels.length, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length, agent_codes: withAgent ? Object.keys(agentBy).length : 'migration 337 not applied' };
+  return { ok: true, env: cfg.env, since, channels: channels.length, shipped_updated: shipSaleIds.length, sales: n, lines: Object.keys(linesById).length, shipments: Object.keys(shipsById).length, agent_codes: withAgent ? Object.keys(agentBy).length : 'migration 337 not applied' };
 }
 app.post('/api/client/fulfil/import-sales', async (req, res) => {
   // v28.008 (Ben, 28-Sep): REAL order data is NOT imported until the import parameters are defined — the route is held behind
