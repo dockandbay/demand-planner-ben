@@ -1295,7 +1295,8 @@ app.use((req, res, next) => {
       || req.path.startsWith('/api/export/csv/')
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
-      || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales') return next();   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
+      || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
+      || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration') return next();   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (safeEq(req.get('x-planner-key'), GATE) || safeEq(cookieVal(req, 'pk'), GATE)) return next();   // v28.151 (review B5): constant-time compare
@@ -1457,6 +1458,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/cp/')) return null;                  // client portal: its own magic-link session (cpAuth) or public request-link / logout
   if (p === '/api/health/client-events') return null;         // staff browser health beacon (rate-limited, no data write beyond the health log)
   if (p === '/api/me/favourites') return null;                // the signed-in user's own favourites
+  if (p === '/mcp' || p.startsWith('/oauth/')) return null;   // v28.480 Claude connector: own OAuth bearer tokens, read-only tools (checked in the handlers)
   if (p.startsWith('/api/dev/')) return null;                 // registered only with HZ_HEALTH_TEST=1 off Vercel
   if (p === '/api/health/send-test') return null;             // hzAdminOnly inside the handler
   if (method === 'POST' && /^\/api\/admin\/data-health\/\d+\/dismiss$/.test(p)) return 'edit';   // v28.432 Data health: the emailed team dismisses findings (any edit right); run / recipients stay admin (default)
@@ -16479,6 +16481,13 @@ async function accColExpr() {
     try { _accCol.ok = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='app_permissions' AND column_name='accounts_access'`)).rowCount > 0; } catch (_) {} }
   return _accCol.ok ? 'coalesce(accounts_access,false)' : 'false';
 }
+// v28.480: Claude connector grant (migration 386); until the column exists nobody but super admins has it.
+let _mcpCol = { ok: false, at: 0 };
+async function mcpColExpr() {
+  if (!_mcpCol.ok && Date.now() - _mcpCol.at > 60000) { _mcpCol.at = Date.now();
+    try { _mcpCol.ok = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='app_permissions' AND column_name='mcp_access'`)).rowCount > 0; } catch (_) {} }
+  return _mcpCol.ok ? 'coalesce(mcp_access,false)' : 'false';
+}
 async function permsFor(req) {
   const email = authUser(req);
   // v28.151 (review B3): no identity under a GATE (prod: planner key but no signed login cookie) = READ-ONLY, not admin.
@@ -16521,7 +16530,7 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await mcpColExpr()) + ' mcp_access, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
     r.rows.forEach(row => { if (row.inbox_types != null && typeof row.inbox_types === 'string') { try { row.inbox_types = JSON.parse(row.inbox_types); } catch (_) { row.inbox_types = null; } } });   // jsonb → array for the client
     res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -16946,6 +16955,9 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
       [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox', !!b.client_access, !!b.commissions, inboxJson === undefined ? null : inboxJson]);
     // v28.247: ACCOUNTS grant (migration 347); skipped until the column exists, so saving permissions never breaks before it is applied
     if (b.accounts_access !== undefined && (await accColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET accounts_access=$2 WHERE email=$1`, [email, !!b.accounts_access]);
+    // v28.480: Claude connector grant; switching it off also signs that person's Claude out (deletes their connector tokens)
+    if (b.mcp_access !== undefined && (await mcpColExpr()) !== 'false') { await pool.query(`UPDATE planner.app_permissions SET mcp_access=$2 WHERE email=$1`, [email, !!b.mcp_access]);
+      if (!b.mcp_access) await pool.query(`DELETE FROM planner.mcp_tokens WHERE lower(email)=$1`, [email]).catch(() => {}); }
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
@@ -26184,7 +26196,8 @@ async function aiSkuAvailability(skus, market) {
   });
   return { as_of: new Date().toISOString().slice(0, 10), forecast_source: 'HORIZON latest forecast run', skus: out };
 }
-const AI_BLOCK_REL = /\b(client_magic_tokens|portal_magic_tokens|client_sessions|portal_sessions)\b/i;
+// v28.480: + app_settings (holds the Xero OAuth tokens), accounts_gmail, MCP clients/tokens, and other people's Ask Claude chats
+const AI_BLOCK_REL = /\b(client_magic_tokens|portal_magic_tokens|client_sessions|portal_sessions|app_settings|accounts_gmail|mcp_tokens|mcp_clients|ai_conversations|ai_messages|ai_files)\b/i;
 function aiCleanRow(row) { const o = {}; for (const k in row) { let v = row[k]; if (Buffer.isBuffer(v)) v = '[binary ' + v.length + 'B]'; else if (typeof v === 'string' && v.length > 1500) v = v.slice(0, 1500) + '\u2026'; o[k] = v; } return o; }
 async function aiDescribeData(table) {
   try {
@@ -26237,6 +26250,267 @@ async function aiRunTool(name, input) {
     return { error: 'unknown tool ' + name };
   } catch (e) { return { error: e.message }; }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// v28.480 (Ben 24-Oct-26): HORIZON CONNECTOR FOR CLAUDE CHAT (MCP, Streamable HTTP, stateless JSON).
+// claude.ai custom connector -> POST /mcp. Each person signs in with their own Google account through HORIZON's
+// OAuth server (/.well-known/*, /oauth/*); HORIZON never sees a Google password and Claude never sees the planner key.
+// READ-ONLY: the tools are Ask Claude's (AI_TOOLS + aiRunTool) plus po_status and client_orders. Who may connect:
+// super admins + app_permissions.mcp_access (CONFIG > Permissions "Claude connector"). query_horizon is narrowed per
+// person (no ACCOUNTS / commission tables without that grant). Every call is written to planner.mcp_audit.
+// Live needs: migration 386, MCP_ENABLED=1, MCP_SIGNING_KEY, the Google client's redirect URI <base>/oauth/google/callback,
+// and the gate exemptions for /mcp, /oauth/*, /.well-known/oauth-*. Sandbox dev sign-in: MCP_DEV_LOGIN=1 (never under a GATE).
+// ════════════════════════════════════════════════════════════════════════════
+const MCP_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const MCP_SCOPE = 'horizon.read';
+const MCP_ACCESS_TTL = 3600, MCP_REFRESH_TTL = 30 * 86400, MCP_CODE_TTL = 300;
+const MCP_REDIRECT_HOSTS = String(process.env.MCP_REDIRECT_HOSTS || 'claude.ai,claude.com,localhost,127.0.0.1').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+function mcpOn() { return !GATE || process.env.MCP_ENABLED === '1'; }   // live is off until Diviyaj sets MCP_ENABLED=1
+function mcpDevLogin() { return !GATE && process.env.MCP_DEV_LOGIN === '1'; }
+function mcpKey() { const k = process.env.MCP_SIGNING_KEY || (GATE ? '' : 'sandbox|' + (process.env.DATABASE_URL || '')); return k ? crypto.createHash('sha256').update('hz-mcp|' + k).digest() : null; }
+function mcpBase(req) { if (process.env.MCP_BASE_URL) return process.env.MCP_BASE_URL.replace(/\/+$/, '');
+  return (_reqHttps(req) ? 'https' : 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers.host); }
+function mcpHash(raw) { return 'h1:' + crypto.createHash('sha256').update(String(raw || '')).digest('hex'); }
+function mcpRand(prefix) { return prefix + crypto.randomBytes(32).toString('base64url'); }
+function mcpSign(obj) { const body = Buffer.from(JSON.stringify(obj)).toString('base64url'); return body + '.' + crypto.createHmac('sha256', mcpKey()).update(body).digest('base64url'); }
+function mcpUnsign(s) { const [body, sig] = String(s || '').split('.'); if (!body || !sig || !mcpKey()) return null;
+  if (!safeEq(sig, crypto.createHmac('sha256', mcpKey()).update(body).digest('base64url'))) return null;
+  try { return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch (_) { return null; } }
+function mcpRedirectOk(u) { try { const x = new URL(u); const h = x.hostname.toLowerCase();
+  if (!MCP_REDIRECT_HOSTS.some(a => h === a || h.endsWith('.' + a))) return false;
+  return x.protocol === 'https:' || (x.protocol === 'http:' && (h === 'localhost' || h === '127.0.0.1')); } catch (_) { return false; } }
+// Who may connect, and with which data grants. Super admins always; others need app_permissions.mcp_access (migration 386).
+async function mcpAccess(email) {
+  const e = String(email || '').trim().toLowerCase(); if (!e) return { ok: false, reason: 'no email' };
+  if (!/@dockandbay\.com$/.test(e)) return { ok: false, reason: 'only @dockandbay.com accounts can connect' };
+  if (SUPER_ADMINS.has(e)) return { ok: true, email: e, accounts: true, commissions: true };
+  let row = null; try { row = (await pool.query(`SELECT coalesce(mcp_access,false) mcp_access, coalesce(is_admin,false) is_admin, coalesce(commissions,false) commissions, ${await accColExpr()} accounts_access FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0]; }
+  catch (err) { if (!/mcp_access/.test(err.message)) throw err; }
+  if (!row || !row.mcp_access) return { ok: false, reason: 'the Claude connector is not switched on for ' + e + ' (CONFIG > Permissions)' };
+  return { ok: true, email: e, accounts: !!(row.accounts_access || row.is_admin), commissions: !!(row.commissions || row.is_admin) };
+}
+async function mcpIssue(kind, client_id, email, scope, extra, ttl) {
+  const raw = mcpRand(kind === 'code' ? 'hzc_' : kind === 'access' ? 'hza_' : 'hzr_');
+  await pool.query(`INSERT INTO planner.mcp_tokens (token_hash, kind, client_id, email, scope, redirect_uri, code_challenge, expires_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(secs => $8))`, [mcpHash(raw), kind, client_id, email, scope || MCP_SCOPE, (extra && extra.redirect_uri) || null, (extra && extra.code_challenge) || null, ttl]);
+  return raw;
+}
+async function mcpTokenPair(client_id, email, scope) {
+  return { access_token: await mcpIssue('access', client_id, email, scope, null, MCP_ACCESS_TTL), token_type: 'Bearer', expires_in: MCP_ACCESS_TTL,
+    refresh_token: await mcpIssue('refresh', client_id, email, scope, null, MCP_REFRESH_TTL), scope: scope || MCP_SCOPE };
+}
+function mcpOff(res) { return res.status(503).json({ error: 'temporarily_unavailable', error_description: 'The HORIZON Claude connector is not enabled on this server' }); }
+function mcpPage(res, status, title, html) {
+  res.status(status).set('content-type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>body{font-family:system-ui,sans-serif;background:#f6f7f9;color:#1f2933;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}main{background:#fff;border:1px solid #e3e7ec;border-radius:12px;padding:28px 32px;max-width:420px}h1{font-size:18px;margin:0 0 10px}p{font-size:14px;line-height:1.5}input{font-size:14px;padding:8px;width:100%;box-sizing:border-box;margin:6px 0 12px}button{font-size:14px;padding:8px 16px;border:0;border-radius:6px;background:#1f4e79;color:#fff;cursor:pointer}</style><main>${html}</main>`);
+}
+const mcpEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Discovery (RFC 9728 protected resource, RFC 8414 authorisation server).
+app.get(['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp'], (req, res) => {
+  if (!mcpOn()) return mcpOff(res); const b = mcpBase(req);
+  res.json({ resource: b + '/mcp', authorization_servers: [b], scopes_supported: [MCP_SCOPE], bearer_methods_supported: ['header'], resource_name: 'HORIZON (Dock & Bay)' });
+});
+app.get(['/.well-known/oauth-authorization-server', '/.well-known/oauth-authorization-server/mcp', '/.well-known/openid-configuration'], (req, res) => {
+  if (!mcpOn()) return mcpOff(res); const b = mcpBase(req);
+  res.json({ issuer: b, authorization_endpoint: b + '/oauth/authorize', token_endpoint: b + '/oauth/token', registration_endpoint: b + '/oauth/register', revocation_endpoint: b + '/oauth/revoke',
+    response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['none', 'client_secret_post', 'client_secret_basic'], scopes_supported: [MCP_SCOPE] });
+});
+// Dynamic client registration (RFC 7591). Redirect URIs must be on MCP_REDIRECT_HOSTS (claude.ai / claude.com / localhost).
+app.post('/oauth/register', async (req, res) => {
+  if (!mcpOn()) return mcpOff(res);
+  try { const b = req.body || {}; const uris = Array.isArray(b.redirect_uris) ? b.redirect_uris.map(String) : [];
+    if (!uris.length || uris.length > 10 || !uris.every(mcpRedirectOk)) return res.status(400).json({ error: 'invalid_redirect_uri', error_description: 'redirect_uris must be https on ' + MCP_REDIRECT_HOSTS.join(', ') });
+    const method = ['client_secret_post', 'client_secret_basic'].includes(b.token_endpoint_auth_method) ? b.token_endpoint_auth_method : 'none';
+    const client_id = 'hzmcp_' + crypto.randomBytes(16).toString('hex'), secret = method === 'none' ? null : mcpRand('hzs_');
+    const name = String(b.client_name || 'Claude').slice(0, 120);
+    await pool.query(`INSERT INTO planner.mcp_clients (client_id, secret_hash, client_name, redirect_uris) VALUES ($1,$2,$3,$4::jsonb)`, [client_id, secret ? mcpHash(secret) : null, name, JSON.stringify(uris)]);
+    res.status(201).json(Object.assign({ client_id, client_id_issued_at: Math.floor(Date.now() / 1000), client_name: name, redirect_uris: uris, token_endpoint_auth_method: method,
+      grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], scope: MCP_SCOPE }, secret ? { client_secret: secret, client_secret_expires_at: 0 } : {}));
+  } catch (e) { log500(e); res.status(500).json({ error: 'server_error', error_description: e.message }); }
+});
+// Authorise: check the client + PKCE, then send the person to Google (or the sandbox dev sign-in) with a signed state.
+app.get('/oauth/authorize', async (req, res) => {
+  if (!mcpOn()) return mcpOff(res);
+  try { const q = req.query || {};
+    const c = (await pool.query(`SELECT client_id, client_name, redirect_uris FROM planner.mcp_clients WHERE client_id=$1`, [String(q.client_id || '')])).rows[0];
+    if (!c) return mcpPage(res, 400, 'HORIZON', '<h1>Unknown app</h1><p>This connector is not registered with HORIZON. Remove it in Claude and add it again.</p>');
+    const uris = Array.isArray(c.redirect_uris) ? c.redirect_uris : JSON.parse(c.redirect_uris || '[]');
+    const ru = String(q.redirect_uri || (uris.length === 1 ? uris[0] : ''));
+    if (!uris.includes(ru)) return mcpPage(res, 400, 'HORIZON', '<h1>Redirect not allowed</h1><p>The return address does not match this connector.</p>');
+    const back = (err, desc) => res.redirect(ru + (ru.includes('?') ? '&' : '?') + new URLSearchParams(Object.assign({ error: err, error_description: desc }, q.state ? { state: String(q.state) } : {})));
+    if (q.response_type !== 'code') return back('unsupported_response_type', 'response_type must be code');
+    if (!q.code_challenge || (q.code_challenge_method || 'plain') !== 'S256') return back('invalid_request', 'PKCE S256 is required');
+    const st = mcpSign({ c: c.client_id, r: ru, s: q.state ? String(q.state) : null, cc: String(q.code_challenge), sc: MCP_SCOPE, n: crypto.randomBytes(8).toString('hex'), t: Date.now() });
+    if (mcpDevLogin()) return mcpPage(res, 200, 'HORIZON sign-in (sandbox)', `<h1>Connect Claude to HORIZON (sandbox)</h1><p><b>${mcpEsc(c.client_name)}</b> wants read-only access to HORIZON data as you. Sandbox dev sign-in: no Google check.</p>
+<form method=post action="/oauth/dev-login"><input type=hidden name=state value="${mcpEsc(st)}"><label>Email<input name=email type=email value="${mcpEsc(process.env.DEV_USER || '')}" required></label><button>Allow</button></form>`);
+    const g = gmailCfg(); if (!g) return back('server_error', 'Google sign-in is not configured on HORIZON');
+    res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({ client_id: process.env.MCP_GOOGLE_CLIENT_ID || g.id, redirect_uri: mcpBase(req) + '/oauth/google/callback', response_type: 'code',
+      scope: 'openid email', hd: 'dockandbay.com', prompt: 'select_account', state: st }));
+  } catch (e) { log500(e); mcpPage(res, 500, 'HORIZON', '<h1>Something went wrong</h1><p>' + mcpEsc(e.message) + '</p>'); }
+});
+// Finish sign-in: access check, then a one-time code back to Claude (5 minutes, bound to the client, redirect and PKCE).
+async function mcpFinish(res, st, email) {
+  const back = (p) => res.redirect(st.r + (st.r.includes('?') ? '&' : '?') + new URLSearchParams(Object.assign(p, st.s ? { state: st.s } : {})));
+  const a = await mcpAccess(email);
+  if (!a.ok) return mcpPage(res, 403, 'HORIZON', '<h1>Not allowed</h1><p>' + mcpEsc(a.reason) + '. Ask a HORIZON admin to tick <b>Claude connector</b> for you in CONFIG &gt; Permissions.</p>');
+  const code = await mcpIssue('code', st.c, a.email, st.sc, { redirect_uri: st.r, code_challenge: st.cc }, MCP_CODE_TTL);
+  return back({ code });
+}
+function mcpState(raw) { const st = mcpUnsign(raw); return (st && Date.now() - st.t < 10 * 60000) ? st : null; }
+app.get('/oauth/google/callback', async (req, res) => {
+  if (!mcpOn()) return mcpOff(res);
+  try { const st = mcpState(req.query.state); if (!st) return mcpPage(res, 400, 'HORIZON', '<h1>Sign-in expired</h1><p>Start the connection again from Claude.</p>');
+    if (req.query.error || !req.query.code) return mcpPage(res, 400, 'HORIZON', '<h1>Google sign-in cancelled</h1><p>' + mcpEsc(req.query.error || 'no code') + '</p>');
+    const g = gmailCfg(); const id = process.env.MCP_GOOGLE_CLIENT_ID || g.id, secret = process.env.MCP_GOOGLE_CLIENT_SECRET || g.secret;
+    const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ code: String(req.query.code), client_id: id, client_secret: secret, redirect_uri: mcpBase(req) + '/oauth/google/callback', grant_type: 'authorization_code' }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.id_token) return mcpPage(res, 502, 'HORIZON', '<h1>Google sign-in failed</h1><p>' + mcpEsc(j.error_description || j.error || ('HTTP ' + r.status)) + '</p>');
+    // id_token came straight from Google's token endpoint over TLS (OIDC 3.1.3.7: signature check optional); check audience + verified email.
+    let p = {}; try { p = JSON.parse(Buffer.from(String(j.id_token).split('.')[1], 'base64url').toString('utf8')); } catch (_) {}
+    if (p.aud !== id || !p.email_verified) return mcpPage(res, 403, 'HORIZON', '<h1>Google account not verified</h1>');
+    return await mcpFinish(res, st, p.email);
+  } catch (e) { log500(e); mcpPage(res, 500, 'HORIZON', '<h1>Something went wrong</h1><p>' + mcpEsc(e.message) + '</p>'); }
+});
+app.post('/oauth/dev-login', express.urlencoded({ extended: false, limit: '8kb' }), async (req, res) => {
+  if (!mcpOn() || !mcpDevLogin()) return res.status(404).send('not found');
+  try { const st = mcpState(req.body && req.body.state); if (!st) return mcpPage(res, 400, 'HORIZON', '<h1>Sign-in expired</h1>');
+    return await mcpFinish(res, st, req.body.email); } catch (e) { log500(e); res.status(500).send(e.message); }
+});
+// Token endpoint: authorisation_code (+ PKCE) and rotating refresh tokens.
+async function mcpClientAuth(req, b) {
+  let id = b.client_id, secret = b.client_secret; const h = String(req.headers.authorization || '');
+  if (/^basic /i.test(h)) { const d = Buffer.from(h.slice(6), 'base64').toString('utf8'); const i = d.indexOf(':'); id = decodeURIComponent(d.slice(0, i)); secret = decodeURIComponent(d.slice(i + 1)); }
+  const c = (await pool.query(`SELECT client_id, secret_hash FROM planner.mcp_clients WHERE client_id=$1`, [String(id || '')])).rows[0];
+  if (!c) return null; if (c.secret_hash && !safeEq(mcpHash(secret), c.secret_hash)) return null; return c;
+}
+app.post('/oauth/token', express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+  if (!mcpOn()) return mcpOff(res);
+  res.set('Cache-Control', 'no-store');
+  const err = (code, desc, st) => res.status(st || 400).json({ error: code, error_description: desc });
+  try { const b = req.body || {}; const c = await mcpClientAuth(req, b); if (!c) return err('invalid_client', 'unknown client or bad secret', 401);
+    if (b.grant_type === 'authorization_code') {
+      const row = (await pool.query(`DELETE FROM planner.mcp_tokens WHERE token_hash=$1 AND kind='code' RETURNING client_id, email, scope, redirect_uri, code_challenge, expires_at > now() live`, [mcpHash(b.code)])).rows[0];   // single use
+      if (!row || !row.live || row.client_id !== c.client_id) return err('invalid_grant', 'code is invalid or expired');
+      if (b.redirect_uri && b.redirect_uri !== row.redirect_uri) return err('invalid_grant', 'redirect_uri does not match');
+      const ch = crypto.createHash('sha256').update(String(b.code_verifier || '')).digest('base64url');
+      if (!b.code_verifier || !safeEq(ch, row.code_challenge)) return err('invalid_grant', 'PKCE verification failed');
+      const a = await mcpAccess(row.email); if (!a.ok) return err('invalid_grant', a.reason);
+      return res.json(await mcpTokenPair(c.client_id, row.email, row.scope));
+    }
+    if (b.grant_type === 'refresh_token') {
+      const row = (await pool.query(`DELETE FROM planner.mcp_tokens WHERE token_hash=$1 AND kind='refresh' RETURNING client_id, email, scope, expires_at > now() live`, [mcpHash(b.refresh_token)])).rows[0];   // rotate
+      if (!row || !row.live || row.client_id !== c.client_id) return err('invalid_grant', 'refresh token is invalid or expired');
+      const a = await mcpAccess(row.email); if (!a.ok) return err('invalid_grant', a.reason);
+      return res.json(await mcpTokenPair(c.client_id, row.email, row.scope));
+    }
+    return err('unsupported_grant_type', 'grant_type must be authorization_code or refresh_token');
+  } catch (e) { log500(e); err('server_error', e.message, 500); }
+});
+app.post('/oauth/revoke', express.urlencoded({ extended: false, limit: '8kb' }), async (req, res) => {
+  if (!mcpOn()) return mcpOff(res);
+  try { const b = req.body || {}; if (b.token) await pool.query(`DELETE FROM planner.mcp_tokens WHERE token_hash=$1 AND kind IN ('access','refresh')`, [mcpHash(b.token)]); res.status(200).json({}); }
+  catch (e) { log500(e); res.status(500).json({ error: 'server_error' }); }
+});
+
+// ── Tools ──
+const MCP_EXTRA_TOOLS = [
+  { name: 'po_status', title: 'Purchase order status', description: 'One HORIZON purchase order: supplier, status, branch, production and delivery dates, shipment, payment dates and amounts, and its lines (SKU, qty, cost). Use for "where is PO-x / when does it land / is it paid".',
+    input_schema: { type: 'object', properties: { po: { type: 'string', description: 'PO number, e.g. PO-57AUBL1' } }, required: ['po'] } },
+  { name: 'client_orders', title: 'Wholesale client orders', description: 'Find wholesale (Fulfil) client orders by order number (SO…), customer reference / PO, or customer name: status, dates, totals, shipments and tracking codes. Newest first.',
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'order number, customer reference or customer name' }, limit: { type: 'integer', description: 'max orders (default 10, max 50)' } }, required: ['query'] } },
+];
+const MCP_TITLES = { resolve_skus: 'Find SKUs', sku_availability: 'Stock, inbound and forecast', describe_data: 'Describe HORIZON data', query_horizon: 'Query HORIZON (read-only SQL)', explain_buy: 'Explain a buy', app_logic: 'HORIZON logic rules' };
+function mcpToolList() {
+  return AI_TOOLS.concat(MCP_EXTRA_TOOLS).map(t => ({ name: t.name, title: t.title || MCP_TITLES[t.name] || t.name, description: t.description, inputSchema: t.input_schema,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
+}
+async function mcpPoStatus(po) {
+  po = String(po || '').trim().toUpperCase(); if (!po) return { error: 'no PO given' };
+  const p = (await pool.query(`SELECT po, supplier_name, status, branch, country_code, client, prod_no, erp_po, ship_type, shipment_ref, start_production, supplier_ship_date,
+      landing_date_overide, delivery_date_overide, warehouse_complete_date, supplier_invoice_total, order_value_estimation,
+      pay_start_deposit_assigned, pay_start_deposit_date, pay_completion_assigned, pay_completion_date, pay_balance_1_amount, pay_balance_1_date, notes
+    FROM planner.purchase_orders WHERE upper(po)=$1`, [po])).rows[0];
+  if (!p) return { error: 'PO not found: ' + po };
+  const lines = (await pool.query(`SELECT sku, qty, carton_qty, cost_price FROM planner.v_purchase_order_lines WHERE po=$1 ORDER BY sku`, [p.po])).rows;
+  const ship = p.shipment_ref ? (await pool.query(`SELECT shipment_ref, status, mode, carrier, carrier_ref, departure_date, landing_date, delivery_date, arrival_date, tracked_delivery_date FROM planner.shipments WHERE shipment_ref=$1`, [p.shipment_ref])).rows[0] || null : null;
+  return { po: aiCleanRow(p), shipment: ship, lines: lines.map(aiCleanRow), line_count: lines.length, total_units: lines.reduce((a, l) => a + (Number(l.qty) || 0), 0) };
+}
+async function mcpClientOrders(query, limit) {
+  const q = String(query || '').trim(); if (!q) return { error: 'no search text' };
+  const n = Math.min(50, Math.max(1, Number(limit) || 10)), like = '%' + q.replace(/[%_\\]/g, m => '\\' + m) + '%';
+  const r = (await pool.query(`SELECT number, reference, party_name customer, channel, state, shipment_state, invoice_state, to_char(sale_date,'YYYY-MM-DD') sale_date, currency, total, carrier, shipments
+    FROM planner.fulfil_sales WHERE number ILIKE $1 OR reference ILIKE $1 OR party_name ILIKE $1 OR ship_name ILIKE $1 ORDER BY sale_date DESC NULLS LAST LIMIT $2`, [like, n])).rows;
+  return { count: r.length, orders: r.map(aiCleanRow) };
+}
+// query_horizon per person: tables outside their grants are refused (on top of Ask Claude's own guards).
+function mcpSqlBlocked(sql, a) {
+  if (!a.accounts && /\baccounts_\w+/i.test(sql)) return 'ACCOUNTS tables need the ACCOUNTS grant';
+  if (!a.commissions && /\b(commission_\w+|rep_groups)\b/i.test(sql)) return 'commission tables need the COMMISSIONS grant';
+  return null;
+}
+async function mcpCallTool(name, args, a) {
+  if (name === 'po_status') return await mcpPoStatus(args.po);
+  if (name === 'client_orders') return await mcpClientOrders(args.query, args.limit);
+  if (!AI_TOOLS.some(t => t.name === name)) return { error: 'unknown tool ' + name };
+  if (name === 'query_horizon') { const why = mcpSqlBlocked(String(args.sql || ''), a); if (why) return { error: why }; }
+  if (name === 'describe_data' && args.table) { const why = mcpSqlBlocked(String(args.table), a); if (why) return { error: why }; }
+  return await aiRunTool(name, args);
+}
+const MCP_INSTRUCTIONS = () => 'HORIZON is Dock & Bay\'s demand and supply planning tool (stock, forecasts, buy plan, purchase orders, shipments, suppliers, samples, wholesale client orders). '
+  + 'This connector is READ-ONLY. Dates: show them as dd-mmm-yy (e.g. 24-Oct-26).\n\n' + AI_SYSTEM.slice(Math.max(0, AI_SYSTEM.indexOf('You have LIVE ACCESS')))
+  + '\n- po_status(po): one purchase order with dates, payments, shipment and lines.\n- client_orders(query): wholesale client orders with shipments and tracking codes.';
+
+// ── /mcp: JSON-RPC 2.0 over HTTP POST (stateless; no SSE stream, so GET is 405) ──
+async function mcpBearer(req) {
+  const m = /^bearer\s+(\S+)/i.exec(String(req.headers.authorization || '')); if (!m) return null;
+  const row = (await pool.query(`UPDATE planner.mcp_tokens SET last_used_at=now() WHERE token_hash=$1 AND kind='access' AND expires_at > now() RETURNING client_id, email`, [mcpHash(m[1])])).rows[0];
+  if (!row) return null; const a = await mcpAccess(row.email); return a.ok ? Object.assign(a, { client_id: row.client_id }) : null;
+}
+function mcpChallenge(req, res, desc) {
+  res.set('WWW-Authenticate', `Bearer resource_metadata="${mcpBase(req)}/.well-known/oauth-protected-resource", scope="${MCP_SCOPE}"` + (desc ? `, error="invalid_token", error_description="${desc}"` : ''));
+  return res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: desc || 'authorisation required' }, id: null });
+}
+async function mcpHandle(msg, a) {
+  const id = msg.id === undefined ? null : msg.id, ok = result => ({ jsonrpc: '2.0', id, result }), fail = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
+  if (!msg || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return fail(-32600, 'invalid request');
+  if (msg.id === undefined) return null;   // notification (notifications/initialized etc.): no response
+  const p = msg.params || {};
+  if (msg.method === 'initialize') return ok({ protocolVersion: MCP_PROTOCOLS.includes(p.protocolVersion) ? p.protocolVersion : MCP_PROTOCOLS[0],
+    capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'horizon', title: 'HORIZON (Dock & Bay)', version: APP_VERSION }, instructions: MCP_INSTRUCTIONS() });
+  if (msg.method === 'ping') return ok({});
+  if (msg.method === 'tools/list') return ok({ tools: mcpToolList() });
+  if (msg.method === 'tools/call') {
+    const name = String(p.name || ''), args = (p.arguments && typeof p.arguments === 'object') ? p.arguments : {}, t0 = Date.now();
+    let out; try { out = await mcpCallTool(name, args, a); } catch (e) { out = { error: e.message }; }
+    const isErr = !!(out && out.error), rows = out && (out.row_count != null ? out.row_count : Array.isArray(out.rows) ? out.rows.length : out.count != null ? out.count : null);
+    pool.query(`INSERT INTO planner.mcp_audit (email, client_id, tool, args, ok, error, ms, rows) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8)`,
+      [a.email, a.client_id, name, JSON.stringify(args).slice(0, 4000), !isErr, isErr ? String(out.error).slice(0, 500) : null, Date.now() - t0, rows]).catch(() => {});
+    let text = JSON.stringify(out); if (text.length > 200000) text = text.slice(0, 200000) + '\n…(truncated: narrow the request)';
+    return ok({ content: [{ type: 'text', text }], isError: isErr });
+  }
+  if (msg.method === 'resources/list') return ok({ resources: [] });
+  if (msg.method === 'prompts/list') return ok({ prompts: [] });
+  return fail(-32601, 'method not found: ' + msg.method);
+}
+app.post('/mcp', async (req, res) => {
+  if (!mcpOn()) return mcpOff(res);
+  try { const a = await mcpBearer(req); if (!a) return mcpChallenge(req, res, String(req.headers.authorization || '') ? 'token is invalid, expired or access was removed' : null);
+    const body = req.body; const batch = Array.isArray(body);
+    const outs = (await Promise.all((batch ? body : [body]).map(m => mcpHandle(m, a)))).filter(Boolean);
+    if (!outs.length) return res.status(202).end();
+    res.set('Cache-Control', 'no-store').json(batch ? outs : outs[0]);
+  } catch (e) { log500(e); res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } }); }
+});
+app.get('/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ error: 'use POST (no SSE stream on this server)' }));
+app.delete('/mcp', (req, res) => res.status(405).set('Allow', 'POST').end());
+// CONFIG > Permissions: audit of connector use (admin only).
+app.get('/api/config/mcp-audit', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  try { const r = await pool.query(`SELECT to_char(at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, email, tool, args, ok, error, ms, rows FROM planner.mcp_audit ORDER BY id DESC LIMIT 200`);
+    res.set('Cache-Control', 'no-store').json({ rows: r.rows }); }
+  catch (e) { if (/mcp_audit/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); } });
 
 // list the caller's conversations (newest first)
 app.get('/api/assistant/conversations', async (req, res) => {

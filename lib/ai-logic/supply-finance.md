@@ -18,6 +18,8 @@ sources:
   - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, cogsRecipient, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
   - artifact_v16.7.html :: renderCogs
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
+  - server.mjs :: mcpAccess, mcpCallTool, mcpSqlBlocked, mcpHandle (Claude connector)
+  - server.mjs :: /oauth/token
   - server.mjs :: buildDATA (on-order and inbound feeds for DEMAND)
   - server.mjs :: /api/supply/po/:po/set-shipping, propagateShippingToPOs, shipmentShippingFromMasterPO
   - server.mjs :: case 'shipments' (shipment effective dates), poShipObj, upsertTracking (DHL/FedEx)
@@ -120,6 +122,11 @@ fingerprints:
   server.mjs::COGS_COLS: 03fda4554d05
   artifact_v16.7.html::renderCogs: 5e8d94ddc0c7
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
+  server.mjs::mcpAccess: 94edd9b2cf7b
+  server.mjs::mcpCallTool: e032a7b68d4e
+  server.mjs::mcpSqlBlocked: bacf960a3825
+  server.mjs::mcpHandle: 529be3cd3236
+  server.mjs::/oauth/token: b2c6931bd683
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
   server.mjs::propagateShippingToPOs: f730be62e59b
@@ -280,7 +287,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.479
+verified_version: v28.480
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -411,6 +418,12 @@ verified_version: v28.479
 ## Write permissions (from v28.255)
 - Every write (POST, PUT, DELETE, PATCH) under /api is classified by path into a required right: DEMAND, SUPPLY, PRODUCT, CONFIG (supply or demand), any edit right, or admin. Reads are open to every signed-in user. Paths are compared in lower case without a trailing slash, routing is case sensitive, and an unclassified write is admin only (fail closed). Families with their own check (crons with the webhook secret, CLIENT admin, Ask Claude, the client portal, the health beacon, own favourites) are listed explicitly. (source: server.mjs :: requiredCap)
 - A user without the right gets 403 "Read-only access" (or "Admin only"); admins always have every edit right. Off Vercel (sandbox) with no identity the gate is open. (source: server.mjs :: requiredCap)
+
+## Claude connector (from v28.480)
+- HORIZON can be added to Claude chat (claude.ai, desktop, mobile) as a custom connector at <HORIZON address>/mcp. Each person signs in with their own Google account; HORIZON issues its own tokens (access 1 hour, refresh 30 days, rotated on use) and never sees a Google password. Only @dockandbay.com accounts, and only super admins or people ticked under Claude connector in CONFIG > Admin > Permissions. Unticking someone deletes their tokens and their next call is refused. (source: server.mjs :: mcpAccess, /oauth/token)
+- Read-only. The tools are Ask Claude's (resolve_skus, sku_availability, describe_data, query_horizon, explain_buy, app_logic) plus po_status (one PO with dates, payments, shipment and lines) and client_orders (wholesale Fulfil orders with shipments and tracking). query_horizon runs inside a READ ONLY transaction with an 8 second limit and 500 rows. (source: server.mjs :: mcpCallTool, mcpHandle)
+- Per person: ACCOUNTS tables (accounts_*) need the ACCOUNTS grant and commission tables (commission_*, rep_groups) need COMMISSIONS, as in the app. Never queryable through Ask Claude or the connector: app_settings (holds the Xero connection), the Gmail connection, connector tokens, portal and client sessions, and anyone's Ask Claude chats. (source: server.mjs :: mcpSqlBlocked)
+- Every tool call is logged (who, tool, request, result, time) and the latest 50 show under the Permissions table. (source: server.mjs :: mcpHandle)
 
 ## Xero API allowance (from v28.253)
 - Xero allows 60 calls a minute and 1,000 a day per organisation for HORIZON's connection on our current Xero plan (measured 12-Oct-26), shared by live and the sandbox. Every recurring read is incremental: the hourly bill sync and the PO link resolver use an UpdatedDateUTC watermark (If-Modified-Since), bank ageing reads only items modified since its last run (first run: last 90 days), the back-date learn job keeps a reconciled-items cache. A full bill resync or a full bank scan only runs on explicit request and only with at least 400 calls of the day left. (source: server.mjs :: accXeroHeadroom, _syncXeroBillsRun, accountsBankSyncOrg)
