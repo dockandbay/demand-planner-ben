@@ -18,6 +18,7 @@ sources:
   - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, cogsRecipient, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
   - artifact_v16.7.html :: renderCogs
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
+  - supply/inject.html :: hzUpload
   - server.mjs :: mcpAccess, mcpCallTool, mcpSqlBlocked, mcpHandle (Claude connector)
   - server.mjs :: /oauth/token
   - server.mjs :: buildDATA (on-order and inbound feeds for DEMAND)
@@ -122,6 +123,7 @@ fingerprints:
   server.mjs::COGS_COLS: 03fda4554d05
   artifact_v16.7.html::renderCogs: 5e8d94ddc0c7
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
+  supply/inject.html::hzUpload: c4353cd913f7
   server.mjs::mcpAccess: 94edd9b2cf7b
   server.mjs::mcpCallTool: e032a7b68d4e
   server.mjs::mcpSqlBlocked: bacf960a3825
@@ -287,7 +289,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.480
+verified_version: v28.481
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -418,6 +420,9 @@ verified_version: v28.480
 ## Write permissions (from v28.255)
 - Every write (POST, PUT, DELETE, PATCH) under /api is classified by path into a required right: DEMAND, SUPPLY, PRODUCT, CONFIG (supply or demand), any edit right, or admin. Reads are open to every signed-in user. Paths are compared in lower case without a trailing slash, routing is case sensitive, and an unclassified write is admin only (fail closed). Families with their own check (crons with the webhook secret, CLIENT admin, Ask Claude, the client portal, the health beacon, own favourites) are listed explicitly. (source: server.mjs :: requiredCap)
 - A user without the right gets 403 "Read-only access" (or "Admin only"); admins always have every edit right. Off Vercel (sandbox) with no identity the gate is open. (source: server.mjs :: requiredCap)
+
+## File upload size (from v28.481)
+- One file can be up to 50 MB on the PRODUCT screens (sample review and feedback, component files, Pantone swatches, product documents, timeline attachments) and on the supplier portal's product documents and sample photos; a larger file is skipped with an "over 50MB" message. Files up to 3 MB are sent inside the request; larger ones go straight to Supabase Storage through a signed upload link, so the Vercel request limit does not apply. The server ceiling is STORAGE_MAX_MB (default 100), and the live bucket allows 100 MB. (source: supply/inject.html :: hzUpload)
 
 ## Claude connector (from v28.480)
 - HORIZON can be added to Claude chat (claude.ai, desktop, mobile) as a custom connector at <HORIZON address>/mcp. Each person signs in with their own Google account; HORIZON issues its own tokens (access 1 hour, refresh 30 days, rotated on use) and never sees a Google password. Only @dockandbay.com accounts, and only super admins or people ticked under Claude connector in CONFIG > Admin > Permissions. Unticking someone deletes their tokens and their next call is refused. (source: server.mjs :: mcpAccess, /oauth/token)

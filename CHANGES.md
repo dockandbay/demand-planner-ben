@@ -1,3 +1,9 @@
+## v28.481 (24-Oct-26) PRODUCT file uploads: limit raised from 10 MB to 50 MB
+- Ben: "Product team advised maximum of 10 mb file upload. They need 50mb and likely need it bumped to 100. Update to 50 for now."
+- Every 10 MB per-file check is now 50 MB: PRODUCT sample review and sample feedback files, component files, Pantone swatch images, product documents (incl. drag and drop), timeline attachments; and on the supplier portal, product documents and sample photos. Messages and hints say 50MB.
+- Files over 3 MB already go straight to Supabase Storage (not through Vercel), so nothing else changes. The server ceiling is STORAGE_MAX_MB (default 100) and the live horizon-uploads bucket allows 100 MB (checked read-only 24-Oct-26), so 100 MB later is a one-number change in these two files.
+- No migration, no new env.
+
 ## v28.480 (24-Oct-26) Claude connector: HORIZON data in Claude chat (read-only, per-person Google sign-in)
 - Ben: "Can we have Claude chat integrated for dock and bay team to horizon via a custom connection" then "Proceed to mcp".
 - New /mcp endpoint (Model Context Protocol over HTTP) plus HORIZON's own OAuth sign-in (/.well-known/oauth-*, /oauth/register, /oauth/authorize, /oauth/google/callback, /oauth/token, /oauth/revoke). An owner of the Claude organisation adds the custom connector once; each person clicks Connect and signs in with their own Google account. No planner key involved.
