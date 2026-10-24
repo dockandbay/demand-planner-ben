@@ -1,3 +1,10 @@
+## v28.482 (24-Oct-26) File uploads: limit raised to 100 MB; PRODUCT documents keep going after a failed file
+- Ben: "Change to 100mb and test".
+- Every per-file check from v28.481 is now 100 MB (PRODUCT sample review and feedback, component files, Pantone swatches, product documents, timeline attachments; supplier portal product documents and sample photos). This matches the server ceiling (STORAGE_MAX_MB, default 100) and the live horizon-uploads bucket (100 MB, checked read-only).
+- PRODUCT documents: one failed file used to stop the whole batch and the list did not refresh, so files already saved looked missing. Now the rest carry on, the list refreshes, and the message names each failure ("1 uploaded · 1 skipped (over 100MB) · failed: <file>: <reason>").
+- Tested on the sandbox in Chrome (product AW27-TEATO-RETROCHECK > Documents, drop of 60 + 45 + 101 MB): 101 MB skipped by the browser, 45 MB saved, 60 MB passed HORIZON's checks and was refused only by the sandbox Supabase project, whose upload cap is 50 MB (it refuses a bucket limit over 50). Live's bucket already holds a 100 MB limit, which Supabase only accepts within the project cap. Test files deleted.
+- No migration, no new env. If prod sets STORAGE_MAX_MB, it must be 100 (unset = 100).
+
 ## v28.481 (24-Oct-26) PRODUCT file uploads: limit raised from 10 MB to 50 MB
 - Ben: "Product team advised maximum of 10 mb file upload. They need 50mb and likely need it bumped to 100. Update to 50 for now."
 - Every 10 MB per-file check is now 50 MB: PRODUCT sample review and sample feedback files, component files, Pantone swatch images, product documents (incl. drag and drop), timeline attachments; and on the supplier portal, product documents and sample photos. Messages and hints say 50MB.
