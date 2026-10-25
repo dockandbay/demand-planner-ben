@@ -1296,7 +1296,8 @@ app.use((req, res, next) => {
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
-      || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration') return next();   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
+      || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration'
+      || req.path.startsWith('/api/connect/') || req.path.startsWith('/api/identity/')) return next();   // v28.483: Connect (signed CONNECT_SHARED_SECRET assertion, checked in the handlers)   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (safeEq(req.get('x-planner-key'), GATE) || safeEq(cookieVal(req, 'pk'), GATE)) return next();   // v28.151 (review B5): constant-time compare
@@ -1458,6 +1459,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/cp/')) return null;                  // client portal: its own magic-link session (cpAuth) or public request-link / logout
   if (p === '/api/health/client-events') return null;         // staff browser health beacon (rate-limited, no data write beyond the health log)
   if (p === '/api/me/favourites') return null;                // the signed-in user's own favourites
+  if (p.startsWith('/api/connect/') || p.startsWith('/api/identity/')) return null;   // v28.483 Connect: signed assertion + that person's access, checked in the handlers (connect routes are read only)
   if (p === '/mcp' || p.startsWith('/oauth/')) return null;   // v28.480 Claude connector: own OAuth bearer tokens, read-only tools (checked in the handlers)
   if (p.startsWith('/api/dev/')) return null;                 // registered only with HZ_HEALTH_TEST=1 off Vercel
   if (p === '/api/health/send-test') return null;             // hzAdminOnly inside the handler
@@ -16530,7 +16532,7 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await mcpColExpr()) + ' mcp_access, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(client_access,false) client_access, coalesce(commissions,false) commissions, ' + (await accColExpr()) + ' accounts_access, ' + (await mcpColExpr()) + ' mcp_access, ' + (await connectColExpr()) + ' connect_access, coalesce(landing_page,\'\') landing_page, inbox_types, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email');
     r.rows.forEach(row => { if (row.inbox_types != null && typeof row.inbox_types === 'string') { try { row.inbox_types = JSON.parse(row.inbox_types); } catch (_) { row.inbox_types = null; } } });   // jsonb → array for the client
     res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -16958,6 +16960,8 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
     // v28.480: Claude connector grant; switching it off also signs that person's Claude out (deletes their connector tokens)
     if (b.mcp_access !== undefined && (await mcpColExpr()) !== 'false') { await pool.query(`UPDATE planner.app_permissions SET mcp_access=$2 WHERE email=$1`, [email, !!b.mcp_access]);
       if (!b.mcp_access) await pool.query(`DELETE FROM planner.mcp_tokens WHERE lower(email)=$1`, [email]).catch(() => {}); }
+    // v28.483: Connect grant (Gmail add-on / Chrome side panel); unticking refuses their next Connect request
+    if (b.connect_access !== undefined && (await connectColExpr()) !== 'false') await pool.query(`UPDATE planner.app_permissions SET connect_access=$2 WHERE email=$1`, [email, !!b.connect_access]);
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
@@ -26283,6 +26287,7 @@ function mcpRedirectOk(u) { try { const x = new URL(u); const h = x.hostname.toL
 async function mcpAccess(email) {
   const e = String(email || '').trim().toLowerCase(); if (!e) return { ok: false, reason: 'no email' };
   if (!/@dockandbay\.com$/.test(e)) return { ok: false, reason: 'only @dockandbay.com accounts can connect' };
+  if (await identityBlocked(e)) return { ok: false, reason: e + ' is signed out of every Dock & Bay app (suspended in Google Workspace)' };   // v28.483: Connect identity revoke
   if (SUPER_ADMINS.has(e)) return { ok: true, email: e, accounts: true, commissions: true };
   let row = null; try { row = (await pool.query(`SELECT coalesce(mcp_access,false) mcp_access, coalesce(is_admin,false) is_admin, coalesce(commissions,false) commissions, ${await accColExpr()} accounts_access FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0]; }
   catch (err) { if (!/mcp_access/.test(err.message)) throw err; }
@@ -26511,6 +26516,316 @@ app.get('/api/config/mcp-audit', async (req, res) => { const me = await permsFor
   try { const r = await pool.query(`SELECT to_char(at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') at, email, tool, args, ok, error, ms, rows FROM planner.mcp_audit ORDER BY id DESC LIMIT 200`);
     res.set('Cache-Control', 'no-store').json({ rows: r.rows }); }
   catch (e) { if (/mcp_audit/.test(e.message)) return res.json({ rows: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); } });
+
+// ════════════════════════════════════════════════════════════════════════════
+// v28.483 (Ben 25-Oct-26): CONNECT, the HORIZON side (Gmail add-on / Chrome side panel hub, see the Connect repo docs/contracts.md 1.1 to 1.4).
+// Connect calls these routes server to server with "Authorization: Connect <assertion>": v1.<base64url payload>.<base64url HMAC-SHA256>
+// signed with CONNECT_SHARED_SECRET (payload sub = the person's email, aud "horizon", act lookup | revoke | restore, iat/exp 60 s, jti).
+// HORIZON verifies it, refuses replays, then applies THAT person's access: super admins, or app_permissions.connect_access (CONFIG >
+// Permissions "Connect"), and never anyone blocked by /api/identity/revoke. All /api/connect/* routes are READ ONLY (HORIZON tables and
+// Fulfil search_read; nothing is written to Fulfil). Orders and clients read Fulfil live (all channels incl. DTC), falling back to
+// planner.fulfil_sales (wholesale mirror) when Fulfil cannot be reached. Every call is logged in planner.mcp_audit (client_id 'connect').
+// Live needs: migration 387, CONNECT_SHARED_SECRET (32+ chars, same value as Connect), gate exemptions for /api/connect/* and /api/identity/*.
+// ════════════════════════════════════════════════════════════════════════════
+const CONNECT_TTL = 60, CONNECT_SKEW = 5, CONNECT_AUD = 'horizon';
+const _connectSeen = new Map();   // jti -> forget-after (ms). Per instance; kept for the token lifetime + skew + a margin (at least 65 s)
+function connectSecret() { const s = String(process.env.CONNECT_SHARED_SECRET || ''); return s.length >= 32 ? s : null; }
+function connectErr(res, status, code, message) { return res.status(status).set('Cache-Control', 'no-store').json({ error: code, message }); }
+// Same checks, in the same order, as Connect's verifyAssertion (src/lib/assertion.ts).
+function connectVerify(header, act, nowSec) {
+  const secret = connectSecret(); if (!secret) return { ok: false, error: 'not configured' };
+  const m = /^Connect\s+(\S+)$/i.exec(String(header || '').trim()); if (!m) return { ok: false, error: 'missing' };
+  const parts = m[1].split('.'); if (parts.length !== 3 || parts[0] !== 'v1') return { ok: false, error: 'malformed' };
+  const [ver, body, sig] = parts;
+  const expected = Buffer.from(crypto.createHmac('sha256', secret).update(ver + '.' + body).digest('base64url')), given = Buffer.from(sig);
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return { ok: false, error: 'bad signature' };
+  let p; try { p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch (_) { return { ok: false, error: 'malformed' }; }
+  if (!p || typeof p !== 'object') return { ok: false, error: 'malformed' };
+  const now = nowSec != null ? nowSec : Math.floor(Date.now() / 1000);
+  if (p.aud !== CONNECT_AUD) return { ok: false, error: 'wrong audience' };
+  if (typeof p.exp !== 'number' || now > p.exp + CONNECT_SKEW) return { ok: false, error: 'expired' };
+  if (typeof p.iat !== 'number' || p.iat > now + CONNECT_SKEW) return { ok: false, error: 'issued in the future' };
+  if (p.exp - p.iat > CONNECT_TTL) return { ok: false, error: 'lifetime too long' };
+  if (typeof p.sub !== 'string' || !/@dockandbay\.com$/.test(p.sub)) return { ok: false, error: 'not a Dock & Bay user' };
+  if (p.act !== act) return { ok: false, error: 'wrong action' };
+  if (typeof p.jti !== 'string' || !p.jti) return { ok: false, error: 'missing request id' };
+  const t = Date.now(); for (const [k, until] of _connectSeen) { if (until < t) _connectSeen.delete(k); }
+  if (_connectSeen.has(p.jti)) return { ok: false, error: 'replayed' };
+  _connectSeen.set(p.jti, Math.max((p.exp + CONNECT_SKEW) * 1000, t + 65000) + 5000);
+  return { ok: true, email: p.sub.toLowerCase(), jti: p.jti };
+}
+// Persistent sign-out block written by /api/identity/revoke (migration 387). Honoured by Connect routes and the Claude connector.
+async function identityBlocked(email) {
+  try { return (await pool.query(`SELECT 1 FROM planner.identity_blocks WHERE email=$1`, [String(email || '').trim().toLowerCase()])).rowCount > 0; }
+  catch (e) { if (/identity_blocks/.test(e.message)) return false; throw e; }   // before migration 387 nobody is blocked
+}
+let _connectCol = { ok: false, at: 0 };
+async function connectColExpr() {
+  if (!_connectCol.ok && Date.now() - _connectCol.at > 60000) { _connectCol.at = Date.now();
+    try { _connectCol.ok = (await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='planner' AND table_name='app_permissions' AND column_name='connect_access'`)).rowCount > 0; } catch (_) {} }
+  return _connectCol.ok ? 'coalesce(connect_access,false)' : 'false';
+}
+// Who may use Connect (modelled on mcpAccess). Blocked people never; super admins always; others need the "Connect" tick.
+async function connectAccess(email) {
+  const e = String(email || '').trim().toLowerCase(); if (!e) return { ok: false, reason: 'no email' };
+  if (!/@dockandbay\.com$/.test(e)) return { ok: false, reason: 'only @dockandbay.com accounts can use Connect' };
+  if (await identityBlocked(e)) return { ok: false, reason: e + ' is signed out of every Dock & Bay app (suspended in Google Workspace)' };
+  if (SUPER_ADMINS.has(e)) return { ok: true, email: e };
+  const row = (await pool.query(`SELECT ${await connectColExpr()} connect_access FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0];
+  if (!row || !row.connect_access) return { ok: false, reason: 'Connect is not switched on for ' + e + ' (CONFIG > Permissions)' };
+  return { ok: true, email: e };
+}
+function connectAudit(email, tool, args, ok, error, ms, rows) {
+  pool.query(`INSERT INTO planner.mcp_audit (email, client_id, tool, args, ok, error, ms, rows) VALUES ($1,'connect',$2,$3::jsonb,$4,$5,$6,$7)`,
+    [email || null, tool, JSON.stringify(args || {}).slice(0, 4000), !!ok, error ? String(error).slice(0, 500) : null, ms, rows == null ? null : rows]).catch(() => {});
+}
+// One wrapper for the three lookup routes: assertion (401), access (403), then the handler; audit every outcome.
+function connectRoute(tool, handler) {
+  return async (req, res) => {
+    const t0 = Date.now(), body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? req.body : {};
+    const v = connectVerify(req.headers.authorization, 'lookup');
+    if (!v.ok) { if (v.error === 'not configured') return connectErr(res, 503, 'not_configured', 'CONNECT_SHARED_SECRET is not set on this HORIZON server');
+      return connectErr(res, 401, 'bad_assertion', 'Connect assertion ' + v.error); }
+    let a; try { a = await connectAccess(v.email); } catch (e) { log500(e); return connectErr(res, 500, 'server_error', e.message); }
+    if (!a.ok) { connectAudit(v.email, tool, body, false, 'no_access', Date.now() - t0, null); return connectErr(res, 403, 'no_access', a.reason); }
+    try { const out = await handler(body, req, a);
+      if (out && out.__status) { connectAudit(a.email, tool, body, false, out.error, Date.now() - t0, null); return connectErr(res, out.__status, out.error, out.message); }
+      const rows = out && (Array.isArray(out.hits) ? out.hits.length : out.card ? 1 : ['pos', 'orders', 'skus'].reduce((n, k) => n + ((out[k] || []).length), 0) + (out.client ? 1 : 0));
+      connectAudit(a.email, tool, body, true, null, Date.now() - t0, rows);
+      res.set('Cache-Control', 'no-store').json(out);
+    } catch (e) { log500(e); connectAudit(a.email, tool, body, false, e.message, Date.now() - t0, null); connectErr(res, 500, 'server_error', e.message); }
+  };
+}
+const _cStr = (v) => (v == null ? '' : String(v)).trim();
+const _cList = (v, n) => [...new Set((Array.isArray(v) ? v : []).map(_cStr).filter(Boolean).map(s => s.slice(0, 80)))].slice(0, n || 50);
+const _cDate = (v) => { const u = fulfilUnwrap(v); return u ? String(u).slice(0, 10) : null; };
+const _cNum = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const _cTitle = (s) => { s = _cStr(s); return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : null; };
+const CONNECT_SALE_STATE = { draft: 'Draft', quotation: 'Quotation', confirmed: 'Confirmed', processing: 'Processing', done: 'Done', cancel: 'Cancelled', cancelled: 'Cancelled' };
+const CONNECT_SHIP_STATE = { draft: 'Draft', waiting: 'Waiting', assigned: 'Assigned', picked: 'Picked', packed: 'Packed', done: 'Done', cancel: 'Cancelled', cancelled: 'Cancelled' };
+const connectSaleState = (s) => CONNECT_SALE_STATE[_cStr(s).toLowerCase()] || _cTitle(s);
+const connectShipState = (s) => CONNECT_SHIP_STATE[_cStr(s).toLowerCase()] || _cTitle(s);
+const CONNECT_SALE_FIELDS = ['id', 'number', 'reference', 'state', 'party', 'party.name', 'channel.name', 'sale_date', 'shipments'];
+async function connectFulfilCfg() { const cfg = fulfilConfigFor(await activeFulfilEnv()); return cfg.configured ? cfg : null; }
+const connectFulfilUrl = (cfg, model, id) => (cfg && cfg.subdomain && id) ? 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/' + model + '/' + id : null;
+const connectLike = (q) => '%' + String(q).replace(/[%_\\]/g, m => '\\' + m) + '%';
+async function fulfilRead(model, domain, fields, limit, order) {   // read only: search_read
+  const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, 0, limit || 50, order || null, fields]);
+  return Array.isArray(rows) ? rows : [];
+}
+
+// ── PO (HORIZON tables; dates and payments from planner.v_po_finance, the canonical calc) ──
+async function connectPoRows(pos) {
+  if (!pos.length) return [];
+  return (await pool.query(`SELECT p.po, p.supplier_name, p.status FROM planner.purchase_orders p WHERE upper(p.po) = ANY($1) ORDER BY p.po`, [pos.map(s => s.toUpperCase())])).rows;
+}
+async function connectPoCard(ref, base) {
+  const po = _cStr(ref).toUpperCase(); if (!po) return null;
+  const f = (await pool.query(`SELECT po, supplier_name, status, shipment_ref, to_char(coalesce(supplier_ship_date, eff_prod_end),'YYYY-MM-DD') ex_factory,
+      to_char(eff_delivery,'YYYY-MM-DD') eta, sh_status_raw, val, credit_amount, start_paid, pay_completion_assigned, pay_balance_1_amount, pay_balance_2_amount
+    FROM planner.v_po_finance WHERE upper(po)=$1`, [po])).rows[0];
+  if (!f) return null;
+  const l = (await pool.query(`SELECT count(*)::int n, coalesce(sum(qty),0)::int u FROM planner.v_purchase_order_lines WHERE po=$1`, [f.po])).rows[0] || {};
+  let extra = 0; try { extra = Number((await pool.query(`SELECT coalesce(sum(amount),0) s FROM planner.po_balance_payments WHERE po=$1`, [f.po])).rows[0].s) || 0; } catch (_) {}
+  const n = (v) => Number(v) || 0;
+  const due = n(f.val) + n(f.credit_amount), dep = n(f.start_paid), rest = n(f.pay_completion_assigned) + n(f.pay_balance_1_amount) + n(f.pay_balance_2_amount) + extra, paid = dep + rest;
+  const pct = due > 0 ? Math.max(0, Math.min(100, Math.round(paid / due * 100))) : null;
+  const state = due <= 0 ? null : pct >= 100 ? 'Paid in full' : rest > 0.009 ? 'Part paid' : dep > 0.009 ? 'Deposit paid' : 'Not paid';
+  const hasShip = !!(f.shipment_ref || f.sh_status_raw);
+  return { ref: f.po, supplier: f.supplier_name || null, status: f.status || null, exFactory: f.ex_factory || null, eta: f.eta || null,
+    shipment: hasShip ? { ref: f.shipment_ref || f.po, status: f.sh_status_raw || null, eta: f.eta || null } : null,
+    lines: l.n != null ? l.n : null, units: l.u != null ? l.u : null, payment: { state, paidPct: pct },
+    horizonUrl: base + '/#/supply/purchase-orders/' + encodeURIComponent(f.po) };
+}
+
+// ── SKU (HORIZON products: inventory_<mkt>_3pl = ERP available, i.e. free stock; open inbound_shipments) ──
+const CONNECT_WH = ['UK', 'US', 'AU', 'EU'];
+async function connectSkuRows(skus) {
+  if (!skus.length) return [];
+  return (await pool.query(`SELECT sku, product_name, inventory_uk_3pl uk, inventory_us_3pl us, inventory_au_3pl au, inventory_eu_3pl eu FROM planner.products WHERE upper(sku) = ANY($1) ORDER BY sku`, [skus.map(s => s.toUpperCase())])).rows;
+}
+const connectStockSub = (r) => 'Free stock ' + CONNECT_WH.filter(w => r[w.toLowerCase()] != null).map(w => w + ' ' + r[w.toLowerCase()]).join(' · ');
+async function connectSkuCard(ref, base) {
+  const p = (await connectSkuRows([_cStr(ref)]))[0]; if (!p) return null;
+  const nx = (await pool.query(`SELECT reference, upper(split_part(destination_warehouse,'_',1)) wh, (quantity-received_quantity)::int qty, to_char(estimated_delivery_date,'YYYY-MM-DD') eta
+    FROM planner.inbound_shipments WHERE sku=$1 AND (quantity-received_quantity)>0 AND estimated_delivery_date IS NOT NULL
+    ORDER BY (estimated_delivery_date::date >= current_date) DESC, estimated_delivery_date LIMIT 1`, [p.sku])).rows[0];
+  const stock = {}; CONNECT_WH.forEach(w => { stock[w] = _cNum(p[w.toLowerCase()]); });
+  return { sku: p.sku, name: p.product_name || null, stock,
+    nextInbound: nx ? { po: nx.reference || null, warehouse: nx.wh || null, qty: nx.qty, eta: nx.eta || null } : null,
+    horizonUrl: base + '/#/supply/purchase-orders' };
+}
+
+// ── Orders (Fulfil live sale.sale, all channels; fallback planner.fulfil_sales) ──
+async function connectFulfilShipments(ids) {
+  if (!ids.length) return {};
+  const ships = await fulfilRead('stock.shipment.out', [['id', 'in', ids]], ['id', 'number', 'state', 'tracking_number.rec_name', 'tracking_number.tracking_url', 'carrier.rec_name', 'packages'], 100);
+  // Fulfil keeps one tracking record per package (shipment.tracking, origin 'stock.package,<id>'); the shipment's own tracking_number is the first.
+  const pkgShip = {}; ships.forEach(x => (x.packages || []).forEach(p => { pkgShip['stock.package,' + p] = x.id; }));
+  const pkgTrk = {}; const refs = Object.keys(pkgShip);
+  if (refs.length) (await fulfilRead('shipment.tracking', [['origin', 'in', refs.slice(0, 400)]], ['id', 'origin', 'rec_name', 'tracking_url'], 500).catch(() => []))
+    .forEach(t => { const sid = pkgShip[t.origin]; if (sid && t.rec_name) (pkgTrk[sid] = pkgTrk[sid] || []).push({ tracking: t.rec_name, url: /^https?:\/\//i.test(t.tracking_url || '') ? t.tracking_url : null }); });
+  const out = {};
+  ships.forEach(x => { const seen = new Set(), packages = [];
+    const add = (no, url) => { no = _cStr(no); if (!no || seen.has(no)) return; seen.add(no); packages.push({ tracking: no, url: url || null }); };
+    (pkgTrk[x.id] || []).forEach(t => add(t.tracking, t.url));
+    add(x['tracking_number.rec_name'], /^https?:\/\//i.test(x['tracking_number.tracking_url'] || '') ? x['tracking_number.tracking_url'] : null);
+    out[x.id] = { ref: x.number || null, state: connectShipState(x.state), carrier: x['carrier.rec_name'] || null, packages }; });
+  return out;
+}
+function connectOrderFromSale(s, ships, cfg, base) {
+  return { number: s.number || null, reference: s.reference || null, channel: s['channel.name'] || null,
+    client: { ref: s.party != null ? String(s.party) : null, name: s['party.name'] || null },
+    orderedAt: _cDate(s.sale_date), state: connectSaleState(s.state),
+    shipments: (s.shipments || []).map(id => ships[id]).filter(Boolean),
+    horizonUrl: base + '/#/client/orders/F' + s.id, fulfilUrl: connectFulfilUrl(cfg, 'sale.sale', s.id) };
+}
+function connectOrderFromMirror(r, base, cfg) {
+  const sh = Array.isArray(r.shipments) ? r.shipments : [];
+  return { number: r.number || null, reference: r.reference || null, channel: r.channel || null,
+    client: { ref: r.party_email || r.party_name || null, name: r.party_name || null }, orderedAt: r.sale_date || null, state: connectSaleState(r.state),
+    shipments: sh.map(x => { const seen = new Set(), packages = [];
+      (Array.isArray(x.trackings) ? x.trackings : []).concat(x.tracking ? [{ no: x.tracking, url: x.tracking_url }] : []).forEach(t => { const no = _cStr(t.no); if (no && !seen.has(no)) { seen.add(no); packages.push({ tracking: no, url: t.url || null }); } });
+      return { ref: x.number || null, state: connectShipState(x.state), carrier: x.carrier || null, packages }; }),
+    horizonUrl: base + '/#/client/orders/F' + r.fulfil_id, fulfilUrl: connectFulfilUrl(cfg, 'sale.sale', r.fulfil_id) };
+}
+const CONNECT_MIRROR_COLS = `fulfil_id, number, reference, state, party_name, party_email, channel, to_char(sale_date,'YYYY-MM-DD') sale_date, shipments`;
+async function connectOrderSales(refs) {   // exact number or reference; Fulfil live, else the mirror. Returns { src, rows, cfg }
+  const cfg = await connectFulfilCfg().catch(() => null);
+  if (cfg) { try { return { src: 'fulfil', cfg, rows: await fulfilRead('sale.sale', ['OR', [['number', 'in', refs]], [['reference', 'in', refs]]], CONNECT_SALE_FIELDS, 100) }; }
+    catch (e) { console.warn('[connect] Fulfil order read failed, using planner.fulfil_sales: ' + e.message); } }
+  return { src: 'mirror', cfg, rows: (await pool.query(`SELECT ${CONNECT_MIRROR_COLS} FROM planner.fulfil_sales WHERE number = ANY($1) OR reference = ANY($1) ORDER BY sale_date DESC NULLS LAST LIMIT 100`, [refs])).rows };
+}
+async function connectOrderCard(ref, base) {
+  const q = _cStr(ref); if (!q) return null;
+  const r = await connectOrderSales([q]);
+  const pick = (rows) => rows.find(s => s.number === q) || rows.find(s => s.reference === q) || rows[0];
+  const s = pick(r.rows); if (!s) return null;
+  if (r.src === 'mirror') return connectOrderFromMirror(s, base, r.cfg);
+  return connectOrderFromSale(s, await connectFulfilShipments(s.shipments || []), r.cfg, base);
+}
+
+// ── Clients (Fulfil party by contact email / id / name; fallback planner.fulfil_sales by party email or name) ──
+async function connectPartyByEmail(email) {
+  const e = _cStr(email).toLowerCase(); if (!/^[^\s@]+@[^\s@]+$/.test(e)) return null;
+  const cfg = await connectFulfilCfg().catch(() => null);
+  if (cfg) { try { const r = (await fulfilRead('party.contact_mechanism', [['type', '=', 'email'], ['value', 'ilike', e.replace(/[%_\\]/g, m => '\\' + m)], ['active', '=', true]], ['id', 'party', 'party.name'], 5))[0];
+      return r ? { ref: String(r.party), label: r['party.name'] || e } : null; }
+    catch (err) { console.warn('[connect] Fulfil contact read failed, using planner.fulfil_sales: ' + err.message); } }
+  const m = (await pool.query(`SELECT party_name FROM planner.fulfil_sales WHERE lower(party_email)=$1 ORDER BY sale_date DESC NULLS LAST LIMIT 1`, [e])).rows[0];
+  return m ? { ref: e, label: m.party_name || e } : null;
+}
+async function connectClientCard(ref, base) {
+  const q = _cStr(ref); if (!q) return null;
+  const cfg = await connectFulfilCfg().catch(() => null);
+  if (cfg) {
+    try {
+      let partyId = /^\d+$/.test(q) ? Number(q) : null;
+      if (partyId == null && q.includes('@')) { const p = await connectPartyByEmail(q); if (p && /^\d+$/.test(p.ref)) partyId = Number(p.ref); }
+      if (partyId != null) {
+        const p = (await fulfilRead('party.party', [['id', '=', partyId]], ['id', 'name'], 1))[0]; if (!p) return null;
+        const em = (await fulfilRead('party.contact_mechanism', [['party', '=', partyId], ['type', '=', 'email'], ['active', '=', true]], ['value'], 1))[0];
+        const sales = await fulfilRead('sale.sale', [['party', '=', partyId], ['number', '!=', null]], ['id', 'number', 'state', 'sale_date'], 5, [['sale_date', 'DESC'], ['id', 'DESC']]);
+        return { ref: String(p.id), name: p.name || null, email: em ? (_cStr(em.value).toLowerCase() || null) : (q.includes('@') ? q.toLowerCase() : null),
+          recentOrders: sales.map(s => ({ number: s.number || null, orderedAt: _cDate(s.sale_date), state: connectSaleState(s.state) })),
+          horizonUrl: base + '/#/client/clients', fulfilUrl: connectFulfilUrl(cfg, 'party.party', p.id) };
+      }
+      if (!q.includes('@')) return null;   // an email that is not a Fulfil contact: try the mirror below
+    } catch (e) { console.warn('[connect] Fulfil client read failed, using planner.fulfil_sales: ' + e.message); }
+  }
+  const rows = (await pool.query(`SELECT number, state, to_char(sale_date,'YYYY-MM-DD') sale_date, party_name, party_email FROM planner.fulfil_sales
+    WHERE lower(party_email)=lower($1) OR party_name=$1 ORDER BY sale_date DESC NULLS LAST LIMIT 5`, [q])).rows;
+  if (!rows.length) return null;
+  return { ref: q, name: rows[0].party_name || null, email: rows[0].party_email ? rows[0].party_email.toLowerCase() : null,
+    recentOrders: rows.map(r => ({ number: r.number || null, orderedAt: r.sale_date || null, state: connectSaleState(r.state) })),
+    horizonUrl: base + '/#/client/clients', fulfilUrl: null };
+}
+
+// 1.1 Which spotted tokens are real
+app.post('/api/connect/resolve', connectRoute('connect.resolve', async (b) => {
+  const pos = _cList(b.pos), orders = _cList(b.orders), skus = _cList(b.skus);
+  const [poRows, skuRows, ord, client] = await Promise.all([connectPoRows(pos), connectSkuRows(skus), orders.length ? connectOrderSales(orders) : { rows: [] },
+    b.clientEmail ? connectPartyByEmail(b.clientEmail) : null]);
+  const seen = new Set(), orderHits = [];
+  orders.forEach(t => { const s = ord.rows.find(x => x.number === t) || ord.rows.find(x => x.reference === t); if (!s || seen.has(t)) return; seen.add(t);
+    const name = ord.src === 'fulfil' ? s['party.name'] : s.party_name;
+    orderHits.push({ ref: t, label: [s.number || t, name, connectSaleState(s.state)].filter(Boolean).join(' · ') }); });
+  return { pos: poRows.map(p => ({ ref: p.po, label: [p.po, p.supplier_name, p.status].filter(Boolean).join(' · ') })),
+    orders: orderHits, skus: skuRows.map(p => ({ ref: p.sku, label: p.product_name || p.sku })), client: client || null };
+}));
+
+// 1.2 Free-text search: PO, order number or reference, SKU or product name, client name
+app.post('/api/connect/search', connectRoute('connect.search', async (b, req) => {
+  const q = _cStr(b.q).slice(0, 80), limit = Math.min(25, Math.max(1, parseInt(b.limit, 10) || 10));
+  if (q.length < 2) return { hits: [] };
+  const like = connectLike(q), up = q.toUpperCase();
+  const poQ = pool.query(`SELECT po, supplier_name, status FROM planner.purchase_orders WHERE po ILIKE $1 OR client_po_ref ILIKE $1
+      ORDER BY (upper(po)=$2) DESC, (upper(coalesce(status,'')) LIKE 'COMPLETE%') ASC, po DESC LIMIT $3`, [like, up, limit]).then(r => r.rows);
+  const skuQ = pool.query(`SELECT sku, product_name, inventory_uk_3pl uk, inventory_us_3pl us, inventory_au_3pl au, inventory_eu_3pl eu FROM planner.products
+      WHERE sku ILIKE $1 OR product_name ILIKE $1 ORDER BY (upper(sku)=$2) DESC, coalesce(in_planning_scope,false) DESC, (sku ILIKE $1) DESC, sku LIMIT $3`, [like, up, limit]).then(r => r.rows);
+  const fulfilQ = (async () => {
+    const cfg = await connectFulfilCfg().catch(() => null);
+    if (cfg) { try {
+      const [sales, parties] = await Promise.all([
+        fulfilRead('sale.sale', ['OR', [['number', 'ilike', like]], [['reference', 'ilike', like]]], CONNECT_SALE_FIELDS, limit, [['sale_date', 'DESC'], ['id', 'DESC']]),
+        q.length >= 3 ? fulfilRead('party.party', [['name', 'ilike', like]], ['id', 'name'], limit) : []]);
+      return { src: 'fulfil', sales: sales.filter(s => s.number || s.reference), parties: parties.map(p => ({ ref: String(p.id), name: p.name })) };
+    } catch (e) { console.warn('[connect] Fulfil search failed, using planner.fulfil_sales: ' + e.message); } }
+    const sales = (await pool.query(`SELECT ${CONNECT_MIRROR_COLS} FROM planner.fulfil_sales WHERE number ILIKE $1 OR reference ILIKE $1 ORDER BY sale_date DESC NULLS LAST LIMIT $2`, [like, limit])).rows;
+    const parties = q.length >= 3 ? (await pool.query(`SELECT DISTINCT ON (party_name) party_name, party_email FROM planner.fulfil_sales WHERE party_name ILIKE $1 ORDER BY party_name, sale_date DESC NULLS LAST LIMIT $2`, [like, limit])).rows
+      .map(p => ({ ref: p.party_email || p.party_name, name: p.party_name })) : [];
+    return { src: 'mirror', sales, parties };
+  })();
+  const [pos, skus, f] = await Promise.all([poQ, skuQ, fulfilQ]);
+  const exact = (s) => _cStr(s).toUpperCase() === up;
+  const hits = [];
+  pos.forEach(p => hits.push({ kind: 'po', ref: p.po, label: p.po, sub: [p.supplier_name, p.status].filter(Boolean).join(' · ') || null, _e: exact(p.po) }));
+  f.sales.forEach(s => { const name = f.src === 'fulfil' ? s['party.name'] : s.party_name, ch = f.src === 'fulfil' ? s['channel.name'] : s.channel;
+    hits.push({ kind: 'order', ref: s.number || s.reference, label: [s.number, s.reference && s.reference !== s.number ? s.reference : null].filter(Boolean).join(' · '),
+      sub: [name, ch, connectSaleState(s.state)].filter(Boolean).join(' · ') || null, _e: exact(s.number) || exact(s.reference) }); });
+  skus.forEach(p => hits.push({ kind: 'sku', ref: p.sku, label: p.product_name || p.sku, sub: connectStockSub(p), _e: exact(p.sku) }));
+  f.parties.forEach(p => hits.push({ kind: 'client', ref: p.ref, label: p.name || p.ref, sub: null, _e: exact(p.name) }));
+  // exact matches first, then the per-kind order above (each list already best-first)
+  return { hits: hits.map((h, i) => [h, i]).sort((x, y) => (y[0]._e - x[0]._e) || (x[1] - y[1])).slice(0, limit).map(([h]) => ({ kind: h.kind, ref: h.ref, label: h.label, sub: h.sub })) };
+}));
+
+// 1.3 One card
+app.post('/api/connect/lookup', connectRoute('connect.lookup', async (b, req) => {
+  const kind = _cStr(b.kind), ref = _cStr(b.ref).slice(0, 120), base = mcpBase(req);
+  if (!['po', 'order', 'sku', 'client'].includes(kind)) return { __status: 400, error: 'bad_request', message: 'kind must be po, order, sku or client' };
+  if (!ref) return { __status: 400, error: 'bad_request', message: 'ref is required' };
+  const card = kind === 'po' ? await connectPoCard(ref, base) : kind === 'sku' ? await connectSkuCard(ref, base) : kind === 'order' ? await connectOrderCard(ref, base) : await connectClientCard(ref, base);
+  if (!card) return { __status: 404, error: 'not_found', message: 'No ' + kind + ' found for ' + ref };
+  return { kind, card };
+}));
+
+// 1.4 Identity: sign a person out of HORIZON (revoke) or lift that block (restore). Called by Connect's suspension watcher.
+// The email is the assertion's sub (the body's email is informational only). Idempotent. Never touches permission ticks.
+async function connectIdentity(req, res, act) {
+  const v = connectVerify(req.headers.authorization, act);
+  if (!v.ok) { if (v.error === 'not configured') return connectErr(res, 503, 'not_configured', 'CONNECT_SHARED_SECRET is not set on this HORIZON server');
+    return connectErr(res, 401, 'bad_assertion', 'Connect assertion ' + v.error); }
+  const email = v.email; let detail = null;
+  try {
+    if (act === 'revoke') {
+      const del = await pool.query(`DELETE FROM planner.mcp_tokens WHERE lower(email)=$1`, [email]).catch(e => { if (/mcp_tokens/.test(e.message)) return { rowCount: 0 }; throw e; });
+      const ins = await pool.query(`INSERT INTO planner.identity_blocks (email, source, jti) VALUES ($1,'connect',$2) ON CONFLICT (email) DO NOTHING`, [email, v.jti]);
+      detail = { connector_tokens_deleted: del.rowCount || 0, newly_blocked: ins.rowCount > 0 };
+    } else {
+      const del = await pool.query(`DELETE FROM planner.identity_blocks WHERE email=$1`, [email]);
+      detail = { was_blocked: del.rowCount > 0 };
+    }
+    permsMemoDrop(email);
+    await pool.query(`INSERT INTO planner.identity_events (email, event, ok, detail, jti) VALUES ($1,$2,true,$3::jsonb,$4)`, [email, act, JSON.stringify(detail), v.jti]).catch(e => console.warn('[connect] identity_events: ' + e.message));
+    console.log('[connect] identity ' + act + ' ' + email + ' ' + JSON.stringify(detail));
+    res.set('Cache-Control', 'no-store').json({ ok: true });
+  } catch (e) {
+    log500(e); pool.query(`INSERT INTO planner.identity_events (email, event, ok, detail, jti) VALUES ($1,$2,false,$3::jsonb,$4)`, [email, act, JSON.stringify({ error: e.message }), v.jti]).catch(() => {});
+    connectErr(res, /identity_blocks/.test(e.message) ? 503 : 500, /identity_blocks/.test(e.message) ? 'not_configured' : 'server_error', /identity_blocks/.test(e.message) ? 'migration 387 is not applied on this database' : e.message);
+  }
+}
+app.post('/api/identity/revoke', (req, res) => connectIdentity(req, res, 'revoke'));
+app.post('/api/identity/restore', (req, res) => connectIdentity(req, res, 'restore'));
 
 // list the caller's conversations (newest first)
 app.get('/api/assistant/conversations', async (req, res) => {
