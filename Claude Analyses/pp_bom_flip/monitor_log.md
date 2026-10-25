@@ -268,3 +268,57 @@ Kits monitored: 66. Orders with those kits: 3. ALL AS EXPECTED.
 | SO70470 | UK-910027 | processing | 10-24T14:13 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
 | SO70502 | UK-910051 | processing | 10-24T16:08 | UK-TOWLB-CAB-XL-6SETK | 1 | PP | PP | PP move assigned,draft |
 
+## Check 2026-10-25 06:47:06 (orders since 2026-10-25T03:47:04)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO70516 | UK-910057 | processing | 10-24T16:48 | UK-TOWLB-CAB-LG-4SETH | 1 | singles | singles |  |
+
+## Check 2026-10-25 09:47:04 (orders since 2026-10-25T06:47:06)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO70574 | UK-910096 | processing | 10-24T20:11 | UK-TEATWL-MD-6SET-AFTPTY | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-25 12:47:04 (orders since 2026-10-25T09:47:04)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-25 15:47:04 (orders since 2026-10-25T12:47:04)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-25 18:47:05 (orders since 2026-10-25T15:47:04)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO70721 | UK-910122 | processing | 10-25T05:47 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-25 21:47:06 (orders since 2026-10-25T18:47:05)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-26 00:47:06 (orders since 2026-10-25T21:47:06)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-26 03:47:06 (orders since 2026-10-26T00:47:06)
+
+Kits monitored: 66. Orders with those kits: 3. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO70893 | UK-910224 | processing | 10-25T14:04 | UK-TOWLB-CAB-LG-6SET-BLUE | 1 | PP | PP | PP move assigned,draft |
+| SO70895 | UK-910226 | processing | 10-25T14:07 | UK-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
+| SO70923 | EU-51262 | processing | 10-25T15:14 | EU-TOWLB-CAB-LG-4SETH | 1 | PP | PP | PP move assigned,draft |
+
