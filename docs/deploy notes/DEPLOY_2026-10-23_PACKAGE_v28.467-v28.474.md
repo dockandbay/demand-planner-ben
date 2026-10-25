@@ -2,7 +2,16 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` HEAD `666039eb` (666039eb7b06be8cee0eb794e374c5a644d229ee); the code is at `1f0bc2fe`, and this note is the only later commit. Live `/api/version` verified **v28.466** (23-Oct-26). Production repo `dockandbayteam/dock-bay-demand-planner`: **PR #9 squash-merged, `main` = `7540d188`** (7540d1881cc282ac1ac66292cffe375a1d26e262).
 
-**STATUS: merged and migrated, NOT live.** The CI deploy job fails at "Check the deploy token": Vercel returns HTTP 403 for `VERCEL_TOKEN`. Last good deploy 22-Oct 12:35. Failed runs: 39931926508 (push) and 39932940152 (workflow_dispatch, after Ben set a new token).
+**STATUS 25-Oct-26: LIVE.** `/api/version` verified **v28.474** at 02:30 UTC. Production `main` = `3e1f18a6`. CI run 40154937533 (workflow_dispatch) green: checks, regression tests, deploy, alias check and smoke. Smoke on live data: all 9 sample requests are `sent`; no Draft requests were created between 23 and 25 Oct.
+
+How it was unblocked (25-Oct):
+1. **Token:** Ben set a new team-scoped `VERCEL_TOKEN` (saved 01:54 UTC); the misnamed `VCP_3PEB…` secret is deleted. "Check the deploy token" now passes.
+2. **Commit email:** Vercel then marked the deploy **Blocked**: "the commit email 62872297+dockandbay@users.noreply.github.com could not be matched to a GitHub account". Every earlier production commit was authored by diviyaj@, so this never showed before. Ben verified admin@dockandbay.com on the dockandbay GitHub account and unticked "Keep my email addresses private".
+3. **Trigger commit:** PR #10 (squash) still used the noreply email; PR #11 (empty, rebase) was dropped as empty; PR #12 added `docs/DEPLOY_LOG.md`, authored admin@, merged by rebase. Then Run workflow on main.
+
+**Div, for next time:** only commits whose author email maps to a GitHub account linked in the Vercel team will deploy. Merges by the dockandbay account now use admin@. Cancelled runs 40152553497, 40154291362, 40154720616 were the blocked attempts.
+
+**Earlier status (23-Oct): merged and migrated, NOT live.** The CI deploy job fails at "Check the deploy token": Vercel returns HTTP 403 for `VERCEL_TOKEN`. Last good deploy 22-Oct 12:35. Failed runs: 39931926508 (push) and 39932940152 (workflow_dispatch, after Ben set a new token).
 
 Ben approved this deploy. Claude ran it through your PR + checks process with Ben approving each step.
 
