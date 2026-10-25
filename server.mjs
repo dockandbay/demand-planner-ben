@@ -26530,6 +26530,9 @@ app.get('/api/config/mcp-audit', async (req, res) => { const me = await permsFor
 const CONNECT_TTL = 60, CONNECT_SKEW = 5, CONNECT_AUD = 'horizon';
 const _connectSeen = new Map();   // jti -> forget-after (ms). Per instance; kept for the token lifetime + skew + a margin (at least 65 s)
 function connectSecret() { const s = String(process.env.CONNECT_SHARED_SECRET || ''); return s.length >= 32 ? s : null; }
+// HORIZON address for card links. v28.484: own helper (not the connector's mcpBase) so these routes do not depend on the v28.480 block.
+function connectBase(req) { const u = process.env.MCP_BASE_URL || ''; if (u) return u.replace(/\/+$/, '');
+  return (_reqHttps(req) ? 'https' : 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers.host); }
 function connectErr(res, status, code, message) { return res.status(status).set('Cache-Control', 'no-store').json({ error: code, message }); }
 // Same checks, in the same order, as Connect's verifyAssertion (src/lib/assertion.ts).
 function connectVerify(header, act, nowSec) {
@@ -26566,14 +26569,15 @@ async function connectColExpr() {
   return _connectCol.ok ? 'coalesce(connect_access,false)' : 'false';
 }
 // Who may use Connect (modelled on mcpAccess). Blocked people never; super admins always; others need the "Connect" tick.
+// v28.484 (Ben 25-Oct-26): order and client data (Fulfil) also need HORIZON's CLIENT grant (client_access, or admin), as in the app.
 async function connectAccess(email) {
   const e = String(email || '').trim().toLowerCase(); if (!e) return { ok: false, reason: 'no email' };
   if (!/@dockandbay\.com$/.test(e)) return { ok: false, reason: 'only @dockandbay.com accounts can use Connect' };
   if (await identityBlocked(e)) return { ok: false, reason: e + ' is signed out of every Dock & Bay app (suspended in Google Workspace)' };
-  if (SUPER_ADMINS.has(e)) return { ok: true, email: e };
-  const row = (await pool.query(`SELECT ${await connectColExpr()} connect_access FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0];
+  if (SUPER_ADMINS.has(e)) return { ok: true, email: e, client: true };
+  const row = (await pool.query(`SELECT ${await connectColExpr()} connect_access, coalesce(client_access,false) client_access, coalesce(is_admin,false) is_admin FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0];
   if (!row || !row.connect_access) return { ok: false, reason: 'Connect is not switched on for ' + e + ' (CONFIG > Permissions)' };
-  return { ok: true, email: e };
+  return { ok: true, email: e, client: !!(row.client_access || row.is_admin) };
 }
 function connectAudit(email, tool, args, ok, error, ms, rows) {
   pool.query(`INSERT INTO planner.mcp_audit (email, client_id, tool, args, ok, error, ms, rows) VALUES ($1,'connect',$2,$3::jsonb,$4,$5,$6,$7)`,
@@ -26615,13 +26619,15 @@ async function fulfilRead(model, domain, fields, limit, order) {   // read only:
 }
 
 // ── PO (HORIZON tables; dates and payments from planner.v_po_finance, the canonical calc) ──
+// v28.484 (Ben 25-Oct-26): ex-factory = the Flexport departure (flex_departure: Flexport actual departure, else estimated, from the
+// Flexport API import / legacy table via flexport_shipments_effective), else the factory production end (eff_prod_end).
 async function connectPoRows(pos) {
   if (!pos.length) return [];
   return (await pool.query(`SELECT p.po, p.supplier_name, p.status FROM planner.purchase_orders p WHERE upper(p.po) = ANY($1) ORDER BY p.po`, [pos.map(s => s.toUpperCase())])).rows;
 }
 async function connectPoCard(ref, base) {
   const po = _cStr(ref).toUpperCase(); if (!po) return null;
-  const f = (await pool.query(`SELECT po, supplier_name, status, shipment_ref, to_char(coalesce(supplier_ship_date, eff_prod_end),'YYYY-MM-DD') ex_factory,
+  const f = (await pool.query(`SELECT po, supplier_name, status, shipment_ref, to_char(coalesce(flex_departure, eff_prod_end),'YYYY-MM-DD') ex_factory,
       to_char(eff_delivery,'YYYY-MM-DD') eta, sh_status_raw, val, credit_amount, start_paid, pay_completion_assigned, pay_balance_1_amount, pay_balance_2_amount
     FROM planner.v_po_finance WHERE upper(po)=$1`, [po])).rows[0];
   if (!f) return null;
@@ -26742,10 +26748,11 @@ async function connectClientCard(ref, base) {
 }
 
 // 1.1 Which spotted tokens are real
-app.post('/api/connect/resolve', connectRoute('connect.resolve', async (b) => {
-  const pos = _cList(b.pos), orders = _cList(b.orders), skus = _cList(b.skus);
+app.post('/api/connect/resolve', connectRoute('connect.resolve', async (b, req, a) => {
+  const pos = _cList(b.pos), skus = _cList(b.skus);
+  const orders = a.client ? _cList(b.orders) : [], clientEmail = a.client ? b.clientEmail : null;   // v28.484: orders + client need the CLIENT grant
   const [poRows, skuRows, ord, client] = await Promise.all([connectPoRows(pos), connectSkuRows(skus), orders.length ? connectOrderSales(orders) : { rows: [] },
-    b.clientEmail ? connectPartyByEmail(b.clientEmail) : null]);
+    clientEmail ? connectPartyByEmail(clientEmail) : null]);
   const seen = new Set(), orderHits = [];
   orders.forEach(t => { const s = ord.rows.find(x => x.number === t) || ord.rows.find(x => x.reference === t); if (!s || seen.has(t)) return; seen.add(t);
     const name = ord.src === 'fulfil' ? s['party.name'] : s.party_name;
@@ -26755,7 +26762,7 @@ app.post('/api/connect/resolve', connectRoute('connect.resolve', async (b) => {
 }));
 
 // 1.2 Free-text search: PO, order number or reference, SKU or product name, client name
-app.post('/api/connect/search', connectRoute('connect.search', async (b, req) => {
+app.post('/api/connect/search', connectRoute('connect.search', async (b, req, a) => {
   const q = _cStr(b.q).slice(0, 80), limit = Math.min(25, Math.max(1, parseInt(b.limit, 10) || 10));
   if (q.length < 2) return { hits: [] };
   const like = connectLike(q), up = q.toUpperCase();
@@ -26764,6 +26771,7 @@ app.post('/api/connect/search', connectRoute('connect.search', async (b, req) =>
   const skuQ = pool.query(`SELECT sku, product_name, inventory_uk_3pl uk, inventory_us_3pl us, inventory_au_3pl au, inventory_eu_3pl eu FROM planner.products
       WHERE sku ILIKE $1 OR product_name ILIKE $1 ORDER BY (upper(sku)=$2) DESC, coalesce(in_planning_scope,false) DESC, (sku ILIKE $1) DESC, sku LIMIT $3`, [like, up, limit]).then(r => r.rows);
   const fulfilQ = (async () => {
+    if (!a.client) return { src: 'none', sales: [], parties: [] };   // v28.484: order and client hits need the CLIENT grant
     const cfg = await connectFulfilCfg().catch(() => null);
     if (cfg) { try {
       const [sales, parties] = await Promise.all([
@@ -26790,10 +26798,11 @@ app.post('/api/connect/search', connectRoute('connect.search', async (b, req) =>
 }));
 
 // 1.3 One card
-app.post('/api/connect/lookup', connectRoute('connect.lookup', async (b, req) => {
-  const kind = _cStr(b.kind), ref = _cStr(b.ref).slice(0, 120), base = mcpBase(req);
+app.post('/api/connect/lookup', connectRoute('connect.lookup', async (b, req, a) => {
+  const kind = _cStr(b.kind), ref = _cStr(b.ref).slice(0, 120), base = connectBase(req);
   if (!['po', 'order', 'sku', 'client'].includes(kind)) return { __status: 400, error: 'bad_request', message: 'kind must be po, order, sku or client' };
   if (!ref) return { __status: 400, error: 'bad_request', message: 'ref is required' };
+  if ((kind === 'order' || kind === 'client') && !a.client) return { __status: 403, error: 'no_access', message: 'Order and client cards need HORIZON\'s CLIENT access (CONFIG > Permissions)' };   // v28.484
   const card = kind === 'po' ? await connectPoCard(ref, base) : kind === 'sku' ? await connectSkuCard(ref, base) : kind === 'order' ? await connectOrderCard(ref, base) : await connectClientCard(ref, base);
   if (!card) return { __status: 404, error: 'not_found', message: 'No ' + kind + ' found for ' + ref };
   return { kind, card };

@@ -3,7 +3,7 @@ topic: connect
 title: Connect (Gmail add-on and Chrome side panel)
 covers: HORIZON side of the Connect app: signed assertions from Connect, who may use Connect (CONFIG > Permissions "Connect"), the resolve / search / lookup routes and what each card shows (PO, Fulfil order and tracking, SKU stock, client), the Fulfil live read with the fulfil_sales fallback, identity revoke / restore (sign-out of suspended Google Workspace users)
 sources:
-  - server.mjs :: connectVerify, connectAccess, identityBlocked, connectColExpr, connectRoute, connectAudit
+  - server.mjs :: connectVerify, connectAccess, identityBlocked, connectColExpr, connectRoute, connectAudit, connectBase
   - server.mjs :: connectPoCard, connectPoRows, connectSkuCard, connectSkuRows, connectStockSub
   - server.mjs :: connectOrderSales, connectOrderCard, connectOrderFromSale, connectOrderFromMirror, connectFulfilShipments
   - server.mjs :: connectPartyByEmail, connectClientCard
@@ -11,15 +11,16 @@ sources:
   - server.mjs :: connectIdentity, /api/identity/revoke, /api/identity/restore
   - server.mjs :: mcpAccess (Claude connector honours the block)
   - migrations/387_connect.sql :: planner.identity_blocks, planner.identity_events, app_permissions.connect_access
-verified_version: v28.483
+verified_version: v28.484
 fingerprints:
   server.mjs::connectVerify: ed0b696fae5a
-  server.mjs::connectAccess: 8a953b754e4a
+  server.mjs::connectAccess: d272750cfad4
   server.mjs::identityBlocked: d6a883caff38
   server.mjs::connectColExpr: fca7dd7efcff
   server.mjs::connectRoute: 424ff2ad20d7
   server.mjs::connectAudit: fbfd65394dd5
-  server.mjs::connectPoCard: cb399798a4a6
+  server.mjs::connectBase: a8d4965b9d93
+  server.mjs::connectPoCard: 8cc5eb2c9861
   server.mjs::connectPoRows: 4013a985cc1c
   server.mjs::connectSkuCard: 474f9aa7ad75
   server.mjs::connectSkuRows: 7bd21d67545a
@@ -31,9 +32,9 @@ fingerprints:
   server.mjs::connectFulfilShipments: ffa639757a48
   server.mjs::connectPartyByEmail: 6a39903c22aa
   server.mjs::connectClientCard: 368c0adefc65
-  server.mjs::/api/connect/resolve: 8d2b51b466ca
-  server.mjs::/api/connect/search: aaa5585226c8
-  server.mjs::/api/connect/lookup: cba2d72b6f0a
+  server.mjs::/api/connect/resolve: e3d434bcf950
+  server.mjs::/api/connect/search: 7f62d998f2fb
+  server.mjs::/api/connect/lookup: 42068be10bbd
   server.mjs::connectIdentity: a43200abf591
   server.mjs::/api/identity/revoke: d2c45371929b
   server.mjs::/api/identity/restore: 74496260447d
@@ -56,12 +57,12 @@ fingerprints:
 ## Who may use Connect
 - Refused with 403 no_access unless: the person is a super admin, or is ticked under "Connect" in CONFIG > Admin > Permissions (app_permissions.connect_access). Unticking refuses their next request. (source: server.mjs :: connectAccess)
 - Anyone signed out by Connect's identity revoke is refused, super admins included, even with the tick. (source: server.mjs :: connectAccess, identityBlocked)
-- Connect does not apply the CLIENT, ACCOUNTS or COMMISSIONS grants: the cards hold no ACCOUNTS or commission data, and order and client cards follow the Claude connector's client_orders, which is also open to every connector user. (source: server.mjs :: connectAccess)
+- Order and client data (from Fulfil) also need HORIZON's CLIENT grant (client_access, or admin; super admins always), the same grant as the CLIENT tab (v28.484, Ben 25-Oct-26). Without it: lookup of kind order or client answers 403 no_access, search leaves out order and client hits, and resolve returns no orders and client null. PO and SKU data need only the Connect tick. ACCOUNTS and COMMISSIONS grants do not apply (the cards hold no ACCOUNTS or commission data). (source: server.mjs :: connectAccess, /api/connect/lookup, /api/connect/search, /api/connect/resolve)
 
 ## Resolve, search and lookup (all read only)
 - Resolve takes up to 50 each of PO numbers, order numbers and SKU candidates, plus one client email, and returns only the real ones with a label. PO label: PO, supplier, status. Order label: order number, client, state. SKU label: product name. Client: the Fulfil party, or null when the email is not a Fulfil contact. (source: server.mjs :: /api/connect/resolve)
 - Search (at least 2 characters, default 10 hits, at most 25) looks in HORIZON POs (PO number or client PO reference; open POs before complete), HORIZON products (SKU or product name; in planning scope first; the hit shows free stock per warehouse), Fulfil orders (number or reference, newest first) and Fulfil clients (party name, 3 or more characters). Exact matches come first, then POs, orders, SKUs, clients. (source: server.mjs :: /api/connect/search)
-- PO card: supplier and status from purchase_orders; ex-factory = the supplier ship date, else the production end (v_po_finance eff_prod_end); ETA = the canonical delivery date (v_po_finance eff_delivery); the shipment (shipment ref, raw shipment status, ETA) when the PO has one; line count and units from v_purchase_order_lines. (source: server.mjs :: connectPoCard)
+- PO card: supplier and status from purchase_orders; ex-factory = the Flexport departure date (v_po_finance flex_departure: the Flexport actual departure, else the estimated departure, from the Flexport API import or the legacy Flexport table, matched to the PO by Flexport reference, PO number or shipment ref), else the factory production end (v_po_finance eff_prod_end: the production end override, else production start + supplier production days) (v28.484, Ben 25-Oct-26); ETA = the canonical delivery date (v_po_finance eff_delivery); the shipment (shipment ref, raw shipment status, ETA) when the PO has one; line count and units from v_purchase_order_lines. (source: server.mjs :: connectPoCard)
 - PO payment: owed = PO value used + credit_amount. Paid = start deposit paid (v_po_finance start_paid, which includes the deposit draw) + completion assigned + balance payments 1 and 2 + balance payments 3 onward (po_balance_payments). paidPct = paid / owed, rounded, 0 to 100. State: "Paid in full" at 100%, "Part paid" when any completion or balance payment exists, "Deposit paid" when only the deposit is paid, else "Not paid"; null when the PO has no value. (source: server.mjs :: connectPoCard)
 - SKU card: free stock per warehouse UK, US, AU, EU = products.inventory_<market>_3pl (the ERP available quantity; on hand is the separate _3pl_onhand column). Next inbound = the open inbound_shipments leg (quantity minus received above 0, with a date) arriving soonest from today; only when none is dated today or later, the oldest overdue one. It shows the PO, warehouse, open quantity and ETA. (source: server.mjs :: connectSkuCard)
 - Order card: read live from Fulfil sale.sale by order number or customer reference, all channels including DTC (Shopify) and Amazon: number, reference, channel, client (party id and name), ordered date, state, and each customer shipment with its state, carrier and every tracking number. Fulfil keeps one tracking record per package (shipment.tracking with origin stock.package), so each package's code is listed; the shipment's own tracking number is added when not already there. (source: server.mjs :: connectOrderCard, connectFulfilShipments)
@@ -79,6 +80,6 @@ fingerprints:
 - Not covered here: HORIZON's main staff login is the production harness's (Diviyaj); ending those sessions on revoke needs his change. (source: server.mjs :: connectIdentity)
 
 ## Common questions
-- "Why does Connect say I have no access?" Ask an admin to tick Connect for you in CONFIG > Admin > Permissions, or you were signed out by Connect after a Google Workspace suspension.
+- "Why does Connect say I have no access?" Ask an admin to tick Connect for you in CONFIG > Admin > Permissions (order and client cards also need CLIENT), or you were signed out by Connect after a Google Workspace suspension.
 - "Why is a Shopify order missing in Connect?" Fulfil could not be read at that moment and the fallback mirror only holds wholesale orders. Try again; if it persists, check the Fulfil connection.
 - "Is Connect's free stock the same as on hand?" No: it is the ERP available quantity (inventory_<market>_3pl), net of allocations.

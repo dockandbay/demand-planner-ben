@@ -107,7 +107,7 @@ const out = (label, r) => { if (show) console.log('\n## ' + label + ' (' + r.sta
 
   // ── tick, revoke, restore (sandbox writes) ──
   if (E.HZ_TEST_WRITES === '1') {
-    const perm = (on) => req('POST', '/api/config/permissions', { body: { email: TESTER, connect_access: on } });
+    const perm = (on, client) => req('POST', '/api/config/permissions', { body: { email: TESTER, connect_access: on, client_access: !!client } });
     r = await perm(true); ok(r.status === 200, 'grant Connect tick to ' + TESTER + ' (got ' + r.status + ' ' + r.text.slice(0, 120) + ')');
     r = await call('/api/connect/search', { q: SKU }, TESTER, 'lookup'); ok(r.status === 200, 'ticked person -> 200 (got ' + r.status + ')');
     // Claude connector honours the block, and revoke deletes the person's connector tokens. Needs HZ_TEST_MCP_TOKEN: a raw access token
@@ -126,6 +126,19 @@ const out = (label, r) => { if (show) console.log('\n## ' + label + ' (' + r.sta
     r = await call('/api/identity/restore', { email: TESTER }, TESTER, 'restore'); out('restore', r); ok(r.status === 200 && r.json.ok === true, 'restore -> {ok:true}');
     r = await call('/api/identity/restore', { email: TESTER }, TESTER, 'restore'); ok(r.status === 200 && r.json.ok === true, 'restore again (idempotent) -> {ok:true}');
     r = await call('/api/connect/search', { q: SKU }, TESTER, 'lookup'); ok(r.status === 200, 'restored person keeps the tick they had -> 200 (got ' + r.status + ')');
+    // v28.484 (Ben): order and client data need the CLIENT grant as well as the Connect tick (TESTER is ticked, CLIENT off here)
+    r = await call('/api/connect/resolve', { pos: [PO], orders: [ORDER], skus: [SKU], clientEmail: CLIENT }, TESTER, 'lookup'); out('resolve without CLIENT', r);
+    ok(r.status === 200 && r.json.pos.length === 1 && r.json.skus.length === 1, 'no CLIENT: resolve still gives POs and SKUs');
+    ok(r.json && Array.isArray(r.json.orders) && r.json.orders.length === 0 && r.json.client === null, 'no CLIENT: resolve omits orders and client');
+    r = await call('/api/connect/search', { q: ORDER }, TESTER, 'lookup'); ok(r.status === 200 && !r.json.hits.some(h => h.kind === 'order' || h.kind === 'client'), 'no CLIENT: search has no order or client hits');
+    r = await call('/api/connect/search', { q: 'shop', limit: 25 }, TESTER, 'lookup'); ok(r.status === 200 && !r.json.hits.some(h => h.kind === 'order' || h.kind === 'client'), 'no CLIENT: name search has no client hits');
+    for (const [kind, ref] of [['order', ORDER], ['client', clientRef]]) { r = await call('/api/connect/lookup', { kind, ref }, TESTER, 'lookup'); out('lookup ' + kind + ' without CLIENT', r);
+      ok(r.status === 403 && r.json.error === 'no_access', 'no CLIENT: lookup ' + kind + ' -> 403 no_access (got ' + r.status + ')'); }
+    for (const [kind, ref] of [['po', PO], ['sku', SKU]]) { r = await call('/api/connect/lookup', { kind, ref }, TESTER, 'lookup'); ok(r.status === 200, 'no CLIENT: lookup ' + kind + ' still 200 (got ' + r.status + ')'); }
+    r = await perm(true, true); ok(r.status === 200, 'grant CLIENT to ' + TESTER);
+    r = await call('/api/connect/lookup', { kind: 'order', ref: ORDER }, TESTER, 'lookup'); ok(r.status === 200, 'with CLIENT: lookup order 200 (got ' + r.status + ')');
+    r = await call('/api/connect/resolve', { orders: [ORDER], clientEmail: CLIENT }, TESTER, 'lookup'); ok(r.status === 200 && r.json.orders.length === 1 && r.json.client, 'with CLIENT: resolve gives the order and client');
+    r = await call('/api/connect/search', { q: ORDER }, TESTER, 'lookup'); ok(r.status === 200 && r.json.hits.some(h => h.kind === 'order'), 'with CLIENT: search has the order hit');
     r = await perm(false); r = await call('/api/connect/search', { q: SKU }, TESTER, 'lookup'); ok(r.status === 403, 'untick -> refused at once (got ' + r.status + ')');
     await req('DELETE', '/api/config/permissions/' + encodeURIComponent(TESTER));
   } else console.log('(HZ_TEST_WRITES not set: tick / revoke / restore flows skipped)');

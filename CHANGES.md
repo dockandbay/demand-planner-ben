@@ -1,3 +1,10 @@
+## v28.484 (25-Oct-26) Connect: order and client data need CLIENT access; PO ex-factory from Flexport
+- Ben (answers to the v28.483 questions): "Order and client data require HORIZON's CLIENT grant", "PO exFactory: use the Flexport ship date ... fall back to factory production end date", payment wording unchanged.
+- Connect order and client data now need the CLIENT grant (client_access, or admin; super admins always) as well as the Connect tick. Without it: lookup of an order or client answers 403 no_access, search leaves out order and client hits, resolve returns no orders and client null. PO and SKU cards are unchanged.
+- PO card exFactory = the Flexport departure (actual, else estimated, from the Flexport import; v_po_finance flex_departure), else the factory production end (eff_prod_end). Before: the supplier ship date, else production end. Sandbox check: PO-57UKMQ1 now shows 2026-06-10 (Flexport) instead of 2026-07-12 (production end); PO-57UKLX3 has no Flexport shipment and keeps 2026-08-30.
+- tests/connect-routes.cjs: new checks for a person with the Connect tick but no CLIENT grant, then with CLIENT. Not run yet: the sandbox can only run one server at a time and Ben's 8124 server stays up; to run with Ben.
+- Ships on its own (v28.483 and v28.484), separate from the v28.475 to v28.482 package. No new migration or env beyond v28.483.
+
 ## v28.483 (25-Oct-26) Connect: HORIZON routes for the Gmail add-on and Chrome side panel, Connect tick, sign-out of suspended people
 - Ben: Connect handover section 6 (HORIZON side of the new Connect app; contract in the Connect repo, docs/contracts.md 1.1 to 1.4).
 - New read-only routes, called server to server by Connect with a signed assertion (HMAC-SHA256 with CONNECT_SHARED_SECRET, 60 s lifetime, 5 s skew, @dockandbay.com only, action must match the route, each request id usable once):
