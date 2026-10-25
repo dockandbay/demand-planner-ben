@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05`. The code is at `37828ca5` (37828ca537922171c734dc6392bec9521690d8ca, v28.482). Later commits are a PP BOM flip run log, the v28.474 deploy note and this note, with no app code. Live `/api/version` verified **v28.474** (25-Oct-26 02:30 UTC). Production `main` = `3e1f18a6`.
 
-**STATUS: ready, NOT deployed.** One migration (386). The Claude connector code ships switched off and stays off until `MCP_ENABLED=1` is set (phase 6 of the runbook), so this package can go live without any Google or env setup.
+**STATUS 25-Oct-26: LIVE (code). Migration 386 NOT yet applied** (code tolerates it missing: mcp_access treated as off). Was: ready, not deployed. One migration (386). The Claude connector code ships switched off and stays off until `MCP_ENABLED=1` is set (phase 6 of the runbook), so this package can go live without any Google or env setup.
 
 ## Merge rule (new since 25-Oct)
 Vercel blocks a deploy whose commit author email it cannot match to a GitHub account in the team. Merge the port PR as **dockandbay** with the commit email **admin@dockandbay.com** (now verified, primary and public on that account), or as Diviyaj. Never with the `…@users.noreply.github.com` address. If a deploy shows **Blocked** in Vercel, that is the cause.
@@ -79,4 +79,8 @@ Identical to baseline after every change on Ben's branch (no planning logic in t
 4. Ben adds `https://horizon.dockandbay.com/mcp` as a custom connector in the Claude organisation.
 
 ## Deploy record
-_To be filled in when it lands: PR number, production `main` SHA, CI run, live version verified, migration read-back._
+- 25-Oct-26: PR #13 (port of 2c8f34cc; one conflict in the login gate, production gate kept + connector exemptions), merged by Ben as admin@dockandbay.com. Production `main` = `7ec02ec2`. CI run 40180526739 green (checks, tests, deploy, alias, smoke).
+- Live `/api/version` verified **v28.482** (09:30 UTC).
+- Connector smoke: `POST /mcp` and `/.well-known/oauth-protected-resource` return 503 "not enabled" (JSON, not the login page), so the gate exemption works; `GET /mcp` 405.
+- Owner of production steps from 25-Oct-26: Ben (no longer Diviyaj).
+- Migration 386: pending Ben's yes (applied after the merge, which is safe here).
