@@ -322,3 +322,15 @@ Kits monitored: 66. Orders with those kits: 3. ALL AS EXPECTED.
 | SO70895 | UK-910226 | processing | 10-25T14:07 | UK-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
 | SO70923 | EU-51262 | processing | 10-25T15:14 | EU-TOWLB-CAB-LG-4SETH | 1 | PP | PP | PP move assigned,draft |
 
+## Check 2026-10-26 06:47:04 (orders since 2026-10-26T03:47:06)
+
+Kits monitored: 66. Orders with those kits: 5. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO70968 | UK-910273 | processing | 10-25T17:09 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
+| SO70970 | UK-910274 | processing | 10-25T17:13 | UK-TOWLB-CAB-XL-4SETH | 1 | PP | PP | PP move assigned,draft |
+| SO71021 | UK-910306 | processing | 10-25T19:07 | UK-TEATWL-MD-3SET-STRAWFZ | 1 | PP | PP | PP move assigned,draft |
+| SO71024 | UK-910309 | processing | 10-25T19:18 | UK-TEATWL-MD-6SET-AFTPTY | 1 | PP | PP | PP move assigned,draft |
+| SO71026 | UK-910312 | processing | 10-25T19:32 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
+
