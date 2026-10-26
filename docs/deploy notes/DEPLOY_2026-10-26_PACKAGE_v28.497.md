@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `33195fcf` (v28.502). Live `/api/version` before: **v28.496** (production `main` = `7d3511bc`). Production port: PR #20, branch `port/v28.500` (PR #19, v28.497 only, closed as superseded). Owner of production steps: Ben.
 
-**STATUS 26-Oct-26:** PR #20 open (now v28.497-v28.502). Migrations 389 + 390 to be applied by Ben BEFORE the merge.
+**STATUS 26-Oct-26:** v28.497-v28.500 LIVE via PR #20 (merged 10:35 UTC by Ben, main `3c9b05b5`, CI run 40308563623 + Run workflow 40308650757 green, live `/api/version` = v28.500). It was merged BEFORE migration 389 was applied: until Ben ran 389 + 390 (read back OK: 4 ship-from rows, 26 plan columns, no anon grants; 18 clients all on a mailbox) the Create FBA Shipment routes answered 'migration not applied'; nothing else depended on it. v28.501-v28.502 were pushed after the merge, so they go out in **PR #21** (`port/v28.502`, cherry-picked onto main).
 
 ## What changed
 - **v28.497** Cin7 Stocktake buttons removed from Manage 3PL and US AWD (Manage FBA in v28.496).
@@ -34,4 +34,4 @@ No planning logic changed.
 6. CLIENT ▸ Clients ▸ a client: Owner mailbox dropdown shows the backfilled mailbox.
 
 ## Deploy record
-- 26-Oct-26: PR #20 opened; v28.501 and v28.502 added to it, checks re-run.
+- 26-Oct-26: PR #20 opened and merged (v28.497-v28.500). Migrations 389 + 390 applied by Ben after the merge, read back by Claude. PR #21 opened for v28.501-v28.502. Leftover remote branch `port/v28.500` (recreated by a push after the merge) to be deleted by Ben (auto mode blocks branch deletes).
