@@ -1,0 +1,965 @@
+{
+ "name": "Fulfil | Personalised UK ILG VAS check (30 min)",
+ "nodes": [
+  {
+   "id": "8ac638a5-aa67-52ca-af4f-6608fc3d74fd",
+   "name": "About",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -40,
+    -380
+   ],
+   "parameters": {
+    "content": "## Personalised UK ILG orders: VAS check (every 30 min)\nUK ILG shipments created in the last `lookbackHours` (1) whose order has a PERSONALISE_1_3 / PERSONALISE_4_12 line must have ILG Order Class = Ecom VAS. Not yet sent to ILG: set it (guarded sub-workflow) and read back. Already sent: alert once. Old orders are not looked at (Ben: they are sorted).\n\n**TEMPORARY band-aid** (Ben 27-Oct-26): the Fulfil automation rule reads the 'Personalised' SO comment, which Shopify Flow adds after import, so it can miss. Remove once Fulfil fixes the rule.\n\nIDs are looked up by code/name, so the same flow works on SANDBOX and PROD. Go-live (Diviyaj): Settings tenant/baseUrl = PROD, read nodes to Fulfil PROD credential, dryRun false, allowProdWrite true, lookbackHours 1. PROD emails go to emailToProd.",
+    "width": 620,
+    "height": 380
+   }
+  },
+  {
+   "id": "cc2013d3-1891-5225-9c95-cb50b3b561d2",
+   "name": "Every 30 min (:20, :50)",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "20,50 * * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "93b1be6c-e332-5d6e-955a-f770e364d649",
+   "name": "Settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "raw",
+    "jsonOutput": "{\n  \"tenant\": \"PROD\",\n  \"baseUrl\": \"https://dockandbay.fulfil.io/api/v2\",\n  \"dryRun\": false,\n  \"allowProdWrite\": true,\n  \"lookbackHours\": 1,\n  \"warehouseCode\": \"UKILG\",\n  \"personaliseCodes\": [\n    \"PERSONALISE_1_3\",\n    \"PERSONALISE_4_12\"\n  ],\n  \"orderClassField\": \"fuse_order_class\",\n  \"vasChoiceName\": \"Ecom VAS\",\n  \"emailTo\": \"ben@dockandbay.com\",\n  \"emailToProd\": \"gabriella@dockandbay.com,rose@dockandbay.com,alexandria@dockandbay.com,sarah@dockandbay.com,diviyaj@dockandbay.com,ben@dockandbay.com\"\n}",
+    "options": {}
+   }
+  },
+  {
+   "id": "05d8b3e6-a96a-5d86-9173-d5dcbdd6be31",
+   "name": "Read order class field",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/metafield.field",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "choices"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"code\",\"=\",$('Settings').first().json.orderClassField],[\"model_name\",\"=\",\"stock.shipment.out\"]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "dcf3572b-39fe-5dc5-a36f-2f9cc3fb26d3",
+   "name": "Read class choices",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/metafield.field.choice",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "name"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"id\",\"in\",$('Read order class field').first().json.choices || []]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "3c735210-cc8a-5099-ba51-c1fd9f4af6ad",
+   "name": "Read warehouse",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    880,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.location",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "code"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"code\",\"=\",$('Settings').first().json.warehouseCode],[\"type\",\"=\",\"warehouse\"]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "b3b94c96-4cdc-57d6-85c7-fbe69ccbdf14",
+   "name": "Read personalisation products",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1100,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/product.product",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "code"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"code\",\"in\",$('Settings').first().json.personaliseCodes]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "e1356b96-076b-55f8-9df7-e065c8e3aa19",
+   "name": "Read new shipments",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1320,
+    0
+   ],
+   "parameters": {
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/stock.shipment.out",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "fields",
+       "value": "number,state,tpl_status,order_references,sales"
+      },
+      {
+       "name": "per_page",
+       "value": "500"
+      },
+      {
+       "name": "page",
+       "value": "1"
+      },
+      {
+       "name": "filter",
+       "value": "={{ JSON.stringify([[\"create_date\",\">=\",$now.minus({hours: $('Settings').first().json.lookbackHours}).toUTC().toFormat('yyyy-MM-dd HH:mm:ss')],[\"warehouse\",\"=\",$('Read warehouse').first().json.id || 0],[\"state\",\"!=\",\"cancel\"]]) }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Accept",
+       "value": "application/json"
+      }
+     ]
+    },
+    "options": {
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "page",
+          "value": "={{ $pageCount + 1 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ $response.body.length < 500 }}",
+       "limitPagesFetched": true,
+       "maxRequests": 100,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "05dc3608-e2e4-53fd-a13c-d72a06084251",
+   "name": "Read personalised lines",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1540,
+    0
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/sale.line/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"product\",\"in\",$('Read personalisation products').all().map(i => i.json.id).filter(x => x)],[\"sale\",\"in\",Array.from(new Set($('Read new shipments').all().flatMap(i => i.json.sales || [])))]],0,500,null,[\"sale\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "56d5c572-d7c3-59dc-a807-59f314b0dde6",
+   "name": "Read orders",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1760,
+    0
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/sale.sale/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"id\",\"in\",Array.from(new Set($('Read personalised lines').all().map(i => i.json.sale).filter(x => x)))]],0,500,null,[\"number\",\"reference\",\"shipments\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "6b488d92-0aaa-51d6-a2cb-eb181c83317e",
+   "name": "Read order class values",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    1980,
+    0
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/metafield.value/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"field\",\"=\",($('Read order class field').first().json.id || 0)],[\"resource\",\"in\",$('Read new shipments').all().filter(i => i.json.id !== undefined).map(i => 'stock.shipment.out,' + i.json.id)]],0,500,null,[\"resource\",\"value_choice\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true,
+   "alwaysOutputData": true
+  },
+  {
+   "id": "0da93acb-62d4-58b7-90c2-36df713a06f9",
+   "name": "Decide",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2200,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst all = n => $(n).all().map(i => i.json).filter(j => j && j.id !== undefined);\nconst field = all('Read order class field')[0];\nif (!field) throw new Error('metafield ' + S.orderClassField + ' on stock.shipment.out not found');\nconst choices = {}; for (const c of all('Read class choices')) choices[c.id] = c.name;\nconst vas = Number(Object.keys(choices).find(k => choices[k] === S.vasChoiceName));\nif (!vas) throw new Error('choice \"' + S.vasChoiceName + '\" not found on ' + S.orderClassField);\nconst orders = {}; for (const o of all('Read orders')) for (const sh of (o.shipments || [])) orders[sh] = o;\nconst cls = {}; for (const m of all('Read order class values')) cls[Number(String(m.resource).split(',')[1])] = m;\nconst fixes = [], alerts = [];\nlet ok = 0;\nconst pers = new Set(all('Read personalised lines').map(l => l.sale));\nconst ships = all('Read new shipments').filter(s => (s.sales || []).some(x => pers.has(x)));\nfor (const s of ships) {\n  const m = cls[s.id];\n  if (m && m.value_choice === vas) { ok++; continue; }\n  const o = orders[s.id] || {};\n  const row = { shipmentId: s.id, shipment: s.number, order: o.number || '', reference: s.order_references || o.reference || '',\n                state: s.state, tpl: s.tpl_status || '', current: m ? (choices[m.value_choice] || String(m.value_choice)) : '(blank)',\n                valueId: m ? m.id : null, fieldId: field.id, vas };\n  if (!['done', 'packed'].includes(s.state) && [null, undefined, '', 'waiting'].includes(s.tpl_status)) fixes.push(row);\n  else alerts.push(row);\n}\n// Alert each already-sent shipment once (static data); fixes are idempotent and always reported.\nconst store = $getWorkflowStaticData('global');\nstore.alerted = store.alerted || {};\nconst newAlerts = alerts.filter(a => !store.alerted[a.shipmentId]);\nif (!S.dryRun) for (const a of newAlerts) store.alerted[a.shipmentId] = new Date().toISOString();\nreturn [{ json: { tenant: S.tenant, dryRun: S.dryRun, fixes, newAlerts, ok, checked: ships.length,\n                  hasFixes: fixes.length > 0, sendEmail: fixes.length > 0 || newAlerts.length > 0 } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "4a4abd23-7453-562e-93d1-2c197770a968",
+   "name": "Anything to email?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2420,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "47cf5497-1e03-5207-8a4c-6d4813f8cdc6",
+       "leftValue": "={{ $json.sendEmail }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "4a62c1b1-7f29-57bd-a3ea-5f0a0be5915a",
+   "name": "Write fixes?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2640,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "73c1c4a2-1a03-5a24-b0a5-961331a3cf05",
+       "leftValue": "={{ $json.hasFixes && !$json.dryRun }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "8caa44c0-5da4-560a-a36d-d0e5995761cf",
+   "name": "Split fixes",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2860,
+    -160
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nreturn $('Decide').first().json.fixes.map(f => ({ json: f.valueId\n  ? { tenant: S.tenant, method: 'PUT', path: '/model/metafield.value/write', body: [[f.valueId], { value_choice: f.vas }],\n      allow_prod_write: S.allowProdWrite === true, tag: f }\n  : { tenant: S.tenant, method: 'POST', path: '/model/metafield.value',\n      body: [{ field: f.fieldId, resource: 'stock.shipment.out,' + f.shipmentId, value_choice: f.vas }],\n      allow_prod_write: S.allowProdWrite === true, tag: f } }));\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "ad36bbbc-9bfe-50b0-830c-2be1e3ff3ec0",
+   "name": "Set Ecom VAS (guarded)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.3,
+   "position": [
+    3080,
+    -160
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "lztERpCZ72lSQx6V",
+     "cachedResultName": "Fulfil | Request (sub-workflow)"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "matchingColumns": [],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false,
+     "schema": [
+      {
+       "id": "tenant",
+       "displayName": "tenant",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "method",
+       "displayName": "method",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "path",
+       "displayName": "path",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string"
+      },
+      {
+       "id": "body",
+       "displayName": "body",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      },
+      {
+       "id": "allow_prod_write",
+       "displayName": "allow_prod_write",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "boolean"
+      },
+      {
+       "id": "tag",
+       "displayName": "tag",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "any"
+      }
+     ],
+     "value": {
+      "tenant": "={{ $json.tenant }}",
+      "method": "={{ $json.method }}",
+      "path": "={{ $json.path }}",
+      "body": "={{ $json.body }}",
+      "allow_prod_write": "={{ $json.allow_prod_write }}",
+      "tag": "={{ $json.tag }}"
+     }
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "77baa240-211f-5834-941e-0a6cf1f7d644",
+   "name": "Read back",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    3300,
+    -160
+   ],
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $('Settings').first().json.baseUrl }}/model/metafield.value/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"field\",\"=\",($('Read order class field').first().json.id || 0)],[\"resource\",\"in\",$('Decide').first().json.fixes.map(f => 'stock.shipment.out,' + f.shipmentId)]],0,500,null,[\"resource\",\"value_choice\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "9c2a7a8f-797c-5f57-a40d-63347e2bfd42",
+   "name": "Build email",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3520,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst S = $('Settings').first().json;\nconst d = $('Decide').first().json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\nlet after = null;\ntry { after = {}; for (const m of $('Read back').all()) if (m.json.resource) after[Number(String(m.json.resource).split(',')[1])] = m.json.value_choice; }\ncatch (e) { after = null; }\nconst table = (rows, extra) => `<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:12px\">\n<tr><th>Order</th><th>Reference</th><th>Shipment</th><th>State</th><th>3PL status</th><th>Order class was</th>${extra ? '<th>Result</th>' : ''}</tr>\n${rows.map(r => `<tr><td>${esc(r.order)}</td><td>${esc(r.reference)}</td><td>${esc(r.shipment)}</td><td>${esc(r.state)}</td><td>${esc(r.tpl)}</td><td>${esc(r.current)}</td>${extra ? '<td>' + extra(r) + '</td>' : ''}</tr>`).join('')}</table>`;\nlet fixedOk = 0;\nconst result = r => { if (d.dryRun) return 'would set Ecom VAS';\n  if (!after) return 'not checked';\n  const good = after[r.shipmentId] === r.vas; if (good) fixedOk++; return good ? 'set to Ecom VAS (verified)' : '<b>NOT VERIFIED</b>'; };\nlet html = `<p><b>Reminder: the Fulfil VAS automation missed ${d.fixes.length + d.newAlerts.length} personalised UK order(s), this n8n flow is mopping up</b>${d.dryRun ? ' (DRY RUN, nothing written)' : ''}</p>\n<p>Fulfil's automation should set ILG Order Class = Ecom VAS on every personalised UK ILG order. It is not working as expected, so this temporary n8n flow checks every 30 minutes and fixes any it missed before they go to ILG. Tenant ${esc(d.tenant)}: ${d.checked} shipments checked, ${d.ok} already Ecom VAS.</p>`;\nif (d.fixes.length) html += `<p><b>${d.dryRun ? 'Would fix' : 'Fixed'}: ${d.fixes.length}</b> (not yet sent to ILG, ILG Order Class set to Ecom VAS)</p>` + table(d.fixes, result);\nif (d.newAlerts.length) html += `<p><b>Already with ILG as non-VAS: ${d.newAlerts.length}</b>. Too late to change in Fulfil; ILG needs to be told to personalise these.</p>` + table(d.newAlerts);\nhtml += `<p><b>Action</b><br>Each row is a case the Fulfil automation missed: please keep adding them to the Fulfil support ticket so they fix the rule (it reads the \"Personalised\" order comment, which Shopify Flow adds after import, so it can miss). This flow is temporary and will be removed once Fulfil's automation works.</p>`;\nconst failed = d.dryRun || !after ? 0 : d.fixes.length - fixedOk;\nconst n = d.fixes.length + d.newAlerts.length;\nconst subject = `${d.dryRun ? 'PREVIEW ' : ''}VAS mop-up - ${n} order${n === 1 ? '' : 's'}${failed ? ' (' + failed + ' NOT VERIFIED)' : ''}`;\nconst to = S.tenant === 'PROD' ? S.emailToProd : S.emailTo;\nreturn [{ json: { subject, html, to } }];\n"
+   },
+   "executeOnce": true
+  },
+  {
+   "id": "1cd78947-244c-5c30-8062-c25422bfef04",
+   "name": "Email team",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.2,
+   "position": [
+    3740,
+    0
+   ],
+   "parameters": {
+    "sendTo": "={{ $json.to }}",
+    "subject": "={{ $json.subject }}",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "gmailOAuth2": {
+     "id": "G2zKu9oStGcK5OKK",
+     "name": "OPS Email"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Every 30 min (:20, :50)": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Settings": {
+   "main": [
+    [
+     {
+      "node": "Read order class field",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read order class field": {
+   "main": [
+    [
+     {
+      "node": "Read class choices",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read class choices": {
+   "main": [
+    [
+     {
+      "node": "Read warehouse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read warehouse": {
+   "main": [
+    [
+     {
+      "node": "Read personalisation products",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read personalisation products": {
+   "main": [
+    [
+     {
+      "node": "Read new shipments",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read new shipments": {
+   "main": [
+    [
+     {
+      "node": "Read personalised lines",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read personalised lines": {
+   "main": [
+    [
+     {
+      "node": "Read orders",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read orders": {
+   "main": [
+    [
+     {
+      "node": "Read order class values",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read order class values": {
+   "main": [
+    [
+     {
+      "node": "Decide",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Decide": {
+   "main": [
+    [
+     {
+      "node": "Anything to email?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Anything to email?": {
+   "main": [
+    [
+     {
+      "node": "Write fixes?",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Write fixes?": {
+   "main": [
+    [
+     {
+      "node": "Split fixes",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Build email",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Split fixes": {
+   "main": [
+    [
+     {
+      "node": "Set Ecom VAS (guarded)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Set Ecom VAS (guarded)": {
+   "main": [
+    [
+     {
+      "node": "Read back",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read back": {
+   "main": [
+    [
+     {
+      "node": "Build email",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build email": {
+   "main": [
+    [
+     {
+      "node": "Email team",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "errorWorkflow": "ZdyI9BvD5vlGlHR7"
+ }
+}
