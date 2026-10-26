@@ -1,0 +1,911 @@
+{
+ "updatedAt": "2026-10-22T13:13:58.174Z",
+ "createdAt": "2026-10-20T08:57:53.561Z",
+ "id": "trhmxfsZuKJGM40U",
+ "name": "Fulfil - CUSTOM-LOGO Geneva routing (PROD)",
+ "description": "Every 5 min: US Geneva (wh 24) custom-logo orders. Not yet sent to G10: sets carrier G10 / service ROUTE and Personalisation=CustomLogo on goods lines, keeping existing values, then verifies. Already sent on the wrong service: alerts ops, never writes.",
+ "active": false,
+ "isArchived": false,
+ "nodes": [
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "minutes"
+      }
+     ]
+    }
+   },
+   "id": "e8e1ae45-49c5-4458-8347-ae89b1e1958a",
+   "name": "Every 5 Minutes",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.3,
+   "position": [
+    -224,
+    512
+   ]
+  },
+  {
+   "parameters": {
+    "mode": "raw",
+    "jsonOutput": "{\n  \"tenant\": \"PRODUCTION\",\n  \"baseUrl\": \"https://dockandbay.fulfil.io/api/v2\",\n  \"dryRun\": true,\n  \"testBanner\": false,\n  \"warehouseId\": 24,\n  \"companyId\": 1,\n  \"lookbackDays\": 3,\n  \"carrierId\": 6,\n  \"carrierServiceId\": 656,\n  \"personalisationOptionId\": 1,\n  \"personalisationValue\": \"CustomLogo\",\n  \"customLogoCodes\": [\n    \"CUSTOM-LOGO\",\n    \"CUSTOM_LOGO\",\n    \"CUSTOM-LOGO-OLD\"\n  ],\n  \"alertEmailTo\": \"diviyaj@dockandbay.com, ben@dockandbay.com, hanna@dockandbay.com\",\n  \"previewEmailTo\": \"diviyaj@dockandbay.com\"\n}",
+    "options": {}
+   },
+   "id": "d5532d9f-226b-406c-a750-fc8ae03a0c57",
+   "name": "Settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    0,
+    512
+   ]
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $json.baseUrl }}/model/customer_shipment/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"warehouse\",\"=\",$json.warehouseId],[\"state\",\"in\",[\"waiting\",\"assigned\"]],[\"created_at\",\">=\",$now.minus({ days: $json.lookbackDays }).toFormat(\"yyyy-MM-dd HH:mm:ss\")]],0,100,[[\"id\",\"DESC\"]],[\"id\",\"number\",\"state\",\"tpl_status\",\"on_hold\",\"carrier\",\"carrier.rec_name\",\"carrier_service\",\"carrier_service.rec_name\",\"company\",\"sales\",\"outgoing_moves\",\"order_numbers\",\"created_at\",\"planned_date\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "e9d9e5a0-1f21-4977-afa1-63e8793653ab",
+   "name": "1. Find Geneva Candidates",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    224,
+    512
+   ],
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/stock.move/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"id\",\"in\",$(\"1. Find Geneva Candidates\").all().flatMap(i => i.json.outgoing_moves || [])]],0,500,null,[\"id\",\"product.code\",\"product.type\",\"origin\",\"quantity\",\"shipment\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "25ee8949-d600-4c76-b74b-f250c18807ac",
+   "name": "2. Read Shipment Moves",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    448,
+    512
+   ],
+   "executeOnce": true,
+   "alwaysOutputData": true,
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/sale.line/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"sale\",\"in\",[...new Set($(\"1. Find Geneva Candidates\").all().flatMap(i => i.json.sales || []))]]],0,500,null,[\"id\",\"sale\",\"type\",\"quantity\",\"product\",\"product.code\",\"product.type\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "ece28245-97d3-4052-83da-93f542670a81",
+   "name": "3. Read Order Lines",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    672,
+    512
+   ],
+   "executeOnce": true,
+   "alwaysOutputData": true,
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/sale.line.option/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"line\",\"in\",$(\"3. Read Order Lines\").all().filter(i => i.json && i.json.id).map(i => i.json.id)],[\"option\",\"=\",$(\"Settings\").first().json.personalisationOptionId]],0,500,null,[\"id\",\"line\",\"option\",\"value\",\"value_string\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "39359f2c-424d-411d-8890-40d48370bdb3",
+   "name": "4. Read Existing Personalisation",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    896,
+    512
+   ],
+   "executeOnce": true,
+   "alwaysOutputData": true,
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "jsCode": "const cfg = $('Settings').first().json;\nconst ships = $('1. Find Geneva Candidates').all().map(i => i.json).filter(s => s && s.id);\nconst moves = $('2. Read Shipment Moves').all().map(i => i.json).filter(m => m && m.id);\nconst lines = $('3. Read Order Lines').all().map(i => i.json).filter(l => l && l.id);\nconst existing = $('4. Read Existing Personalisation').all().map(i => i.json).filter(o => o && o.id);\n\n// Fulfil caps a page at 500. Hitting the cap means the read was truncated and every\n// decision below would be made on partial data. Fail loudly rather than write wrongly.\nconst PAGE_CAP = 500;\nif (moves.length >= PAGE_CAP) throw new Error('Truncated: stock.move hit the 500-row page cap. Lower lookbackDays.');\nif (lines.length >= PAGE_CAP) throw new Error('Truncated: sale.line hit the 500-row page cap. Lower lookbackDays.');\nif (existing.length >= PAGE_CAP) throw new Error('Truncated: sale.line.option hit the 500-row page cap. Lower lookbackDays.');\n\nconst customCodes = (cfg.customLogoCodes || []).map(c => String(c).toUpperCase());\nconst isCustomLogo = code => !!code && customCodes.includes(String(code).toUpperCase());\nconst SENT_STATES = ['sent', 'sending_in_progress', 'edi_document_created', 'waiting_cancellation', 'cancelled', 'cancellation_error'];\n\nconst movesById = new Map(moves.map(m => [m.id, m]));\nconst linesById = new Map(lines.map(l => [l.id, l]));\nconst linesBySale = new Map();\nfor (const l of lines) {\n  if (!linesBySale.has(l.sale)) linesBySale.set(l.sale, []);\n  linesBySale.get(l.sale).push(l);\n}\nconst valueByLine = new Map();\nfor (const o of existing) {\n  const v = o.value_string != null ? o.value_string : o.value;\n  if (v != null && String(v).trim() !== '') valueByLine.set(o.line, String(v));\n}\n\nconst out = [];\nfor (const s of ships) {\n  const saleIds = s.sales || [];\n  const orderLines = saleIds.flatMap(id => linesBySale.get(id) || []);\n  const orderHasCustomLogo = orderLines.some(l => isCustomLogo(l['product.code']));\n\n  const shipmentLineIds = [...new Set((s.outgoing_moves || [])\n    .map(id => movesById.get(id))\n    .filter(Boolean)\n    .map(m => (typeof m.origin === 'string' && m.origin.startsWith('sale.line,')) ? Number(m.origin.split(',')[1]) : null)\n    .filter(id => id !== null && !Number.isNaN(id)))];\n\n  const targetLines = shipmentLineIds\n    .map(id => linesById.get(id))\n    .filter(Boolean)\n    .filter(l => l.type === 'line')\n    .filter(l => l['product.type'] === 'goods')\n    .filter(l => !isCustomLogo(l['product.code']))\n    .filter(l => Number(l.quantity) > 0);\n\n  const linesNeedingOption = targetLines.filter(l => !valueByLine.has(l.id));\n  const keptExistingValues = targetLines.filter(l => valueByLine.has(l.id))\n    .map(l => ({ line: l.id, sku: l['product.code'], existingValue: valueByLine.get(l.id) }));\n\n  const carrierOk = s.carrier === cfg.carrierId && s.carrier_service === cfg.carrierServiceId;\n  const alreadySent = SENT_STATES.includes(s.tpl_status);\n  const createdAt = (s.created_at && s.created_at.iso_string) ? s.created_at.iso_string.slice(0, 10) : null;\n  const serviceName = s['carrier_service.rec_name'] || null;\n\n  let action, reason;\n  if (!orderHasCustomLogo) {\n    action = 'skip';\n    reason = 'No CUSTOM-LOGO line on the order';\n  } else if (alreadySent) {\n    // Once G10 has the shipment, writing to it changes nothing they will see.\n    // Never write. Either it went out correctly, or ops has to fix it at the 3PL.\n    if (carrierOk) {\n      action = 'skip';\n      reason = 'Already sent to the 3PL on ROUTE, nothing to do';\n    } else {\n      action = 'alert';\n      reason = 'Already sent to the 3PL on ' + (s.carrier_service == null ? 'no service' : 'service ' + (serviceName || s.carrier_service)) + ', ops must fix this one with G10 directly';\n    }\n  } else if (carrierOk && linesNeedingOption.length === 0) {\n    action = 'skip';\n    reason = 'Already correct';\n  } else {\n    action = 'fix';\n    reason = [carrierOk ? null : 'set carrier G10 / service ROUTE', linesNeedingOption.length ? linesNeedingOption.length + ' line(s) need Personalisation' : null].filter(Boolean).join(' + ');\n  }\n\n  out.push({ json: {\n    action,\n    reason,\n    shipmentId: s.id,\n    number: s.number,\n    state: s.state,\n    tplStatus: s.tpl_status,\n    onHold: s.on_hold,\n    orderNumbers: s.order_numbers,\n    createdAt,\n    company: s.company || cfg.companyId,\n    saleIds,\n    orderHasCustomLogo,\n    currentCarrier: s.carrier,\n    currentCarrierName: s['carrier.rec_name'] || null,\n    currentService: s.carrier_service,\n    currentServiceName: serviceName,\n    targetCarrier: cfg.carrierId,\n    targetService: cfg.carrierServiceId,\n    carrierOk,\n    alreadySent,\n    keptExistingValues,\n    targetLineIds: targetLines.map(l => l.id),\n    optionsToCreate: linesNeedingOption.map(l => ({ line: l.id, option: cfg.personalisationOptionId, value_string: cfg.personalisationValue, sku: l['product.code'] }))\n  }});\n}\nreturn out;"
+   },
+   "id": "3b678995-695b-46df-bb1d-2591fd4f94cb",
+   "name": "5. Decide Actions",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    512
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "is-live",
+       "leftValue": "={{ $(\"Settings\").first().json.dryRun }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "false",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "id": "a58fda54-1bd0-4664-a471-4a5cdcec07f0",
+   "name": "6. Live Run?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.3,
+   "position": [
+    1344,
+    512
+   ]
+  },
+  {
+   "parameters": {
+    "rules": {
+     "values": [
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict",
+         "version": 1
+        },
+        "conditions": [
+         {
+          "id": "r-fix",
+          "leftValue": "={{ $json.action }}",
+          "rightValue": "fix",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "fix"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict",
+         "version": 1
+        },
+        "conditions": [
+         {
+          "id": "r-alert",
+          "leftValue": "={{ $json.action }}",
+          "rightValue": "alert",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "alert ops"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict",
+         "version": 1
+        },
+        "conditions": [
+         {
+          "id": "r-skip",
+          "leftValue": "={{ $json.action }}",
+          "rightValue": "skip",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "skip"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "6f18f026-2920-4ed1-92f7-65d8e4d8c125",
+   "name": "7. Route Shipment",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.4,
+   "position": [
+    1568,
+    384
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const cfg = $('Settings').first().json;\nconst planned = $('5. Decide Actions').all().map(i => i.json);\nconst fixes = planned.filter(p => p.action === 'fix');\n\n// Inside a splitInBatches loop, $('Node').all() returns ONLY the last run.\n// Walk every run index so the summary sees every shipment, not just the final one.\nfunction allRuns(nodeName) {\n  const out = [];\n  for (let r = 0; r < 500; r++) {\n    let items;\n    try { items = $(nodeName).all(0, r); } catch (e) { break; }\n    if (!items || items.length === 0) break;\n    for (const it of items) if (it && it.json && it.json.id) out.push(it.json);\n  }\n  return out;\n}\n\nconst verifiedCarrier = allRuns('12. Verify Carrier + Service');\nconst verifiedOptions = allRuns('13. Verify Personalisation');\n\nconst optionValueByLine = new Map(verifiedOptions.map(o => [o.line, o.value_string]));\nconst carrierById = new Map(verifiedCarrier.map(s => [s.id, s]));\n\nconst perShipment = fixes.map(f => {\n  const after = carrierById.get(f.shipmentId) || null;\n  const expectedLines = f.targetLineIds || [];\n  const missing = expectedLines.filter(id => {\n    const v = optionValueByLine.get(id);\n    return v == null || String(v).trim() === '';\n  });\n  return {\n    number: f.number,\n    shipmentId: f.shipmentId,\n    orderNumbers: f.orderNumbers,\n    plannedReason: f.reason,\n    carrierAfter: after ? after['carrier.rec_name'] : null,\n    serviceAfter: after ? after['carrier_service.rec_name'] : null,\n    carrierVerified: !!after && after.carrier === cfg.carrierId && after.carrier_service === cfg.carrierServiceId,\n    linesExpected: expectedLines.length,\n    linesWithPersonalisation: expectedLines.length - missing.length,\n    linesMissingPersonalisation: missing,\n    personalisationVerified: missing.length === 0,\n    existingValuesKept: f.keptExistingValues || []\n  };\n});\n\nconst failures = perShipment.filter(p => !p.carrierVerified || !p.personalisationVerified);\n\nreturn [{ json: {\n  tenant: cfg.tenant,\n  dryRun: false,\n  ranAt: new Date().toISOString(),\n  executionId: $execution.id,\n  candidatesScanned: planned.length,\n  shipmentsFixed: fixes.length,\n  shipmentsSkipped: planned.filter(p => p.action === 'skip').length,\n  shipmentsNeedingOpsFix: planned.filter(p => p.action === 'alert').length,\n  allVerified: failures.length === 0,\n  verificationFailures: failures,\n  perShipment\n}}];"
+   },
+   "id": "20a9ade1-daa3-4fc0-ba35-9aa00cf81665",
+   "name": "14. Run Summary",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2016,
+    -80
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/sale.line.option",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify(($json.optionsToCreate || []).map(o => ({ line: o.line, option: o.option, value_string: o.value_string }))) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "20afb723-07e7-4057-94eb-4c6832af0d37",
+   "name": "9. Set Personalisation",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2016,
+    112
+   ],
+   "alwaysOutputData": true,
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/customer_shipment/{{ $(\"8. Loop Over Shipments\").first().json.shipmentId }}?context={\"company\":{{ $(\"8. Loop Over Shipments\").first().json.company }}}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ carrier: $(\"Settings\").first().json.carrierId, carrier_service: $(\"Settings\").first().json.carrierServiceId }) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "7fbd1a81-7ded-42b1-a2cd-4b5b1e1dda8e",
+   "name": "10. Set Carrier + ROUTE",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2240,
+    112
+   ],
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/ir.note",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([{ resource: \"stock.shipment.out,\" + $(\"8. Loop Over Shipments\").first().json.shipmentId, message: \"CUSTOM-LOGO routing (n8n execution \" + $execution.id + \"): \" + $(\"8. Loop Over Shipments\").first().json.reason + \". Personalisation set on line(s): \" + (($(\"8. Loop Over Shipments\").first().json.optionsToCreate || []).map(o => o.line).join(\", \") || \"none\") + \". Existing values kept: \" + (($(\"8. Loop Over Shipments\").first().json.keptExistingValues || []).length) + \".\" }]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "aafc0eca-5d2e-4c24-aa23-156b7b60334c",
+   "name": "11. Comment On Shipment",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2464,
+    112
+   ],
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/customer_shipment/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"id\",\"=\",$(\"8. Loop Over Shipments\").first().json.shipmentId]],0,1,null,[\"id\",\"number\",\"state\",\"tpl_status\",\"carrier\",\"carrier.rec_name\",\"carrier_service\",\"carrier_service.rec_name\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "ae92e5e8-7c5e-45a9-9876-4efe8759072d",
+   "name": "12. Verify Carrier + Service",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2688,
+    112
+   ],
+   "alwaysOutputData": true,
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "method": "PUT",
+    "url": "={{ $(\"Settings\").first().json.baseUrl }}/model/sale.line.option/search_read",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify([[[\"line\",\"in\",$(\"8. Loop Over Shipments\").first().json.targetLineIds || []],[\"option\",\"=\",$(\"Settings\").first().json.personalisationOptionId]],0,500,null,[\"id\",\"line\",\"option\",\"value_string\"]]) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "id": "7d306568-a739-4dc9-a717-3fde86f9a861",
+   "name": "13. Verify Personalisation",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.4,
+   "position": [
+    2912,
+    128
+   ],
+   "alwaysOutputData": true,
+   "retryOnFail": true,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "options": {}
+   },
+   "id": "b87fe1e9-50f0-487f-b076-8ef5442d2041",
+   "name": "8. Loop Over Shipments",
+   "type": "n8n-nodes-base.splitInBatches",
+   "typeVersion": 3,
+   "position": [
+    1712,
+    80
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const cfg = $('Settings').first().json;\nconst stuck = $input.all().map(i => i.json);\nconst isTest = cfg.testBanner === true;\n\nconst esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst serviceLabel = s => {\n  if (s.currentService == null) return 'none set';\n  return (s.currentServiceName ? esc(s.currentServiceName) : 'unknown') + ' (' + s.currentService + ')';\n};\nconst carrierLabel = s => s.currentCarrier == null ? 'none set' : (s.currentCarrierName ? esc(s.currentCarrierName) : 'id ' + s.currentCarrier);\n\nconst rows = stuck.map(s => '<tr>' +\n  '<td>' + esc(s.number) + '</td>' +\n  '<td>' + esc(s.orderNumbers || '') + '</td>' +\n  '<td>' + esc(s.createdAt || '') + '</td>' +\n  '<td>' + carrierLabel(s) + '</td>' +\n  '<td>' + serviceLabel(s) + '</td>' +\n  '<td>' + esc(s.tplStatus) + '</td>' +\n  '</tr>').join('');\n\nconst banner = isTest\n  ? '<p style=\"background:#fff3cd;border:2px solid #e0a800;padding:12px;font-family:sans-serif\">' +\n    '<strong>THIS IS A TEST. No action needed.</strong><br>' +\n    'Sent from the Fulfil <strong>sandbox</strong> to check the alert reaches everyone on the list. ' +\n    'The shipment below is not a real custom-logo order, it was forced into the test deliberately. ' +\n    'Please ignore and delete.</p>'\n  : '';\n\nconst html = banner +\n  '<p>These US Geneva custom-logo shipments went to the 3PL without carrier service ROUTE (656). ' +\n  'n8n has not touched them and will not, because G10 already has the shipment. They need correcting with G10 directly.</p>' +\n  '<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:sans-serif;font-size:13px\">' +\n  '<tr><th>Shipment</th><th>Order</th><th>Created</th><th>Carrier</th><th>Service</th><th>3PL status</th></tr>' +\n  rows + '</table>' +\n  '<p style=\"color:#666;font-size:12px\">Tenant: ' + esc(cfg.tenant) + '. Workflow \\\"CUSTOM-LOGO Geneva routing\\\", execution ' + $execution.id + '. ' +\n  'Search the shipment number in Fulfil to open it.</p>';\n\nconst subject = (isTest ? '[TEST - please ignore] ' : '') +\n  'CUSTOM-LOGO: ' + stuck.length + ' Geneva shipment' + (stuck.length === 1 ? '' : 's') + ' sent to G10 without ROUTE';\n\nreturn [{ json: { count: stuck.length, subject, html, shipments: stuck.map(s => s.number) } }];"
+   },
+   "id": "616a6224-7d13-41f9-ba67-dc8207eec5c9",
+   "name": "15. Build Ops Alert",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1792,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "sendTo": "={{ $(\"Settings\").first().json.alertEmailTo }}",
+    "subject": "={{ $json.subject }}",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "id": "9b401f5a-c9bf-44c4-b57e-4bea43c369a3",
+   "name": "16. Email Ops Alert",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.2,
+   "position": [
+    2016,
+    400
+   ],
+   "webhookId": "16aa38a8-e66a-4816-a943-cef2c5b5d1e8",
+   "credentials": {
+    "gmailOAuth2": {
+     "id": "G2zKu9oStGcK5OKK",
+     "name": "OPS Email"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {},
+   "id": "1abb0854-8935-41e1-ba2e-ef327cc97bd3",
+   "name": "17. Already Correct",
+   "type": "n8n-nodes-base.noOp",
+   "typeVersion": 1,
+   "position": [
+    1792,
+    592
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const cfg = $('Settings').first().json;\nconst planned = $input.all().map(i => i.json);\nconst worthReporting = planned.filter(p => p.action === 'fix' || p.action === 'alert').length;\nif (worthReporting === 0) return [];\n\nreturn [{ json: {\n  tenant: cfg.tenant,\n  dryRun: true,\n  ranAt: new Date().toISOString(),\n  executionId: $execution.id,\n  note: 'No writes were made. Set dryRun to false in Settings to apply.',\n  candidatesScanned: planned.length,\n  wouldFix: planned.filter(p => p.action === 'fix').length,\n  wouldSkip: planned.filter(p => p.action === 'skip').length,\n  wouldAlertOps: planned.filter(p => p.action === 'alert').length,\n  plan: planned.map(p => ({\n    shipment: p.number,\n    order: p.orderNumbers,\n    action: p.action,\n    reason: p.reason,\n    carrierNow: p.currentCarrier + ' / ' + p.currentService,\n    carrierTarget: p.targetCarrier + ' / ' + p.targetService,\n    linesToPersonalise: (p.optionsToCreate || []).map(o => o.sku + ' (line ' + o.line + ')'),\n    existingValuesKept: p.keptExistingValues\n  }))\n}}];"
+   },
+   "id": "0e4f54e7-46a1-450c-bfb0-282ec9e701a8",
+   "name": "18. Dry Run Preview",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1568,
+    608
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## Fulfil has no native n8n node\nEvery Fulfil call here is an HTTP Request against REST v2 (X-API-KEY header via the **Fulfil SANDBOX** credential).\n\n**Read path, in order:** candidate shipments, then their stock moves, then the sale lines behind those moves, then any Personalisation already on those lines. Nodes 2-4 are executeOnce so they fire once per run, not once per shipment.",
+    "height": 200,
+    "width": 960,
+    "color": 4
+   },
+   "id": "7b0a3cf9-e34e-4431-b95f-bf941b874450",
+   "name": "Sticky Note a9787e11",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    64,
+    -320
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## Two Fulfil gotchas baked in here\n**1. `tpl_status != \"sent\"` silently misses NULL.** Verified live 20 Oct: `!=` and `not in` both exclude NULL, which is the normal state for a shipment not yet queued to the 3PL. Filtering literally returned 4 shipments where 40 were in scope.\n\nSo node 1 does **not** filter `tpl_status` at all. It reads every waiting/assigned shipment and lets node 5 classify. That is also what makes the \"alert ops\" branch reachable: if node 1 filtered out already-sent shipments, nothing could ever reach it.\n\n**2. A `T` separator in a datetime filter returns HTTP 500.** `created_at >= \"2026-10-17T00:00:00\"` 500s; a space works. Hence `toFormat(\"yyyy-MM-dd HH:mm:ss\")`.\n\n**3. Page size caps at 500.** Node 5 throws if any read comes back at the cap rather than deciding on truncated data.",
+    "height": 200,
+    "width": 520,
+    "color": 3
+   },
+   "id": "58e08719-7ae3-46fa-aee7-a58d006ef109",
+   "name": "Sticky Note cf158778",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    2176,
+    -336
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## What counts as a custom-logo order, and which lines get the note\n**Ben, 20 Oct:** `CUSTOM-LOGO` (2137) is a **service**, so it is not sent to the warehouse as a line item, which is what Geneva asked for. `CUSTOM-LOGO-OLD` (679) is **goods**, so it does go through as a line item.\n\nDetection matches **all three** codes, because orders are still being raised on both. In production the orders that actually reached `processing` are all on the OLD code.\n\nNeither is ever given the Personalisation note itself. The service one is excluded by type and by code; the OLD one is goods, so only the explicit code list stops it being treated as a product line.\n\n**A target line is:** on this shipment (via `stock.move.origin`), `type = line`, `product.type = goods`, quantity > 0, and not a custom-logo product. Not a SKU pattern: SO60486 is a custom-logo order of **hair wraps**, not towels.\n\n**Open with Ben:** `CUSTOM-LOGO-OLD` does reach Geneva as a line. Do they want the note on that line too? Currently no.\n\n**Product ids differ between tenants** (2137 prod / 1908 sandbox). Always match on code.",
+    "height": 340,
+    "width": 520,
+    "color": 5
+   },
+   "id": "70136a21-ac99-40ce-952c-e04b81c6947c",
+   "name": "Sticky Note b9ee0c74",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    1104,
+    -400
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## Before this goes live\n1. `dryRun` is **true** in Settings. Nothing is written until it is false.\n2. Tenant is **SANDBOX**. For production: set `baseUrl` to `https://dockandbay.fulfil.io/api/v2`, `tenant` to PROD, and repoint all **9** HTTP nodes to the **Fulfil PROD** credential.\n3. Retry on Fail is ON for those 9 nodes. Fulfil rate-limits and returned 429 twice during testing. Keep it on.\n4. `alertEmailTo` currently goes to Diviyaj. Ben's brief says alert **ops**, which is Alexandria.\n5. Ben confirms before go-live.\n6. Remove the old live probe: Fulfil rule #93 and function #47.\n\n**Editing warning:** a save from a browser tab opened before an API change will silently revert it. Refresh before saving.\n\nThis workflow never unholds and never releases a shipment, and never writes to a shipment the 3PL already has. It only writes `carrier`, `carrier_service`, `sale.line.option` and a note.",
+    "height": 200,
+    "width": 300,
+    "color": 7
+   },
+   "id": "ca0aa1dd-1a15-4d1a-91b9-33dd2b1fb24d",
+   "name": "Sticky Note ea78f6cd",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    1792,
+    -352
+   ]
+  },
+  {
+   "parameters": {},
+   "id": "9270e35e-f4cf-4760-87bf-7ebbd1f13932",
+   "name": "9b. One Item Per Shipment",
+   "type": "n8n-nodes-base.limit",
+   "typeVersion": 1,
+   "position": [
+    2240,
+    -64
+   ]
+  },
+  {
+   "parameters": {
+    "sendTo": "={{ $(\"Settings\").first().json.previewEmailTo }}",
+    "subject": "={{ \"CUSTOM-LOGO Geneva PREVIEW (\" + $(\"Settings\").first().json.tenant + \") - \" + $json.wouldFix + \" would change, \" + $json.wouldAlertOps + \" to alert, \" + $json.candidatesScanned + \" scanned\" }}",
+    "message": "={{ \"<p><strong>Dry run. Nothing was written to Fulfil.</strong> Tenant \" + $(\"Settings\").first().json.tenant + \", execution \" + $json.executionId + \".</p><pre style='font-family:ui-monospace,Menlo,monospace;font-size:12px'>\" + JSON.stringify($json.plan, null, 2).split(\"<\").join(\"&lt;\") + \"</pre>\" }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "id": "75ad3fdc-7c65-4b78-bcd6-2d517d5e96f7",
+   "name": "19. Email Dry Run Preview",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.2,
+   "position": [
+    1808,
+    800
+   ],
+   "webhookId": "144f1c90-f8d8-4dce-a15c-87acb7638bd2",
+   "credentials": {
+    "gmailOAuth2": {
+     "id": "G2zKu9oStGcK5OKK",
+     "name": "OPS Email"
+    }
+   },
+   "onError": "continueRegularOutput"
+  }
+ ],
+ "connections": {
+  "Every 5 Minutes": {
+   "main": [
+    [
+     {
+      "node": "Settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Settings": {
+   "main": [
+    [
+     {
+      "node": "1. Find Geneva Candidates",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "1. Find Geneva Candidates": {
+   "main": [
+    [
+     {
+      "node": "2. Read Shipment Moves",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "2. Read Shipment Moves": {
+   "main": [
+    [
+     {
+      "node": "3. Read Order Lines",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "3. Read Order Lines": {
+   "main": [
+    [
+     {
+      "node": "4. Read Existing Personalisation",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "4. Read Existing Personalisation": {
+   "main": [
+    [
+     {
+      "node": "5. Decide Actions",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "5. Decide Actions": {
+   "main": [
+    [
+     {
+      "node": "6. Live Run?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "6. Live Run?": {
+   "main": [
+    [
+     {
+      "node": "7. Route Shipment",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "18. Dry Run Preview",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "7. Route Shipment": {
+   "main": [
+    [
+     {
+      "node": "8. Loop Over Shipments",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "15. Build Ops Alert",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "17. Already Correct",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "10. Set Carrier + ROUTE": {
+   "main": [
+    [
+     {
+      "node": "11. Comment On Shipment",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "11. Comment On Shipment": {
+   "main": [
+    [
+     {
+      "node": "12. Verify Carrier + Service",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "12. Verify Carrier + Service": {
+   "main": [
+    [
+     {
+      "node": "13. Verify Personalisation",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "13. Verify Personalisation": {
+   "main": [
+    [
+     {
+      "node": "8. Loop Over Shipments",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "8. Loop Over Shipments": {
+   "main": [
+    [
+     {
+      "node": "14. Run Summary",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "9. Set Personalisation",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "15. Build Ops Alert": {
+   "main": [
+    [
+     {
+      "node": "16. Email Ops Alert",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "9. Set Personalisation": {
+   "main": [
+    [
+     {
+      "node": "9b. One Item Per Shipment",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "9b. One Item Per Shipment": {
+   "main": [
+    [
+     {
+      "node": "10. Set Carrier + ROUTE",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "18. Dry Run Preview": {
+   "main": [
+    [
+     {
+      "node": "19. Email Dry Run Preview",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "availableInMCP": true,
+  "binaryMode": "separate"
+ },
+ "staticData": {
+  "node:Every 5 Minutes": {
+   "recurrenceRules": []
+  }
+ },
+ "meta": {
+  "aiBuilderAssisted": true,
+  "builderVariant": "mcp"
+ },
+ "nodeGroups": [],
+ "pinData": {},
+ "versionId": "615e70a2-cd03-4c93-aafe-8a93c6a70b8f",
+ "activeVersionId": null,
+ "versionCounter": 43,
+ "triggerCount": 1,
+ "shared": [
+  {
+   "updatedAt": "2026-10-20T08:57:53.561Z",
+   "createdAt": "2026-10-20T08:57:53.561Z",
+   "role": "workflow:owner",
+   "workflowId": "trhmxfsZuKJGM40U",
+   "projectId": "LKxlGONeBBGweZ8v",
+   "project": {
+    "updatedAt": "2026-06-02T22:14:29.148Z",
+    "createdAt": "2026-06-02T22:06:04.720Z",
+    "id": "LKxlGONeBBGweZ8v",
+    "name": "Diviyaj Ayengia <ops@dockandbay.com>",
+    "type": "personal",
+    "icon": null,
+    "description": null,
+    "creatorId": "f63d6529-519b-468a-b221-33a86d9fd6fd"
+   }
+  }
+ ],
+ "tags": [],
+ "activeVersion": null
+}
