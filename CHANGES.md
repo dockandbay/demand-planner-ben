@@ -1,3 +1,10 @@
+## v28.493 (26-Oct-26) File uploads up to 300 MB per file
+- Ben: "can we increase storage on supabase to 300mb for 1 file".
+- One setting per page, window.HZ_UP_MAX_MB (300), replaces the 16 hard-coded 100 MB checks and messages: staff app (inject.html: timeline attachments, sample review / feedback files, component files, Pantone swatches, product documents and the other PRODUCT uploads) and supplier portal (portal-view.js: product documents, sample photos, timeline). Server ceiling STORAGE_MAX_MB now defaults to 300 (was 100).
+- Files over 3 MB still go straight to Supabase Storage through a signed upload link, so Vercel's request limit does not apply.
+- LIVE needs, besides this deploy: (1) bucket horizon-uploads file_size_limit 100 MB → 300 MB (one SQL line, Ben's OK); (2) Supabase ▸ Project Settings ▸ Storage ▸ Upload file size limit at least 300 MB (Ben, dashboard); (3) Vercel env STORAGE_MAX_MB unset or 300 (an old value of 100 would override the new default).
+- No migration.
+
 ## v28.492 (26-Oct-26) Status Report: open Fulfil sales orders behind each backorder (SUG-0040)
 - SUG-0040 (Zera, 10-Sep): "can we add the sales order number to the backorder report?" Ben 26-Oct-26: check and build.
 - BUY & MOVE ▸ Inventory ▸ Status Report, Backorder groups (3PL and FBA): new "Sales orders (Fulfil)" column. Up to 3 orders per SKU as links to the order in Fulfil (number ×units; hover: units, channel, customer, order date, reference), "+N more" with the rest on hover, and the total units. "none open" when no open order ships that SKU from that warehouse (the negative stock is then a count or allocation issue, said on hover).
