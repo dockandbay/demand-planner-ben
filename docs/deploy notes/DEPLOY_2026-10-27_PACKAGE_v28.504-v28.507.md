@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `aacf507d` (`aacf507d1b88e72f755849fa265a062229939024`, v28.507). Live `/api/version` before: **v28.503** (production `main` = `d31f646c`). Production port: PR #23, branch `port/v28.507` (`83fad86a`). Owner of production steps: Ben.
 
-**STATUS 27-Oct-26: LIVE v28.507, migration 392 NOT YET APPLIED.** PR #23 merged by Ben before the migration (production `main` CI push + dispatch both success). Code handles the missing tables: no strip for clients, CLIENT ▸ Notices says "not set up yet". Run 392, then the notice board works with no redeploy.
+**STATUS 27-Oct-26: LIVE v28.507, migration 392 applied.** PR #23 was merged before the migration; 392 was applied afterwards by Claude (Ben: "run migration 392") and read back. Notice board now usable, no redeploy needed.
 
 ## What changed
 - v28.504 Supplier portal: Custom orders tab (Customiser batches, proxied server to server; HORIZON stores nothing). Hidden until CUSTOMISER_API_URL / CUSTOMISER_API_KEY are set.
@@ -30,3 +30,4 @@ No planning logic changed.
 ## Deploy record
 - 27-Oct-26: PR #23 opened, migration 392 SQL handed to Ben.
 - 27-Oct-26: PR #23 merged (before migration 392). CI push + dispatch success. Live verified v28.507. Read-back via MCP: client_notices / client_notice_reads absent. SQL handed to Ben again.
+- 27-Oct-26: migration 392 applied on live by Claude via MCP at Ben's request. Read back: client_notices 18 columns, client_notice_reads 3, index client_notices_live_ix, no anon / authenticated access, 0 rows.
