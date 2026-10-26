@@ -15,6 +15,8 @@ sources:
   - server.mjs :: accountsGate, /api/accounts/payables (ACCOUNTS > Payables)
   - server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun (ACCOUNTS bills from accounts@ receipts)
   - supply/inject.html :: acRenderPayables, accountsCan, acRenderConfig, acCfReload, acInLinesHtml, acDrOpen, acDrPaint, acRenderStmt, acRenderAgeing, acComboWire, acPdfRender, acMetricsHtml
+  - server.mjs :: custProxy (supplier portal Custom orders, Customiser batches)
+  - supply/portal-custom.js :: render
   - server.mjs :: /api/cp/sku-lists
   - server.mjs :: /api/cp/catalogue/images
   - server.mjs :: cpProductsFrom
@@ -121,6 +123,8 @@ fingerprints:
   supply/inject.html::acComboWire: 821987bad274
   supply/inject.html::acPdfRender: e969626e19ec
   supply/inject.html::acMetricsHtml: 147a050711a0
+  server.mjs::custProxy: 4d584460050d
+  supply/portal-custom.js::render: 1513ec2e5ad4
   server.mjs::/api/cp/sku-lists: 46aae4ce8a74
   server.mjs::/api/cp/catalogue/images: 92df708d793f
   server.mjs::cpProductsFrom: 767b372c0058
@@ -300,7 +304,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.503
+verified_version: v28.504
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -568,6 +572,7 @@ verified_version: v28.503
 - Supplier submissions (completion date, invoice value, tracking, production status, confirmation) are checked before anything is saved; if a later step fails after something was saved, the supplier is told exactly what was saved (409) and the caches are refreshed. (source: server.mjs :: /api/portal/submit)
 - A supplier can remove a PO document it uploaded itself while it is a draft or was rejected; once sent for approval (or approved) it stays. The document type chosen at upload is stored. (source: server.mjs :: /api/portal/doc-remove, /api/portal/upload)
 - Dock & Bay's shipment messages are read per supplier: opening a shipment card marks the notes shown read for that supplier only; other suppliers on the same shipment still see them unread. shipment_notes.read_at still means "a supplier has read it" for Dock & Bay. (source: server.mjs :: /api/portal/shipment-notes-read, shipNoteUnreadSql)
+- Custom orders tab (v28.504, Ben 27-Oct-26): suppliers that make Customiser custom towels see ORDERS ▸ Custom orders: the weekly Tuesday batches with accept / flag a problem, line progress (cut, stitched, packed, forward only), first unit photo, Mark made (needs every line packed and the photo), cartons with the 10 digit DHL AWB (every carton with an AWB = batch shipped, customers told), and the PO PDF, production zip and artwork downloads. HORIZON keeps none of this data: every call goes server to server to the Customiser (CUSTOMISER_API_URL, key CUSTOMISER_API_KEY) with the supplier names from the signed-in portal session, never from the browser; the Customiser maps them to its suppliers (custom.suppliers.horizon_supplier, set in Customiser ops ▸ Settings ▸ Production files) and applies its own rules, so the two portals cannot disagree. Only listed paths and methods pass (CUST_PATH_RE / CUST_POST_RE). Lines reach the supplier without prices, customer names or addresses. The tab shows only when the supplier is linked (status call after the portal loads; a down Customiser just hides it), with the count of batches waiting on them. Staff see it in CONFIG ▸ Portal preview; changes there need SUPPLY edit. (source: server.mjs :: custProxy; supply/portal-custom.js :: render)
 - Portal "Amount due" = final invoice − milestones with a paid date, + credit_amount. It is 0 until a final invoice exists. Amounts show in the supplier's own currency (suppliers.default_currency, USD when unset; v28.190), 2 decimals, unit costs up to 4. (source: supply/portal-view.js :: PAYMENTS tab)
 
 ## Client portal pricing, orders, commissions

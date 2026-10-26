@@ -1105,7 +1105,7 @@
   #scenario-root .tw,#scenario-root .exec-tw{max-height:calc(100dvh - 140px);-webkit-overflow-scrolling:touch}
 }
 </style>
-<script src="/portal-view.js?v=__APP_VERSION__"></script>
+<script src="/portal-view.js?v=__APP_VERSION__"></script><script src="/portal-custom.js?v=__APP_VERSION__"></script>
 <script>
 // ── v28.081 perf (Ben's audit): same-origin GET coalescing ──────────────────────────────────────────────────────────
 // The audit found the PO grid (2.95 MB) requested FOUR times on load, portal-line-costs ×4, dtc/mismatch ×2 and lookups on
@@ -10198,7 +10198,10 @@
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); },
               onChange:function(){ invalidateDerived(); }   // a portal write (e.g. creating a shipment) must refresh the admin grids
-            }); }
+            }) 
+            // v28.504: the supplier's Custom orders tab (Customiser batches) when that supplier is linked; writes need SUPPLY edit
+            if(window.HZCustomOrders&&window.DBPortalView.addTab){ var cb='/api/supply/custom-portal/'+encodeURIComponent(name)+'/';
+              window.HZCustomOrders.status(cb,function(st){ if(PORTAL_SUP!==name)return; window.DBPortalView.addTab({pt:'custom',label:'Custom orders'+(st.todo?' ('+st.todo+')':''),sec:'orders',render:function(host){ window.HZCustomOrders.render(host,{base:cb,canWrite:!ME||!ME.live||!!(ME.supply_edit||ME.is_admin)}); }}); }); } }
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; syncHash(); mountFor(this.value); };
           if(PORTAL_SUP)mountFor(PORTAL_SUP);
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };

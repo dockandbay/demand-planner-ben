@@ -33085,6 +33085,49 @@ app.post('/api/portal/logout', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── v28.504 (Ben 27-Oct-26): Customiser custom orders in the supplier portal ─────────────────────────────────────────────────────────
+// The Customiser (separate app, dockandbay/customiser) sends its weekly Tuesday custom towel batches to suppliers. Its suppliers now
+// work them here, in portal tab ORDERS ▸ Custom orders: accept or flag a problem, line progress (cut, stitched, packed), first unit
+// photo, mark made, cartons + DHL AWB, and the PO PDF / artwork / production zip downloads. HORIZON does NOT touch the custom schema:
+// it calls the Customiser server to server (CUSTOMISER_API_URL + CUSTOMISER_API_KEY, its HORIZON_API_KEY) with the supplier NAMES from
+// the signed-in portal session (never from the browser) and the user's email; the Customiser maps names to its suppliers
+// (custom.suppliers.horizon_supplier, set in Customiser ops ▸ Settings ▸ Production files) and applies its own portal rules, so saving
+// an AWB still ships the orders and emails the customers there. Staff see the same tab in CONFIG ▸ Portal preview (writes need SUPPLY edit).
+const CUST_PATH_RE = /^(status|batches|batches\/[0-9a-f-]{36}(\/(respond|lines|photo|made|cartons|po|artwork|production))?|files\/[0-9a-f-]{36})$/i;
+const CUST_POST_RE = /^batches\/[0-9a-f-]{36}\/(respond|lines|photo|made|cartons)$/i;
+function custConfigured() { return !!(process.env.CUSTOMISER_API_URL && String(process.env.CUSTOMISER_API_KEY || '').length >= 24); }
+async function custProxy(req, res, suppliers, actor, path) {
+  if (!CUST_PATH_RE.test(path)) return res.status(404).json({ error: 'not found' });
+  const post = req.method === 'POST';
+  if (post && !CUST_POST_RE.test(path)) return res.status(405).json({ error: 'not allowed' });
+  if (!post && req.method !== 'GET') return res.status(405).json({ error: 'not allowed' });
+  if (!custConfigured()) return path === 'status' ? res.json({ linked: false, configured: false }) : res.status(503).json({ error: 'custom orders are not connected on this server' });
+  const qs = new URLSearchParams();
+  for (const k of ['line', 'file', 'list']) if (req.query && req.query[k] != null) qs.set(k, String(req.query[k]).slice(0, 200));
+  const url = String(process.env.CUSTOMISER_API_URL).replace(/\/$/, '') + '/api/horizon/supplier/' + path + (qs.toString() ? '?' + qs : '');
+  const slow = /\/production$/.test(path);
+  try {
+    const r = await fetch(url, { method: req.method, signal: AbortSignal.timeout(slow ? 60000 : 25000),
+      headers: { 'x-horizon-key': process.env.CUSTOMISER_API_KEY, 'x-horizon-suppliers': encodeURIComponent(JSON.stringify(suppliers || [])), 'x-horizon-actor': encodeURIComponent(String(actor || '').slice(0, 200)), ...(post ? { 'content-type': 'application/json' } : {}) },
+      body: post ? JSON.stringify(req.body || {}) : undefined });
+    const buf = Buffer.from(await r.arrayBuffer());
+    for (const h of ['content-type', 'content-disposition', 'x-file-count']) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
+    res.setHeader('cache-control', 'no-store');
+    if (path === 'status' && r.ok) { try { const j = JSON.parse(buf.toString('utf8')); return res.json({ ...j, configured: true }); } catch { /* fall through */ } }
+    return res.status(r.status).send(buf);
+  } catch (e) {
+    const timeout = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    if (path === 'status') return res.json({ linked: false, configured: true, unavailable: true });   // the portal still loads; the tab just stays hidden
+    return res.status(502).json({ error: timeout ? 'the custom order service took too long, try again' : 'the custom order service is not reachable right now' });
+  }
+}
+// Supplier portal (psid session): the session's own suppliers only.
+app.all(/^\/api\/portal\/custom\/(.+)$/, portalAuth, (req, res) => custProxy(req, res, req.portal.suppliers, req.portal.email, req.params[0]));
+// Staff CONFIG ▸ Portal preview, acting as one supplier (reads open; POSTs go through the global gate = SUPPLY edit).
+app.all(/^\/api\/supply\/custom-portal\/([^/]+)\/(.+)$/, staffOnly, (req, res) => {
+  const name = decodeURIComponent(req.params[0] || '').slice(0, 200);
+  return custProxy(req, res, [name], 'staff preview (' + (authUser(req) || 'staff') + ')', req.params[1]);
+});
 app.get('/api/portal/me', portalAuth, async (req, res) => {
   // zh_enabled (v27.508): the EN/中文 toggle is offered only when one of the user's suppliers is based in China (planner.suppliers.country).
   let zh = false;
@@ -33260,6 +33303,12 @@ function portalViewAsset() {
   if (_pvjs.src !== src) { _pvjs.src = src; _pvjs.etag = '"' + crypto.createHash('sha1').update(src).digest('hex').slice(0, 20) + '"'; }
   return _pvjs;
 }
+// v28.504: the Custom orders tab (Customiser batches), loaded by the supplier portal and the staff Portal preview.
+const PORTAL_CUSTOM_JS = (() => { try { return readFileSync(new URL('./supply/portal-custom.js', import.meta.url), 'utf8'); } catch { return '/* portal-custom.js missing */'; } })();
+app.get('/portal-custom.js', (req, res) => {
+  const src = DEV ? (() => { try { return readFileSync(new URL('./supply/portal-custom.js', import.meta.url), 'utf8'); } catch { return '/* missing */'; } })() : PORTAL_CUSTOM_JS;
+  return hzSendAsset(req, res, 'portal-custom.js', 'application/javascript; charset=utf-8', src, { immutable: hzVerOk(req) });
+});
 app.get('/portal-view.js', (req, res) => {
   const a = portalViewAsset();
   return hzSendAsset(req, res, 'portal-view.js', 'application/javascript; charset=utf-8', a.src, { immutable: hzVerOk(req) });   // v28.189 (Ben, M4): + brotli (was gzip only); same versioned immutable rule
