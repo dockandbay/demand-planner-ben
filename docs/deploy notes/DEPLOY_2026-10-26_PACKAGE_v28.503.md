@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `5137bf82` (v28.503). Live `/api/version` before: **v28.502** (production `main` = `1a3e5bc3`). Production port: PR #22, branch `port/v28.503`. Owner of production steps: Ben.
 
-**STATUS 26-Oct-26:** PR #22 open. Migration 391 to be applied by Ben BEFORE the merge (this time: migration first, then merge).
+**STATUS 26-Oct-26: LIVE.** Migration 391 applied by Ben first and read back (8 columns, unique index, 0 anon grants). PR #22 merged by Ben (production `main` = `d31f646c`), live `/api/version` = **v28.503**.
 
 ## What changed
 - Client portal Catalogue (Madison / Ben): "☰ SKU list" on the line sheet and on Images. Paste or upload SKUs / style codes, or load a saved list; the line sheet shows just those (list order, not-found codes, "hidden by the filters: show them"); PDF / XLSX export them. Saved lists per client account (any number, named).
@@ -27,3 +27,4 @@ No planning logic changed.
 
 ## Deploy record
 - 26-Oct-26: PR #22 opened, migration 391 SQL handed to Ben.
+- 26-Oct-26: migration 391 run by Ben, read back via MCP. PR #22 merged, main `d31f646c`, CI push run 40319255748 + dispatch 40319276213. Live verified v28.503. Smoke: `/api/cp/sku-lists` and `/api/cp/catalogue/images` without a session = 401.
