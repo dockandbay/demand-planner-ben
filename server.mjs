@@ -32355,7 +32355,7 @@ function cpProdSql(d, hs) {
   return `SELECT p.sku, coalesce(nullif(p.product_name_final,''), p.product_name) name, coalesce(nullif(p.category_name_final,''), p.category) category, coalesce(nullif(p.subcategory_name_final,''), p.subcategory) subcategory,
       p.colour_long colour, coalesce(nullif(p.size_short,''), p.size) size, p.size_long, p.release_window season, upper(coalesce(p.status,'')) status, p.discontinue_date_final disc_us, p.discontinue_date_au_final disc_au, p.discontinue_date_ca disc_ca, p.product_ean ean, p.asin, p.carton_qty, p.case_pack_size inner_qty, p.sku_barcode, p.carton_barcode,
       p.${hs} hs, p.${d}_prod_length pl, p.${d}_prod_width pw, p.${d}_prod_height ph, p.${d}_prod_weight pwt, p.${d}_carton_length cl, p.${d}_carton_width cw, p.${d}_carton_height chh, p.${d}_carton_weight cwt, p.grs_material_product material,
-      coalesce(nullif(p.variant_image_url_final,''), nullif(p.colour_swatch_url,'')) image, p.parent_p1 parent, p.marketing_category_final mcat, p.launch_date_ws, p.polybags, p.clearance
+      coalesce(nullif(p.variant_image_url_final,''), nullif(p.colour_swatch_url,'')) image, p.parent_p1 parent, p.marketing_category_final mcat, p.launch_date_ws, p.polybags, p.clearance, p.uk_rt, p.us_rt, p.eu_rt, p.au_rt, p.ca_rt   -- v28.503 RRP per market
     FROM planner.products p WHERE coalesce(p.in_planning_scope,false) AND upper(coalesce(p.status,'')) NOT IN ('CLOSED') AND p.sku NOT IN (${NON_SKU_LIST}) ORDER BY category, subcategory, p.sku`;
 }
 async function cpProductsMemo(client, opts) {
@@ -32378,11 +32378,12 @@ function cpProductsFrom(client, opts, rows, stockBy, settings) {   // pure: the 
     const disc = discMkt === 'AU' ? p.disc_au : discMkt === 'CA' ? p.disc_ca : p.disc_us;   // v28.020: per the client account's discontinue-date market (default = client market)
     const num = v => v == null || v === '' ? null : Number(v);
     const o = { sku: p.sku, name: p.name, category: p.category, subcategory: p.subcategory, colour: p.colour, size: p.size, size_long: p.size_long, season: p.season, status: p.status, discontinued: p.status === 'PHASE OUT' || p.status === 'LAST SEASON' || !!disc, disc_date: disc ? String(disc).slice(0, 10) : null, disc_basis: discMkt, ean: p.ean, asin: p.asin, carton_qty: num(p.carton_qty), inner_qty: num(p.inner_qty), carton_barcode: p.carton_barcode, hs: p.hs, material: p.material, image: p.image, parent: p.parent, mcat: p.mcat, launch: p.launch_date_ws,
+      rrp: num(p[CP_RT_COL[client.market] || 'uk_rt']),   // v28.503 (Ben): RRP in the client's market currency
       dims: { unit: d === 'us' ? 'in' : 'cm', wunit: d === 'us' ? 'lb' : 'kg', product: [num(p.pl), num(p.pw), num(p.ph)], product_weight: num(p.pwt), carton: [num(p.cl), num(p.cw), num(p.chh)], carton_weight: num(p.cwt) } };
     if (client.features.view_stock && !(client.type === 'distributor' && opts.forOrder)) { const q = stock[p.sku]; if (q != null) o.stock = exact ? q : cpBand(q, bands); o.stock_exact = exact; }
     return o;
   });
-  return { products: out, market: client.market, currency: client.currency, warehouse: wh, warehouse_label: scope.mode === 'custom' ? (scope.region === 'us_all' ? 'All US warehouses' : scope.region === 'market_all' ? 'All ' + client.market + ' warehouses' : (CP_WAREHOUSES[wh] || wh)) + ' · custom report' : (CP_WAREHOUSES[wh] || wh), stock_exact: exact, custom_sku_count: skuLimit ? skuLimit.size : null };
+  return { products: out, market: client.market, currency: client.currency, rrp_currency: (CP_MARKETS[client.market] || CP_MARKETS.UK).currency, warehouse: wh, warehouse_label: scope.mode === 'custom' ? (scope.region === 'us_all' ? 'All US warehouses' : scope.region === 'market_all' ? 'All ' + client.market + ' warehouses' : (CP_WAREHOUSES[wh] || wh)) + ' · custom report' : (CP_WAREHOUSES[wh] || wh), stock_exact: exact, custom_sku_count: skuLimit ? skuLimit.size : null };
 }
 // v28.175 (Ben): memoised per (bases, client signature) + sendJsonMemo (gzip once, strong ETag, 304). Cache-Control is now
 // `private, no-cache` (browser may keep it but must revalidate every time, so a 304 replaces the ~60 KB gzip body; never stale).
@@ -32465,6 +32466,47 @@ app.get('/api/cp/prices', cpAuth, async (req, res) => {
     const rows = await _lcGet(_cpCache('cp:pl:' + c.price_list, CP_TTL.pl, 10 * 60000, async () => (await pool.query(`SELECT sku, price, currency FROM planner.client_price_lists WHERE code=$1`, [c.price_list])).rows));
     const v = _cpMemo(_cpSig('list', c.price_list, c.currency), [rows], () => { const m = {}; rows.forEach(r => { m[r.sku] = Number(r.price); }); return { code: c.price_list, prices: m, currency: (rows[0] && rows[0].currency) || c.currency }; });
     sendJsonMemo(req, res, v, () => v); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── v28.503 (Ben 26-Oct-26, Madison): Catalogue SKU lists. A client pastes / uploads SKUs (or picks a saved list) and the line sheet and the
+// image gallery show just those. Saved lists belong to the CLIENT ACCOUNT (any number, named); anyone signed in for that client can use and edit them.
+const CP_SKU_LIST_MAX = 2000;
+const cpSkuClean = a => [...new Set((Array.isArray(a) ? a : String(a || '').split(/[\s,;|]+/)).map(x => String(x || '').trim().toUpperCase()).filter(x => x && x.length <= 80))].slice(0, CP_SKU_LIST_MAX);
+app.get('/api/cp/sku-lists', cpAuth, async (req, res) => {
+  try { const r = await pool.query(`SELECT id, name, skus, coalesce(updated_by, created_by) by, to_char(updated_at,'YYYY-MM-DD') updated FROM planner.client_sku_lists WHERE client_id=$1 ORDER BY lower(name)`, [req.cp.client.id]);
+    res.set('Cache-Control', 'no-store').json({ lists: r.rows }); }
+  catch (e) { if (e.code === '42P01') return res.json({ lists: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cp/sku-lists', cpAuth, async (req, res) => {   // {id?, name, skus}: create, or rename / replace an existing list of this client
+  const b = req.body || {}, name = String(b.name || '').trim().slice(0, 80), skus = cpSkuClean(b.skus), by = (req.cp.user && req.cp.user.email) || 'portal';
+  if (!name) return res.status(400).json({ error: 'Give the list a name' });
+  if (!skus.length) return res.status(400).json({ error: 'The list has no SKUs' });
+  try {
+    const r = b.id
+      ? await pool.query(`UPDATE planner.client_sku_lists SET name=$3, skus=$4, updated_by=$5, updated_at=now() WHERE id=$1 AND client_id=$2 RETURNING id`, [Number(b.id) || 0, req.cp.client.id, name, skus, by])
+      : await pool.query(`INSERT INTO planner.client_sku_lists (client_id, name, skus, created_by, updated_by) VALUES ($1,$2,$3,$4,$4)
+          ON CONFLICT (client_id, lower(name)) DO UPDATE SET skus=EXCLUDED.skus, updated_by=EXCLUDED.updated_by, updated_at=now() RETURNING id`, [req.cp.client.id, name, skus, by]);
+    if (!r.rowCount) return res.status(404).json({ error: 'List not found' });
+    res.json({ ok: true, id: r.rows[0].id, count: skus.length });
+  } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'You already have a list called "' + name + '"' }); if (e.code === '42P01') return res.status(503).json({ error: 'Saved lists are not set up yet' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cp/sku-lists/:id/delete', cpAuth, async (req, res) => {
+  try { const r = await pool.query(`DELETE FROM planner.client_sku_lists WHERE id=$1 AND client_id=$2`, [Number(req.params.id) || 0, req.cp.client.id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Images for a SKU list, across every gallery this client may see. Needs Image Bank's GET /api/v1/portal/products/images?codes= (asked of the
+// Image Bank thread 26-Oct-26); until that is live this answers {pending:true} and the portal says so. Size SKUs are sent as-is; Image Bank
+// resolves SKU → style + colourway. Version ids are noted so the existing download route accepts them for restricted clients.
+app.get('/api/cp/catalogue/images', cpAuth, async (req, res) => { if (!cpImagesOk(req, res)) return;
+  const codes = cpSkuClean(req.query.codes).slice(0, 200);
+  if (!codes.length) return res.json({ products: [], not_found: [], no_images: [] });
+  try { const [j, allow] = await Promise.all([ibCall('/products/images?' + _ibQs({ codes: codes.join(',') }), { customerId: req.cp.client.id, cache: true }), cpGalleryRule(req.cp.client.id)]);
+    const products = (j.products || []).map(p => { const images = (p.images || []).filter(im => !allow || allow.has(String(im.galleryId)));
+      images.forEach(im => (im.versions || []).forEach(v => { if (v && v.id && im.galleryId) _ibVer.set(String(v.id), String(im.galleryId)); }));
+      return Object.assign({}, p, { images }); });
+    res.set('Cache-Control', 'private, no-store').json({ products, not_found: j.not_found || [], no_images: [...new Set((j.no_images || []).concat(products.filter(p => !p.images.length).map(p => p.code)))] });
+  } catch (e) {
+    if (e.status === 404 || e.status === 405) return res.json({ pending: true, message: 'Images by SKU list are coming soon: Image Bank is adding the search. Use the galleries below for now.' });
+    _ibErr(res, e, 'catalogue images'); }
 });
 // v28.175 (Ben): per-user cache. Key = sha1 of every input cpOrders reads: the client (id, name, channel, visibility), the user (id,
 // scope, email) and the filters. Busted by 'client-order' (an order placed here: the placer gets read-your-writes) and 'client'.

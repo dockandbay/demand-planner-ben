@@ -15,6 +15,9 @@ sources:
   - server.mjs :: accountsGate, /api/accounts/payables (ACCOUNTS > Payables)
   - server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun (ACCOUNTS bills from accounts@ receipts)
   - supply/inject.html :: acRenderPayables, accountsCan, acRenderConfig, acCfReload, acInLinesHtml, acDrOpen, acDrPaint, acRenderStmt, acRenderAgeing, acComboWire, acPdfRender, acMetricsHtml
+  - server.mjs :: /api/cp/sku-lists
+  - server.mjs :: /api/cp/catalogue/images
+  - server.mjs :: cpProductsFrom
   - server.mjs :: cpSalesTeam
   - server.mjs :: cpNotifyOpsMessage
   - server.mjs :: cpDefaultOwner
@@ -118,6 +121,9 @@ fingerprints:
   supply/inject.html::acComboWire: 821987bad274
   supply/inject.html::acPdfRender: e969626e19ec
   supply/inject.html::acMetricsHtml: 147a050711a0
+  server.mjs::/api/cp/sku-lists: 46aae4ce8a74
+  server.mjs::/api/cp/catalogue/images: 92df708d793f
+  server.mjs::cpProductsFrom: 767b372c0058
   server.mjs::cpSalesTeam: ac64d51bffeb
   server.mjs::cpNotifyOpsMessage: ce23a98983bc
   server.mjs::cpDefaultOwner: 3c33d9b94527
@@ -275,7 +281,7 @@ fingerprints:
   server.mjs::/api/cp/galleries: 3dae21c4b8bb
   server.mjs::/api/cp/galleries/:id/download/:vid: 04a0a349f73c
   server.mjs::/api/client/galleries: 7e7fafe2d837
-  supply/client-view.js::vImages: 3e493123a188
+  supply/client-view.js::vImages: 50b7e03b2a67
   supply/client-view.js::vGallery: 77f8907976c0
   supply/inject.html::cpGalleryDefault: a6c4e82dfb44
   supply/inject.html::cpGalleryClient: 70c04636fb79
@@ -294,7 +300,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.502
+verified_version: v28.503
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -567,6 +573,9 @@ verified_version: v28.502
 ## Client portal pricing, orders, commissions
 - Price tiers by market: rt = products.<mkt>_rt (includes tax). ws = ex-tax retail ÷ 2, where ex-tax = RT ÷ 1.2 (UK, EU), ÷ 1.1 (AU) or ÷ 1.0 (US, CA). dist = ws × (1 − discount %), with the discount taken from distributor_offers by market and method (fob, exw or 3pl). If no discount is set, the price falls back to ws. With no tier set, the legacy client_price_lists is used. (source: server.mjs :: cpTierPrice, /api/cp/prices)
 - Line sheet dimensions (v28.473): carton L / W / H / weight and product L / W / H / weight are separate columns in the table and the XLSX download, in the market's units (cm / kg; in / lb for US and CA dims), from products.<uk|us>_carton_* and _prod_*. (source: supply/client-view.js :: lineTable, csvDownload, DIMC; server.mjs :: cpProdSql)
+- SKU list (v28.503, Ben 26-Oct-26 for Madison; the line sheet Google Sheet and SmugMug are being retired, the portal Catalogue is the line sheet): a "SKU list" button on Catalogue and Images. Paste SKUs or style codes (newline / comma separated), upload a CSV or TXT (first column of each line; a "sku" header is ignored), or load a saved list. The line sheet then shows only those products, in list order (a style code / parent matches all its sizes), with the other filters still applied; the summary says how many codes, how many shown, which were not found, and how many are hidden by the filters (one click clears the filters, incl. hide discontinued). PDF and XLSX export exactly what is shown. The active list carries between Catalogue and Images for the browser session. Saved lists (planner.client_sku_lists, migration 391) belong to the CLIENT ACCOUNT: any number, named; saving under an existing name (any case) replaces that list; up to 2,000 codes. (source: /api/cp/sku-lists, skulApply)
+- RRP and Your price (v28.503): the line sheet (table, cards, XLSX, PDF) shows RRP = the product's retail for the client's market (uk_rt / us_rt / eu_rt / au_rt / ca_rt) in the market currency, and Your price = the client's own price from /api/cp/prices (tier or price list) where one exists. (source: cpProductsFrom, /api/cp/prices)
+- Images for a SKU list (v28.503): the Images page shows each listed SKU's photos across every gallery the client may see, with a download per image, from Image Bank GET /api/v1/portal/products/images?codes= (asked of the Image Bank thread 26-Oct-26). Until Image Bank has that endpoint HORIZON answers "coming soon" and the galleries are shown as before. Up to 200 codes per request. (source: /api/cp/catalogue/images)
 - My orders invoices (v28.475, Ben 23-Oct-26): an order whose Fulfil invoice_state is waiting / paid / partially_paid / exception shows "⬇ Invoice" (the latest posted invoice); the order detail lists every posted customer invoice and credit note (account.invoice type out, state posted or paid, read live from the sale's invoices). The PDF is Fulfil's own Invoice print template (report account.invoice.html), streamed by HORIZON as Dock-and-Bay-invoice-<number>.pdf. Only orders visible to the signed-in user (same visibility rules as My orders); an invoice id from another order is refused. Cin7-era orders (Xero invoices) show no download yet. (source: server.mjs :: cpOrderInvoices)
 - Order import channels (v28.477, Ben 24-Oct-26: "every wholesale channel ... including faire ... and markettime"): the Fulfil sales import (fulfilImportSales, feeding planner.fulfil_sales for My orders, tracking, invoices and agent visibility) pulls only the sale channels named in app_settings cp_import_channels (CLIENT > Config > Order import; comma separated). Default: the 17 wholesale channels: dockandbay-uk/us/eu-ws (MarketTime orders arrive through these Shopify WS stores), Faire UK and US, UK/US/EU Key Accounts, UK/US/EU/AU Custom/Co-Brand, AU Wholesale and the four International Distributor channels. Retail Shopify, Amazon and TikTok (over 99% of Fulfil orders, about 130k in 120 days) are never imported. Each run takes, on those channels: orders dated in the last N days, every open order (draft, quotation, confirmed, processing), and (v28.478, Ben: "also needs to import recently shipped orders ... the tracking code") any order changed in the last N days or whose customer shipment changed in them (stock.shipment.out write_date, filtered by sales.channel.name), so an older order that ships picks up its shipment state and tracking. Cron: n8n every 30 minutes with ?days=7; the Config button backfills 120. The commission engine is separate: it reads Fulfil and Xero live per run. (source: server.mjs :: fulfilImportSales)
 - Shipments and tracking codes (v28.479, Ben 24-Oct-26: "show in portal the order number and customer shipment number linked. There could be multiple shipments ... multiple tracking codes"): the sales import stores, per customer shipment, every tracking code: the shipment's own tracking_number plus one per package (shipment.tracking records whose origin is 'stock.package,<id>'), de-duplicated, each with Fulfil's tracking URL. My orders shows the Fulfil order number (SO…) beside the reference, the first tracking code with "+N more", and the order page lists every shipment (CS number, status, date, carrier, every tracking code linked to the carrier). CSV adds order_no and shipments. (source: server.mjs :: fulfilImportSales, cpOrders; supply/client-view.js :: shipCard)
