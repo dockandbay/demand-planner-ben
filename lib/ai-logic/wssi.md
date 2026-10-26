@@ -6,15 +6,21 @@ sources:
   - lib/wssi.mjs :: wssiLoad, wssiBuild
   - server.mjs :: /api/demand/wssi
   - artifact_v16.7.html :: renderWssiView, wssiCompute, wssiDerive, wssiPeriod
-verified_version: v28.486
+  - artifact_v16.7.html :: renderOtbInputView
+  - server.mjs :: /api/demand/wssi-otb
+  - migrations/388_wssi_otb.sql :: planner.wssi_otb
+verified_version: v28.487
 fingerprints:
   lib/wssi.mjs::wssiLoad: f97960cbcdd8
   lib/wssi.mjs::wssiBuild: f0a6fe67d056
   server.mjs::/api/demand/wssi: ad274546ff25
-  artifact_v16.7.html::renderWssiView: 55514fd20ef7
-  artifact_v16.7.html::wssiCompute: c14cb7daf348
+  artifact_v16.7.html::renderWssiView: 7f39f00c69a8
+  artifact_v16.7.html::wssiCompute: 3776d2116f1e
   artifact_v16.7.html::wssiDerive: c0b64d1f5b46
-  artifact_v16.7.html::wssiPeriod: 01ee3313d860
+  artifact_v16.7.html::wssiPeriod: 0b109896c92c
+  artifact_v16.7.html::renderOtbInputView: d6db27611f2a
+  server.mjs::/api/demand/wssi-otb: 0e498c81c438
+  migrations/388_wssi_otb.sql::planner.wssi_otb: 44eb8321b554
 ---
 
 # WSSI (DEMAND > WSSI)
@@ -74,7 +80,10 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Target closing units per SKU, market and pool = cover-weeks target x average weekly units of the next 3 months (actual where known, else forecast). Cover-weeks target = products.target_cover_weeks_<market>_<pool>_from_category, default 8 weeks.
 - Closing stock vs target £ cost = closing - target. Red when over target.
 - Open to buy remaining £ cost (forecast months) = target - projected closing £ cost. Positive = room to buy, negative = over-bought.
-- OTB planned rows (£ retail, £ cost, units) are plan inputs. They stay blank while WSSI is read only.
+- OTB planned (v28.487) comes from DEMAND ▸ Inputs ▸ Open to buy (planner.wssi_otb): £ at cost per month × market × channel, entered by planners (demand edit rights), past months locked. WSSI sums the inputs for the markets and channels picked (category, seasonality and status filters do not split them; a note says so).
+  - OTB planned £ cost = the inputs; units = £ / that month's cost per unit sold (cost of sales / units, else closing cost / closing units); £ retail = units x current selling price.
+  - OTB adds to projected stock cumulatively: each forecast month's opening and closing include all OTB planned up to then, so closing vs target and OTB remaining move with it. Actual months ignore OTB.
+(source: artifact_v16.7.html :: wssiCompute, renderOtbInputView; server.mjs :: /api/demand/wssi-otb)
 (source: lib/wssi.mjs :: wssiBuild; artifact_v16.7.html :: wssiDerive)
 
 ## Cover
@@ -100,4 +109,5 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 ## Q&A
 **Q:** Why is intake in a past month different from the POs received? **A:** Past intake is measured from stock movement (closing - opening + units sold), because PO receipt history is incomplete before Dec-25. It also catches stock arriving by other routes.
 **Q:** Why does DTC alone show the same stock as DTC + B2B? **A:** Stock is held by pool, not channel. DTC, B2B, Zalando and TikTok share the 3PL pool.
+**Q:** Where do I enter open to buy? **A:** DEMAND > Inputs > Open to buy, or the "Enter open to buy" button on WSSI. Amounts are £ at cost by month, market and channel.
 **Q:** Why are the margins so high? **A:** Cost is FOB product cost without freight or duty until Fulfil landed cost is available on production.

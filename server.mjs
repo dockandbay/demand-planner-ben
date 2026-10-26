@@ -1427,6 +1427,7 @@ function requiredCap(method, p) {
       || p.startsWith('/api/filter-rules')
       || p.startsWith('/api/auto-forecast/')
       || p.startsWith('/api/demand/worksheets')   // v28.216 Cross Market saved worksheets
+      || p.startsWith('/api/demand/wssi-otb')   // v28.487 DEMAND ▸ Inputs ▸ Open to buy (handler re-checks demand_edit)
       || p.startsWith('/api/demand/intake/')   // v28.224 intake deadlines + snoozes
       || p.startsWith('/api/demand/preorders')   // v28.245 Sync from Fulfil writes preorders + preorder_lines (Diviyaj review)
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
@@ -24559,6 +24560,53 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
     out.sort((a, b) => (b.residual_cost - a.residual_cost) || (b.residual - a.residual));
     res.json({ rows: out, season_end: endISO, wks_to_eos: Math.round(wksToEos), vel_weeks: VEL_WEEKS, basis });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// v28.487 (Ben 26-Oct-26): DEMAND ▸ Inputs ▸ Open to buy (migration 388). Planned OTB £ at cost per month × market × channel.
+// GET ?fy=<start year> (open to all) → {rows:[{month:'YYYY-MM',market,channel,otb_cost}], updated}; POST {fy, rows:[...]} replaces
+// that FY's figures for the market × channel pairs sent (0 / blank deletes). Needs demand_edit (or admin).
+const WSSI_OTB_MKTS = ['UK', 'US', 'EU', 'AU', 'CA'], WSSI_OTB_CHS = ['DTC', 'B2B', 'FBA', 'ZAL', 'TIK'];
+const _otbMissing = e => /wssi_otb/.test(String(e && e.message)) && /does not exist/.test(String(e && e.message));
+const _otbFy = (v) => { const n = parseInt(v, 10); return n >= 2024 && n <= 2040 ? n : null; };
+app.get('/api/demand/wssi-otb', async (req, res) => {
+  try {
+    const fy = _otbFy(req.query.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
+    const rows = (await pool.query(`SELECT to_char(month,'YYYY-MM') AS month, market, channel, otb_cost::float8 AS otb_cost FROM planner.wssi_otb
+      WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY month, market, channel`, [fy])).rows;
+    const up = (await pool.query(`SELECT coalesce(updated_by,'') updated_by, to_char(updated_at AT TIME ZONE 'Europe/London','YYYY-MM-DD HH24:MI') updated_at FROM planner.wssi_otb
+      WHERE month >= make_date($1,3,1) AND month < make_date($1 + 1,3,1) ORDER BY updated_at DESC LIMIT 1`, [fy])).rows[0] || null;
+    res.set('Cache-Control', 'no-store').json({ fy, rows, updated: up });
+  } catch (e) { if (_otbMissing(e)) return res.json({ fy: _otbFy(req.query.fy), rows: [], updated: null, missing: 'migration 388' }); log500(e); res.status(500).json({ error: 'Could not load open to buy' }); }
+});
+app.post('/api/demand/wssi-otb', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const me = await permsFor(req); if (me.live && !me.demand_edit && !me.is_admin) return res.status(403).json({ error: 'Demand edit rights needed to save open to buy' });
+    const b = req.body || {}, fy = _otbFy(b.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
+    const months = []; for (let i = 0; i < 12; i++) { const m = 3 + i, y = fy + (m > 12 ? 1 : 0); months.push(y + '-' + String(m > 12 ? m - 12 : m).padStart(2, '0')); }
+    const rows = Array.isArray(b.rows) ? b.rows : [];
+    if (rows.length > 2000) return res.status(413).json({ error: 'Too many rows' });
+    const clean = [];
+    for (const r of rows) {
+      const mk = String(r.market || '').toUpperCase(), ch = String(r.channel || '').toUpperCase(), m = String(r.month || '').slice(0, 7);
+      if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch) || !months.includes(m)) return res.status(400).json({ error: 'Bad row: ' + [m, mk, ch].join(' ') });
+      const v = r.otb_cost === '' || r.otb_cost == null ? 0 : Number(r.otb_cost);
+      if (!isFinite(v) || v < 0 || v > 1e9) return res.status(400).json({ error: 'Amount must be a positive number: ' + [m, mk, ch].join(' ') });
+      clean.push({ m, mk, ch, v: Math.round(v * 100) / 100 });
+    }
+    await client.query('BEGIN');
+    let saved = 0, removed = 0;
+    for (const r of clean) {
+      if (!r.v) { removed += (await client.query(`DELETE FROM planner.wssi_otb WHERE month=($1||'-01')::date AND market=$2 AND channel=$3`, [r.m, r.mk, r.ch])).rowCount; continue; }
+      await client.query(`INSERT INTO planner.wssi_otb (month, market, channel, otb_cost, updated_by) VALUES (($1||'-01')::date,$2,$3,$4,$5)
+        ON CONFLICT (month, market, channel) DO UPDATE SET otb_cost=EXCLUDED.otb_cost, updated_by=EXCLUDED.updated_by, updated_at=now()
+        WHERE planner.wssi_otb.otb_cost IS DISTINCT FROM EXCLUDED.otb_cost`, [r.m, r.mk, r.ch, r.v, me.email || null]);
+      saved++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, saved, removed });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (_otbMissing(e)) return res.status(503).json({ error: 'Open to buy needs migration 388' }); log500(e); res.status(500).json({ error: 'Could not save open to buy' }); }
+  finally { client.release(); }
 });
 
 // v28.485 (Ben 26-Oct-26): DEMAND ▸ WSSI (weekly sales, stock and intake with open to buy), read only. Replaces the old

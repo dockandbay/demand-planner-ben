@@ -1,3 +1,13 @@
+## v28.487 (26-Oct-26) DEMAND ▸ Inputs ▸ Open to buy, feeding WSSI
+- Ben: "is there an input location for open to buy? there should be in INPUTS which links from the wssi, add it ... so user can enter".
+- New DEMAND ▸ Inputs ▸ Open to buy (#/demand/inputs/otbinput): planned open-to-buy budget at cost (£, ex VAT) by month × market × channel (UK/US/EU/AU DTC, B2B, FBA; EU Zalando; CA FBA), for the financial year picked. Market and all-market totals, FY totals. Past months are locked. Type an amount or paste a block from a spreadsheet (fills across and down). Save sends only changed cells; 0 or blank removes a figure. "Open WSSI" link; shows who saved last. Saving needs DEMAND edit rights.
+- Grain = market × channel as agreed (Katherine to review when she looks at WSSI).
+- DEMAND ▸ WSSI: new "Enter open to buy" button. The OTB planned rows now come from these inputs in forecast months: £ cost = the inputs for the markets and channels picked; units = £ ÷ that month's cost per unit sold; £ retail = units × current selling price. They add to projected opening and closing stock (cumulatively), so closing vs target and OTB remaining move with them. With a category, seasonality or status filter on, a note explains that OTB inputs are not split by those.
+- Migration 388_wssi_otb.sql: planner.wssi_otb (month, market, channel, otb_cost, note, updated_at, updated_by; key month + market + channel). Additive.
+- Routes: GET /api/demand/wssi-otb?fy= (open to all; answers empty with "missing" before migration 388) and POST /api/demand/wssi-otb (demand_edit or admin; validates market, channel, month inside the FY, amount 0 to 1bn).
+- Tests: sandbox migration applied; save / read / delete-by-0 / bad market / month outside FY / negative all answered correctly. jsdom with the live FY27 data: £100k Nov UK DTC + £50k Dec US FBA added £100k to Nov closing cost and £150k from Dec on; US-only filter showed only the £50k; input page 14 rows, Mar to Sep locked, paste filled a 2 × 2 block, Save posted only the 5 changed cells.
+- No new env, no new cron routes. Buy plan untouched.
+
 ## v28.486 (26-Oct-26) WSSI: Summary numbers (k / m)
 - Ben: "on wssi have a summary option for numbers. in k and m. 93.1k. 537k. etc"
 - DEMAND ▸ WSSI Show bar: new Numbers switch, Full (default) or Summary. Summary shows £ and unit figures to 3 significant figures in k / m (£1.65m, 82.8k, 537k, -15.8k), in the grid and the summary tiles. Prices per unit, %, % pts and weeks are unchanged; Download .xlsx always exports full numbers. The choice is remembered in this browser.
