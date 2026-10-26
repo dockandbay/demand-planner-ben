@@ -15189,16 +15189,6 @@ function invFbaUpload(mode,file){ if(!file)return; var mkt=INV_FBA, msg=document
 // US AWD (Amazon Warehousing & Distribution) upload + reconciliation — its own inventory sub-tab (US-only). Display
 // only: reconciles the uploaded AWD Inventory Ledger against planner.products.inventory_us_awd (does not write it).
 var _AWD_LAST=null;
-// Build a Cin7 stocktake import CSV from the uploaded ledger's MATCHED rows (SKU · Branch · Counted Qty = ledger units).
-// Client-side download only — no write to Cin7. Ben imports the file into Cin7 (US AWD branch) himself. Column headers /
-// branch label may need tweaking to match Ben's Cin7 stocktake importer.
-function _awdStocktakeDownload(){ var j=_AWD_LAST; if(!j||!j.awd)return; var rows=j.awd.filter(function(r){return r.matched;});
-  if(!rows.length){ alert('No matched SKUs to include in the stocktake.'); return; }
-  var esc=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
-  var m=[['Code','Count']].concat(rows.map(function(r){ return [r.erp_sku,r.units]; }));
-  var csv=m.map(function(r){return r.map(esc).join(',');}).join('\n')+'\n';
-  var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='cin7-awd-stocktake.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800);
-}
 function invAwdLoad(){ var panel=document.getElementById('invawd-panel'); if(!panel)return;
   panel.innerHTML='<div class="mut" style="font-size:12px">Loading AWD…</div>';
   fetch('/api/supply/inventory-awd/status').then(function(r){return r.json();}).then(function(j){ invAwdRender(j); })
@@ -15216,7 +15206,6 @@ function invAwdWire(){ var drop=document.getElementById('invawd-drop'), file=doc
   drop.ondragover=function(e){ e.preventDefault(); drop.style.background='#e0f2fe'; };
   drop.ondragleave=function(){ drop.style.background='#f8fbff'; };
   drop.ondrop=function(e){ e.preventDefault(); drop.style.background='#f8fbff'; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0])invAwdUpload(e.dataTransfer.files[0]); };
-  var _stk=document.getElementById('awd-stocktake-btn'); if(_stk)_stk.onclick=_awdStocktakeDownload;
 }
 function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(!panel)return; _AWD_LAST=j;
   var host='<div style="padding-top:4px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:15px">US AWD — Amazon Warehousing &amp; Distribution</b>'
@@ -15241,7 +15230,7 @@ function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(
   var totals='<div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0;font-size:13px"><div><b>'+(j.total_units||0).toLocaleString()+'</b> <span class="mut">units on hand ('+(j.total_cartons||0).toLocaleString()+' cartons)</span></div>'
     +'<div><b>'+(j.matched_units||0).toLocaleString()+'</b> <span class="mut">matched units</span></div>'
     +'<div><b>'+(j.current_total||0).toLocaleString()+'</b> <span class="mut">current inventory_us_awd (matched)</span></div>'
-    +((j.matched_units>0)?'<button id="awd-stocktake-btn" title="Download a Cin7 stocktake CSV (Code · Count) for the matched SKUs — import it into Cin7 yourself (no live write)" style="margin-left:auto;background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos);border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer;font-size:12px">&#11015; Cin7 stocktake</button>':'')+'</div>';
++'</div>';
   panel.innerHTML=host+drop+'<div style="margin:2px 0 6px">'+meta+'</div>'+totals+'<div style="max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(awd.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+awd.length+'</div>':'')+'</div>';
   invAwdWire();
 }
@@ -15388,18 +15377,6 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
   var fd=document.getElementById('fba-dead'); if(fd)fd.onclick=function(){ INV_FBA_DEAD=!INV_FBA_DEAD; invFbaRender('manage',_invFbaLast); };
   var qf=document.getElementById('fba-q'); if(qf)qf.oninput=function(){ var cp=this.selectionStart; INV_FBA_Q=this.value; invFbaRender('manage',_invFbaLast); var n=document.getElementById('fba-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
 }
-// Cin7 Stocktake export (shared by Manage FBA + Manage 3PL): Code = products SKU, Count = the report count.
-function invStkBind(btnId, menuId, name, getRows){ var btn=document.getElementById(btnId), menu=document.getElementById(menuId); if(!(btn&&menu))return;
-  btn.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'block':'none'); };
-  menu.querySelectorAll('.fba-stk-opt').forEach(function(o){ o.onclick=function(){ menu.style.display='none'; invStkExport(o.dataset.a, name, getRows()); }; }); }
-function invStkExport(kind, name, rows){ if(!rows||!rows.length){ alert('Nothing to export for this filter/market.'); return; }
-  if(kind==='clip'){ var t='Code\tCount\n'+rows.map(function(r){return r[0]+'\t'+r[1];}).join('\n');
-    if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function(){invStkToast(rows.length+' rows copied — paste into Cin7/Sheets');},function(){invStkFallbackCopy(t,rows.length);});
-    else invStkFallbackCopy(t,rows.length);
-  } else { var csv='Code,Count\n'+rows.map(function(r){return '"'+String(r[0]).replace(/"/g,'""')+'",'+r[1];}).join('\n');
-    var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='cin7-stocktake-'+name+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},100); } }
-function invStkFallbackCopy(t,n){ var ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;left:-9999px'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');invStkToast(n+' rows copied');}catch(e){alert('Copy failed');} ta.remove(); }
-function invStkToast(msg){ var t=document.createElement('div'); t.textContent='✓ '+msg; t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--nav);color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;z-index:200005;box-shadow:0 6px 20px rgba(0,0,0,.3)'; document.body.appendChild(t); setTimeout(function(){t.remove();},1800); }
 function fbaListTbl(head, rows, cap){ if(!rows.length)return '<div class="mut" style="font-size:12px">none</div>';
   return '<div class="mut" style="font-size:11px;margin:2px 0 4px">'+tHesc(cap)+' ('+rows.length+')</div>'
     +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;max-width:520px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
@@ -15458,7 +15435,6 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       return ck(r.diff_onhand,r.erp_onhand)||ck(r.diff_avail,r.erp_avail); }
     var _q3=String(INV_3PL_Q||'').trim().toLowerCase(); var _toks3=_q3?_q3.split(/[\s,]+/).filter(Boolean):[];   // SKU filter: space/comma-separated, matches any token
     var fr=(INV_3PL_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap3)).filter(function(r){ if(!_toks3.length)return true; var s=String(r.sku||'').toLowerCase(); return _toks3.some(function(t){return s.indexOf(t)>=0;}); });
-    var stk=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.sku, r.report_onhand]; }); window._inv3plStk=stk;   // Cin7 Stocktake: Code=SKU, Count=3PL Report - On Hand
     // Items in the 3PL report but NOT in the product list, that still hold stock (Ben) — surfaced as a toggled list.
     var _unm=rows.filter(function(r){return !r.matched && ((Number(r.report_onhand)||0)>0 || (Number(r.report_avail)||0)>0);})
       .sort(function(a,b){return ((Number(b.report_avail)||0)+(Number(b.report_onhand)||0))-((Number(a.report_avail)||0)+(Number(a.report_onhand)||0));});
@@ -15482,10 +15458,7 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       +'<input id="inv3pl-q" placeholder="filter SKU(s) — space/comma…" value="'+tHesc(INV_3PL_Q||'')+'" style="width:190px;max-width:60vw;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">'
       +'<button id="inv3pl-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete stock in this warehouse" style="background:'+(INV_3PL_DEAD?'var(--neg)':'var(--neg-bg)')+';color:'+(INV_3PL_DEAD?'#fff':'var(--neg)')+';border:1px solid var(--neg);border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
-      +'<span style="margin-left:auto;position:relative"><button id="inv3pl-stk" class="save-btn" style="background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos);font-weight:600">⤓ Cin7 Stocktake ▾</button>'
-        +'<div id="inv3pl-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
-        +'<div class="fba-stk-opt" data-a="csv" style="padding:8px 12px;cursor:pointer;font-size:12px">⬇ Download CSV</div>'
-        +'<div class="fba-stk-opt" data-a="clip" style="padding:8px 12px;cursor:pointer;font-size:12px;border-top:1px solid var(--line2)">📋 Copy to clipboard</div></div></span></div>';
+      +'</div>';   // v28.497 (Ben): Cin7 Stocktake button removed from all Inventory pages
     var num=function(v){return v==null?'—':v;};
     var dcell=function(d,note){ var c=(d==null?'var(--faint)':(d>0?'var(--pos)':(d===0?'var(--pos)':'var(--neg)'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600;white-space:normal">'+(d==null?'—':(d>0?'+':'')+d)+(note||'')+'</td>'; };   // positive diff (report > ERP) shown green — likely stock received but not yet registered in ERP; note sits under the number
     var th=function(t){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--hover);white-space:nowrap">'+t+'</th>';};
@@ -15511,7 +15484,7 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
   var u3=document.getElementById('inv3pl-unm-tgl'); if(u3)u3.onclick=function(){ _inv3plUnmOpen=!_inv3plUnmOpen; inv3plRender(_inv3plLast); };
   var d3=document.getElementById('inv3pl-dead'); if(d3)d3.onclick=function(){ INV_3PL_DEAD=!INV_3PL_DEAD; inv3plRender(_inv3plLast); };
   var q3=document.getElementById('inv3pl-q'); if(q3)q3.oninput=function(){ var cp=this.selectionStart; INV_3PL_Q=this.value; inv3plRender(_inv3plLast); var n=document.getElementById('inv3pl-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
-  invStkBind('inv3pl-stk','inv3pl-stk-menu','3PL-'+INV_3PL,function(){ return window._inv3plStk||[]; }); }
+ }
 function renderBuyMoveActions(){
   // P2 Buy & Move v2 (Diviyaj canvas): KPI strip (To buy / Urgent / To move) + an action×country matrix; cells expand
   // to a SKU worklist. DISPLAY ONLY — reads the exact same BP.getBuyQtys / BP.trfLane numbers, buy logic untouched.

@@ -1,3 +1,8 @@
+## v28.497 (26-Oct-26) Cin7 Stocktake buttons removed from every Inventory page
+- Ben: "Cin7 Stocktake button - remove from all inventory pages".
+- BUY & MOVE ▸ Inventory: the "⤓ Cin7 Stocktake" button (CSV / clipboard) is gone from Manage 3PL (all markets) and the "Cin7 stocktake" download from US AWD (Manage FBA lost it in v28.496). The now-unused helpers (invStkBind, invStkExport, invStkFallbackCopy, invStkToast, _awdStocktakeDownload) are deleted. Cin7 is retired; Fulfil is the ERP.
+- No server change, no migration, no env, no new routes.
+
 ## v28.496 (26-Oct-26) Manage FBA: UK / US / AU fed by n8n daily; upload and Cin7 Stocktake buttons removed; AU 365+ aged stock counted
 - Ben: "once n8n flow is working remove the upload button and definitely remove the cin7 stocktake download button".
 - n8n flow ZFmzekiXUrfa7Od7 tested on live 26-Oct-26 (Ben ran it): UK 617 rows / 536 SKUs, US 650 / 531, AU 430 / 430, all saved.
