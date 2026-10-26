@@ -2512,8 +2512,18 @@ function fbaSelSummary(){
   });
   return {units,cartonsF,cartons:Math.ceil(cartonsF)};
 }
+// FBA Transfer Upload / AWD upload / Create FBA Shipment buttons: FBA view only, and (v28.500, Ben: "hide the create fba shipment and
+// fba transfer upload button if nothing selected") only while at least one row for this market is ticked with a quantity.
+function fbaBtnVis(){
+  var fba=(BP_VIEW==='fba'), sel=fba&&fbaSelSummary().units>0;
+  var _dl=document.getElementById('fba-dl-btn'); if(_dl)_dl.style.display=sel?'':'none';
+  var _dlAwd=document.getElementById('fba-dl-awd-btn'); if(_dlAwd)_dlAwd.style.display=(sel&&CUR==='US')?'':'none';   // AWD upload = US only (a distinct Amazon template)
+  var _cr=document.getElementById('fba-create-btn');   // v28.499: anyone with SUPPLY edit (Ben); CA has no 3PL
+  if(_cr)_cr.style.display=(sel&&(!window.ME||!window.ME.live||window.ME.supply_edit||window.ME.is_admin)&&['UK','US','EU','AU'].indexOf(CUR)>=0)?'':'none';
+}
 // Refresh the selection highlight box in the settings row (FBA view only).
 function updateFbaSelBox(){
+  fbaBtnVis();
   const el=document.getElementById('fba-sel-summary'); if(!el)return;
   if(BP_VIEW!=='fba'){el.style.display='none';return;}
   const s=fbaSelSummary();
@@ -2989,12 +2999,7 @@ function render(){
         +'<th class="r" style="min-width:64px">Buy FBA</th>');   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
     _hdr.innerHTML=_lead+_trail+'</tr>';
   }
-  var _dl=document.getElementById('fba-dl-btn');
-  if(_dl)_dl.style.display=(BP_VIEW==='fba')?'':'none';
-  var _dlAwd=document.getElementById('fba-dl-awd-btn');   // AWD upload = US only (a distinct Amazon template)
-  if(_dlAwd)_dlAwd.style.display=(BP_VIEW==='fba'&&CUR==='US')?'':'none';
-  var _cr=document.getElementById('fba-create-btn');
-  if(_cr)_cr.style.display=(BP_VIEW==='fba'&&(!window.ME||!window.ME.live||window.ME.supply_edit||window.ME.is_admin)&&['UK','US','EU','AU'].indexOf(CUR)>=0)?'':'none';   // v28.499: anyone with SUPPLY edit (Ben); CA has no 3PL
+  fbaBtnVis();
   // Create PO / Refresh / multi-Download (#bp-buy-actions) are BUY-only. FBA Transfer Logic → FBA only.
   // A single "Download CSV (data in view)" button shows on FBA + TRANSFER instead.
   var _bt=document.getElementById('bp-buy-actions'); if(_bt)_bt.style.display=(BP_VIEW==='buy')?'inline-flex':'none';

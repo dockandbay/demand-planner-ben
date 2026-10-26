@@ -1,3 +1,7 @@
+## v28.500 (26-Oct-26) FBA tab: upload / create buttons only when rows are selected
+- Ben: "hide the create fba shipment and fba transfer upload button if nothing selected".
+- BUY & MOVE ▸ FBA: FBA Transfer Upload, AWD Transfer Upload (US) and Create FBA Shipment now show only while at least one row for the market on screen is ticked with a quantity; they appear and disappear as rows are ticked / cleared and when switching market. One function (fbaBtnVis) runs on render and on every selection change.
+
 ## v28.499 (26-Oct-26) Create FBA Shipment: trial disclaimer; open to everyone with SUPPLY edit
 - Ben: add a disclaimer before the process, "this process is currently under trial, proceed with caution and check data in amazon at each phase"; "it shouldn't be admin only, anyone with access can create".
 - Opening Create FBA Shipment now shows a Trial warning first (I understand, continue / Cancel), every time; the same line stays at the top of each step.
