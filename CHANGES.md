@@ -1,3 +1,10 @@
+## v28.505 (27-Oct-26) Client portal: SKU list images follow parent and size SKUs
+- Ben: "SKU list should also work for parent product SKUs. And vice versa. They are the same concept, child also shows linked parent product images too."
+- Images ▸ SKU list: a parent code (style + colour, e.g. TOWLB-CAB-LTBGE) now shows its own images plus every size's images; a size SKU (e.g. TOWLB-CAB-XL-LTBGE-R) shows its own images plus its parent product's. Merged under the code as typed, own first, each image once; a size with no images of its own but a parent with images is no longer "no images yet". The heading notes "incl. its parent / size SKUs".
+- Line sheet unchanged: a parent code already showed all its sizes, a size SKU shows that size.
+- Server: cpSkuFamily (products.parent_p1) expands each code to its parent and up to 30 sizes before asking Image Bank (up to 600 codes in calls of 200). No migration, no new env.
+- Sandbox check against a stand-in Image Bank (the real endpoint is still being built): parent = own + sizes, XL size = parent's images, LG size = own + parent, unknown code = not found.
+
 ## v28.504 (27-Oct-26) Supplier portal: Custom orders tab (Customiser batches)
 - Ben: "build the integration from customiser to horizon, supplier portal". Customiser suppliers (Lixin for the China batch) now work their weekly custom towel batches in HORIZON's supplier portal instead of a second portal.
 - Portal ORDERS ▸ Custom orders (only when the supplier is linked; label shows how many batches wait on them): batch list (PO, Tuesday, accept by, made by, lines, towels, progress, cartons, status, late flags), then one batch: Documents (PO PDF, production zip, artwork per line), 1 Accept or flag a problem, 2 line progress cut / stitched / packed, 3 first unit photo, 4 Mark made, 5 cartons + DHL AWB, timeline.

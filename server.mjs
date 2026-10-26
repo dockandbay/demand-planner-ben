@@ -32496,14 +32496,47 @@ app.post('/api/cp/sku-lists/:id/delete', cpAuth, async (req, res) => {
 // Images for a SKU list, across every gallery this client may see. Needs Image Bank's GET /api/v1/portal/products/images?codes= (asked of the
 // Image Bank thread 26-Oct-26); until that is live this answers {pending:true} and the portal says so. Size SKUs are sent as-is; Image Bank
 // resolves SKU → style + colourway. Version ids are noted so the existing download route accepts them for restricted clients.
+// v28.505: parent / child SKU family for the client portal SKU list (products.parent_p1 = the style + colour code of a size SKU).
+// Map code -> [its parent (when the code is a size SKU), its children (when the code is a parent, up to 30)], codes upper case.
+async function cpSkuFamily(codes) {
+  const up = [...new Set(codes.map(c => String(c).toUpperCase()))], out = new Map(up.map(c => [c, []]));
+  if (!up.length) return out;
+  const r = await pool.query(`SELECT upper(sku) sku, upper(parent_p1) parent FROM planner.products
+      WHERE coalesce(parent_p1,'') <> '' AND (upper(sku) = ANY($1::text[]) OR upper(parent_p1) = ANY($1::text[]))`, [up]);
+  for (const x of r.rows) {
+    if (out.has(x.sku) && x.parent !== x.sku) out.get(x.sku).push(x.parent);   // size SKU -> its parent
+    if (out.has(x.parent) && x.parent !== x.sku && out.get(x.parent).length < 30) out.get(x.parent).push(x.sku);   // parent -> its size SKUs
+  }
+  for (const [k, v] of out) out.set(k, [...new Set(v)].filter(x => x !== k));
+  return out;
+}
 app.get('/api/cp/catalogue/images', cpAuth, async (req, res) => { if (!cpImagesOk(req, res)) return;
   const codes = cpSkuClean(req.query.codes).slice(0, 200);
   if (!codes.length) return res.json({ products: [], not_found: [], no_images: [] });
-  try { const [j, allow] = await Promise.all([ibCall('/products/images?' + _ibQs({ codes: codes.join(',') }), { customerId: req.cp.client.id, cache: true }), cpGalleryRule(req.cp.client.id)]);
-    const products = (j.products || []).map(p => { const images = (p.images || []).filter(im => !allow || allow.has(String(im.galleryId)));
+  try {
+    // v28.505 (Ben 27-Oct-26: "SKU list should also work for parent product SKUs and vice versa ... child shows linked parent product
+    // images too"): a parent (style + colour, products.parent_p1) and its size SKUs are one product. Each code asks Image Bank for itself,
+    // its parent and its children (up to 30), and the images come back merged under the code as typed: own first, then the parent's, then
+    // the children's, each image once.
+    const fam = await cpSkuFamily(codes);
+    const ask = [...new Set(codes.flatMap(c => [c, ...(fam.get(c) || [])]))].slice(0, 600);
+    const parts = []; for (let i = 0; i < ask.length; i += 200) parts.push(ask.slice(i, i + 200));
+    const [js, allow] = await Promise.all([Promise.all(parts.map(pc => ibCall('/products/images?' + _ibQs({ codes: pc.join(',') }), { customerId: req.cp.client.id, cache: true }))), cpGalleryRule(req.cp.client.id)]);
+    const byCode = new Map();
+    for (const j of js) for (const p of (j.products || [])) { const images = (p.images || []).filter(im => !allow || allow.has(String(im.galleryId)));
       images.forEach(im => (im.versions || []).forEach(v => { if (v && v.id && im.galleryId) _ibVer.set(String(v.id), String(im.galleryId)); }));
-      return Object.assign({}, p, { images }); });
-    res.set('Cache-Control', 'private, no-store').json({ products, not_found: j.not_found || [], no_images: [...new Set((j.no_images || []).concat(products.filter(p => !p.images.length).map(p => p.code)))] });
+      byCode.set(String(p.code || '').toUpperCase(), Object.assign({}, p, { images })); }
+    const products = [], notFound = [], noImages = [];
+    for (const c of codes) {
+      const own = byCode.get(c), rel = (fam.get(c) || []).map(x => byCode.get(x)).filter(Boolean);
+      if (!own && !rel.length) { notFound.push(c); continue; }
+      const seen = new Set(), images = [];
+      for (const p of [own, ...rel].filter(Boolean)) for (const im of p.images) { const k = String(im.id || im.thumbUrl); if (!seen.has(k)) { seen.add(k); images.push(im); } }
+      const base = own || rel[0];
+      products.push(Object.assign({}, base, { code: c, images: images.slice(0, 120), via: own ? (rel.length ? 'sku + related' : 'sku') : 'related' }));
+      if (!images.length) noImages.push(c);
+    }
+    res.set('Cache-Control', 'private, no-store').json({ products, not_found: notFound, no_images: noImages });
   } catch (e) {
     if (e.status === 404 || e.status === 405) return res.json({ pending: true, message: 'Images by SKU list are coming soon: Image Bank is adding the search. Use the galleries below for now.' });
     _ibErr(res, e, 'catalogue images'); }
