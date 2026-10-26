@@ -124,7 +124,7 @@ fingerprints:
   artifact_v16.7.html::renderCogs: 5e8d94ddc0c7
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   supply/inject.html::hzUpload: c4353cd913f7
-  server.mjs::mcpAccess: 1b7b2f57c291
+  server.mjs::mcpAccess: 6fa73a2097c0
   server.mjs::mcpCallTool: e032a7b68d4e
   server.mjs::mcpSqlBlocked: bacf960a3825
   server.mjs::mcpHandle: 529be3cd3236
@@ -289,7 +289,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.483
+verified_version: v28.489
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -430,6 +430,7 @@ verified_version: v28.483
 - Read-only. The tools are Ask Claude's (resolve_skus, sku_availability, describe_data, query_horizon, explain_buy, app_logic) plus po_status (one PO with dates, payments, shipment and lines) and client_orders (wholesale Fulfil orders with shipments and tracking). query_horizon runs inside a READ ONLY transaction with an 8 second limit and 500 rows. (source: server.mjs :: mcpCallTool, mcpHandle)
 - Per person: ACCOUNTS tables (accounts_*) need the ACCOUNTS grant and commission tables (commission_*, rep_groups) need COMMISSIONS, as in the app. Never queryable through Ask Claude or the connector: app_settings (holds the Xero connection), the Gmail connection, connector tokens, portal and client sessions, and anyone's Ask Claude chats. (source: server.mjs :: mcpSqlBlocked)
 - Every tool call is logged (who, tool, request, result, time) and the latest 50 show under the Permissions table. (source: server.mjs :: mcpHandle)
+- Who can connect (v28.489, Ben 26-Oct-26): every @dockandbay.com account, read only, with no Permissions tick (people with no app_permissions row included); ACCOUNTS and COMMISSIONS data still need those grants; people suspended in Google Workspace are refused. The Permissions "Claude connector" column was removed. (source: server.mjs :: mcpAccess)
 
 ## Xero API allowance (from v28.253)
 - Xero allows 60 calls a minute and 1,000 a day per organisation for HORIZON's connection on our current Xero plan (measured 12-Oct-26), shared by live and the sandbox. Every recurring read is incremental: the hourly bill sync and the PO link resolver use an UpdatedDateUTC watermark (If-Modified-Since), bank ageing reads only items modified since its last run (first run: last 90 days), the back-date learn job keeps a reconciled-items cache. A full bill resync or a full bank scan only runs on explicit request and only with at least 400 calls of the day left. (source: server.mjs :: accXeroHeadroom, _syncXeroBillsRun, accountsBankSyncOrg)

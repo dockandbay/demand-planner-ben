@@ -11,7 +11,7 @@ sources:
   - server.mjs :: connectIdentity, /api/identity/revoke, /api/identity/restore
   - server.mjs :: mcpAccess (Claude connector honours the block)
   - migrations/387_connect.sql :: planner.identity_blocks, planner.identity_events, app_permissions.connect_access
-verified_version: v28.484
+verified_version: v28.489
 fingerprints:
   server.mjs::connectVerify: ed0b696fae5a
   server.mjs::connectAccess: d272750cfad4
@@ -38,7 +38,7 @@ fingerprints:
   server.mjs::connectIdentity: a43200abf591
   server.mjs::/api/identity/revoke: d2c45371929b
   server.mjs::/api/identity/restore: 74496260447d
-  server.mjs::mcpAccess: 1b7b2f57c291
+  server.mjs::mcpAccess: 6fa73a2097c0
   migrations/387_connect.sql::planner.identity_blocks: f68b1e47bbec
   migrations/387_connect.sql::planner.identity_events: f68b1e47bbec
   migrations/387_connect.sql::app_permissions.connect_access: f68b1e47bbec
@@ -74,6 +74,8 @@ fingerprints:
 
 ## Identity: sign-out of suspended people
 - Connect's watcher calls POST /api/identity/revoke when someone is suspended or deleted in Google Workspace, and POST /api/identity/restore when they are active again. The person is the assertion's email; the body is informational only. (source: server.mjs :: connectIdentity)
+- Claude connector access (v28.489, Ben 26-Oct-26): every @dockandbay.com account may connect, read only, with no Permissions tick, including people with no app_permissions row. ACCOUNTS and COMMISSIONS data still need those grants (no row = neither). Suspended people (identity block) are refused. The old "Claude connector" Permissions column is gone; app_permissions.mcp_access is no longer read.
+  (source: server.mjs :: mcpAccess)
 - Revoke deletes all the person's Claude connector tokens (planner.mcp_tokens) and writes a block row (planner.identity_blocks). While blocked, Connect routes and the Claude connector refuse them. It does not untick any permission. (source: server.mjs :: connectIdentity, mcpAccess)
 - Restore deletes the block row only. Permissions stay as they are (never re-ticked); deleted connector tokens stay deleted, so the person connects Claude again. (source: server.mjs :: connectIdentity)
 - Both are idempotent (a repeat answers ok), and every call is written to planner.identity_events (email, revoke or restore, ok, detail). (source: server.mjs :: connectIdentity)

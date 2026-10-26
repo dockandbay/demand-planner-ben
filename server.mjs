@@ -26335,7 +26335,7 @@ function mcpUnsign(s) { const [body, sig] = String(s || '').split('.'); if (!bod
 function mcpRedirectOk(u) { try { const x = new URL(u); const h = x.hostname.toLowerCase();
   if (!MCP_REDIRECT_HOSTS.some(a => h === a || h.endsWith('.' + a))) return false;
   return x.protocol === 'https:' || (x.protocol === 'http:' && (h === 'localhost' || h === '127.0.0.1')); } catch (_) { return false; } }
-// Who may connect, and with which data grants. Super admins always; others need app_permissions.mcp_access (migration 386).
+// Who may connect, and with which data grants. v28.489: every @dockandbay.com account that is not suspended (was: super admins + app_permissions.mcp_access).
 async function mcpAccess(email) {
   const e = String(email || '').trim().toLowerCase(); if (!e) return { ok: false, reason: 'no email' };
   if (!/@dockandbay\.com$/.test(e)) return { ok: false, reason: 'only @dockandbay.com accounts can connect' };
@@ -26343,7 +26343,10 @@ async function mcpAccess(email) {
   if (SUPER_ADMINS.has(e)) return { ok: true, email: e, accounts: true, commissions: true };
   let row = null; try { row = (await pool.query(`SELECT coalesce(mcp_access,false) mcp_access, coalesce(is_admin,false) is_admin, coalesce(commissions,false) commissions, ${await accColExpr()} accounts_access FROM planner.app_permissions WHERE lower(email)=$1`, [e])).rows[0]; }
   catch (err) { if (!/mcp_access/.test(err.message)) throw err; }
-  if (!row || !row.mcp_access) return { ok: false, reason: 'the Claude connector is not switched on for ' + e + ' (CONFIG > Permissions)' };
+  // v28.489 (Ben 26-Oct-26): "everyone can have access by default ... even people not in permissions can have read only access".
+  // Any @dockandbay.com account may connect (read only); app_permissions.mcp_access is no longer checked. ACCOUNTS and COMMISSIONS
+  // data still need those grants (a person with no permissions row gets neither).
+  if (!row) return { ok: true, email: e, accounts: false, commissions: false };
   return { ok: true, email: e, accounts: !!(row.accounts_access || row.is_admin), commissions: !!(row.commissions || row.is_admin) };
 }
 async function mcpIssue(kind, client_id, email, scope, extra, ttl) {

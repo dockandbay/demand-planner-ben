@@ -1,3 +1,10 @@
+## v28.489 (26-Oct-26) Claude connector open to everyone at Dock & Bay (read only)
+- Ben: "claude connector. everyone can have access by default." / "even people not in permissions can have read only access."
+- mcpAccess: any @dockandbay.com Google account may connect, read only, without a Permissions tick, including people with no app_permissions row. ACCOUNTS and COMMISSIONS data still need those grants (no row = neither). People suspended in Google Workspace (Connect identity block) are still refused. app_permissions.mcp_access is no longer read (column left in place, harmless).
+- CONFIG ▸ Admin ▸ Permissions: the "Claude connector" column is removed and the connector help text now says everyone can connect. Saving a row no longer sends the old tick.
+- Live check before this change (26-Oct-26 14:37): Ben's describe_data and query_horizon calls all ok in mcp_audit.
+- No migration, no new env.
+
 ## v28.488 (26-Oct-26) Open to buy: spreadsheet grid + xlsx template; HORIZON icon for the Claude connector
 - Ben: "can you make this able to download and upload a xlsx template, and also can you make it even more spreadsheety like key accounts forecast grid"; "change the icon to the horizon icon" (Claude connector).
 - DEMAND ▸ Inputs ▸ Open to buy is now a spreadsheet grid on the Key accounts model: click / drag / Shift / Ctrl(Cmd)-click to select, arrows (Shift extends), Tab, Enter / F2 / typing a digit edits, Delete clears, Ctrl/Cmd+C copies, Ctrl/Cmd+V pastes a block from Excel or Sheets (one value into a selection fills it), Ctrl/Cmd+Z undoes, Ctrl/Cmd+A selects all. Status bar: Selected / Sum / Count / Avg, Copy, Clear, Undo. Every change saves at once (one request per action, in order), shows straight away and is reverted with a message if the save fails. Past months stay visible but locked (edits and pastes into them are skipped and counted). Totals per market and for all markets update live.
