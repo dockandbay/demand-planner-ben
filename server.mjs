@@ -3726,9 +3726,19 @@ async function accStmtUploadUncoded(req, res, name, text) {
         if (/\.co\.uk\b|\bGBP\b|lloyds|barclays|\bLTD\b/i.test(t)) sc.uk++; });
       fileOrg = sc.au > sc.uk ? 'au' : sc.uk > sc.au ? 'uk' : null;
       if (!fileOrg) return res.status(400).json({ error: 'Could not tell whether this file is UK or AU: none of its bank accounts are known yet. Run the bank sync in ACCOUNTS first, then upload again.' }); }
+    // v28.501 (Rita 26-Oct-26: "ON CONFLICT DO UPDATE command cannot affect row a second time"): two genuinely separate bank lines with the same
+    // date, amount and reference (e.g. two identical card fees on one day) collided on the line key inside one INSERT. Repeats are now numbered
+    // (reference "X (2)", "X (3)") so every line is kept, and file blocks that resolve to the same Xero account are merged first (otherwise the
+    // second block's "not listed = reconciled" pass would clear the first block's lines).
+    const grouped = new Map();
+    for (const x of matched) { const g = (x.k ? x.k.org : fileOrg) + '|' + (x.k ? x.k.name : x.a.name);
+      if (grouped.has(g)) { const y = grouped.get(g); y.a = Object.assign({}, y.a, { lines: y.a.lines.concat(x.a.lines) }); } else grouped.set(g, { a: x.a, k: x.k }); }
+    for (const x of grouped.values()) { const seen = {};
+      x.a.lines.forEach(l => { const k0 = l.date + '|' + l.amount.toFixed(2) + '|' + l.reference; seen[k0] = (seen[k0] || 0) + 1;
+        if (seen[k0] > 1) l.reference = (l.reference ? l.reference + ' ' : '') + '(' + seen[k0] + ')'; }); }
     const c = await pool.connect(); let lines = 0, cleared = 0, unmatched = [];
     try { await c.query('BEGIN');
-      for (const { a, k } of matched) {
+      for (const { a, k } of grouped.values()) {
         const org = k ? k.org : fileOrg, acct = k ? k.name : a.name; if (!k) unmatched.push(a.raw);
         const keys = a.lines.map(l => l.date + '|' + l.amount.toFixed(2) + '|' + l.reference);
         const r = await c.query(`UPDATE planner.accounts_stmt_lines SET reconciled=true, reconciled_seen=coalesce(reconciled_seen,$3::date), updated_at=now() WHERE org=$1 AND account_name=$2 AND NOT reconciled AND line_date <= $3::date AND NOT (line_date::text || '|' || to_char(amount,'FM9999999990.00') || '|' || reference) = ANY($4::text[])`, [org, acct, asAt, keys]);

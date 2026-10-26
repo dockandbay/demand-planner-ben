@@ -1,3 +1,9 @@
+## v28.501 (26-Oct-26) ACCOUNTS: Uncoded statement lines upload no longer fails on repeated identical lines
+- Rita: uploading "Statement Lines Report For All Orgs 2026-10-26.csv" failed with "ON CONFLICT DO UPDATE command cannot affect row a second time".
+- Cause: two separate bank lines in one account with the same date, amount and reference (e.g. two identical card fees on one day) share the stored line key, so the second hit the first inside one insert and the whole upload was refused.
+- Fix: repeats are numbered (reference "X (2)", "X (3)") so both lines are kept for reconciling; file blocks that resolve to the same Xero account are merged first, so one block no longer marks the other's lines as reconciled. Sandbox check: the 16-Oct file with one AMEX line duplicated uploads OK, both lines stored.
+- No migration.
+
 ## v28.500 (26-Oct-26) FBA tab: upload / create buttons only when rows are selected
 - Ben: "hide the create fba shipment and fba transfer upload button if nothing selected".
 - BUY & MOVE ▸ FBA: FBA Transfer Upload, AWD Transfer Upload (US) and Create FBA Shipment now show only while at least one row for the market on screen is ticked with a quantity; they appear and disappear as rows are ticked / cleared and when switching market. One function (fbaBtnVis) runs on render and on every selection change.
