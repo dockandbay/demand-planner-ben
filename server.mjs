@@ -13772,6 +13772,21 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, 
     return { sent: list.length };
   } catch (e) { console.error('[email] Resend failed:', e.message); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: e.message }); return { sent: 0, error: e.message }; }
 }
+// v28.506: one email per recipient (nobody sees anyone else's address) through Resend's batch endpoint, 100 per call, one log row per call.
+async function sendResendBatch(list, subject, html, { kind, ref, by, channel }) {
+  const to = [...new Set(list)]; if (!to.length) return { sent: 0 };
+  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY, would email ' + to.length + ' recipient(s) one by one :: ' + subject); logEmail({ recipients: to.join(', '), subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
+  const snd = emailSender(channel); let sent = 0, error = null;
+  for (let i = 0; i < to.length; i += 100) { const chunk = to.slice(i, i + 100);
+    try { const resp = await _fetchT('https://api.resend.com/emails/batch', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(chunk.map(e => ({ ...snd, to: [e], subject, html }))) });
+      if (!resp.ok) { const t = await resp.text().catch(() => ''); error = 'resend ' + resp.status; console.error('[email] Resend batch error ' + resp.status + ': ' + t.slice(0, 200)); logEmail({ recipients: chunk.join(', '), subject, kind, ref, by, status: 'error', error }); break; }
+      sent += chunk.length; logEmail({ recipients: chunk.join(', '), subject, kind, ref, by, status: 'sent' });
+    } catch (e) { error = e.message; logEmail({ recipients: chunk.join(', '), subject, kind, ref, by, status: 'error', error }); break; }
+  }
+  return { sent, error };
+}
 // Escalation email now goes through the shared best-effort sender (like the magic link) — never throws.
 async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html, kind: 'escalation', ref: r.ref, replyTo: r.replyTo, channel: r.channel }); }
 // A supplier submitting invoice / completion info should be VISIBLE, not silent: drop an UNREAD timeline note
@@ -30594,6 +30609,67 @@ const CP_IMPORT_CHANNELS_DEFAULT = ['dockandbay-uk-ws', 'dockandbay-us-ws', 'doc
   'US - Key Accounts', 'US - Custom/Co-Brand', 'EU - Key Accounts', 'EU - Custom/Co-Brand', 'EU - International Distributor'];
 const CP_SETTINGS = ['cp_import_channels', 'cp_sales_import_enabled', 'cp_cutover_cin7_until', 'cp_cutover_fulfil_from', 'cp_ops_emails', 'cp_client_confirm_email', 'cp_per_market_cutover', 'cp_stock_bands', 'cp_hide_discontinued', 'cp_default_method', 'cp_message_default_to', 'cp_auto_push_fulfil', 'cp_sales_team_emails'];
 const CP_REVIEW_MODES = ['inherit', 'review', 'auto'];   // v28.227 clients.order_review
+// ── v28.506 client notices, staff side (CLIENT ▸ Notices). Reach = active clients matching the audience and their active portal users. ──
+async function cpNoticeReach(aud) {
+  const cs = (await pool.query(`SELECT id, name, market, type FROM planner.clients WHERE active`)).rows.filter(c => cpNoticeFor({ audience: aud }, c));
+  const us = cs.length ? (await pool.query(`SELECT id, email, client_id FROM planner.client_users WHERE active AND client_id = ANY($1::int[])`, [cs.map(c => c.id)])).rows : [];
+  return { clients: cs, users: us };
+}
+const _cpFd = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '')); return m ? m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + '-' + m[1].slice(2) : ''; };
+async function cpNoticeEmail(id, req, by, again) {
+  const n = (await pool.query(`SELECT ${CP_NOTICE_COLS}, n.archived, n.emailed_at FROM planner.client_notices n WHERE n.id=$1`, [id])).rows[0];
+  if (!n) return { error: 'notice not found' };
+  if (n.archived) return { error: 'archived notices are not emailed' };
+  if (n.emailed_at && !again) return { skipped: 'already emailed' };
+  const to = [...new Set((await cpNoticeReach(n.audience)).users.map(u => String(u.email || '').trim().toLowerCase()).filter(e => /^[^@\s]+@[^@\s]+$/.test(e)))];
+  if (!to.length) return { recipients: 0, sent: 0 };
+  const E = escHtml, base = cpBase(req), link = n.link_url ? (/^#\//.test(n.link_url) ? base + '/client' + n.link_url : n.link_url) : '';
+  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#101828;max-width:600px;font-size:15px;line-height:1.5">`
+    + `<div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#5b6b83;font-weight:700">Dock &amp; Bay · notice</div>`
+    + `<h2 style="font-size:20px;margin:6px 0 8px">${E(n.title)}</h2>` + (n.key_date ? `<p style="margin:0 0 10px;font-weight:600">${E(_cpFd(n.key_date))}</p>` : '')
+    + String(n.body || '').split(/\n{2,}/).filter(p => p.trim()).map(p => `<p style="margin:0 0 10px">${E(p.trim()).replace(/\n/g, '<br>')}</p>`).join('')
+    + (link ? `<p style="margin:14px 0"><a href="${E(link)}" style="display:inline-block;background:#0f6f6a;color:#fff;padding:9px 16px;border-radius:8px;text-decoration:none;font-weight:600">${E(n.link_label || 'Find out more')}</a></p>` : '')
+    + `<p style="font-size:13px;color:#5b6b83;margin-top:18px">All notices are on the <a href="${E(base + '/client#/home/notices')}">Dock &amp; Bay client portal</a>. Questions? Send us a message in the portal.</p></div>`;
+  const r = await sendResendBatch(to, 'Dock & Bay: ' + n.title, html, { kind: 'client-notice', ref: 'notice ' + id, by, channel: 'client' });
+  if (r.sent || r.sandbox) await pool.query(`UPDATE planner.client_notices SET emailed_at=now(), emailed_count=$2, emailed_by=$3 WHERE id=$1`, [id, r.sandbox ? to.length : r.sent, by]);
+  return { recipients: to.length, sent: r.sent, sandbox: !!r.sandbox, error: r.error || null };
+}
+app.get('/api/client/notices', async (req, res) => {
+  try { const [ns, cl, uc] = await Promise.all([
+      pool.query(`SELECT ${CP_NOTICE_COLS}, n.archived, (${CP_NOTICE_LIVE}) live, to_char(n.emailed_at,'YYYY-MM-DD') emailed_on, n.emailed_count, n.emailed_by, n.created_by, n.updated_by, to_char(n.updated_at,'YYYY-MM-DD') updated_on,
+        (SELECT count(*)::int FROM planner.client_notice_reads r WHERE r.notice_id=n.id) reads FROM planner.client_notices n ORDER BY n.archived, n.pinned DESC, n.publish_at DESC, n.id DESC LIMIT 300`),
+      pool.query(`SELECT id, name, market, type FROM planner.clients WHERE active ORDER BY name`),
+      pool.query(`SELECT client_id, count(*)::int n FROM planner.client_users WHERE active GROUP BY 1`) ]);
+    const users = Object.fromEntries(uc.rows.map(r => [r.client_id, r.n])); const clients = cl.rows.map(c => ({ ...c, users: users[c.id] || 0 }));
+    const notices = ns.rows.map(n => { const a = cpNoticeAud(n.audience), m = clients.filter(c => cpNoticeFor({ audience: a }, c));
+      return { ...n, audience: a, reach_clients: m.length, reach_users: m.reduce((s, c) => s + c.users, 0) }; });
+    res.set('Cache-Control', 'no-store').json({ notices, clients, markets: Object.keys(CP_MARKETS), types: CP_TYPES });
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Notices are not set up yet (migration 392)' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/notices', async (req, res) => {   // {id?, title, body, link_url, link_label, key_date, pinned, audience, expires_on, email}
+  try { const b = req.body || {}, by = (req.me && req.me.email) || 'staff';
+    const title = String(b.title || '').trim().slice(0, 160); if (!title) return res.status(400).json({ error: 'Give the notice a title' });
+    const link = String(b.link_url || '').trim(); if (link && !/^https:\/\/\S+$/i.test(link) && !/^#\/\S*$/.test(link)) return res.status(400).json({ error: 'The link must start with https:// (or #/ for a portal page, e.g. #/catalogue)' });
+    const d = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null;
+    const vals = [title, String(b.body || '').trim().slice(0, 4000) || null, link || null, String(b.link_label || '').trim().slice(0, 60) || null, d(b.key_date), !!b.pinned, JSON.stringify(cpNoticeAud(b.audience)), d(b.expires_on), by];
+    let id = Number(b.id) || 0;
+    if (id) { const r = await pool.query(`UPDATE planner.client_notices SET title=$1, body=$2, link_url=$3, link_label=$4, key_date=$5, pinned=$6, audience=$7::jsonb, expires_on=$8, updated_by=$9, updated_at=now() WHERE id=$10`, [...vals, id]); if (!r.rowCount) return res.status(404).json({ error: 'notice not found' }); }
+    else id = (await pool.query(`INSERT INTO planner.client_notices (title, body, link_url, link_label, key_date, pinned, audience, expires_on, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$9) RETURNING id`, vals)).rows[0].id;
+    res.json({ ok: true, id, email: b.email ? await cpNoticeEmail(id, req, by, false) : null });
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Notices are not set up yet (migration 392)' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/notices/:id/email', async (req, res) => {   // {again}: email (or re-email) the notice's audience now
+  try { const r = await cpNoticeEmail(Number(req.params.id) || 0, req, (req.me && req.me.email) || 'staff', !!(req.body && req.body.again)); if (r.error && !r.sent) return res.status(400).json(r); res.json({ ok: true, ...r }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/notices/:id/archive', async (req, res) => {   // {archived}: hide from clients (or bring back)
+  try { const r = await pool.query(`UPDATE planner.client_notices SET archived=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [Number(req.params.id) || 0, req.body && req.body.archived !== false, (req.me && req.me.email) || 'staff']); res.json({ ok: true, updated: r.rowCount }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/client/notices/:id/delete', async (req, res) => {
+  try { const r = await pool.query(`DELETE FROM planner.client_notices WHERE id=$1`, [Number(req.params.id) || 0]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/client/config', async (req, res) => {
   try {
     const rows = (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key = ANY($1)`, [CP_SETTINGS])).rows; const s = {}; rows.forEach(r => { s[r.key] = r.value; });
@@ -32337,7 +32413,8 @@ app.get('/api/cp/me', cpAuth, async (req, res) => {
   // notes never counted), so the nav badge, Messages and My orders agree. 0 when messaging is off.
   try { const c = req.cp.client; const unread = c.features.messaging ? (await cpPortalThreads(req.cp)).reduce((s, t) => s + (t.unread_client || 0), 0) : 0;
     const stockScope = c.stock_scope || { mode: 'default' }; const wh = c.warehouse_code || CP_MARKETS[c.market].wh;
-    res.set('Cache-Control', 'no-store').json({ user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSettingC('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSettingC('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
+    const notices_unread = (await cpNoticesFor(req.cp).catch(() => [])).filter(n => !n.seen).length;   // v28.506: Home nav badge
+    res.set('Cache-Control', 'no-store').json({ notices_unread, user: req.cp.user, client: { id: c.id, name: c.name, type: c.type, market: c.market, currency: c.currency, price_list: c.price_list, features: c.features, stock_scope: stockScope, warehouse: wh, warehouse_label: CP_WAREHOUSES[wh] || wh, rep_group: c.rep_group_name || null, owner: c.owner_email || null }, unread, hide_discontinued: String(await cpSettingC('cp_hide_discontinued', 'true')) !== 'false', default_method: await cpSettingC('cp_default_method', 'Pallet · DHL'), preview: !!req.cp.preview, version: APP_VERSION });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Line sheet + stock: one product layer, two views. Market drives dims / HS / currency; stock is banded (default scope) or
@@ -32492,6 +32569,31 @@ app.post('/api/cp/sku-lists', cpAuth, async (req, res) => {   // {id?, name, sku
 app.post('/api/cp/sku-lists/:id/delete', cpAuth, async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.client_sku_lists WHERE id=$1 AND client_id=$2`, [Number(req.params.id) || 0, req.cp.client.id]); res.json({ ok: true, deleted: r.rowCount }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── v28.506 (Ben 27-Oct-26, idea from Liam): client notice board (migration 392). Staff post in CLIENT ▸ Notices; clients see the live ones
+// at the top of Home (pinned first, then newest) with NEW until that user has seen them. Audience {markets, types, client_ids}: empty = every
+// client; client_ids set = only those clients. Email is opt-in per post: one email to each active user of the matching clients.
+function cpNoticeAud(a) { a = a && typeof a === 'object' ? a : {}; const L = (v, ok) => (Array.isArray(v) ? v : []).map(String).filter(ok);
+  return { markets: L(a.markets, m => !!CP_MARKETS[m]), types: L(a.types, t => CP_TYPES.includes(t)), client_ids: L(a.client_ids, x => /^\d+$/.test(x)).map(Number) }; }
+function cpNoticeFor(n, c) { const a = cpNoticeAud(n.audience); if (a.client_ids.length) return a.client_ids.includes(Number(c.id));
+  return (!a.markets.length || a.markets.includes(c.market)) && (!a.types.length || a.types.includes(c.type)); }
+const CP_NOTICE_LIVE = `NOT n.archived AND n.publish_at <= now() AND (n.expires_on IS NULL OR n.expires_on >= current_date)`;
+const CP_NOTICE_COLS = `n.id, n.title, coalesce(n.body,'') body, n.link_url, n.link_label, to_char(n.key_date,'YYYY-MM-DD') key_date, n.pinned, n.audience, to_char(n.publish_at,'YYYY-MM-DD') posted, to_char(n.expires_on,'YYYY-MM-DD') expires_on`;
+async function cpNoticesFor(cp) {   // live notices for this client, each with seen = this user has seen it
+  const rows = (await pool.query(`SELECT ${CP_NOTICE_COLS}, EXISTS (SELECT 1 FROM planner.client_notice_reads r WHERE r.notice_id=n.id AND r.user_id=$1) seen
+    FROM planner.client_notices n WHERE ${CP_NOTICE_LIVE} ORDER BY n.pinned DESC, n.publish_at DESC, n.id DESC LIMIT 200`, [cp.user.id])).rows;
+  return rows.filter(n => cpNoticeFor(n, cp.client)).map(({ audience, ...n }) => n);
+}
+app.get('/api/cp/notices', cpAuth, async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ notices: await cpNoticesFor(req.cp) }); }
+  catch (e) { if (e.code === '42P01') return res.json({ notices: [] }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/cp/notices/read', cpAuth, async (req, res) => {   // {ids}: this user has seen them (an admin preview never marks anything)
+  try { if (req.cp.preview) return res.json({ ok: true, preview: true });
+    const ids = (Array.isArray(req.body && req.body.ids) ? req.body.ids : []).map(Number).filter(n => n > 0).slice(0, 200);
+    if (ids.length) await pool.query(`INSERT INTO planner.client_notice_reads (notice_id, user_id) SELECT n.id, $2 FROM planner.client_notices n WHERE n.id = ANY($1::bigint[]) ON CONFLICT DO NOTHING`, [ids, req.cp.user.id]);
+    res.json({ ok: true });
+  } catch (e) { if (e.code === '42P01') return res.json({ ok: true }); log500(e); res.status(500).json({ error: e.message }); }
 });
 // Images for a SKU list, across every gallery this client may see. Needs Image Bank's GET /api/v1/portal/products/images?codes= (asked of the
 // Image Bank thread 26-Oct-26); until that is live this answers {pending:true} and the portal says so. Size SKUs are sent as-is; Image Bank
