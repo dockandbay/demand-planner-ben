@@ -19371,6 +19371,8 @@ function invFbaParse(text) {
                       : (line => parseCsvLine(line).map(s => String(s).replace(/^"|"$/g, '').trim()));
   const hdr = split(lines[0]);
   const ci = {}; for (const k in INVFBA_COLS) ci[k] = hdr.indexOf(INVFBA_COLS[k]);
+  // v28.496: Amazon AU sends one 'inv-age-365-plus-days' column instead of 366-455 + 456+; count it in a4 (over a year) so AU aged stock is not dropped
+  if (ci.a4 < 0 && ci.a5 < 0) ci.a4 = hdr.indexOf('inv-age-365-plus-days');
   if (ci.sku < 0) return { error: 'FBA report "sku" column not found', headers: hdr.slice(0, 12) };
   const rep = {};
   for (let i = 1; i < lines.length; i++) { const f = split(lines[i]); const sku = String(f[ci.sku] || '').trim(); if (!sku) continue;
@@ -19621,7 +19623,7 @@ app.post('/api/cron/fba-report-import', async (req, res) => {
     const text = [cols.join('\t')].concat(rows.map(r => cols.map(k => clean(r[k])).join('\t'))).join('\n');
     const parsed = invFbaParse(text);
     if (!parsed || parsed.error) return res.status(400).json({ error: (parsed && parsed.error) || 'Empty report', headers: cols.slice(0, 30) });
-    const missing = Object.entries(INVFBA_COLS).filter(([, h]) => !cols.includes(h)).map(([, h]) => h);   // reported, not fatal: those values count as 0
+    const missing = Object.entries(INVFBA_COLS).filter(([k, h]) => !cols.includes(h) && !((k === 'a4' || k === 'a5') && cols.includes('inv-age-365-plus-days'))).map(([, h]) => h);   // reported, not fatal: those values count as 0 (v28.496: AU's single 365-plus column covers a4 / a5)
     const by = 'n8n (Amazon SP-API' + (b.report_id ? ' ' + String(b.report_id).slice(0, 40) : '') + ')';
     await pool.query(`INSERT INTO planner.inventory_fba_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);

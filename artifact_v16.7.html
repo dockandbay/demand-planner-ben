@@ -15246,7 +15246,8 @@ function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(
   invAwdWire();
 }
 function invFbaMeta(j){ if(!j.imported)return '<span class="mut" style="font-size:12px">Not uploaded yet.</span>';
-  var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last uploaded <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; }
+  var a=inv3plAge(j.imported_at), auto=/^n8n/i.test(String(j.imported_by||''));   // v28.496: n8n imports read 'imported from Amazon'
+  return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · '+(auto?'imported from <b>Amazon</b> (n8n)':'last uploaded <b>'+tHesc(inv3plUser(j.imported_by))+'</b>')+' on '+tHesc(a.stamp)+'</span>'; }
 // Save edited FBA aged-storage rates for a market, then reload the tab so costs recompute.
 function invFbaSaveRates(mkt,rt){ var msg=document.getElementById('fba-rates-msg');
   function num(id){ var e=document.getElementById(id); return e?(parseFloat(e.value)||0):0; }
@@ -15321,7 +15322,12 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
   // Where to get the report per market (Amazon Seller Central → FBA Inventory ▸ Reports ▸ Inventory Report → CSV/TXT).
   var _fbaHost={UK:'amazon.co.uk',US:'amazon.com',EU:'amazon.de',AU:'amazon.com.au',CA:'amazon.ca'}[INV_FBA]||'amazon.com';
   var _fbaUrl='https://sellercentral.'+_fbaHost+'/inventoryplanning/manageinventoryhealth';
-  var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 6px">'
+  // v28.496 (Ben 26-Oct-26: "once n8n flow is working remove the upload button"): UK / US / AU arrive daily from Amazon via n8n
+  // (/api/cron/fba-report-import, 05:30 London), so they show where the data came from instead of an upload box. EU and CA stay manual.
+  var _fbaAuto=['UK','US','AU'].indexOf(INV_FBA)>=0;
+  var drop=_fbaAuto?('<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px">'
+    +'<span class="tool-badge bg-blue" title="n8n reads Amazon\'s FBA Inventory report (GET_FBA_INVENTORY_PLANNING_DATA) through the SP-API every morning and sends it to HORIZON. No upload needed.">⟳ Imported daily from Amazon at 05:30 (UK time)</span>'
+    +'<span>'+invFbaMeta(j)+'</span></div>'):'<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 6px">'
     +'<div id="invfba-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:var(--hover);padding:8px 10px;text-align:center;cursor:pointer;max-width:200px;box-sizing:border-box;font-size:11px">'
     +'<div style="color:var(--blue-ink);font-weight:600">⬆ Drop '+tHesc(INV_FBA)+' FBA report</div>'
     +'<div class="mut" style="margin-top:2px">.csv/.txt · or <span style="color:var(--blue);text-decoration:underline">choose file</span></div>'
@@ -15339,9 +15345,6 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       if(INV_FBA_GAP==='pct20')return (r.erp_fba>0)?(Math.abs(r.diff)/r.erp_fba>0.20):(r.report_fba>0); return true; }
     var _qf=String(INV_FBA_Q||'').trim().toLowerCase();
     var fr=(INV_FBA_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap)).filter(function(r){ return !_qf || (String(r.erp_sku||'')+' '+String(r.sku||'')+' '+String(r.asin||'')).toLowerCase().indexOf(_qf)>=0; });
-    // Cin7 Stocktake export = matched rows in the current filter: Code = products SKU, Count = Amazon FBA (available+fc-transfer)
-    var stkRows=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.erp_sku, r.report_fba]; });
-    window._invFbaStk=stkRows;
     var summary='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;align-items:center"><span><b>'+j.report_skus+'</b> report SKUs</span>'
       +'<span style="color:var(--pos)"><b>'+j.matched+'</b> matched</span>'
       +'<button class="fba-toggle" data-t="notinerp" style="background:none;border:none;cursor:pointer;color:var(--amber);font-size:12px;padding:0;font-family:inherit"><b>'+j.unmatched+'</b> not in ERP ▾</button>'
@@ -15354,10 +15357,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       +'<input id="fba-q" placeholder="search SKU…" value="'+tHesc(INV_FBA_Q||'')+'" style="width:150px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">'
       +'<button id="fba-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding FBA stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete FBA stock" style="background:'+(INV_FBA_DEAD?'var(--neg)':'var(--neg-bg)')+';color:'+(INV_FBA_DEAD?'#fff':'var(--neg)')+';border:1px solid var(--neg);border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
-      +'<span style="margin-left:auto;position:relative"><button id="fba-stk" class="save-btn" style="background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos);font-weight:600">⤓ Cin7 Stocktake ▾</button>'
-        +'<div id="fba-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
-        +'<div class="fba-stk-opt" data-a="csv" style="padding:8px 12px;cursor:pointer;font-size:12px">⬇ Download CSV</div>'
-        +'<div class="fba-stk-opt" data-a="clip" style="padding:8px 12px;cursor:pointer;font-size:12px;border-top:1px solid var(--line2)">📋 Copy to clipboard</div></div></span></div>';
+      +'</div>';   // v28.496 (Ben): Cin7 Stocktake button removed (Cin7 retired; Fulfil is the ERP)
     var H=['SKU','ASIN','Available','FC-transfer','Reserved staging','FBA report (avail+fc+staging)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--hover);white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
@@ -15387,7 +15387,6 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
   var gp=document.getElementById('fba-gap'); if(gp)gp.onchange=function(){ INV_FBA_GAP=this.value; invFbaRender('manage',_invFbaLast); };
   var fd=document.getElementById('fba-dead'); if(fd)fd.onclick=function(){ INV_FBA_DEAD=!INV_FBA_DEAD; invFbaRender('manage',_invFbaLast); };
   var qf=document.getElementById('fba-q'); if(qf)qf.oninput=function(){ var cp=this.selectionStart; INV_FBA_Q=this.value; invFbaRender('manage',_invFbaLast); var n=document.getElementById('fba-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
-  invStkBind('fba-stk','fba-stk-menu','FBA-'+INV_FBA,function(){ return window._invFbaStk||[]; });
 }
 // Cin7 Stocktake export (shared by Manage FBA + Manage 3PL): Code = products SKU, Count = the report count.
 function invStkBind(btnId, menuId, name, getRows){ var btn=document.getElementById(btnId), menu=document.getElementById(menuId); if(!(btn&&menu))return;

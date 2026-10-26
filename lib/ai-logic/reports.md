@@ -197,6 +197,7 @@ verified_version: v28.493
 - FBA aged:
   - Money = the aged-cost total, in the currency of the imported report.
   - Units older than 270 days = buckets 271-365, 366-455 and 456+.
+  - Amazon AU's report has one 'inv-age-365-plus-days' column instead of 366-455 and 456+; it is counted in the 366-455 bucket (v28.496), so AU over-a-year stock is not dropped. AU has no 'Reserved Staging' column (reads 0).
 - A tile reads "no report imported" when the source report is missing.
 (source: artifact_v16.7.html :: renderInventoryMetrics)
 

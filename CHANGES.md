@@ -1,3 +1,10 @@
+## v28.496 (26-Oct-26) Manage FBA: UK / US / AU fed by n8n daily; upload and Cin7 Stocktake buttons removed; AU 365+ aged stock counted
+- Ben: "once n8n flow is working remove the upload button and definitely remove the cin7 stocktake download button".
+- n8n flow ZFmzekiXUrfa7Od7 tested on live 26-Oct-26 (Ben ran it): UK 617 rows / 536 SKUs, US 650 / 531, AU 430 / 430, all saved.
+- BUY & MOVE ▸ Inventory ▸ Manage FBA: UK, US and AU show "Imported daily from Amazon at 05:30 (UK time)" instead of the upload box; the import line reads "imported from Amazon (n8n)". EU and CA keep the upload (no n8n feed). Cin7 Stocktake button (CSV / clipboard) removed from Manage FBA for every market. Manage 3PL's stocktake button is unchanged.
+- Fix: Amazon AU's report has one inv-age-365-plus-days column instead of 366-455 + 456+, so AU stock aged over a year read 0 on FBA Aged. It is now counted in the 366-455 bucket (manual uploads and n8n alike) and no longer reported as a missing column.
+- No migration, no new env, no new routes.
+
 ## v28.495 (26-Oct-26) COGS: raise values well below supplier cost to supplier cost
 - Ben: "if cogs is less than cost price in airtable then set it to COST as something seems wrong."
 - BUY & MOVE ▸ Inventory ▸ COGS: after the Fulfil / kept / supplier-cost / set rules, any value MORE THAN 10% below the SKU's supplier cost (products.cost, USD, from Airtable, converted at today's Fulfil rate) is replaced by supplier cost. Stored as source cost_floor when emailed.
