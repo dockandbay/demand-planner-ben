@@ -151,6 +151,7 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
     const tg = hzThawGap();   // v28.231 (gap G1): a "timeout" that spanned an instance freeze
     // v28.370 (Diviyaj 14-Oct-26): which route (or 'background') and staff user made the call, so an API error can be tied to a page
     let ex = 'background', who = null; try { const st = _reqStore.getStore(), r = st && st.req; if (r) { ex = (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200); who = hzReqUser(r) || null; } } catch (_) {}
+    if (tg && timeout && ex === 'background') { _hzFrozen.integ++; return; }   // v28.490: a background call frozen mid-flight (e.g. KV reads), not a real outage
     hzHealthEvt('integration_error', svc + '|' + method + '|' + op + '|' + status + '|' + (timeout ? 1 : 0) + (tg ? '|thaw' : ''), { path: svc + ' ' + method + ' ' + op, method, status: status || null, ms, message,
       meta: Object.assign({ service: svc, op, status: status || 0, timeout: !!timeout, example: ex }, who ? { user: who } : null, tg ? { thaw_gap_ms: tg } : null) });
   } catch (_) { /* measurement must never throw */ }
@@ -160,8 +161,17 @@ function hzIntegNote(url, o, status, ms, timeout, msg) {
 { const _origQuery = pool.query.bind(pool);
   // v28.083: HZ_QLOG=<ms> logs every query slower than <ms> as "[q 123ms] GET /api/... :: <sql head>" (diagnostic only; off by default).
   const _QLOG = Math.max(0, Number(process.env.HZ_QLOG || 0));
+  // v28.490 (Ben 26-Oct-26, health review): a READ that fails with a connect / read timeout in the minute after an instance thaw is retried
+  // once on a fresh connection (the failed client is discarded by pg-pool). 30 user requests failed this way in the week to 26-Oct (e.g.
+  // GET /api/me, /api/supply/deposits). Only promise-style SELECT / WITH statements with no INSERT / UPDATE / DELETE / FOR UPDATE: never a write.
+  const _THAW_RETRY_RE = /timeout exceeded when trying to connect|Query read timeout|Connection terminated due to connection timeout|Connection terminated unexpectedly/i;
+  const _isRead = (q) => { const t = String((q && q.text) || q || ''); return /^\s*(SELECT|WITH)\b/i.test(t) && !/\b(INSERT|UPDATE|DELETE|MERGE)\b|\bFOR\s+(UPDATE|SHARE)\b/i.test(t); };
   pool.query = function () { let s = null; try { s = (typeof _reqStore !== 'undefined') ? _reqStore.getStore() : null; if (s) s.q = (s.q || 0) + 1; } catch (_) {}
-    const p = _origQuery.apply(pool, arguments);
+    const args = arguments, last = args.length ? args[args.length - 1] : null;
+    let p = _origQuery.apply(pool, args);
+    if (typeof last !== 'function' && p && typeof p.then === 'function' && _isRead(args[0])) {
+      p = p.catch((e) => { if (!_THAW_RETRY_RE.test(String((e && e.message) || '')) || !(typeof hzThawGap === 'function' && hzThawGap() > 0)) throw e;
+        _hzRetry.n++; return _origQuery.apply(pool, args).then((r) => { _hzRetry.ok++; return r; }); }); }
     if (_QLOG && p && typeof p.then === 'function') { const t0 = Date.now(); const sql = String((arguments[0] && arguments[0].text) || arguments[0] || '').replace(/\s+/g, ' ').slice(0, 110); const path = (s && s.req) ? (s.req.method + ' ' + String(s.req.originalUrl || s.req.url || '').split('?')[0]) : '-';
       p.then(() => { const ms = Date.now() - t0; if (ms >= _QLOG) console.log('[q ' + ms + 'ms] ' + path + ' :: ' + sql); }, () => {}); }
     return p; }; }
@@ -194,6 +204,7 @@ function hzThawGap() { if (Date.now() - _hzTickAt - 1000 > HZ_THAW_MS) hzThawChe
 // v28.231 (Ben, health review fix 1): keep a Vercel instance alive until post-response work finishes, instead of freezing it mid-query.
 // Same request-context hook @vercel/functions' waitUntil uses (no new dependency); a no-op off Vercel or outside a request.
 const _hzWU = { ok: 0, miss: 0 };
+const _hzRetry = { n: 0, ok: 0 }, _hzFrozen = { db: 0, integ: 0 };   // v28.490: thaw read retries; background work that failed because the instance froze under it (counted, not logged)
 function hzWaitUntil(p) { try { if (!p || typeof p.then !== 'function' || !process.env.VERCEL) return p;
   const rc = globalThis[Symbol.for('@vercel/request-context')], c = rc && typeof rc.get === 'function' ? rc.get() : null;
   if (c && typeof c.waitUntil === 'function') { c.waitUntil(Promise.resolve(p).catch(() => {})); _hzWU.ok++; } else _hzWU.miss++; } catch (_) {} return p; }
@@ -208,6 +219,7 @@ function hzDbErr(e, op) { try { const m = String((e && e.message) || e || '');
   const kind = /ECHECKOUTTIMEOUT|EMAXCONNSESSION|max clients/i.test(m) ? 'pooler_saturated' : /connect/i.test(m) ? 'connect_timeout' : /statement timeout/i.test(m) ? 'statement_timeout' : 'query_timeout';   // pooler_saturated = Supabase pooler out of sessions / checkouts
   let ex = 'background'; try { const st = _reqStore.getStore(), r = st && st.req; if (r) ex = (r.method + ' ' + String(r.originalUrl || r.url || '').split('?')[0]).slice(0, 200); } catch (_) {}   // v28.231 (gap G2): which route / background job hit it
   const tg = hzThawGap();   // v28.231 (gap G1): a timeout that straddled an instance freeze is not a real DB timeout
+  if (tg && ex === 'background') { _hzFrozen.db++; return; }   // v28.490: background work frozen mid-query (95% of db_pool rows, no user waiting): counted on the instance metric, not logged / alerted
   hzHealthEvt('db_pool', kind + '|' + ex + (tg ? '|thaw' : ''), { path: 'db ' + kind.replace('_', ' '), message: m.slice(0, 300), meta: Object.assign({ op, error: kind, example: ex, max_waiting: pool.waitingCount, total: pool.totalCount, idle: pool.idleCount }, tg ? { thaw_gap_ms: tg } : null) });
 } catch (_) {} }
 pool.on('connect', (client) => { try { if (client.__hzQ) return; client.__hzQ = 1; client.__hzNew = 1; const oq = client.query;   // __hzNew: v28.231 (gap G3) this checkout opened a physical connection
@@ -983,7 +995,7 @@ function hzHealthFlush(force) {
     if (!force && _hzHBn < 25 && now - _hzHBlast < 60000) return null;
     if (now < _hzHBoffUntil) return null;
     if (_hzCk.n) { hzHealthEvt('metric', 'db_checkout|' + HZ_INSTANCE + '|' + now, { path: 'db checkout', ms: _hzCk.max, message: 'DB checkouts ' + _hzCk.n + ', avg ' + Math.round(_hzCk.ms / _hzCk.n) + 'ms, max ' + _hzCk.max + 'ms; new connections ' + _hzCk.newN + (_hzCk.newN ? ', avg ' + Math.round(_hzCk.newMs / _hzCk.newN) + 'ms, max ' + _hzCk.newMax + 'ms' : ''),
-      meta: { value: Math.round(_hzCk.ms / _hzCk.n), n: _hzCk.n, avg_ms: Math.round(_hzCk.ms / _hzCk.n), max_ms: _hzCk.max, over_1s: _hzCk.slow, new_n: _hzCk.newN, new_avg_ms: _hzCk.newN ? Math.round(_hzCk.newMs / _hzCk.newN) : 0, new_max_ms: _hzCk.newMax, wait_until: _hzWU.ok, wait_until_miss: _hzWU.miss } });   // v28.231 (gap G3)
+      meta: { value: Math.round(_hzCk.ms / _hzCk.n), n: _hzCk.n, avg_ms: Math.round(_hzCk.ms / _hzCk.n), max_ms: _hzCk.max, over_1s: _hzCk.slow, new_n: _hzCk.newN, new_avg_ms: _hzCk.newN ? Math.round(_hzCk.newMs / _hzCk.newN) : 0, new_max_ms: _hzCk.newMax, wait_until: _hzWU.ok, wait_until_miss: _hzWU.miss, thaw_retry: _hzRetry.n, thaw_retry_ok: _hzRetry.ok, frozen_bg_db: _hzFrozen.db, frozen_bg_integ: _hzFrozen.integ } });   // v28.231 (gap G3)
       for (const k in _hzCk) _hzCk[k] = 0; }
     const rows = Array.from(_hzHB.values(), e => Object.assign({ app_version: APP_VERSION }, e, { meta: Object.assign({ instance: HZ_INSTANCE }, e.meta || null) })); _hzHB.clear(); _hzHBn = 0; _hzHBlast = now;   // v28.231 (gap G4): instance id on every server row
     // v28.231 (Ben): kinds 'instance' and 'cron_run' need migration 342. Before it, a CHECK violation (23514) retries the batch with those

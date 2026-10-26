@@ -1,3 +1,12 @@
+## v28.490 (26-Oct-26) Health review: retry reads once after an instance thaw; stop logging frozen background work as errors
+- Ben: "Review app health and performance" then "Yes proceed" (fixes 1 and 2).
+- Live health log, 19 to 26-Oct-26: 666 db_pool and 166 KV "errors" (95%) were BACKGROUND work frozen mid-flight by Vercel and timed out on thaw (thaw_gap 17 s to 8 min; waitUntil is working: 152k ok, 0 miss). No user waited on them, but they filled the log and the red-alert kinds. 30 errors hit real user requests right after a thaw (GET /api/me, /api/supply/deposits, /api/supply/timeline-notifications, /api/client/commission/readiness ...).
+- pool.query: a READ (promise-style SELECT / WITH with no INSERT / UPDATE / DELETE / MERGE / FOR UPDATE / FOR SHARE) that fails with a connect or read timeout, or a terminated connection, within 60 s of a thaw is retried once on a fresh connection. Writes, callback-style calls, other errors and failures with no recent thaw are never retried.
+- Health log: a db_pool or integration timeout from background work that spans a freeze is now counted on the instance metric (frozen_bg_db, frozen_bg_integ) instead of logged row by row (it no longer feeds the red-alert check). Real request errors are still logged as before. New metric fields thaw_retry / thaw_retry_ok to confirm the retry on live.
+- KV (Upstash) unchanged: all 166 KV timeouts were background reads, so the earlier "cut the 5 s wait" suggestion is withdrawn (users never waited on them; the breaker already handles it).
+- Tests: the retry wrapper with a fake pool, 10 cases (retried: read after thaw, WITH read, {text} config; not retried: no thaw, UPDATE, WITH ... INSERT, FOR UPDATE, syntax error, callback style). Server boots; routes answer through the wrapper.
+- No migration, no new env.
+
 ## v28.489 (26-Oct-26) Claude connector open to everyone at Dock & Bay (read only)
 - Ben: "claude connector. everyone can have access by default." / "even people not in permissions can have read only access."
 - mcpAccess: any @dockandbay.com Google account may connect, read only, without a Permissions tick, including people with no app_permissions row. ACCOUNTS and COMMISSIONS data still need those grants (no row = neither). People suspended in Google Workspace (Connect identity block) are still refused. app_permissions.mcp_access is no longer read (column left in place, harmless).
