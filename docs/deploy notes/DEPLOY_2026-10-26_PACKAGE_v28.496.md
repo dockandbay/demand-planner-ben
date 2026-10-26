@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `9d81cc3f` (v28.496). Live `/api/version` before: **v28.495** (production `main` = `1b1f53ea`). Production port: PR #18, branch `port/v28.496`. Owner of production steps: Ben.
 
-**STATUS 26-Oct-26:** PR #18 open, checks running.
+**STATUS 26-Oct-26: LIVE.** PR #18 merged by Ben (production `main` = `7d3511bc`), CI push run 40304166414 green, live `/api/version` = **v28.496**. n8n `ZFmzekiXUrfa7Od7` Active (Ben).
 
 ## What changed
 - BUY & MOVE ▸ Inventory ▸ Manage FBA: UK, US and AU show "Imported daily from Amazon at 05:30 (UK time)" instead of the upload box (n8n flow `ZFmzekiXUrfa7Od7`, tested on live 26-Oct-26: UK 536, US 531, AU 430 SKUs). EU and CA keep the upload.
@@ -26,4 +26,4 @@ No planning logic changed.
 3. After the next n8n run, FBA Aged AU shows units over 365 days where Amazon reports them.
 
 ## Deploy record
-- 26-Oct-26: PR #18 opened.
+- 26-Oct-26: PR #18 opened, checks green; merged by Ben, main `7d3511bc`, live verified v28.496.
