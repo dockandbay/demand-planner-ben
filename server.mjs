@@ -24609,6 +24609,55 @@ app.post('/api/demand/wssi-otb', async (req, res) => {
   finally { client.release(); }
 });
 
+// v28.488 (Ben 26-Oct-26): Open to buy xlsx template upload, READ ONLY: parses the sheet and returns the cells; the page shows a
+// preview and saves them through POST /api/demand/wssi-otb (so Undo covers an upload). Body {fy, file_b64}. Layout = the page's
+// Download template: a header row with Market, Channel and one column per month (Mmm-yy, YYYY-MM or a real date), then one row
+// per market × channel. Blank cells are returned as blank (= no OTB); text that is not a number is reported, not guessed.
+const _OTB_MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function _otbHeadMonth(v) {
+  if (v instanceof Date && !isNaN(v)) return v.getUTCFullYear() + '-' + String(v.getUTCMonth() + 1).padStart(2, '0');
+  const t = String(v == null ? '' : (v.richText ? v.richText.map(x => x.text).join('') : (v.result != null ? v.result : v))).trim();
+  let m = /^(\d{4})-(\d{1,2})$/.exec(t); if (m) return m[1] + '-' + m[2].padStart(2, '0');
+  m = /^([A-Za-z]{3})[A-Za-z]*[-\s']+(\d{2}|\d{4})$/.exec(t); if (m && _OTB_MON[m[1].toLowerCase()]) return (m[2].length === 2 ? '20' + m[2] : m[2]) + '-' + String(_OTB_MON[m[1].toLowerCase()]).padStart(2, '0');
+  return null;
+}
+app.post('/api/demand/wssi-otb/upload', async (req, res) => {
+  try {
+    const b = req.body || {}, fy = _otbFy(b.fy); if (!fy) return res.status(400).json({ error: 'fy (start year) needed' });
+    const buf = Buffer.from(String(b.file_b64 || ''), 'base64'); if (!buf.length) return res.status(400).json({ error: 'No file' });
+    if (buf.length > 3 * 1024 * 1024) return res.status(413).json({ error: 'File too large (3 MB max)' });
+    const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(buf); } catch (e) { return res.status(400).json({ error: 'Not an .xlsx file (save it as Excel Workbook .xlsx)' }); }
+    const ws = wb.worksheets[0]; if (!ws) return res.status(400).json({ error: 'The file has no sheet' });
+    const months = []; for (let i = 0; i < 12; i++) { const m = 3 + i, y = fy + (m > 12 ? 1 : 0); months.push(y + '-' + String(m > 12 ? m - 12 : m).padStart(2, '0')); }
+    const cellV = (c) => { const v = c && c.value; if (v == null) return null; if (typeof v === 'object' && !(v instanceof Date)) { if (v.result != null) return v.result; if (v.richText) return v.richText.map(x => x.text).join(''); if (v.text != null) return v.text; } return v; };
+    let head = null, mkCol = 0, chCol = 0; const monCol = {};
+    for (let r = 1; r <= Math.min(ws.rowCount, 15) && !head; r++) {
+      const row = ws.getRow(r); const cols = {};
+      row.eachCell({ includeEmpty: false }, (c, ci) => { const t = String(cellV(c) == null ? '' : cellV(c)).trim().toLowerCase(); if (t === 'market') cols.mk = ci; if (t === 'channel') cols.ch = ci; const hm = _otbHeadMonth(c.value); if (hm) monCol[ci] = hm; });
+      if (cols.mk && cols.ch) { head = r; mkCol = cols.mk; chCol = cols.ch; } else { for (const k in monCol) delete monCol[k]; }
+    }
+    if (!head) return res.status(400).json({ error: 'Could not find the header row (it needs Market and Channel columns). Start from the Download template.' });
+    const inFy = Object.entries(monCol).filter(([, m]) => months.includes(m));
+    if (!inFy.length) return res.status(400).json({ error: 'No month columns for FY' + String(fy + 1).slice(2) + ' in the header row' });
+    const cells = [], bad = [], unknown = [];
+    for (let r = head + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r); const mk = String(cellV(row.getCell(mkCol)) || '').trim().toUpperCase(); let ch = String(cellV(row.getCell(chCol)) || '').trim().toUpperCase();
+      if (!mk && !ch) continue; if (/TOTAL/.test(mk) || /TOTAL/.test(ch)) continue;
+      ch = ({ 'B2B (WHOLESALE)': 'B2B', WHOLESALE: 'B2B', 'AMAZON FBA': 'FBA', AMAZON: 'FBA', ZALANDO: 'ZAL', TIKTOK: 'TIK' })[ch] || ch;
+      if (!WSSI_OTB_MKTS.includes(mk) || !WSSI_OTB_CHS.includes(ch)) { unknown.push('row ' + r + ': ' + (mk || '?') + ' ' + (ch || '?')); continue; }
+      for (const [ci, m] of inFy) {
+        const v = cellV(row.getCell(+ci));
+        if (v == null || String(v).trim() === '') { cells.push({ month: m, market: mk, channel: ch, otb_cost: null }); continue; }
+        const n = typeof v === 'number' ? v : Number(String(v).replace(/[£,\s]/g, ''));
+        if (!isFinite(n) || n < 0) { bad.push(mk + ' ' + ch + ' ' + m + ': "' + String(v).slice(0, 20) + '"'); continue; }
+        cells.push({ month: m, market: mk, channel: ch, otb_cost: Math.round(n * 100) / 100 });
+      }
+    }
+    res.json({ ok: true, fy, months: inFy.map(([, m]) => m), cells, bad: bad.slice(0, 50), n_bad: bad.length, unknown: unknown.slice(0, 50), n_unknown: unknown.length });
+  } catch (e) { log500(e); res.status(500).json({ error: 'Could not read the file' }); }
+});
+
 // v28.485 (Ben 26-Oct-26): DEMAND ▸ WSSI (weekly sales, stock and intake with open to buy), read only. Replaces the old
 // REPORTS ▸ Open-to-Buy (/api/scenario/otb). One financial year (?fy=<start year>, Mar to Feb) plus last year, rolled up
 // by market × channel / stock pool × category × seasonality × product status; the page filters and sums. Engine and

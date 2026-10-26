@@ -7,9 +7,9 @@ sources:
   - server.mjs :: /api/demand/wssi
   - artifact_v16.7.html :: renderWssiView, wssiCompute, wssiDerive, wssiPeriod
   - artifact_v16.7.html :: renderOtbInputView
-  - server.mjs :: /api/demand/wssi-otb
+  - server.mjs :: /api/demand/wssi-otb, /api/demand/wssi-otb/upload
   - migrations/388_wssi_otb.sql :: planner.wssi_otb
-verified_version: v28.487
+verified_version: v28.488
 fingerprints:
   lib/wssi.mjs::wssiLoad: f97960cbcdd8
   lib/wssi.mjs::wssiBuild: f0a6fe67d056
@@ -18,8 +18,9 @@ fingerprints:
   artifact_v16.7.html::wssiCompute: 3776d2116f1e
   artifact_v16.7.html::wssiDerive: c0b64d1f5b46
   artifact_v16.7.html::wssiPeriod: 0b109896c92c
-  artifact_v16.7.html::renderOtbInputView: d6db27611f2a
+  artifact_v16.7.html::renderOtbInputView: 1a57dc9a3eb4
   server.mjs::/api/demand/wssi-otb: 0e498c81c438
+  server.mjs::/api/demand/wssi-otb/upload: 099ea374341f
   migrations/388_wssi_otb.sql::planner.wssi_otb: 44eb8321b554
 ---
 
@@ -82,6 +83,8 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Open to buy remaining £ cost (forecast months) = target - projected closing £ cost. Positive = room to buy, negative = over-bought.
 - OTB planned (v28.487) comes from DEMAND ▸ Inputs ▸ Open to buy (planner.wssi_otb): £ at cost per month × market × channel, entered by planners (demand edit rights), past months locked. WSSI sums the inputs for the markets and channels picked (category, seasonality and status filters do not split them; a note says so).
   - OTB planned £ cost = the inputs; units = £ / that month's cost per unit sold (cost of sales / units, else closing cost / closing units); £ retail = units x current selling price.
+  - The input page is a spreadsheet grid (v28.488): select / drag / Shift / Ctrl, arrows, Tab, Enter / F2 / digit edits, Delete clears, copy / paste blocks, fill, undo, status bar Sum / Count / Avg. Each change saves at once and is reverted if the save fails. Past months are locked.
+  - .xlsx template: Download = the grid with current figures; Upload = the server reads it (read only), the page previews the changes, Apply saves them as one undoable action. Past months and total rows are ignored; non-numbers and unknown market / channel rows are listed, never guessed.
   - OTB adds to projected stock cumulatively: each forecast month's opening and closing include all OTB planned up to then, so closing vs target and OTB remaining move with it. Actual months ignore OTB.
 (source: artifact_v16.7.html :: wssiCompute, renderOtbInputView; server.mjs :: /api/demand/wssi-otb)
 (source: lib/wssi.mjs :: wssiBuild; artifact_v16.7.html :: wssiDerive)
