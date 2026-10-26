@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `2f60168e` (2f60168e1e843066e35831ce672bd4b9877f9fdf, v28.486). Live `/api/version` before the deploy: **v28.484** (Connect, PR #14, production `main` = `9e8846e4`). Production port: PR #15, branch `port/v28.486`, commit `8d7987db` (author admin@dockandbay.com). Owner of production steps: Ben.
 
-**STATUS 26-Oct-26: PR #15 open, checks green (pre-deploy checks, regression tests). Waiting for Ben's merge.**
+**STATUS 26-Oct-26: LIVE.** PR #15 merged by Ben (production `main` = `2d7f0188`), CI run 40264065647 green, live `/api/version` = **v28.486**.
 
 ## What changed
 - **v28.485 DEMAND ▸ WSSI** (#/demand/wssi), second in the DEMAND menu after Cross Market view. Weekly sales, stock and intake with open to buy, laid out like Ben's "WSSI OTB Format" sheet. Read only. Logic: `lib/ai-logic/wssi.md`.
@@ -34,4 +34,5 @@ No planning logic changed. Buy plan untouched.
 5. Numbers: Summary shows k / m.
 
 ## Deploy record
-- 26-Oct-26: PR #15 opened, checks green. (Merge, run and live version to follow.)
+- 26-Oct-26: PR #15 opened, checks green (two CI runs, one for the branch push and one for the PR; neither deploys).
+- 26-Oct-26 03:25 UTC: merged by Ben, production `main` = `2d7f0188`. CI run 40264065647 (push to main: checks, tests, deploy, alias, smoke) green. Live `/api/version` verified **v28.486**. Ben confirmed WSSI is live.
