@@ -1,3 +1,24 @@
+## v28.484 (25-Oct-26) Connect: order and client data need CLIENT access; PO ex-factory from Flexport
+- Ben (answers to the v28.483 questions): "Order and client data require HORIZON's CLIENT grant", "PO exFactory: use the Flexport ship date ... fall back to factory production end date", payment wording unchanged.
+- Connect order and client data now need the CLIENT grant (client_access, or admin; super admins always) as well as the Connect tick. Without it: lookup of an order or client answers 403 no_access, search leaves out order and client hits, resolve returns no orders and client null. PO and SKU cards are unchanged.
+- PO card exFactory = the Flexport departure (actual, else estimated, from the Flexport import; v_po_finance flex_departure), else the factory production end (eff_prod_end). Before: the supplier ship date, else production end. Sandbox check: PO-57UKMQ1 now shows 2026-06-10 (Flexport) instead of 2026-07-12 (production end); PO-57UKLX3 has no Flexport shipment and keeps 2026-08-30.
+- tests/connect-routes.cjs: new checks for a person with the Connect tick but no CLIENT grant, then with CLIENT. Not run yet: the sandbox can only run one server at a time and Ben's 8124 server stays up; to run with Ben.
+- Ships on its own (v28.483 and v28.484), separate from the v28.475 to v28.482 package. No new migration or env beyond v28.483.
+
+## v28.483 (25-Oct-26) Connect: HORIZON routes for the Gmail add-on and Chrome side panel, Connect tick, sign-out of suspended people
+- Ben: Connect handover section 6 (HORIZON side of the new Connect app; contract in the Connect repo, docs/contracts.md 1.1 to 1.4).
+- New read-only routes, called server to server by Connect with a signed assertion (HMAC-SHA256 with CONNECT_SHARED_SECRET, 60 s lifetime, 5 s skew, @dockandbay.com only, action must match the route, each request id usable once):
+  - POST /api/connect/resolve: which spotted POs, order numbers, SKUs and sender email are real, with labels.
+  - POST /api/connect/search: free text over POs, Fulfil orders (number or reference), SKUs or product names, Fulfil clients.
+  - POST /api/connect/lookup: one card (PO, order and tracking, SKU stock, client), every key always present.
+- Orders and clients read Fulfil live (all channels incl. DTC/Shopify; every tracking code per package), falling back to the wholesale mirror planner.fulfil_sales when Fulfil cannot be read. Nothing is written to Fulfil.
+- CONFIG > Admin > Permissions: new **Connect** column next to Claude connector. Super admins always allowed; unticking refuses the next request.
+- POST /api/identity/revoke and /api/identity/restore (Connect's Google Workspace suspension watcher): revoke deletes the person's Claude connector tokens and blocks them from Connect routes and the Claude connector (super admins included); restore lifts the block only (never re-ticks anything). Both idempotent and logged (planner.identity_events). Connect calls are also listed in the connector use list (planner.mcp_audit, client "connect").
+- Gate: /api/connect/* and /api/identity/* are exempt from the planner key gate and the write-permission gate (they authenticate by assertion in the handler).
+- New logic topic lib/ai-logic/connect.md; supply-finance connector rule updated.
+- Tested on the sandbox (worktree instance): tests/connect-routes.cjs, 126 checks passed, incl. 401 cases (no header, wrong secret, expired, lifetime over 60 s, wrong aud, outside domain, wrong action both ways, replay, Bearer scheme), 403 unticked and 403 blocked, revoke and restore twice each, connector token refused after revoke, and the gate exemption with PLANNER_KEY set.
+- **Migration 387** (app_permissions.connect_access, identity_blocks, identity_events), applied to the sandbox. **New env:** CONNECT_SHARED_SECRET (32+ characters, same value as Connect). **Gate exemptions (prod harness):** /api/connect/*, /api/identity/*.
+
 ## v28.482 (24-Oct-26) File uploads: limit raised to 100 MB; PRODUCT documents keep going after a failed file
 - Ben: "Change to 100mb and test".
 - Every per-file check from v28.481 is now 100 MB (PRODUCT sample review and feedback, component files, Pantone swatches, product documents, timeline attachments; supplier portal product documents and sample photos). This matches the server ceiling (STORAGE_MAX_MB, default 100) and the live horizon-uploads bucket (100 MB, checked read-only).
