@@ -1,3 +1,10 @@
+## v28.494 (26-Oct-26) Amazon FBA inventory report by n8n (Manage FBA / FBA Aged)
+- Ben: "I want to update some Amazon data reports in horizon. Inventory > Amazon uk/us/au. And aged ... inventory ... it comes in with the report."
+- New POST /api/cron/fba-report-import {market, rows, report_id, report_type} for n8n. Header x-webhook-secret must equal N8N_WEBHOOK_SECRET (fails closed: 401). Rows (one object per report line, Amazon column names) are turned back into the report text and parsed by the same invFbaParse as a manual upload, then saved to planner.inventory_fba_imports for that market (one row per market, replaced). Manage FBA and FBA Aged read it unchanged; imported_by reads "n8n (Amazon SP-API <report id>)".
+- Refuses: unknown market (400), no rows (400, nothing changed), a report the parser cannot read (400, first 30 headers returned). Reply lists any expected columns missing.
+- n8n flow (built inactive, needs Ben's OK to switch on): daily, GET_FBA_INVENTORY_PLANNING_DATA for UK (EU region), US (NA), AU (AU) through the existing Report fetch sub-workflow.
+- Production gate: /api/cron/fba-report-import must be added to the cron exemption list at port. No new env (uses N8N_WEBHOOK_SECRET). No migration.
+
 ## v28.493 (26-Oct-26) File uploads up to 300 MB per file
 - Ben: "can we increase storage on supabase to 300mb for 1 file".
 - One setting per page, window.HZ_UP_MAX_MB (300), replaces the 16 hard-coded 100 MB checks and messages: staff app (inject.html: timeline attachments, sample review / feedback files, component files, Pantone swatches, product documents and the other PRODUCT uploads) and supplier portal (portal-view.js: product documents, sample photos, timeline). Server ceiling STORAGE_MAX_MB now defaults to 300 (was 100).

@@ -1309,6 +1309,7 @@ app.use((req, res, next) => {
       || req.path === '/hz-health.js' || req.path === '/api/cron/health-weekly' || req.path === '/api/cron/health-checks' || req.path === '/api/cron/fba-inflight-refresh'   // v28.168 (Ben): + fba-inflight-refresh cron (x-webhook-secret in the handler). v28.163 (Ben): + health-checks cron (x-webhook-secret in the handler). v28.159 (Ben): health capture script (static, no data) + weekly health cron (x-webhook-secret checked in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/api/cron/up-fx-statement' || req.path === '/api/cron/preorders-sync' || req.path === '/api/cron/accounts-bank-sync' || req.path === '/api/cron/accounts-learn' || req.path === '/api/cron/payment-emails'   // v28.174 (Ben): weekly Universal Partners FX statement email (x-webhook-secret in the handler); Diviyaj: mirror in the prod login gate
       || req.path === '/client' || req.path === '/client-view.js' || req.path.startsWith('/api/cp/') || req.path === '/api/cron/client-sales'
+      || req.path === '/api/cron/fba-report-import'   // v28.494 (Ben): n8n Amazon FBA inventory report → Manage FBA / FBA Aged (x-webhook-secret checked in the handler, fails closed)
       || req.path === '/mcp' || req.path.startsWith('/oauth/') || req.path.startsWith('/.well-known/oauth-') || req.path === '/.well-known/openid-configuration'
       || req.path.startsWith('/api/connect/') || req.path.startsWith('/api/identity/')) return next();   // v28.483: Connect (signed CONNECT_SHARED_SECRET assertion, checked in the handlers)   // v28.480: Claude connector (own OAuth bearer tokens, checked in the handlers)   // v28.008: client portal (magic-link cookie csid) + its cron (webhook secret)   // v27.756: n8n webhooks carry x-webhook-secret (checked in the handler), not the planner key — mirrors Diviyaj. v28.001: script exports carry x-export-token (checked in the handler) — Diviyaj: mirror this exemption in the prod login gate's prod hotfix so the crons are not 401'd here   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
@@ -19594,6 +19595,30 @@ app.post('/api/supply/inventory-fba/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, imported: true, imported_by: by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, parsed.rep)) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v28.494 (Ben 26-Oct-26): the Amazon FBA inventory (planning) report, fetched by n8n through SP-API (workflow "Horizon — Amazon FBA
+// inventory report → HORIZON"), replaces the manual upload for BUY & MOVE ▸ Inventory ▸ Manage FBA and FBA Aged (aged inventory
+// buckets come in the same report). Body {market:'UK'|'US'|'AU'|'EU'|'CA', rows:[{column: value}], report_type?, report_id?}: the rows
+// are turned back into the report's own tab-separated layout and go through the SAME parser + table as the manual upload, so the
+// two tabs read it exactly as before. x-webhook-secret = N8N_WEBHOOK_SECRET (fails closed when unset).
+app.post('/api/cron/fba-report-import', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET; if (!secret || !safeEq(req.get('x-webhook-secret'), secret)) return res.status(401).json({ error: 'unauthorized' });
+  const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
+  if (INVFBA_MKTS.indexOf(mkt) < 0) return res.status(400).json({ error: 'Unknown market ' + mkt });
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'No rows (the report came back empty); nothing changed' });
+  try {
+    const cols = []; rows.forEach(r => Object.keys(r || {}).forEach(k => { if (!cols.includes(k)) cols.push(k); }));
+    const clean = v => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim();
+    const text = [cols.join('\t')].concat(rows.map(r => cols.map(k => clean(r[k])).join('\t'))).join('\n');
+    const parsed = invFbaParse(text);
+    if (!parsed || parsed.error) return res.status(400).json({ error: (parsed && parsed.error) || 'Empty report', headers: cols.slice(0, 30) });
+    const missing = Object.entries(INVFBA_COLS).filter(([, h]) => !cols.includes(h)).map(([, h]) => h);   // reported, not fatal: those values count as 0
+    const by = 'n8n (Amazon SP-API' + (b.report_id ? ' ' + String(b.report_id).slice(0, 40) : '') + ')';
+    await pool.query(`INSERT INTO planner.inventory_fba_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
+      ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);
+    res.json({ ok: true, market: mkt, skus: Object.keys(parsed.rep).length, rows: rows.length, missing_columns: missing, report_type: b.report_type || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PO inbound delays + impacted products (SUG-0024 Inventory Status Report §6) ───────────────
