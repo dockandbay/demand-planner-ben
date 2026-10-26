@@ -18923,7 +18923,7 @@ function _hzDbRun(job){ if(job.cancelled)return; job.tries++; job.snap=_hzDemand
     var r={mode:job.mode, ms:Math.round((performance.now()-job.t0)*10)/10, why:job.full, skus:0, tries:job.tries, slices:job.slices, maxSliceMs:Math.round(job.maxSlice*10)/10,
       postMs:Math.round(job.postMs*10)/10, posts:job.posts, applyMs:Math.round(job.applyMs*10)/10, workerMs:job.workerMs||null, werr:job.werr, caller:job.why,
       moved:job.moved||null, catchup:job.catchup||null};   // v28.181 (Ben): why a try was discarded / caught up (first input difference) + the catch-up build
-    HZ_DEMAND_LAST=r; HZ_BUILD_LOG.push(r); if(HZ_BUILD_LOG.length>50)HZ_BUILD_LOG.shift();
+    HZ_DEMAND_LAST=r; try{ window.HZ_DEMAND_LAST=r; }catch(_e){}   /* v28.491: read by hz-health.js for the slow first-load stages */ HZ_BUILD_LOG.push(r); if(HZ_BUILD_LOG.length>50)HZ_BUILD_LOG.shift();
     hzDemandSanity(job.stale); HZ_DBUILD=null;
     if(!_hzDbMetric&&typeof window.hzHealthMetric==='function'){ _hzDbMetric=true; try{ window.hzHealthMetric('metric','demand async build',{mode:r.mode,ms:r.ms,max_slice_ms:Math.max(r.maxSliceMs,r.applyMs),post_ms:r.postMs,tries:r.tries,worker_ms:r.workerMs,moved:r.moved,catchup:r.catchup},'client:demand_build'); }catch(e){} }   // once per session: real-device timings
     if(hzBuildCheckOn()){ try{ hzBuildCheck(); }catch(e){ if(window.console)console.error('[HORIZON build-check] failed',e); } }

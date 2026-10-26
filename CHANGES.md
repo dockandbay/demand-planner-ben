@@ -1,3 +1,11 @@
+## v28.491 (26-Oct-26) Health follow-ups: retire the false Flexport alarm; stage breakdown for slow first loads
+- Ben: "2. Proceed" (health follow-ups: slow pages, Flexport false alarm, database clean-up).
+- ETL health: n8n_sync_flexport added to the retired jobs (HORIZON's own /api/cron/flexport-import replaced it in v28.040; it ran 42 times this week with 0 failures). The n8n job's last run was 07-Oct-26, so the check raised "no run for N days" every day.
+- Slow pages: every slow view on live this week was a FIRST load (#/reports/sa up to 58 s, #/demand/analysis/summary up to 45 s, #/demand/plan typically 8 s), but the log could not say where the time went. The browser-side DEMAND build is not it (median 1.6 s in the worker, p90 5.5 s). hz-health.js now adds the stages to a slow first-load event from the browser's own timing: time to first byte, page done, DOM ready, page size, the 3 slowest API calls / scripts in the load window (path, ms, start) and the DEMAND build ms (window.HZ_DEMAND_LAST, now set explicitly). Read only, no extra requests. Next week's log decides which stage to speed up.
+- Tests: the stage function with fake timings (correct stages, slowest 3, late requests excluded, non-API resources excluded) and with the timing API missing or throwing (returns nothing, never throws). Script syntax clean.
+- Database clean-up: 20 backup tables listed for Ben (no code reads them); nothing dropped.
+- No migration, no new env.
+
 ## v28.490 (26-Oct-26) Health review: retry reads once after an instance thaw; stop logging frozen background work as errors
 - Ben: "Review app health and performance" then "Yes proceed" (fixes 1 and 2).
 - Live health log, 19 to 26-Oct-26: 666 db_pool and 166 KV "errors" (95%) were BACKGROUND work frozen mid-flight by Vercel and timed out on thaw (thaw_gap 17 s to 8 min; waitUntil is working: 152k ok, 0 miss). No user waited on them, but they filled the log and the red-alert kinds. 30 errors hit real user requests right after a thaw (GET /api/me, /api/supply/deposits, /api/supply/timeline-notifications, /api/client/commission/readiness ...).

@@ -29637,7 +29637,7 @@ app.post('/api/health/send-test', async (req, res) => {
 // etl_drop: latest rows_affected < 60% of the median of the previous 10 successful runs. Calibrated on live etl_runs 06-Oct-26.
 const HZ_ETL = {
   exclude: /^(ui_|supply_erp_push$)/,                                     // UI saves + event-driven ERP staging: not schedules
-  retired: new Set(['n8n_sync_inbound', 'n8n_sync_sales']),                 // replaced by cin7_inbound_direct / n8n_sync_sales_sheets
+  retired: new Set(['n8n_sync_inbound', 'n8n_sync_sales', 'n8n_sync_flexport']),   // replaced by cin7_inbound_direct / n8n_sync_sales_sheets / HORIZON's own /api/cron/flexport-import (v28.040; v28.491: the n8n job's last run was 07-Oct-26, so it alarmed daily as stale)
   flat_ok: new Set(['n8n_sync_categories_subcategories', 'n8n_sync_key_account_fc', 'n8n_sync_preorders']),   // reference / committed data that can legitimately repeat
   flat_ok_msg: /no change|unchanged|nothing to (do|sync)/i,                 // a job that says so in its message is not "flat"
   core: /sales|products|inbound/,                                           // red alert on a failed status

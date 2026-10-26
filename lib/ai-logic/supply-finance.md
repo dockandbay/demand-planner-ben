@@ -289,7 +289,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.489
+verified_version: v28.491
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -337,6 +337,7 @@ verified_version: v28.489
 - When an inbound row's estimated_delivery_date is in the past, the fallback ETA is: shipment arrival, else delivery, else landing, else the PO landing override, else the calculated landing. (source: server.mjs :: buildDATA po_eta)
 - PO-56UKXR2 and PO-56UKXR2A are hard-excluded from inbound and on-order (bad data). (source: server.mjs :: EXCLUDED_INBOUND_REFS)
 - inbound_shipments is filled by the n8n job cin7_inbound_direct (the old n8n_sync_inbound is retired). HORIZON never writes that table. (source: server.mjs :: HZ_ETL)
+- Flexport data comes from HORIZON's own /api/cron/flexport-import; the old n8n job n8n_sync_flexport is retired from the health checks (v28.491), so it no longer raises "no run for N days". (source: server.mjs :: HZ_ETL)
 
 ## Order plan (PO lines)
 - Carton check per line uses products.carton_qty (sku_labels as fallback). "Full Cartons" when qty divides exactly; "OK Partial" when partial_carton_approved; otherwise "Partial Carton - up to N", where N is qty rounded up to a whole carton. (source: v_purchase_order_lines)

@@ -130,7 +130,7 @@ fingerprints:
   artifact_v16.7.html::_hzBuildDemandCore: de531209af79
   artifact_v16.7.html::_hzDemandGen: e2a62173559a
   artifact_v16.7.html::hzDemandBuildAsync: ae8d121bb869
-  artifact_v16.7.html::_hzDbRun: 757b1925b060
+  artifact_v16.7.html::_hzDbRun: aecc503d1ecc
   artifact_v16.7.html::hzDemandScope: 910b3f7073b6
   artifact_v16.7.html::computeSmoothAlloc: c256121c798f
   artifact_v16.7.html::applySmoothAlloc: 69c70cde748f
@@ -153,7 +153,7 @@ fingerprints:
   server.mjs::/api/supply/ka-forecast-cells: 18e14684afe2
   server.mjs::/api/supply/ka-forecast-cell: 0207a9f0b2a5
   server.mjs::kaCellQty: 1946ebc733a7
-verified_version: v28.443
+verified_version: v28.491
 ---
 ## Planning scope (which SKUs are planned)
 - A SKU is in the plan when `planner.products.in_planning_scope` is true. The database sets it: variant type is MASTER or SET, AND status is ACTIVE, LAST SEASON or PHASE OUT, AND at least one `available_<market>_<channel>` flag is true. CLOSED products are out. Launch and discontinue dates are NOT part of the scope test. (source: set_in_planning_scope)

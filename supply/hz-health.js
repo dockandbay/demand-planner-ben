@@ -36,10 +36,21 @@
   var LOADSEL='.count,.mut,.cp-lead,.pv-empty,.ask-empty', pend=null, manualAt=0;
   function loading(){ var els=document.querySelectorAll(LOADSEL); for(var i=0;i<els.length;i++){ var t=els[i].textContent; if(t&&t.length<120&&/^[^A-Za-z0-9]{0,4}(Loading|加载中)/.test(t)&&els[i].offsetParent!==null)return true; }
     var pn=document.querySelectorAll('[data-hz-loading]'); for(var j=0;j<pn.length;j++)if(pn[j].offsetParent!==null)return true; return false; }
+  // v28.491 (Ben 26-Oct-26, health review: every slow view on live was a FIRST load and the log could not say where the time went):
+  // for a slow first load, add the stages from the browser's own timing: page response (first byte / done), DOM ready, the 3 slowest
+  // API calls and scripts in the load window (path + ms), and the DEMAND build. Read only, no extra requests.
+  function phases(endMs){ var o={}; try{ var P=window.performance; if(!P||!P.getEntriesByType)return o;
+      var n=(P.getEntriesByType('navigation')||[])[0]; if(n){ o.ttfb_ms=Math.round(n.responseStart); o.html_ms=Math.round(n.responseEnd); o.dom_ready_ms=Math.round(n.domContentLoadedEventEnd); o.html_kb=n.transferSize?Math.round(n.transferSize/1024):null; }
+      var rs=(P.getEntriesByType('resource')||[]).filter(function(r){ return r.startTime<=endMs&&(r.initiatorType==='fetch'||r.initiatorType==='xmlhttprequest'||r.initiatorType==='script'); });
+      rs.sort(function(x,y){ return y.duration-x.duration; });
+      o.slowest=rs.slice(0,3).map(function(r){ var u=String(r.name||''); try{ u=new URL(u).pathname; }catch(_){} return u.slice(0,60)+' '+Math.round(r.duration)+'ms@'+Math.round(r.startTime); });
+      o.requests=rs.length;
+      var d=window.HZ_DEMAND_LAST; if(d&&d.ms!=null)o.demand_build_ms=Math.round(d.ms);
+    }catch(_){} return o; }
   function watch(t0,first){ var id={}; pend=id; var quiet=0, qms=0;   // two quiet ticks in a row = rendered (the app's own hashchange handler may run after ours)
     (function tick(){ if(pend!==id)return; var ms=(first?performance.now():Date.now()-t0);
       if(ms>60000){ pend=null; add('slow_view','View still loading after 60s: '+view(),null,ms,{timeout:true,first:!!first}); return; }
-      if(document.readyState!=='loading'&&!loading()){ if(!quiet++)qms=ms; if(quiet>=2){ pend=null; if(qms>SLOW_VIEW_MS)add('slow_view','Slow view load: '+view(),null,qms,{first:!!first}); return; } } else quiet=0;
+      if(document.readyState!=='loading'&&!loading()){ if(!quiet++)qms=ms; if(quiet>=2){ pend=null; if(qms>SLOW_VIEW_MS){ var mt={first:!!first}; if(first){ var ph=phases(qms); for(var k in ph)mt[k]=ph[k]; } add('slow_view','Slow view load: '+view(),null,qms,mt); } return; } } else quiet=0;
       setTimeout(tick,300); })(); }
   window.addEventListener('hashchange',function(){ if(Date.now()-manualAt<1000)return; watch(Date.now(),false); });   // v28.188: a view that started its own watch (hzHealthWatch) just before changing the hash keeps that start time
   watch(0,true);
