@@ -6,7 +6,7 @@ exception classes (see memory fulfil-functions-runtime). It never adds an order 
 leaves dates as imported and notes the error in order metadata.
 
 Rule (Ben, 22-Oct-26): planned ship date = today in the warehouse's local time + N business days,
-N = 1 retail, 5 if any line is personalised, 3 wholesale (the larger applies). Weekends and the warehouse
+N = 1 retail (personalised too: +5 held shipments back from the 3PL, changed 26-Oct-26), 3 wholesale. Weekends and the warehouse
 country's public holidays are skipped; an order placed on a non-business day counts from the next one.
 A later date already on a line, or an order-level shipping_start_date (preorder / future ship date), is kept.
 """
@@ -218,7 +218,7 @@ CONFIGS = {
 }
 
 
-def block(cfg, retail=1, personalised=5, wholesale_days=3):
+def block(cfg, retail=1, personalised=1, wholesale_days=3):
     return BLOCK % {"label": cfg["label"], "tz": cfg["tz"], "holidays": cfg["holidays"], "retail": retail,
                     "personalised": personalised, "wholesale": "True" if cfg["wholesale"] else "False",
                     "wholesale_days": wholesale_days}

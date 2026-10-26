@@ -334,3 +334,32 @@ Kits monitored: 66. Orders with those kits: 5. ALL AS EXPECTED.
 | SO71024 | UK-910309 | processing | 10-25T19:18 | UK-TEATWL-MD-6SET-AFTPTY | 1 | PP | PP | PP move assigned,draft |
 | SO71026 | UK-910312 | processing | 10-25T19:32 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
 
+## Check 2026-10-26 09:47:07 (orders since 2026-10-26T06:47:04)
+
+Kits monitored: 66. Orders with those kits: 2. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO71034 | 112-7100903-4833061 | processing | 10-25T19:21 | US-TOWLB-CAB-XL-4SETG | 1 | singles | singles |  |
+| SO71049 | UK-910325 | processing | 10-25T20:14 | UK-TOWLB-CAB-XL-4SETK | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-26 12:47:05 (orders since 2026-10-26T09:47:07)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-26 15:47:05 (orders since 2026-10-26T12:47:05)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-26 18:47:07 (orders since 2026-10-26T15:47:05)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-26 21:47:04 (orders since 2026-10-26T18:47:07)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+

@@ -74,18 +74,18 @@ CASES = {
         ("Sat retail -> Tue", {}, U(2026, 10, 24, 15), "2026-10-27"),
         ("Thu 22:00 CT is still Thu (03:00 UTC Fri) -> Fri", {}, U(2026, 10, 23, 3), "2026-10-23"),
         ("Wed before Thanksgiving -> Fri", {}, U(2026, 11, 25, 15), "2026-11-27"),
-        ("personalised Wed -> +5 = next Wed", {"pers": True}, U(2026, 10, 21, 15), "2026-10-28"),
+        ("personalised Wed -> +1 like retail (since 26-Oct-26) = Thu", {"pers": True}, U(2026, 10, 21, 15), "2026-10-22"),
         ("later preorder line date kept", {"line_date": "2027-02-01"}, U(2026, 10, 21, 15), "2027-02-01")],
     3: [("Thu 10:00 Sydney retail -> Fri", {}, U(2026, 10, 21, 23), "2026-10-23"),
         ("01:00 Fri Sydney (14:00 UTC Thu) counts as Fri -> Mon", {}, U(2026, 10, 22, 14), "2026-10-26"),
         ("Mon before Australia Day (Tue 26 Jan 27) -> Wed", {}, U(2027, 1, 24, 23), "2027-01-27"),
         ("Thu before Good Friday 2027 -> Tue (Fri + Mon holidays)", {}, U(2027, 3, 24, 23), "2027-03-30"),
-        ("personalised -> +5", {"pers": True}, U(2026, 10, 21, 23), "2026-10-29")],
+        ("personalised -> +1 like retail = Fri", {"pers": True}, U(2026, 10, 21, 23), "2026-10-23")],
     36: [("EU wholesale Wed -> +3 = Mon", {}, U(2026, 10, 21, 9), "2026-10-26"),
          ("EU wholesale over Ascension (Thu 6 May 27): Wed 5 -> Tue 11", {}, U(2027, 5, 5, 9), "2027-05-11"),
          ("EU wholesale over German Unity Day (Mon 3 Oct 22 style: Fri 2 Oct 26 -> Wed 7; 3 Oct 26 is Sat)", {}, U(2026, 10, 2, 9), "2026-10-07"),
          ("future ship date on order -> untouched", {"start": "2026-12-01", "line_date": "2026-12-01"}, U(2026, 10, 21, 9), "2026-12-01"),
-         ("wholesale + personalised -> +5", {"pers": True}, U(2026, 10, 21, 9), "2026-10-28")],
+         ("wholesale + personalised -> wholesale +3 = Mon", {"pers": True}, U(2026, 10, 21, 9), "2026-10-26")],
     37: [("US wholesale Wed -> +3 = Mon", {}, U(2026, 10, 21, 15), "2026-10-26"),
          ("US wholesale Mon before Thanksgiving week: Mon 23 Nov -> Fri 27", {}, U(2026, 11, 23, 15), "2026-11-27"),
          ("no order date set and no line date -> set", {}, U(2026, 10, 21, 15), "2026-10-26")],
@@ -134,4 +134,5 @@ got = {d for d in got if 2027 <= d.year <= 2031}
 check("2027-2031 England holidays match the function 48 list", sorted(got ^ listed), [])
 
 print("ALL PASS" if not fails else f"{fails} FAILED")
-sys.exit(1 if fails else 0)
+if __name__ == "__main__":
+    sys.exit(1 if fails else 0)
