@@ -6816,6 +6816,7 @@ app.get('/api/supply/fulfil/sales-order/pushes', async (req, res) => {   // audi
 //      own daily rates, GBP base) and STORED as the new value;
 //   2. otherwise (sold out: Fulfil values it at 0) → the last stored value is KEPT, never overwritten;
 //   3. never valued (nothing stored) → supplier cost (planner.products.cost, USD) converted to the column currency.
+//   4. v28.495: any value more than 10% below supplier cost (products.cost from Airtable, converted) is raised to supplier cost ('floor').
 // Analyse = preview, writes nothing. Email = rebuild server side, email the CSV (exact Airtable column order) to
 // the Airtable address (cogsRecipient) via Resend, then store the values (migration 345). Airtable's email sync replaces the table, so
 // every SKU is sent every time.
@@ -6832,6 +6833,7 @@ const COGS_COLS = [
   { col: 'EU FBA',          ccy: 'EUR', co: 1, wh: ['AMZ_FBA_DE', 'AMZ_FBA_FR', 'AMZ_FBA_IT', 'AMZ_FBA_ES', 'AMZ_FBA_PL', 'AMZ_FBA_NL', 'AMZ_FBA_SE', 'AMZ_FBA_BE', 'AMZ_FBA_IE'] },   // qty-weighted across EU FBA
 ];
 const COGS_CO_CCY = { 1: 'GBP', 3: 'AUD' };
+const COGS_FLOOR_TOL = 0.9;   // v28.495: raise to supplier cost only when more than 10% below it
 function cogsFulfilCfg() { const l = fulfilConfigFor('live'); return l.configured ? l : null; }
 async function cogsFulfil(cfg, method, path, body) { return cfg ? fulfilFetchCfg(cfg, method, path, body) : fulfilFetch(method, path, body); }
 async function cogsValuation(cfg, company, date) {
@@ -6862,7 +6864,7 @@ async function cogsBuild() {
   const fz = {}; [1, 3].forEach(co => rep[co].rows.forEach(x => { (fz[x.code] = fz[x.code] || {})[co] = x; }));
   const skus = new Set(Object.keys(stored)); Object.keys(fz).forEach(s => { if (prod[s]) skus.add(s); });   // Fulfil-only codes not in HORIZON products (test items, polybags) are left out
   Object.keys(bom).forEach(s => { if (prod[s]) skus.add(s); bom[s].forEach(x => { if (prod[x.sku]) skus.add(x.sku); }); });
-  const stats = {}; COGS_COLS.forEach(c => { stats[c.col] = { fulfil: 0, set: 0, changed: 0, kept: 0, supplier: 0, blank: 0 }; });
+  const stats = {}; COGS_COLS.forEach(c => { stats[c.col] = { fulfil: 0, set: 0, changed: 0, kept: 0, supplier: 0, floor: 0, blank: 0 }; });
   const one = (sku, setPass, cellsBySku) => {
     const cells = {};
     COGS_COLS.forEach(c => {
@@ -6878,6 +6880,11 @@ async function cogsBuild() {
       if (!cell && prev && prev.v != null) cell = { v: Math.round(prev.v * 100) / 100, src: 'kept', since: prev.d, from: prev.source };
       if (!cell && !c.keepOnly && prod[sku] && prod[sku].cost > 0) { const v = cogsConv(prod[sku].cost, 'USD', c.ccy, R); if (v != null) cell = { v: Math.round(v * 100) / 100, src: 'supplier', usd: prod[sku].cost, fx: R[c.ccy] / R.USD }; }
       if (!cell) { st.blank++; cells[c.col] = null; return; }
+      // v28.495 (Ben 26-Oct-26: "if cogs is less than cost price in airtable then set it to COST as something seems wrong"): floor every
+      // value (Fulfil, set, kept) at the SKU's supplier cost (products.cost, USD, synced from Airtable) in the column currency.
+      // Only when more than 10% below: kept values sit 1-5% under today's converted cost from exchange-rate drift alone (11k cells on 26-Oct-26).
+      if (cell.src !== 'supplier' && prod[sku] && prod[sku].cost > 0) { const fl = cogsConv(prod[sku].cost, 'USD', c.ccy, R);
+        if (fl != null && cell.v < fl * COGS_FLOOR_TOL) cell = { v: Math.round(fl * 100) / 100, src: 'floor', usd: prod[sku].cost, fx: R[c.ccy] / R.USD, below: cell.v, belowSrc: cell.src }; }
       if (setPass && cell.src !== 'set' && typeof setMiss !== 'undefined' && setMiss) cell.miss = setMiss;
       if (prev && prev.v != null && cell.src !== 'kept') cell.prev = Math.round(prev.v * 100) / 100;
       cell.changed = cell.src !== 'kept' && (cell.prev == null || Math.abs(cell.v - cell.prev) >= 0.005);
@@ -6932,7 +6939,7 @@ app.get('/api/supply/cogs/csv', async (req, res) => {
 async function cogsStore(b, by) {   // upsert every Fulfil / supplier-cost cell; kept cells are already stored
   const s = [], c = [], v = [], k = [], src = [], q = [], uc = [], fx = [];
   b.rows.forEach(r => COGS_COLS.forEach(col => { const x = r.cells[col.col]; if (!x || x.src === 'kept') return;
-    s.push(r.sku); c.push(col.col); v.push(x.v); k.push(col.ccy); src.push(x.src === 'fulfil' ? 'fulfil' : x.src === 'set' ? 'set_bom' : 'supplier_cost'); q.push(x.qty == null ? null : x.qty); uc.push(x.uc == null ? null : x.uc); fx.push(x.fx == null ? null : x.fx); }));
+    s.push(r.sku); c.push(col.col); v.push(x.v); k.push(col.ccy); src.push(x.src === 'fulfil' ? 'fulfil' : x.src === 'set' ? 'set_bom' : x.src === 'floor' ? 'cost_floor' : 'supplier_cost'); q.push(x.qty == null ? null : x.qty); uc.push(x.uc == null ? null : x.uc); fx.push(x.fx == null ? null : x.fx); }));
   for (let i = 0; i < s.length; i += 2000) {
     await pool.query(`INSERT INTO planner.cogs_values (sku, col, value, ccy, source, qty, unit_cost_company, fx, updated_at, updated_by)
       SELECT * , now(), $9 FROM unnest($1::text[], $2::text[], $3::numeric[], $4::text[], $5::text[], $6::numeric[], $7::numeric[], $8::numeric[])

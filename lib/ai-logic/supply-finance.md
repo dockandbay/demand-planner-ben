@@ -115,13 +115,13 @@ fingerprints:
   supply/inject.html::acComboWire: 821987bad274
   supply/inject.html::acPdfRender: e969626e19ec
   supply/inject.html::acMetricsHtml: 147a050711a0
-  server.mjs::cogsBuild: 2fa4f4ad0d15
+  server.mjs::cogsBuild: 010a4c2b6cec
   server.mjs::cogsValuation: bc96a6558dea
   server.mjs::cogsRates: 1824cafed9b3
-  server.mjs::cogsStore: bcd45226f5b0
+  server.mjs::cogsStore: 735e5e195042
   server.mjs::cogsRecipient: 2cca827fa12b
   server.mjs::COGS_COLS: 03fda4554d05
-  artifact_v16.7.html::renderCogs: 5e8d94ddc0c7
+  artifact_v16.7.html::renderCogs: ccb61850066d
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   supply/inject.html::hzUpload: c4353cd913f7
   server.mjs::mcpAccess: 6fa73a2097c0
@@ -289,7 +289,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.493
+verified_version: v28.495
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -665,12 +665,13 @@ verified_version: v28.493
   1. Stock on hand in Fulfil with a unit cost > 0: the Fulfil value, which replaces the stored one.
   2. Otherwise (sold out: Fulfil values it at 0): the LAST STORED value is kept, never overwritten.
   3. Never valued (nothing stored): supplier cost (planner.products.cost, USD) converted to the column currency. Stored once sent, so it becomes the last known value until Fulfil values the SKU.
+  4. Cost floor (v28.495, Ben 26-Oct-26: "if cogs is less than cost price in airtable then set it to COST as something seems wrong"): after rules 1-3 and the set sum, any value MORE THAN 10% below the SKU's supplier cost (products.cost, USD, from Airtable, converted at today's rate) is raised to supplier cost (source 'floor', stored as cost_floor; amber in the grid, hover shows the value it replaced and where it came from; quick filter 'Raised to cost'; column tiles count them). The 10% margin is deliberate: kept values sit 1-5% under today's converted cost from exchange-rate drift alone (11,028 cells on 26-Oct-26). Live check 26-Oct-26: 639 cells raised across 237 SKUs (Fulfil 318, sets 269, kept 52). (source: cogsBuild, COGS_FLOOR_TOL)
 - FBA columns (v28.240, Ben): UK FBA = AMZ_FBA_UK (GBP), US FBA = AMZ_FBA_US (USD; AWD and Geneva FBA prep are separate pools, not included), EU FBA = quantity-weighted across AMZ_FBA_DE, FR, IT, ES, PL, NL, SE, BE and IE (EUR), all from the UK company. CA FBA (decommissioned) is kept only (sets still recomputed from kept components).
 - SKUs = everything stored plus Fulfil products that exist in planner.products (Fulfil test items and packaging codes are left out). Airtable's email sync replaces the table, so every SKU is sent every time.
 - Analyse writes nothing. Email rebuilds on the server, sends (Resend, attachment cogs-up-IMPORT.csv, to the address in CONFIG > Exports & uploads > COGS to Airtable, app_settings cogs_airtable_email, v28.439; the COGS_AIRTABLE_EMAIL env var is only a fallback; with neither the button is disabled; source: cogsRecipient) and only then stores values (planner.cogs_values) and logs the run (planner.cogs_uploads, migration 345). A missing warehouse in the Fulfil report blocks the send. Load baseline CSV seeds the stored values from an Airtable export (fills only empty cells). (source: cogsStore, /api/supply/cogs/email, /api/supply/cogs/import-baseline)
 - Review flags: moves over 25% vs the stored value are shown red (often a Fulfil costing oddity worth checking before sending).
 - Sets / bundles (v28.236): every build-on-the-fly set in planner.set_bom (one level, 311 sets) is costed per column as the sum of its components' values in that column × quantity, using each component's own resolved value (Fulfil, kept or supplier cost). Components are worked out first. If any component has no value in that column, the set falls back to the normal rules (kept, else supplier cost) and the cell lists the missing components. Set values are stored with source set_bom when sent. Set component SKUs are included even if nothing was stored for them. (source: cogsBuild)
-- Filters (v28.236): category (products.category_name_final, else category), status (products.status), search on SKU or product name, and quick filters All / Changed / Big moves / Sets / Supplier cost / Has blanks. History opens in its own modal.
+- Filters (v28.236): category (products.category_name_final, else category), status (products.status), search on SKU or product name, and quick filters All / Changed / Big moves / Sets / Supplier cost / Raised to cost (v28.495) / Has blanks. History opens in its own modal.
 - Persistence (v28.238): every Analyse saves its full result (planner.cogs_analysis, newest row only, migration 345). Opening the tab shows that saved result with "Analysed <date time> by <user>" until the next Analyse. Times are London time. (source: /api/supply/cogs/last, /api/supply/cogs/analyse)
 
 ## DHL import (ACCOUNTS > Reconcile > Bank lines, from v28.352; own tab until v28.397)

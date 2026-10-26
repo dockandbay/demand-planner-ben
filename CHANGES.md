@@ -1,3 +1,11 @@
+## v28.495 (26-Oct-26) COGS: raise values well below supplier cost to supplier cost
+- Ben: "if cogs is less than cost price in airtable then set it to COST as something seems wrong."
+- BUY & MOVE ▸ Inventory ▸ COGS: after the Fulfil / kept / supplier-cost / set rules, any value MORE THAN 10% below the SKU's supplier cost (products.cost, USD, from Airtable, converted at today's Fulfil rate) is replaced by supplier cost. Stored as source cost_floor when emailed.
+- Why 10% and not any amount: kept values sit 1-5% under today's converted cost from exchange-rate drift alone. A strict rule raised 12,169 cells across 2,105 of 2,384 SKUs; with 10% it is 639 cells across 237 SKUs (Fulfil 318, sets 269, kept 52). One setting (COGS_FLOOR_TOL).
+- Grid: raised cells in amber; hover shows supplier cost, rate and the value replaced (Fulfil / set total / kept); new quick filter "Raised to cost"; column tiles count them.
+- Worth a look (not changed): 154 set cells are under half their own supplier cost (e.g. TOWLB-CAB-LG-4SETO UK FBA 3.15 vs 12.62), which points at set BOM quantities or the set's Airtable cost; some Fulfil costs are near zero (TOWLB-SUM-LG-CSTCANDY UK FBA 0.07 vs 3.89).
+- No migration (cogs_values.source is free text). Nothing goes to Airtable until someone presses Email to Airtable.
+
 ## v28.494 (26-Oct-26) Amazon FBA inventory report by n8n (Manage FBA / FBA Aged)
 - Ben: "I want to update some Amazon data reports in horizon. Inventory > Amazon uk/us/au. And aged ... inventory ... it comes in with the report."
 - New POST /api/cron/fba-report-import {market, rows, report_id, report_type} for n8n. Header x-webhook-secret must equal N8N_WEBHOOK_SECRET (fails closed: 401). Rows (one object per report line, Amazon column names) are turned back into the report text and parsed by the same invFbaParse as a manual upload, then saved to planner.inventory_fba_imports for that market (one row per market, replaced). Manage FBA and FBA Aged read it unchanged; imported_by reads "n8n (Amazon SP-API <report id>)".
