@@ -13,6 +13,7 @@ import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
 import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
 import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 import { paySplitKeyLines } from './lib/pay_split_note.mjs';   // v28.285
+import { wssiLoad, wssiBuild } from './lib/wssi.mjs';   // v28.485 DEMAND ▸ WSSI
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
@@ -24560,68 +24561,22 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
-// Open-To-Buy (OTB) — per category × market, how much is left to buy (or how over-committed you are) to hit
-// the cover target over a forward horizon. Rolls stock forward: projected closing = on-hand + on-order (open
-// PO receipts landing in the horizon) − forecast demand. Target closing = cover-weeks target × weekly forward
-// demand. OTB units = target closing − projected closing (positive = buy; negative = already over-bought).
-// £ at cost. Tunables: ?market=all|uk|… ?months=6 horizon ?defcover=8 fallback cover when no target set.
-app.get('/api/scenario/otb', async (req, res) => {
+// v28.485 (Ben 26-Oct-26): DEMAND ▸ WSSI (weekly sales, stock and intake with open to buy), read only. Replaces the old
+// REPORTS ▸ Open-to-Buy (/api/scenario/otb). One financial year (?fy=<start year>, Mar to Feb) plus last year, rolled up
+// by market × channel / stock pool × category × seasonality × product status; the page filters and sums. Engine and
+// sources: lib/wssi.mjs. Cached 10 minutes per year (about 6 s to build on live); ?fresh=1 rebuilds.
+const _wssiCache = new Map();
+app.get('/api/demand/wssi', async (req, res) => {
   try {
-    const months = Math.max(1, Math.min(12, parseInt(req.query.months, 10) || 6));
-    const defCover = Math.max(1, Number(req.query.defcover) || 8);
-    const mkt = (req.query.market || 'all').toLowerCase();
-    const weeks = months * 4.345;
-    const rows = (await pool.query(`
-      WITH fc AS (SELECT p.category, split_part(fo.warehouse,'_',1) market, sum(fo.units)::numeric demand
-          FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
-          WHERE fo.month >= date_trunc('month',CURRENT_DATE)
-            AND fo.month < date_trunc('month',CURRENT_DATE) + ($1||' months')::interval
-          GROUP BY 1,2),
-      oo AS (SELECT p.category, lower(coalesce(nullif(po.country_code,''), b.country_code,'')) market, sum(l.qty)::numeric qty
-          FROM planner.purchase_orders po
-          JOIN planner.purchase_order_lines l ON l.po=po.po
-          JOIN planner.products p ON p.sku=l.sku
-          LEFT JOIN planner.shipments s ON s.shipment_ref=po.shipment_ref
-          LEFT JOIN planner.branches  b ON b.name=po.branch
-          WHERE coalesce(po.status,'') NOT ILIKE '%complete%'
-            AND coalesce(s.arrival_date,s.delivery_date,s.landing_date,po.landing_date_overide) >= CURRENT_DATE
-            AND coalesce(s.arrival_date,s.delivery_date,s.landing_date,po.landing_date_overide) < CURRENT_DATE + ($1||' months')::interval
-          GROUP BY 1,2),
-      oh AS (SELECT p.category, split_part(i.warehouse,'_',1) market,
-            sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::numeric onhand
-          FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku
-          WHERE p.in_planning_scope GROUP BY 1,2),
-      cost AS (SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
-          JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1),
-      keys AS (SELECT category, market FROM fc UNION SELECT category, market FROM oh UNION SELECT category, market FROM oo)
-      SELECT k.category, k.market,
-        coalesce(oh.onhand,0) onhand, coalesce(oo.qty,0) onorder, coalesce(fc.demand,0) demand,
-        coalesce(c.c,0) unit_cost, NULL::numeric cover_weeks_target   -- Sell-through targets decommissioned → always the default cover
-      FROM keys k
-      LEFT JOIN fc   ON fc.category=k.category AND fc.market=k.market
-      LEFT JOIN oo   ON oo.category=k.category AND oo.market=k.market
-      LEFT JOIN oh   ON oh.category=k.category AND oh.market=k.market
-      LEFT JOIN cost c ON c.category=k.category
-      WHERE k.category IS NOT NULL AND k.market <> ''`, [String(months)])).rows;
-    // OTB is only meaningful where there's forward demand; zero-demand stock is a markdown/slow-moving signal, not a buy decision
-    const out = rows.filter(r => TARGET_MARKETS.includes((r.market || '').toUpperCase()) && Number(r.demand) > 0)
-      .map(r => {
-        const onhand = Number(r.onhand), onorder = Number(r.onorder), demand = Number(r.demand), cost = Number(r.unit_cost) || 0;
-        const wkDemand = demand / weeks, projClose = onhand + onorder - demand;
-        const coverT = r.cover_weeks_target != null ? Number(r.cover_weeks_target) : defCover;
-        const targetClose = coverT * wkDemand;
-        const otb = Math.round(targetClose - projClose);
-        return { category: r.category, market: r.market.toUpperCase(), onhand: Math.round(onhand), onorder: Math.round(onorder),
-          demand: Math.round(demand), proj_close: Math.round(projClose),
-          cover_now: wkDemand > 0 ? Math.round(onhand / wkDemand) : null,
-          proj_cover: wkDemand > 0 ? Math.round(projClose / wkDemand) : null,
-          cover_target: coverT, has_target: r.cover_weeks_target != null,
-          otb_units: otb, otb_cost: Math.round(otb * cost),
-          status: otb > Math.max(50, demand * 0.05) ? 'buy' : (otb < -Math.max(50, demand * 0.05) ? 'over' : 'ok') };
-      });
-    out.sort((a, b) => Math.abs(b.otb_cost) - Math.abs(a.otb_cost));
-    const f = mkt === 'all' ? out : out.filter(r => r.market.toLowerCase() === mkt);
-    res.json({ rows: f, months, weeks: Math.round(weeks), def_cover: defCover });
+    const now = new Date(), curFy = now.getMonth() + 1 >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fy = Math.max(2024, Math.min(curFy + 1, parseInt(req.query.fy, 10) || curFy));
+    const hit = _wssiCache.get(fy);
+    if (hit && !req.query.fresh && Date.now() - hit.at < 10 * 60 * 1000) return res.json(hit.data);
+    const q = async (sql, params) => (await pool.query(sql, params)).rows;
+    const data = wssiBuild(await wssiLoad(q, fy), fy, now.toISOString().slice(0, 10));
+    data.built_at = now.toISOString(); data.fy_options = [curFy - 1, curFy, curFy + 1];
+    _wssiCache.set(fy, { at: Date.now(), data });
+    res.json(data);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

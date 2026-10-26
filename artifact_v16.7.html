@@ -5137,7 +5137,6 @@ function daSection(x){ return DA_INSIGHT_TYPES[x.type]?'insights':'actions'; }
 let AF_MARKET='all'; var AF_CACHE={}; // Auto Forecast: market + response cache (keyed by market). Cover-months + freight% controls removed — units come from the forecast gap; freight is containerised + duty is category×country, both server-side.
 var SM_CACHE=null; var SM={market:'uk',whtype:'3pl',basis:'trail',cat:'all',cover:26,days:'',vel:'',units:50,sort:'value'}; // Slow Moving state (defaults: UK · 3PL)
 var ME={market:'uk',status:'markdown',basis:'fc',end:''}; var ME_CACHE={}; // Markdown & EOS state (defaults UK · Markdown · Seasonal forecast; cache keyed market|basis|end; status filtered client-side)
-var OTB={market:'all',status:'all',months:6,defcover:8}; var OTB_CACHE={}; // Open-to-Buy state (cache keyed market|months|defcover; status filtered client-side)
 var KA_CACHE=null; var KA={weeks:4,market:'all',risk:'critical'}; // Key Stock Arrivals state
 var BI_CACHE={}; // subcat|co|ch -> adjusted fu map from Claude
 var CAL_EVENTS=null; // trading-calendar events (for PLAN month-cell "C" markers); null=unloaded
@@ -10699,6 +10698,7 @@ function render(){
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
     else if(DEMAND_VIEW==='crossmarket') renderCrossMarketView(body);
+    else if(DEMAND_VIEW==='wssi') renderWssiView(body);   // v28.485 DEMAND ▸ WSSI (#/demand/wssi); replaces REPORTS ▸ Open-to-Buy
     else if(DEMAND_VIEW==='intake') renderIntakeView(body);   // v28.224 DEMAND ▸ Analysis ▸ Intake deadlines (#/demand/analysis/intake)   // v28.216 DEMAND ▸ Cross Market view (#/demand/crossmarket)
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
     else if(DEMAND_VIEW==='accuracy') renderAccuracyView(body);   // DEMAND ▸ Accuracy — forecast accuracy & bias vs locked snapshots (#/demand/accuracy)
@@ -14043,7 +14043,254 @@ function renderShipBagView(body){
   var mp={ratio:'SB_RATIO',mmed:'SB_MMED',mlar:'SB_MLAR',mxlg:'SB_MXLG'};
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });
 }
-var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
+// v28.485 (Ben 26-Oct-26): DEMAND ▸ WSSI (#/demand/wssi). Weekly sales, stock and intake with open to buy, laid out like Ben's
+// "WSSI OTB Format" sheet. Replaces REPORTS ▸ Open-to-Buy. Read only for now (a worksheet version with editable OTB and target
+// inputs may follow). Data: GET /api/demand/wssi (lib/wssi.mjs): month × market × channel (sales) / stock pool (stock) ×
+// category × seasonality × product status. This view filters, sums and derives the ratios. Logic: lib/ai-logic/wssi.md.
+var WSSI={fy:null,data:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false},closed:{}};
+var WSSI_CH_POOL={DTC:'3PL',B2B:'3PL',ZAL:'3PL',TIK:'3PL',FBA:'FBA'};
+function wssiH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function wssiMon(k){ var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+k.slice(5,7)-1]+'-'+k.slice(2,4); }
+function wssiLoad(fy,fresh){
+  WSSI.loading=true; WSSI.err='';
+  fetch('/api/demand/wssi?fy='+fy+(fresh?'&fresh=1':'')).then(function(r){ return r.json(); }).then(function(d){
+    WSSI.loading=false; if(d.error){ WSSI.err=d.error; } else { WSSI.data[d.fy]=d; WSSI.fy=d.fy; }
+    if(VIEW_MODE==='planning'&&DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); }
+  }).catch(function(e){ WSSI.loading=false; WSSI.err=String(e&&e.message||e); if(DEMAND_VIEW==='wssi'){ var b=document.getElementById('demand-body'); if(b)renderWssiView(b); } });
+}
+// Sum the filtered facts into one column object per month (24: last year then this year).
+function wssiCompute(D){
+  var S=WSSI.sel, dict=D.dict, n=D.months.length;
+  function keep(d,i){ var a=S[d]; return !a.length||a.indexOf(dict[d][i])>=0; }
+  var pools={}; if(S.ch.length){ S.ch.forEach(function(c){ pools[WSSI_CH_POOL[c]||'3PL']=1; }); } else { pools['3PL']=pools.FBA=1; }
+  var onlyB2B=S.ch.length===1&&S.ch[0]==='B2B';
+  var sc=D.sales_cols, kc=D.stock_cols, sales=[], stock=[], i, j;
+  for(i=0;i<n;i++){ sales.push(new Array(sc.length).fill(0)); stock.push(new Array(kc.length).fill(0)); }
+  D.sales.forEach(function(r){ if(!keep('mkt',r[1])||!keep('ch',r[2])||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5]))return; var a=sales[r[0]]; for(j=0;j<sc.length;j++)a[j]+=r[6+j]; });
+  D.stock.forEach(function(r){ if(!keep('mkt',r[1])||!pools[dict.pool[r[2]]]||!keep('cat',r[3])||!keep('sea',r[4])||!keep('st',r[5]))return; var a=stock[r[0]]; for(j=0;j<kc.length;j++)a[j]+=r[6+j]; });
+  var SI={}, KI={}; sc.forEach(function(c,x){ SI[c]=x; }); kc.forEach(function(c,x){ KI[c]=x; });
+  var cols=D.months.map(function(m,x){ var s=sales[x], k=stock[x], o={i:x,m:m,act:m<=D.actual_to,weeks:D.weeks[x],fwdW:D.fwd_weeks[x]};
+    o.r=s[SI.r]; o.u=s[SI.u]; o.cos=s[SI.cos]; o.fullRev=s[SI.full];
+    kc.forEach(function(c){ o[c]=k[KI[c]]; }); o.fullMul=onlyB2B?0.5:1; return o; });
+  return {cols:cols, partialPool:S.ch.length>0&&!(S.ch.length===1&&S.ch[0]==='FBA')&&['DTC','B2B','ZAL','TIK'].some(function(c){ return S.ch.indexOf(c)<0; })};
+}
+function wssiDerive(o,ly){
+  var d=function(a,b){ return b?a/b:null; };
+  o.sales=o.r; o.units=o.u; o.asp=d(o.r,o.u); o.price=d(o.clR,o.clU); o.full=o.clU?o.clF/o.clU*o.fullMul:null; o.disc=(o.price!=null&&o.full)?1-o.price/o.full:null;
+  o.cost=d(o.cos,o.u); o.margin=o.r?1-o.cos/o.r:null; o.exit=o.clR?1-o.clC/o.clR:null;
+  o.vsT=o.clC-o.tgC; o.otbRem=o.act||o.tot?null:o.tgC-o.clC;
+  o.cover=o.plU?o.clU/(o.plU/o.weeks):null; if(o.fwd===undefined)o.fwd=o.fwdU?o.clU/(o.fwdU/o.fwdW):null;
+  if(o.act||o.tot){ /* actual or period: transfers / write-offs as measured */ } else { o.woU=o.woC=o.woR=null; o.trU=o.trC=o.trR=null; }
+  if(ly){ o.lySales=ly.r; o.lyUnits=ly.u; o.lyAsp=d(ly.r,ly.u); o.lyInR=ly.inR; o.lyInC=ly.inC; o.lyInU=ly.inU; o.lyClR=ly.clR; o.lyClC=ly.clC; o.lyClU=ly.clU;
+    o.lyExit=ly.clR?1-ly.clC/ly.clR:null; o.lyCover=ly.plU?ly.clU/(ly.plU/ly.weeks):null;
+    var v=function(a,b){ return (a==null||b==null)?null:a-b; }, vp=function(a,b){ return (a==null||!b)?null:(a-b)/b; };
+    o.vSales=v(o.sales,o.lySales); o.vSalesP=vp(o.sales,o.lySales); o.vUnits=v(o.units,o.lyUnits); o.vUnitsP=vp(o.units,o.lyUnits);
+    o.vAsp=v(o.asp,o.lyAsp); o.vAspP=vp(o.asp,o.lyAsp); o.vClR=v(o.clR,o.lyClR); o.vClRP=vp(o.clR,o.lyClR); o.vClC=v(o.clC,o.lyClC); o.vClCP=vp(o.clC,o.lyClC);
+    o.vClU=v(o.clU,o.lyClU); o.vClUP=vp(o.clU,o.lyClU); o.vExit=v(o.exit,o.lyExit); o.vCover=v(o.cover,o.lyCover); }
+  return o;
+}
+function wssiPeriod(cols,name,idx){
+  var o={tot:true,name:name,act:false,fullMul:cols[0].fullMul}, first=cols[idx[0]], last=cols[idx[idx.length-1]];
+  ['weeks','r','u','cos','fullRev','inU','inC','inR','trU','trC','trR','woU','woC','woR','plU','plC'].forEach(function(k){ o[k]=idx.reduce(function(s,i){ return s+(cols[i][k]||0); },0); });
+  ['opU','opC','opR','opF'].forEach(function(k){ o[k]=first[k]; });
+  ['clU','clC','clR','clF','tgU','tgC','tgR','fwdU','fwdW'].forEach(function(k){ o[k]=last[k]; });
+  o.fwd=last.fwd; return o;
+}
+var WSSI_ROWS=[
+ {sec:'s',name:'This year: sales'},
+ {k:'sales',l:'Sales £ (actual / forecast)',s:'System / Forecast',f:'gbp',c:'plan',t:'r',key:1,tip:'Actual months: sales_actuals revenue (GBP, ex VAT). Forecast months: forecast units from DEMAND ▸ Plan × forecast ASP (same month last year, then sub-category, then the last 3 months, then full price; with price changes and ASP reduction).'},
+ {k:'units',l:'Sales units (actual / forecast)',s:'System / Forecast',f:'int',c:'plan',t:'u',tip:'Units sold as sold (a set counts as one), or forecast units from DEMAND ▸ Plan.'},
+ {k:'asp',l:'ASP £ (actual / forecast)',s:'Calc',f:'gbp2',c:'calc',t:'r',tip:'Sales £ ÷ sales units.'},
+ {sec:'t',name:'This year: stock and OTB'},
+ {k:'price',l:'Avg current selling price per unit £ (ex VAT)',s:'System',f:'gbp2',c:'plan',t:'r',tip:'Closing stock £ retail ÷ closing units. Each SKU is valued at its actual ASP over the last 3 months in that market (consumer channels), else full price × 0.95. Forecast months hold the last actual price.'},
+ {k:'full',l:'Avg full price per unit £ (ex VAT)',s:'System',f:'gbp2',c:'plan',t:'r',tip:'RT price for the market (US = RT_US) converted to GBP and ex VAT (UK/EU ÷ 1.2, AU ÷ 1.1), weighted by closing stock. Wholesale (B2B only selected) = RT ÷ 2.'},
+ {k:'disc',l:'Avg discount in stock % (current selling vs full price)',s:'Calc',f:'pct',c:'calc',t:'r',tip:'1 − current selling price ÷ full price.'},
+ {k:'cost',l:'Avg cost per unit £',s:'System',f:'gbp2',c:'plan',t:'c',tip:'Product cost (products.cost, supplier currency USD) ÷ the FY USD rate, weighted by units sold. FOB cost: no freight or duty.'},
+ {k:'cos',l:'Cost of sales £',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Units sold × product cost.'},
+ {k:'margin',l:'Achieved margin % on sales',s:'Calc',f:'pct',c:'calc',t:null,tip:'1 − cost of sales ÷ sales £.'},
+ {gap:1},
+ {k:'opR',l:'Opening stock £ retail',s:'System / Calc',f:'gbp',c:'calc',t:'r',tip:'Stock on the 1st of the month (inventory snapshot) × current selling price.'},
+ {k:'opC',l:'Opening stock £ cost',s:'System / Calc',f:'gbp',c:'calc',t:'c',tip:'Stock on the 1st of the month × product cost.'},
+ {k:'opU',l:'Opening stock units',s:'System / Calc',f:'int',c:'calc',t:'u',tip:'Stock on the 1st of the month (inventory snapshot); forecast months = last month\'s projected closing.'},
+ {gap:1},
+ {k:'inR',l:'Intake £ retail: received / confirmed PO',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Intake units × current selling price.'},
+ {k:'inC',l:'Intake £ cost: received / confirmed PO',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Intake units × product cost.'},
+ {k:'inU',l:'Intake units: received / confirmed PO',s:'System',f:'int',c:'sys',t:'u',tip:'Actual months: stock received, measured from stock movement per SKU (closing − opening + units sold; sets sold count against their components). Forecast months: open POs (Production, Ready to ship, Shipping) by expected arrival; overdue ones land in the first forecast month.'},
+ {gap:1},
+ {k:'otbR',l:'OTB planned £ retail',s:'Plan input',f:'gbp',c:'otb',t:'r',tip:'Plan input. Not entered yet: WSSI is read only for now.'},
+ {k:'otbC',l:'OTB planned £ cost',s:'Plan input',f:'gbp',c:'otb',t:'c',tip:'Plan input (your open-to-buy budget at cost). Not entered yet: WSSI is read only for now.'},
+ {k:'otbU',l:'OTB planned units',s:'Plan input',f:'int',c:'otb',t:'u',tip:'Plan input. Not entered yet: WSSI is read only for now.'},
+ {gap:1},
+ {k:'trR',l:'Transfers £ retail (3PL / FBA)',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Transfer units × current selling price.'},
+ {k:'trC',l:'Transfers £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Transfer units × product cost.'},
+ {k:'trU',l:'Transfers units (+ in / − out)',s:'Calc',f:'int',c:'calc',t:'u',tip:'Stock moving between 3PL and FBA inside a market (a fall in one pool against a rise in the other, per SKU). Nets to zero when both pools are shown, so it only shows when a channel filter picks one pool.'},
+ {gap:1},
+ {k:'woR',l:'Write-offs / other £ retail',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Write-off units × current selling price.'},
+ {k:'woC',l:'Write-offs / other £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',tip:'Write-off units × product cost.'},
+ {k:'woU',l:'Write-offs / other units (+ / −)',s:'Calc',f:'int',c:'calc',t:'u',tip:'Stock that left without a sale (damages, samples, count corrections, moves to unmanaged branches): the part of the stock movement that is not a sale, intake or transfer. Forecast months: none planned.'},
+ {gap:1},
+ {k:'clR',l:'Closing stock £ retail (current selling)',s:'System / Calc',f:'gbp',c:'close',t:'r',key:1,tip:'Closing units × current selling price.'},
+ {k:'clC',l:'Closing stock £ cost',s:'System / Calc',f:'gbp',c:'close',t:'c',key:1,tip:'Closing units × product cost.'},
+ {k:'clU',l:'Closing stock units',s:'System / Calc',f:'int',c:'close',t:'u',key:1,tip:'Actual months: stock on the 1st of the next month. Forecast months: opening + confirmed PO intake − forecast units sold from that stock pool, per SKU and never below zero (forecast beyond stock is lost sales).'},
+ {k:'exit',l:'Exit margin % (closing stock at current selling)',s:'Calc',f:'pct',c:'calc',t:null,tip:'1 − closing £ cost ÷ closing £ retail.'},
+ {gap:1},
+ {k:'tgR',l:'Target closing stock £ retail',s:'Calc',f:'gbp',c:'calc',t:'r',tip:'Target units × current selling price.'},
+ {k:'tgC',l:'Target closing stock £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',key:1,tip:'Target units × product cost.'},
+ {k:'tgU',l:'Target closing stock units',s:'Calc',f:'int',c:'calc',t:'u',tip:'Per SKU: cover-weeks target (the category\'s target cover for that market and pool, default 8 weeks) × average weekly units of the next 3 months.'},
+ {k:'vsT',l:'Closing stock vs target £ cost',s:'Calc',f:'gbp',c:'calc',t:'c',sign:'over',tip:'Closing £ cost − target £ cost. Red = over target (too much stock), green = under.'},
+ {k:'otbRem',l:'Open to buy remaining £ cost',s:'Calc',f:'gbp',c:'otb',t:'c',sign:'otb',key:1,tip:'Forecast months: target − projected closing £ cost. Positive = room left to buy; negative = over-bought.'},
+ {gap:1},
+ {k:'cover',l:'On-hand cover (weeks)',s:'Calc',f:'wk',c:'calc',t:null,tip:'Closing units ÷ this period\'s average weekly units sold from that stock.'},
+ {k:'fwd',l:'Forward cover (weeks)',s:'Calc',f:'wk',c:'calc',t:null,tip:'Closing units ÷ average weekly units of the next 3 months.'},
+ {sec:'l',name:'Last year'},
+ {k:'lySales',l:'Sales £ LY',s:'System',f:'gbp',c:'sys',t:'r'},
+ {k:'lyUnits',l:'Sales units LY',s:'System',f:'int',c:'sys',t:'u'},
+ {k:'lyAsp',l:'ASP £ LY',s:'Calc',f:'gbp2',c:'calc',t:'r'},
+ {k:'lyInR',l:'Intake £ retail LY',s:'System',f:'gbp',c:'sys',t:'r'},
+ {k:'lyInC',l:'Intake £ cost LY',s:'System',f:'gbp',c:'sys',t:'c'},
+ {k:'lyInU',l:'Intake units LY',s:'System',f:'int',c:'sys',t:'u'},
+ {k:'lyClR',l:'Closing stock £ retail LY (selling price at the time)',s:'System',f:'gbp',c:'sys',t:'r'},
+ {k:'lyClC',l:'Closing stock £ cost LY',s:'System',f:'gbp',c:'sys',t:'c'},
+ {k:'lyClU',l:'Closing stock units LY',s:'System',f:'int',c:'sys',t:'u'},
+ {k:'lyExit',l:'Exit margin % LY',s:'Calc',f:'pct',c:'calc',t:null},
+ {k:'lyCover',l:'On-hand cover LY (weeks)',s:'Calc',f:'wk',c:'calc',t:null},
+ {sec:'v',name:'Variance: this year (actual / forecast) vs last year'},
+ {k:'vSales',l:'Sales £: var',s:'Calc',f:'gbp',c:'calc',t:'r'},
+ {k:'vSalesP',l:'Sales £: var %',s:'Calc',f:'pct',c:'calc',t:'r'},
+ {k:'vUnits',l:'Sales units: var',s:'Calc',f:'int',c:'calc',t:'u'},
+ {k:'vUnitsP',l:'Sales units: var %',s:'Calc',f:'pct',c:'calc',t:'u'},
+ {k:'vAsp',l:'ASP £: var',s:'Calc',f:'gbp2',c:'calc',t:'r'},
+ {k:'vAspP',l:'ASP £: var %',s:'Calc',f:'pct',c:'calc',t:'r'},
+ {k:'vClR',l:'Closing stock £ retail: var',s:'Calc',f:'gbp',c:'calc',t:'r'},
+ {k:'vClRP',l:'Closing stock £ retail: var %',s:'Calc',f:'pct',c:'calc',t:'r'},
+ {k:'vClC',l:'Closing stock £ cost: var',s:'Calc',f:'gbp',c:'calc',t:'c'},
+ {k:'vClCP',l:'Closing stock £ cost: var %',s:'Calc',f:'pct',c:'calc',t:'c'},
+ {k:'vClU',l:'Closing stock units: var',s:'Calc',f:'int',c:'calc',t:'u'},
+ {k:'vClUP',l:'Closing stock units: var %',s:'Calc',f:'pct',c:'calc',t:'u'},
+ {k:'vExit',l:'Exit margin: var (% pts)',s:'Calc',f:'pts',c:'calc',t:null},
+ {k:'vCover',l:'On-hand cover: var (weeks)',s:'Calc',f:'wk',c:'calc',t:null}
+];
+function wssiFmt(v,f){
+  if(v==null||!isFinite(v))return '';
+  if(f==='gbp'){ var r=Math.round(v); if(r===0)return '-'; return (r<0?'-':'')+'£'+Math.abs(r).toLocaleString('en-GB'); }
+  if(f==='gbp2')return (v<0?'-':'')+'£'+Math.abs(v).toFixed(2);
+  if(f==='int'){ var n=Math.round(v); if(n===0)return '-'; return n.toLocaleString('en-GB'); }
+  if(f==='pct')return (v*100).toFixed(1)+'%';
+  if(f==='pts')return (v>0?'+':'')+(v*100).toFixed(1)+' pts';
+  if(f==='wk')return v.toFixed(1);
+  return String(v);
+}
+function wssiCellCls(r,o){
+  if(o.tot)return 'wc-tot'; var a=o.act;
+  switch(r.c){ case 'plan': return a?'wc-sys':'wc-inp'; case 'sys': return a?'wc-sys':'wc-cf'; case 'otb': return a?'wc-na':'wc-cf'; case 'close': return a?'wc-sys':'wc-cf'; default: return a?'wc-ca':'wc-cf'; }
+}
+function wssiTone(r,v){ if(v==null||!isFinite(v)||Math.abs(v)<1e-9)return ''; if(r.sign==='over')return v>0?'wc-bad':'wc-good'; if(r.sign==='otb')return v<0?'wc-bad':'wc-good'; return v<0?'wc-neg':''; }
+function wssiCss(){
+  if(document.getElementById('wssi-css'))return;
+  var st=document.createElement('style'); st.id='wssi-css';
+  st.textContent='#wssi-root{--w-sys:color-mix(in srgb,var(--pos) 9%,var(--card));--w-inp:color-mix(in srgb,var(--prod) 24%,var(--card));--w-cf:color-mix(in srgb,var(--amber) 8%,var(--card));--w-na:var(--line2);--w-tot:var(--hdr-tint)}'
+   +'#wssi-root .w-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;margin:2px 0 10px}#wssi-root .w-head h2{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}#wssi-root .w-sub{color:var(--muted);font-size:12px;margin-top:2px}'
+   +'#wssi-root .w-acts{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}#wssi-root .w-meta{font-size:11px;color:var(--faint)}'
+   +'#wssi-root .w-btn{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font:inherit;font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer}#wssi-root .w-btn:hover{background:var(--hover);border-color:var(--faint)}'
+   +'#wssi-root .w-filters{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:10px}'
+   +'#wssi-root .w-fg{display:inline-flex;align-items:center;gap:6px;position:relative}#wssi-root .w-fl{font-size:10.5px;font-weight:700;color:var(--faint);letter-spacing:.06em;text-transform:uppercase}'
+   +'#wssi-root .w-pick{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 9px;font:inherit;font-size:12px;color:var(--ink);cursor:pointer;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#wssi-root .w-pick:hover{border-color:#93c5fd;background:var(--hover)}'
+   +'#wssi-root .w-sep{width:1px;height:20px;background:var(--line)}#wssi-root .w-pill{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font:inherit;font-size:11px;padding:3px 11px;border-radius:14px;cursor:pointer;font-weight:600}#wssi-root .w-pill.on{background:var(--nav);color:#fff;border-color:var(--nav)}'
+   +'#wssi-root .w-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.16);padding:6px;min-width:210px;max-height:320px;overflow:auto}'
+   +'#wssi-root .w-pop label{display:flex;gap:8px;align-items:center;padding:4px 8px;border-radius:5px;font-size:12px;cursor:pointer;white-space:nowrap}#wssi-root .w-pop label:hover{background:var(--hover)}#wssi-root .w-pop .w-pa{display:flex;gap:10px;padding:4px 8px 6px;border-bottom:1px solid var(--line2);margin-bottom:4px}#wssi-root .w-pop .w-pa a{font-size:11px;color:var(--blue);cursor:pointer}'
+   +'#wssi-root .w-note{font-size:11.5px;color:var(--amber);background:var(--amber-bg);border-radius:7px;padding:6px 10px;margin-bottom:10px}'
+   +'#wssi-root .w-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px}@media (max-width:1100px){#wssi-root .w-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+   +'#wssi-root .w-kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-width:0}#wssi-root .w-kpi .k{font-size:10.5px;font-weight:700;color:var(--faint);letter-spacing:.06em;text-transform:uppercase}#wssi-root .w-kpi .v{font-size:18px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}#wssi-root .w-kpi .d{font-size:11.5px;color:var(--muted);margin-top:2px}'
+   +'#wssi-root .w-up{color:var(--pos)}#wssi-root .w-dn{color:var(--neg)}#wssi-root .w-chip{display:inline-block;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 7px}#wssi-root .w-chip.over{background:var(--neg-bg);color:var(--neg)}#wssi-root .w-chip.ok{background:var(--pos-bg);color:var(--pos)}'
+   +'#wssi-root .w-card{background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}#wssi-root .w-scroll{overflow:auto;max-height:calc(100vh - 250px);border-radius:10px}'
+   +'#wssi-root table{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;width:max-content;min-width:100%}'
+   +'#wssi-root th,#wssi-root td{padding:4px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;text-align:right;font-size:12px}'
+   +'#wssi-root thead th{position:sticky;background:var(--hdr-tint);z-index:3;color:var(--ink-soft);font-weight:700}#wssi-root thead tr.h1 th{top:0;height:28px}#wssi-root thead tr.h2 th{top:28px;font-weight:600;height:24px}#wssi-root thead tr.h3 th{top:52px;font-weight:500;color:var(--faint);font-size:11px;height:22px;border-bottom:1px solid var(--line)}'
+   +'#wssi-root .lab{position:sticky;left:0;z-index:2;text-align:left;background:var(--card);min-width:280px;max-width:280px;overflow:hidden;text-overflow:ellipsis;border-right:1px solid var(--line);color:var(--ink-soft);font-weight:500}#wssi-root thead .lab{z-index:4;background:var(--hdr-tint)}'
+   +'#wssi-root .src{text-align:left;color:var(--faint);font-size:11px;min-width:110px;border-right:1px solid var(--line)}#wssi-root table.nosrc .src{display:none}#wssi-root td.num{min-width:80px}'
+   +'#wssi-root .ptot{border-left:1px solid var(--line)}#wssi-root .p0{border-left:2px solid var(--faint)}#wssi-root .cut{border-left:2px dashed var(--blue)}'
+   +'#wssi-root .af{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:9px}#wssi-root .af.a{background:var(--pos-bg);color:var(--pos)}#wssi-root .af.f{background:var(--prod-bg);color:var(--amber)}'
+   +'#wssi-root tr.sec td{background:var(--l3-bg);color:var(--blue-ink);font-weight:800;font-size:11px;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;border-bottom:1px solid var(--line)}#wssi-root tr.sec .chev{display:inline-block;width:14px}#wssi-root tr.sec.closed .chev{transform:rotate(-90deg)}'
+   +'#wssi-root tr.gap td{height:6px;padding:0;background:var(--card)}#wssi-root tr.key td.lab{font-weight:700;color:var(--ink)}#wssi-root tr:hover td.lab{color:var(--blue)}'
+   +'#wssi-root .wc-sys{background:var(--w-sys)}#wssi-root .wc-inp{background:var(--w-inp)}#wssi-root .wc-na{background:var(--w-na);color:var(--faint)}#wssi-root .wc-ca{background:var(--card)}#wssi-root .wc-cf{background:var(--w-cf)}#wssi-root .wc-tot{background:var(--w-tot);font-weight:700}'
+   +'#wssi-root .wc-neg{color:var(--neg)}#wssi-root .wc-good{color:var(--pos);font-weight:700}#wssi-root .wc-bad{color:var(--neg);font-weight:700}'
+   +'#wssi-root .w-key{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:11.5px;color:var(--muted);margin-top:10px}#wssi-root .w-key i{display:inline-block;width:14px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:6px;border:1px solid var(--line)}';
+  document.head.appendChild(st);
+}
+function renderWssiView(body){
+  wssiCss();
+  var now=new Date(), curFy=now.getMonth()+1>=3?now.getFullYear():now.getFullYear()-1;
+  if(WSSI.fy==null)WSSI.fy=curFy;
+  var D=WSSI.data[WSSI.fy];
+  if(!D){ body.innerHTML='<div id="wssi-root"><div style="padding:18px;color:'+(WSSI.err?'var(--neg)':'var(--muted)')+'">'+(WSSI.err?'Could not load WSSI: '+wssiH(WSSI.err):'Loading WSSI for FY'+String(WSSI.fy+1).slice(2)+'…')+'</div></div>'; if(!WSSI.loading&&!WSSI.err)wssiLoad(WSSI.fy); return; }
+  var C=wssiCompute(D), M=C.cols, ly=D.ly_months, ty=M.slice(ly);
+  ty.forEach(function(o,x){ wssiDerive(o,M[x]); });
+  var tyIdx=ty.map(function(_,x){ return x; }), act=tyIdx.filter(function(x){ return ty[x].act; }), fc=tyIdx.filter(function(x){ return !ty[x].act; });
+  var PER=[['H1',tyIdx.slice(0,6)],['H2',tyIdx.slice(6)],['YTD',act],['YTG',fc],['FY',tyIdx]].filter(function(p){ return p[1].length; });
+  var lyAll=M.slice(0,ly);
+  var tots=PER.map(function(p){ return wssiDerive(wssiPeriod(ty,p[0],p[1]),wssiPeriod(lyAll,p[0],p[1])); });
+  var cols=ty.concat(tots), cutAt=act.length;
+  var colCls=function(j){ return j===ty.length?'ptot p0':(j>ty.length?'ptot':(j===cutAt&&cutAt>0&&cutAt<ty.length?'cut':'')); };
+  var fyLbl='FY'+String(D.fy+1).slice(2), dict=D.dict;
+  var pick=function(d,lbl,opts){ var s=WSSI.sel[d], v=!s.length?'All':(s.length<=2?s.join(', '):s.length+' selected'); return '<span class="w-fg" data-f="'+d+'"><span class="w-fl">'+lbl+'</span><button type="button" class="w-pick" title="'+wssiH(v)+'">'+wssiH(v)+' ▾</button></span>'; };
+  var h='<div id="wssi-root"><div class="w-head"><div><h2>WSSI</h2><div class="w-sub">Weekly sales, stock and intake with open to buy. '+fyLbl+' runs '+wssiMon(D.months[ly])+' to '+wssiMon(D.months[D.months.length-1])+'; H1 Mar to Aug, H2 Sep to Feb. Read only.</div></div>'
+    +'<div class="w-acts"><span class="w-meta">Actuals to '+wssiMon(D.actual_to)+' · built '+(D.built_at?new Date(D.built_at).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/ /g,'-').replace(',-',' '):'')+'</span>'
+    +'<button class="w-btn" id="wssi-refresh" title="Rebuild from live data (cached 10 minutes)">Refresh</button><button class="w-btn" id="wssi-dl">Download .xlsx</button></div></div>'
+    +'<div class="w-filters">'+pick('mkt','Market')+pick('ch','Channel')+pick('cat','Category')+pick('sea','Seasonality')+pick('st','Product status')
+    +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Year</span><select class="w-pick" id="wssi-fy">'+(D.fy_options||[curFy]).map(function(y){ return '<option value="'+y+'"'+(y===D.fy?' selected':'')+'>FY'+String(y+1).slice(2)+'</option>'; }).join('')+'</select></span>'
+    +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Show</span>'
+    +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span></div>';
+  if(C.partialPool)h+='<div class="w-note">Stock is held by pool (3PL for DTC, B2B and Zalando; FBA for Amazon), not by channel. With this channel filter the stock rows show the whole 3PL pool, while the sales rows show only the channels picked.</div>';
+  var fyT=tots[tots.length-1], last=ty[ty.length-1], ytg=tots.filter(function(t){ return t.name==='YTG'; })[0];
+  var vp=fyT.vSalesP, over=last.vsT>0;
+  h+='<div class="w-kpis">'
+    +'<div class="w-kpi"><div class="k">'+fyLbl+' sales (actual + forecast)</div><div class="v">'+wssiFmt(fyT.sales,'gbp')+'</div><div class="d">'+(vp!=null?'<span class="'+(vp>=0?'w-up':'w-dn')+'">'+(vp>=0?'+':'')+(vp*100).toFixed(1)+'%</span> vs LY '+wssiFmt(fyT.lySales,'gbp'):'No last year')+'</div></div>'
+    +'<div class="w-kpi"><div class="k">Closing stock '+wssiMon(last.m)+' at cost</div><div class="v">'+wssiFmt(last.clC,'gbp')+'</div><div class="d">Target '+wssiFmt(last.tgC,'gbp')+' &nbsp;<span class="w-chip '+(over?'over':'ok')+'">'+(over?wssiFmt(last.vsT,'gbp')+' over':wssiFmt(-last.vsT,'gbp')+' under')+'</span></div></div>'
+    +'<div class="w-kpi"><div class="k">Confirmed PO intake YTG at cost</div><div class="v">'+(ytg?wssiFmt(ytg.inC,'gbp'):'-')+'</div><div class="d">'+(ytg?wssiFmt(ytg.inU,'int')+' units, '+wssiMon(ty[fc[0]].m)+' to '+wssiMon(last.m):'No forecast months')+'</div></div>'
+    +'<div class="w-kpi"><div class="k">Exit margin '+wssiMon(last.m)+'</div><div class="v">'+wssiFmt(last.exit,'pct')+'</div><div class="d">'+(last.vExit!=null?wssiFmt(last.vExit,'pts')+' vs LY · ':'')+wssiFmt(last.fwd!=null?last.fwd:last.cover,'wk')+' wks cover</div></div></div>';
+  h+='<div class="w-card"><div class="w-scroll"><table class="'+(WSSI.show.src?'':'nosrc')+'"><thead><tr class="h1"><th class="lab">Month</th><th class="src">Source</th>';
+  cols.forEach(function(o,j){ h+='<th class="'+colCls(j)+'">'+(o.tot?o.name:wssiMon(o.m))+'</th>'; });
+  h+='</tr><tr class="h2"><th class="lab">Actual / Forecast</th><th class="src"></th>';
+  cols.forEach(function(o,j){ h+='<th class="'+colCls(j)+'">'+(o.tot?'':(o.act?'<span class="af a">Actual</span>':'<span class="af f">Forecast</span>'))+'</th>'; });
+  h+='</tr><tr class="h3"><th class="lab">Weeks in period</th><th class="src"></th>';
+  cols.forEach(function(o,j){ h+='<th class="'+colCls(j)+'">'+o.weeks.toFixed(1)+'</th>'; });
+  h+='</tr></thead><tbody>';
+  var sec=null, gapPending=false, rowsOut=0;
+  WSSI_ROWS.forEach(function(r){
+    if(r.sec){ sec=r.sec; gapPending=false; var cl=!!WSSI.closed[sec]; h+='<tr class="sec'+(cl?' closed':'')+'" data-sec="'+sec+'"><td class="lab"><span class="chev">▾</span>'+wssiH(r.name)+'</td><td class="src"></td><td colspan="'+cols.length+'"></td></tr>'; rowsOut=0; return; }
+    if(WSSI.closed[sec])return;
+    if(r.gap){ if(rowsOut)gapPending=true; return; }
+    if(r.t&&!WSSI.show[r.t])return;
+    if(gapPending){ h+='<tr class="gap"><td class="lab"></td><td class="src"></td><td colspan="'+cols.length+'"></td></tr>'; gapPending=false; }
+    rowsOut++;
+    h+='<tr class="'+(r.key?'key':'')+'"><td class="lab"'+(r.tip?' title="'+wssiH(r.l+': '+r.tip)+'"':'')+'>'+wssiH(r.l)+'</td><td class="src">'+wssiH(r.s)+'</td>';
+    cols.forEach(function(o,j){ var v=o[r.k]; h+='<td class="num '+wssiCellCls(r,o)+' '+colCls(j)+' '+wssiTone(r,v)+'">'+wssiFmt(v,r.f)+'</td>'; });
+    h+='</tr>';
+  });
+  h+='</tbody></table></div></div>'
+    +'<div class="w-key"><span><i class="wc-sys"></i>System actual (stock snapshots, sales, last year)</span><span><i class="wc-inp"></i>Forecast or price input</span><span><i class="wc-ca"></i>Calculated, actual month</span><span><i class="wc-cf"></i>Calculated, forecast month</span><span><i class="wc-na"></i>Not used</span><span><i class="wc-tot"></i>Period total</span><span>Hover a row name for how it is worked out.</span></div></div>';
+  body.innerHTML=h;
+  var root=body.querySelector('#wssi-root');
+  root.querySelectorAll('tr.sec').forEach(function(tr){ tr.onclick=function(){ WSSI.closed[tr.dataset.sec]=!WSSI.closed[tr.dataset.sec]; renderWssiView(body); }; });
+  root.querySelectorAll('[data-show]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.show; WSSI.show[k]=!WSSI.show[k]; renderWssiView(body); }; });
+  root.querySelector('#wssi-fy').onchange=function(){ WSSI.fy=+this.value; if(!WSSI.data[WSSI.fy])wssiLoad(WSSI.fy); renderWssiView(body); };
+  root.querySelector('#wssi-refresh').onclick=function(){ delete WSSI.data[WSSI.fy]; WSSI.err=''; wssiLoad(WSSI.fy,true); renderWssiView(body); };
+  root.querySelector('#wssi-dl').onclick=function(){
+    var g=[['WSSI '+fyLbl+(WSSI.sel.mkt.length?' · '+WSSI.sel.mkt.join(', '):'')+(WSSI.sel.ch.length?' · '+WSSI.sel.ch.join(', '):'')+(WSSI.sel.cat.length?' · '+WSSI.sel.cat.join(', '):'')+' · actuals to '+wssiMon(D.actual_to)],['Month','Source'].concat(cols.map(function(o){ return o.tot?o.name:wssiMon(o.m); })),['Actual / Forecast',''].concat(cols.map(function(o){ return o.tot?'':(o.act?'Actual':'Forecast'); }))];
+    WSSI_ROWS.forEach(function(r){ if(r.sec){ g.push([r.name.toUpperCase()]); return; } if(r.gap)return; g.push([r.l,r.s].concat(cols.map(function(o){ var v=o[r.k]; return (v==null||!isFinite(v))?'':(r.f==='pct'||r.f==='pts'?Math.round(v*10000)/10000:Math.round(v*100)/100); }))); });
+    var bytes=buildXlsx('WSSI',g), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download='wssi_'+fyLbl+'_'+D.actual_to+'.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },150); };
+  var closePop=function(){ root.querySelectorAll('.w-pop').forEach(function(p){ p.remove(); }); };
+  root.querySelectorAll('.w-fg[data-f] .w-pick').forEach(function(b){ b.onclick=function(e){
+    e.stopPropagation(); var g=b.parentNode, d=g.dataset.f, had=g.querySelector('.w-pop'); closePop(); if(had)return;
+    var opts=dict[d].slice().sort(function(a,b2){ return String(a).localeCompare(String(b2)); }), p=document.createElement('div'); p.className='w-pop';
+    p.innerHTML='<div class="w-pa"><a data-a="all">All</a><a data-a="none">Clear</a></div>'+opts.map(function(o,ix){ return '<label><input type="checkbox" id="wssi-'+d+'-'+ix+'" value="'+wssiH(o)+'"'+(WSSI.sel[d].indexOf(o)>=0?' checked':'')+'> '+wssiH(o||'(blank)')+'</label>'; }).join('');
+    p.onclick=function(ev){ ev.stopPropagation(); var a=ev.target.closest('[data-a]'); if(a){ WSSI.sel[d]=[]; renderWssiView(body); } };
+    p.onchange=function(){ WSSI.sel[d]=[].slice.call(p.querySelectorAll('input:checked')).map(function(x){ return x.value; }); if(WSSI.sel[d].length===opts.length)WSSI.sel[d]=[]; var keep=d; renderWssiView(body); var nb=document.querySelector('#wssi-root .w-fg[data-f="'+keep+'"] .w-pick'); if(nb)nb.click(); };
+    g.appendChild(p); }; });
+  if(!WSSI._docClose){ WSSI._docClose=true; document.addEventListener('click',function(){ var r=document.getElementById('wssi-root'); if(r)r.querySelectorAll('.w-pop').forEach(function(p){ p.remove(); }); }); }
+}
+var DEMAND_TABS=[['plan','Plan'],['crossmarket','Cross Market view'],['wssi','WSSI'],['intake','Intake deadlines'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -14060,7 +14307,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['orderexcl']='Order exclusions'; _dlbl['weeklyswitch']='Weekly switch-over'; _dlbl['preorders']='Preorders'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest'; _dlbl['replacements']='Replacement forecasts';
-  var PRIMARY=['plan','crossmarket','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','crossmarket','wssi','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags','intake'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','preorders','calendar','pricechanges','replacements','klaviyobis','orderexcl','weeklyswitch'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -16620,7 +16867,7 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // ─── REPORTS area: sub-tab shell ──────────────────────────────────────────
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
-var REPORT_TABS=[['ex','Exec Summary'],['performance','Performance'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability']];   /* v28.247: 3PL & Invoicing moved to ACCOUNTS > 3PL invoicing */   // Performance (L2) holds Supply metrics + Inventory metrics (L3). Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
+var REPORT_TABS=[['ex','Exec Summary'],['performance','Performance'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['sa','Stock Availability']];   /* v28.247: 3PL & Invoicing moved to ACCOUNTS > 3PL invoicing */   // Performance (L2) holds Supply metrics + Inventory metrics (L3). Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
 var PERF_SUBS=[['demand-metrics','Demand Metrics'],['supply-metrics','Supply metrics'],['inventory-metrics','Inventory metrics']];   // Demand Metrics = the ex-DEMAND ▸ KPIs pages (In Stock / Slow moving / Inventory cover / Stockout risk / Discontinued)
 var PERF_SUB='supply-metrics';   // REPORTS ▸ Performance sub-tab; deep-linked #/reports/performance/<sub>
 // Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
@@ -16904,7 +17151,7 @@ function renderReportView(tabsOnly){   // v28.150: tabsOnly = draw the REPORTS t
   if(REPORT_VIEW==='af'){ REPORT_VIEW='ex'; try{ if(window.location)location.hash='#/supply/payments/af'; }catch(e){} return; }   // Auto Forecast moved to SUPPLY ▸ Payments — redirect old #/reports/af
   if(REPORT_VIEW==='ka'){ renderKeyArrivalsReport(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='me'){ renderMarkdownEosReport(body); mobileFilterCollapse(body); return; }
-  if(REPORT_VIEW==='otb'){ renderOtbReport(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='otb'){ try{ location.hash='#/demand/wssi'; }catch(e){} return; }   // v28.485: Open-to-Buy replaced by DEMAND ▸ WSSI
   if(REPORT_VIEW==='sa'){ renderStockAvailability(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='tpl'||REPORT_VIEW==='3pl-invoicing'){ REPORT_VIEW='ex'; var _t3=(location.hash||'').split('/')[3]; location.hash='#/accounts/3pl-invoicing'+(_t3?'/'+_t3:''); return; }   // v28.247: moved to ACCOUNTS (old links redirect)
 }
@@ -17783,62 +18030,6 @@ function renderMarkdownEosReport(body){
   body.innerHTML='<div style="padding:18px;color:var(--muted);font-size:12px">Loading…</div>';
   var qs='?market='+ME.market+'&basis='+ME.basis+(ME.end?'&end='+ME.end:'');
   fetch('/api/scenario/markdown-eos'+qs).then(function(r){return r.json();}).then(function(d){ if(d.error){body.innerHTML='<div style="padding:18px;color:var(--neg)">Could not load: '+d.error+'</div>';return;} ME_CACHE[key]=d; draw(d); }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:var(--neg)">'+e+'</div>'; });
-}
-function otbPills(name,opts){ return opts.map(function(o){return '<button class="view-toggle otb-'+name+(o[0]===OTB[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
-function renderOtbReport(body){
-  var key=OTB.market+'|'+OTB.months+'|'+OTB.defcover;
-  var draw=function(d){
-    var rows=d.rows||[];
-    var MK=[['all','All'],['uk','UK'],['us','US'],['eu','EU'],['au','AU'],['ca','CA']];
-    var ST=[['all','All'],['buy','To buy'],['over','Over-bought'],['ok','On plan']];
-    var ninp=function(k,lbl,suf){ return '<label style="display:inline-flex;align-items:center;gap:3px"><span style="font-size:11px;font-weight:700;color:var(--faint)">'+lbl+'</span>'
-      +'<input class="otb-num" data-k="'+k+'" value="'+OTB[k]+'" style="width:42px;padding:2px 4px;border:1px solid var(--line);border-radius:4px;font-size:11px;text-align:right">'+(suf||'')+'</label>'; };
-    body.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:14px 18px;align-items:center;margin-bottom:10px">'
-      +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:var(--faint)">MARKET</span>'+otbPills('market',MK)+'</span>'
-      +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:var(--faint)">STATUS</span>'+otbPills('status',ST)+'</span>'
-      +ninp('months','HORIZON','mo')+ninp('defcover','DEFAULT COVER','wk')
-      +'<span style="font-size:11px;color:var(--faint)">'+d.months+'mo horizon · '+d.def_cover+'wk default cover target</span>'
-      +'</div><div id="otb-body"></div>';
-    body.querySelectorAll('.otb-market,.otb-status').forEach(function(b){ var k=b.classList.contains('otb-market')?'market':'status'; b.onclick=function(){ OTB[k]=b.dataset.v; renderOtbReport(body); }; });
-    body.querySelectorAll('.otb-num').forEach(function(el){ el.onchange=function(){ var v=Number(el.value)||0; if(v>0){OTB[el.dataset.k]=v; renderOtbReport(body);} }; });
-    var f=rows.filter(function(r){ return OTB.status==='all'?true:r.status===OTB.status; });
-    var buy=rows.filter(function(r){return r.status==='buy';}), over=rows.filter(function(r){return r.status==='over';});
-    var buyVal=buy.reduce(function(a,b){return a+b.otb_cost;},0), overVal=over.reduce(function(a,b){return a+Math.abs(b.otb_cost);},0);
-    var tile=function(v,l,c){ return '<div style="flex:1;min-width:130px;background:var(--hover);border-radius:6px;padding:8px 12px"><div style="font-size:18px;font-weight:700;color:'+(c||'#222')+'">'+v+'</div><div style="font-size:11px;color:var(--faint)">'+l+'</div></div>'; };
-    var sev={buy:['var(--pos)','var(--pos-bg)','Buy'],over:['var(--neg)','var(--neg-bg)','Over'],ok:['var(--muted)','#eef0f2','On plan']};
-    var badge=function(s){ var c=sev[s]; return '<span style="background:'+c[1]+';color:'+c[0]+';font-weight:600;padding:2px 7px;border-radius:10px;font-size:10px">'+c[2]+'</span>'; };
-    var h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-      +tile('£'+buyVal.toLocaleString(),'Open-to-buy (to order)','var(--pos)')
-      +tile(buy.length.toLocaleString(),'Category·markets to buy')
-      +tile('£'+overVal.toLocaleString(),'Over-committed','var(--neg)')
-      +tile(over.length.toLocaleString(),'Category·markets over-bought')
-      +'</div>';
-    h+='<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr>'
-      +'<th style="text-align:left;padding:4px 6px">Category</th><th style="text-align:left;padding:4px 6px">Mkt</th>'
-      +'<th style="text-align:right;padding:4px 6px">On hand</th><th style="text-align:right;padding:4px 6px">On order</th>'
-      +'<th style="text-align:right;padding:4px 6px">Demand ('+d.months+'mo)</th><th style="text-align:right;padding:4px 6px">Proj cover</th>'
-      +'<th style="text-align:right;padding:4px 6px">Target cover</th><th style="text-align:right;padding:4px 6px">OTB units</th>'
-      +'<th style="text-align:right;padding:4px 6px">OTB £</th><th style="text-align:left;padding:4px 6px">Status</th></tr></thead><tbody>';
-    var cv=function(c){ return c==null?'–':c+'wk'; };
-    f.forEach(function(r){
-      var oc=r.otb_units>0?'var(--pos)':(r.otb_units<0?'var(--neg)':'var(--muted)');
-      h+='<tr><td style="padding:3px 6px;font-weight:600;text-align:left">'+r.category+'</td>'
-        +'<td style="padding:3px 6px;color:var(--muted)">'+r.market+'</td>'
-        +'<td style="text-align:right;padding:3px 6px">'+r.onhand.toLocaleString()+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;color:var(--muted)">'+r.onorder.toLocaleString()+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;color:var(--muted)">'+r.demand.toLocaleString()+'</td>'
-        +'<td style="text-align:right;padding:3px 6px">'+cv(r.proj_cover)+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;color:var(--muted)">'+r.cover_target+'wk'+(r.has_target?'':'<span title="no target set — using default" style="color:var(--faint)"> *</span>')+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;font-weight:600;color:'+oc+'">'+(r.otb_units>0?'+':'')+r.otb_units.toLocaleString()+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;font-weight:600;color:'+oc+'">'+(r.otb_cost<0?'-£'+Math.abs(r.otb_cost).toLocaleString():'£'+r.otb_cost.toLocaleString())+'</td>'
-        +'<td style="padding:3px 6px">'+badge(r.status)+'</td></tr>';
-    });
-    h+='</tbody></table></div><div style="font-size:11px;color:var(--faint);margin-top:6px">* using the '+d.def_cover+'wk default cover target.</div>';
-    document.getElementById('otb-body').innerHTML=h;
-  };
-  if(OTB_CACHE[key]) return draw(OTB_CACHE[key]);
-  body.innerHTML='<div style="padding:18px;color:var(--muted);font-size:12px">Loading…</div>';
-  fetch('/api/scenario/otb?market='+OTB.market+'&months='+OTB.months+'&defcover='+OTB.defcover).then(function(r){return r.json();}).then(function(d){ if(d.error){body.innerHTML='<div style="padding:18px;color:var(--neg)">Could not load: '+d.error+'</div>';return;} OTB_CACHE[key]=d; draw(d); }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:var(--neg)">'+e+'</div>'; });
 }
 function afMonthLabel(ym){ var p=ym.split('-'); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]; return mn+' '+p[0].slice(2); }
 // (Removed dead afK — superseded by afN in the payments plan. v25.652)

@@ -1,7 +1,7 @@
 ---
 topic: reports
 title: Reports
-covers: Read-only reports in HORIZON: REPORTS menu (Exec Summary, Performance metrics, Slow Moving, Key Arrivals, Markdown & EOS, Open-to-Buy, Stock Availability), DEMAND analysis views (Trends, Accuracy, Forecast trend anomalies, Safety stock, Stock cover, Ship bags, AI Insights), Inventory Status Report, SUPPLY Pipeline, What's next, Supplier delays, Production summary, Payments Due, PRODUCT Reports
+covers: Read-only reports in HORIZON: REPORTS menu (Exec Summary, Performance metrics, Slow Moving, Key Arrivals, Markdown & EOS, Stock Availability), DEMAND analysis views (Trends, Accuracy, Forecast trend anomalies, Safety stock, Stock cover, Ship bags, AI Insights), Inventory Status Report, SUPPLY Pipeline, What's next, Supplier delays, Production summary, Payments Due, PRODUCT Reports
 sources:
   - artifact_v16.7.html :: renderReportView
   - artifact_v16.7.html :: renderExecView
@@ -13,7 +13,6 @@ sources:
   - artifact_v16.7.html :: renderInventoryMetrics
   - artifact_v16.7.html :: renderSlowMovingReport
   - artifact_v16.7.html :: renderMarkdownEosReport
-  - artifact_v16.7.html :: renderOtbReport
   - artifact_v16.7.html :: renderStockAvailability
   - artifact_v16.7.html :: saInbound
   - artifact_v16.7.html :: saStatusBadge
@@ -39,7 +38,6 @@ sources:
   - server.mjs :: /api/supply/:section (case bi, pipeline, upcoming, supplier-timing)
   - server.mjs :: /api/scenario/slow-moving
   - server.mjs :: /api/scenario/markdown-eos
-  - server.mjs :: /api/scenario/otb
   - server.mjs :: /api/scenario/key-arrivals
   - server.mjs :: /api/scenario/prime-day
   - server.mjs :: /api/scenario/sales-planning
@@ -54,7 +52,7 @@ sources:
   - server.mjs :: /api/product/reports/approval-stats
   - supply/inject.html :: renderApprovalStats
 fingerprints:
-  artifact_v16.7.html::renderReportView: d295c42ef5f0
+  artifact_v16.7.html::renderReportView: ccfa229ffa43
   artifact_v16.7.html::renderExecView: 255e38a51f5e
   artifact_v16.7.html::buildExecData: 279a59ce1aeb
   artifact_v16.7.html::getASP: c70881d04bde
@@ -64,7 +62,6 @@ fingerprints:
   artifact_v16.7.html::renderInventoryMetrics: cd8c35e5ce61
   artifact_v16.7.html::renderSlowMovingReport: 44d0a2dbe4dd
   artifact_v16.7.html::renderMarkdownEosReport: 4b5928c38f67
-  artifact_v16.7.html::renderOtbReport: 3d410f502fdd
   artifact_v16.7.html::renderStockAvailability: 850a1230d744
   artifact_v16.7.html::saInbound: 2bdaef711165
   artifact_v16.7.html::saStatusBadge: 0d601ebb76f3
@@ -90,7 +87,6 @@ fingerprints:
   server.mjs::/api/supply/:section: 6338a43b5269
   server.mjs::/api/scenario/slow-moving: fb22071cbe1a
   server.mjs::/api/scenario/markdown-eos: bb925e0e2b9b
-  server.mjs::/api/scenario/otb: 2e30af6efc34
   server.mjs::/api/scenario/key-arrivals: 944c5a8c92c7
   server.mjs::/api/scenario/prime-day: a97ff1a33a71
   server.mjs::/api/scenario/sales-planning: 98b7b1faa28b
@@ -109,7 +105,7 @@ fingerprints:
   supply/inject.html::renderSampleCosts: 54e82203f6c1
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
   supply/inject.html::renderApprovalStats: daa931f71daf
-verified_version: v28.482
+verified_version: v28.485
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -251,19 +247,8 @@ verified_version: v28.482
   - Give-away = residual x net retail x depth. Net retail = market retail price, divided by 1.2 for UK and EU.
 (source: server.mjs :: /api/scenario/markdown-eos; renderMarkdownEosReport)
 
-## Open-to-Buy (REPORTS > Open-to-Buy)
-- Grain: category x market. Horizon N defaults to 6 months (range 1 to 12).
-- Inputs:
-  - Demand = forecast_outputs from the current month for N months.
-  - On order = qty on non-complete POs landing in [today, today + N months). Landing = shipment arrival > delivery > landing > PO override.
-  - On hand = available stock, plus AWD for the US.
-- Formulas:
-  - Projected close = on hand + on order minus demand.
-  - Target close = 8 weeks x weekly demand, where weekly demand = demand / (N x 4.345). The 8 weeks is fixed because sell-through targets were decommissioned.
-  - OTB units = target close minus projected close.
-  - OTB cost = OTB units x category average PO cost.
-- Status: buy if OTB > max(50, 5% of demand); over if OTB < minus that; otherwise ok.
-(source: server.mjs :: /api/scenario/otb)
+## Open-to-Buy (removed v28.485)
+- REPORTS > Open-to-Buy was replaced by DEMAND > WSSI in v28.485 (Ben 26-Oct-26). Old #/reports/otb links redirect to #/demand/wssi. See the wssi topic.
 
 ## Key Arrivals (REPORTS > Key Arrivals)
 - Scope: non-complete POs arriving today or later.
@@ -485,7 +470,7 @@ verified_version: v28.482
 ## Common questions
 **Q:** Why does Exec Summary show a full month for the current month when the month is not over? **A:** The current partial month uses the full-month forecast, not month-to-date actuals. Past months are actuals; future months are plan forecast x ASP.
 **Q:** Why does Slow moving in Demand Metrics differ from the Slow Moving report? **A:** They are different calculations. Demand Metrics uses months of cover from the 12-month forecast with a > 6 month threshold. The Slow Moving report uses weeks of cover from trailing 3-month (or forecast) velocity, with >= 26 weeks and >= 50 units by default.
-**Q:** Does Stockout risk include stock on the water? **A:** No. It compares the next N months of forecast with on hand only. Inbound is counted in the Inventory Status runway and in Open-to-Buy.
+**Q:** Does Stockout risk include stock on the water? **A:** No. It compares the next N months of forecast with on hand only. Inbound is counted in the Inventory Status runway and in DEMAND > WSSI (confirmed PO intake).
 **Q:** Is the £ value on these reports exact GBP? **A:** Treat it as indicative. Most server reports multiply units by PO cost_price or product cost without FX conversion.
 **Q:** What forecast does Accuracy compare against? **A:** The locked forecast: the latest saved snapshot taken before each month started. Forecast trend anomalies uses today's forecast instead.
 
