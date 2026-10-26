@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `f99bdc13` (v28.495). Live `/api/version` before: **v28.489** (production `main` = `e0b013e4`). Production port: PR #17, branch `port/v28.495`, commit `26c28b2e` (author admin@dockandbay.com). Owner of production steps: Ben.
 
-**STATUS 26-Oct-26:** PR #17 open, checks running. (Merge, CI run and live version to follow.)
+**STATUS 26-Oct-26: LIVE.** PR #17 merged by Ben (production `main` = `1b1f53ea`), CI runs 40302625512 (push) and 40302640572 (Run workflow) green, live `/api/version` = **v28.495**.
 
 ## What changed
 - **v28.490** Health: a read that fails because the instance was just thawed is retried once; background work frozen by Vercel is counted, not logged as an error.
@@ -33,4 +33,5 @@ No planning logic changed.
 5. Run the n8n flow once by hand; Manage FBA UK / US / AU show "n8n (Amazon SP-API ...)" as the importer.
 
 ## Deploy record
-- 26-Oct-26: PR #17 opened.
+- 26-Oct-26: PR #17 opened, pre-deploy checks + regression tests green.
+- 26-Oct-26: merged by Ben, production `main` = `1b1f53ea`. Live `/api/version` verified **v28.495**. Smoke: `POST /api/cron/fba-report-import` without a secret = 401 (gate holds).
