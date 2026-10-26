@@ -1,3 +1,9 @@
+## v28.486 (26-Oct-26) WSSI: Summary numbers (k / m)
+- Ben: "on wssi have a summary option for numbers. in k and m. 93.1k. 537k. etc"
+- DEMAND ▸ WSSI Show bar: new Numbers switch, Full (default) or Summary. Summary shows £ and unit figures to 3 significant figures in k / m (£1.65m, 82.8k, 537k, -15.8k), in the grid and the summary tiles. Prices per unit, %, % pts and weeks are unchanged; Download .xlsx always exports full numbers. The choice is remembered in this browser.
+- Checked in jsdom with the live FY27 data: Full £21,776,196 / Summary £21.8m; 999,600 rounds to 1.00m (not 1000k).
+- No server change, no migration, no new env.
+
 ## v28.485 (26-Oct-26) DEMAND ▸ WSSI (weekly sales, stock and intake with open to buy); replaces REPORTS ▸ Open-to-Buy
 - Ben: build his "WSSI OTB Format" sheet under DEMAND, directly under Cross Market view (mockup approved 26-Oct-26: "this will replace", read only for now, maybe a worksheet later; ASP from actuals; full price = RT_US for US DTC and FBA, RT_US / 2 for wholesale B2B; add a category filter).
 - New DEMAND ▸ WSSI (#/demand/wssi), second in the DEMAND menu and the left rail. Same rows and four sections as the sheet (this year sales; stock and OTB; last year; variance), 12 months plus H1, H2, YTD, YTG and FY, Actual / Forecast header, weeks per month. Filters: Market, Channel, Category, Seasonality, Product status (multi-select), Year (last / this / next FY), Show £ retail / £ cost / Units / Source. Summary tiles (FY sales vs LY, closing stock vs target, confirmed PO intake to go, exit margin), Download .xlsx, Refresh. Hover a row name for how it is worked out.

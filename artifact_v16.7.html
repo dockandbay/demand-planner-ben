@@ -14047,7 +14047,8 @@ function renderShipBagView(body){
 // "WSSI OTB Format" sheet. Replaces REPORTS ▸ Open-to-Buy. Read only for now (a worksheet version with editable OTB and target
 // inputs may follow). Data: GET /api/demand/wssi (lib/wssi.mjs): month × market × channel (sales) / stock pool (stock) ×
 // category × seasonality × product status. This view filters, sums and derives the ratios. Logic: lib/ai-logic/wssi.md.
-var WSSI={fy:null,data:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false},closed:{}};
+var WSSI={fy:null,data:{},loading:false,err:'',sel:{mkt:[],ch:[],cat:[],sea:[],st:[]},show:{r:true,c:true,u:true,src:false,sum:false},closed:{}};
+try{ WSSI.show.sum=localStorage.getItem('hz_wssi_sum')==='1'; }catch(e){}   // v28.486 Summary numbers (k / m), remembered per browser
 var WSSI_CH_POOL={DTC:'3PL',B2B:'3PL',ZAL:'3PL',TIK:'3PL',FBA:'FBA'};
 function wssiH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function wssiMon(k){ var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return M[+k.slice(5,7)-1]+'-'+k.slice(2,4); }
@@ -14170,8 +14171,12 @@ var WSSI_ROWS=[
  {k:'vExit',l:'Exit margin: var (% pts)',s:'Calc',f:'pts',c:'calc',t:null},
  {k:'vCover',l:'On-hand cover: var (weeks)',s:'Calc',f:'wk',c:'calc',t:null}
 ];
+// v28.486 (Ben): Summary numbers = 3 significant figures in k / m (93.1k, 537k, 1.25m). Prices, %, weeks unchanged.
+function wssiShort(n){ var a=Math.abs(n), u='', d=a; if(a>=1e6){ d=a/1e6; u='m'; } else if(a>=1e3){ d=a/1e3; u='k'; } else return String(Math.round(a));
+  var t=d>=100?d.toFixed(0):d>=10?d.toFixed(1):d.toFixed(2); if(t==='1000'&&u==='k'){ t='1.00'; u='m'; } return t+u; }
 function wssiFmt(v,f){
   if(v==null||!isFinite(v))return '';
+  if(WSSI.show.sum&&(f==='gbp'||f==='int')){ if(Math.round(v)===0)return '-'; return (v<0?'-':'')+(f==='gbp'?'£':'')+wssiShort(v); }
   if(f==='gbp'){ var r=Math.round(v); if(r===0)return '-'; return (r<0?'-':'')+'£'+Math.abs(r).toLocaleString('en-GB'); }
   if(f==='gbp2')return (v<0?'-':'')+'£'+Math.abs(v).toFixed(2);
   if(f==='int'){ var n=Math.round(v); if(n===0)return '-'; return n.toLocaleString('en-GB'); }
@@ -14239,7 +14244,8 @@ function renderWssiView(body){
     +'<div class="w-filters">'+pick('mkt','Market')+pick('ch','Channel')+pick('cat','Category')+pick('sea','Seasonality')+pick('st','Product status')
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Year</span><select class="w-pick" id="wssi-fy">'+(D.fy_options||[curFy]).map(function(y){ return '<option value="'+y+'"'+(y===D.fy?' selected':'')+'>FY'+String(y+1).slice(2)+'</option>'; }).join('')+'</select></span>'
     +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Show</span>'
-    +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span></div>';
+    +[['r','£ retail'],['c','£ cost'],['u','Units'],['src','Source']].map(function(p){ return '<button class="w-pill'+(WSSI.show[p[0]]?' on':'')+'" data-show="'+p[0]+'">'+p[1]+'</button>'; }).join('')+'</span>'
+    +'<span class="w-sep"></span><span class="w-fg"><span class="w-fl">Numbers</span><button class="w-pill'+(WSSI.show.sum?'':' on')+'" data-num="0" title="Every number in full">Full</button><button class="w-pill'+(WSSI.show.sum?' on':'')+'" data-num="1" title="£ and units in k / m, 3 significant figures (93.1k, 537k, 1.25m)">Summary</button></span></div>';
   if(C.partialPool)h+='<div class="w-note">Stock is held by pool (3PL for DTC, B2B and Zalando; FBA for Amazon), not by channel. With this channel filter the stock rows show the whole 3PL pool, while the sales rows show only the channels picked.</div>';
   var fyT=tots[tots.length-1], last=ty[ty.length-1], ytg=tots.filter(function(t){ return t.name==='YTG'; })[0];
   var vp=fyT.vSalesP, over=last.vsT>0;
@@ -14273,6 +14279,7 @@ function renderWssiView(body){
   var root=body.querySelector('#wssi-root');
   root.querySelectorAll('tr.sec').forEach(function(tr){ tr.onclick=function(){ WSSI.closed[tr.dataset.sec]=!WSSI.closed[tr.dataset.sec]; renderWssiView(body); }; });
   root.querySelectorAll('[data-show]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.show; WSSI.show[k]=!WSSI.show[k]; renderWssiView(body); }; });
+  root.querySelectorAll('[data-num]').forEach(function(b){ b.onclick=function(){ WSSI.show.sum=b.dataset.num==='1'; try{ localStorage.setItem('hz_wssi_sum',WSSI.show.sum?'1':'0'); }catch(e){} renderWssiView(body); }; });
   root.querySelector('#wssi-fy').onchange=function(){ WSSI.fy=+this.value; if(!WSSI.data[WSSI.fy])wssiLoad(WSSI.fy); renderWssiView(body); };
   root.querySelector('#wssi-refresh').onclick=function(){ delete WSSI.data[WSSI.fy]; WSSI.err=''; wssiLoad(WSSI.fy,true); renderWssiView(body); };
   root.querySelector('#wssi-dl').onclick=function(){

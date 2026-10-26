@@ -6,12 +6,12 @@ sources:
   - lib/wssi.mjs :: wssiLoad, wssiBuild
   - server.mjs :: /api/demand/wssi
   - artifact_v16.7.html :: renderWssiView, wssiCompute, wssiDerive, wssiPeriod
-verified_version: v28.485
+verified_version: v28.486
 fingerprints:
   lib/wssi.mjs::wssiLoad: f97960cbcdd8
   lib/wssi.mjs::wssiBuild: f0a6fe67d056
   server.mjs::/api/demand/wssi: ad274546ff25
-  artifact_v16.7.html::renderWssiView: 08da72606ad8
+  artifact_v16.7.html::renderWssiView: 55514fd20ef7
   artifact_v16.7.html::wssiCompute: c14cb7daf348
   artifact_v16.7.html::wssiDerive: c0b64d1f5b46
   artifact_v16.7.html::wssiPeriod: 01ee3313d860
@@ -26,7 +26,7 @@ Where: DEMAND, second item after Cross Market view (#/demand/wssi). Read only (v
 - Rows follow Ben's "WSSI OTB Format" sheet in four sections: This year: sales; This year: stock and OTB; Last year; Variance (this year vs last year). Sections collapse.
 - Weeks in period = days in month / 7.
 - "Actuals to" = the last completed month whose closing stock snapshot (1st of the next month) exists. Later months are forecast.
-- Filters (multi-select, none ticked = all): Market, Channel, Category, Seasonality (products.core_seasonal, blank = Unassigned), Product status (products.status). Year: last, current or next FY. Show: £ retail, £ cost, Units, Source column.
+- Filters (multi-select, none ticked = all): Market, Channel, Category, Seasonality (products.core_seasonal, blank = Unassigned), Product status (products.status). Year: last, current or next FY. Show: £ retail, £ cost, Units, Source column. Numbers: Full or Summary (v28.486: £ and units to 3 significant figures in k / m, e.g. 93.1k, 537k, 1.25m; prices, %, weeks unchanged; the .xlsx keeps full numbers; remembered per browser).
 (source: artifact_v16.7.html :: renderWssiView)
 
 ## Grain and filters
