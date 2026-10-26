@@ -21304,7 +21304,7 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
 //   new → plan created → packing option generated + confirmed → box contents sent → draft_ready   (Phase 1: stop here and finish in
 //   Seller Central, or continue) → placement generated → placement_choose (user picks; fees shown) → placement confirmed →
 //   transport generated (ready date) → transport_choose (user picks per shipment) → delivery windows (own carrier) → transport
-//   confirmed → labels → done.  Cancel any time (cancelInboundPlan). Prep + label owner = Seller (Ben). Admin only while on test.
+//   confirmed → labels → done.  Cancel any time (cancelInboundPlan). Prep + label owner = Seller (Ben). Writes need SUPPLY edit (v28.499).
 // Markets: UK, US, AU and EU (EU always ships to Amazon.de, Ben). Ship-from = planner.fba_ship_from (3PL default per market, or any
 // other address, e.g. the local Flexport warehouse in China for direct-from-China shipments).
 const FBA_IB_MKT = {
@@ -21511,8 +21511,8 @@ async function fbaIbAdvance(p, action, body, me) {
     return fbaIbSave(p, { stage: 'done', shipments: ships, labels }, 'Labels: ' + labels.map(l => (l.confirmationId || l.shipmentId) + (l.url ? ' ready' : ' ' + (l.error || 'none'))).join(', '));
   }
 }
-async function fbaIbAdmin(req, res) {   // admin only while this is on test (Ben)
-  try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Create FBA Shipment is admin only while on test' }); return null; } return me; }
+async function fbaIbAdmin(req, res) {   // v28.499 (Ben: "it shouldn't be admin only, anyone with access can create"): SUPPLY edit, like the rest of BUY & MOVE
+  try { const me = await permsFor(req); if (me.live && !(me.supply_edit || me.is_admin)) { res.status(403).json({ error: 'Create FBA Shipment needs SUPPLY edit access' }); return null; } return me; }
   catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; }
 }
 app.get('/api/supply/fba-inbound/ship-from', async (req, res) => {

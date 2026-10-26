@@ -1,3 +1,8 @@
+## v28.499 (26-Oct-26) Create FBA Shipment: trial disclaimer; open to everyone with SUPPLY edit
+- Ben: add a disclaimer before the process, "this process is currently under trial, proceed with caution and check data in amazon at each phase"; "it shouldn't be admin only, anyone with access can create".
+- Opening Create FBA Shipment now shows a Trial warning first (I understand, continue / Cancel), every time; the same line stays at the top of each step.
+- Writes (create, advance, ship-from addresses) need SUPPLY edit instead of admin; the button shows for SUPPLY editors (and admins).
+
 ## v28.498 (26-Oct-26) Create FBA Shipment: straight into Amazon from BUY & MOVE ▸ FBA (built, on test)
 - Ben: "we have a button to create an amazon fba shipment directly but it's not done, possible to do this via n8n? scope it out and build and we can test in a controlled manner"; build Phase 1 and 2 "with a clear step where user can jump out into seller central"; layout A (stepper modal); test UK; prep / labels = Seller; "EU ships from EU iFulfilment to Amazon Germany always. also sometimes we ship from china direct to amazon, but the warehouse is a local warehouse for flexport".
 - The "Create FBA Shipment" button (was a "feature to build" popup) opens a 5-step modal: Review → Draft in Amazon → Placement → Transport → Labels. Same ticked rows, quantities, case packs and carton dims as FBA Transfer Upload. Markets UK, US, EU (Amazon.de) and AU; CA has no 3PL. Admin only while on test.

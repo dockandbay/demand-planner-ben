@@ -2994,7 +2994,7 @@ function render(){
   var _dlAwd=document.getElementById('fba-dl-awd-btn');   // AWD upload = US only (a distinct Amazon template)
   if(_dlAwd)_dlAwd.style.display=(BP_VIEW==='fba'&&CUR==='US')?'':'none';
   var _cr=document.getElementById('fba-create-btn');
-  if(_cr)_cr.style.display=(BP_VIEW==='fba'&&(!window.ME||!window.ME.live||window.ME.is_admin)&&['UK','US','EU','AU'].indexOf(CUR)>=0)?'':'none';   // v28.498: admin only while on test; CA has no 3PL
+  if(_cr)_cr.style.display=(BP_VIEW==='fba'&&(!window.ME||!window.ME.live||window.ME.supply_edit||window.ME.is_admin)&&['UK','US','EU','AU'].indexOf(CUR)>=0)?'':'none';   // v28.499: anyone with SUPPLY edit (Ben); CA has no 3PL
   // Create PO / Refresh / multi-Download (#bp-buy-actions) are BUY-only. FBA Transfer Logic → FBA only.
   // A single "Download CSV (data in view)" button shows on FBA + TRANSFER instead.
   var _bt=document.getElementById('bp-buy-actions'); if(_bt)_bt.style.display=(BP_VIEW==='buy')?'inline-flex':'none';
@@ -3346,8 +3346,8 @@ function downloadFbaTransfer(dest){
 
 // v28.498 (Ben 26-Oct-26): Create FBA Shipment. Stepper modal (Review → Draft in Amazon → Placement → Transport → Labels) driving
 // /api/supply/fba-inbound/* (Amazon Inbound API through n8n). Rows = the same ticked rows + quantities as FBA Transfer Upload.
-// Step 2 is the jump-out point: finish in Seller Central, or continue here. Admin only while on test.
-var FBA_SHIP={plan:null,sc:'',addr:[],sf:'',edit:false,busy:false,logOpen:false,cancelArm:false,pick:{},ready:'',err:'',plans:[]};
+// Step 2 is the jump-out point: finish in Seller Central, or continue here. SUPPLY edit (v28.499); trial disclaimer first.
+var FBA_SHIP={ack:false,plan:null,sc:'',addr:[],sf:'',edit:false,busy:false,logOpen:false,cancelArm:false,pick:{},ready:'',err:'',plans:[]};
 var FBA_SHIP_MKTS=['UK','US','EU','AU'];
 function fbaShipEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function fbaShipDate(v){ var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/); if(!m)return fbaShipEsc(v||''); var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -3366,7 +3366,7 @@ function fbaShipRows(){   // ticked rows for CUR, boxes from carton dims (UK/EU/
   return out; }
 function fbaShipOpen(){
   if(FBA_SHIP_MKTS.indexOf(CUR)<0){ alert('Create FBA Shipment covers UK, US, EU (Amazon.de) and AU.'); return; }
-  FBA_SHIP.plan=null; FBA_SHIP.err=''; FBA_SHIP.edit=false; FBA_SHIP.cancelArm=false; FBA_SHIP.pick={}; FBA_SHIP.logOpen=false;
+  FBA_SHIP.ack=false; FBA_SHIP.plan=null; FBA_SHIP.err=''; FBA_SHIP.edit=false; FBA_SHIP.cancelArm=false; FBA_SHIP.pick={}; FBA_SHIP.logOpen=false;
   var m=document.getElementById('fbaship-modal'); if(!m){ m=document.createElement('div'); m.id='fbaship-modal';
     m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto';
     m.addEventListener('click',function(e){ if(e.target===m)fbaShipClose(); }); document.body.appendChild(m); }
@@ -3408,6 +3408,13 @@ function fbaShipDraw(){
     +'<div style="display:flex;flex-wrap:wrap;gap:4px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12px">'+FBA_SHIP_STEPS.map(function(s,i){ var on=i===cur, done=i<cur||(p&&p.stage==='done');
       return '<span style="padding:3px 10px;border-radius:99px;'+(on&&!(p&&p.stage==='done')?'background:var(--nav);color:#fff;font-weight:700':done?'background:var(--pos-bg);color:var(--pos);font-weight:600':'color:var(--muted)')+'">'+(done?'✓ ':(i+1)+' ')+s[0]+'</span>'+(i<4?'<span class="mut">─</span>':''); }).join('')+'</div>'
     +'<div style="padding:14px 16px;font-size:12px;max-height:62vh;overflow:auto">';
+  // v28.499 (Ben 26-Oct-26): trial disclaimer before the process, then a reminder line on every step
+  var FBA_SHIP_TRIAL='This process is currently under trial. Proceed with caution and check the data in Amazon at each phase.';
+  if(!FBA_SHIP.ack){ m.innerHTML=h+'<div style="border:1px solid var(--amber);background:var(--amber-bg);color:var(--amber);border-radius:10px;padding:16px 18px">'
+      +'<div style="font-size:15px;font-weight:800;margin-bottom:6px">⚠ Trial</div><div style="font-size:13px;color:var(--ink);line-height:1.5">'+FBA_SHIP_TRIAL+'</div></div>'
+      +'<div style="display:flex;gap:8px;margin-top:14px">'+btn('ack','I understand, continue','go')+btn('close','Cancel','')+'</div></div></div>';
+    m.querySelectorAll('[data-fs]').forEach(function(b){ b.onclick=function(){ if(b.dataset.fs==='ack'){ FBA_SHIP.ack=true; fbaShipDraw(); } else fbaShipClose(); }; }); return; }
+  h+='<div style="font-size:11px;color:var(--amber);margin-bottom:8px">⚠ '+FBA_SHIP_TRIAL+'</div>';
   if(FBA_SHIP.err||(p&&p.error))h+='<div style="background:var(--neg-bg);color:var(--neg);border:1px solid var(--neg);border-radius:8px;padding:8px 10px;margin-bottom:10px;white-space:pre-wrap"><b>Amazon / HORIZON said:</b> '+E(FBA_SHIP.err||p.error)+'</div>';
   if(!p){   // ① Review
     var rows=fbaShipRows(), units=rows.reduce(function(a,r){return a+r.qty;},0), uom=CUR==='US'?['in','lb']:['cm','kg'];
@@ -5015,7 +5022,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     </span>
     <button type="button" id="fba-dl-btn" onclick="BP.downloadFbaTransfer('fba')" title="Download ticked rows as an Amazon FBA Transfer Upload workbook (.xlsx)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--pos);border-radius:3px;background:var(--pos-bg);color:var(--pos);cursor:pointer;font-weight:600">&#8681; FBA Transfer Upload</button>
     <button type="button" id="fba-dl-awd-btn" onclick="BP.downloadFbaTransfer('awd')" title="US only — download ticked rows in the Amazon AWD upload format (.xlsx): no lot code, adds Palletized? / Boxes Per Pallet / Number of pallets" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--violet);border-radius:3px;background:var(--violet-bg);color:var(--violet);cursor:pointer;font-weight:600">&#8681; AWD Transfer Upload (US)</button>
-    <button type="button" id="fba-create-btn" onclick="BP.fbaShipOpen()" title="Create the shipment directly in Amazon (UK, US, EU = Amazon.de, AU): draft plan, then placement, transport and labels, or finish in Seller Central. Admin only while on test." style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--amber);border-radius:3px;background:var(--amber-bg);color:var(--amber);cursor:pointer;font-weight:600">Create FBA Shipment</button>
+    <button type="button" id="fba-create-btn" onclick="BP.fbaShipOpen()" title="Create the shipment directly in Amazon (UK, US, EU = Amazon.de, AU): draft plan, then placement, transport and labels, or finish in Seller Central. Trial: check the data in Amazon at each phase." style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--amber);border-radius:3px;background:var(--amber-bg);color:var(--amber);cursor:pointer;font-weight:600">Create FBA Shipment</button>
     <span id="fba-sel-summary" style="display:none;align-items:center;gap:4px;font-size:11px;padding:3px 12px;background:var(--amber-bg);border:1px solid #fde047;border-radius:5px;color:var(--amber)"></span>
   </div>
   <!-- Settings panel: shown when ⚙ Settings is clicked. Keeps the original input IDs so BP.render() keeps reading from them. -->

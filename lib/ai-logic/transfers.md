@@ -73,12 +73,12 @@ fingerprints:
   server.mjs::fbaInflightExcludedCodes: 7089bef268c5
   server.mjs::/api/supply/fba-transfers/list: d968d218b3ca
   server.mjs::/api/cron/fba-inflight-refresh: 7732e28433a0
-  artifact_v16.7.html::fbaShipRows: 1d9702940fa4
-  artifact_v16.7.html::fbaShipOpen: cdde900468a4
+  artifact_v16.7.html::fbaShipRows: f961e5d3fd6c
+  artifact_v16.7.html::fbaShipOpen: 52e534981193
   server.mjs::fbaIbAdvance: cd651007ffb8
   server.mjs::fbaIbCall: f3bb7a0ac121
   server.mjs::/api/supply/fba-inbound/ship-from: 9df48c98555e
-verified_version: v28.498
+verified_version: v28.499
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -144,7 +144,7 @@ verified_version: v28.498
 - FBA Transfer Upload file layout follows Amazon's Send-to-Amazon template per region: UK/EU = SKU, Quantity, Expiration date, Manufacturing lot code, case-pack columns (cm/kg); AU = SKU, Quantity, Prep owner, Labeling owner, Expiration date, case-pack columns (cm/kg), no lot code; US/CA = imperial (in/lb). Default prep and labeling owner = Seller; per-row owners and dates left blank. Case-pack columns filled only when quantity is a whole number of cartons. (source: downloadFbaTransfer)
 
 ## Create FBA Shipment (v28.498, Ben 26-Oct-26)
-- Button on BUY & MOVE > FBA for UK, US, EU (always Amazon.de, from iFulfillment Bocholt) and AU; admin only while on test. It sends the SAME ticked rows and quantities as FBA Transfer Upload (fbaTransferEff, case pack, carton dims: UK/EU/AU cm/kg, US in/lb; UK/EU SKU alias such as the trailing dot) to Amazon's Fulfillment Inbound API (2024-03-20). Prep and label owner = Seller; an SKU Amazon says needs no prep / label is switched to NONE and the plan created again. (source: fbaShipRows, fbaShipOpen, fbaIbAdvance)
+- Button on BUY & MOVE > FBA for UK, US, EU (always Amazon.de, from iFulfillment Bocholt) and AU; anyone with SUPPLY edit (v28.499, Ben). Opening it first shows a trial disclaimer ("This process is currently under trial. Proceed with caution and check the data in Amazon at each phase.") that must be accepted every time, and the same line stays at the top of every step. It sends the SAME ticked rows and quantities as FBA Transfer Upload (fbaTransferEff, case pack, carton dims: UK/EU/AU cm/kg, US in/lb; UK/EU SKU alias such as the trailing dot) to Amazon's Fulfillment Inbound API (2024-03-20). Prep and label owner = Seller; an SKU Amazon says needs no prep / label is switched to NONE and the plan created again. (source: fbaShipRows, fbaShipOpen, fbaIbAdvance)
 - HORIZON holds no Amazon keys: every call goes to the n8n proxy webhook (horizon-spapi-inbound, x-webhook-secret = N8N_WEBHOOK_SECRET), which only allows the inbound plan / operation paths and v0 box labels and calls "Amazon SP-API | 00 Core request". (source: fbaIbCall)
 - Ship-from = planner.fba_ship_from: the market's 3PL by default, or any other saved address (e.g. the local Flexport warehouse when a PO ships direct from China). Amazon needs a phone number; the plan cannot be created without one. (source: /api/supply/fba-inbound/ship-from)
 - One planner.fba_inbound_plans row per shipment, moved one Amazon step per POST /api/supply/fba-inbound/plans/:id/advance (async operations polled up to 20 s, the page calls again until a step needs a person):
