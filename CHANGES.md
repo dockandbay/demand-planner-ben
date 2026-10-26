@@ -1,3 +1,9 @@
+## v28.508 (27-Oct-26) Client emails: replies go to the client's sales mailbox (clientportal@ does not exist)
+- Ben: "we dont have an email clientportal@". Since v28.295 every client email had reply-to clientportal@, so client replies were bouncing.
+- Every email to a client now has reply-to = that client's owner mailbox (sales-uk@ / sales-us@ / sales-eu@ / keyaccounts@, v28.502): portal sign-in link, order / sample confirmation, "Dock & Bay replied", commission statement (owner of the agent's client account), notices (per recipient). ops@ only when there is no owner. From is unchanged.
+- sendResendEmail takes an explicit `reply`; sendResendBatch takes {email, reply} per recipient. CLIENT ▸ Notices hint updated. No migration, no new env. EMAIL_REPLY_TO_CLIENT still overrides the ops@ fallback only.
+- Sandbox check with a stub in place of Resend (nothing sent): notice to 5 users = sales-us@ / sales-eu@ x3 / keyaccounts@ by client; sign-in link to an Ideco user = sales-eu@.
+
 ## v28.507 (27-Oct-26) CLIENT ▸ Notices: link is a page picker
 - Ben: "should be a selection of pages option or hard coding. users wont know the page structure". The Link box is now a "Link to" dropdown: No link, Catalogue / line sheet, Image gallery, New order, My orders, Messages, Commission, All notices, or "A web address…" (only then the https:// box shows). Editing a notice preselects its page.
 - A client without that page (e.g. images not enabled) lands on Home, as before. Sandbox check in jsdom: options, preselect, web box toggles, saved #/images.

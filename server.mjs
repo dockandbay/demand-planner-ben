@@ -13746,19 +13746,23 @@ async function logEmail(m) {
 //   admin (team, internal, partners) = horizon@ · supplier portal (anything sent to suppliers) = supplierportal@ · client portal = clientportal@
 // Reply-to switches straight away. The From address only switches once EMAIL_FROM_ADMIN / _SUPPLIER / _CLIENT are set (dockandbay.com must be
 // verified in Resend first); until then it stays PORTAL_FROM. EMAIL_REPLY_TO_ADMIN / _SUPPLIER / _CLIENT override the reply-to defaults.
-const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com' }, supplier: { reply: 'supplierportal@dockandbay.com' }, client: { reply: 'clientportal@dockandbay.com' } };
+// v28.508 (Ben 27-Oct-26: "we dont have an email clientportal@"): client email replies go to the client's owner mailbox (sales-uk@ / sales-us@ /
+// sales-eu@ / keyaccounts@, v28.502) via the `reply` argument; ops@ only when the email is not about one client (or it has no owner).
+const EMAIL_CHANNELS = { admin: { reply: 'horizon@dockandbay.com' }, supplier: { reply: 'supplierportal@dockandbay.com' }, client: { reply: 'ops@dockandbay.com' } };
+const emailOk = e => /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/.test(String(e || '').trim());
 function emailSender(channel) {
   const ch = EMAIL_CHANNELS[channel] ? channel : 'admin', K = ch.toUpperCase();
   return { from: (process.env['EMAIL_FROM_' + K] || process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>').trim(),
     reply_to: (process.env['EMAIL_REPLY_TO_' + K] || EMAIL_CHANNELS[ch].reply).trim() };
 }
-async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel }) {
+async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments, channel, reply }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
   if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject + ((attachments && attachments.length) ? ' [+' + attachments.length + ' attachment]' : '')); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   try {
     const payload = { ...emailSender(channel), to: list, subject, html };   // v28.295: channel = admin (default) | supplier | client
+    if (emailOk(reply)) payload.reply_to = String(reply).trim();   // v28.508: explicit reply-to (client owner mailbox)
     if (cclist.length) payload.cc = cclist;
     // v28.137/v28.295: reply-to is the channel's ops@ alias (emailSender), set in the payload above. Was the person who triggered the email (replyTo
     // arg: submitter / escalator / supplier) — callers still pass it; it is now ignored.
@@ -13773,14 +13777,15 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, 
   } catch (e) { console.error('[email] Resend failed:', e.message); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: e.message }); return { sent: 0, error: e.message }; }
 }
 // v28.506: one email per recipient (nobody sees anyone else's address) through Resend's batch endpoint, 100 per call, one log row per call.
-async function sendResendBatch(list, subject, html, { kind, ref, by, channel }) {
-  const to = [...new Set(list)]; if (!to.length) return { sent: 0 };
+async function sendResendBatch(list, subject, html, { kind, ref, by, channel }) {   // list: emails, or {email, reply} (v28.508: reply-to per recipient)
+  const seen = new Set(), items = list.map(x => typeof x === 'string' ? { email: x } : x).filter(x => x && x.email && !seen.has(x.email) && seen.add(x.email));
+  const to = items.map(x => x.email); if (!to.length) return { sent: 0 };
   if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY, would email ' + to.length + ' recipient(s) one by one :: ' + subject); logEmail({ recipients: to.join(', '), subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   const snd = emailSender(channel); let sent = 0, error = null;
-  for (let i = 0; i < to.length; i += 100) { const chunk = to.slice(i, i + 100);
+  for (let i = 0; i < to.length; i += 100) { const chunk = to.slice(i, i + 100), its = items.slice(i, i + 100);
     try { const resp = await _fetchT('https://api.resend.com/emails/batch', { method: 'POST',
         headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(chunk.map(e => ({ ...snd, to: [e], subject, html }))) });
+        body: JSON.stringify(its.map(x => ({ ...snd, ...(emailOk(x.reply) ? { reply_to: x.reply } : {}), to: [x.email], subject, html }))) });
       if (!resp.ok) { const t = await resp.text().catch(() => ''); error = 'resend ' + resp.status; console.error('[email] Resend batch error ' + resp.status + ': ' + t.slice(0, 200)); logEmail({ recipients: chunk.join(', '), subject, kind, ref, by, status: 'error', error }); break; }
       sent += chunk.length; logEmail({ recipients: chunk.join(', '), subject, kind, ref, by, status: 'sent' });
     } catch (e) { error = e.message; logEmail({ recipients: chunk.join(', '), subject, kind, ref, by, status: 'error', error }); break; }
@@ -29426,7 +29431,8 @@ app.post('/api/client/users/:uid/delete', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 async function cpSendLink(email, url, clientName) {
-  await sendResendEmail({ channel: 'client', kind: 'client-magic-link', ref: email, to: email, subject: 'Your Dock & Bay client portal link',
+  const own = (await pool.query(`SELECT c.owner_email FROM planner.client_users u JOIN planner.clients c ON c.id=u.client_id WHERE lower(u.email)=lower($1) ORDER BY u.active DESC LIMIT 1`, [email]).catch(() => ({ rows: [] }))).rows[0];
+  await sendResendEmail({ channel: 'client', reply: own && own.owner_email, kind: 'client-magic-link', ref: email, to: email, subject: 'Your Dock & Bay client portal link',
     html: `<p>Hi,</p><p>Here is your link to the Dock &amp; Bay client portal${clientName ? ' for <b>' + clientName + '</b>' : ''} (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
 app.post('/api/client/users/:uid/invite', async (req, res) => {
@@ -30611,8 +30617,9 @@ const CP_SETTINGS = ['cp_import_channels', 'cp_sales_import_enabled', 'cp_cutove
 const CP_REVIEW_MODES = ['inherit', 'review', 'auto'];   // v28.227 clients.order_review
 // ── v28.506 client notices, staff side (CLIENT ▸ Notices). Reach = active clients matching the audience and their active portal users. ──
 async function cpNoticeReach(aud) {
-  const cs = (await pool.query(`SELECT id, name, market, type FROM planner.clients WHERE active`)).rows.filter(c => cpNoticeFor({ audience: aud }, c));
-  const us = cs.length ? (await pool.query(`SELECT id, email, client_id FROM planner.client_users WHERE active AND client_id = ANY($1::int[])`, [cs.map(c => c.id)])).rows : [];
+  const cs = (await pool.query(`SELECT id, name, market, type, owner_email FROM planner.clients WHERE active`)).rows.filter(c => cpNoticeFor({ audience: aud }, c));
+  const own = Object.fromEntries(cs.map(c => [c.id, c.owner_email]));
+  const us = cs.length ? (await pool.query(`SELECT id, email, client_id FROM planner.client_users WHERE active AND client_id = ANY($1::int[])`, [cs.map(c => c.id)])).rows.map(u => ({ ...u, owner_email: own[u.client_id] || null })) : [];
   return { clients: cs, users: us };
 }
 const _cpFd = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '')); return m ? m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2] - 1] + '-' + m[1].slice(2) : ''; };
@@ -30621,7 +30628,7 @@ async function cpNoticeEmail(id, req, by, again) {
   if (!n) return { error: 'notice not found' };
   if (n.archived) return { error: 'archived notices are not emailed' };
   if (n.emailed_at && !again) return { skipped: 'already emailed' };
-  const to = [...new Set((await cpNoticeReach(n.audience)).users.map(u => String(u.email || '').trim().toLowerCase()).filter(e => /^[^@\s]+@[^@\s]+$/.test(e)))];
+  const to = (await cpNoticeReach(n.audience)).users.map(u => ({ email: String(u.email || '').trim().toLowerCase(), reply: u.owner_email })).filter(x => emailOk(x.email));   // reply-to = each client's owner mailbox
   if (!to.length) return { recipients: 0, sent: 0 };
   const E = escHtml, base = cpBase(req), link = n.link_url ? (/^#\//.test(n.link_url) ? base + '/client' + n.link_url : n.link_url) : '';
   const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#101828;max-width:600px;font-size:15px;line-height:1.5">`
@@ -31983,7 +31990,7 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
     // agent to check (they reply by email); Approved sends the final one. A draft run sends nothing.
     if (p.run.status === 'open') return res.status(409).json({ error: 'Finalise the run first: the draft statement is sent from review, the final one once approved.' });
     const draft = p.run.status === 'finalised';
-    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
+    const g = (await pool.query(`SELECT name, to_jsonb(g)->>'statement_email' email, (SELECT c.owner_email FROM planner.clients c WHERE c.rep_group_id=g.id AND coalesce(c.owner_email,'')<>'' ORDER BY c.active DESC, c.id LIMIT 1) owner_email FROM planner.rep_groups g WHERE id=$1`, [p.run.rep_group_id])).rows[0] || {};
     const to = String((req.body && req.body.to) || g.email || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /@/.test(x));
     if (!to.length) return res.status(400).json({ error: 'No statement email for ' + (g.name || 'this agent') + ': set "Statement to" on the agent (CLIENT ▸ Clients ▸ ' + (g.name || 'agent') + ' ▸ Commission).' });
     const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], ml = M[+p.run.month.slice(5, 7) - 1] + '-' + p.run.month.slice(2, 4);
@@ -31992,7 +31999,7 @@ app.post('/api/client/commission/runs/:id/email-statement', async (req, res) => 
         : '<p>Please find attached your Dock &amp; Bay commission statement for <b>' + ml + '</b>: <b>' + p.run.ccy + ' ' + money(p.total) + '</b> on ' + p.rows + ' payment' + (p.rows === 1 ? '' : 's') + '.</p>')
       + '<p>Commission is on cash received in the month for shipped orders, on product sales ex tax and ex shipping. Credit notes in the month reduce it.</p>'
       + (p.run.xero_bill_ref ? '<p>Our reference: ' + p.run.xero_bill_ref + '</p>' : '') + '<p>Kind regards,<br>Dock &amp; Bay</p>';
-    const r = await sendResendEmail({ to, subject: (draft ? 'DRAFT for review: ' : '') + 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
+    const r = await sendResendEmail({ to, subject: (draft ? 'DRAFT for review: ' : '') + 'Dock & Bay commission statement ' + ml + ' · ' + g.name, html, kind: draft ? 'commission_statement_draft' : 'commission_statement', ref: 'run ' + p.run.id, by: req.me && req.me.email, channel: 'client', reply: g.owner_email, attachments: [{ filename: p.filename, content: p.buf.toString('base64') }, { filename: xl.filename, content: xl.buf.toString('base64') }] });   // v28.467: + the xlsx
     if (!r || !r.sent) return res.status(502).json({ error: 'Email not sent: ' + ((r && r.error) || 'email service not configured (RESEND_API_KEY)') });
     try { await pool.query(`UPDATE planner.commission_runs SET ${draft ? 'draft_sent_at=now(), draft_sent_to=$2, draft_sent_by=$3' : 'statement_sent_at=now(), statement_sent_to=$2, statement_sent_by=$3'} WHERE id=$1`, [p.run.id, to.join(', '), req.me && req.me.email]); }
     catch (e) { if (!/does not exist/.test(e.message)) throw e; }   // before migration 384 the draft send is only in the audit log
@@ -32150,14 +32157,14 @@ app.get('/api/client/attachment/:id', async (req, res) => {
 });
 async function cpNotifyClientMessage(threadId, req) {   // email the client's active users that Dock & Bay replied (best-effort)
   try { const has = await cpHas336();
-    const t = (await pool.query(`SELECT t.subject, t.client_id, c.name, c.visibility${has ? `, t.order_key, t.order_ref, ${CP_OKEY_SQL} okey` : ''} FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [threadId])).rows[0]; if (!t) return;
+    const t = (await pool.query(`SELECT t.subject, t.client_id, c.name, c.owner_email, c.visibility${has ? `, t.order_key, t.order_ref, ${CP_OKEY_SQL} okey` : ''} FROM planner.client_threads t JOIN planner.clients c ON c.id=t.client_id WHERE t.id=$1`, [threadId])).rows[0]; if (!t) return;
     let users = (await pool.query(`SELECT id, email, scope FROM planner.client_users WHERE client_id=$1 AND active`, [t.client_id])).rows;
     // v28.200 (Ben): an order thread only emails the users who can see that order (scope 'self' = their own orders only)
     if (t.order_key) { const cl = { id: t.client_id, visibility: t.visibility || {} }; const keep = [];
       for (const u of users) { if ((await cpAllowedOrderKeys(cl, u, [t.order_key, t.okey])).size) keep.push(u); } users = keep; }
     const to = users.map(u => u.email); if (!to.length) return;
     const link = t.order_key ? cpBase(req) + '/client#/orders/' + encodeURIComponent(cpOkeyToPortalId(t.okey || t.order_key)) : cpBase(req) + '/client#/messages/' + threadId;
-    await sendResendEmail({ channel: 'client', kind: 'client-message', ref: String(threadId), to, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${escHtml(t.subject || 'your message')}</b> in the client portal.</p><p><a href="${escHtml(link)}">Open the conversation</a></p>` }); } catch (e) {}
+    await sendResendEmail({ channel: 'client', reply: t.owner_email, kind: 'client-message', ref: String(threadId), to, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${escHtml(t.subject || 'your message')}</b> in the client portal.</p><p><a href="${escHtml(link)}">Open the conversation</a></p>` }); } catch (e) {}
 }
 async function cpNotifyOpsMessage(threadId, client, req) {
   try { const to = client.owner_email ? [client.owner_email] : String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean);   // v28.502: owner mailbox only; global list only when no owner
@@ -32760,7 +32767,7 @@ app.post('/api/cp/order', cpAuth, async (req, res) => {
     const lineHtml = '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="right">Qty</th><th align="right">Cartons</th><th align="right">Price</th><th align="left">Flags</th></tr>' + lines.map(l => `<tr><td>${E(l.sku)}</td><td align="right">${E(l.qty)}</td><td align="right">${l.cartons == null ? '' : E(l.cartons)}</td><td align="right">${l.price == null ? '' : E(l.price.toFixed(2))}</td><td>${E(l.flags.join(', '))}</td></tr>`).join('') + '</table>';
     const toClient = String(await cpSetting('cp_client_confirm_email', 'true')) !== 'false';
     const to = toClient ? req.cp.user.email : team; const cc = toClient ? team.filter(x => x.toLowerCase() !== String(req.cp.user.email).toLowerCase()) : [];
-    if ((Array.isArray(to) ? to.length : to)) await sendResendEmail({ channel: 'client', kind: 'client-order-confirm', ref: String(o.id), to, cc, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id + (b.customer_po ? ' (PO ' + String(b.customer_po).trim() + ')' : '') + ' · ' + c.name,
+    if ((Array.isArray(to) ? to.length : to)) await sendResendEmail({ channel: 'client', reply: c.owner_email, kind: 'client-order-confirm', ref: String(o.id), to, cc, subject: 'Dock & Bay — we received your ' + (type === 'sample' ? 'sample request' : 'order') + ' #' + o.id + (b.customer_po ? ' (PO ' + String(b.customer_po).trim() + ')' : '') + ' · ' + c.name,
       html: `<p>Hi ${E(req.cp.user.name || '')},</p><p>Thanks, we have received your ${type === 'sample' ? 'sample request' : 'order'} <b>#${o.id}</b>${b.customer_po ? ' (your PO ' + E(b.customer_po) + ')' : ''} for <b>${E(c.name)}</b>. Our team will review and confirm it shortly.</p><p>${units} units${type === 'sample' ? '' : ' · ' + E(c.currency) + ' ' + total.toFixed(2) + ' ex shipping'}${b.requested_date ? ' · requested ' + E(b.requested_date) : ''}</p>${lineHtml}${b.notes ? '<p>Notes: ' + E(b.notes) + '</p>' : ''}<p><a href="${E(base)}/client#/orders">View your orders</a></p>` });
     if (auto && !fulfil.ok && team.length) await sendResendEmail({ kind: 'client-order', ref: String(o.id), to: team, subject: 'Client order #' + o.id + ' from ' + c.name + ' — auto-post to Fulfil failed', html: `<p>The Fulfil draft for portal order <b>#${o.id}</b> (${E(c.name)}) was not created: ${E(fulfil.reason)}.</p><p><a href="${E(adminBase(req))}/#/client/orders">Review and push it in HORIZON ▸ CLIENT ▸ Orders</a></p>` });
     res.json({ ok: true, id: o.id, status, fulfil, units, total, lines });
