@@ -21296,6 +21296,301 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
 });
 // Serve the in-flight (not-yet-inbound) FBA transfers for the FBA tab + last-run stamp. Only rows whose
 // reference isn't already in inbound_shipments (defensive — the refresh also prunes them).
+// ── v28.498 (Ben 26-Oct-26): Create FBA Shipment (BUY & MOVE ▸ FBA) ─────────────────────────────────────────────────────────
+// Amazon Fulfillment Inbound API v2024-03-20 through n8n: n8n holds the SP-API keys. HORIZON posts {region, method, path, query, body}
+// to the n8n proxy webhook (x-webhook-secret); n8n allows only the inbound paths and calls 'Amazon SP-API | 00 Core request'.
+// One planner.fba_inbound_plans row per shipment (migration 389), moved one Amazon step per POST .../advance (each async operation is
+// polled up to ~20 s; if still running the client simply calls again):
+//   new → plan created → packing option generated + confirmed → box contents sent → draft_ready   (Phase 1: stop here and finish in
+//   Seller Central, or continue) → placement generated → placement_choose (user picks; fees shown) → placement confirmed →
+//   transport generated (ready date) → transport_choose (user picks per shipment) → delivery windows (own carrier) → transport
+//   confirmed → labels → done.  Cancel any time (cancelInboundPlan). Prep + label owner = Seller (Ben). Admin only while on test.
+// Markets: UK, US, AU and EU (EU always ships to Amazon.de, Ben). Ship-from = planner.fba_ship_from (3PL default per market, or any
+// other address, e.g. the local Flexport warehouse in China for direct-from-China shipments).
+const FBA_IB_MKT = {
+  UK: { mp: 'A1F83G8C2ARO7P', region: 'EU', sc: 'sellercentral.amazon.co.uk', metric: true, page: 'PackageLabel_A4_4' },
+  EU: { mp: 'A1PA6795UKMFR9', region: 'EU', sc: 'sellercentral.amazon.de', metric: true, page: 'PackageLabel_A4_4' },
+  US: { mp: 'ATVPDKIKX0DER', region: 'NA', sc: 'sellercentral.amazon.com', metric: false, page: 'PackageLabel_Letter_6' },
+  AU: { mp: 'A39IBJ37TRP1C6', region: 'AU', sc: 'sellercentral.amazon.com.au', metric: true, page: 'PackageLabel_A4_4' },
+};
+const FBA_IB_BASE = '/inbound/fba/2024-03-20';
+const FBA_IB_USER_STAGES = ['draft_ready', 'placement_choose', 'placement_confirmed', 'transport_choose', 'done', 'cancelled'];
+const fbaIbUrl = () => process.env.N8N_SPAPI_INBOUND_URL || 'https://n8n.dockandbay.com/webhook/horizon-spapi-inbound';
+async function fbaIbCall(region, method, path, query, body) {
+  const secret = process.env.N8N_WEBHOOK_SECRET;
+  if (!secret) { const e = new Error('N8N_WEBHOOK_SECRET is not set: HORIZON cannot reach the n8n Amazon proxy'); e.code = 503; throw e; }
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 60000);
+  try {
+    const r = await fetch(fbaIbUrl(), { method: 'POST', headers: { 'content-type': 'application/json', 'x-webhook-secret': secret },
+      body: JSON.stringify({ region, method, path, query: query || {}, body: body || {} }), signal: ctl.signal });
+    const txt = await r.text(); let j = null; try { j = JSON.parse(txt); } catch (_) {}
+    if (!r.ok || !j) { const e = new Error('n8n Amazon proxy ' + r.status + (r.status === 404 ? ' (is the n8n proxy workflow Active?)' : '') + ': ' + txt.slice(0, 300)); e.code = 502; throw e; }
+    return j;   // { ok, error, response }
+  } finally { clearTimeout(t); }
+}
+// Amazon / n8n error → readable text (Amazon: {errors:[{code,message,details}]}; n8n HTTP node: {message, description})
+function fbaIbErrText(err) {
+  if (!err) return 'unknown error';
+  const pick = o => { if (!o) return ''; if (typeof o === 'string') { try { return pick(JSON.parse(o)); } catch (_) { return o; } }
+    if (Array.isArray(o.errors)) return o.errors.map(x => (x.code ? x.code + ': ' : '') + (x.message || '') + (x.details ? ' (' + x.details + ')' : '')).join(' · ');
+    return [o.message, pick(o.description)].filter(Boolean).join(' · ') || JSON.stringify(o).slice(0, 400); };
+  return pick(err).slice(0, 1500);
+}
+async function fbaIbReq(p, method, path, query, body, what) {
+  const j = await fbaIbCall(p.region, method, path, query, body);
+  if (!j.ok) { const e = new Error((what || path) + ': ' + fbaIbErrText(j.error)); e.amazon = true; throw e; }
+  return j.response || {};
+}
+async function fbaIbWaitOp(p, opId, budgetMs) {
+  const end = Date.now() + budgetMs;
+  for (;;) {
+    const r = await fbaIbReq(p, 'GET', FBA_IB_BASE + '/operations/' + encodeURIComponent(opId), null, null, 'operation status');
+    if (r.operationStatus === 'SUCCESS') return { done: true };
+    if (r.operationStatus === 'FAILED') return { done: true, failed: (r.operationProblems || []).map(x => (x.severity ? x.severity + ' ' : '') + (x.code || '') + ': ' + (x.message || '') + (x.details ? ' (' + x.details + ')' : '')).join(' · ') || 'Amazon operation failed' };
+    if (Date.now() > end) return { done: false };
+    await new Promise(r2 => setTimeout(r2, 2500));
+  }
+}
+const FBA_IB_COLS = `id, market, ship_from_code, marketplace_id, region, name, stage, op_id, op_next, inbound_plan_id, items, loose, ship_from, packing_option_id,
+  packing_groups, placement_options, placement_option_id, shipments, transport_options, transport, labels, error, log, created_by,
+  to_char(created_at,'YYYY-MM-DD"T"HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD"T"HH24:MI') updated_at`;
+async function fbaIbGet(id) { return (await pool.query(`SELECT ${FBA_IB_COLS} FROM planner.fba_inbound_plans WHERE id=$1`, [id])).rows[0] || null; }
+const FBA_IB_JSON = ['items', 'ship_from', 'packing_groups', 'placement_options', 'shipments', 'transport_options', 'transport', 'labels'];
+async function fbaIbSave(p, f, msg) {   // f = fields to set; msg = one log line
+  Object.assign(p, f); const keys = Object.keys(f), vals = keys.map(k => (FBA_IB_JSON.includes(k) && f[k] != null ? JSON.stringify(f[k]) : f[k]));
+  const sets = keys.map((k, i) => k + '=$' + (i + 2) + (FBA_IB_JSON.includes(k) ? '::jsonb' : ''));
+  const logEntry = msg ? JSON.stringify([{ at: new Date().toISOString().slice(0, 19), msg: String(msg).slice(0, 1500) }]) : '[]';
+  await pool.query(`UPDATE planner.fba_inbound_plans SET ${sets.concat(['log = (log || $' + (keys.length + 2) + '::jsonb)', 'updated_at=now()']).join(', ')} WHERE id=$1`, [p.id].concat(vals, [logEntry]));
+  if (msg) p.log = (p.log || []).concat(JSON.parse(logEntry));
+}
+async function fbaIbStartOp(p, r, next, msg, extra) {   // r = Amazon response holding operationId
+  if (!r.operationId) throw new Error('Amazon gave no operationId for: ' + msg);
+  await fbaIbSave(p, Object.assign({ op_id: r.operationId, op_next: next, error: null }, extra || {}), msg + ' (operation ' + r.operationId + ')');
+}
+const fbaIbPlanPath = p => FBA_IB_BASE + '/inboundPlans/' + encodeURIComponent(p.inbound_plan_id);
+// Prep / label owner problems name the msku: switch those items to NONE and recreate (Amazon rejects SELLER for items that need no prep)
+function fbaIbOwnerFix(p, text) {
+  const t = String(text || ''), low = t.toLowerCase(); let changed = false;
+  (p.items || []).forEach(it => {
+    if (t.indexOf(it.msku) < 0) return;
+    if (/prep/.test(low) && it.prepOwner !== 'NONE' && /none/.test(low)) { it.prepOwner = 'NONE'; changed = true; }
+    if (/label/.test(low) && it.labelOwner !== 'NONE' && /none/.test(low)) { it.labelOwner = 'NONE'; changed = true; }
+  });
+  return changed;
+}
+async function fbaIbAdvance(p, action, body, me) {
+  const P = fbaIbPlanPath;
+  if (action === 'cancel') {
+    if (p.stage === 'done' && (p.shipments || []).some(s => s.shipped)) throw new Error('Shipped shipments cannot be cancelled here');
+    if (!p.inbound_plan_id) return fbaIbSave(p, { stage: 'cancelled', op_id: null, op_next: null, error: null }, 'Cancelled in HORIZON (no Amazon plan yet) by ' + me);
+    const r = await fbaIbReq(p, 'PUT', P(p) + '/cancellation', null, {}, 'cancel plan');
+    return fbaIbStartOp(p, r, 'cancelled', 'Cancel requested by ' + me);
+  }
+  if (p.op_id) {   // an Amazon operation is running: poll it
+    const w = await fbaIbWaitOp(p, p.op_id, 20000);
+    if (!w.done) return;
+    if (w.failed) {
+      if (p.op_next === 'created' && fbaIbOwnerFix(p, w.failed)) {
+        return fbaIbSave(p, { stage: 'new', op_id: null, op_next: null, inbound_plan_id: null, items: p.items, error: null }, 'Amazon refused prep / label owner for some SKUs: set to NONE and creating again. ' + w.failed);
+      }
+      return fbaIbSave(p, { op_id: null, op_next: null, error: w.failed }, 'FAILED: ' + w.failed);
+    }
+    return fbaIbSave(p, { stage: p.op_next, op_id: null, op_next: null, error: null }, 'Done: ' + p.op_next);
+  }
+  const st = p.stage;
+  if (st === 'new') {
+    const sf = p.ship_from || {};
+    const r = await fbaIbReq(p, 'POST', FBA_IB_BASE + '/inboundPlans', null, {
+      name: p.name, destinationMarketplaces: [p.marketplace_id],
+      sourceAddress: { name: sf.name, companyName: sf.company_name || undefined, addressLine1: sf.address_line1, addressLine2: sf.address_line2 || undefined, city: sf.city,
+        stateOrProvinceCode: sf.state_code || undefined, postalCode: sf.postal_code, countryCode: sf.country_code, phoneNumber: sf.phone, email: sf.email || undefined },
+      items: p.items.map(i => ({ msku: i.msku, quantity: i.qty, prepOwner: i.prepOwner || 'SELLER', labelOwner: i.labelOwner || 'SELLER' })),
+    }, 'create inbound plan');
+    return fbaIbStartOp(p, r, 'created', 'Plan created by ' + me + ': ' + r.inboundPlanId, { inbound_plan_id: r.inboundPlanId });
+  }
+  if (st === 'created') { const r = await fbaIbReq(p, 'POST', P(p) + '/packingOptions', null, {}, 'generate packing options'); return fbaIbStartOp(p, r, 'packing_generated', 'Packing options requested'); }
+  if (st === 'packing_generated') {
+    const r = await fbaIbReq(p, 'GET', P(p) + '/packingOptions', { pageSize: 20 }, null, 'list packing options');
+    const opts = (r.packingOptions || []).filter(o => o.status === 'OFFERED' || !o.status).sort((a, b) => (a.packingGroups || []).length - (b.packingGroups || []).length);
+    if (!opts.length) throw new Error('Amazon offered no packing option');
+    const o = opts[0];
+    const c = await fbaIbReq(p, 'POST', P(p) + '/packingOptions/' + encodeURIComponent(o.packingOptionId) + '/confirmation', null, {}, 'confirm packing option');
+    return fbaIbStartOp(p, c, 'packing_confirmed', 'Packing option ' + o.packingOptionId + ' confirmed (' + (o.packingGroups || []).length + ' group' + ((o.packingGroups || []).length === 1 ? '' : 's') + ' of ' + opts.length + ' offered)', { packing_option_id: o.packingOptionId, packing_groups: o.packingGroups || [] });
+  }
+  if (st === 'packing_confirmed') {
+    if (p.loose) return fbaIbSave(p, { stage: 'draft_ready' }, 'Some SKUs are not in full cartons: box contents to be entered in Seller Central');
+    const metric = FBA_IB_MKT[p.market].metric, groups = [];
+    for (const gid of (p.packing_groups || [])) {
+      const gi = await fbaIbReq(p, 'GET', P(p) + '/packingGroups/' + encodeURIComponent(gid) + '/items', { pageSize: 100 }, null, 'packing group items');
+      groups.push({ gid, mskus: new Set((gi.items || []).map(x => x.msku)) });
+    }
+    const used = new Set(), pkg = groups.map(g => ({ packingGroupId: g.gid, boxes: p.items.filter(i => g.mskus.has(i.msku)).map(i => { used.add(i.msku); return {
+      contentInformationSource: 'BOX_CONTENT_PROVIDED', quantity: i.boxes,
+      dimensions: { length: i.dims[0], width: i.dims[1], height: i.dims[2], unitOfMeasurement: metric ? 'CM' : 'IN' },
+      weight: { value: i.wt, unit: metric ? 'KG' : 'LB' },
+      items: [{ msku: i.msku, quantity: i.cp, prepOwner: i.prepOwner || 'SELLER', labelOwner: i.labelOwner || 'SELLER' }] }; }) })).filter(g => g.boxes.length);
+    const miss = p.items.filter(i => !used.has(i.msku)).map(i => i.msku);
+    if (miss.length) throw new Error('Amazon packing groups do not include: ' + miss.join(', '));
+    const r = await fbaIbReq(p, 'POST', P(p) + '/packingInformation', null, { packageGroupings: pkg }, 'send box contents');
+    return fbaIbStartOp(p, r, 'draft_ready', 'Box contents sent: ' + p.items.reduce((a, i) => a + i.boxes, 0) + ' boxes');
+  }
+  if (st === 'draft_ready') {
+    if (action !== 'placement') return;
+    const r = await fbaIbReq(p, 'POST', P(p) + '/placementOptions', null, {}, 'generate placement options');
+    return fbaIbStartOp(p, r, 'placement_generated', 'Continued in HORIZON by ' + me + ': placement options requested');
+  }
+  if (st === 'placement_generated') {
+    const r = await fbaIbReq(p, 'GET', P(p) + '/placementOptions', { pageSize: 20 }, null, 'list placement options');
+    const opts = (r.placementOptions || []).filter(o => o.status !== 'EXPIRED');
+    const sids = [...new Set(opts.flatMap(o => o.shipmentIds || []))], ships = {};
+    for (const sid of sids) { const s = await fbaIbReq(p, 'GET', P(p) + '/shipments/' + encodeURIComponent(sid), null, null, 'shipment');
+      const d = s.destination || {}, a = d.address || {}; ships[sid] = { shipmentId: sid, fc: d.warehouseId || '', city: a.city || '', postal: a.postalCode || '' }; }
+    return fbaIbSave(p, { stage: 'placement_choose', placement_options: opts.map(o => ({ id: o.placementOptionId, status: o.status, expiration: o.expiration,
+      fees: (o.fees || []).map(f => ({ type: f.type, target: f.target, amount: f.value && f.value.amount, ccy: f.value && f.value.code })),
+      discounts: (o.discounts || []).map(f => ({ type: f.type, amount: f.value && f.value.amount, ccy: f.value && f.value.code })),
+      shipments: (o.shipmentIds || []).map(s => ships[s] || { shipmentId: s }) })) }, opts.length + ' placement option(s) from Amazon');
+  }
+  if (st === 'placement_choose') {
+    if (action !== 'confirm_placement') return;
+    const o = (p.placement_options || []).find(x => x.id === body.placementOptionId); if (!o) throw new Error('Pick one of the placement options');
+    const r = await fbaIbReq(p, 'POST', P(p) + '/placementOptions/' + encodeURIComponent(o.id) + '/confirmation', null, {}, 'confirm placement');
+    const fee = o.fees.map(f => (f.amount != null ? f.ccy + ' ' + f.amount : '') + ' ' + (f.type || '')).join(', ');
+    return fbaIbStartOp(p, r, 'placement_confirmed', 'Placement confirmed by ' + me + ': ' + o.shipments.length + ' shipment(s) to ' + o.shipments.map(s => s.fc).join(', ') + (fee ? ' · fees ' + fee : ''),
+      { placement_option_id: o.id, shipments: o.shipments });
+  }
+  if (st === 'placement_confirmed') {
+    if (action !== 'transport') return;
+    const d = String(body.readyDate || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('Ready-to-ship date needed');
+    const r = await fbaIbReq(p, 'POST', P(p) + '/transportationOptions', null, { placementOptionId: p.placement_option_id,
+      shipmentTransportationConfigurations: (p.shipments || []).map(s => ({ shipmentId: s.shipmentId, readyToShipWindow: { start: d + 'T09:00:00Z' } })) }, 'generate transport options');
+    return fbaIbStartOp(p, r, 'transport_generated', 'Transport options requested by ' + me + ', ready ' + d, { transport: { ready_date: d } });
+  }
+  if (st === 'transport_generated') {
+    let all = [], tok = null;
+    do { const r = await fbaIbReq(p, 'GET', P(p) + '/transportationOptions', Object.assign({ placementOptionId: p.placement_option_id, pageSize: 20 }, tok ? { paginationToken: tok } : {}), null, 'list transport options');
+      all = all.concat(r.transportationOptions || []); tok = r.pagination && r.pagination.nextToken; } while (tok && all.length < 200);
+    return fbaIbSave(p, { stage: 'transport_choose', transport_options: all.map(o => ({ id: o.transportationOptionId, shipmentId: o.shipmentId, mode: o.shippingMode,
+      solution: o.shippingSolution, carrier: o.carrier && (o.carrier.name || o.carrier.alphaCode), cost: o.quote && o.quote.cost && o.quote.cost.amount,
+      ccy: o.quote && o.quote.cost && o.quote.cost.code, voidable: o.quote && o.quote.voidableUntil })) }, all.length + ' transport option(s) from Amazon');
+  }
+  if (st === 'transport_choose' && action === 'confirm_transport') {
+    const sel = body.selections || {}, t = Object.assign({}, p.transport || {}), opts = p.transport_options || [];
+    for (const s of (p.shipments || [])) { const o = opts.find(x => x.id === sel[s.shipmentId] && x.shipmentId === s.shipmentId); if (!o) throw new Error('Pick a transport option for shipment ' + (s.fc || s.shipmentId)); }
+    t.selections = sel; t.windows = {};
+    (p.shipments || []).forEach(s => { const o = opts.find(x => x.id === sel[s.shipmentId]); if (o.solution === 'USE_YOUR_OWN_CARRIER') t.windows[s.shipmentId] = 'generate'; });
+    return fbaIbSave(p, { stage: 'transport_windows', transport: t }, 'Transport picked by ' + me + ': ' + (p.shipments || []).map(s => { const o = opts.find(x => x.id === sel[s.shipmentId]); return (s.fc || s.shipmentId) + ' ' + (o.carrier || o.solution) + (o.cost != null ? ' ' + o.ccy + ' ' + o.cost : ''); }).join(', '));
+  }
+  if (st === 'transport_windows') {   // own carrier: Amazon needs a delivery window per shipment before transport is confirmed
+    const t = Object.assign({}, p.transport || {}), w = t.windows || {}, sid = Object.keys(w).find(k => w[k] !== 'done');
+    if (sid) {
+      const sp = P(p) + '/shipments/' + encodeURIComponent(sid) + '/deliveryWindowOptions';
+      if (w[sid] === 'generate') { const r = await fbaIbReq(p, 'POST', sp, null, {}, 'generate delivery windows'); w[sid] = 'pick'; t.windows = w; return fbaIbStartOp(p, r, 'transport_windows', 'Delivery windows requested for ' + sid, { transport: t }); }
+      const l = await fbaIbReq(p, 'GET', sp, { pageSize: 20 }, null, 'list delivery windows');
+      const dw = (l.deliveryWindowOptions || []).filter(x => !x.availabilityType || x.availabilityType === 'AVAILABLE').sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))[0];
+      if (!dw) throw new Error('Amazon offered no delivery window for shipment ' + sid);
+      const c = await fbaIbReq(p, 'POST', sp + '/' + encodeURIComponent(dw.deliveryWindowOptionId) + '/confirmation', null, {}, 'confirm delivery window');
+      w[sid] = 'done'; t.windows = w; return fbaIbStartOp(p, c, 'transport_windows', 'Delivery window ' + String(dw.startDate).slice(0, 10) + ' to ' + String(dw.endDate).slice(0, 10) + ' confirmed for ' + sid, { transport: t });
+    }
+    const r = await fbaIbReq(p, 'POST', P(p) + '/transportationOptions/confirmation', null, { transportationSelections: Object.entries(t.selections || {}).map(([shipmentId, transportationOptionId]) => ({ shipmentId, transportationOptionId })) }, 'confirm transport');
+    return fbaIbStartOp(p, r, 'transport_confirmed', 'Transport confirmed');
+  }
+  if (st === 'transport_confirmed' || (st === 'done' && action === 'labels')) {   // labels (Amazon's link expires, so they can be fetched again)
+    const mk = FBA_IB_MKT[p.market], ships = [], labels = [];
+    for (const s0 of (p.shipments || [])) {
+      const s = await fbaIbReq(p, 'GET', P(p) + '/shipments/' + encodeURIComponent(s0.shipmentId), null, null, 'shipment');
+      const conf = s.shipmentConfirmationId || s0.confirmationId || '';
+      const bx = await fbaIbReq(p, 'GET', P(p) + '/shipments/' + encodeURIComponent(s0.shipmentId) + '/boxes', { pageSize: 1000 }, null, 'shipment boxes');
+      const ids = (bx.boxes || []).map(b => b.boxId).filter(Boolean);
+      ships.push(Object.assign({}, s0, { confirmationId: conf, boxes: ids.length, status: s.status || '' }));
+      if (!conf) { labels.push({ shipmentId: s0.shipmentId, error: 'no shipment confirmation id yet' }); continue; }
+      const q = { PageType: mk.page, LabelType: 'UNIQUE' }; if (ids.length) q.PackageLabelsToPrint = ids.join(','); else q.NumberOfPackages = 1;
+      try { const lb = await fbaIbReq(p, 'GET', '/fba/inbound/v0/shipments/' + encodeURIComponent(conf) + '/labels', q, null, 'box labels');
+        labels.push({ shipmentId: s0.shipmentId, confirmationId: conf, url: lb.payload && lb.payload.DownloadURL, at: new Date().toISOString().slice(0, 16) }); }
+      catch (e) { labels.push({ shipmentId: s0.shipmentId, confirmationId: conf, error: e.message }); }
+    }
+    return fbaIbSave(p, { stage: 'done', shipments: ships, labels }, 'Labels: ' + labels.map(l => (l.confirmationId || l.shipmentId) + (l.url ? ' ready' : ' ' + (l.error || 'none'))).join(', '));
+  }
+}
+async function fbaIbAdmin(req, res) {   // admin only while this is on test (Ben)
+  try { const me = await permsFor(req); if (me.live && !me.is_admin) { res.status(403).json({ error: 'Create FBA Shipment is admin only while on test' }); return null; } return me; }
+  catch (e) { log500(e); res.status(500).json({ error: 'permission check failed' }); return null; }
+}
+app.get('/api/supply/fba-inbound/ship-from', async (req, res) => {
+  try { res.json({ ok: true, rows: (await pool.query(`SELECT code, label, default_for, name, company_name, address_line1, address_line2, city, state_code, postal_code, country_code, phone, email FROM planner.fba_ship_from WHERE active ORDER BY default_for NULLS LAST, label`)).rows, markets: Object.keys(FBA_IB_MKT) }); }
+  catch (e) { if (e.code === '42P01') return res.json({ ok: true, rows: [], markets: Object.keys(FBA_IB_MKT), missing: 'Migration 389 not applied' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/fba-inbound/ship-from', async (req, res) => {   // add or edit an address (e.g. the Flexport warehouse in China)
+  const me = await fbaIbAdmin(req, res); if (!me) return;
+  const b = req.body || {}, s = v => (v == null ? null : String(v).trim() || null);
+  const code = String(b.code || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '-').slice(0, 40);
+  if (!code) return res.status(400).json({ error: 'Code needed' });
+  for (const k of ['label', 'name', 'address_line1', 'city', 'postal_code', 'country_code', 'phone']) if (!s(b[k])) return res.status(400).json({ error: k.replace(/_/g, ' ') + ' is required' });
+  try { await pool.query(`INSERT INTO planner.fba_ship_from (code, label, name, company_name, address_line1, address_line2, city, state_code, postal_code, country_code, phone, email, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,upper($10),$11,$12,now(),$13)
+      ON CONFLICT (code) DO UPDATE SET label=EXCLUDED.label, name=EXCLUDED.name, company_name=EXCLUDED.company_name, address_line1=EXCLUDED.address_line1, address_line2=EXCLUDED.address_line2,
+        city=EXCLUDED.city, state_code=EXCLUDED.state_code, postal_code=EXCLUDED.postal_code, country_code=EXCLUDED.country_code, phone=EXCLUDED.phone, email=EXCLUDED.email, updated_at=now(), updated_by=EXCLUDED.updated_by`,
+      [code, s(b.label), s(b.name), s(b.company_name), s(b.address_line1), s(b.address_line2), s(b.city), s(b.state_code), s(b.postal_code), s(b.country_code), s(b.phone), s(b.email), me.email || authUser(req) || 'admin']);
+    res.json({ ok: true, code }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/fba-inbound/plans', async (req, res) => {
+  try { const m = String(req.query.market || '').toUpperCase();
+    const r = await pool.query(`SELECT ${FBA_IB_COLS} FROM planner.fba_inbound_plans WHERE ($1 = '' OR market = $1) ORDER BY id DESC LIMIT 30`, [m]);
+    res.json({ ok: true, rows: r.rows.map(p => Object.assign(p, { log: (p.log || []).slice(-3) })) }); }
+  catch (e) { if (e.code === '42P01') return res.json({ ok: true, rows: [] }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/fba-inbound/plans/:id', async (req, res) => {
+  try { const p = await fbaIbGet(Number(req.params.id) || 0); if (!p) return res.status(404).json({ error: 'Not found' }); res.json({ ok: true, plan: p, sc: FBA_IB_MKT[p.market] && FBA_IB_MKT[p.market].sc }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/fba-inbound/plans', async (req, res) => {   // record the ticked rows; nothing is sent to Amazon until advance
+  const me = await fbaIbAdmin(req, res); if (!me) return;
+  const b = req.body || {}, mkt = String(b.market || '').toUpperCase(), M = FBA_IB_MKT[mkt];
+  if (!M) return res.status(400).json({ error: 'Create FBA Shipment covers ' + Object.keys(FBA_IB_MKT).join(', ') + ' only' });
+  try {
+    const sf = (await pool.query(`SELECT * FROM planner.fba_ship_from WHERE code=$1 AND active`, [String(b.ship_from_code || '')])).rows[0];
+    if (!sf) return res.status(400).json({ error: 'Pick a ship-from address' });
+    if (!sf.phone) return res.status(400).json({ error: 'The ship-from address needs a phone number (Amazon requires one): add it first' });
+    const n = v => Number(v), items = [], bad = []; let loose = false;
+    for (const it of (Array.isArray(b.items) ? b.items : [])) {
+      const qty = Math.round(n(it.qty)), cp = Math.round(n(it.cp)) || 0, msku = String(it.msku || it.sku || '').trim();
+      if (!msku || !(qty > 0)) continue;
+      const dims = (it.dims || []).map(x => Math.round(n(x) * 10) / 10), wt = Math.round(n(it.wt) * 100) / 100;
+      const boxed = cp > 0 && qty % cp === 0 && dims.length === 3 && dims.every(x => x > 0) && wt > 0;
+      if (!boxed) { loose = true; if (!(cp > 0 && qty % cp === 0)) bad.push(msku + ' (' + qty + ' not full cartons of ' + (cp || '?') + ')'); else bad.push(msku + ' (carton dims / weight missing)'); }
+      items.push({ sku: String(it.sku || msku), msku, qty, cp, boxes: boxed ? qty / cp : 0, dims: boxed ? dims : null, wt: boxed ? wt : null, prepOwner: 'SELLER', labelOwner: 'SELLER' });
+    }
+    if (!items.length) return res.status(400).json({ error: 'No ticked rows with a quantity for ' + mkt });
+    const ship = { name: sf.name, company_name: sf.company_name, address_line1: sf.address_line1, address_line2: sf.address_line2, city: sf.city, state_code: sf.state_code, postal_code: sf.postal_code, country_code: sf.country_code, phone: sf.phone, email: sf.email, label: sf.label };
+    const by = me.email || authUser(req) || 'admin';
+    const r = await pool.query(`INSERT INTO planner.fba_inbound_plans (market, ship_from_code, marketplace_id, region, items, loose, ship_from, created_by, log)
+      VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8,$9::jsonb) RETURNING id`, [mkt, sf.code, M.mp, M.region, JSON.stringify(items), loose, JSON.stringify(ship), by,
+      JSON.stringify([{ at: new Date().toISOString().slice(0, 19), msg: 'Drafted by ' + by + ': ' + items.length + ' SKUs, ' + items.reduce((a, i) => a + i.qty, 0) + ' units from ' + sf.label + (bad.length ? '. Not boxed (finish box contents in Seller Central): ' + bad.join(', ') : '') }])]);
+    const id = r.rows[0].id, name = 'HORIZON ' + mkt + ' #' + id + ' ' + ddMonYy(new Date().toISOString().slice(0, 10));
+    await pool.query(`UPDATE planner.fba_inbound_plans SET name=$2 WHERE id=$1`, [id, name]);
+    res.json({ ok: true, plan: await fbaIbGet(id), sc: M.sc, not_boxed: bad });
+  } catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Migration 389 (fba_inbound_plans) not applied' }); log500(e); res.status(500).json({ error: e.message }); }
+});
+const FBA_IB_RUNNING = new Set();
+app.post('/api/supply/fba-inbound/plans/:id/advance', async (req, res) => {   // one Amazon step; the client calls again while stage is automatic
+  const me = await fbaIbAdmin(req, res); if (!me) return;
+  const by = String(me.email || authUser(req) || 'admin').split('@')[0] + '@';
+  let p;
+  try { p = await fbaIbGet(Number(req.params.id) || 0); if (!p) return res.status(404).json({ error: 'Not found' });
+    if (p.stage === 'cancelled') return res.json({ ok: true, plan: p, auto: false });
+    const b = req.body || {}, action = String(b.action || 'next');
+    if (FBA_IB_RUNNING.has(p.id)) return res.json({ ok: true, plan: p, auto: true, busy: true });   // a double click / second tab waits
+    FBA_IB_RUNNING.add(p.id);
+    try { await fbaIbAdvance(p, action, b, by); } finally { FBA_IB_RUNNING.delete(p.id); }
+    p = await fbaIbGet(p.id);
+    res.json({ ok: true, plan: p, auto: !!p.op_id || (!p.error && !FBA_IB_USER_STAGES.includes(p.stage)), sc: FBA_IB_MKT[p.market] && FBA_IB_MKT[p.market].sc });
+  } catch (e) {
+    const msg = String(e.message || e);
+    if (p && p.id) { try { await fbaIbSave(p, { error: msg }, 'ERROR: ' + msg); } catch (_) {} }
+    if (!e.amazon) log500(e);
+    res.status(e.code === 503 ? 503 : 200).json({ ok: false, error: msg, plan: p && p.id ? await fbaIbGet(p.id).catch(() => p) : null });
+  }
+});
 app.get('/api/supply/fba-transfers/list', async (req, res) => {
   try {
     const rows = (await pool.query(`SELECT cin7_id, sku, qty, reference, market, pool, warehouse, stage, coalesce(source,'cin7') source,

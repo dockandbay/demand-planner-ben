@@ -35,6 +35,11 @@ sources:
   - server.mjs :: fbaInflightExcludedCodes
   - server.mjs :: /api/supply/fba-transfers/list
   - server.mjs :: /api/cron/fba-inflight-refresh
+  - artifact_v16.7.html :: fbaShipRows
+  - artifact_v16.7.html :: fbaShipOpen
+  - server.mjs :: fbaIbAdvance
+  - server.mjs :: fbaIbCall
+  - server.mjs :: /api/supply/fba-inbound/ship-from
 fingerprints:
   artifact_v16.7.html::fbaTransferRec: 2c58b46155be
   artifact_v16.7.html::fbaTransferSized: 9b9e832b97db
@@ -68,7 +73,12 @@ fingerprints:
   server.mjs::fbaInflightExcludedCodes: 7089bef268c5
   server.mjs::/api/supply/fba-transfers/list: d968d218b3ca
   server.mjs::/api/cron/fba-inflight-refresh: 7732e28433a0
-verified_version: v28.404
+  artifact_v16.7.html::fbaShipRows: 1d9702940fa4
+  artifact_v16.7.html::fbaShipOpen: cdde900468a4
+  server.mjs::fbaIbAdvance: cd651007ffb8
+  server.mjs::fbaIbCall: f3bb7a0ac121
+  server.mjs::/api/supply/fba-inbound/ship-from: 9df48c98555e
+verified_version: v28.498
 ---
 ## Where transfers live
 - BUY & MOVE has three transfer views: **FBA** (3PL to Amazon FBA, per market), **TRANSFER** (3PL to 3PL between markets) and **Zalando** (send stock to Zalando, EU). (source: setView, renderZalando)
@@ -132,6 +142,15 @@ verified_version: v28.404
 - Override accepts shortcuts: `2c` = 2 x carton qty; `50r` = 50 rounded UP to the next full carton; plain numbers pass through. Overrides and ticks are session-only and do not change the buy plan. (source: fbaResolveQty, fbaTransferEff)
 - Selected total = units and cartons (sum of qty / carton qty, rounded up) across ticked rows. FBA Transfer Upload and AWD Transfer Upload (US) download ticked rows with qty > 0. (source: fbaSelSummary, downloadFbaTransfer)
 - FBA Transfer Upload file layout follows Amazon's Send-to-Amazon template per region: UK/EU = SKU, Quantity, Expiration date, Manufacturing lot code, case-pack columns (cm/kg); AU = SKU, Quantity, Prep owner, Labeling owner, Expiration date, case-pack columns (cm/kg), no lot code; US/CA = imperial (in/lb). Default prep and labeling owner = Seller; per-row owners and dates left blank. Case-pack columns filled only when quantity is a whole number of cartons. (source: downloadFbaTransfer)
+
+## Create FBA Shipment (v28.498, Ben 26-Oct-26)
+- Button on BUY & MOVE > FBA for UK, US, EU (always Amazon.de, from iFulfillment Bocholt) and AU; admin only while on test. It sends the SAME ticked rows and quantities as FBA Transfer Upload (fbaTransferEff, case pack, carton dims: UK/EU/AU cm/kg, US in/lb; UK/EU SKU alias such as the trailing dot) to Amazon's Fulfillment Inbound API (2024-03-20). Prep and label owner = Seller; an SKU Amazon says needs no prep / label is switched to NONE and the plan created again. (source: fbaShipRows, fbaShipOpen, fbaIbAdvance)
+- HORIZON holds no Amazon keys: every call goes to the n8n proxy webhook (horizon-spapi-inbound, x-webhook-secret = N8N_WEBHOOK_SECRET), which only allows the inbound plan / operation paths and v0 box labels and calls "Amazon SP-API | 00 Core request". (source: fbaIbCall)
+- Ship-from = planner.fba_ship_from: the market's 3PL by default, or any other saved address (e.g. the local Flexport warehouse when a PO ships direct from China). Amazon needs a phone number; the plan cannot be created without one. (source: /api/supply/fba-inbound/ship-from)
+- One planner.fba_inbound_plans row per shipment, moved one Amazon step per POST /api/supply/fba-inbound/plans/:id/advance (async operations polled up to 20 s, the page calls again until a step needs a person):
+  1. Review (nothing sent). 2. Draft in Amazon: create plan, generate + confirm the packing option with the fewest groups, send box contents (each SKU = N identical cartons of its case pack). This is the JUMP-OUT point: "Finish in Seller Central" (link to the plan) or "Continue in HORIZON". SKUs not in full cartons, or with no carton size, are created as loose units and their box contents must be finished in Seller Central (Continue is disabled).
+  3. Placement: Amazon's options with fees; confirming books the fee. 4. Transport: ready-to-ship date, then a carrier per shipment (Amazon partnered or own carrier); own carrier = the earliest available delivery window is confirmed automatically. 5. Labels: box labels PDF per shipment (A4 4-up; US Letter 6-up), fetchable again because Amazon's link expires.
+- Cancel plan in Amazon (two clicks) works at any step before shipping. Every Amazon answer is written to the plan's log. The Fulfil transfer is NOT created by this; it is still picked up as in-flight once the team books it in Fulfil. (source: fbaIbAdvance)
 
 ## TRANSFER tab (3PL to 3PL)
 - Lanes and lead weeks come from `planner.transfer_lead_times` (CONFIG ▸ Branches). A lane with no entry is never recommended. (source: buildTRANSFER_LEADS, trfLane)

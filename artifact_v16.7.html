@@ -2994,7 +2994,7 @@ function render(){
   var _dlAwd=document.getElementById('fba-dl-awd-btn');   // AWD upload = US only (a distinct Amazon template)
   if(_dlAwd)_dlAwd.style.display=(BP_VIEW==='fba'&&CUR==='US')?'':'none';
   var _cr=document.getElementById('fba-create-btn');
-  if(_cr)_cr.style.display=(BP_VIEW==='fba')?'':'none';
+  if(_cr)_cr.style.display=(BP_VIEW==='fba'&&(!window.ME||!window.ME.live||window.ME.is_admin)&&['UK','US','EU','AU'].indexOf(CUR)>=0)?'':'none';   // v28.498: admin only while on test; CA has no 3PL
   // Create PO / Refresh / multi-Download (#bp-buy-actions) are BUY-only. FBA Transfer Logic → FBA only.
   // A single "Download CSV (data in view)" button shows on FBA + TRANSFER instead.
   var _bt=document.getElementById('bp-buy-actions'); if(_bt)_bt.style.display=(BP_VIEW==='buy')?'inline-flex':'none';
@@ -3342,6 +3342,139 @@ function downloadFbaTransfer(dest){
     // A manual refresh (⟳) cancels this pending run (see fbaTrfRefresh).
     if(_fbaDlTimer)clearTimeout(_fbaDlTimer); _fbaDlTimer=setTimeout(function(){ fbaTrfRefresh(true); },600000);
   }catch(e){ alert('FBA Transfer Upload could not be built: '+(e&&e.message||e)); }
+}
+
+// v28.498 (Ben 26-Oct-26): Create FBA Shipment. Stepper modal (Review → Draft in Amazon → Placement → Transport → Labels) driving
+// /api/supply/fba-inbound/* (Amazon Inbound API through n8n). Rows = the same ticked rows + quantities as FBA Transfer Upload.
+// Step 2 is the jump-out point: finish in Seller Central, or continue here. Admin only while on test.
+var FBA_SHIP={plan:null,sc:'',addr:[],sf:'',edit:false,busy:false,logOpen:false,cancelArm:false,pick:{},ready:'',err:'',plans:[]};
+var FBA_SHIP_MKTS=['UK','US','EU','AU'];
+function fbaShipEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function fbaShipDate(v){ var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/); if(!m)return fbaShipEsc(v||''); var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return m[3]+'-'+M[+m[2]-1]+'-'+m[1].slice(2)+(m[4]?' '+m[4]:''); }
+function fbaShipRows(){   // ticked rows for CUR, boxes from carton dims (UK/EU/AU cm/kg, US in/lb), same rules as downloadFbaTransfer
+  var us=(CUR==='US'), euuk=(CUR==='UK'||CUR==='EU'), DIMS=(window.FBA_DIMS)||{}, out=[];
+  var n=function(x){return (x==null||x==='')?null:Number(x);};
+  Object.keys(FBA_TICK).forEach(function(k){ if(!FBA_TICK[k])return; var sep=k.lastIndexOf('|'),sku=k.slice(0,sep); if(k.slice(sep+1)!==CUR)return;
+    var qty=Number(fbaTransferEff(sku,CUR)); if(!(qty>0))return;
+    var d=DIMS[sku]||{}, cp=Number((PD[sku]&&PD[sku].cp)||d.cp||0), u=d.u||[], s=d.s||[], L,W,H,Wt;
+    var uL=n(u[0]),uW=n(u[1]),uH=n(u[2]),uWt=n(u[3]),sL=n(s[0]),sW=n(s[1]),sH=n(s[2]),sWt=n(s[3]);
+    if(us){ L=sL!=null?sL:(uL!=null?uL/2.54:null); W=sW!=null?sW:(uW!=null?uW/2.54:null); H=sH!=null?sH:(uH!=null?uH/2.54:null); Wt=sWt!=null?sWt:(uWt!=null?uWt/0.453592:null); }
+    else { L=uL!=null?uL:(sL!=null?sL*2.54:null); W=uW!=null?uW:(sW!=null?sW*2.54:null); H=uH!=null?uH:(sH!=null?sH*2.54:null); Wt=uWt!=null?uWt:(sWt!=null?sWt*0.453592:null); }
+    var r1=function(x){return x==null?null:Math.round(x*10)/10;};
+    out.push({sku:sku, msku:(euuk&&FBA_SKU_ALIAS_EUUK[sku])||sku, qty:qty, cp:cp, dims:[r1(L),r1(W),r1(H)], wt:Wt==null?null:Math.round(Wt*100)/100}); });
+  return out; }
+function fbaShipOpen(){
+  if(FBA_SHIP_MKTS.indexOf(CUR)<0){ alert('Create FBA Shipment covers UK, US, EU (Amazon.de) and AU.'); return; }
+  FBA_SHIP.plan=null; FBA_SHIP.err=''; FBA_SHIP.edit=false; FBA_SHIP.cancelArm=false; FBA_SHIP.pick={}; FBA_SHIP.logOpen=false;
+  var m=document.getElementById('fbaship-modal'); if(!m){ m=document.createElement('div'); m.id='fbaship-modal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto';
+    m.addEventListener('click',function(e){ if(e.target===m)fbaShipClose(); }); document.body.appendChild(m); }
+  m.style.display='flex'; fbaShipDraw();
+  Promise.all([fetch('/api/supply/fba-inbound/ship-from').then(function(r){return r.json();}), fetch('/api/supply/fba-inbound/plans?market='+CUR).then(function(r){return r.json();})])
+    .then(function(a){ FBA_SHIP.addr=(a[0]&&a[0].rows)||[]; FBA_SHIP.err=a[0]&&a[0].missing||''; var d=FBA_SHIP.addr.filter(function(x){return x.default_for===CUR;})[0]; FBA_SHIP.sf=d?d.code:((FBA_SHIP.addr[0]||{}).code||'');
+      FBA_SHIP.plans=((a[1]&&a[1].rows)||[]).filter(function(p){return p.stage!=='cancelled';}); fbaShipDraw(); })
+    .catch(function(e){ FBA_SHIP.err='Could not load: '+e.message; fbaShipDraw(); }); }
+function fbaShipClose(){ var m=document.getElementById('fbaship-modal'); if(m)m.style.display='none'; FBA_SHIP.busy=false; }
+var FBA_SHIP_STEPS=[['Review'],['Draft in Amazon'],['Placement'],['Transport'],['Labels']];
+function fbaShipStep(p){ if(!p)return 0; var s=p.stage; if(s==='done'||s==='transport_confirmed')return 4; if(/^transport/.test(s)||s==='placement_confirmed')return 3; if(/^placement/.test(s))return 2; return 1; }
+var FBA_SHIP_LBL={'new':'Creating the plan','created':'Asking for packing options','packing_generated':'Confirming the packing option','packing_confirmed':'Sending box contents',
+  'placement_generated':'Reading placement options','transport_generated':'Reading transport options','transport_windows':'Confirming delivery windows','transport_confirmed':'Getting box labels'};
+function fbaShipAdvance(action,extra){ var p=FBA_SHIP.plan; if(!p||FBA_SHIP.busy)return; FBA_SHIP.busy=true; FBA_SHIP.err=''; fbaShipDraw();
+  fetch('/api/supply/fba-inbound/plans/'+p.id+'/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({action:action||'next'},extra||{}))})
+    .then(function(r){return r.json();}).then(function(j){ FBA_SHIP.busy=false; if(j.plan)FBA_SHIP.plan=j.plan; if(j.sc)FBA_SHIP.sc=j.sc; if(!j.ok)FBA_SHIP.err=j.error||'Failed';
+      fbaShipDraw(); var m=document.getElementById('fbaship-modal');
+      if(j.ok&&j.auto&&m&&m.style.display!=='none')setTimeout(function(){ fbaShipAdvance('next'); },j.busy?3000:400); })
+    .catch(function(e){ FBA_SHIP.busy=false; FBA_SHIP.err=String(e.message||e); fbaShipDraw(); }); }
+function fbaShipCreate(){ if(FBA_SHIP.busy)return; var rows=fbaShipRows(); if(!rows.length){ alert('No rows ticked for '+CUR+'. Tick the Ship box on the rows you want to send.'); return; }
+  FBA_SHIP.busy=true; FBA_SHIP.err=''; fbaShipDraw();
+  fetch('/api/supply/fba-inbound/plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:CUR,ship_from_code:FBA_SHIP.sf,items:rows})})
+    .then(function(r){return r.json();}).then(function(j){ FBA_SHIP.busy=false; if(!j.ok){ FBA_SHIP.err=j.error||'Failed'; fbaShipDraw(); return; } FBA_SHIP.plan=j.plan; FBA_SHIP.sc=j.sc; fbaShipAdvance('next'); })
+    .catch(function(e){ FBA_SHIP.busy=false; FBA_SHIP.err=String(e.message||e); fbaShipDraw(); }); }
+function fbaShipResume(id){ fetch('/api/supply/fba-inbound/plans/'+id).then(function(r){return r.json();}).then(function(j){ if(j.plan){ FBA_SHIP.plan=j.plan; FBA_SHIP.sc=j.sc; fbaShipDraw();
+  if(!j.plan.error&&(j.plan.op_id||FBA_SHIP_LBL[j.plan.stage]))fbaShipAdvance('next'); } }); }
+function fbaShipSaveAddr(){ var f=document.getElementById('fbaship-addr'); if(!f)return; var b={}; f.querySelectorAll('[data-k]').forEach(function(i){ b[i.dataset.k]=i.value; });
+  fetch('/api/supply/fba-inbound/ship-from',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(j){
+    if(!j.ok){ FBA_SHIP.err=j.error||'Not saved'; fbaShipDraw(); return; } FBA_SHIP.edit=false; FBA_SHIP.sf=j.code;
+    return fetch('/api/supply/fba-inbound/ship-from').then(function(r){return r.json();}).then(function(a){ FBA_SHIP.addr=a.rows||[]; FBA_SHIP.err=''; fbaShipDraw(); }); }); }
+function fbaShipDraw(){
+  var m=document.getElementById('fbaship-modal'); if(!m)return; var p=FBA_SHIP.plan, E=fbaShipEsc, cur=fbaShipStep(p);
+  var sf=p?(p.ship_from||{}):(FBA_SHIP.addr.filter(function(a){return a.code===FBA_SHIP.sf;})[0]||{});
+  var btn=function(id,label,kind,dis,title){ var c=kind==='go'?'background:var(--nav);color:#fff;border:1px solid var(--nav)':kind==='warn'?'background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)':kind==='neg'?'background:var(--neg-bg);color:var(--neg);border:1px solid var(--neg)':'background:var(--card);color:var(--ink-soft);border:1px solid var(--line)';
+    return '<button type="button" data-fs="'+id+'" '+(dis?'disabled ':'')+'title="'+E(title||'')+'" style="'+c+';border-radius:6px;padding:6px 14px;font-weight:700;font-size:12px;cursor:'+(dis?'not-allowed;opacity:.5':'pointer')+'">'+label+'</button>'; };
+  var h='<div style="background:var(--card);color:var(--ink);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:min(860px,100%);overflow:hidden">'
+    +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)"><b style="font-size:15px">Create FBA shipment · '+E(p?p.market:CUR)+(CUR==='EU'||(p&&p.market==='EU')?' (Amazon.de)':'')+' · '+E(sf.label||sf.name||'')+'</b>'
+    +(p&&p.name?'<span class="mut" style="font-size:11px">'+E(p.name)+'</span>':'')+'<span style="margin-left:auto;cursor:pointer;font-size:18px" data-fs="close">✕</span></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:4px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12px">'+FBA_SHIP_STEPS.map(function(s,i){ var on=i===cur, done=i<cur||(p&&p.stage==='done');
+      return '<span style="padding:3px 10px;border-radius:99px;'+(on&&!(p&&p.stage==='done')?'background:var(--nav);color:#fff;font-weight:700':done?'background:var(--pos-bg);color:var(--pos);font-weight:600':'color:var(--muted)')+'">'+(done?'✓ ':(i+1)+' ')+s[0]+'</span>'+(i<4?'<span class="mut">─</span>':''); }).join('')+'</div>'
+    +'<div style="padding:14px 16px;font-size:12px;max-height:62vh;overflow:auto">';
+  if(FBA_SHIP.err||(p&&p.error))h+='<div style="background:var(--neg-bg);color:var(--neg);border:1px solid var(--neg);border-radius:8px;padding:8px 10px;margin-bottom:10px;white-space:pre-wrap"><b>Amazon / HORIZON said:</b> '+E(FBA_SHIP.err||p.error)+'</div>';
+  if(!p){   // ① Review
+    var rows=fbaShipRows(), units=rows.reduce(function(a,r){return a+r.qty;},0), uom=CUR==='US'?['in','lb']:['cm','kg'];
+    var boxed=function(r){ return r.cp>0&&r.qty%r.cp===0&&r.dims.every(function(x){return x>0;})&&r.wt>0; }, nLoose=rows.filter(function(r){return !boxed(r);}).length;
+    var open=FBA_SHIP.plans.filter(function(x){return x.stage!=='done';});
+    if(open.length)h+='<div style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--hover)"><b>Open '+E(CUR)+' shipments from HORIZON:</b> '+open.map(function(x){ return '<a href="javascript:void 0" data-fsresume="'+x.id+'" style="color:var(--blue);font-weight:600;margin-left:8px">'+E(x.name||('#'+x.id))+' · '+E(x.stage.replace(/_/g,' '))+'</a>'; }).join('')+'</div>';
+    h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b>Ship from</b><select id="fbaship-sf" style="font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">'
+      +FBA_SHIP.addr.map(function(a){ return '<option value="'+E(a.code)+'"'+(a.code===FBA_SHIP.sf?' selected':'')+'>'+E(a.label)+(a.default_for?' (default '+E(a.default_for)+')':'')+'</option>'; }).join('')+'</select>'
+      +'<a href="javascript:void 0" data-fs="editaddr" style="color:var(--blue);font-size:11px">'+(FBA_SHIP.edit?'close':'edit this / add another address (e.g. Flexport China)')+'</a></div>'
+      +'<div class="mut" style="margin-bottom:10px">'+E([sf.name,sf.address_line1,sf.address_line2,sf.city,sf.state_code,sf.postal_code,sf.country_code].filter(Boolean).join(', '))+(sf.phone?' · ☎ '+E(sf.phone):' · <b style="color:var(--neg)">no phone: Amazon requires one, add it</b>')+'</div>';
+    if(FBA_SHIP.edit){ var F=[['code','Code (e.g. CN-FLEXPORT-NINGBO)'],['label','Label'],['name','Contact / site name'],['company_name','Company'],['address_line1','Address line 1'],['address_line2','Address line 2'],['city','City'],['state_code','State / province code'],['postal_code','Postcode'],['country_code','Country (2 letters)'],['phone','Phone'],['email','Email']];
+      h+='<div id="fbaship-addr" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;margin-bottom:10px;padding:10px;border:1px dashed var(--line);border-radius:8px">'
+        +F.map(function(f){ return '<label style="font-size:10px" class="mut">'+f[1]+'<input data-k="'+f[0]+'" value="'+E(sf[f[0]]||'')+'" style="display:block;width:100%;box-sizing:border-box;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--ink)"></label>'; }).join('')
+        +'<div style="grid-column:1/-1">'+btn('saveaddr','Save address','go')+' <span class="mut">Same code = edit; new code = new address.</span></div></div>'; }
+    h+='<div style="margin-bottom:6px"><b>'+rows.length+'</b> ticked SKU'+(rows.length===1?'':'s')+' · <b>'+units.toLocaleString()+'</b> units · prep and labels: Seller</div>'
+      +(rows.length?'<div style="overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+['SKU','Amazon SKU','Units','Cartons','Box ('+uom[0]+')','Box '+uom[1],''].map(function(t){return '<th style="padding:5px 8px;border-bottom:1px solid var(--line);background:var(--hover)">'+t+'</th>';}).join('')+'</tr></thead><tbody>'
+        +rows.map(function(r){ var ok=boxed(r); return '<tr><td style="padding:4px 8px">'+E(r.sku)+'</td><td style="padding:4px 8px">'+(r.msku!==r.sku?E(r.msku):'<span class="mut">same</span>')+'</td><td style="padding:4px 8px">'+r.qty+'</td><td style="padding:4px 8px">'+(r.cp>0&&r.qty%r.cp===0?(r.qty/r.cp)+' × '+r.cp:'<span style="color:var(--amber)">loose'+(r.cp?' (carton '+r.cp+')':'')+'</span>')+'</td><td style="padding:4px 8px">'+(r.dims.every(function(x){return x>0;})?r.dims.join(' × '):'<span style="color:var(--amber)">missing</span>')+'</td><td style="padding:4px 8px">'+(r.wt>0?r.wt:'<span style="color:var(--amber)">missing</span>')+'</td><td style="padding:4px 8px">'+(ok?'<span style="color:var(--pos)">✓ boxed</span>':'<span style="color:var(--amber)">box contents in Seller Central</span>')+'</td></tr>'; }).join('')+'</tbody></table></div>':'<div class="mut">Tick the Ship box on the rows to send, then open this again.</div>')
+      +(nLoose?'<div style="margin-top:8px;color:var(--amber)">'+nLoose+' SKU'+(nLoose===1?' is':'s are')+' not in full cartons or have no carton size. The draft is still created, but its box contents must be finished in Seller Central (HORIZON stops at step 2).</div>':'')
+      +'<div style="margin-top:12px;display:flex;gap:8px;align-items:center">'+btn('create',FBA_SHIP.busy?'Working…':'Create draft in Amazon','go',FBA_SHIP.busy||!rows.length||!sf.phone,'Creates a DRAFT inbound plan in Seller Central (free, can be cancelled). Nothing is booked.')+'<span class="mut">Step 1 of Amazon\'s process: a draft only. No fees, cancellable.</span></div>';
+  } else {
+    var st=p.stage, link=FBA_SHIP.sc&&p.inbound_plan_id?'https://'+FBA_SHIP.sc+'/fba/sendtoamazon?wf='+encodeURIComponent(p.inbound_plan_id):'';
+    var sumU=(p.items||[]).reduce(function(a,i){return a+i.qty;},0), sumB=(p.items||[]).reduce(function(a,i){return a+(i.boxes||0);},0);
+    h+='<div style="margin-bottom:10px">'+(p.inbound_plan_id?'Plan <b>'+E(p.inbound_plan_id)+'</b> · ':'')+(p.items||[]).length+' SKUs · '+sumU.toLocaleString()+' units'+(sumB?' · '+sumB+' cartons':'')+(link?' · <a href="'+link+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">Open in Seller Central ↗</a>':'')+'</div>';
+    if(FBA_SHIP.busy||p.op_id||FBA_SHIP_LBL[st]){ h+='<div style="padding:16px;text-align:center;border:1px solid var(--line);border-radius:8px;background:var(--hover)"><b>⏳ Talking to Amazon: '+E(FBA_SHIP_LBL[st]||st.replace(/_/g,' '))+'…</b><div class="mut" style="margin-top:4px">Each step can take up to a minute. You can close this and resume later from the button.</div>'
+        +(p.error&&!FBA_SHIP.busy?'<div style="margin-top:8px">'+btn('retry','Try again','warn')+'</div>':'')+'</div>'; }
+    else if(st==='draft_ready'){ h+='<div style="margin-bottom:10px"><b style="color:var(--pos)">✓ Draft created in Amazon</b>'+(p.loose?' · <span style="color:var(--amber)">box contents to finish in Seller Central</span>':' · box contents sent ✓ · packing option confirmed ✓')+'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">'
+        +'<div style="border:1px solid var(--line);border-radius:10px;padding:12px"><b>Finish in Seller Central</b><div class="mut" style="margin:4px 0 8px">Stop here. Placement, carrier and labels are done in Seller Central as today.</div>'+(link?'<a href="'+link+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700">Open plan ↗</a>':'')+'</div>'
+        +'<div style="border:1px solid var(--line);border-radius:10px;padding:12px"><b>Continue in HORIZON →</b><div class="mut" style="margin:4px 0 8px">Placement options next, with Amazon\'s fees shown before anything is confirmed.</div>'+btn('placement','Get placement options','go',FBA_SHIP.busy||p.loose,p.loose?'Box contents must be finished in Seller Central first':'')+'</div></div>'; }
+    else if(st==='placement_choose'){ var po=p.placement_options||[];
+      h+='<div style="margin-bottom:8px"><b>③ Choose how Amazon splits the shipment</b> <span class="mut">(confirming books Amazon\'s placement fee shown)</span></div>'
+        +po.map(function(o){ var fee=(o.fees||[]).map(function(f){return (f.ccy||'')+' '+Number(f.amount||0).toFixed(2)+(f.type?' '+String(f.type).toLowerCase():'');}).join(', ')||'no fee';
+          return '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid '+(FBA_SHIP.pick.po===o.id?'var(--nav)':'var(--line)')+';border-radius:8px;margin-bottom:6px;cursor:pointer"><input type="radio" name="fbaship-po" value="'+E(o.id)+'"'+(FBA_SHIP.pick.po===o.id?' checked':'')+'><span><b>'+o.shipments.length+' shipment'+(o.shipments.length===1?'':'s')+'</b> to '+o.shipments.map(function(s){return E(s.fc+(s.city?' ('+s.city+')':''));}).join(', ')+'<br><span class="mut">Fee: '+E(fee)+(o.expiration?' · offer expires '+fbaShipDate(o.expiration):'')+'</span></span></label>'; }).join('')
+        +'<div style="margin-top:8px">'+btn('confplace','Confirm placement','go',FBA_SHIP.busy||!FBA_SHIP.pick.po)+(link?' <a href="'+link+'" target="_blank" rel="noopener" style="color:var(--blue);margin-left:8px">or finish in Seller Central ↗</a>':'')+'</div>'; }
+    else if(st==='placement_confirmed'){ var dflt=FBA_SHIP.ready||(function(){ var d=new Date(); d.setDate(d.getDate()+(d.getDay()===5?3:d.getDay()===6?2:1)); return d.toISOString().slice(0,10); })();
+      h+='<div style="margin-bottom:8px"><b style="color:var(--pos)">✓ Placement confirmed</b>: '+(p.shipments||[]).map(function(s){return E(s.fc||s.shipmentId);}).join(', ')+'</div>'
+        +'<div style="display:flex;gap:8px;align-items:center"><b>④ Ready to ship from the 3PL on</b><input type="date" id="fbaship-ready" value="'+E(dflt)+'" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">'+btn('transport','Get transport options','go',FBA_SHIP.busy)+'</div>'; }
+    else if(st==='transport_choose'){ var to=p.transport_options||[];
+      h+='<div style="margin-bottom:8px"><b>④ Choose the carrier per shipment</b> <span class="mut">(confirming books the carrier; Amazon-partnered costs are charged by Amazon)</span></div>'
+        +(p.shipments||[]).map(function(s){ var os=to.filter(function(o){return o.shipmentId===s.shipmentId;});
+          return '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px"><b>'+E(s.fc||s.shipmentId)+'</b>'+(s.city?' <span class="mut">'+E(s.city)+'</span>':'')
+            +os.map(function(o){ return '<label style="display:block;margin-top:4px;cursor:pointer"><input type="radio" name="fbaship-t-'+E(s.shipmentId)+'" data-ship="'+E(s.shipmentId)+'" value="'+E(o.id)+'"'+(FBA_SHIP.pick[s.shipmentId]===o.id?' checked':'')+'> '+E((o.carrier||'')+' · '+String(o.mode||'').replace(/_/g,' ').toLowerCase()+' · '+(o.solution==='AMAZON_PARTNERED_CARRIER'?'Amazon partnered':'own carrier'))+(o.cost!=null?' · <b>'+E(o.ccy+' '+Number(o.cost).toFixed(2))+'</b>':'')+'</label>'; }).join('')+'</div>'; }).join('')
+        +btn('conftrans','Confirm transport','go',FBA_SHIP.busy||(p.shipments||[]).some(function(s){return !FBA_SHIP.pick[s.shipmentId];})); }
+    else if(st==='done'){ h+='<div style="margin-bottom:8px"><b style="color:var(--pos)">✓ Shipment ready to send</b>. Print the box labels and give them to the 3PL.</div>'
+        +(p.labels||[]).map(function(l){ var s=(p.shipments||[]).filter(function(x){return x.shipmentId===l.shipmentId;})[0]||{}; return '<div style="padding:6px 0;border-bottom:1px solid var(--line2)"><b>'+E(l.confirmationId||l.shipmentId)+'</b> → '+E(s.fc||'')+(s.boxes?' · '+s.boxes+' boxes':'')+' · '+(l.url?'<a href="'+E(l.url)+'" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700">Box labels (PDF) ↗</a>':'<span style="color:var(--neg)">'+E(l.error||'no labels')+'</span>')+'</div>'; }).join('')
+        +'<div style="margin-top:8px">'+btn('labels','Get labels again','',FBA_SHIP.busy,'Amazon\'s label link expires; this fetches a fresh one')+'</div>'; }
+    else if(st==='cancelled'){ h+='<div><b>Cancelled.</b> The plan is void in Amazon.</div>'; }
+    if(p.error&&!FBA_SHIP_LBL[st]&&!p.op_id&&st!=='cancelled')h+='<div style="margin-top:8px">'+btn('retry','Try again','warn',FBA_SHIP.busy)+'</div>';
+    h+='<div style="display:flex;gap:10px;align-items:center;margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">'
+      +(st!=='cancelled'&&st!=='done'?btn('cancel',FBA_SHIP.cancelArm?'Click again to cancel the plan in Amazon':'Cancel plan in Amazon','neg',FBA_SHIP.busy):'')
+      +'<a href="javascript:void 0" data-fs="log" style="margin-left:auto;color:var(--blue)">Log '+(FBA_SHIP.logOpen?'▴':'▾')+'</a></div>'
+      +(FBA_SHIP.logOpen?'<div style="margin-top:6px;font-size:11px;max-height:200px;overflow:auto;background:var(--hover);border-radius:6px;padding:6px 8px">'+(p.log||[]).slice().reverse().map(function(l){ return '<div><span class="mut">'+fbaShipDate(l.at)+'</span> '+E(l.msg)+'</div>'; }).join('')+'</div>':'');
+  }
+  m.innerHTML=h+'</div></div>';
+  m.querySelectorAll('[data-fs]').forEach(function(b){ b.onclick=function(){ var a=b.dataset.fs;
+    if(a==='close')fbaShipClose(); else if(a==='editaddr'){ FBA_SHIP.edit=!FBA_SHIP.edit; fbaShipDraw(); } else if(a==='saveaddr')fbaShipSaveAddr();
+    else if(a==='create')fbaShipCreate(); else if(a==='retry')fbaShipAdvance('next'); else if(a==='placement')fbaShipAdvance('placement');
+    else if(a==='confplace')fbaShipAdvance('confirm_placement',{placementOptionId:FBA_SHIP.pick.po});
+    else if(a==='transport'){ var d=document.getElementById('fbaship-ready'); FBA_SHIP.ready=d?d.value:''; fbaShipAdvance('transport',{readyDate:FBA_SHIP.ready}); }
+    else if(a==='conftrans'){ var sel={}; (FBA_SHIP.plan.shipments||[]).forEach(function(s){ sel[s.shipmentId]=FBA_SHIP.pick[s.shipmentId]; }); fbaShipAdvance('confirm_transport',{selections:sel}); }
+    else if(a==='labels')fbaShipAdvance('labels');
+    else if(a==='cancel'){ if(!FBA_SHIP.cancelArm){ FBA_SHIP.cancelArm=true; fbaShipDraw(); setTimeout(function(){ FBA_SHIP.cancelArm=false; fbaShipDraw(); },6000); } else { FBA_SHIP.cancelArm=false; fbaShipAdvance('cancel'); } }
+    else if(a==='log'){ FBA_SHIP.logOpen=!FBA_SHIP.logOpen; fbaShipDraw(); } }; });
+  m.querySelectorAll('[data-fsresume]').forEach(function(a){ a.onclick=function(){ fbaShipResume(+a.dataset.fsresume); }; });
+  var s=document.getElementById('fbaship-sf'); if(s)s.onchange=function(){ FBA_SHIP.sf=this.value; fbaShipDraw(); };
+  m.querySelectorAll('input[name="fbaship-po"]').forEach(function(r){ r.onchange=function(){ FBA_SHIP.pick.po=r.value; fbaShipDraw(); }; });
+  m.querySelectorAll('input[data-ship]').forEach(function(r){ r.onchange=function(){ FBA_SHIP.pick[r.dataset.ship]=r.value; fbaShipDraw(); }; });
 }
 
 function buildReport(type){
@@ -4606,7 +4739,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, fbaPe
   seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
   skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
 
-  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='ALL';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
+  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='ALL';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer, fbaShipOpen:fbaShipOpen,
   open_:open_, close_:close_, refreshDerived:bpRefreshDerived,   // v28.142
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
 })();
@@ -4882,7 +5015,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     </span>
     <button type="button" id="fba-dl-btn" onclick="BP.downloadFbaTransfer('fba')" title="Download ticked rows as an Amazon FBA Transfer Upload workbook (.xlsx)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--pos);border-radius:3px;background:var(--pos-bg);color:var(--pos);cursor:pointer;font-weight:600">&#8681; FBA Transfer Upload</button>
     <button type="button" id="fba-dl-awd-btn" onclick="BP.downloadFbaTransfer('awd')" title="US only — download ticked rows in the Amazon AWD upload format (.xlsx): no lot code, adds Palletized? / Boxes Per Pallet / Number of pallets" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--violet);border-radius:3px;background:var(--violet-bg);color:var(--violet);cursor:pointer;font-weight:600">&#8681; AWD Transfer Upload (US)</button>
-    <button type="button" id="fba-create-btn" onclick="alert('Feature to build - Direct created shipment in Amazon FBA')" title="Create the shipment directly in Amazon FBA (coming soon)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--amber);border-radius:3px;background:var(--amber-bg);color:var(--amber);cursor:pointer;font-weight:600">Create FBA Shipment</button>
+    <button type="button" id="fba-create-btn" onclick="BP.fbaShipOpen()" title="Create the shipment directly in Amazon (UK, US, EU = Amazon.de, AU): draft plan, then placement, transport and labels, or finish in Seller Central. Admin only while on test." style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid var(--amber);border-radius:3px;background:var(--amber-bg);color:var(--amber);cursor:pointer;font-weight:600">Create FBA Shipment</button>
     <span id="fba-sel-summary" style="display:none;align-items:center;gap:4px;font-size:11px;padding:3px 12px;background:var(--amber-bg);border:1px solid #fde047;border-radius:5px;color:var(--amber)"></span>
   </div>
   <!-- Settings panel: shown when ⚙ Settings is clicked. Keeps the original input IDs so BP.render() keeps reading from them. -->
