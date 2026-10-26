@@ -1,3 +1,11 @@
+## v28.492 (26-Oct-26) Status Report: open Fulfil sales orders behind each backorder (SUG-0040)
+- SUG-0040 (Zera, 10-Sep): "can we add the sales order number to the backorder report?" Ben 26-Oct-26: check and build.
+- BUY & MOVE ▸ Inventory ▸ Status Report, Backorder groups (3PL and FBA): new "Sales orders (Fulfil)" column. Up to 3 orders per SKU as links to the order in Fulfil (number ×units; hover: units, channel, customer, order date, reference), "+N more" with the rest on hover, and the total units. "none open" when no open order ships that SKU from that warehouse (the negative stock is then a count or allocation issue, said on hover).
+- Data: new POST /api/inventory/backorder-orders {mkt, skus} (read only, live Fulfil, cached 5 minutes): sale lines whose order is confirmed or processing and not fully shipped (sale.shipment_state != sent), from the market's warehouses: UK UKILG + ILG-VENDOR / FBA AMZ_FBA_UK; US USGENEVA_STD / AMZ_FBA_US + USAWD; EU EUIFUL / the 9 EU FBA sites; AU AUCOGHLANS / AMZ_FBA_AU; CA AMZ_FBA_CA. One call per market for that market's backordered SKUs, oldest order first. POST only to carry the SKU list (requiredCap: read).
+- Checked on live Fulfil: EU TOWLB-SUM-XL-OCEAN (-35 at EU 3PL) → SO47358 ×2, SO55118 ×20, SO63027 ×12 (+1); the three COOL-DES SKUs → 11-12 open orders each; UK TOWLB-DES SKUs → none open in Fulfil (so their negative stock is not an order backlog). 565 ms, 9 ms cached.
+- Noted: CP_FULFIL_WH maps uk_3pl to 'ILG' but Fulfil's UK warehouse code is UKILG (client portal stock); to check separately.
+- No migration, no new env.
+
 ## v28.491 (26-Oct-26) Health follow-ups: retire the false Flexport alarm; stage breakdown for slow first loads
 - Ben: "2. Proceed" (health follow-ups: slow pages, Flexport false alarm, database clean-up).
 - ETL health: n8n_sync_flexport added to the retired jobs (HORIZON's own /api/cron/flexport-import replaced it in v28.040; it ran 42 times this week with 0 failures). The n8n job's last run was 07-Oct-26, so the check raised "no run for N days" every day.

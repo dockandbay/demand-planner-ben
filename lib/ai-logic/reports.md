@@ -13,6 +13,7 @@ sources:
   - artifact_v16.7.html :: renderInventoryMetrics
   - artifact_v16.7.html :: renderSlowMovingReport
   - artifact_v16.7.html :: renderMarkdownEosReport
+  - server.mjs :: /api/inventory/backorder-orders
   - artifact_v16.7.html :: renderStockAvailability
   - artifact_v16.7.html :: saInbound
   - artifact_v16.7.html :: saStatusBadge
@@ -62,11 +63,12 @@ fingerprints:
   artifact_v16.7.html::renderInventoryMetrics: cd8c35e5ce61
   artifact_v16.7.html::renderSlowMovingReport: 44d0a2dbe4dd
   artifact_v16.7.html::renderMarkdownEosReport: 4b5928c38f67
+  server.mjs::/api/inventory/backorder-orders: 2efc1f68a734
   artifact_v16.7.html::renderStockAvailability: 850a1230d744
   artifact_v16.7.html::saInbound: 2bdaef711165
   artifact_v16.7.html::saStatusBadge: 0d601ebb76f3
   artifact_v16.7.html::saEnsureDrawer: d8f99f0c13fb
-  artifact_v16.7.html::renderInvStatus: ba1fccbb71eb
+  artifact_v16.7.html::renderInvStatus: 6c20960a91ee
   artifact_v16.7.html::statusMetrics: aad255d3ba05
   artifact_v16.7.html::renderTrendsView: ba92239c7585
   artifact_v16.7.html::renderAccuracyView: ed20d484765e
@@ -105,7 +107,7 @@ fingerprints:
   supply/inject.html::renderSampleCosts: 54e82203f6c1
   server.mjs::/api/product/reports/approval-stats: 4b14b5a97c6b
   supply/inject.html::renderApprovalStats: daa931f71daf
-verified_version: v28.485
+verified_version: v28.492
 ---
 ## Shared definitions
 - CUR_MONTH is the latest YYYY_MM in DATA that has units, capped at the calendar month. CUR_YTD_END is the month before it. (source: artifact_v16.7.html :: hzInitCurMonth)
@@ -273,6 +275,7 @@ verified_version: v28.485
 - Cover weeks = (on hand + on order) / weekly demand.
 - Targets: 3PL = products 3PL cover (default 12 weeks). FBA = the buy engine's FBA cover (v28.168): SSM FBA cover when SSM FBA is opted in for the market, else the Buy Plan Settings "FBA target" box (default 8). (source: artifact_v16.7.html :: statusMetrics)
 - Scope: not FUTURE, already launched, and not discontinued, unless "Show discontinued" is on.
+- Backorder groups (v28.492, SUG-0040): a "Sales orders (Fulfil)" column lists the open Fulfil orders behind the negative stock: sale lines whose order is confirmed or processing and not fully shipped, shipping from that market's 3PL (UK UKILG / ILG-VENDOR, US USGENEVA_STD, EU EUIFUL, AU AUCOGHLANS) or FBA warehouses. Up to 3 order links (×units), the rest on hover, total units; "none open" means the negative stock is not an order backlog. Read live, cached 5 minutes. (source: server.mjs :: /api/inventory/backorder-orders; artifact_v16.7.html :: renderInvStatus)
 - Each location is classified once, in priority order:
   1. Backorder: on hand < 0.
   2. Out of stock: on hand = 0 and demand > 0.

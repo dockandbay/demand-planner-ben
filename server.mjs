@@ -1458,7 +1458,8 @@ function requiredCap(method, p) {
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (method === 'POST' && p === '/api/demand/cache/invalidate') return null;   // in-app "refresh" button — rebuild-only, harmless, no data write (ungated sibling of the secret-gated /api/data-cache/invalidate)
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
-  if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
+  if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;
+  if (method === 'POST' && p === '/api/inventory/backorder-orders') return null;   // v28.492 (SUG-0040): live Fulfil READ of the orders behind backorders (POST only to carry the SKU list), no DB write   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (method === 'POST' && p === '/api/supply/fulfil/sales-order/analyse-batch') return null;   // v28.194 (Ben): batch Validate sales order = Fulfil reads only (the single analyse is a GET); pushes stay gated
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
@@ -24686,6 +24687,47 @@ app.get('/api/demand/wssi', async (req, res) => {
     data.built_at = now.toISOString(); data.fy_options = [curFy - 1, curFy, curFy + 1];
     _wssiCache.set(fy, { at: Date.now(), data });
     res.json(data);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// v28.492 (SUG-0040, Zera / Ben 26-Oct-26): the open Fulfil sales orders behind a backorder (negative available stock) in
+// BUY & MOVE ▸ Inventory ▸ Status Report. POST {mkt:'UK'|'US'|'EU'|'AU'|'CA', skus:[...]} → {pool:{'3pl':{sku:[order]}, fba:{...}}}.
+// An order line counts when its order is confirmed or processing, not fully shipped (sale.shipment_state not 'sent'), and it ships
+// from that market's 3PL or Amazon FBA warehouse in Fulfil. Read only, live Fulfil, cached 5 minutes per market + SKU list.
+const BO_FULFIL_WH = {
+  UK: { '3pl': ['UKILG', 'ILG-VENDOR'], fba: ['AMZ_FBA_UK'] }, US: { '3pl': ['USGENEVA_STD'], fba: ['AMZ_FBA_US', 'USAWD'] },
+  EU: { '3pl': ['EUIFUL'], fba: ['AMZ_FBA_DE', 'AMZ_FBA_FR', 'AMZ_FBA_IT', 'AMZ_FBA_ES', 'AMZ_FBA_PL', 'AMZ_FBA_NL', 'AMZ_FBA_SE', 'AMZ_FBA_BE', 'AMZ_FBA_IE'] },
+  AU: { '3pl': ['AUCOGHLANS'], fba: ['AMZ_FBA_AU'] }, CA: { '3pl': [], fba: ['AMZ_FBA_CA'] },
+};
+const _boCache = new Map();
+app.post('/api/inventory/backorder-orders', async (req, res) => {
+  try {
+    const b = req.body || {}, mkt = String(b.mkt || '').toUpperCase(), W = BO_FULFIL_WH[mkt];
+    if (!W) return res.status(400).json({ error: 'market must be UK, US, EU, AU or CA' });
+    const skus = [...new Set((Array.isArray(b.skus) ? b.skus : []).map(x => String(x || '').trim()).filter(Boolean))].slice(0, 600);
+    if (!skus.length) return res.json({ mkt, pool: { '3pl': {}, fba: {} }, lines: 0 });
+    const cfg = fulfilConfigFor('live'); if (!cfg.configured) return res.status(501).json({ error: 'Fulfil live API not configured' });
+    const key = mkt + '|' + skus.slice().sort().join(','), hit = _boCache.get(key);
+    if (hit && Date.now() - hit.at < 5 * 60000) return res.json(hit.data);
+    const whPool = {}; for (const pl of ['3pl', 'fba']) for (const c of W[pl]) whPool[c] = pl;
+    const base = 'https://' + cfg.subdomain + '.fulfil.io/client/#/model/sale.sale/';
+    const out = { '3pl': {}, fba: {} }; let n = 0;
+    for (let i = 0; i < skus.length; i += 100) {
+      const dom = [['product.code', 'in', skus.slice(i, i + 100)], ['warehouse.code', 'in', Object.keys(whPool)], ['sale.state', 'in', ['confirmed', 'processing']],
+        ['sale.shipment_state', '!=', 'sent'], ['type', '=', 'line']];
+      for (let off = 0; off < 5000; off += 500) {
+        const rows = await fulfilFetchCfg(cfg, 'PUT', '/model/sale.line/search_read', [dom, off, 500, [['id', 'ASC']],
+          ['sale', 'sale.number', 'sale.reference', 'sale.party.name', 'sale.channel.name', 'sale.sale_date', 'sale.shipment_state', 'product.code', 'quantity', 'warehouse.code']]);
+        (rows || []).forEach(l => { const pl = whPool[l['warehouse.code']], sku = l['product.code']; if (!pl || !sku) return; n++;
+          const d = l['sale.sale_date']; (out[pl][sku] = out[pl][sku] || []).push({ so: l['sale.number'], ref: l['sale.reference'] || '', party: l['sale.party.name'] || '', channel: l['sale.channel.name'] || '',
+            date: d && typeof d === 'object' ? (d.iso_string || null) : (d ? String(d).slice(0, 10) : null), qty: Number(l.quantity) || 0, wh: l['warehouse.code'], ship: l['sale.shipment_state'] || '', url: l.sale ? base + l.sale : null }); });
+        if (!rows || rows.length < 500) break;
+      }
+    }
+    for (const pl in out) for (const sku in out[pl]) out[pl][sku].sort((x, y) => String(x.date || '').localeCompare(String(y.date || '')));   // oldest order first
+    const data = { mkt, pool: out, lines: n, at: new Date().toISOString() };
+    _boCache.set(key, { at: Date.now(), data }); if (_boCache.size > 50) _boCache.delete(_boCache.keys().next().value);
+    res.set('Cache-Control', 'no-store').json(data);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

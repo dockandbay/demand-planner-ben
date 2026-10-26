@@ -14734,7 +14734,8 @@ function _invFullXlsxDownload(mkt,btn){
     .catch(function(e){ alert('Export failed: '+((e&&e.message)||e)); })
     .finally(function(){ if(btn){btn.disabled=false;btn.textContent=btn.dataset.lbl||'⤓ Full XLSX report';} });
 }
-var INV_STATUS_SHOWDISC=false;   // Inventory Status Report: include already-discontinued SKUs (default hidden)
+var INV_STATUS_SHOWDISC=false;
+var INV_BO_SO={};   // v28.492 (SUG-0040): per market, the open Fulfil sales orders behind the Backorder rows ({key, state, data})   // Inventory Status Report: include already-discontinued SKUs (default hidden)
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -14895,6 +14896,25 @@ function renderInvStatus(){
       else if(r.iff>0 && r.tf>0 && r.covf>2*r.tf) _push(gf.over,r);
     }
   });
+  // v28.492 (SUG-0040, Zera): which open Fulfil sales orders are behind each backorder. One live read per market for the backordered SKUs
+  // (POST /api/inventory/backorder-orders), then the report redraws with a Sales orders column in the Backorder groups.
+  (function(){ var skus={}; [g3.bo,gf.bo].forEach(function(b){ ['A','B','C'].forEach(function(t){ (b[t]||[]).forEach(function(r){ skus[r.sku]=1; }); }); });
+    var list=Object.keys(skus).sort(), key=mkt+'|'+list.join(','), cur=INV_BO_SO[mkt];
+    if(!list.length||(cur&&cur.key===key))return;
+    INV_BO_SO[mkt]={key:key,state:'loading'};
+    fetch('/api/inventory/backorder-orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mkt:mkt,skus:list})})
+      .then(function(r){ return r.json(); }).then(function(d){ INV_BO_SO[mkt]=d&&!d.error?{key:key,state:'ok',data:d}:{key:key,state:'err',err:(d&&d.error)||'failed'}; })
+      .catch(function(e){ INV_BO_SO[mkt]={key:key,state:'err',err:String(e&&e.message||e)}; })
+      .then(function(){ if(INV_STATUS_MKT===mkt&&document.getElementById('invstatus-panel'))renderInvStatus(); });
+  })();
+  function boSoCell(loc){ return function(r){ var e=INV_BO_SO[mkt]; if(!e||e.state==='loading')return '<span class="mut" style="font-size:11px">Loading…</span>';
+    if(e.state==='err')return '<span class="mut" title="'+esc(e.err||'')+'">n/a</span>';
+    var L=((e.data.pool||{})[loc]||{})[r.sku]||[]; if(!L.length)return '<span class="mut" style="font-size:11px" title="No open order in Fulfil ships this SKU from this warehouse: the negative stock may be a count or allocation issue">none open</span>';
+    var tot=L.reduce(function(a,o){ return a+(o.qty||0); },0);
+    var chip=function(o){ var t=o.so+' · '+o.qty+' u · '+(o.channel||'')+(o.party?' · '+o.party:'')+(o.date?' · '+invFmtEta(o.date):'')+(o.ref?' · ref '+o.ref:'');
+      return o.url?'<a href="'+esc(o.url)+'" target="_blank" rel="noopener" title="'+esc(t)+'" style="color:var(--blue-ink);text-decoration:none;font-weight:600">'+esc(o.so)+'</a><span class="mut"> ×'+o.qty+'</span>':'<span title="'+esc(t)+'">'+esc(o.so)+' ×'+o.qty+'</span>'; };
+    var more=L.slice(3).map(function(o){ return o.so+' ×'+o.qty+(o.party?' ('+o.party+')':''); }).join('\n');
+    return '<span style="font-size:11px;white-space:normal;display:inline-block;max-width:260px;text-align:left">'+L.slice(0,3).map(chip).join(', ')+(L.length>3?' <span class="mut" title="'+esc(more)+'">+'+(L.length-3)+' more</span>':'')+' <span class="mut">('+invNum(tot)+' u)</span></span>'; }; }
   function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'8px':'24px')+' 0 4px;padding:7px 11px;background:var(--nav);color:#fff;border-radius:7px">'+esc(title)+'</div>'
     +(sub?'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>':''); }
   // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
@@ -14972,6 +14992,7 @@ function renderInvStatus(){
     cols.push({h:'4wk fcst',f:function(r){ return invNum(Math.round(wk(r)*4)); }});   // next 4 weeks forecast demand (avg weekly × 4)
     cols.push({h:'On order',f:function(r){return invNum(isF?r.oof:r.oo3);}});
     cols.push({h:'Inbound qty / ETA / PO',f:inbCellLoc(loc)});
+    if(status==='bo')cols.push({h:'Sales orders (Fulfil)',align:'left',f:boSoCell(isF?'fba':'3pl')});   // v28.492 (SUG-0040)
     return cols;
   }
   // Status order: out of stock → low stock → backorders → overstock (Ben: low stock is the higher weekly-review priority, before backorders).
