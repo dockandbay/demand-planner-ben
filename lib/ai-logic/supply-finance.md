@@ -15,6 +15,9 @@ sources:
   - server.mjs :: accountsGate, /api/accounts/payables (ACCOUNTS > Payables)
   - server.mjs :: accBillCandidates, accCreateBill, accAutoBillRun (ACCOUNTS bills from accounts@ receipts)
   - supply/inject.html :: acRenderPayables, accountsCan, acRenderConfig, acCfReload, acInLinesHtml, acDrOpen, acDrPaint, acRenderStmt, acRenderAgeing, acComboWire, acPdfRender, acMetricsHtml
+  - server.mjs :: cpSalesTeam
+  - server.mjs :: cpNotifyOpsMessage
+  - server.mjs :: cpDefaultOwner
   - server.mjs :: cogsBuild, cogsValuation, cogsRates, cogsStore, cogsRecipient, COGS_COLS (BUY & MOVE > Inventory > COGS for Airtable)
   - artifact_v16.7.html :: renderCogs
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
@@ -115,6 +118,9 @@ fingerprints:
   supply/inject.html::acComboWire: 821987bad274
   supply/inject.html::acPdfRender: e969626e19ec
   supply/inject.html::acMetricsHtml: 147a050711a0
+  server.mjs::cpSalesTeam: ac64d51bffeb
+  server.mjs::cpNotifyOpsMessage: ce23a98983bc
+  server.mjs::cpDefaultOwner: 3c33d9b94527
   server.mjs::cogsBuild: 010a4c2b6cec
   server.mjs::cogsValuation: bc96a6558dea
   server.mjs::cogsRates: 1824cafed9b3
@@ -215,7 +221,6 @@ fingerprints:
   server.mjs::/api/cp/order: 1741c58aa030
   server.mjs::cpCreateFulfilDraft: 81e3ebb94ea9
   server.mjs::cpAutoPush: c9e609cf631c
-  server.mjs::cpSalesTeam: fc161fffe290
   server.mjs::/api/client/portal-orders/:id: f994a90fd00a
   server.mjs::/api/client/commission/runs/build: e7e271814b3f
   server.mjs::/api/client/commission/runs/:id/xero-bill: 2d0d149c51a8
@@ -289,7 +294,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.501
+verified_version: v28.502
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -568,7 +573,8 @@ verified_version: v28.501
 - Tracking links (v28.475): the sales sync stores the shipment's tracking number (shipment.tracking rec_name; it used to store the record id) and Fulfil's tracking URL. My orders links the tracking number to that URL, else to a carrier page built from the carrier name (UPS, FedEx, DHL, USPS, Royal Mail, Parcelforce, DPD, Evri, Australia Post, StarTrack, Sendle); unknown carriers show plain text. (source: server.mjs :: fulfilImportSales)
 - Client orders reject unknown and CLOSED SKUs. Non-whole cartons need explicit acceptance (sample orders are exempt). Samples are priced 0. Stock shows in bands unless exact stock is configured. (source: server.mjs :: /api/cp/order)
 - Order review before Fulfil (v28.227): a submitted portal order goes straight to Fulfil as a draft sale only when auto-post applies: the client's "Portal orders" setting (clients.order_review) is Auto post, or it is Inherit and CLIENT ▸ Config "Post portal orders to Fulfil automatically" (cp_auto_push_fulfil) is on. The default is OFF, so orders are held with status 'review' (Awaiting review). Always review beats the global switch. The override is read fresh at submit time. If an auto-post fails, the order shows "Needs push" with the reason. (source: server.mjs :: cpAutoPush, /api/cp/order)
-- Order emails (v28.227): one email on submit, to the client user, cc the sales team (cp_sales_team_emails, else cp_ops_emails) plus the client's owner. With cp_client_confirm_email off it goes to the sales team only. A failed auto-post also alerts the sales team. (source: server.mjs :: cpSalesTeam, /api/cp/order)
+- Order emails (v28.227): one email on submit, to the client user, cc the client's owner mailbox (v28.502; the global cp_sales_team_emails, else cp_ops_emails, only when a client has no owner). With cp_client_confirm_email off it goes to the owner mailbox only. A failed auto-post also alerts the owner mailbox. (source: server.mjs :: cpSalesTeam, /api/cp/order)
+- Owner mailbox (v28.502, Ben 26-Oct-26): every client has an owner = one of sales-uk@, sales-us@, sales-eu@, keyaccounts@dockandbay.com (dropdown on the client; anything else is refused). Default: key account → keyaccounts@; UK / US / EU → sales-uk@ / sales-us@ / sales-eu@; AU and CA → keyaccounts@ (migration 390 backfilled every client whose owner was not a mailbox). ALL staff emails about a client go to its owner mailbox ONLY: client portal messages, the copy of order / sample confirmations, Fulfil auto-post failures. The global lists (cp_sales_team_emails / cp_ops_emails / cp_message_default_to) are used only when a client has no owner. Emails to the client's own users are unchanged. (source: cpSalesTeam, cpNotifyOpsMessage, cpDefaultOwner)
 - Reviewing an order (CLIENT ▸ Orders, v28.227): anyone with CLIENT access can edit an order that is Awaiting review / Needs push: PO, requested date, ship-from, Fulfil carrier and service, internal note (appended to the Fulfil comment), lines (qty, price, add, remove). Flags, cartons, units and totals are recomputed on the server; every edit is written to the order history. Fulfilment per line is From stock (delivery_mode ship), Back order (backorder) or Drop ship (dropship). Back order and drop ship need a supplier from the product's Fulfil suppliers (purchase.product_supplier, the client market's company first): one option is set automatically, several show a dropdown. (source: server.mjs :: /api/client/portal-orders/:id, /fulfil-options)
 - Pushing (v28.227): creates a Fulfil DRAFT sale (Confirmed is not wired yet). Blocked while a back order / drop ship line has no supplier, or the order already has a Fulfil draft; partial cartons need explicit acceptance. One push at a time per order. Each line carries delivery_mode and, when not From stock, supplier; the header carries carrier and carrier_service when set. Live writes need FULFIL_LIVE_WRITES=true; dry run returns the payload without writing; HZ_FULFIL_WRITE_STUB=1 fakes the write on the sandbox. A pushed or cancelled order is read-only. (source: server.mjs :: /api/client/portal-orders/:id/push, cpCreateFulfilDraft)
 - Commissions are monthly runs per rep group. Rate = the per-order override, else the group default. Commission = commissionable × rate ÷ 100. A credit-note row has commission 0 and carries amount × rate ÷ 100 in credit_adj; net = commission + credit_adj. Fulfil rows come from done/processing sales in the month using the untaxed amount; they are "exception" until the invoice is paid. A run cannot be finalised while exceptions remain (unless forced). The Xero bill is GBP, in the UK org, named COMMISSION-<month>-<GROUP>. (source: server.mjs :: /api/client/commission/*)

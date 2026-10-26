@@ -29252,7 +29252,7 @@ app.get('/api/client/lookups', async (req, res) => {
       return { types: CP_TYPES, warehouses: CP_WAREHOUSES, markets: Object.keys(CP_MARKETS), feature_defaults: CP_FEATURE_DEFAULTS,
         rep_groups: rg.rows, key_accounts: ka.rows, channels: ch.rows, countries: cnt.rows, price_lists: pl.rows, channel_alias: CP_CHANNEL_ALIAS };
     });
-    res.set('Cache-Control', 'no-store').json(Object.assign({}, base, {
+    res.set('Cache-Control', 'no-store').json(Object.assign({}, base, { owner_boxes: CP_OWNER_BOXES,   // v28.502 owner mailboxes
       me: { email: req.me.email, commissions: !!(req.me.is_admin || req.me.commissions || !req.me.live) } }));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -29288,6 +29288,13 @@ app.post('/api/client/clients/:id/agent-group', async (req, res) => {
   try { res.json({ ok: true, rep_group_id: await cpAgentGroup(Number(req.params.id), req.me && req.me.email) }); }
   catch (e) { if (!e.status) log500(e); res.status(e.status || 500).json({ error: e.message }); }
 });
+// v28.502 (Ben 26-Oct-26): every client account has an OWNER MAILBOX, one of these four; every email to D&B staff about that client goes
+// there only (client messages, the copy of order / sample confirmations, Fulfil auto-post failures). Default from type / market: key account
+// → keyaccounts@; UK / US / EU → sales-uk@ / sales-us@ / sales-eu@; AU and CA → keyaccounts@ (Ben). Emails to the client's own users unchanged.
+const CP_OWNER_BOXES = ['sales-uk@dockandbay.com', 'sales-us@dockandbay.com', 'sales-eu@dockandbay.com', 'keyaccounts@dockandbay.com'];
+function cpDefaultOwner(type, market) { if (type === 'key_account') return 'keyaccounts@dockandbay.com';
+  return { UK: 'sales-uk@dockandbay.com', US: 'sales-us@dockandbay.com', EU: 'sales-eu@dockandbay.com' }[market] || 'keyaccounts@dockandbay.com'; }
+const cpOwnerOk = v => CP_OWNER_BOXES.includes(String(v || '').trim().toLowerCase());
 app.post('/api/client/clients', async (req, res) => {
   const b = req.body || {}; const name = String(b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name required' });
@@ -29297,7 +29304,7 @@ app.post('/api/client/clients', async (req, res) => {
   try {
     let code = cpSlug(name) || ('client-' + Date.now()); const dup = (await pool.query(`SELECT 1 FROM planner.clients WHERE code=$1`, [code])).rowCount; if (dup) code = code + '-' + Date.now().toString(36).slice(-4);
     const r = await pool.query(`INSERT INTO planner.clients (name, code, type, owner_email, market, currency, warehouse_code, features, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$9) RETURNING id`,
-      [name, code, type, b.owner_email || req.me.email || null, market, CP_MARKETS[market].currency, CP_MARKETS[market].wh, JSON.stringify(feats), req.me.email || 'sandbox']);
+      [name, code, type, cpOwnerOk(b.owner_email) ? String(b.owner_email).trim().toLowerCase() : cpDefaultOwner(type, market), market, CP_MARKETS[market].currency, CP_MARKETS[market].wh, JSON.stringify(feats), req.me.email || 'sandbox']);
     await cpAudit(r.rows[0].id, 'Client created', type + ' · ' + market, req.me.email);
     if (type === 'agent') await cpAgentGroup(r.rows[0].id, req.me.email);   // v28.331: an agent client carries its commission settings (rep group) from the start
     res.json({ ok: true, id: r.rows[0].id });
@@ -29327,7 +29334,8 @@ app.post('/api/client/clients/:id', async (req, res) => {
   for (const [k, t] of Object.entries(CP_CLIENT_FIELDS)) {
     if (!(k in b)) continue; let v = b[k];
     if (t === 'json') v = JSON.stringify(v == null ? {} : v); else if (t === 'int') v = (v === '' || v == null) ? null : parseInt(v, 10); else if (t === 'bool') v = !!v; else v = (v == null) ? null : String(v);
-    if (k === 'type' && !CP_TYPES.includes(v)) continue; if (k === 'market' && !CP_MARKETS[v]) continue; if (k === 'order_review' && !CP_REVIEW_MODES.includes(v)) continue;
+    if (k === 'type' && !CP_TYPES.includes(v)) continue; if (k === 'market' && !CP_MARKETS[v]) continue;
+    if (k === 'owner_email') { if (!String(v || '').trim()) continue; if (!cpOwnerOk(v)) return res.status(400).json({ error: 'Owner must be one of ' + CP_OWNER_BOXES.join(', ') }); v = String(v).trim().toLowerCase(); }   // v28.502 if (k === 'order_review' && !CP_REVIEW_MODES.includes(v)) continue;
     vals.push(v); sets.push(k + '=$' + vals.length + (t === 'json' ? '::jsonb' : '')); changed.push(k);
   }
   if (!sets.length) return res.json({ ok: true, unchanged: true });
@@ -32076,7 +32084,8 @@ async function cpNotifyClientMessage(threadId, req) {   // email the client's ac
     await sendResendEmail({ channel: 'client', kind: 'client-message', ref: String(threadId), to, subject: 'Dock & Bay replied: ' + (t.subject || 'your message'), html: `<p>Dock &amp; Bay has replied to <b>${escHtml(t.subject || 'your message')}</b> in the client portal.</p><p><a href="${escHtml(link)}">Open the conversation</a></p>` }); } catch (e) {}
 }
 async function cpNotifyOpsMessage(threadId, client, req) {
-  try { const to = String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean); if (client.owner_email && !to.includes(client.owner_email)) to.push(client.owner_email); if (!to.length) { console.log('[client portal] message from ' + client.name + ' — no cp_message_default_to / owner set, not emailed'); return; }
+  try { const to = client.owner_email ? [client.owner_email] : String(await cpSetting('cp_message_default_to', await cpSetting('cp_ops_emails', ''))).split(/[,;\s]+/).filter(Boolean);   // v28.502: owner mailbox only; global list only when no owner
+    if (!to.length) { console.log('[client portal] message from ' + client.name + ' — no cp_message_default_to / owner set, not emailed'); return; }
     const t = (await pool.query(`SELECT subject FROM planner.client_threads WHERE id=$1`, [threadId])).rows[0];
     await sendResendEmail({ kind: 'client-message', ref: String(threadId), to, subject: 'Client message — ' + client.name + ': ' + ((t && t.subject) || ''), html: `<p><b>${escHtml(client.name)}</b> sent a message in the client portal: <b>${escHtml((t && t.subject) || '')}</b>.</p><p><a href="${adminBase(req)}/#/client/messages/${threadId}">Open in HORIZON ▸ CLIENT ▸ Messages</a></p>` }); } catch (e) {}
 }
@@ -32507,8 +32516,9 @@ const CP_LINE_MODES = ['ship', 'backorder', 'dropship'];
 // v28.227: does this client's portal order go straight to Fulfil? clients.order_review auto | review | inherit (→ cp_auto_push_fulfil)
 async function cpAutoPush(c) {   // order_review read fresh: the portal session memo (cpAuth) holds a client copy for minutes
   let m = c && c.order_review; try { const r = c && c.id ? (await pool.query(`SELECT order_review FROM planner.clients WHERE id=$1`, [c.id])).rows[0] : null; if (r) m = r.order_review; } catch (e) {} if (m === 'auto') return true; if (m === 'review') return false; return String(await cpSetting('cp_auto_push_fulfil', 'false')).toLowerCase() === 'true'; }
-async function cpSalesTeam(c) { const raw = String(await cpSetting('cp_sales_team_emails', '')) || String(await cpSetting('cp_ops_emails', ''));
-  const t = raw.split(/[,;\s]+/).filter(Boolean); if (c && c.owner_email && !t.some(x => x.toLowerCase() === c.owner_email.toLowerCase())) t.push(c.owner_email); return t; }
+async function cpSalesTeam(c) {   // v28.502 (Ben): the client's owner mailbox only; the global sales-team list only when a client has no owner
+  if (c && c.owner_email) return [c.owner_email];
+  const raw = String(await cpSetting('cp_sales_team_emails', '')) || String(await cpSetting('cp_ops_emails', '')); return raw.split(/[,;\s]+/).filter(Boolean); }
 async function cpCreateFulfilDraft(client, order, lines) {
   const env = await activeFulfilEnv(); const cfg = fulfilConfigFor(env); if (!cfg.configured) return { ok: false, reason: 'Fulfil not configured' };
   if (!order.dry && !sovStubOn() && env === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true') return { ok: false, reason: 'live Fulfil writes are disabled (FULFIL_LIVE_WRITES)' };

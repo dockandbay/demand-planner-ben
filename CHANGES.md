@@ -1,3 +1,10 @@
+## v28.502 (26-Oct-26) CLIENT: owner mailbox per client account; all staff emails about the client go there
+- Ben: "client accounts need an owner email account which is either sales-uk@dockandbay.com, sales-us@, sales-eu@, keyaccounts@; this is where email notifications must go for that client." AU and CA → keyaccounts@; owner mailbox only, no global copy.
+- CLIENT ▸ Clients: the Owner field (new client and edit) is now a dropdown of the four mailboxes. New clients default from type / market: key account → keyaccounts@; UK / US / EU → sales-uk@ / sales-us@ / sales-eu@; AU, CA → keyaccounts@ (follows type / market until picked by hand). Any other address is refused by the server.
+- Staff emails about a client now go to its owner mailbox ONLY: portal messages from the client, the copy of order and sample confirmations, and "auto-post to Fulfil failed". The CONFIG lists (sales team cc, client messages go to) are used only when a client has no owner, and are labelled so. Emails to the client's own users are unchanged.
+- Migration 390_client_owner_mailbox.sql backfills every client whose owner is not one of the four (live 26-Oct-26: 18 active agents, UK 3 / US 12 / EU 2 / CA 1, owners mostly blank; one US client had ben@).
+- Sandbox: default owner on create, personal address refused, blank owner skipped (other fields still save), dropdown renders for mailbox and legacy owners.
+
 ## v28.501 (26-Oct-26) ACCOUNTS: Uncoded statement lines upload no longer fails on repeated identical lines
 - Rita: uploading "Statement Lines Report For All Orgs 2026-10-26.csv" failed with "ON CONFLICT DO UPDATE command cannot affect row a second time".
 - Cause: two separate bank lines in one account with the same date, amount and reference (e.g. two identical card fees on one day) share the stored line key, so the second hit the first inside one insert and the whole upload was refused.
