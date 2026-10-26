@@ -21904,6 +21904,8 @@
   var _cpNb={view:'live',edit:null,flash:null};
   function cpnPl(n,w){ return n+' '+w+(n===1?'':'s'); }
   function cpnFd(s){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||'')); return m?m[3]+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1]+'-'+m[1].slice(2):''; }
+  // Portal pages a notice can link to (client-view.js routes). A client without that page (e.g. images not enabled) lands on Home.
+  var CPN_PAGES=[['#/catalogue','Catalogue / line sheet'],['#/images','Image gallery'],['#/order','New order'],['#/orders','My orders'],['#/messages','Messages'],['#/commission','Commission'],['#/home/notices','All notices']];
   var CPN_TYPES={key_account:'Key accounts',distributor:'Distributors',agent:'Agents / rep groups',direct_wholesale:'Direct wholesale'};
   function cpnReach(d,a){ var m=d.clients.filter(function(c){ if((a.client_ids||[]).length)return a.client_ids.indexOf(c.id)>=0; return (!(a.markets||[]).length||a.markets.indexOf(c.market)>=0)&&(!(a.types||[]).length||a.types.indexOf(c.type)>=0); });
     return {clients:m.length,users:m.reduce(function(s,c){return s+(c.users||0);},0)}; }
@@ -21936,13 +21938,14 @@
   function cpnEditor(b,d){ var S=_cpNb, n=S.edit, a=n.audience||{markets:[],types:[],client_ids:[]}, box=document.getElementById('cpn-ed'); if(!box)return;
     var ck=function(cls,v,on,l){ return '<label class="tiny" style="display:inline-flex;gap:5px;align-items:center;margin-right:12px"><input type="checkbox" class="'+cls+'" value="'+esc(v)+'"'+(on?' checked':'')+'>'+esc(l)+'</label>'; };
     var lab=function(t){ return '<div class="tiny mut" style="font-weight:700;margin:10px 0 3px">'+t+'</div>'; };
-    var named=(a.client_ids||[]).length>0;
+    var named=(a.client_ids||[]).length>0, lt=!n.link_url?'':CPN_PAGES.some(function(p){return p[0]===n.link_url;})?n.link_url:'web';
     box.innerHTML='<div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px;max-width:900px;background:var(--hover)">'
       +'<div style="font-weight:700;margin-bottom:6px">'+(n.id?'Edit notice':'New notice')+'</div>'
       +lab('Title')+'<input class="fci" id="cpn-t" maxlength="160" style="width:100%" placeholder="e.g. 4 weeks until the SS27 preorder deadline" value="'+esc(n.title||'')+'">'
       +lab('Text <span style="font-weight:400">(optional; a blank line starts a new paragraph)</span>')+'<textarea class="fci" id="cpn-b" rows="4" maxlength="4000" style="width:100%;font-family:inherit">'+esc(n.body||'')+'</textarea>'
       +'<div style="display:flex;gap:14px;flex-wrap:wrap"><div>'+lab('Key date <span style="font-weight:400">(optional)</span>')+'<input type="date" class="fci" id="cpn-kd" value="'+esc(n.key_date||'')+'"></div>'
-      +'<div style="flex:1;min-width:240px">'+lab('Link <span style="font-weight:400">(optional; https://… or a portal page such as #/catalogue)</span>')+'<input class="fci" id="cpn-l" style="width:100%" value="'+esc(n.link_url||'')+'"></div>'
+      +'<div>'+lab('Link to <span style="font-weight:400">(optional)</span>')+'<select class="fci" id="cpn-lt"><option value="">No link</option>'+CPN_PAGES.map(function(p){ return '<option value="'+esc(p[0])+'"'+(lt===p[0]?' selected':'')+'>'+esc(p[1])+'</option>'; }).join('')+'<option value="web"'+(lt==='web'?' selected':'')+'>A web address…</option></select></div>'
+      +'<div id="cpn-lw" style="flex:1;min-width:240px'+(lt==='web'?'':';display:none')+'">'+lab('Web address')+'<input class="fci" id="cpn-l" style="width:100%" placeholder="https://" value="'+esc(lt==='web'?n.link_url:'')+'"></div>'
       +'<div>'+lab('Link text')+'<input class="fci" id="cpn-ll" maxlength="60" placeholder="Find out more" value="'+esc(n.link_label||'')+'"></div>'
       +'<div>'+lab('Hide after <span style="font-weight:400">(optional)</span>')+'<input type="date" class="fci" id="cpn-ex" value="'+esc(n.expires_on||'')+'"></div></div>'
       +'<div style="margin-top:10px">'+ck('cpn-pin','1',n.pinned,'Pin to the top of Home')+'</div>'
@@ -21955,13 +21958,13 @@
     var val=function(id){ var x=document.getElementById(id); return x?x.value:''; };
     var aud=function(){ if(box.querySelector('input[name="cpn-am"]:checked').value==='n')return {markets:[],types:[],client_ids:Array.prototype.map.call(document.getElementById('cpn-cl').selectedOptions,function(o){return +o.value;})};
       return {markets:Array.prototype.map.call(box.querySelectorAll('.cpn-mk:checked'),function(x){return x.value;}),types:Array.prototype.map.call(box.querySelectorAll('.cpn-ty:checked'),function(x){return x.value;}),client_ids:[]}; };
-    var upd=function(){ var am=box.querySelector('input[name="cpn-am"]:checked').value; document.getElementById('cpn-af').style.display=am==='n'?'none':''; document.getElementById('cpn-an').style.display=am==='n'?'':'none';
+    var upd=function(){ document.getElementById('cpn-lw').style.display=val('cpn-lt')==='web'?'':'none'; var am=box.querySelector('input[name="cpn-am"]:checked').value; document.getElementById('cpn-af').style.display=am==='n'?'none':''; document.getElementById('cpn-an').style.display=am==='n'?'':'none';
       var r=cpnReach(d,aud()), em=document.getElementById('cpn-em'); document.getElementById('cpn-reach').textContent='Reaches '+cpnPl(r.clients,'client')+' · '+cpnPl(r.users,'portal user');
       document.getElementById('cpn-save').textContent=em&&em.checked?'Save and email '+cpnPl(r.users,'user'):'Save'; };
     box.addEventListener('change',upd); upd(); var t=document.getElementById('cpn-t'); if(t&&!n.id)t.focus();
     document.getElementById('cpn-cancel').onclick=function(){ S.edit=null; box.innerHTML=''; };
     document.getElementById('cpn-save').onclick=function(){ var btn=this, em=document.getElementById('cpn-em'), out=document.getElementById('cpn-emsg'); out.textContent='';
-      var body={id:n.id||null,title:val('cpn-t'),body:val('cpn-b'),key_date:val('cpn-kd'),link_url:val('cpn-l'),link_label:val('cpn-ll'),expires_on:val('cpn-ex'),pinned:!!box.querySelector('.cpn-pin:checked'),audience:aud(),email:!!(em&&em.checked)};
+      var body={id:n.id||null,title:val('cpn-t'),body:val('cpn-b'),key_date:val('cpn-kd'),link_url:val('cpn-lt')==='web'?val('cpn-l'):val('cpn-lt'),link_label:val('cpn-ll'),expires_on:val('cpn-ex'),pinned:!!box.querySelector('.cpn-pin:checked'),audience:aud(),email:!!(em&&em.checked)};
       if(!body.title.trim()){ out.textContent='Give the notice a title.'; return; } if(body.audience.client_ids.length===0&&box.querySelector('input[name="cpn-am"]:checked').value==='n'){ out.textContent='Pick at least one client.'; return; }
       btn.disabled=true; cpPost('/api/client/notices',body).then(function(r){ S.edit=null; var e=r.email; S.flash={ok:!(e&&e.error),t:'Saved ✓'+(e?' '+cpnMailTxt(e):'')}; cpRenderNotices(b); }).catch(function(e){ btn.disabled=false; out.textContent=e.message; }); }; }
   // ── CONFIG ──

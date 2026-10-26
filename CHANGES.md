@@ -1,3 +1,7 @@
+## v28.507 (27-Oct-26) CLIENT ▸ Notices: link is a page picker
+- Ben: "should be a selection of pages option or hard coding. users wont know the page structure". The Link box is now a "Link to" dropdown: No link, Catalogue / line sheet, Image gallery, New order, My orders, Messages, Commission, All notices, or "A web address…" (only then the https:// box shows). Editing a notice preselects its page.
+- A client without that page (e.g. images not enabled) lands on Home, as before. Sandbox check in jsdom: options, preselect, web box toggles, saved #/images.
+
 ## v28.506 (27-Oct-26) Client portal: notice board on Home (+ optional email)
 - Liam (via Ben): "a 'notice board' on the landing/homepage ... drop in & update clients on major developments (and stop them coming to sales@/mads with questions) ... could even send an email notification to clients when a post/update is added?" Ben picked: strip at the top of Home, audience per post, email by tick box, NEW per user.
 - Client Home: a Notices strip above the hero with pinned notices (up to 3) and the newest 2; each shows Pinned / New, title, key date, text (2 lines), link, posted date. "All notices" (#/home/notices) lists every live one in full. NEW until that user has seen it; the Home menu item counts unseen notices. An admin preview never marks anything seen.

@@ -30649,7 +30649,7 @@ app.get('/api/client/notices', async (req, res) => {
 app.post('/api/client/notices', async (req, res) => {   // {id?, title, body, link_url, link_label, key_date, pinned, audience, expires_on, email}
   try { const b = req.body || {}, by = (req.me && req.me.email) || 'staff';
     const title = String(b.title || '').trim().slice(0, 160); if (!title) return res.status(400).json({ error: 'Give the notice a title' });
-    const link = String(b.link_url || '').trim(); if (link && !/^https:\/\/\S+$/i.test(link) && !/^#\/\S*$/.test(link)) return res.status(400).json({ error: 'The link must start with https:// (or #/ for a portal page, e.g. #/catalogue)' });
+    const link = String(b.link_url || '').trim(); if (link && !/^https:\/\/\S+$/i.test(link) && !/^#\/\S*$/.test(link)) return res.status(400).json({ error: 'The web address must start with https://' });
     const d = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null;
     const vals = [title, String(b.body || '').trim().slice(0, 4000) || null, link || null, String(b.link_label || '').trim().slice(0, 60) || null, d(b.key_date), !!b.pinned, JSON.stringify(cpNoticeAud(b.audience)), d(b.expires_on), by];
     let id = Number(b.id) || 0;
