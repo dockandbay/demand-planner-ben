@@ -608,6 +608,7 @@
 #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg,#supply-root #sovdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
 #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open,#supply-root #erpdrawer-bg.open,#supply-root #sovdrawer-bg.open{background:rgba(15,23,42,.32)}
 #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer,#supply-root #erpdrawer,#supply-root #sovdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:var(--card);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #podrawer,#supply-root #shipdrawer{width:clamp(min(920px,94vw),70vw,94vw)}#podrawer>.mdh,#shipdrawer>.mdh{flex:0 0 auto}   /* v28.524: same width + header as the PO grid drawer */
 #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer,#supply-root #erpdrawer-bg.open #erpdrawer,#supply-root #sovdrawer-bg.open #sovdrawer{transform:translateX(0)}
 #supply-root #sovdrawer{width:max(50vw, min(560px,100vw))}   /* v28.192 (Ben): Validate sales order drawer = 50% of the screen (full width on phones, below) */
 #supply-root #podrawer-bg,#supply-root #sampdrawer-bg,#supply-root #erpdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
@@ -939,13 +940,13 @@
 #mob-sheet-ov.as-drawer{background:rgba(15,23,42,.38);overflow:hidden}
 #mob-sheet-ov.as-drawer .mob-drawer{position:absolute;top:0;right:0;bottom:0;width:70vw;max-width:100%;background:var(--card);box-shadow:-10px 0 28px rgba(15,23,42,.22);overflow-y:auto;overflow-x:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;animation:mobDrawerIn .16s ease-out}
 @keyframes mobDrawerIn{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
-#mob-sheet-ov.as-drawer .mdh{position:sticky;top:0;left:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;background:linear-gradient(90deg,#1d4ed8,#2361d8);color:#fff;border-bottom:1px solid #1e40af;box-shadow:0 2px 6px rgba(29,78,216,.25)}   /* v28.512; v28.513 (Ben: "a different colour to stand out"): deep blue, same in both themes (white text stays readable) */
-#mob-sheet-ov.as-drawer .mdh-id{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-width:0;user-select:text;cursor:text}
-#mob-sheet-ov.as-drawer .mdh-ref{font-size:22px;font-weight:800;letter-spacing:.01em;line-height:1.2;white-space:pre-wrap;overflow-wrap:anywhere}
-#mob-sheet-ov.as-drawer .mdh-sup{font-size:15px;font-weight:600;color:#dbeafe}
-#mob-sheet-ov.as-drawer .mdh-act{display:flex;gap:8px;flex:0 0 auto}
-#mob-sheet-ov.as-drawer .mdh-btn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
-#mob-sheet-ov.as-drawer .mdh-btn:hover{background:rgba(255,255,255,.2)}
+#mob-sheet-ov.as-drawer .mdh,#podrawer .mdh,#shipdrawer .mdh{position:sticky;top:0;left:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;background:linear-gradient(90deg,#1d4ed8,#2361d8);color:#fff;border-bottom:1px solid #1e40af;box-shadow:0 2px 6px rgba(29,78,216,.25)}   /* v28.512; v28.513 (Ben: "a different colour to stand out"): deep blue, same in both themes (white text stays readable) */
+#mob-sheet-ov.as-drawer .mdh-id,#podrawer .mdh-id,#shipdrawer .mdh-id{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-width:0;user-select:text;cursor:text}
+#mob-sheet-ov.as-drawer .mdh-ref,#podrawer .mdh-ref,#shipdrawer .mdh-ref{font-size:22px;font-weight:800;letter-spacing:.01em;line-height:1.2;white-space:pre-wrap;overflow-wrap:anywhere}
+#mob-sheet-ov.as-drawer .mdh-sup,#podrawer .mdh-sup,#shipdrawer .mdh-sup{font-size:15px;font-weight:600;color:#dbeafe}
+#mob-sheet-ov.as-drawer .mdh-act,#podrawer .mdh-act,#shipdrawer .mdh-act{display:flex;gap:8px;flex:0 0 auto}
+#mob-sheet-ov.as-drawer .mdh-btn,#podrawer .mdh-btn,#shipdrawer .mdh-btn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
+#mob-sheet-ov.as-drawer .mdh-btn:hover,#podrawer .mdh-btn:hover,#shipdrawer .mdh-btn:hover{background:rgba(255,255,255,.2)}
 #mob-sheet-ov.as-drawer .mob-back{position:sticky;top:0;left:0;padding:11px 16px;font-size:13px}
 #mob-sheet-ov.as-drawer .mob-sheet-body{padding:8px 14px 24px;text-align:left;white-space:normal}
 #mob-sheet-ov.as-drawer .tw>table{width:max-content;min-width:100%}
@@ -4396,6 +4397,15 @@
   // Same move-the-node mechanism, so every #podet-* / #shipdet-* binding works unchanged.
   // v28.512 (Ben 27-Oct-26): on desktop the drawer header is text (big PO / shipment ref + supplier, selectable) with its own Copy link and
   // Close buttons; it used to be one big close button, so selecting the PO number closed the drawer. kind = 'po' | 'ship'. Phones keep the back bar.
+  // v28.524 (Ben: "the popout drawer from global search isnt the same as popout draw from po grid, it should be with the new header"): the
+  // blue drawer header (ref + supplier, Copy link, extra buttons, Close) shared by the grid drawer and the standalone PO / shipment drawers.
+  function mdhHeader(kind,ref,sup,extra,onClose){ var hd=document.createElement('div'); hd.className='mdh';
+    hd.innerHTML='<div class="mdh-id"><span class="mdh-ref">'+esc(ref||'')+'</span>'+(sup?'<span class="mdh-sup">'+esc(sup)+'</span>':'')+'</div>'
+      +'<div class="mdh-act"><button type="button" class="mdh-btn mdh-copy" title="copy a direct link to this '+(kind==='ship'?'shipment':'PO')+'">🔗 Copy link</button>'+(extra||'')+'<button type="button" class="mdh-btn mdh-x" title="close (Esc)">✕ Close</button></div>';
+    hd.querySelector('.mdh-x').onclick=function(e){ e.stopPropagation(); onClose(); };
+    hd.querySelector('.mdh-copy').onclick=function(e){ e.stopPropagation(); var btn=this, url=mdhLink(kind,ref), done=function(){ btn.textContent='✓ Link copied'; setTimeout(function(){ btn.textContent='🔗 Copy link'; },1400); };
+      try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,function(){ try{legacyCopy(url);}catch(_){} done(); }); } else { legacyCopy(url); done(); } }catch(_){ done(); } };
+    return hd; }
   function mdhLink(kind,ref){ return location.origin+location.pathname+'#/supply/purchase-orders/'+(kind==='ship'?'shipments/':'')+encodeURIComponent(ref); }
   function applyMobSheet(ex, opening, closeFn, label, kind){ var td=ex&&ex.querySelector('td'); if(!td)return;
     var ov=document.getElementById('mob-sheet-ov');
@@ -4414,12 +4424,7 @@
         ov.onclick=function(e){ if(e.target===ov)closeNow(); }; }
       else ov.onclick=null;
       if(drawer){ var _row=(kind!=='ship'&&typeof poBy!=='undefined'&&poBy&&poBy[label])||null, _sup=_row?(_row.supplier_name||_row.supplier||''):'';
-        var hd=document.createElement('div'); hd.className='mdh';
-        hd.innerHTML='<div class="mdh-id"><span class="mdh-ref">'+esc(label||'')+'</span>'+(_sup?'<span class="mdh-sup">'+esc(_sup)+'</span>':'')+'</div>'
-          +'<div class="mdh-act"><button type="button" class="mdh-btn mdh-copy" title="copy a direct link to this '+(kind==='ship'?'shipment':'PO')+'">🔗 Copy link</button><button type="button" class="mdh-btn mdh-x" title="close (Esc)">✕ Close</button></div>';
-        hd.querySelector('.mdh-x').onclick=function(e){ e.stopPropagation(); closeNow(); };
-        hd.querySelector('.mdh-copy').onclick=function(e){ e.stopPropagation(); var btn=this, url=mdhLink(kind,label), done=function(){ btn.textContent='✓ Link copied'; setTimeout(function(){ btn.textContent='🔗 Copy link'; },1400); };
-          try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,function(){ try{legacyCopy(url);}catch(_){} done(); }); } else { legacyCopy(url); done(); } }catch(_){ done(); } };
+        var hd=mdhHeader(kind,label,_sup,'',closeNow);
         host.appendChild(hd); }
       else { var bk=document.createElement('button'); bk.className='mob-back';
         bk.innerHTML='<span>← Back to list</span>'+(label?'<span class="mob-back-ref">'+esc(label)+'</span>':'');   // show which PO / shipment this sheet is
@@ -8033,15 +8038,12 @@
     closeShipDrawer(true);   // drop any existing drawer (silent: keep the saved patch to restore later)
     var root=document.getElementById('supply-root')||document.body;
     var bg=document.createElement('div'); bg.id='shipdrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a PO drawer)
-    bg.innerHTML='<div id="shipdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">Shipment '+esc(ref)+'</div>'
-      +'<div><button class="lnk-btn shipdrawer-full" title="open the full Shipments page for this shipment">Full page ↗</button>'
-      +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
-      +'<div class="shipdrawer-body"><div id="shipdet-DRAWER" class="count">Loading…</div></div></div>';
+    bg.innerHTML='<div id="shipdrawer"><div class="shipdrawer-body"><div id="shipdet-DRAWER" class="count">Loading…</div></div></div>';
+    bg.firstChild.insertBefore(mdhHeader('ship',ref,'','<button type="button" class="mdh-btn shipdrawer-full" title="open the full Shipments page for this shipment">Full page ↗</button>',function(){ closeShipDrawer(); }),bg.firstChild.firstChild);   // v28.524: grid-drawer header
     root.appendChild(bg);
     requestAnimationFrame(function(){ bg.classList.add('open'); });
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)closeShipDrawer(); });
-    bg.querySelector('.shipdrawer-x').onclick=function(){ closeShipDrawer(); };
-    bg.querySelector('.shipdrawer-full').onclick=function(){ closeShipDrawer(); gotoShipmentPage(ref); };
+    bg.querySelector('.shipdrawer-full').onclick=function(e){ e.stopPropagation(); closeShipDrawer(); gotoShipmentPage(ref); };
     // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer — the grid row that
     // normally patches itself may not exist on this page (e.g. PURCHASE ORDERS ▸ Plan).
     if(_shipPatchRow!==refreshShipDrawer){ _shipDrawerPrevPatch=_shipPatchRow; _shipPatchRow=refreshShipDrawer; }
@@ -8434,15 +8436,13 @@
     var _overlay = root.id==='supply-root' && root.style.display==='none';
     if(_overlay){ root.classList.add('hz-drawer-overlay'); root.style.display='block'; }
     var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a shipment drawer)
-    bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
-      +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
-      +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
-      +'<div class="shipdrawer-body"><div id="podet-DRAWER" class="count">Loading…</div></div></div>';
+    var _pr=poBy[po]||null;
+    bg.innerHTML='<div id="podrawer"><div class="shipdrawer-body"><div id="podet-DRAWER" class="count">Loading…</div></div></div>';
+    bg.firstChild.insertBefore(mdhHeader('po',po,_pr?(_pr.supplier_name||_pr.supplier||''):'','<button type="button" class="mdh-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>',function(){ closePODrawer(); }),bg.firstChild.firstChild);   // v28.524: grid-drawer header
     root.appendChild(bg);
     requestAnimationFrame(function(){ bg.classList.add('open'); });
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)closePODrawer(); });
-    bg.querySelector('.shipdrawer-x').onclick=function(){ closePODrawer(); };
-    bg.querySelector('.shipdrawer-full').onclick=function(){ closePODrawer(); gotoPO(po,tab); };
+    bg.querySelector('.shipdrawer-full').onclick=function(e){ e.stopPropagation(); closePODrawer(); gotoPO(po,tab); };
     }
     // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer, not a grid row that
     // may not exist on this page (e.g. the What's Next report).
@@ -8452,7 +8452,7 @@
     // Always refetch THIS PO's row so the drawer shows current data (poBy may be stale after an edit elsewhere —
     // e.g. a "pay" on the Payments Due report). Cheap single-row fetch; falls back to the full list if needed.
     fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
-        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; loadPoDetail(po,'DRAWER',tab); return; }
+        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; var _ms=document.querySelector('#podrawer .mdh-id'); if(_ms&&!_ms.querySelector('.mdh-sup')&&(rr.supplier_name||rr.supplier))_ms.insertAdjacentHTML('beforeend','<span class="mdh-sup">'+esc(rr.supplier_name||rr.supplier)+'</span>'); loadPoDetail(po,'DRAWER',tab); return; }
         if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; }
         return fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ (rows||[]).forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,'DRAWER',tab); }); })
       .catch(function(e){ if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; } var b=document.getElementById('podet-DRAWER'); if(b)b.innerHTML='<span style="color:var(--neg)">Could not load PO: '+esc(e.message||e)+'</span>'; });

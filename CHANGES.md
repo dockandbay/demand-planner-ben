@@ -1,3 +1,8 @@
+## v28.524 (28-Oct-26) PO / shipment drawer from global search matches the PO grid drawer
+- Ben: "the popout drawer from global search isnt the same as popout draw from po grid, it should be with the new header".
+- The PO drawer (global search, reports, Payments due, What's next…) and the shipment drawer now use the same deep blue header as the PO grid drawer: the PO / shipment number large with the supplier, 🔗 Copy link, Full page ↗ and ✕ Close; and the same 70% width. One shared header builder (mdhHeader) for all three.
+- Front end only.
+
 ## v28.523 (28-Oct-26) PO actions clear silently as you fix them
 - Ben (PO473 ▸ Payments): "had 3 actions, i actioned them but the messages stayed and the counter stayed on drawer and po grid until i refreshed the page. can they all remove silently as actions are closed like adding dates or fulfil links or deposits etc".
 - Cause: actions are worked out from the PO's grid row, and saves such as assigning a deposit or linking a Fulfil PO did not re-read that row.
