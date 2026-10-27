@@ -1,3 +1,9 @@
+## v28.515 (27-Oct-26) Supplier portal: clearer submitted charges; "Freight & Handling Charges", "Amount"
+- Ben: "make the charges submitted and pending clearer 'CHARGE 1 - PENDING - 55', same size as adding a new charge" and "rather than 'Freight cost' call it 'Amount' and left aligned, and the header '💰 Freight charges' change to 'Freight & Handling Charges'".
+- Every list of submitted charges (shipment card, PO row, Shipment plan, sample charges) now uses one row (ppChgRows): CHARGE n, status in words (PENDING REVIEW amber / ACCEPTED green / REJECTED grey) with a matching left edge, the total at 15px, the freight + product split when there is a product cost, then the description; 13px like the add row. Was a small "pending 55.00 · thus" line.
+- Shipment card: header "💰 Freight & Handling Charges", input label "Amount" (left aligned). PO row: same header and "Amount". Chinese labels added.
+- Check (jsdom, sandbox ACME preview, shipment PO-53UKJM4-JAN): header, row "CHARGE 1 · PENDING REVIEW · 55.00 · thus" at 13px, Amount left aligned. No server change.
+
 ## v28.514 (27-Oct-26) Portal preview no longer hijacks HORIZON's URL
 - Ben: "pageis returning blank on live https://horizon.dockandbay.com/#/supply/config/portal/lx". Reproduced on live: in CONFIG ▸ Portal preview, clicking a portal tab (seen on Custom orders) set HORIZON's address to the portal's own "#/orders/custom"; HORIZON cannot route that, the sidebar jumped to Demand and a reload or that link gave a blank page. Every preview tab did this (since v27.500); the new Custom orders tab made it visible.
 - Fix: portal-view.js changes the address only on the real supplier portal page (window.__PV_STANDALONE); in the staff preview tabs switch without touching HORIZON's URL. The sample-card "Open full record" opens the product in place in the preview.
