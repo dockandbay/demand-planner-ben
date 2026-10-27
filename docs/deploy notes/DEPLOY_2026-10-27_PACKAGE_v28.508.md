@@ -1,5 +1,7 @@
 # HORIZON deploy package v28.508 (27-Oct-26)
 
+**SUPERSEDED by DEPLOY_2026-10-27_PACKAGE_v28.508-v28.509.md (v28.509 added to PR #24).**
+
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `8f6358d5` (`8f6358d562b096cb84652bf877bbe4ad88ce881c`; code v28.508). Live `/api/version` before: **v28.507** (production `main` = `632c73e6`). Production port: PR #24, branch `port/v28.508` (`36aa8600`). Owner of production steps: Ben.
 
 **STATUS 27-Oct-26: PR OPEN.** No migration: merge when the checks are green.
