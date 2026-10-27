@@ -3599,7 +3599,8 @@
     if(hBtn&&hMenu){
       hBtn.onclick=function(e){ e.stopPropagation(); hMenu.style.display=(hMenu.style.display==='none'?'block':'none'); };
       if(!window._poHideDocBound){ window._poHideDocBound=1; document.addEventListener('click',function(e){ var m=document.getElementById('po-hide-menu'), hb=document.getElementById('po-hide-btn'); if(m&&m.style.display!=='none' && !m.contains(e.target) && e.target!==hb) m.style.display='none'; }); }   // v28.151 (review F5): bound once, looks the menu up by id (was one listener per render)
-      function syncHide(){ var n=_hideCount(); hBtn.textContent='Hide'+(n?' ('+n+')':'')+' ▾'; hBtn.style.background=n?'#0f172a':''; hBtn.style.color=n?'#fff':''; hBtn.style.borderColor=n?'#0f172a':''; hBtn.style.fontWeight=n?'700':''; }
+      function syncHide(){ try{ syncActErp(); }catch(e){} try{ _navCounts.plan=actItemsCount(); updateNavBadges(); }catch(e){}   // + the PURCHASE ORDERS nav badge   // v28.529 (Ben: "adding items to the HIDE on po grid should change the count of action items"): relabel ACTION ITEMS (n)
+        var n=_hideCount(); hBtn.textContent='Hide'+(n?' ('+n+')':'')+' ▾'; hBtn.style.background=n?'#0f172a':''; hBtn.style.color=n?'#fff':''; hBtn.style.borderColor=n?'#0f172a':''; hBtn.style.fontWeight=n?'700':''; }
       var ph1=document.getElementById('po-hide-snz'); if(ph1)ph1.onchange=function(){ _poShowSnoozed=!this.checked; syncHide(); view(); };
       var ph2=document.getElementById('po-hide-pay'); if(ph2)ph2.onchange=function(){ _hidePayDue=this.checked; syncHide(); view(); };
       var ph3=document.getElementById('po-hide-tl'); if(ph3)ph3.onchange=function(){ _hideTimelineUnread=this.checked; syncHide(); view(); };

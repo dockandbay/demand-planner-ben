@@ -1,3 +1,8 @@
+## v28.529 (28-Oct-26) Hide ▾ updates the ACTION ITEMS count
+- Ben: "adding items to the HIDE on po grid should change the count of action items" (ACTION ITEMS (229) stayed put).
+- Cause: the Hide toggles re-filtered the grid and badges, but the ACTION ITEMS (n) pill lives in the filter bar, which is not redrawn, so its number only changed on a full reload.
+- Now every Hide toggle relabels ACTION ITEMS (n) and the PURCHASE ORDERS nav count straight away (same snooze- and hide-aware count as the badges).
+
 ## v28.528 (28-Oct-26) PO actions: hide "waiting for supplier", approve all partials, apply a submitted end date from the timeline, DTC client name
 - Ben: "Hide (1) ▾ can you add waiting for supplier approval". PO grid ▸ Hide ▾ has a 4th toggle, waiting for supplier approval: hides "Not confirmed by supplier" and "Direct-to-Client not approved" from the ACTION ITEMS count, red badges and filter (like payment due / timeline unread).
 - Ben (PO-59USLX1-DILLARDS ▸ Order plan): "can you have a button approve all partials". The Order plan tab shows "✓ Approve all partials (n)" when the PO has unapproved partial-carton lines (open POs only); it approves them all (same route and change log as the grid tick box) and re-reads the panel.
