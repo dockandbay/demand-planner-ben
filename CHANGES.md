@@ -1,3 +1,12 @@
+## v28.517 (27-Oct-26) Custom orders: production file list (no zip); cancelled lines shown
+- Ben: "a batch download should be controlled via a download modal, controlling which files are already downloaded or which need to be downloaded and importing one at a time" and "the supplier will be the ones downloading". Lixin needs TIFF at full quality, so one batch zip would run to GBs.
+- Supplier portal ORDERS > Custom orders, batch view: "Production files (zip)" replaced by a Production files list. Every file (front / back TIFF or PDF, pouch labels, manifest) with Downloaded (date) or Not downloaded, from the Customiser's own record (so it survives a reload); Download remaining, Download ticked, or one file; files are made and downloaded one at a time, with Stop.
+- Each file goes through `?file=<name>&link=1`: the Customiser stores it and answers a short signed storage link; the browser downloads it straight from storage, so nothing large passes through HORIZON.
+- Line progress: a line the customer cancelled in Shopify shows "Cancelled: do not make" and has no stage button.
+- server.mjs custProxy: passes `link` through (with `line`, `file`, `list`); production requests may take up to 280 s (was 60 s; a full quality TIFF can take a minute).
+- Check (jsdom, stubbed proxy): cancelled line shown, zip button gone, 3 files with 1 already downloaded, Download remaining fetched one at a time in order and marked all downloaded, every request through /api/portal/custom/.
+- Deploy: no new env vars, no migration. Needs the Customiser at commit 9f25700 or later (live 27-Oct-26). If the host caps function time below 280 s, a very large TIFF can time out: raise the limit for /api/portal/custom/* and /api/supply/custom-portal/*.
+
 ## v28.516 (27-Oct-26) Supplier portal: POs, shipments and samples open in a drawer
 - Ben: "can the supplier portal ORDERS and SHIPMENT PLAN and SAMPLES popout in a drawer rather than expanded list". Picked: right drawer 70% (phones full screen), same deep blue header as HORIZON's PO drawer.
 - Purchase orders (Manage), Shipment plan cards and Samples (Manage) now open their detail as a right-hand drawer instead of expanding under the row. Header: the ref large (PO / master PO / SR), then branch + P#, mode + carrier, or the sample status; "🔗 Copy link" (the portal deep link, e.g. /portal#/orders/pos/PO-57UKBL1) and "✕ Close". Esc and clicking off close it; one drawer at a time; the header text is selectable.

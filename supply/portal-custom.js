@@ -1,6 +1,10 @@
 // v28.504 (Ben 27-Oct-26): supplier portal tab ORDERS ▸ Custom orders. The Customiser's weekly Tuesday custom towel batches for this
 // supplier: list, then one batch with its steps (1 accept or flag a problem, 2 line progress cut / stitched / packed, 3 first unit
-// photo, 4 mark made, 5 cartons + DHL AWB), downloads (PO PDF, production zip, artwork per line) and the timeline.
+// photo, 4 mark made, 5 cartons + DHL AWB), downloads (PO PDF, artwork per line, production files) and the timeline.
+// v28.517 (Ben 27-Oct-26: "a batch download should be controlled via a download modal ... the supplier will be the ones downloading"):
+// the production zip is replaced by a file list (full quality TIFFs make one zip GBs): every file with downloaded / not downloaded
+// (recorded by the Customiser), Download remaining / ticked / one, made and downloaded ONE AT A TIME through ?link=1 (the browser
+// fetches each file straight from storage, nothing large passes through HORIZON). Lines cancelled by the customer show as such.
 // Data comes through HORIZON's proxy to the Customiser (server.mjs custProxy): /api/portal/custom/* for suppliers,
 // /api/supply/custom-portal/<supplier>/* for the staff preview. Used by supply/portal.html and the CONFIG ▸ Portal preview in inject.html.
 (function () {
@@ -24,7 +28,7 @@
 
   // opts: { base: '/api/portal/custom/' (ends with /), canWrite: bool, onCount: fn(n) }
   function render(host, opts) {
-    var base = opts.base, ST = { list: null, open: null, flagLabel: {} };
+    var base = opts.base, ST = { list: null, open: null, flagLabel: {}, files: null, done: {}, fst: {}, ferr: {}, pick: {}, running: false, stop: false };
     if (!document.getElementById('hzc-css')) { var st = document.createElement('style'); st.id = 'hzc-css'; st.textContent = CSS; document.head.appendChild(st); }
     function api(path, body) {
       return fetch(base + path, body === undefined ? { headers: { accept: 'application/json' } } : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -66,8 +70,9 @@
       var dl = base + 'batches/' + b.id;
       var h = '<div class="hzc"><div class="hzc-row2"><button class="hzc-btn" data-back>Back to custom orders</button><b>' + esc(b.po_ref) + '</b>' + statusPill(b)
         + (b.flags || []).map(function (f) { return pill('neg', ST.flagLabel[f] || f); }).join(' ') + '<span class="hzc-mut2">Tuesday ' + fd(b.batch_date) + ' · accept by ' + fd(b.accept_by) + ' · made by ' + fd(b.due_date) + '</span></div>';
-      h += '<div class="hzc-card"><h3>Documents</h3><div class="hzc-row2"><a class="hzc-btn" href="' + dl + '/po">PO (PDF)</a><a class="hzc-btn" href="' + dl + '/production">Production files (zip)</a>'
-        + (b.lines || []).map(function (l, i) { return '<a class="hzc-btn" href="' + dl + '/artwork?line=' + encodeURIComponent(l.id) + '">Artwork line ' + (i + 1) + '</a>'; }).join('') + '</div><div class="hzc-mut2">The zip holds the print-ready file for every towel (true size, bleed, margin QR), pouch labels and the PO.</div></div>';
+      h += '<div class="hzc-card"><h3>Documents</h3><div class="hzc-row2"><a class="hzc-btn" href="' + dl + '/po">PO (PDF)</a>'
+        + (b.lines || []).map(function (l, i) { return '<a class="hzc-btn" href="' + dl + '/artwork?line=' + encodeURIComponent(l.id) + '">Artwork line ' + (i + 1) + '</a>'; }).join('') + '</div></div>';
+      h += '<div class="hzc-card"><h3>Production files</h3><div class="hzc-mut2">The print-ready file for every towel (true size, bleed, margin QR), pouch labels and the manifest. Files are made one at a time; a large file can take a minute. If the browser asks to allow several downloads, allow it once.</div><div data-files><div class="hzc-msg">Loading the file list…</div></div></div>';
       // 1 accept / problem
       h += '<div class="hzc-card"><div class="hzc-step">Step 1</div><h3>Accept the batch</h3>';
       if (accepted) h += '<div class="hzc-done">Accepted ' + fdt(b.accepted_at) + (b.accepted_by ? ' by ' + esc(b.accepted_by) : '') + '</div>';
@@ -79,9 +84,10 @@
       h += '<div class="hzc-card hzc-scroll"><div class="hzc-step">Step 2</div><h3>Line progress</h3><table><thead><tr><th>#</th><th>Order</th><th>Towel</th><th>Design</th><th>Qty</th><th>Unit refs</th><th>Stage</th></tr></thead><tbody>';
       (b.lines || []).forEach(function (l, i) {
         var cur = prog[l.id] || '', ix = ST.stages.indexOf(cur), next = ST.stages[ix + 1];
-        var btn = (!made && accepted && next && !ro) ? '<button class="hzc-btn" data-stage="' + esc(next) + '" data-line="' + esc(l.id) + '">Mark ' + esc(next) + '</button>' : '';
+        var gone = l.status === 'cancelled';   // v28.517: cancelled by the customer in Shopify (the Customiser takes it out of the files and the made check)
+        var btn = (!made && accepted && next && !ro && !gone) ? '<button class="hzc-btn" data-stage="' + esc(next) + '" data-line="' + esc(l.id) + '">Mark ' + esc(next) + '</button>' : '';
         h += '<tr><td>' + (i + 1) + '</td><td>' + esc(l.external_ref || '') + '<div class="hzc-mut2">' + esc(l.market || '') + (l.via_node ? ' via ' + esc(l.via_node) : '') + '</div></td><td>' + esc(l.product_name || l.product_code) + '</td><td>' + esc(l.design || '') + '</td><td>' + (l.qty || 0) + '</td>'
-          + '<td class="hzc-mut2">' + esc((l.units || []).map(function (u) { return u.ref; }).join(' ')) + '</td><td>' + (cur ? '<span class="' + (cur === 'packed' ? 'hzc-done' : '') + '">' + esc(cur) + '</span> ' : '<span class="hzc-mut2">not started</span> ') + btn + '</td></tr>';
+          + '<td class="hzc-mut2">' + esc((l.units || []).map(function (u) { return u.ref; }).join(' ')) + '</td><td>' + (gone ? pill('neg', 'Cancelled: do not make') : cur ? '<span class="' + (cur === 'packed' ? 'hzc-done' : '') + '">' + esc(cur) + '</span> ' : '<span class="hzc-mut2">not started</span> ') + btn + '</td></tr>';
       });
       h += '</tbody></table>' + (accepted ? '' : '<div class="hzc-mut2">Accept the batch first.</div>') + '<div class="hzc-msg" data-m2></div></div>';
       // 3 photo
@@ -108,7 +114,54 @@
       // timeline
       if ((b.timeline || []).length) h += '<div class="hzc-card"><h3>Timeline</h3>' + b.timeline.slice(0, 30).map(function (t) { return '<div class="hzc-mut2">' + fdt(t.at) + ' · ' + esc(t.type) + (t.actor ? ' · ' + esc(t.actor) : '') + '</div>'; }).join('') + '</div>';
       host.innerHTML = h + '</div>';
-      wire();
+      wire(); loadFiles();
+    }
+    // ── production files (v28.517) ──
+    var KIND = { front: 'Front', back: 'Back', label: 'Pouch label', pouch: 'Printed pouch', roll: 'Roll sheet', manifest: 'Manifest' };
+    function prodUrl(qs) { return base + 'batches/' + ST.open.id + '/production?' + qs; }
+    function loadFiles() {
+      var id = ST.open.id;
+      fetch(prodUrl('list=1'), { headers: { accept: 'application/json' } }).then(function (r) { return r.json().then(function (j) { if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); return j; }); })
+        .then(function (j) { if (!ST.open || ST.open.id !== id) return; var tag = String(ST.open.po_ref || '').replace(/[^A-Za-z0-9_-]+/g, '');
+          ST.files = (j.files || []).map(function (f) { return { name: f.name, kind: f.kind, format: f.format, unit: f.unit }; }).concat([{ name: tag + '_manifest.csv', kind: 'manifest', format: 'csv' }]);
+          ST.done = j.downloads || {}; ST.fst = {}; ST.ferr = {}; ST.pick = {}; ST.files.forEach(function (f) { ST.pick[f.name] = !ST.done[f.name]; }); drawFiles(); })
+        .catch(function (e) { var el = q('[data-files]'); if (el) el.innerHTML = '<div class="hzc-msg err">' + esc(e.message) + '</div>'; });
+    }
+    function drawFiles() {
+      var el = q('[data-files]'); if (!el || !ST.files) return; var F = ST.files, run = ST.running;
+      var rem = F.filter(function (f) { return !ST.done[f.name]; }), tick = F.filter(function (f) { return ST.pick[f.name]; });
+      var h = '<div class="hzc-row2"><button class="hzc-btn pri" data-dl-rem' + (run || !rem.length ? ' disabled' : '') + '>Download remaining (' + rem.length + ')</button>'
+        + '<button class="hzc-btn" data-dl-tick' + (run || !tick.length ? ' disabled' : '') + '>Download ticked (' + tick.length + ')</button>'
+        + (run ? '<button class="hzc-btn" data-dl-stop>Stop after this file</button>' : '') + '<span class="hzc-mut2">' + (F.length - rem.length) + ' of ' + F.length + ' downloaded</span></div>';
+      h += '<div class="hzc-scroll"><table><thead><tr><th><input type="checkbox" data-dl-all aria-label="Tick all"' + (tick.length === F.length ? ' checked' : '') + (run ? ' disabled' : '') + '></th><th>File</th><th>Towel</th><th>Kind</th><th>Status</th><th></th></tr></thead><tbody>';
+      F.forEach(function (f, i) { var s = ST.fst[f.name] || '', d = ST.done[f.name];
+        var stat = s === 'busy' ? pill('blue', 'Preparing…') : s === 'queued' ? pill('mut', 'Waiting') : s === 'error' ? pill('neg', 'Failed') + '<div class="hzc-msg err">' + esc(ST.ferr[f.name] || '') + '</div>'
+          : d ? pill('pos', 'Downloaded ' + fdt(d.at)) : pill('amber', 'Not downloaded');
+        h += '<tr><td><input type="checkbox" data-dl-pick="' + i + '" aria-label="Tick ' + esc(f.name) + '"' + (ST.pick[f.name] ? ' checked' : '') + (run ? ' disabled' : '') + '></td><td style="word-break:break-all">' + esc(f.name) + '</td><td>' + esc(f.unit || '') + '</td>'
+          + '<td>' + esc((KIND[f.kind] || f.kind) + ' ' + String(f.format || '').toUpperCase()) + '</td><td>' + stat + '</td><td><button class="hzc-btn" data-dl-one="' + i + '"' + (run ? ' disabled' : '') + '>' + (d ? 'Again' : 'Download') + '</button></td></tr>'; });
+      el.innerHTML = h + '</tbody></table></div>';
+      var b1 = el.querySelector('[data-dl-rem]'); if (b1) b1.onclick = function () { runFiles(rem); };
+      var b2 = el.querySelector('[data-dl-tick]'); if (b2) b2.onclick = function () { runFiles(tick); };
+      var b3 = el.querySelector('[data-dl-stop]'); if (b3) b3.onclick = function () { ST.stop = true; b3.disabled = true; };
+      var al = el.querySelector('[data-dl-all]'); if (al) al.onchange = function () { F.forEach(function (f) { ST.pick[f.name] = al.checked; }); drawFiles(); };
+      el.querySelectorAll('[data-dl-pick]').forEach(function (c) { c.onchange = function () { ST.pick[F[+c.dataset.dlPick].name] = c.checked; drawFiles(); }; });
+      el.querySelectorAll('[data-dl-one]').forEach(function (bt) { bt.onclick = function () { runFiles([F[+bt.dataset.dlOne]]); }; });
+    }
+    function oneFile(f) {
+      ST.fst[f.name] = 'busy'; ST.ferr[f.name] = ''; drawFiles();
+      return fetch(prodUrl('file=' + encodeURIComponent(f.name) + '&link=1'), { headers: { accept: 'application/json' } })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || !j.url) throw new Error(j.error || ('HTTP ' + r.status)); return j; }); })
+        .then(function (j) { var a = document.createElement('a'); a.href = j.url; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+          ST.fst[f.name] = 'done'; ST.done[f.name] = { at: new Date().toISOString() }; ST.pick[f.name] = false; })
+        .catch(function (e) { ST.fst[f.name] = 'error'; ST.ferr[f.name] = String(e && e.message || e).slice(0, 160); });
+    }
+    function runFiles(list) {
+      if (ST.running || !list.length) return; ST.running = true; ST.stop = false; list.forEach(function (f) { ST.fst[f.name] = 'queued'; }); drawFiles();
+      var i = 0, id = ST.open.id;
+      (function next() {
+        if (ST.stop || i >= list.length || !ST.open || ST.open.id !== id) { ST.running = false; list.forEach(function (f) { if (ST.fst[f.name] === 'queued') ST.fst[f.name] = ''; }); drawFiles(); return; }
+        oneFile(list[i++]).then(function () { drawFiles(); setTimeout(next, 1200); });   // a pause so the browser takes each download in turn
+      })();
     }
     function cartonRows(cs, ro) {
       return cs.map(function (c, i) { function inp(k, w) { return '<input data-c="' + i + '" data-k="' + k + '" value="' + esc(c[k] == null ? '' : c[k]) + '" style="width:' + w + 'px"' + (ro ? ' disabled' : '') + '>'; }

@@ -33341,11 +33341,11 @@ async function custProxy(req, res, suppliers, actor, path) {
   if (!post && req.method !== 'GET') return res.status(405).json({ error: 'not allowed' });
   if (!custConfigured()) return path === 'status' ? res.json({ linked: false, configured: false }) : res.status(503).json({ error: 'custom orders are not connected on this server' });
   const qs = new URLSearchParams();
-  for (const k of ['line', 'file', 'list']) if (req.query && req.query[k] != null) qs.set(k, String(req.query[k]).slice(0, 200));
+  for (const k of ['line', 'file', 'list', 'link']) if (req.query && req.query[k] != null) qs.set(k, String(req.query[k]).slice(0, 200));   // link (v28.517): JSON with a signed storage link, so big files never pass through HORIZON
   const url = String(process.env.CUSTOMISER_API_URL).replace(/\/$/, '') + '/api/horizon/supplier/' + path + (qs.toString() ? '?' + qs : '');
   const slow = /\/production$/.test(path);
   try {
-    const r = await fetch(url, { method: req.method, signal: AbortSignal.timeout(slow ? 60000 : 25000),
+    const r = await fetch(url, { method: req.method, signal: AbortSignal.timeout(slow ? 280000 : 25000),   // v28.517: a full quality TIFF can take a minute or more to make
       headers: { 'x-horizon-key': process.env.CUSTOMISER_API_KEY, 'x-horizon-suppliers': encodeURIComponent(JSON.stringify(suppliers || [])), 'x-horizon-actor': encodeURIComponent(String(actor || '').slice(0, 200)), ...(post ? { 'content-type': 'application/json' } : {}) },
       body: post ? JSON.stringify(req.body || {}) : undefined });
     const buf = Buffer.from(await r.arrayBuffer());
