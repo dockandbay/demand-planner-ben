@@ -33,6 +33,7 @@ sources:
   - server.mjs :: POS_SQL_PORTAL (supplier portal PO rows)
   - supply/inject.html :: hzUpload
   - server.mjs :: mcpAccess, mcpCallTool, mcpSqlBlocked, mcpHandle (Claude connector)
+  - server.mjs :: mcpWrite, mcpRoute, MCP_WRITE_TOOLS, authUser (Claude connector writes, v28.525)
   - server.mjs :: /oauth/token
   - server.mjs :: buildDATA (on-order and inbound feeds for DEMAND)
   - server.mjs :: /api/supply/po/:po/set-shipping, propagateShippingToPOs, shipmentShippingFromMasterPO
@@ -154,9 +155,13 @@ fingerprints:
   server.mjs::POS_SQL_PORTAL: 2f8ff75581d4
   supply/inject.html::hzUpload: c4353cd913f7
   server.mjs::mcpAccess: 6fa73a2097c0
-  server.mjs::mcpCallTool: e032a7b68d4e
+  server.mjs::mcpCallTool: 3168cccfa958
   server.mjs::mcpSqlBlocked: bacf960a3825
   server.mjs::mcpHandle: 529be3cd3236
+  server.mjs::mcpWrite: e746d01e75cd
+  server.mjs::mcpRoute: a67c7fc398a1
+  server.mjs::MCP_WRITE_TOOLS: 827591ddd86d
+  server.mjs::authUser: 0cc1c625d126
   server.mjs::/oauth/token: b2c6931bd683
   server.mjs::buildDATA: b1b365e09434
   server.mjs::/api/supply/po/:po/set-shipping: 52ab3a7e4e1a
@@ -323,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.522
+verified_version: v28.525
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -465,6 +470,7 @@ verified_version: v28.522
 ## Claude connector (from v28.480)
 - HORIZON can be added to Claude chat (claude.ai, desktop, mobile) as a custom connector at <HORIZON address>/mcp. Each person signs in with their own Google account; HORIZON issues its own tokens (access 1 hour, refresh 30 days, rotated on use) and never sees a Google password. Only @dockandbay.com accounts, and only super admins or people ticked under Claude connector in CONFIG > Admin > Permissions. Unticking someone deletes their tokens and their next call is refused. From v28.483 a person signed out by Connect (POST /api/identity/revoke, a row in planner.identity_blocks) is refused too, super admins included, until Connect restores them; see the connect topic. (source: server.mjs :: mcpAccess, /oauth/token)
 - Read-only. The tools are Ask Claude's (resolve_skus, sku_availability, describe_data, query_horizon, explain_buy, app_logic) plus po_status (one PO with dates, payments, shipment and lines) and client_orders (wholesale Fulfil orders with shipments and tracking). query_horizon runs inside a READ ONLY transaction with an 8 second limit and 500 rows. (source: server.mjs :: mcpCallTool, mcpHandle)
+- Writes (v28.525, Ben 28-Oct-26): 11 write tools for purchase orders (update fields incl. dates and payment milestones, set order plan quantities, team-only or supplier-visible notes, Fulfil main / extra, Xero bill and Flexport links), shipments (update fields, assign / unassign a PO, notes) and PRODUCT (update an item, notes, update a sample request, set sample feedback). Never the demand plan, never create / delete / rename / merge, never a push to Fulfil, Cin7 or Xero. Each runs the app's own route in-process as the connected person (mcpRoute sets req._mcpEmail, which authUser trusts because no HTTP request can set it): requiredCap + permsFor decide exactly as for the app (SUPPLY edit, PRODUCT edit), the route's validation and change logs apply, then the server caches drop as after an app save. Missing shipments are refused (the routes would create one). (source: server.mjs :: mcpWrite, mcpRoute, MCP_WRITE_TOOLS)
 - Per person: ACCOUNTS tables (accounts_*) need the ACCOUNTS grant and commission tables (commission_*, rep_groups) need COMMISSIONS, as in the app. Never queryable through Ask Claude or the connector: app_settings (holds the Xero connection), the Gmail connection, connector tokens, portal and client sessions, and anyone's Ask Claude chats. (source: server.mjs :: mcpSqlBlocked)
 - Every tool call is logged (who, tool, request, result, time) and the latest 50 show under the Permissions table. (source: server.mjs :: mcpHandle)
 - Who can connect (v28.489, Ben 26-Oct-26): every @dockandbay.com account, read only, with no Permissions tick (people with no app_permissions row included); ACCOUNTS and COMMISSIONS data still need those grants; people suspended in Google Workspace are refused. The Permissions "Claude connector" column was removed. (source: server.mjs :: mcpAccess)

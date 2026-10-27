@@ -16624,6 +16624,9 @@ app.post('/api/supply/sample-note-delete/:id', (req, res) => deleteLatestNote(re
 // The signed-in user's email, forwarded by the auth layer in front of the app (Diviyaj's Gmail login).
 // Checks the common auth-proxy headers; strips the IAP "accounts.google.com:" prefix. null if none present.
 function authUser(req) {
+  // v28.525: a Claude-connector write runs the app's own route in-process as the signed-in person (mcpRoute). _mcpEmail is a property set
+  // only by that code after the OAuth bearer token is verified; it can never come from an HTTP request (headers / body are separate).
+  if (req && req._mcpEmail) return req._mcpEmail;
   // v28.121 (Diviyaj): the x-*-email headers are SPOOFABLE (prod passes client headers through), so under PLANNER_KEY
   // they are NEVER trusted — identity comes only from the verified signed 'pu' session cookie via the prod auth
   // harness's cookieUser(req). (v28.120 wrongly assumed req._authEmail existed → every signed-in user got "session
@@ -26919,7 +26922,7 @@ async function aiRunTool(name, input) {
 // v28.480 (Ben 24-Oct-26): HORIZON CONNECTOR FOR CLAUDE CHAT (MCP, Streamable HTTP, stateless JSON).
 // claude.ai custom connector -> POST /mcp. Each person signs in with their own Google account through HORIZON's
 // OAuth server (/.well-known/*, /oauth/*); HORIZON never sees a Google password and Claude never sees the planner key.
-// READ-ONLY: the tools are Ask Claude's (AI_TOOLS + aiRunTool) plus po_status and client_orders. Who may connect:
+// Tools: Ask Claude's (AI_TOOLS + aiRunTool) plus po_status and client_orders (read), and from v28.525 the MCP_WRITE_TOOLS (POs, shipments, PRODUCT; see mcpWrite). Who may connect:
 // super admins + app_permissions.mcp_access (CONFIG > Permissions "Claude connector"). query_horizon is narrowed per
 // person (no ACCOUNTS / commission tables without that grant). Every call is written to planner.mcp_audit.
 // Live needs: migration 386, MCP_ENABLED=1, MCP_SIGNING_KEY, the Google client's redirect URI <base>/oauth/google/callback,
@@ -27011,7 +27014,7 @@ app.get('/oauth/authorize', async (req, res) => {
     if (q.response_type !== 'code') return back('unsupported_response_type', 'response_type must be code');
     if (!q.code_challenge || (q.code_challenge_method || 'plain') !== 'S256') return back('invalid_request', 'PKCE S256 is required');
     const st = mcpSign({ c: c.client_id, r: ru, s: q.state ? String(q.state) : null, cc: String(q.code_challenge), sc: MCP_SCOPE, n: crypto.randomBytes(8).toString('hex'), t: Date.now() });
-    if (mcpDevLogin()) return mcpPage(res, 200, 'HORIZON sign-in (sandbox)', `<h1>Connect Claude to HORIZON (sandbox)</h1><p><b>${mcpEsc(c.client_name)}</b> wants read-only access to HORIZON data as you. Sandbox dev sign-in: no Google check.</p>
+    if (mcpDevLogin()) return mcpPage(res, 200, 'HORIZON sign-in (sandbox)', `<h1>Connect Claude to HORIZON (sandbox)</h1><p><b>${mcpEsc(c.client_name)}</b> wants access to HORIZON as you: read HORIZON data, and change purchase orders, shipments and PRODUCT within your HORIZON edit rights (Claude asks before each change). Sandbox dev sign-in: no Google check.</p>
 <form method=post action="/oauth/dev-login"><input type=hidden name=state value="${mcpEsc(st)}"><label>Email<input name=email type=email value="${mcpEsc(process.env.DEV_USER || '')}" required></label><button>Allow</button></form>`);
     const g = gmailCfg(); if (!g) return back('server_error', 'Google sign-in is not configured on HORIZON');
     res.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({ client_id: process.env.MCP_GOOGLE_CLIENT_ID || g.id, redirect_uri: mcpBase(req) + '/oauth/google/callback', response_type: 'code',
@@ -27093,7 +27096,9 @@ const MCP_EXTRA_TOOLS = [
 const MCP_TITLES = { resolve_skus: 'Find SKUs', sku_availability: 'Stock, inbound and forecast', describe_data: 'Describe HORIZON data', query_horizon: 'Query HORIZON (read-only SQL)', explain_buy: 'Explain a buy', app_logic: 'HORIZON logic rules' };
 function mcpToolList() {
   return AI_TOOLS.concat(MCP_EXTRA_TOOLS).map(t => ({ name: t.name, title: t.title || MCP_TITLES[t.name] || t.name, description: t.description, inputSchema: t.input_schema,
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }))
+    .concat(MCP_WRITE_TOOLS.map(t => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.input_schema,   // v28.525: write tools (Claude asks the person before each call)
+      annotations: { readOnlyHint: false, destructiveHint: t.name === 'set_po_lines', idempotentHint: !/^add_/.test(t.name), openWorldHint: false } })));
 }
 async function mcpPoStatus(po) {
   po = String(po || '').trim().toUpperCase(); if (!po) return { error: 'no PO given' };
@@ -27119,7 +27124,138 @@ function mcpSqlBlocked(sql, a) {
   if (!a.commissions && /\b(commission_\w+|rep_groups)\b/i.test(sql)) return 'commission tables need the COMMISSIONS grant';
   return null;
 }
+// ════════════════════════════════════════════════════════════════════════════
+// v28.525 (Ben 28-Oct-26): "extend MCP for horizon to allow WRITE to purchase orders and shipments and product. leave demand plan out";
+// scope: edits + notes, Fulfil / Xero / Flexport links, order plan lines, dates. No create, delete, rename, merge or external pushes.
+// Every write tool runs HORIZON's OWN route handler in-process as the connected person (mcpRoute): the same capability check as the
+// app (requiredCap + permsFor: SUPPLY edit for POs / shipments, PRODUCT edit for product), the same validation and the same PO /
+// shipment / product change logs, then the same cache drops as an app save. Logged in planner.mcp_audit like every tool call.
+// ════════════════════════════════════════════════════════════════════════════
+const MCP_PO_FIELDS = ['status', 'ship_type', 'deposit_ref', 'prod_no', 'batch_id', 'branch', 'erp_po', 'notes', 'container_size', 'country_code', 'client', 'client_requirements',
+  'sales_order_ref', 'client_deadline_date', 'asn_numbers', 'client_po_ref', 'dispatch_order_ref', 'final_delivery_address', 'crossdock_skus', 'branch_delivery_notes',
+  'po_consignee', 'po_contact_person', 'po_contact_number', 'po_freight_forwarder', 'preship_not_required', 'confirmed_in_3pl', 'starred',
+  'pack_polybags', 'pack_polybags_notes', 'pack_dnb_barcodes', 'pack_dnb_barcodes_notes', 'pack_rfid_barcodes', 'pack_rfid_barcodes_notes', 'pack_dnb_carton', 'pack_dnb_carton_notes',
+  'pack_client_carton', 'pack_client_carton_notes', 'pack_pallet_notes', 'pack_other_notes', 'order_value_estimation', 'supplier_invoice_total',
+  'start_production', 'end_production_overide', 'supplier_ship_date', 'landing_date_overide', 'delivery_date_overide', 'balance_due_date_overide',
+  'start_deposit_pct_override', 'completion_pct_override', 'pay_start_deposit_assigned', 'pay_start_deposit_date', 'pay_completion_assigned', 'pay_completion_date',
+  'pay_balance_1_amount', 'pay_balance_1_date', 'pay_balance_2_amount', 'pay_balance_2_date', 'credit_amount', 'pallets_override'];
+const MCP_SHIP_FIELDS = ['carrier', 'carrier_ref', 'status', 'notes', 'mode', 'starred', 'cost_manual', 'tracked_delivery_date', 'departure_date', 'landing_date', 'delivery_date', 'arrival_date', 'branch', 'country_code', 'export_port', 'delivery_notes'];
+const MCP_ITEM_FIELDS = ['type', 'colour_name', 'bulk_colour_name', 'description', 'status', 'season', 'category', 'stage'];
+const MCP_REQ_FIELDS = ['stage', 'approval_method', 'recipient_countries', 'dev_start', 'notes', 'action_owner'];
+const MCP_WRITE_NOTE = ' Runs as you, with your HORIZON edit rights, and is logged.';
+const MCP_WRITE_TOOLS = [
+  { name: 'update_purchase_order', title: 'Update a purchase order', description: 'Change fields on one HORIZON purchase order: dates (start_production, end_production_overide, supplier_ship_date, landing_date_overide, delivery_date_overide, balance_due_date_overide, client_deadline_date; yyyy-mm-dd), status, deposit_ref, branch, notes, client / DTC details, packing, payment milestones (pay_* amounts and dates) and the other fields listed in the schema. Not the order plan lines (use set_po_lines) or links (use link_po_record). Empty string clears a field. Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { po: { type: 'string', description: 'PO number, e.g. PO-57UKBL1' }, fields: { type: 'object', description: 'field -> new value. Allowed: ' + MCP_PO_FIELDS.join(', ') } }, required: ['po', 'fields'] } },
+  { name: 'set_po_lines', title: 'Set order plan lines', description: 'Set the quantity of SKUs on a purchase order\'s order plan (adds the SKU when it is not on the PO yet). qty 0 REMOVES that SKU from the plan. A change to a supplier-confirmed order resets the supplier\'s confirmation, as in the app. Each change goes on the PO timeline. Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { po: { type: 'string' }, lines: { type: 'array', items: { type: 'object', properties: { sku: { type: 'string' }, qty: { type: 'integer', minimum: 0 } }, required: ['sku', 'qty'] }, description: 'up to 100 lines' } }, required: ['po', 'lines'] } },
+  { name: 'add_po_note', title: 'Add a PO note', description: 'Post a note on a purchase order timeline. TEAM-ONLY by default; set to_supplier true only when the user explicitly wants the supplier to see it in their portal (the supplier is notified). Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { po: { type: 'string' }, text: { type: 'string' }, to_supplier: { type: 'boolean', description: 'default false (team only)' } }, required: ['po', 'text'] } },
+  { name: 'link_po_record', title: 'Link a PO to Fulfil / Xero / Flexport', description: 'Set a purchase order\'s linked record. fulfil: the Fulfil PO (number like PO474 or its numeric id) becomes the PO\'s main link = its push / sync target; with extra true it is added as an EXTRA Fulfil PO instead (shown and used to match bills; main link unchanged). xero: the Xero bill (InvoiceID, or bill number + region uk / au). flexport: the shipment (FLEX-… id or app.flexport.com URL). A Fulfil PO already linked to another HORIZON PO is only moved when move is true. Nothing is written to Fulfil, Xero or Flexport. Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { po: { type: 'string' }, system: { type: 'string', enum: ['fulfil', 'xero', 'flexport'] }, record: { type: 'string', description: 'Fulfil PO number or id / Xero InvoiceID or bill number / Flexport id or URL' }, region: { type: 'string', enum: ['uk', 'au'], description: 'xero bill number only' }, extra: { type: 'boolean', description: 'fulfil only: add as an extra Fulfil PO' }, move: { type: 'boolean' } }, required: ['po', 'system', 'record'] } },
+  { name: 'update_shipment', title: 'Update a shipment', description: 'Change fields on an existing HORIZON shipment: dates (departure_date, landing_date, delivery_date, arrival_date, tracked_delivery_date; yyyy-mm-dd), status, mode, carrier, carrier_ref (tracking), cost_manual, branch, notes and the other schema fields. Date changes flow to the POs on it, as in the app. Empty string clears. Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { shipment_ref: { type: 'string' }, fields: { type: 'object', description: 'field -> new value. Allowed: ' + MCP_SHIP_FIELDS.join(', ') } }, required: ['shipment_ref', 'fields'] } },
+  { name: 'assign_po_to_shipment', title: 'Assign a PO to a shipment', description: 'Put a purchase order on an existing shipment (it leaves its previous one), or take it off with unassign true. Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { po: { type: 'string' }, shipment_ref: { type: 'string' }, unassign: { type: 'boolean' } }, required: ['po', 'shipment_ref'] } },
+  { name: 'add_shipment_note', title: 'Add a shipment note', description: 'Post a note on a shipment timeline (Shipment Plan). Suppliers on that shipment can see shipment notes in their portal. Needs SUPPLY edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { shipment_ref: { type: 'string' }, text: { type: 'string' } }, required: ['shipment_ref', 'text'] } },
+  { name: 'update_product_item', title: 'Update a product', description: 'Change fields on a PRODUCT development item: ' + MCP_ITEM_FIELDS.join(', ') + ' (stage one of ' + PROD_STAGES.join(', ') + '; empty stage = derived from its requests). Needs PRODUCT edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { ref: { type: 'string', description: 'product ref, e.g. AW27-TEATO-TOOHOTTOHANDLE' }, fields: { type: 'object' } }, required: ['ref', 'fields'] } },
+  { name: 'add_product_note', title: 'Add a product note', description: 'Post a note on a PRODUCT item timeline. Product timeline notes are visible to the product\'s supplier in their portal. Needs PRODUCT edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } }, required: ['ref', 'text'] } },
+  { name: 'update_sample_request', title: 'Update a sample request', description: 'Change a PRODUCT sample request: ' + MCP_REQ_FIELDS.join(', ') + ' (stage one of ' + PROD_STAGES.join(', ') + '; approval_method samples or photo; dev_start yyyy-mm-dd). Find the request id with query_horizon on planner.product_dev_requests. Needs PRODUCT edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { id: { type: 'integer' }, fields: { type: 'object' } }, required: ['id', 'fields'] } },
+  { name: 'set_sample_feedback', title: 'Set sample feedback', description: 'Set (replace) the Dock & Bay feedback on one sample version (planner.product_dev_samples id). New feedback also goes on the product timeline, which the supplier sees. Needs PRODUCT edit.' + MCP_WRITE_NOTE,
+    input_schema: { type: 'object', properties: { sample_id: { type: 'integer' }, feedback: { type: 'string' } }, required: ['sample_id', 'feedback'] } },
+];
+const MCP_WRITE_NAMES = new Set(MCP_WRITE_TOOLS.map(t => t.name));
+// Run one of the app's own POST routes in-process as person a.email: capability check (as the app.use guard), then the route's handler.
+async function mcpRoute(a, path, body) {
+  const p = String(path).toLowerCase().replace(/\/+$/, '') || '/';
+  const req = { method: 'POST', url: path, originalUrl: path, path, baseUrl: '', params: {}, query: {}, body: body || {}, headers: { 'content-type': 'application/json' },
+    ip: '127.0.0.1', protocol: 'https', secure: true, app, _mcpEmail: a.email, get(h) { return this.headers[String(h).toLowerCase()]; }, header(h) { return this.get(h); } };
+  const cap = requiredCap('POST', p);
+  if (cap) { const me = await permsFor(req); if (me.lookupFailed) return { error: 'permission check failed, try again' };
+    const ok = cap === 'supply' ? (me.supply_edit || me.is_admin) : cap === 'product' ? (me.product_edit || me.is_admin) : cap === 'config' ? (me.supply_edit || me.demand_edit || me.is_admin)
+      : cap === 'edit' ? (me.supply_edit || me.demand_edit || me.product_edit || me.is_admin) : cap === 'admin' ? !!me.is_admin : false;   // 'demand' never reaches here
+    if (!ok) return { error: a.email + ' has no ' + (cap === 'product' ? 'PRODUCT' : cap === 'supply' ? 'SUPPLY' : cap.toUpperCase()) + ' edit rights in HORIZON, so this change was not made. Ask an admin (CONFIG > Permissions).' }; }
+  const stack = (app.router && app.router.stack) || [];
+  const layer = stack.find(l => l && l.route && l.route.methods && l.route.methods.post && l.match(path));
+  if (!layer) return { error: 'no HORIZON route for ' + path };
+  req.params = Object.assign({}, layer.params);
+  const out = await new Promise((resolve) => {
+    let done = false; const fin = (b) => { if (done) return; done = true; clearTimeout(t); resolve({ status: res.statusCode, body: b }); };
+    const t = setTimeout(() => fin({ error: 'HORIZON did not answer within 60 s' }), 60000);
+    const res = { statusCode: 200, headersSent: false, locals: {}, _h: {}, req,
+      status(c) { this.statusCode = c; return this; }, set(k, v) { if (k && typeof k === 'object') Object.assign(this._h, k); else this._h[String(k).toLowerCase()] = v; return this; },
+      setHeader(k, v) { this._h[String(k).toLowerCase()] = v; }, getHeader(k) { return this._h[String(k).toLowerCase()]; }, header(k, v) { return this.set(k, v); }, append() { return this; }, type() { return this; },
+      on() { return this; }, once() { return this; }, emit() { return true; },
+      json(b) { fin(b); return this; }, send(b) { let x = b; if (typeof b === 'string') { try { x = JSON.parse(b); } catch (_) { x = { text: b }; } } fin(x); return this; },
+      end(b) { fin(b == null ? null : { text: String(b) }); return this; }, sendStatus(c) { this.statusCode = c; fin(null); return this; } };
+    req.res = res;
+    try { const r = layer.route.dispatch(req, res, (err) => fin({ error: err ? (err.message || String(err)) : 'not handled' })); if (r && typeof r.catch === 'function') r.catch(e => fin({ error: e.message })); }
+    catch (e) { fin({ error: e.message }); }
+  });
+  const b = out.body && typeof out.body === 'object' ? out.body : { result: out.body };
+  if (out.status >= 400 || b.error) return Object.assign({ error: String(b.error || ('HTTP ' + out.status)) }, b.code ? { code: b.code } : {}, b.held ? { held: b.held } : {});
+  try { shellMemoDrop(); } catch (_) {} try { invalidateSupplyCaches(); } catch (_) {}   // as after an app save
+  const o = Object.assign({ ok: true }, b); if (Array.isArray(o.rows)) { o.rows_updated = o.rows.length; delete o.rows; } if (o.row && typeof o.row === 'object') delete o.row;   // keep replies small
+  return o;
+}
+const mcpPick = (fields, allow) => { const f = (fields && typeof fields === 'object') ? fields : {}, bad = Object.keys(f).filter(k => !allow.includes(k));
+  return bad.length ? { error: 'not editable here: ' + bad.join(', ') + '. Allowed: ' + allow.join(', ') } : (Object.keys(f).length ? { body: f } : { error: 'no fields given' }); };
+async function mcpPoExists(po) { const r = (await pool.query(`SELECT po FROM planner.purchase_orders WHERE upper(po)=upper($1) LIMIT 1`, [String(po || '').trim()])).rows[0]; return r ? r.po : null; }
+async function mcpShipExists(ref) { const r = (await pool.query(`SELECT shipment_ref FROM planner.shipments WHERE upper(shipment_ref)=upper($1) LIMIT 1`, [String(ref || '').trim()])).rows[0]; return r ? r.shipment_ref : null; }
+async function mcpWrite(name, args, a) {
+  const enc = encodeURIComponent;
+  if (['update_purchase_order', 'set_po_lines', 'add_po_note', 'link_po_record', 'assign_po_to_shipment'].includes(name)) {
+    const po = await mcpPoExists(args.po); if (!po) return { error: 'PO not found: ' + (args.po || '') };
+    if (name === 'update_purchase_order') { const pk = mcpPick(args.fields, MCP_PO_FIELDS); if (pk.error) return pk; return Object.assign({ po }, await mcpRoute(a, '/api/supply/po/' + enc(po), pk.body)); }
+    if (name === 'set_po_lines') { const L = Array.isArray(args.lines) ? args.lines.slice(0, 100) : []; if (!L.length) return { error: 'no lines given' };
+      const done = [], failed = [];
+      for (const l of L) { const q = parseInt(l && l.qty, 10); if (!(q >= 0)) { failed.push({ sku: l && l.sku, error: 'qty must be 0 or more' }); continue; }
+        const m = (await pool.query(`SELECT sku FROM planner.products WHERE upper(sku)=upper($1) UNION SELECT sku FROM planner.v_sku_attrs WHERE upper(sku)=upper($1) LIMIT 1`, [String(l.sku || '').trim()])).rows[0];
+        if (!m) { failed.push({ sku: l.sku, error: 'unknown SKU' }); continue; }
+        const r = await mcpRoute(a, '/api/supply/po-line/' + enc(po + '|' + m.sku), { po, sku: m.sku, qty: q, who: 'Claude connector (' + a.email + ')' });
+        if (r.error) { failed.push({ sku: m.sku, error: r.error }); if (/edit rights/.test(r.error)) break; } else done.push({ sku: m.sku, qty: q }); }
+      return Object.assign({ po, set: done, failed }, failed.length && !done.length ? { error: failed[0].error } : {}); }
+    if (name === 'add_po_note') { const text = String(args.text || '').trim(); if (!text) return { error: 'no text' };
+      return Object.assign({ po, visible_to_supplier: !!args.to_supplier }, await mcpRoute(a, '/api/supply/portal-note', { po, body: text, author_kind: 'internal', private: !args.to_supplier })); }
+    if (name === 'assign_po_to_shipment') { const ref = await mcpShipExists(args.shipment_ref); if (!ref) return { error: 'shipment not found: ' + (args.shipment_ref || '') + ' (this tool never creates one)' };
+      return Object.assign({ po, shipment_ref: ref, unassigned: !!args.unassign }, await mcpRoute(a, '/api/supply/shipment/' + enc(ref) + '/assign', { po, assign: args.unassign ? false : true })); }
+    if (name === 'link_po_record') { const sys = String(args.system || '').toLowerCase(), rec = String(args.record || '').trim(); if (!rec) return { error: 'record required' };
+      if (sys === 'fulfil') { let id = /^[0-9]+$/.test(rec) ? rec : null;
+        if (!id) { let hit; try { hit = await fulfilStrictSearch(FULFIL_MAP.poModel, [['number', '=', rec.toUpperCase()]], ['id', 'number', 'state'], 2, 'Fulfil PO'); } catch (e) { return { error: e.message }; }
+          if (!hit || !hit.length) return { error: 'Fulfil PO ' + rec + ' not found' }; id = String(hit[0].id); }
+        if (args.extra) return Object.assign({ po, fulfil_id: id, extra: true }, await mcpRoute(a, '/api/supply/po/' + enc(po) + '/fulfil-extra', { fulfil_id: id, move: !!args.move }));
+        return Object.assign({ po, fulfil_id: id }, await mcpRoute(a, '/api/supply/po/' + enc(po) + '/links', { system: 'fulfil', external_id: id, move: !!args.move })); }
+      if (sys === 'xero') { let b;
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rec)) b = (await pool.query(`SELECT invoice_id, invoice_number, region FROM planner.xero_bills WHERE invoice_id=$1`, [rec])).rows[0] || { invoice_id: rec, invoice_number: rec };
+        else { const rg = String(args.region || '').toLowerCase(); const rs = (await pool.query(`SELECT invoice_id, invoice_number, lower(region) region FROM planner.xero_bills WHERE upper(trim(invoice_number))=upper($1) AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')` + (rg ? ` AND lower(region)=$2` : ''), rg ? [rec, rg] : [rec])).rows;
+          if (!rs.length) return { error: 'Xero bill ' + rec + ' not found in HORIZON\'s Xero cache' + (rg ? ' (' + rg.toUpperCase() + ')' : '') };
+          if (rs.length > 1) return { error: 'Xero bill ' + rec + ' exists in ' + rs.map(x => x.region.toUpperCase()).join(' and ') + ': give region uk or au' }; b = rs[0]; }
+        return Object.assign({ po, xero_bill: b.invoice_number }, await mcpRoute(a, '/api/supply/po/' + enc(po) + '/links', { system: 'xero', external_id: b.invoice_id, external_ref: b.invoice_number, url: 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + b.invoice_id })); }
+      if (sys === 'flexport') { const fid = (/FLEX-\d+/i.exec(rec) || [])[0]; if (!fid) return { error: 'give a FLEX-… id or an app.flexport.com shipment URL' };
+        return Object.assign({ po, flexport: fid.toUpperCase() }, await mcpRoute(a, '/api/supply/po/' + enc(po) + '/links', { system: 'flexport', external_id: fid.toUpperCase(), external_ref: fid.toUpperCase(), url: 'https://app.flexport.com/shipments/' + fid.toUpperCase() })); }
+      return { error: 'system must be fulfil, xero or flexport' }; }
+  }
+  if (name === 'update_shipment' || name === 'add_shipment_note') {
+    const ref = await mcpShipExists(args.shipment_ref); if (!ref) return { error: 'shipment not found: ' + (args.shipment_ref || '') + ' (this tool never creates one)' };
+    if (name === 'update_shipment') { const pk = mcpPick(args.fields, MCP_SHIP_FIELDS); if (pk.error) return pk; return Object.assign({ shipment_ref: ref }, await mcpRoute(a, '/api/supply/shipment/' + enc(ref), pk.body)); }
+    const text = String(args.text || '').trim(); if (!text) return { error: 'no text' };
+    return Object.assign({ shipment_ref: ref }, await mcpRoute(a, '/api/supply/shipment-note', { shipment_ref: ref, body: text, author_kind: 'internal' })); }
+  if (name === 'update_product_item' || name === 'add_product_note') {
+    const it = (await pool.query(`SELECT ref FROM planner.product_dev_items WHERE upper(ref)=upper($1) LIMIT 1`, [String(args.ref || '').trim()])).rows[0]; if (!it) return { error: 'product not found: ' + (args.ref || '') };
+    if (name === 'update_product_item') { const pk = mcpPick(args.fields, MCP_ITEM_FIELDS); if (pk.error) return pk; return Object.assign({ ref: it.ref }, await mcpRoute(a, '/api/product/item/' + enc(it.ref), pk.body)); }
+    const text = String(args.text || '').trim(); if (!text) return { error: 'no text' };
+    return Object.assign({ ref: it.ref }, await mcpRoute(a, '/api/product/note', { ref: it.ref, body: text })); }
+  if (name === 'update_sample_request') { const id = Number(args.id); if (!id || !(await pool.query(`SELECT 1 FROM planner.product_dev_requests WHERE id=$1`, [id])).rowCount) return { error: 'sample request not found: ' + (args.id || '') };
+    const pk = mcpPick(args.fields, MCP_REQ_FIELDS); if (pk.error) return pk; return Object.assign({ id }, await mcpRoute(a, '/api/product/request/' + id, pk.body)); }
+  if (name === 'set_sample_feedback') { const id = Number(args.sample_id); if (!id || !(await pool.query(`SELECT 1 FROM planner.product_dev_samples WHERE id=$1`, [id])).rowCount) return { error: 'sample not found: ' + (args.sample_id || '') };
+    return Object.assign({ sample_id: id }, await mcpRoute(a, '/api/product/sample/' + id + '/feedback', { admin_feedback: String(args.feedback || '') })); }
+  return { error: 'unknown tool ' + name };
+}
 async function mcpCallTool(name, args, a) {
+  if (MCP_WRITE_NAMES.has(name)) return await mcpWrite(name, args, a);   // v28.525
   if (name === 'po_status') return await mcpPoStatus(args.po);
   if (name === 'client_orders') return await mcpClientOrders(args.query, args.limit);
   if (!AI_TOOLS.some(t => t.name === name)) return { error: 'unknown tool ' + name };
@@ -27128,7 +27264,7 @@ async function mcpCallTool(name, args, a) {
   return await aiRunTool(name, args);
 }
 const MCP_INSTRUCTIONS = () => 'HORIZON is Dock & Bay\'s demand and supply planning tool (stock, forecasts, buy plan, purchase orders, shipments, suppliers, samples, wholesale client orders). '
-  + 'This connector is READ-ONLY. Dates: show them as dd-mmm-yy (e.g. 24-Oct-26).\n\n' + AI_SYSTEM.slice(Math.max(0, AI_SYSTEM.indexOf('You have LIVE ACCESS')))
+  + 'Reads cover everything except where noted. WRITES (v28.525) are limited to purchase orders, shipments and PRODUCT (never the demand plan, never creating or deleting records, never pushing to Fulfil / Cin7 / Xero): they run as the connected person with their HORIZON edit rights and are logged. Before any write, state exactly what will change (record, field, old value -> new value) and get the user\'s clear yes in the chat; read the current value first. Notes on shipments and products are visible to the supplier; PO notes are team-only unless the user asks to tell the supplier. Dates: show them as dd-mmm-yy (e.g. 24-Oct-26); send them to write tools as yyyy-mm-dd.\n\n' + AI_SYSTEM.slice(Math.max(0, AI_SYSTEM.indexOf('You have LIVE ACCESS')))
   + '\n- po_status(po): one purchase order with dates, payments, shipment and lines.\n- client_orders(query): wholesale client orders with shipments and tracking codes.';
 
 // ── /mcp: JSON-RPC 2.0 over HTTP POST (stateless; no SSE stream, so GET is 405) ──
