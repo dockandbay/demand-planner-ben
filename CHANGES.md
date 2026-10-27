@@ -1,3 +1,8 @@
+## v28.514 (27-Oct-26) Portal preview no longer hijacks HORIZON's URL
+- Ben: "pageis returning blank on live https://horizon.dockandbay.com/#/supply/config/portal/lx". Reproduced on live: in CONFIG ▸ Portal preview, clicking a portal tab (seen on Custom orders) set HORIZON's address to the portal's own "#/orders/custom"; HORIZON cannot route that, the sidebar jumped to Demand and a reload or that link gave a blank page. Every preview tab did this (since v27.500); the new Custom orders tab made it visible.
+- Fix: portal-view.js changes the address only on the real supplier portal page (window.__PV_STANDALONE); in the staff preview tabs switch without touching HORIZON's URL. The sample-card "Open full record" opens the product in place in the preview.
+- Check (jsdom, sandbox Lixin preview): Purchase orders and Shipment plan switch and render the same as before; HORIZON's hash stays #/supply/config/portal (old code: #/orders/pos, #/orders/shipmentplan). No server change.
+
 ## v28.513 (27-Oct-26) Drawer header in deep blue
 - Ben: "can the top row of that draw be a different colour to stand out". The PO / shipment drawer header (v28.512) is now a deep blue band (#1d4ed8 to #2361d8) instead of the sidebar's navy; supplier in pale blue. Fixed colours so white text stays readable in light and dark themes. CSS only.
 

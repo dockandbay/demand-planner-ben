@@ -868,7 +868,10 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     // v28.188 (Ben): a tab click renders BEFORE ppSetHash changes the hash, so hz-health's hashchange timer never saw tab renders. The click
     // starts the slow-view timer itself (until no loading panel is visible, > 3 s recorded per tab); no-op in the staff preview without it.
     function ppHealthWatch(){ try{ if(window.__PV_STANDALONE&&typeof window.hzHealthWatch==='function')window.hzHealthWatch(); }catch(e){} }
-    function ppSetHash(tab, ref){ _ppRouting=true; try{ var sec=(typeof PP_SEC!=='undefined'&&PP_SEC[tab])||'orders'; location.hash='#/'+sec+'/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }   // v27.500: section/tab slugs
+    // v28.514 (Ben 27-Oct-26, staff preview went blank): the portal owns the URL only on its own page. Inside HORIZON's Portal preview a tab
+    // click wrote "#/orders/custom" into HORIZON's address, which HORIZON cannot route (sidebar jumped to Demand; a reload was blank).
+    function ppOwnsHash(){ return !!window.__PV_STANDALONE; }
+    function ppSetHash(tab, ref){ if(!ppOwnsHash())return; _ppRouting=true; try{ var sec=(typeof PP_SEC!=='undefined'&&PP_SEC[tab])||'orders'; location.hash='#/'+sec+'/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }   // v27.500: section/tab slugs
     // ── v27.747 (P4c portal) Supplier phone SAMPLE CARD — scanning their own sample-card QR (or the short code)
     // opens the sample record: a clear swatch + identity + receipt status + Dock & Bay's review (read-only).
     // Ownership-guarded server-side (/api/portal/scan/:code), so a code only ever resolves the caller's own sample.
@@ -882,7 +885,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
           +'<button id="pp-scc-x" aria-label="Close" style="margin-left:auto;width:36px;height:36px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;font-size:16px;cursor:pointer">✕</button></div>'
         +'<div id="pp-scc-body" style="padding:14px 14px 48px"><div style="padding:20px 0;color:#6b7280">Loading…</div></div></div>';
       document.body.appendChild(ov); document.body.style.overflow='hidden';
-      function close(){ try{ ov.remove(); }catch(e){} document.body.style.overflow=''; _ppRouting=true; try{ location.hash='#/product/product'; }catch(e){} setTimeout(function(){ _ppRouting=false; },30); if(_ppData)renderPP(); }
+      function close(){ try{ ov.remove(); }catch(e){} document.body.style.overflow=''; if(ppOwnsHash()){ _ppRouting=true; try{ location.hash='#/product/product'; }catch(e){} setTimeout(function(){ _ppRouting=false; },30); } if(_ppData)renderPP(); }
       ov.querySelector('#pp-scc-x').onclick=close;
       var body=ov.querySelector('#pp-scc-body');
       fetch('/api/portal/scan/'+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(d){
@@ -910,7 +913,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
           +(review?('<div style="font-weight:700;margin-top:16px"><span class="pp-i18n">Dock &amp; Bay review</span></div>'+review):'')
           +photos
           +'<div style="margin-top:20px"><button id="pp-scc-full" style="width:100%;background:#111827;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:700;cursor:pointer"><span class="pp-i18n">Open full record</span> ↗</button></div>';
-        var fb=body.querySelector('#pp-scc-full'); if(fb)fb.onclick=function(){ close(); _ppRouting=true; try{ location.hash='#/product/product/'+encodeURIComponent(s.item_ref); }catch(e){} setTimeout(function(){ _ppRouting=false; ppApplyHash(); },40); };
+        var fb=body.querySelector('#pp-scc-full'); if(fb)fb.onclick=function(){ close(); if(!ppOwnsHash()){ PORTAL_TAB='product'; _ppOpenProd=s.item_ref; if(_ppData)renderPP(); return; } _ppRouting=true; try{ location.hash='#/product/product/'+encodeURIComponent(s.item_ref); }catch(e){} setTimeout(function(){ _ppRouting=false; ppApplyHash(); },40); };
         try{ if(PP_LANG==='zh'&&typeof ppTranslate==='function')ppTranslate(ov); }catch(e){}
       }).catch(function(e){ body.innerHTML='<div style="color:#dc2626;padding:16px">Failed to load: '+esc(e&&e.message||e)+'</div>'; });
     }
