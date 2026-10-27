@@ -112,6 +112,33 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
   var shortNotes=function(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; };
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
   function units(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
+  // v28.516 (Ben 27-Oct-26: "can the supplier portal ORDERS and SHIPMENT PLAN and SAMPLES popout in a drawer rather than expanded list"): the
+  // expanded section of a PO / shipment / sample is shown as a right-hand drawer (70%, full width on phones) in place: it stays where it is in the
+  // page, so every lookup and button keeps working. Deep blue header (as HORIZON's PO drawer): big ref + sub, Copy link, Close; Esc / click off close.
+  // o = {ref, sub, link, close, kind}. One drawer at a time. A list re-render (renderPP) drops the drawer; an open PO reopens itself (_ppOpenPO).
+  var _ppdCur=null;
+  function ppDrawerStrip(panel){ if(!panel)return; panel.classList.remove('ppd-on'); var h=panel.querySelector(':scope > .ppd-head'); if(h)h.remove();
+    if(_ppdCur&&_ppdCur.panel===panel)_ppdCur=null; if(!_ppdCur){ var bk=document.getElementById('ppd-back'); if(bk)bk.style.display='none'; document.body.style.overflow=''; } }
+  function ppDrawerOpen(panel,o){ if(!panel)return; o=o||{};
+    if(_ppdCur&&_ppdCur.panel!==panel){ var prev=_ppdCur; _ppdCur=null; try{ prev.close(); }catch(e){} ppDrawerStrip(prev.panel); }
+    var old=panel.querySelector(':scope > .ppd-head'); if(old)old.remove();
+    var hd=document.createElement('div'); hd.className='ppd-head';
+    hd.innerHTML='<div class="ppd-id"><span class="ppd-ref">'+esc(o.ref||'')+'</span>'+(o.sub?'<span class="ppd-sub">'+esc(o.sub)+'</span>':'')+'</div>'
+      +'<div class="ppd-act">'+(o.link?'<button type="button" class="ppd-btn ppd-copy"><span class="pp-i18n">🔗 Copy link</span></button>':'')+'<button type="button" class="ppd-btn ppd-x"><span class="pp-i18n">✕ Close</span></button></div>';
+    panel.insertBefore(hd,panel.firstChild); panel.classList.add('ppd-on'); panel.scrollTop=0;
+    var host=panel.closest('#supply-root')||document.body, bk=document.getElementById('ppd-back'); if(!bk){ bk=document.createElement('div'); bk.id='ppd-back'; bk.className='ppd-back'; host.appendChild(bk); }
+    bk.style.display='block'; bk.onclick=function(){ ppDrawerClose(); };
+    hd.querySelector('.ppd-x').onclick=function(e){ e.stopPropagation(); ppDrawerClose(); };
+    var cp=hd.querySelector('.ppd-copy'); if(cp)cp.onclick=function(e){ e.stopPropagation(); var b=this, done=function(){ b.textContent='✓ Link copied'; setTimeout(function(){ b.textContent='🔗 Copy link'; },1400); };
+      try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(o.link).then(done,function(){ ppCopyFallback(o.link); done(); }); } else { ppCopyFallback(o.link); done(); } }catch(_){ done(); } };
+    _ppdCur={panel:panel,close:o.close||function(){},kind:o.kind,ref:o.ref}; document.body.style.overflow='hidden';
+    try{ if(PP_LANG==='zh')ppTranslate(hd); }catch(e){} }
+  function ppDrawerClose(){ var c=_ppdCur; if(!c)return; _ppdCur=null; try{ c.close(); }catch(e){} ppDrawerStrip(c.panel); }
+  function ppDrawerReset(){ var c=_ppdCur; if(!c)return; _ppdCur=null; ppDrawerStrip(c.panel); return c; }   // the list is about to be re-rendered
+  function ppCopyFallback(t){ var ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); }catch(e){} ta.remove(); }
+  // direct link to an item: the portal page itself (or, from HORIZON's staff preview, the same app's /portal page)
+  function ppItemLink(sec,tab,ref){ var base=window.__PV_STANDALONE?(location.origin+location.pathname):(location.origin+'/portal'); return base+'#/'+sec+'/'+tab+'/'+encodeURIComponent(ref); }
+  try{ document.addEventListener('keydown',function(e){ if(e.key!=='Escape'||!_ppdCur)return; if(document.querySelector('#pv-confirm-back.on'))return; var t=e.target; if(t&&/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return; ppDrawerClose(); }); }catch(e){}
   // v28.515 (Ben 27-Oct-26: "make the charges submitted and pending clearer: CHARGE 1 - PENDING - 55, same size as adding a new charge"):
   // one row per submitted charge, numbered, status in words, the total large; product + freight split shown when there is a product cost.
   var PP_CHG_ST={pending:['#fef3c7','#92710a','Pending review'],accepted:['#dcfce7','#166534','Accepted'],rejected:['#f1f5f9','#64748b','Rejected']};
@@ -689,6 +716,18 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
 #supply-root .tip{position:relative}
 #supply-root .tip::after{content:attr(data-tip);position:absolute;left:50%;bottom:100%;transform:translateX(-50%);margin-bottom:5px;background:#0f172a;color:#fff;font-size:10px;font-weight:400;padding:4px 7px;border-radius:4px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .08s;transition-delay:0s;z-index:60}
 #supply-root .tip:hover::after{opacity:1;transition-delay:120ms}
+#supply-root .ppd-on{position:fixed!important;top:0;right:0;bottom:0;width:70vw;max-width:100vw;z-index:100001;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch;box-shadow:-10px 0 28px rgba(15,23,42,.22);margin:0!important;border-radius:0!important;display:block!important;text-align:left;box-sizing:border-box;animation:ppdIn .16s ease-out}   /* v28.516 portal drawer */
+#supply-root .ppd-back{position:fixed;inset:0;background:rgba(15,23,42,.38);z-index:100000}
+#supply-root .ppd-head{position:sticky;top:0;left:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;background:linear-gradient(90deg,#1d4ed8,#2361d8);color:#fff;box-shadow:0 2px 6px rgba(29,78,216,.25)}
+#supply-root .ppd-id{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-width:0;user-select:text;cursor:text}
+#supply-root .ppd-ref{font-size:22px;font-weight:800;line-height:1.2;overflow-wrap:anywhere}
+#supply-root .ppd-sub{font-size:15px;font-weight:600;color:#dbeafe}
+#supply-root .ppd-act{display:flex;gap:8px;flex:0 0 auto}
+#supply-root .ppd-btn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
+#supply-root .ppd-btn:hover{background:rgba(255,255,255,.2)}
+#supply-root .ppd-on > .ppd-c{padding:12px 16px}
+@keyframes ppdIn{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+@media (max-width:820px){ #supply-root .ppd-on{width:100vw} #supply-root .ppd-head{padding:10px 12px} #supply-root .ppd-ref{font-size:18px} }
 #supply-root .samp-card{font-size:13px}#supply-root .samp-card .tiny{font-size:12.5px}#supply-root .samp-card .mut.tiny{font-size:12px}#supply-root .samp-card .mut{font-size:inherit}
 #supply-root .todo{color:#16a34a;font-weight:700}  /* "to proceed / needs input" prompts — bright green */
 #supply-root .lnk-btn{background:none;border:none;color:#1d4ed8;cursor:pointer;font-size:11px;font-family:inherit;text-decoration:underline;padding:0}#supply-root .lnk-btn:hover{color:#dc2626}
@@ -1219,7 +1258,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
     // spans the full table width, so it has no containing-block slack). transform is compositor-only + rAF-coalesced.
     function portalGridTw(){ var tbl=document.querySelector('#supply-root table.pp-tbl'); return tbl&&tbl.closest('.tw'); }
     function applyPortalPin(){ var tw=portalGridTw(); if(!tw)return; var x=tw.scrollLeft;
-      document.querySelectorAll('#supply-root table.pp-tbl .ppx').forEach(function(el){ el.style.transform=x?('translateX('+x+'px)'):''; }); }
+      document.querySelectorAll('#supply-root table.pp-tbl .ppx').forEach(function(el){ el.style.transform=(x&&!el.closest('.ppd-on'))?('translateX('+x+'px)'):''; }); }   // v28.516: never shift a detail shown in the drawer
     function bindPortalScrollPin(){ var tw=portalGridTw(); if(!tw||tw._pin)return; tw._pin=1; var raf=0;
       tw.addEventListener('scroll',function(){ if(!raf)raf=requestAnimationFrame(function(){ raf=0; applyPortalPin(); }); },{passive:true}); }
     function subFmt(s){ if(s.kind==='tracking'){ try{var o=JSON.parse(s.value);return 'tracking '+(o.tracking||'')+(o.carrier?' / '+o.carrier:'');}catch(e){return 'tracking';} }
@@ -1638,7 +1677,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+'<span class="pp-grp-cnt"> — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</span></td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="pp-skel" data-hz-loading="1" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="ppd-wrap"><div class="ppd-c"><div class="pp-skel" data-hz-loading="1" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></div></div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -2100,7 +2139,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               +'<td class="l">'+(s.completion_required?fd(s.completion_required):'<span class="mut">—</span>')+'</td>'
               +'<td class="l"><b>'+units+'</b> <span class="mut tiny">· '+nsku+' SKU'+(nsku===1?'':'s')+'</span></td>'
               +'<td class="l">'+(s.tracking_code?carrierTrackLink(s.carrier,s.tracking_code):'<span class="mut">—</span>')+'</td></tr>'
-              +'<tr class="ps-exp" id="ps-exp-'+i+'" style="display:none"><td colspan="8"><div class="ps-det" data-id="'+s.id+'"></div></td></tr>'; }
+              +'<tr class="ps-exp" id="ps-exp-'+i+'" style="display:none"><td colspan="8"><div class="ppd-wrap"><div class="ps-det ppd-c" data-id="'+s.id+'"></div></div></td></tr>'; }
           function ppSamples(samples){
             var F=[['open','Open'],['closed','Closed'],['all','All']];
             var q=(PORTAL_SAMP_Q||'').toLowerCase();
@@ -2209,6 +2248,8 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             var q=body.querySelector('.ps-q'); if(q)q.oninput=debounce(function(){ PORTAL_SAMP_Q=q.value; var foc=document.activeElement===q; renderPP(); if(foc){ var n=body.querySelector('.ps-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },300);
             body.querySelectorAll('.ps-manage').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('ps-exp-'+i), open=ex.style.display!=='none';
               ex.style.display=open?'none':''; b.classList.toggle('open',!open);
+              var _sp=ex.querySelector('.ppd-wrap'); if(open)ppDrawerStrip(_sp); else { var _sx=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(b.dataset.id);})[0]||{};   // v28.516: open as a drawer
+                ppDrawerOpen(_sp,{ref:_sx.ref||('Sample '+b.dataset.id), sub:_sx.status_calc||'', link:_sx.ref?ppItemLink('samples','samples',_sx.ref):'', kind:'sample', close:function(){ if(ex.style.display!=='none')b.click(); }}); }
               if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var det=ex.querySelector('.ps-det'); var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(b.dataset.id);})[0]; if(s){ det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id);
                 // refresh contents from the DB — the cached _ppData.samples can be stale if dev samples were linked from PRODUCT ▸ samples after the portal loaded
                 getJSON(EP.sampleContentsBase+s.id+'/contents').then(function(c){ if(c&&!c.error){ s.lines=c.lines||[]; s.dev_samples=c.dev_samples||[]; det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id); } }).catch(function(){}); } } }; });
@@ -2741,6 +2782,7 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
           function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display='';   // always visible (like Deposits/Payments) — shows an empty state when there are none
             var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
+            try{ var _dc=ppDrawerReset(); if(_dc&&_dc.kind==='po'&&PORTAL_TAB==='pos'&&!_ppOpenPO)_ppOpenPO=_dc.ref; }catch(e){}   // v28.516: the list is rebuilt; an open PO drawer reopens
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);}); ppSyncSec();
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ setProdnBadge(); }catch(e){} try{ renderPortalNotif(); }catch(e){} ppSyncSec(); if(PP_LANG==='zh')try{ ppTranslate(document.body); }catch(e){}   // re-sync after the badges are set (section counts, v27.506)
             if(PP_EXTRA[PORTAL_TAB]){ body.innerHTML=''; try{ PP_EXTRA[PORTAL_TAB].render(body); }catch(e){ body.innerHTML='<div class="count">Could not load this page.</div>'; } return; }   // host-registered tab (Price List)
@@ -2779,7 +2821,10 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
               // collapse each Shipment Plan card behind its header — click the header (not the buttons/fields) to expand
               body.querySelectorAll('.sp-card .sp-head').forEach(function(h){ h.onclick=function(e){ if(e.target.closest('button,input,textarea,select,a'))return;
                 var card=h.closest('.sp-card'), bd=card&&card.querySelector('.sp-body'), tg=h.querySelector('.sp-toggle'); if(!bd)return;
-                var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
+                var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾';
+                if(open){ ppDrawerStrip(bd); return; }   // v28.516: open as a drawer
+                var _ref=card.querySelector('.sp-chg-list')&&card.querySelector('.sp-chg-list').dataset.ref, _s=((_ppData&&_ppData.shipmentPlan)||[]).filter(function(x){ return x.shipment_ref===_ref||x.master_po===_ref; })[0]||{}, _mp=_s.master_po||(h.querySelector('div[style*="font-size:15px"]')||{}).textContent||_ref||'';
+                ppDrawerOpen(bd,{ref:_mp, sub:[_s.mode, _s.carrier].filter(Boolean).join(' · '), link:ppItemLink('orders','shipmentplan',_mp), kind:'ship', close:function(){ if(bd.style.display!=='none')h.click(); }}); }; });
               body.querySelectorAll('.pp-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1'; postJSON(EP.shipmentEscalate+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ reload(); }); }; });
               body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
                 if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; else if(f==='fob')PORTAL_SP_FOB=!PORTAL_SP_FOB; _ppShowAllSP=false; renderPP(); }; });
@@ -2984,12 +3029,16 @@ window.HZ_UP_MAX_MB=window.HZ_UP_MAX_MB||300;   // v28.493 (Ben 26-Oct-26): per-
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
               // v28.189 (Ben, deep dive H2): a completed PO is a light row and the SKU list is partial until a card needs them: fetch the
               // PO's detail (+ the full SKU list for the "add a line" picker) first, keeping the skeleton up, then build the same card.
-              if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[0];
+              if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.querySelector('.ppd-c')||ex.children[0];   // v28.516: inside the drawer wrapper
                 var build=function(){ if(!(p&&cell&&cell.isConnected))return; cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell);
                   ex.dataset.ready='1'; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); } applyPortalPin(); };
                 if(p&&ppNeedsDetail([p],true))ppEnsureDetail([p],true,build,function(){ ex.dataset.built=''; if(cell)cell.innerHTML='<div class="count" style="color:var(--neg)">Could not load this order. Close it and open it again.</div>'; });
                 else build(); }
               ex.style.display=(ex.style.display!=='none')?'none':''; var _poOpen=ex.style.display!=='none'; var _poRow=btn.closest('.pp-row'); if(_poRow)_poRow.classList.toggle('row-open',_poOpen);   // highlight the open PO row (light yellow, like the main supply grid)
+              var _pnl=ex.querySelector('.ppd-wrap');   // v28.516: open as a drawer
+              if(_poOpen){ var _pd=(_ppData.pos||[]).filter(function(x){return x.po===btn.dataset.po;})[0]||{};
+                ppDrawerOpen(_pnl,{ref:btn.dataset.po, sub:[_pd.branch, _pd.prod_no?('P# '+_pd.prod_no):''].filter(Boolean).join(' · '), link:ppItemLink('orders','pos',btn.dataset.po), kind:'po', close:function(){ if(ex.style.display!=='none')btn.click(); }}); }
+              else ppDrawerStrip(_pnl);
               ppSetHash('pos', _poOpen?btn.dataset.po:'');   // keep the URL shareable — #/pos/<PO> when open
               if(_poOpen&&ex.dataset.ready&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
               applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
