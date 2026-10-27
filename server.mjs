@@ -8541,7 +8541,8 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
     if (xVoid) actions.push({ system: 'xero', level: 'action', msg: 'The Xero bill linked to ' + po + ' (' + (xr.external_ref || xr.external_id) + ') was voided in Xero: choose the right bill (change bill)' });
     else if (shipped && (!xr || xr.status !== 'linked')) actions.push({ system: 'xero', level: 'action', msg: 'PO ' + po + ' is ' + (poRow.status || 'shipped') + ' but has no linked bill in Xero' });
     const systems = PO_LINK_SYSTEMS.map(sys => Object.assign({ system: sys, external_id: null, external_ref: null, url: null, status: 'none', note: null, found_by: null, found_at: null }, byS[sys] || {}));
-    res.set('Cache-Control', 'no-store').json({ po, status: poRow.status, shipped, resolved: doResolve, systems, actions,
+    const fulfil_extra = await poFulfilExtras(po).catch(() => []);   // v28.522
+    res.set('Cache-Control', 'no-store').json({ po, status: poRow.status, shipped, resolved: doResolve, systems, actions, fulfil_extra,
       healed: heal && heal.healed.length ? heal.healed : undefined, voided_link: xVoid || undefined });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -8587,6 +8588,60 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
       [po, sys, eid, eref, url]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// v28.522 (Ben 28-Oct-26: "i want to be able to add multiple fulfil po links not just change", PO-57UKBL1 = Fulfil PO226 + PO474): EXTRA Fulfil
+// POs on a HORIZON PO (planner.po_fulfil_extra, migration 394). The main Fulfil link above stays the push / sync target; extras are shown under
+// Linked records, found by search and used to match Fulfil bills to the PO (fulfilBillPoLinks). A Fulfil PO is an extra on one HORIZON PO at most,
+// and never one that is a main link or in a client PO group. Nothing is written to Fulfil. Tolerates a missing table (migration not run yet).
+let _ffxOn = { at: 0, on: false };   // does planner.po_fulfil_extra exist (migration 394)? checked at most once a minute
+async function ffExtraOn() { if (Date.now() - _ffxOn.at < 60000) return _ffxOn.on;
+  try { _ffxOn = { at: Date.now(), on: !!(await pool.query(`SELECT to_regclass('planner.po_fulfil_extra') t`)).rows[0].t }; } catch (e) { _ffxOn = { at: Date.now(), on: false }; } return _ffxOn.on; }
+async function poFulfilExtras(po) {
+  try { return (await pool.query(`SELECT fulfil_id::text id, number, reference, supplier, state, url, added_by, to_char(added_at,'YYYY-MM-DD') added_at FROM planner.po_fulfil_extra WHERE po=$1 ORDER BY number NULLS LAST, fulfil_id`, [po])).rows; }
+  catch (e) { if (e.code === '42P01') return []; throw e; }
+}
+app.get('/api/supply/po/:po/fulfil-extra', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ po: req.params.po, rows: await poFulfilExtras(String(req.params.po || '')) }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/po/:po/fulfil-extra', async (req, res) => {
+  try {
+    const po = String(req.params.po || '').trim(), b = req.body || {}, eid = String(b.fulfil_id || '').trim();
+    if (!po || !/^[0-9]+$/.test(eid)) return res.status(400).json({ error: 'po and the numeric Fulfil PO id are required' });
+    if (!(await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [po])).rows.length) return res.status(404).json({ error: po + ' is not a HORIZON PO' });
+    let fp;
+    try { fp = (await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', '=', Number(eid)]], ['id', 'number', 'reference', 'state', 'party.name'], 1, 'Fulfil PO'))[0]; }
+    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 503).json({ error: e.message }); }
+    if (!fp) return res.status(404).json({ error: 'Fulfil PO id ' + eid + ' not found in Fulfil' });
+    if (/^cancel/.test(String(fp.state || ''))) return res.status(409).json({ error: 'Fulfil ' + (fp.number || eid) + ' is cancelled: choose a live PO' });
+    const main = [...new Set((await pool.query(`SELECT po FROM planner.po_links WHERE system='fulfil' AND status='linked' AND external_id=$1
+      UNION SELECT f.po FROM planner.fulfil_purchase_orders f WHERE f.fulfil_id::text=$1 AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.po=f.po)`, [eid])).rows.map(r => r.po))];   // main link or mirror
+    if (main.includes(po)) return res.status(409).json({ error: 'Fulfil ' + (fp.number || eid) + ' is already the main Fulfil link of ' + po });
+    if (main.length) return res.status(409).json({ error: 'Fulfil ' + (fp.number || eid) + ' is the main Fulfil link of ' + main.join(', ') + '. Unlink it there first.' });
+    const grp = (await pool.query(`SELECT po FROM planner.po_fulfil_group WHERE fulfil_id=$1`, [eid]).catch(() => ({ rows: [] }))).rows.map(r => r.po);
+    if (grp.length) return res.status(409).json({ error: 'Fulfil ' + (fp.number || eid) + ' is in the client PO group of ' + grp.join(', ') });
+    let held = [];
+    try { held = (await pool.query(`SELECT po FROM planner.po_fulfil_extra WHERE fulfil_id=$1 AND po <> $2`, [eid, po])).rows.map(r => r.po); }
+    catch (e) { if (e.code === '42P01') return res.status(503).json({ error: 'Extra Fulfil links need migration 394 (po_fulfil_extra)' }); throw e; }
+    if (held.length && b.move !== true) return res.status(409).json({ code: 'FULFIL_EXTRA_HELD', held, error: 'Fulfil ' + (fp.number || eid) + ' is already an extra link on ' + held.join(', ') + '. Move it to ' + po + '?' });
+    const fc = fulfilConfigFor(await activeFulfilEnv());
+    const furl = fc.subdomain ? ('https://' + fc.subdomain + '.fulfil.io/v2/erp/model/purchase_order/' + fp.id + '?window_name=default') : null;
+    await pool.query(`INSERT INTO planner.po_fulfil_extra (fulfil_id, po, number, reference, supplier, state, url, added_by, added_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+      ON CONFLICT (fulfil_id) DO UPDATE SET po=$2, number=$3, reference=$4, supplier=$5, state=$6, url=$7, added_by=$8, added_at=now()`,
+      [Number(fp.id), po, fp.number || null, fp.reference || null, fp['party.name'] || null, fp.state || null, furl, authUser(req) || null]);
+    logPoChange(po, 'Linked records', 'Extra Fulfil PO linked: ' + (fp.number || fp.id) + (fp.reference ? ' (' + fp.reference + ')' : '') + (held.length ? ', moved from ' + held.join(', ') : ''), authUser(req));
+    res.json({ ok: true, fulfil_id: fp.id, number: fp.number || null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/po/:po/fulfil-extra/remove', async (req, res) => {
+  try {
+    const po = String(req.params.po || '').trim(), eid = String((req.body || {}).fulfil_id || '').trim();
+    if (!/^[0-9]+$/.test(eid)) return res.status(400).json({ error: 'fulfil_id required' });
+    const r = await pool.query(`DELETE FROM planner.po_fulfil_extra WHERE po=$1 AND fulfil_id=$2 RETURNING number`, [po, eid]);
+    if (r.rowCount) logPoChange(po, 'Linked records', 'Extra Fulfil PO unlinked: ' + (r.rows[0].number || eid), authUser(req));
+    res.json({ ok: true, removed: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // v28.199 (Ben): "Link Fulfil PO" picker. READ ONLY against Fulfil (search_read only). With ?po= it first lists the
@@ -10376,6 +10431,7 @@ async function fulfilBillPoLinks() {
   const xb = (await pool.query(`SELECT invoice_id, lower(region) region, invoice_number, reference, total::float8 total FROM planner.xero_bills WHERE upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')
       AND (upper(trim(invoice_number)) = ANY($1::text[]) OR upper(trim(reference)) = ANY($1::text[]))`, [refs])).rows;
   const ffLink = {}; (await pool.query(`SELECT po, external_id FROM planner.po_links WHERE system='fulfil' AND status='linked' AND external_id = ANY($1::text[])`, [pIds.map(String)])).rows.forEach(r => { ffLink[r.external_id] = r.po; });
+  (await pool.query(`SELECT po, fulfil_id::text external_id FROM planner.po_fulfil_extra WHERE fulfil_id = ANY($1::bigint[])`, [pIds]).catch(() => ({ rows: [] }))).rows.forEach(r => { if (!ffLink[r.external_id]) ffLink[r.external_id] = r.po; });   // v28.522: extra Fulfil links
   const pRefs = [...new Set(Object.values(purch).flatMap(p => { const r = String(p.reference || '').trim(), t = (r.split(/[\/|]/).pop() || '').trim(), b = x => x.replace(/\s*\(.*$/, '').trim().split(/\s+/)[0] || ''; return [r, t, b(r), b(t)]; }).filter(Boolean))];
   const known = new Set(pRefs.length ? (await pool.query(`SELECT po FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [pRefs])).rows.map(r => r.po) : []);
   const inGroup = new Set((await pool.query(`SELECT fulfil_id FROM planner.po_fulfil_group WHERE fulfil_id = ANY($1::bigint[])`, [pIds]).catch(() => ({ rows: [] }))).rows.map(r => Number(r.fulfil_id)));
@@ -11049,6 +11105,7 @@ app.get('/api/hz-search', async (req, res) => {
     const prodTok = (/^(?:p\s*#?\s*|prod(?:uction)?\s*#?\s*)?(\d{1,4})$/i.exec(raw) || [])[1] || null;
     // ONE round trip: every group is a sub-select aggregated to JSON ($1 = %raw%, $2 = raw, $3 = production number or null)
     const PO_META = `coalesce(p.supplier_name,'') supplier, coalesce(p.status,'') status, upper(coalesce(nullif(p.country_code,''), b.country_code,'')) market`;
+    const ffx = (await ffExtraOn()) ? ` UNION ALL SELECT x.po, 'Fulfil ' || concat_ws(' · ', x.number, x.reference), NULL, 2 FROM planner.po_fulfil_extra x WHERE x.number ILIKE $1 OR x.reference ILIKE $1` : '';   // v28.522
     const G = {
       pos: `SELECT p.po, ${PO_META}, CASE ${why} END why, left(${snip}, 140) snippet
            FROM planner.purchase_orders p LEFT JOIN planner.branches b ON b.name=p.branch
@@ -11056,7 +11113,7 @@ app.get('/api/hz-search', async (req, res) => {
            ORDER BY (p.po ILIKE $2) DESC, (p.po ILIKE $1) DESC, (upper(coalesce(p.status,'')) LIKE 'COMPLETE%') ASC, p.po DESC LIMIT 12`,
       linked: `SELECT h.po, h.why, h.snippet, ${PO_META} FROM (
              SELECT l.po, 'Fulfil ' || l.external_ref why, NULL::text snippet, 1 o FROM planner.po_links l WHERE l.system='fulfil' AND coalesce(l.status,'linked')<>'removed' AND l.external_ref ILIKE $1
-             UNION ALL SELECT g.po, 'Fulfil ' || coalesce(g.number,'') || coalesce(' · ' || g.reference,''), NULL, 2 FROM planner.po_fulfil_group g WHERE g.number ILIKE $1 OR g.reference ILIKE $1
+             UNION ALL SELECT g.po, 'Fulfil ' || coalesce(g.number,'') || coalesce(' · ' || g.reference,''), NULL, 2 FROM planner.po_fulfil_group g WHERE g.number ILIKE $1 OR g.reference ILIKE $1${ffx}
              UNION ALL SELECT n.po, 'message', left(n.body, 140), 3 FROM planner.supplier_notes n WHERE n.po IS NOT NULL AND n.body ILIKE $1) h
            JOIN planner.purchase_orders p ON p.po=h.po LEFT JOIN planner.branches b ON b.name=p.branch ORDER BY h.o LIMIT 12`,
       sos: `SELECT p.sales_order_ref so, coalesce(max(nullif(p.client,'')),'') client, count(*)::int n, string_agg(p.po, ', ' ORDER BY p.po) pos

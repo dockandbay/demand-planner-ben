@@ -46,6 +46,8 @@ sources:
   - server.mjs :: /api/supply/tpl/data, /api/supply/tpl/goods-in, _tplGridSummary, _tplConsumablesInside (3PL invoices)
   - server.mjs :: fulfilPushLines, FULFIL_MAP, fulfilCompletionMap, /api/supply/fulfil/drift, /api/supply/fulfil/grid-status, fulfilCompareRows, fulfilImportPOs
   - server.mjs :: fulfilPushTarget, fulfilGuardCtx, fulfilExistingCandidates, FULFIL_CLIENT_PO_SQL, /api/supply/fulfil/po-search, /api/supply/po/:po/links (Fulfil create guard + Link Fulfil PO)
+  - server.mjs :: poFulfilExtras, ffExtraOn, /api/supply/po/:po/fulfil-extra, /api/supply/po/:po/fulfil-extra/remove, fulfilBillPoLinks, /api/hz-search (extra Fulfil POs, v28.522)
+  - migrations/394_po_fulfil_extra.sql :: planner.po_fulfil_extra
   - server.mjs :: sovAnalyse, sovLineBlock, sovModeBlock, sovChangeMode, sovFindSales, sovPushOrder, /api/supply/fulfil/sales-order/push-suppliers, /api/supply/fulfil/sales-order/analyse-batch, /api/supply/fulfil/sales-order/push-batch (Validate sales order)
   - migrations/334_so_supplier_pushes.sql :: planner.so_supplier_pushes
   - server.mjs :: /api/supply/received-pos/process (processReceivedPos)
@@ -102,7 +104,7 @@ fingerprints:
   server.mjs::PO_ROWS_SQL: 9297d1d761b5
   server.mjs::_tplFulfilShipLookup: a90edcb58d76
   server.mjs::_tplRefOverride: 292f4d59386e
-  server.mjs::/api/hz-search: 73ad48851aa1
+  server.mjs::/api/hz-search: f0ac31208a4d
   supply/inject.html::runCmd: d0195899403f
   supply/inject.html::gotoPO: 3a92dc2c4023
   supply/inject.html::gotoPOFilter: 0775f59112be
@@ -203,7 +205,13 @@ fingerprints:
   server.mjs::fulfilExistingCandidates: 4a108d8a257b
   server.mjs::FULFIL_CLIENT_PO_SQL: 1dfcdf1c9fe5
   server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
-  server.mjs::/api/supply/po/:po/links: 6d3a47f8aeb4
+  server.mjs::/api/supply/po/:po/links: be268f5a2f86
+  server.mjs::poFulfilExtras: 5649f4f9f1fc
+  server.mjs::ffExtraOn: acafa58afa08
+  server.mjs::/api/supply/po/:po/fulfil-extra: 4472ed8c5070
+  server.mjs::/api/supply/po/:po/fulfil-extra/remove: 1d5622e593be
+  server.mjs::fulfilBillPoLinks: 4b6ff61ddfdc
+  migrations/394_po_fulfil_extra.sql::planner.po_fulfil_extra: af950b575a37
   server.mjs::sovAnalyse: 9b73b85176ff
   server.mjs::sovLineBlock: bf5806a2f16a
   server.mjs::sovModeBlock: daa8ceb2c541
@@ -315,7 +323,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.521
+verified_version: v28.522
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -758,6 +766,7 @@ verified_version: v28.521
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+- v28.522 (Ben 28-Oct-26): a HORIZON PO can carry EXTRA Fulfil POs (planner.po_fulfil_extra) besides its main Fulfil link. The main link (po_links fulfil, or the mirror) stays the only push / sync target; extras are listed under Linked records (＋ add another Fulfil PO, ✕ remove), found by HORIZON search, and mapped to the PO when matching Fulfil bills to Xero bills (fulfilBillPoLinks). A Fulfil PO is an extra on one HORIZON PO at most (moving asks), and is refused when cancelled, another PO's main link or mirror, or in a client PO group. HORIZON lines and totals do not change. (source: server.mjs :: poFulfilExtras, /api/supply/po/:po/fulfil-extra, fulfilBillPoLinks; supply/inject.html :: fulfilPoPicker)
 - v28.521 (Ben 28-Oct-26): Push bill to Xero is off until the Xero contact, Account and Tax are all filled and the receipt can still be billed. Blank required fields show light red (not yellow); hovering the greyed button gives the reason in the 120 ms tooltip ("Fill in Tax to push (marked red)", "Cannot push: <reason>", "Checking the bill…"). (source: supply/inject.html :: acDrWhy, acDrMark, acDrPaint)
 
 ## EDI labels: Dillards SSCC labels and supplier packing lists

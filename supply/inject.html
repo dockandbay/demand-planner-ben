@@ -2245,14 +2245,15 @@
   // POs that already look like this one (same number, SO / client ref, sale-linked to that SO; marked "suggested"), then
   // whatever is typed (number, reference, supplier, sales order). Click a row to save it as this PO's manual Fulfil link
   // (po_links fulfil, found_by manual): the push target from then on. Nothing is written to Fulfil.
-  function fulfilPoPicker(po,done){
+  // v28.522 (Ben): opts.extra = add ANOTHER Fulfil PO to this HORIZON PO (po_fulfil_extra). The main link stays the push target.
+  function fulfilPoPicker(po,done,opts){ var X=!!(opts&&opts.extra);
     var old=document.getElementById('fpl-bg'); if(old)old.remove();
     var bg=document.createElement('div'); bg.id='fpl-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100100;display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto';
     bg.innerHTML='<style>#fpl-bg table{table-layout:auto!important;border-collapse:collapse;width:100%}#fpl-bg th,#fpl-bg td{padding:6px 8px!important;overflow:visible!important;text-align:left!important;vertical-align:top;border-top:1px solid var(--line)}#fpl-bg tr.fpl-row{cursor:pointer}#fpl-bg tr.fpl-row:hover td{background:var(--hover)}#fpl-bg .fpl-num{font-family:ui-monospace,Menlo,monospace;font-weight:700;white-space:nowrap}#fpl-bg tr.fpl-dead{cursor:not-allowed;opacity:.62}#fpl-bg tr.fpl-dead .fpl-num{text-decoration:line-through}</style>'
       +'<div style="background:var(--card);border-radius:12px;max-width:920px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">'
-      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">Link Fulfil PO → '+esc(po)+'</b><span id="fpl-ctx" class="mut tiny"></span><button id="fpl-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
+      +'<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px"><b style="font-size:15px">'+(X?'Add another Fulfil PO → ':'Link Fulfil PO → ')+esc(po)+'</b><span id="fpl-ctx" class="mut tiny"></span><button id="fpl-x" class="save-btn light" style="margin-left:auto">✕</button></div>'
       +'<div style="padding:14px 18px"><input id="fpl-q" class="fci" placeholder="Search Fulfil PO number, reference, supplier or sales order…" style="width:100%;text-align:left;font-size:13px;padding:7px 10px">'
-      +'<div class="mut tiny" style="margin:6px 0 8px">Searches Fulfil live (read only). <b>Suggested</b> = Fulfil POs that already match this PO&rsquo;s number or sales order. Click a PO to link it; HORIZON then uses it for this PO and never creates a new one.</div>'
+      +'<div class="mut tiny" style="margin:6px 0 8px">Searches Fulfil live (read only). <b>Suggested</b> = Fulfil POs that already match this PO&rsquo;s number or sales order. '+(X?'Click a PO to add it as an extra Fulfil PO on this PO: shown under Linked records and used to match its Fulfil bills. The main Fulfil link stays the push / sync target.':'Click a PO to link it; HORIZON then uses it for this PO and never creates a new one.')+'</div>'
       +'<div id="fpl-res" style="max-height:52vh;overflow:auto"></div></div></div>';
     document.body.appendChild(bg);
     function close(){ bg.remove(); }
@@ -2271,7 +2272,14 @@
             +'<td style="text-align:right!important">'+esc(p.line_count)+'</td><td style="text-align:right!important">'+units(p.units)+'</td><td style="white-space:nowrap">'+esc(p.last_modification?fd(p.last_modification):'')+'</td>'
             +'<td>'+(p.url?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener" class="fpl-open" style="color:var(--blue);white-space:nowrap">Fulfil ↗</a>':'')+'</td></tr>'; }).join('')+'</tbody></table>';
       res.querySelectorAll('.fpl-open').forEach(function(a){ a.onclick=function(ev){ ev.stopPropagation(); }; });
-      res.querySelectorAll('tr.fpl-row').forEach(function(tr){ tr.onclick=function(){ var p=L[+tr.dataset.i]; if(/^cancel/i.test(p.state||''))return; if(p.current){ close(); return; }
+      res.querySelectorAll('tr.fpl-row').forEach(function(tr){ tr.onclick=function(){ var p=L[+tr.dataset.i]; if(/^cancel/i.test(p.state||''))return;
+        if(X){ if(p.current){ alert('Fulfil '+(p.number||p.id)+' is already the main Fulfil link of '+po+'.'); return; }
+          if(!confirm('Add Fulfil '+(p.number||p.id)+(p.reference?' ('+p.reference+')':'')+' to '+po+' as an extra Fulfil PO?\n\nThis saves the link in HORIZON only; nothing is written to Fulfil.'))return;
+          var post=function(mv){ return fetch('/api/supply/po/'+encodeURIComponent(po)+'/fulfil-extra',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fulfil_id:String(p.id),move:!!mv})}).then(function(r){return r.json();}); };
+          post(false).then(function(j){ if(j&&j.code==='FULFIL_EXTRA_HELD'){ if(!confirm(j.error))return null; return post(true); } return j; })
+            .then(function(j){ if(!j)return; if(j.error)throw new Error(j.error); close(); if(done)done(); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); });
+          return; }
+        if(p.current){ close(); return; }
         var others=(p.linked_pos||[]).filter(function(x){return x.po!==po;});
         var _mv=others.some(function(x){return x.by!=='mirror';});   // v28.378: a Fulfil PO links to ONE HORIZON PO: linking here moves it
         if(others.length && !confirm('Fulfil '+(p.number||p.id)+' is already tied to '+others.map(function(x){return x.po;}).join(', ')+'. Move the link to '+po+'? '+others.map(function(x){return x.po;}).join(', ')+' will no longer be linked to it.'))return;
@@ -2378,7 +2386,11 @@
           +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="xero" style="color:var(--neg);white-space:nowrap" title="remove the manual link (the auto-resolver can find it again)">unlink</button>':''))
         :(s.system==='fulfil'   // v28.199 (Ben): Fulfil uses the read-only search picker (the link becomes the push target)
           ?('<button class="lnk-btn poln-fsearch" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="search Fulfil POs by number, reference, supplier or sales order">'+(linked?'✎ change PO':'🔍 link Fulfil PO')+'</button>'+((!linked&&poActionsAll(poBy[po]||{}).indexOf('fulfil_link')>=0)?' <span class="ex-badge" title="1 open action">1</span> '+actMark(po,'fulfil_link'):'')
-            +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="fulfil" style="color:var(--neg);white-space:nowrap" title="remove the manual Fulfil link">unlink</button>':''))
+            +((linked&&s.found_by==='manual')?' <button class="lnk-btn poln-unlink" data-po="'+esc(po)+'" data-sys="fulfil" style="color:var(--neg);white-space:nowrap" title="remove the manual Fulfil link">unlink</button>':'')
+            +(function(){ var xs=d.fulfil_extra||[];   // v28.522 (Ben): extra Fulfil POs on this PO
+              return (xs.length?'<div style="margin-top:6px;display:grid;gap:3px">'+(linked?'<div class="mut tiny">main link above = push / sync target</div>':'')+xs.map(function(x){ return '<div style="white-space:nowrap">+ <b>'+esc(x.number||('id '+x.id))+'</b>'+(x.reference?' <span class="mut">· '+esc(x.reference)+'</span>':'')
+                +(x.url?' <a href="'+esc(x.url)+'" target="_blank" rel="noopener" style="color:var(--blue)">open ↗</a>':'')+' <button class="lnk-btn poln-fxrm" data-po="'+esc(po)+'" data-id="'+esc(x.id)+'" data-n="'+esc(x.number||x.id)+'" style="color:var(--neg)" title="remove this extra Fulfil PO">✕</button></div>'; }).join('')+'</div>':'')
+                +'<div style="margin-top:4px"><button class="lnk-btn poln-fxadd" data-po="'+esc(po)+'" style="color:var(--blue);white-space:nowrap" title="add another Fulfil PO to this PO (shown and used to match Fulfil bills; the main link stays the push target)">＋ add another Fulfil PO</button></div>'; })())
           :('<button class="lnk-btn poln-add" data-po="'+esc(po)+'" data-sys="'+esc(s.system)+'" style="color:var(--blue);white-space:nowrap">'+(linked?'✎ change':'＋ add link')+'</button>'));
       return '<tr style="border-top:1px solid #eef2f7">'
         +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(m.label)+' <span class="mut tiny">'+esc(m.hint)+'</span></td>'
@@ -2442,6 +2454,10 @@
     el.querySelectorAll('.poln-refresh').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='↻ Finding…'; loadPoLinks(el,true); }; });
     el.querySelectorAll('.poln-xsearch').forEach(function(b){ b.onclick=function(){ xeroBillPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); }); }; });
     el.querySelectorAll('.poln-fsearch').forEach(function(b){ b.onclick=function(){ fulfilPoPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); try{fillErpFulfil();}catch(e){} }); }; });   // v28.199 (Ben)
+    el.querySelectorAll('.poln-fxadd').forEach(function(b){ b.onclick=function(){ fulfilPoPicker(b.dataset.po,function(){ el._loaded=0; loadPoLinks(el,false); },{extra:true}); }; });   // v28.522
+    el.querySelectorAll('.poln-fxrm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove the extra Fulfil PO '+b.dataset.n+' from '+b.dataset.po+'? (Nothing changes in Fulfil.)'))return;
+      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/fulfil-extra/remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fulfil_id:b.dataset.id})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); el._loaded=0; loadPoLinks(el,false); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });
     el.querySelectorAll('.poln-unlink').forEach(function(b){ b.onclick=function(){ var sys=b.dataset.sys||'xero'; if(!confirm('Unlink the '+(sys==='fulfil'?'Fulfil PO':'Xero bill')+' from '+b.dataset.po+'?'))return;
       fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({system:sys})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); el._loaded=0; loadPoLinks(el,false); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }; });

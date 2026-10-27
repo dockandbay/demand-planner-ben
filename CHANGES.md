@@ -1,3 +1,11 @@
+## v28.522 (28-Oct-26) PO ▸ Linked records: add more than one Fulfil PO
+- Ben: "i want to be able to add multiple fulfil po links not just change under master data & docs" (PO-57UKBL1 = Fulfil PO226 + PO474 / PO-57UKBL1-2). Chose: extra links; the main link stays the push / sync target.
+- Linked records ▸ Fulfil now lists extra Fulfil POs under the main one (number, reference, open ↗, ✕ remove) with "＋ add another Fulfil PO", which opens the same live Fulfil search (read only).
+- Extras are used to match Fulfil bills to the PO in Xero (hourly Fulfil bill sync) and are found by the HORIZON search. HORIZON lines, pushes and totals are unchanged.
+- Guards: a Fulfil PO can be an extra on one HORIZON PO only (moving it asks first); never a cancelled PO, a PO that is another HORIZON PO's main link or mirror, or one in a client PO group. Every add / remove goes in the PO change log. Nothing is written to Fulfil.
+- Migration 394_po_fulfil_extra.sql (additive): planner.po_fulfil_extra. Routes: GET / POST /api/supply/po/:po/fulfil-extra, POST /api/supply/po/:po/fulfil-extra/remove. Works without the migration (no extras shown; adding says the migration is needed).
+- Sandbox check: added sandbox Fulfil 98 (PO-57EUBL-SAMPLES) to PO-57UKBL1, listed under Linked records, found by search; adding it to PO-57EUBL1 asked to move; PO-57EUBL1's own mirror refused; removed again.
+
 ## v28.521 (28-Oct-26) ACCOUNTS bill drawer: blank required fields go light red; Push explains why it is greyed out
 - Ben: "push bill is greyed out. Is it because tax isn't chosen? I think the mandatory fields should be light red if blank. Also button tooltip explains why greyed out on 120ms hover".
 - Why it greys out: Push needs a Xero contact, an Account and a Tax, and a receipt that can still be billed. Any of those missing turns it off (so yes, a blank Tax does).
