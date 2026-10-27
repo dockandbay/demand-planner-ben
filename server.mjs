@@ -23899,7 +23899,7 @@ const _PO_DETAIL_Q = [
                     coalesce(s.name,'') supplier_name, n.attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=n.attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=n.attachment_id) attachment_mime
                   FROM planner.supplier_notes n LEFT JOIN planner.suppliers s ON s.id=n.supplier_id
                   WHERE n.po=$1 ORDER BY n.created_at`],
-  ["subs", `SELECT kind, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
+  ["subs", `SELECT id, kind, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 ORDER BY submitted_at`],
   ["lineCosts", `SELECT plc.sku, plc.actual_cost, plc.final_cost, plc.amended_qty, coalesce(plc.is_added,false) is_added,
                     coalesce(pr.product_name,'') product_name,

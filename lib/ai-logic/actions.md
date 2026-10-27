@@ -61,7 +61,7 @@ fingerprints:
   supply/inject.html::openAddSalesOrders: d98be5bcfa32
   supply/inject.html::renderDtc2: f94fc74da7c3
   artifact_v16.7.html::renderBuyMoveActions: a772167cf2ee
-  supply/inject.html::PO_ACTCOND: c295b79fd5d6
+  supply/inject.html::PO_ACTCOND: 43480f8f57c4
   supply/inject.html::cfUnpaidActions: fe40096c76b7
   supply/inject.html::renderRecsTab: cb6e7811b196
   server.mjs::buildTierRecommendations: 8fdd4a3bbb0b
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.437
+verified_version: v28.528
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -284,6 +284,9 @@ verified_version: v28.437
   - Fulfil generates these POs from the sales order, so the guard refuses to push them until someone links the Fulfil PO (Master data > Linked records > Link Fulfil PO).
   - Not on complete or cancelled POs; child POs raise nothing. Clears by itself once linked.
   - Same SQL rule (FULFIL_LINK_NEEDED_SQL) in the PO grid, SUPPLY > Actions (type "Link Fulfil PO", priority, Client group) and the open-actions metric po_actions.
+- dtc_client_missing, "Direct to Client: client name missing" (v28.528, Ben 28-Oct-26, Client tab):
+  - An open PO (not complete, cancelled or future) on a Direct to Client / B2B JLEW / B2B NEXT branch with no client name. PO grid and drawer only (client rule; not in SUPPLY > Actions).
+- Hide ▾ (PO grid) toggles: snoozed, payment due, timeline unread, and from v28.528 waiting for supplier approval (hides po_not_approved and dtc_not_approved from the count, badges and filter).
 - In the PO drawer (v28.302, Ben 13-Oct-26: "all actions must have this"): every tab with open actions starts with an Open actions (n) strip, one row per action with its explainer and the Ⓐ / SNOOZE marker. This covers the coded actions above and the drawer-only ones: supplier invoice awaiting approval or differing from the final, no freight rate, supplier completion date awaiting approval, production start / end status, unread supplier messages, unconfirmed order-plan changes, partial cartons / supplier risk / discontinued arrival / country risk to approve, supplier documents awaiting approval. Each is snoozable (same supply_action_state store, key poact|<po>|<code>) and a snoozed one drops from its tab count. Link Fulfil PO also shows a 1 badge and the marker next to its button in Linked records.
 (source: supply/inject.html :: PO_ACTCOND)
 
