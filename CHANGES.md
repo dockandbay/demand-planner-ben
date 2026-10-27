@@ -1,3 +1,9 @@
+## v28.521 (28-Oct-26) ACCOUNTS bill drawer: blank required fields go light red; Push explains why it is greyed out
+- Ben: "push bill is greyed out. Is it because tax isn't chosen? I think the mandatory fields should be light red if blank. Also button tooltip explains why greyed out on 120ms hover".
+- Why it greys out: Push needs a Xero contact, an Account and a Tax, and a receipt that can still be billed. Any of those missing turns it off (so yes, a blank Tax does).
+- Receipt found ▸ Review: blank Xero contact / Account / Tax fields now show light red (instead of yellow) until filled, updating as you type or pick.
+- Hovering the greyed Push button shows the reason (the app's 120 ms tooltip): "Fill in Tax to push (marked red)", "Cannot push: <reason>" or "Checking the bill…". The button no longer swallows the hover (it shows a not-allowed cursor instead).
+
 ## v28.520 (27-Oct-26) PRODUCT sizes: searchable size list (default sizes) with dimensions; Config ▸ Sizes
 - Ben: "existing products should have a default size user can select, or add new custom sizes. sizes list is attached (SIZE-WORKING.csv)" and "should be a searchable filter selection box". Decided: the list starts from the CSV and is editable in PRODUCT ▸ Config ▸ Sizes; picking a size fills its label and dimensions in cm only.
 - Product ▸ Size & variants ▸ ＋ Add size is now a search box over the size list (code, label or dimensions, several words narrow it; Enter takes the first match). Picking one adds the size with its label and L × W × H (cm), marked "from the size list: <code>". Anything else can still be added as a custom size ("Add "<text>" as a custom size"). Sizes already on the product are greyed.

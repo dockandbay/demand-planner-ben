@@ -122,7 +122,7 @@ fingerprints:
   supply/inject.html::acCfReload: 38efe35ae70b
   supply/inject.html::acInLinesHtml: 79f878629433
   supply/inject.html::acDrOpen: b3be4c0b9c61
-  supply/inject.html::acDrPaint: 06889ab883b7
+  supply/inject.html::acDrPaint: 774c5ec44000
   supply/inject.html::acRenderStmt: 43008dd01ade
   supply/inject.html::acRenderAgeing: 12f7b1f017e1
   supply/inject.html::acComboWire: 821987bad274
@@ -315,7 +315,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.519
+verified_version: v28.521
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -758,6 +758,7 @@ verified_version: v28.519
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+- v28.521 (Ben 28-Oct-26): Push bill to Xero is off until the Xero contact, Account and Tax are all filled and the receipt can still be billed. Blank required fields show light red (not yellow); hovering the greyed button gives the reason in the 120 ms tooltip ("Fill in Tax to push (marked red)", "Cannot push: <reason>", "Checking the bill…"). (source: supply/inject.html :: acDrWhy, acDrMark, acDrPaint)
 
 ## EDI labels: Dillards SSCC labels and supplier packing lists
 - Page: Direct-to-Client report > EDI LABELS (#/supply/purchase-orders/edi-labels). Inputs: the ASN (wc-asn, POST PACK) CSV and the SSCC label PDFs, uploaded or saved in a project. Reads only; nothing is written to Fulfil or the ERP. (source: server.mjs :: _ediParse)

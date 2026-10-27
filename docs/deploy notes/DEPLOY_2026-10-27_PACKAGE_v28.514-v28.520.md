@@ -2,7 +2,7 @@
 
 **AT A GLANCE:** Ben's branch `review-fixes-2026-10-05` at `5a00066f` (`5a00066fcba7273c8d4ce2da56385583948a04e7`; code v28.520). Live `/api/version` before: **v28.513** (production `main` = `0ae7d6c5`). Production port: PR #26, branch `port/v28.520` (`1d1e4fa5`). Owner of production steps: Ben.
 
-**STATUS 27-Oct-26: LIVE v28.520 (PR #26 merged, main 4ae6fa37, CI success) but migration 393 NOT applied** (merged before the migration; PRODUCT product pages fail until it runs). Previously: PR OPEN. Migration 393 NOT applied (Claude's apply was blocked by the permission check). Ben runs 393 in the SQL editor FIRST, then merges. Merging first breaks the PRODUCT sizes grid (the size queries read the new columns).
+**STATUS 28-Oct-26: COMPLETE. Migration 393 applied on live by Claude via MCP (Ben: "Run migration 393"); read back: 56 library sizes, 4 new columns on product_dev_sizes, no anon access; the size query runs.** Earlier, 27-Oct-26: LIVE v28.520 (PR #26 merged, main 4ae6fa37, CI success) but migration 393 NOT applied** (merged before the migration; PRODUCT product pages fail until it runs). Previously: PR OPEN. Migration 393 NOT applied (Claude's apply was blocked by the permission check). Ben runs 393 in the SQL editor FIRST, then merges. Merging first breaks the PRODUCT sizes grid (the size queries read the new columns).
 
 ## What changed
 - v28.514 Portal preview: portal tabs no longer rewrite HORIZON's URL (blank page).
@@ -31,3 +31,4 @@ No planning logic changed.
 ## Deploy record
 - 27-Oct-26: PR #26 opened; migration 393 SQL handed to Ben (on the clipboard).
 - 27-Oct-26: PR #26 merged (main 4ae6fa37), CI push + dispatch success, live verified v28.520. Read-back: planner.product_size_library absent, 0 of 4 new product_dev_sizes columns. SQL handed to Ben again.
+- 28-Oct-26: migration 393 applied on live (Claude, MCP); read back OK. PRODUCT product pages work again.

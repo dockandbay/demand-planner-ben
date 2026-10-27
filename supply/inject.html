@@ -97,7 +97,7 @@
 #acdrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease;display:none}#acdrawer-bg.show{display:block}#acdrawer-bg.open{background:rgba(15,23,42,.32)}
 #acdrawer{position:absolute;top:0;right:0;height:100%;width:min(680px,100vw);background:var(--card);color:var(--ink);box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);text-align:left}#acdrawer-bg.open #acdrawer{transform:translateX(0)}   /* v28.280 Reconcile review drawer */
 #acdrawer,#acdrawer div,#acdrawer td,#acdrawer th,#acdrawer label{text-align:left}#acdrawer table{border-collapse:collapse}#acdrawer td{padding:5px 10px 5px 0;vertical-align:top}#accounts-root #acdrawer .save-btn.ac-blue,#acdrawer .ac-blue{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}#accounts-root #acdrawer .save-btn.ac-blue:hover,#acdrawer .ac-blue:hover{background:#1d4ed8;border-color:#1d4ed8}   /* v28.284 (Ben): fully left aligned, blue primary button */
-#acdrawer .acdr-in{width:100%;box-sizing:border-box;text-align:left;background:#fff3b0;color:#141413;border:1px solid #d9b800;border-radius:6px;padding:7px 9px;font:inherit;font-size:13px}#acdrawer .acdr-in:focus{outline:2px solid #b38f00;outline-offset:1px}#acdrawer .acdr-in:disabled{opacity:.6}   /* v28.281 (Ben): yellow, left-aligned, full width */
+#acdrawer .acdr-in{width:100%;box-sizing:border-box;text-align:left;background:#fff3b0;color:#141413;border:1px solid #d9b800;border-radius:6px;padding:7px 9px;font:inherit;font-size:13px}#acdrawer .acdr-in:focus{outline:2px solid #b38f00;outline-offset:1px}#acdrawer .acdr-in:disabled{opacity:.6}#acdrawer .acdr-in.acdr-req,#acdrawer .ac-hl.acdr-req{background:#fde2e2;border-color:#e08a8a}   /* v28.281 (Ben): yellow, left-aligned, full width */
 #accounts-root .ac-hl,#acdrawer .ac-hl{width:100%;box-sizing:border-box;text-align:left;background:#fff3b0;color:#141413;border:1px solid #d9b800;border-radius:6px;padding:6px 9px;font:inherit;font-size:13px}#accounts-root .ac-cb,#acdrawer .ac-cb{position:relative}#accounts-root .ac-cb-list,#acdrawer .ac-cb-list{position:absolute;left:0;right:0;top:100%;z-index:100005;max-height:260px;overflow:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 20px rgba(15,23,42,.18);margin-top:2px;text-align:left}#accounts-root .ac-cb-list div,#acdrawer .ac-cb-list div{padding:6px 9px;cursor:pointer;font-size:13px}#accounts-root .ac-cb-list div:hover,#accounts-root .ac-cb-list div.on,#acdrawer .ac-cb-list div:hover,#acdrawer .ac-cb-list div.on{background:var(--hover)}   /* v28.282 searchable Xero pickers */
 #accounts-root #accounts-subnav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 4px;align-items:center;flex-wrap:wrap}
 #accounts-root #accounts-subnav .ver{margin-left:auto}
@@ -20728,7 +20728,16 @@
         AC_DR.f={contact:c.contact||'',account_code:c.account_code||'',tax_type:c.tax_type||'',invoice_number:c.invoice_number||'',note:c.note||''}; acDrPaint(); })
       .catch(function(e){ if(AC_DR!==mine)return; AC_DR.busy=false; AC_DR.c={reason:e.message}; acDrPaint(); }); }
   function acDrAcctHtml(org,code,dis){ return acComboHtml('account',org,code||'',acAcctLabel(org,code),'acdr-acct',dis); }   // v28.282: searchable
-  function acDrCanPush(){ var c=AC_DR.c, f=AC_DR.f; return !!(c&&(c.ok||/No coding yet/.test(c.reason||''))&&f.contact&&f.account_code&&f.tax_type&&!AC_DR.done); }
+  function acDrCanPush(){ return !acDrWhy(); }
+  // v28.521 (Ben 28-Oct-26: "push bill is greyed out. Is it because tax isn't chosen? mandatory fields should be light red if blank. Also button
+  // tooltip explains why greyed out"): the reason Push is off (tooltip on the button), and the blank required fields go light red.
+  function acDrWhy(){ var c=AC_DR.c, f=AC_DR.f||{}; if(AC_DR.done)return 'Already pushed'; if(AC_DR.busy||!c)return 'Checking the bill…';
+    if(!(c.ok||/No coding yet/.test(c.reason||'')))return 'Cannot push: '+(c.reason||'this receipt cannot be billed');
+    var miss=[]; if(!f.contact)miss.push('Xero contact'); if(!f.account_code)miss.push('Account'); if(!f.tax_type)miss.push('Tax');
+    return miss.length?'Fill in '+miss.join(', ')+' to push (marked red)':''; }
+  function acDrMark(){ var f=AC_DR.f||{}, g=function(id){ return document.getElementById(id); };
+    [['acdr-contact','contact'],['acdr-acct','account_code'],['acdr-tax','tax_type']].forEach(function(x){ var e=g(x[0]); if(e)e.classList.toggle('acdr-req',!e.disabled&&!f[x[1]]); });
+    var p=g('acdr-push'); if(p){ var why=acDrWhy(); p.style.opacity=why?'.45':''; p.style.cursor=why?'not-allowed':''; if(why)p.setAttribute('data-ttl',why); else p.removeAttribute('data-ttl'); } }
   function acDrPaint(){ var el=document.getElementById('acdrawer'); if(!el||!AC_DR.r)return; var r=AC_DR.r, c=AC_DR.c, em=AC_DR.em, f=AC_DR.f||{};
     var amt=acMoney(-r.amount,r.currency);
     var csp='<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: cid:; style-src \'unsafe-inline\'; font-src data:">';
@@ -20769,7 +20778,6 @@
         +(r.treatment==='autobill'?'<div class="tiny" style="margin-top:12px">'+esc(r.payee_key)+' is on Auto bill. <b>Push bill to Xero</b> creates this one now; the automatic run then skips it.</div>'
           :'<label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;cursor:pointer"><input type="checkbox" id="acdr-auto"'+(AC_DR.auto?' checked':'')+'> Create a rule: Auto bill '+esc(r.payee_key)+' from now on (its receipts become bills automatically, with this coding)</label>')
         +(AC_DR.err?'<div class="count" style="color:var(--neg);margin-top:8px">'+esc(AC_DR.err)+'</div>':''); }
-    var can=acDrCanPush();
     el.innerHTML='<div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc(r.payee_key)+' · '+amt+'</div><div class="tiny mut">'+esc(r.org.toUpperCase()+' · '+r.account_name+' · '+hzTrkDate(r.line_date))+' · '+esc(String(r.reference||'').slice(0,80))+'</div></div><span class="save-btn light" id="acdr-x" title="Close (Esc)">✕</span></div>'
       +'<div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:12px">'
       +(AC_DR.done?'':'<div><div style="display:flex;gap:2px;border-bottom:1px solid var(--line);align-items:center"><button class="stab'+(AC_DR.view==='email'?' active':'')+'" data-drv="email">EMAIL</button><button class="stab'+(AC_DR.view==='pdf'?' active':'')+'" data-drv="pdf">PDF</button>'
@@ -20781,11 +20789,12 @@
       +'<div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
       +(AC_DR.done?(AC_DR.done.url?'<a class="save-btn ac-blue" href="'+esc(AC_DR.done.url)+'" target="_blank" rel="noopener" style="text-decoration:none">Open bill in Xero ↗</a>':'')+'<span class="save-btn" id="acdr-x2">Close</span>'
         :(AC_DR.pushing?'<span class="save-btn ac-blue" style="opacity:.7">Creating the bill in Xero…</span>'   // v28.316 (Ben): one click, no confirm step
-          :'<span class="save-btn ac-blue" id="acdr-push"'+(can?'':' style="opacity:.45;pointer-events:none"')+'>Push bill to Xero</span>')+'<span class="save-btn light" id="acdr-ig" style="margin-left:auto">Ignore payee '+esc(r.payee_key)+'</span>')+'</div>';
+          :'<span class="save-btn ac-blue" id="acdr-push">Push bill to Xero</span>')+'<span class="save-btn light" id="acdr-ig" style="margin-left:auto">Ignore payee '+esc(r.payee_key)+'</span>')+'</div>';
     var g=function(id){ return document.getElementById(id); }; acComboWire(el); if(AC_DR.view==='pdf'&&em&&!em.error&&!AC_DR.done)acPdfRender(g('acdr-pdf'),'/api/accounts/attach/preview?email_id='+encodeURIComponent(r.match.id));
     var keep=function(){ ['contact','ref','acct','tax','loan','note'].forEach(function(k){ var x=g('acdr-'+k); if(x){ var key={contact:'contact',ref:'invoice_number',acct:'account_code',tax:'tax_type',loan:'loan_amount',note:'note'}[k]; AC_DR.f[key]=x.dataset.cb?acComboVal(x).v:x.value.trim(); } }); var a=g('acdr-auto'); if(a&&!a.disabled)AC_DR.auto=a.checked; };
     var lo=g('acdr-loan'); if(lo)lo.onchange=function(){ keep(); acDrPaint(); };   // v28.354: refresh the GST-free amount
-    ['contact','ref','acct','tax','auto','note'].forEach(function(k){ var x=g('acdr-'+k); if(x){ x.oninput=x.onchange=function(){ keep(); var dd=g('acdr-desc'); if(dd&&k==='note')dd.textContent=(AC_DR.f.note?AC_DR.f.note+' · ':'')+((AC_DR.c&&AC_DR.c.subject)||r.payee_key); var p=g('acdr-push'); if(p){ var ok=acDrCanPush(); p.style.opacity=ok?'':'.45'; p.style.pointerEvents=ok?'':'none'; } }; } });
+    ['contact','ref','acct','tax','auto','note'].forEach(function(k){ var x=g('acdr-'+k); if(x){ x.oninput=x.onchange=function(){ keep(); var dd=g('acdr-desc'); if(dd&&k==='note')dd.textContent=(AC_DR.f.note?AC_DR.f.note+' · ':'')+((AC_DR.c&&AC_DR.c.subject)||r.payee_key); acDrMark(); }; } });
+    acDrMark();
     [g('acdr-x'),g('acdr-x2')].forEach(function(x){ if(x)x.onclick=acDrClose; });
     el.querySelectorAll('[data-drv]').forEach(function(x){ x.onclick=function(){ keep(); AC_DR.view=x.dataset.drv; acDrPaint(); }; });
     var pu=g('acdr-push'); if(pu)pu.onclick=function(){ keep(); if(!acDrCanPush())return; AC_DR.err=''; doGo(); };   // v28.316: Push creates the bill straight away
