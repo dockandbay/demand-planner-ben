@@ -6064,7 +6064,7 @@ async function fulfilPushLines(po, completion) {
         }
       }
     }
-    try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }   // v27.738: keep the drift mirror fresh on push
+    try { await fulfilMirrorOne(fulfilId, 'push', po); } catch (e) { console.error('[fulfil push] mirror ' + po + ' failed (best-effort):', e && e.message); }   // v27.738: keep the drift mirror fresh on push
     return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(fulfilId), reverted_from: _reconfirm ? 'confirmed' : null,
       problems: _upProblems, reconfirm_failed: _upProblems.length > 0 };
   }
@@ -6073,7 +6073,7 @@ async function fulfilPushLines(po, completion) {
   const created =await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
   const newId = Array.isArray(created) ? (created[0] && (typeof created[0] === 'object' ? created[0].id : created[0])) : (created && created.id);
   await fulfilUpsertMetafield(newId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (definition pre-flighted above)
-  try { await fulfilMirrorOne(newId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738
+  try { await fulfilMirrorOne(newId, 'push', po); } catch (e) { /* mirror best-effort */ }   // v27.738 · v28.527: + erp_qty + number
   return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution, total_units: _totUnits, total_cost: _totCost, currency: curCode, fulfil_url: _fulfilUrl(newId) };
 }
 // ── v27.738: Fulfil PO MIRROR (drift) — import Fulfil POs into planner.fulfil_purchase_orders (mig 282) ──
@@ -6089,12 +6089,22 @@ async function _fulfilMirrorUpsert(p, lines, source) {
     [p._po || p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), reqDeliv, source || 'cron', hdrDeliv]);
 }
 // Mirror ONE Fulfil PO by id (used after a push so the drift table is fresh without waiting for the next import).
-async function fulfilMirrorOne(fulfilId, source) {
+// v28.527 (Ben 28-Oct-26: "when user pushes to fulfil, it should read back and update the fulfil erp reference rather than waiting for a full
+// refresh in 3 hours"): with hzPo (the pushed HORIZON PO) the copy is filed under that PO (a hand-linked Fulfil PO's reference is not the
+// HORIZON PO), then that PO's erp_qty (the "ERP deviations" basis) and its hand link's Fulfil number are read back straight away.
+async function fulfilMirrorOne(fulfilId, source, hzPo) {
   if (!fulfilId) return;
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date', 'delivery_date']]);
-  const p = Array.isArray(rows) && rows[0]; if (!p || !p.reference) return;
+  const p = Array.isArray(rows) && rows[0]; if (!p || (!p.reference && !hzPo)) return;
+  if (hzPo) p._po = hzPo;
   const lr = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['product.code', 'quantity', 'unit_price']]);   // page size cap 500
   await _fulfilMirrorUpsert(p, (lr || []).map(_fulfilLineMap), source || 'push');
+  if (hzPo) {
+    try { await fulfilErpQtyFromMirror(hzPo); } catch (e) { console.error('[fulfil push] erp_qty ' + hzPo + ':', e && e.message); }
+    try { const n = (await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['number']]) || [])[0];
+      if (n && n.number) await pool.query(`UPDATE planner.po_links SET external_ref=$3, updated_at=now() WHERE po=$1 AND system='fulfil' AND found_by='manual' AND external_id=$2 AND external_ref IS DISTINCT FROM $3`, [hzPo, String(fulfilId), n.number]); }
+    catch (e) { /* number read-back is best-effort; the Linked records open fixes it later (v28.526) */ }
+  }
 }
 // Import EVERY Fulfil PO into the mirror (cron: n8n later, or the in-app timer / this endpoint). One lines call for all POs.
 async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil caps page size at 500 — paginate.
@@ -6153,12 +6163,13 @@ async function _fulfilImportPOsRun() {
 // v28.362 (Ben 14-Oct-26): HORIZON's copy of the ERP qty (purchase_order_lines.erp_qty) follows FULFIL after every mirror run, so an
 // "ERP deviation" means the plan differs from Fulfil right now (dropship POs are changed in Fulfil and can't be pushed from HORIZON).
 // Per PO in the mirror (not cancelled): erp_qty = the Fulfil qty for that SKU (sum of its lines), 0 when Fulfil has no such line.
-async function fulfilErpQtyFromMirror() {
+async function fulfilErpQtyFromMirror(onlyPo) {   // v28.527: onlyPo = just that PO (after a push)
   const fix = await pool.query(`UPDATE planner.purchase_order_lines l SET erp_qty = sub.q FROM (
       SELECT l2.po_sku, coalesce((SELECT round(sum(coalesce((x->>'qty')::numeric,0)))::int FROM planner.fulfil_purchase_orders fp CROSS JOIN LATERAL jsonb_array_elements(coalesce(fp.lines,'[]'::jsonb)) x
         WHERE fp.po = l2.po AND upper(trim(x->>'sku')) = upper(trim(l2.sku))), 0) q
-      FROM planner.purchase_order_lines l2 JOIN planner.fulfil_purchase_orders fp2 ON fp2.po = l2.po AND coalesce(fp2.state,'') NOT IN ('cancelled','cancel')) sub
-    WHERE l.po_sku = sub.po_sku AND l.erp_qty IS DISTINCT FROM sub.q`);
+      FROM planner.purchase_order_lines l2 JOIN planner.fulfil_purchase_orders fp2 ON fp2.po = l2.po AND coalesce(fp2.state,'') NOT IN ('cancelled','cancel')
+      WHERE ($1::text IS NULL OR l2.po = $1)) sub
+    WHERE l.po_sku = sub.po_sku AND l.erp_qty IS DISTINCT FROM sub.q`, [onlyPo || null]);
   try { invalidateSupplyCaches('po'); } catch (_) {}
   return { ok: true, lines_updated: fix.rowCount };
 }

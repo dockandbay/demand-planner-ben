@@ -1,3 +1,9 @@
+## v28.527 (28-Oct-26) Push to Fulfil reads the Fulfil PO straight back (no more stale ERP deviations)
+- Ben: "i clicked Push to Fulfil (full) and it updated fulfil successfully but still shows erp deviations" and "when user pushes to fulfil, it should read back and update the fulfil erp reference rather than waiting for a full refresh in 3 hours".
+- Cause: after a push HORIZON refreshed its copy of that Fulfil PO, but the per-line ERP qty the deviations compare against was only recalculated by the full Fulfil import (every few hours); and a hand-linked PO's copy was filed under the Fulfil reference (e.g. TAG10793-57/7484) instead of the HORIZON PO. The PO panel was also left as it was after the push.
+- Now every push (create or update) reads the Fulfil PO back, files it under the pushed HORIZON PO, recalculates that PO's ERP qty at once, and stores the Fulfil PO number on a hand-made link (PO483, not the reference). The open PO panel (grid or drawer, same sub-tab) then re-reads, so the deviations clear straight away. Same for the date push.
+- Check: the single-PO ERP qty update runs on the sandbox for one PO and for all (rolled back, nothing to change).
+
 ## v28.526 (28-Oct-26) Fulfil links made while the Fulfil PO was a draft now show its PO number
 - Ben (PO-1903237 ▸ Master data): "is linked to TAG10793-57/7484 (manual) but it doesnt say PO483 and i would expect it would".
 - Cause: the link is right (Fulfil id 656 = PO483, XR Textile), but it was made at 23:31 on 27-Oct while PO483 was still a draft with no number (Fulfil numbered it two minutes later), so HORIZON saved the reference instead.
