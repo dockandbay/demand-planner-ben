@@ -939,6 +939,13 @@
 #mob-sheet-ov.as-drawer{background:rgba(15,23,42,.38);overflow:hidden}
 #mob-sheet-ov.as-drawer .mob-drawer{position:absolute;top:0;right:0;bottom:0;width:70vw;max-width:100%;background:var(--card);box-shadow:-10px 0 28px rgba(15,23,42,.22);overflow-y:auto;overflow-x:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;animation:mobDrawerIn .16s ease-out}
 @keyframes mobDrawerIn{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+#mob-sheet-ov.as-drawer .mdh{position:sticky;top:0;left:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;background:var(--nav);color:#fff;border-bottom:1px solid var(--line)}   /* v28.512 */
+#mob-sheet-ov.as-drawer .mdh-id{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-width:0;user-select:text;cursor:text}
+#mob-sheet-ov.as-drawer .mdh-ref{font-size:22px;font-weight:800;letter-spacing:.01em;line-height:1.2;white-space:pre-wrap;overflow-wrap:anywhere}
+#mob-sheet-ov.as-drawer .mdh-sup{font-size:15px;font-weight:600;color:#93c5fd}
+#mob-sheet-ov.as-drawer .mdh-act{display:flex;gap:8px;flex:0 0 auto}
+#mob-sheet-ov.as-drawer .mdh-btn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
+#mob-sheet-ov.as-drawer .mdh-btn:hover{background:rgba(255,255,255,.2)}
 #mob-sheet-ov.as-drawer .mob-back{position:sticky;top:0;left:0;padding:11px 16px;font-size:13px}
 #mob-sheet-ov.as-drawer .mob-sheet-body{padding:8px 14px 24px;text-align:left;white-space:normal}
 #mob-sheet-ov.as-drawer .tw>table{width:max-content;min-width:100%}
@@ -4348,23 +4355,39 @@
   // v28.474 (Ben 23-Oct-26: "po out the PLAN in 70% screen DRAW instead of the popdown expand ... same for shipments tab"): on desktop the
   // PO / shipment expand opens in a right-hand drawer (70% of the screen) instead of under the row; phones keep the full-screen sheet.
   // Same move-the-node mechanism, so every #podet-* / #shipdet-* binding works unchanged.
-  function applyMobSheet(ex, opening, closeFn, label){ var td=ex&&ex.querySelector('td'); if(!td)return;
+  // v28.512 (Ben 27-Oct-26): on desktop the drawer header is text (big PO / shipment ref + supplier, selectable) with its own Copy link and
+  // Close buttons; it used to be one big close button, so selecting the PO number closed the drawer. kind = 'po' | 'ship'. Phones keep the back bar.
+  function mdhLink(kind,ref){ return location.origin+location.pathname+'#/supply/purchase-orders/'+(kind==='ship'?'shipments/':'')+encodeURIComponent(ref); }
+  function applyMobSheet(ex, opening, closeFn, label, kind){ var td=ex&&ex.querySelector('td'); if(!td)return;
     var ov=document.getElementById('mob-sheet-ov');
     if(opening){
       var drawer=!isPhone();
       if(_mobActiveTd && _mobActiveTd!==td){ var _pex=_mobActiveTd.closest('tr'); restoreMob(_mobActiveTd); if(_pex){ _pex.classList.remove('in-drawer'); if(_pex._closeFn&&_pex.style.display!=='none'){ var _cf=_pex._closeFn; _pex._closeFn=null; _cf(); } } }   // only one sheet at a time
       if(!ov){ ov=document.createElement('div'); ov.id='mob-sheet-ov'; (document.getElementById('supply-root')||document.body).appendChild(ov); }   // inside #supply-root so its CSS still applies
       ov.innerHTML=''; ov.classList.toggle('as-drawer',drawer);
+      // v28.512: a grid re-render while the sheet is open replaces the row, so closeFn (row toggle) would reopen the NEW row instead of closing.
+      // closeNow tears the sheet down directly in that case. Used by Close, Esc, click-off and Back.
+      var closeNow=function(){ if(ex.isConnected&&ex.style.display!=='none'){ closeFn(); return; }
+        restoreMob(td); if(_mobActiveTd===td)_mobActiveTd=null; ex._closeFn=null; var o=document.getElementById('mob-sheet-ov'); if(o){ o.style.display='none'; o.innerHTML=''; o.classList.remove('as-drawer'); }
+        document.body.style.overflow=''; try{ writeHash(['supply','purchase-orders']); }catch(_){} };
       var host=ov; if(drawer){ host=document.createElement('div'); host.className='mob-drawer'; ov.appendChild(host);
         var _sb=document.getElementById('sbx-banner'); if(_sb&&_sb.offsetHeight)host.style.top=_sb.offsetHeight+'px';   // below the sandbox-only banner
-        ov.onclick=function(e){ if(e.target===ov)closeFn(); }; }
+        ov.onclick=function(e){ if(e.target===ov)closeNow(); }; }
       else ov.onclick=null;
-      var bk=document.createElement('button'); bk.className='mob-back';
-      bk.innerHTML=(drawer?'<span class="mob-back-ref">'+esc(label||'')+'</span><span>✕ Close</span>':'<span>← Back to list</span>'+(label?'<span class="mob-back-ref">'+esc(label)+'</span>':''));   // show which PO / shipment this sheet is
-      bk.onclick=function(e){ e.stopPropagation(); closeFn(); }; host.appendChild(bk);
+      if(drawer){ var _row=(kind!=='ship'&&typeof poBy!=='undefined'&&poBy&&poBy[label])||null, _sup=_row?(_row.supplier_name||_row.supplier||''):'';
+        var hd=document.createElement('div'); hd.className='mdh';
+        hd.innerHTML='<div class="mdh-id"><span class="mdh-ref">'+esc(label||'')+'</span>'+(_sup?'<span class="mdh-sup">'+esc(_sup)+'</span>':'')+'</div>'
+          +'<div class="mdh-act"><button type="button" class="mdh-btn mdh-copy" title="copy a direct link to this '+(kind==='ship'?'shipment':'PO')+'">🔗 Copy link</button><button type="button" class="mdh-btn mdh-x" title="close (Esc)">✕ Close</button></div>';
+        hd.querySelector('.mdh-x').onclick=function(e){ e.stopPropagation(); closeNow(); };
+        hd.querySelector('.mdh-copy').onclick=function(e){ e.stopPropagation(); var btn=this, url=mdhLink(kind,label), done=function(){ btn.textContent='✓ Link copied'; setTimeout(function(){ btn.textContent='🔗 Copy link'; },1400); };
+          try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,function(){ try{legacyCopy(url);}catch(_){} done(); }); } else { legacyCopy(url); done(); } }catch(_){ done(); } };
+        host.appendChild(hd); }
+      else { var bk=document.createElement('button'); bk.className='mob-back';
+        bk.innerHTML='<span>← Back to list</span>'+(label?'<span class="mob-back-ref">'+esc(label)+'</span>':'');   // show which PO / shipment this sheet is
+        bk.onclick=function(e){ e.stopPropagation(); closeNow(); }; host.appendChild(bk); }
       var holder=document.createElement('div'); holder.className='mob-sheet-body';
       while(td.firstChild){ holder.appendChild(td.firstChild); }   // move #podet-* (and its future innerHTML) into the overlay
-      host.appendChild(holder); td._mobHolder=holder; _mobActiveTd=td; ex._closeFn=closeFn;
+      host.appendChild(holder); td._mobHolder=holder; _mobActiveTd=td; ex._closeFn=closeNow;
       if(drawer)ex.classList.add('in-drawer');   // the grid row stays collapsed under the drawer
       ov.style.display='block'; ov.scrollTop=0; host.scrollTop=0; document.body.style.overflow='hidden'; }
     else {
@@ -4411,7 +4434,7 @@
   function bindExpand(){ document.querySelectorAll('#supply-root .po-exp[data-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('poexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
-    applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.po);
+    applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.po, 'po');
     if(typeof writeHash==='function'){ if(open){ writeHash(['supply','purchase-orders']); }   // collapsed → back to the grid URL
       else { var _at=document.querySelector('#podet-'+i+' .potab.active'); writePoTabHash(b.dataset.po, _at?_at.dataset.pt:(_pendingPOTab||'pay')); } }   // open → URL reflects the PO + active sub-tab
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var wt=_pendingPOTab; _pendingPOTab=null; loadPoDetail(b.dataset.po,i,wt); } }; }); }
@@ -7768,7 +7791,7 @@
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
-    applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.ref);
+    applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.ref, 'ship');
     if(typeof writeHash==='function')writeHash(open?['supply','purchase-orders','shipments']:['supply','purchase-orders','shipments',b.dataset.ref]);   // v27.868 (Ben): deep-link the expanded shipment (collapse → back to the grid URL)
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; shipExpand(b.dataset.ref, i); } }; }); }
   // Expand: editable shipment header + date overrides, plus the POs aboard with master / unassign.
