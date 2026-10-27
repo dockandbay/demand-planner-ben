@@ -1,5 +1,5 @@
 {
- "name": "Fulfil | PP prepack BOM flip (hourly) [SANDBOX]",
+ "name": "Fulfil | PP prepack BOM flip (hourly)",
  "nodes": [
   {
    "id": "8ac638a5-aa67-52ca-af4f-6608fc3d74fd",
@@ -47,7 +47,7 @@
    ],
    "parameters": {
     "mode": "raw",
-    "jsonOutput": "{\n  \"tenant\": \"SANDBOX\",\n  \"baseUrl\": \"https://dockandbay-sandbox.fulfil.io/api/v2\",\n  \"dryRun\": true,\n  \"allowProdWrite\": false,\n  \"minPP\": 1,\n  \"markets\": {\n    \"UK\": [\n      \"UKILG\"\n    ],\n    \"US\": [\n      \"USGENEVA_STD\",\n      \"USGENEVA-STD\"\n    ],\n    \"EU\": [\n      \"EUIFUL\"\n    ],\n    \"AU\": [\n      \"AUCOGHLANS\"\n    ]\n  },\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"alwaysEmailPreview\": false\n}",
+    "jsonOutput": "{\n  \"tenant\": \"PROD\",\n  \"baseUrl\": \"https://dockandbay.fulfil.io/api/v2\",\n  \"dryRun\": false,\n  \"allowProdWrite\": true,\n  \"minPP\": 1,\n  \"markets\": {\n    \"UK\": [\n      \"UKILG\"\n    ],\n    \"US\": [\n      \"USGENEVA_STD\",\n      \"USGENEVA-STD\"\n    ],\n    \"EU\": [\n      \"EUIFUL\"\n    ],\n    \"AU\": [\n      \"AUCOGHLANS\"\n    ]\n  },\n  \"alertEmailTo\": \"ben@dockandbay.com\",\n  \"alwaysEmailPreview\": false\n}",
     "options": {}
    }
   },
@@ -88,8 +88,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -156,8 +156,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -228,8 +228,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -300,8 +300,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -372,8 +372,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -444,8 +444,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true
@@ -739,8 +739,8 @@
    },
    "credentials": {
     "httpHeaderAuth": {
-     "id": "EDrfRZJRHfhBe2fB",
-     "name": "Fulfil SANDBOX"
+     "id": "j9m8FVwKL7nvn8Lk",
+     "name": "Fulfil PROD"
     }
    },
    "executeOnce": true

@@ -2,7 +2,7 @@
 
 Every change made by `pp_bom_flip.py` (and `revert.py`). Source of truth: `ledger_live.jsonl`. Undo a run with `python3 -I revert.py --env live --run <run id> --apply --confirm-live` (dry run without `--apply`).
 
-Total changes: 340 across 24 runs.
+Total changes: 620 across 29 runs.
 
 ## Run psd-uk-ws-2026-10-22_232610
 
@@ -20,6 +20,297 @@ Total changes: 340 across 24 runs.
 | 23:31 2026-10-22 | LIVE EU wholesale planned ship date (Ben 22-Oct go) | dx_function 36 | `code`: `planned_ship_date/live_functions/fn36_v42.py` -> `planned_ship_date/candidates/fn36_candidate.py` | set `code` back to `planned_ship_date/live_functions/fn36_v42.py` |
 | 23:31 2026-10-22 | LIVE new EU retail import function (planned ship date only), Ben 22-Oct | dx_function 49 | created | delete link |
 | 23:31 2026-10-22 | attach EU retail function to dockandbay-eu (was none). Undo = set back to null | sale.channel 7 | `order_customization_function`: `None` -> `49` | set `order_customization_function` back to `None` |
+
+## Run psd-removed-live
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 03:51 2026-10-27 | remove planned ship date | dx_function 1 | `code`: `live_after_pers_fix/fn1.py` -> `live_psd_removed/fn1.py` | set `code` back to `live_after_pers_fix/fn1.py` |
+| 03:51 2026-10-27 | remove planned ship date | dx_function 3 | `code`: `live_after_pers_fix/fn3.py` -> `live_psd_removed/fn3.py` | set `code` back to `live_after_pers_fix/fn3.py` |
+| 03:51 2026-10-27 | remove planned ship date | dx_function 36 | `code`: `live_after_pers_fix/fn36.py` -> `live_psd_removed/fn36.py` | set `code` back to `live_after_pers_fix/fn36.py` |
+| 03:51 2026-10-27 | remove planned ship date | dx_function 37 | `code`: `live_after_pers_fix/fn37.py` -> `live_psd_removed/fn37.py` | set `code` back to `live_after_pers_fix/fn37.py` |
+| 03:51 2026-10-27 | remove planned ship date | dx_function 44 | `code`: `live_after_pers_fix/fn44.py` -> `live_psd_removed/fn44.py` | set `code` back to `live_after_pers_fix/fn44.py` |
+| 03:51 2026-10-27 | remove planned ship date | dx_function 48 | `code`: `live_after_pers_fix/fn48.py` -> `live_psd_removed/fn48.py` | set `code` back to `live_after_pers_fix/fn48.py` |
+| 03:51 2026-10-27 | unlink fn49 (EU retail planned ship date only) | sale.channel 7 | `order_customization_function`: `49` -> `None` | set `order_customization_function` back to `49` |
+
+## Run psd-pers-fix-live
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 23:11 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 1 | `code`: `live_before_pers_fix/fn1.py` -> `live_after_pers_fix/fn1.py` | set `code` back to `live_before_pers_fix/fn1.py` |
+| 23:11 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 3 | `code`: `live_before_pers_fix/fn3.py` -> `live_after_pers_fix/fn3.py` | set `code` back to `live_before_pers_fix/fn3.py` |
+| 23:11 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 36 | `code`: `live_before_pers_fix/fn36.py` -> `live_after_pers_fix/fn36.py` | set `code` back to `live_before_pers_fix/fn36.py` |
+| 23:11 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 37 | `code`: `live_before_pers_fix/fn37.py` -> `live_after_pers_fix/fn37.py` | set `code` back to `live_before_pers_fix/fn37.py` |
+| 23:11 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 44 | `code`: `live_before_pers_fix/fn44.py` -> `live_after_pers_fix/fn44.py` | set `code` back to `live_before_pers_fix/fn44.py` |
+| 23:12 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 48 | `code`: `live_before_pers_fix/fn48.py` -> `live_after_pers_fix/fn48.py` | set `code` back to `live_before_pers_fix/fn48.py` |
+| 23:12 2026-10-26 | personalised planned date +5 -> +1 (Ben approved 26-Oct-26) | dx_function 49 | `code`: `live_before_pers_fix/fn49.py` -> `live_after_pers_fix/fn49.py` | set `code` back to `live_before_pers_fix/fn49.py` |
+
+## Run ilg-row-dhl-rule
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 11:22 2026-10-27 |  | fulfil.automation.rule 103 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 479 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 480 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 481 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 482 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 483 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 484 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 485 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 486 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 487 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 488 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 489 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 490 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 491 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 492 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 493 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 494 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 495 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 496 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 497 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 498 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 499 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 500 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 501 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 502 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 503 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 504 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 505 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 506 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 507 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 508 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 509 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 510 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 511 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 512 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 513 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 514 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 515 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 516 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 517 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 518 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 519 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 520 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 521 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 522 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 523 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 524 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 525 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 526 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 527 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 528 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 529 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 530 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 531 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 532 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 533 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 534 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 535 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 536 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 537 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 538 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 539 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 540 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 541 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 542 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 543 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 544 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 545 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 546 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 547 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 548 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 549 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 550 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 551 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 552 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 553 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 554 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 555 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 556 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 557 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 558 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 559 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 560 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 561 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 562 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 563 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 564 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 565 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 566 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 567 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 568 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 569 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 570 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 571 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 572 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 573 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 574 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 575 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 576 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 577 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 578 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 579 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 580 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 581 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 582 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 583 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 584 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 585 | created | delete link |
+| 11:22 2026-10-27 |  | fulfil.automation.rule.condition 586 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 587 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 588 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 589 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 590 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 591 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 592 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 593 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 594 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 595 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 596 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 597 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 598 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 599 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 600 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 601 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 602 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 603 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 604 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 605 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 606 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 607 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 608 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 609 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 610 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 611 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 612 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 613 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 614 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 615 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 616 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 617 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 618 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 619 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 620 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 621 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 622 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 623 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 624 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 625 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 626 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 627 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 628 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 629 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 630 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 631 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 632 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 633 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 634 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 635 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 636 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 637 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 638 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 639 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 640 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 641 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 642 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 643 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 644 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 645 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 646 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 647 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 648 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 649 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 650 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 651 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 652 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 653 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 654 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 655 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 656 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 657 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 658 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 659 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 660 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 661 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 662 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 663 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 664 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 665 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 666 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 667 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 668 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 669 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 670 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 671 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 672 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 673 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 674 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 675 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 676 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 677 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 678 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 679 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 680 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 681 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 682 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 683 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 684 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 685 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 686 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 687 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 688 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 689 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 690 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 691 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 692 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 693 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.condition 694 | created | delete link |
+| 11:23 2026-10-27 |  | fulfil.automation.rule.action 160 | created | delete link |
+| 11:23 2026-10-27 | activate after read-back | fulfil.automation.rule 103 | `active`: `False` -> `True` | set `active` back to `False` |
+
+## Run ilg-europe-dpd-rule
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 11:17 2026-10-27 |  | fulfil.automation.rule 102 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 447 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 448 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 449 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 450 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 451 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 452 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 453 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 454 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 455 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 456 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 457 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 458 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 459 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 460 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 461 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 462 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 463 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 464 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 465 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 466 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 467 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 468 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 469 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 470 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 471 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 472 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 473 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 474 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 475 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 476 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 477 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.condition 478 | created | delete link |
+| 11:17 2026-10-27 |  | fulfil.automation.rule.action 159 | created | delete link |
+| 11:17 2026-10-27 | activate after read-back | fulfil.automation.rule 102 | `active`: `False` -> `True` | set `active` back to `False` |
+| 11:17 2026-10-27 | EU retail to CH via UK ILG had ifulfillment carrier | stock.shipment.out 64030 | `carrier`: `2` -> `7` | set `carrier` back to `2` |
+| 11:17 2026-10-27 | EU retail to CH via UK ILG had ifulfillment carrier | stock.shipment.out 64030 | `carrier_service`: `None` -> `667` | set `carrier_service` back to `None` |
+| 11:17 2026-10-27 | re-queue for ILG push after carrier fix | stock.shipment.out 64030 | `tpl_status`: `sending_error` -> `waiting` | set `tpl_status` back to `sending_error` |
 
 ## Run fn48-retry-2026-10-22_225557
 
@@ -142,6 +433,20 @@ Total changes: 340 across 24 runs.
 |---|---|---|---|---|
 | 16:12 2026-10-22 | Rule 68 Wholesale Hold Rule: stop holding Faire US + Faire UK (Ben 22-Oct-26: Faire releases on arrival). Undo = recreate these 2 conditions (type or, channel is 37 / 36) on rule 68 | fulfil.automation.rule.condition [367, 383] | deleted | recreate link [{"rule": 68, "type": "or", "parameter": "channel", "operator": "is", "value_channel": 37, "id": 367, "condition_blurb": {"title": "Channel is Faire US"}}, {"rule": 68, "type": "or", "parameter": "channel", "operator": "is", "value_channel": 36, "id": 383, "condition_blurb": {"title": "Channel is Faire UK"}}] |
 | 16:12 2026-10-22 | release Faire US shipment CS61176 (SO68066), ship-by 22-Oct (Ben 22-Oct-26) | stock.shipment.out 61176 | `on_hold`: `True` -> `False` | set `on_hold` back to `True` |
+
+## Run dispatch-due-live
+
+| Time | What | Record | Change | Undo |
+|---|---|---|---|---|
+| 03:54 2026-10-27 | Dispatch Due metafield | metafield.field 99 | created | delete link |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 1 | `code`: `live_psd_removed/fn1.py` -> `live_dispatch_due/fn1.py` | set `code` back to `live_psd_removed/fn1.py` |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 3 | `code`: `live_psd_removed/fn3.py` -> `live_dispatch_due/fn3.py` | set `code` back to `live_psd_removed/fn3.py` |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 36 | `code`: `live_psd_removed/fn36.py` -> `live_dispatch_due/fn36.py` | set `code` back to `live_psd_removed/fn36.py` |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 37 | `code`: `live_psd_removed/fn37.py` -> `live_dispatch_due/fn37.py` | set `code` back to `live_psd_removed/fn37.py` |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 44 | `code`: `live_psd_removed/fn44.py` -> `live_dispatch_due/fn44.py` | set `code` back to `live_psd_removed/fn44.py` |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 48 | `code`: `live_psd_removed/fn48.py` -> `live_dispatch_due/fn48.py` | set `code` back to `live_psd_removed/fn48.py` |
+| 03:54 2026-10-27 | add Dispatch Due metafield | dx_function 49 | `code`: `EU retail stub (unlinked)` -> `live_dispatch_due/fn49.py` | set `code` back to `EU retail stub (unlinked)` |
+| 03:54 2026-10-27 | relink fn49 (EU retail Dispatch Due) | sale.channel 7 | `order_customization_function`: `None` -> `49` | set `order_customization_function` back to `None` |
 
 ## Run au-sumsuga-bom-2026-10-21_144922
 

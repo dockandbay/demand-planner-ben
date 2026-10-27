@@ -363,3 +363,35 @@ Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
 Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
 
 
+## Check 2026-10-27 00:47:05 (orders since 2026-10-26T21:47:04)
+
+Kits monitored: 66. Orders with those kits: 1. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO71302 | UK-910400 | processing | 10-26T11:11 | UK-TOWLB-CAB-LG-6SETM | 1 | PP | PP | PP move assigned,draft |
+
+## Check 2026-10-27 03:47:29 (orders since 2026-10-27T00:47:05)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-27 06:47:04 (orders since 2026-10-27T03:47:29)
+
+Kits monitored: 66. Orders with those kits: 2. ALL AS EXPECTED.
+
+| Order | Ref | State | Created (UTC) | Kit | Qty | Expected | Actual | Note |
+|---|---|---|---|---|---|---|---|---|
+| SO71433 | UK-910470 | processing | 10-26T17:57 | UK-TOWLB-CAB-XL-4SETG | 1 | PP | PP | PP move assigned,draft |
+| SO71451 | UK-910483 | processing | 10-26T18:37 | UK-TOWLB-CAB-XL-4SETK | 1 | singles | singles |  |
+
+## Check 2026-10-27 12:47:03 (orders since 2026-10-27T06:47:04)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+
+## Check 2026-10-27 16:00:21 (orders since 2026-10-27T12:47:03)
+
+Kits monitored: 66. Orders with those kits: 0. ALL AS EXPECTED.
+
+

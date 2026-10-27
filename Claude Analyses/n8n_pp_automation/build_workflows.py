@@ -356,7 +356,26 @@ def build_b():
             "settings": {"executionOrder": "v1", "errorWorkflow": ERROR_WORKFLOW_ID}}
 
 
+PROD_CRED = {"httpHeaderAuth": {"id": "j9m8FVwKL7nvn8Lk", "name": "Fulfil PROD"}}
+B_PROD_SETTINGS = {"tenant": "PROD", "baseUrl": "https://dockandbay.fulfil.io/api/v2", "dryRun": False, "allowProdWrite": True}
+
+
+def to_prod(wf, cfg_update):
+    """Live version: PROD settings and read credential. B approved by Ben 27-Oct-26 (replaces the session cron)."""
+    for n in wf["nodes"]:
+        if n["name"] == "Settings":
+            cfg = json.loads(n["parameters"]["jsonOutput"])
+            cfg.update(cfg_update)
+            n["parameters"]["jsonOutput"] = json.dumps(cfg, indent=2)
+        if n.get("credentials", {}).get("httpHeaderAuth"):
+            n["credentials"] = PROD_CRED
+    wf["name"] = wf["name"].replace(" [SANDBOX]", "")
+    return wf
+
+
 if __name__ == "__main__":
-    for tag, wf in (("A", build_a()), ("B", build_b())):
+    import sys
+    b = to_prod(build_b(), B_PROD_SETTINGS) if "--prod-b" in sys.argv else build_b()
+    for tag, wf in (("A", build_a()), ("B", b)):
         json.dump(wf, open(os.path.join(HERE, f"workflow_{tag}.json"), "w"), indent=1)
         print(tag, wf["name"], len(wf["nodes"]), "nodes")
