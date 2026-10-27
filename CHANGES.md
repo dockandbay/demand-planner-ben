@@ -1,3 +1,6 @@
+## v28.513 (27-Oct-26) Drawer header in deep blue
+- Ben: "can the top row of that draw be a different colour to stand out". The PO / shipment drawer header (v28.512) is now a deep blue band (#1d4ed8 to #2361d8) instead of the sidebar's navy; supplier in pale blue. Fixed colours so white text stays readable in light and dark themes. CSS only.
+
 ## v28.512 (27-Oct-26) PO / shipment drawer header: bigger PO number, supplier, Copy link, separate Close
 - Ben: "can the po number be larger. then have a link button to COPY the url to that direct link PO, then show supplier after the PO number all in the header. clicking anywhere in header currently closes but i want to be able to copy the po number and other details, clicking close should close or clicking off the drawer".
 - Desktop drawer (PO grid and Shipments): the header is now text, not one big close button. PO / shipment ref at 22px, then the supplier (PO drawer), both selectable. Buttons: "🔗 Copy link" (copies the direct link, e.g. …/#/supply/purchase-orders/PO-60UKBE1 or …/shipments/<ref>; shows "✓ Link copied") and "✕ Close". Click-off (the dark area) and Esc still close. Phones keep the "← Back to list" bar.
