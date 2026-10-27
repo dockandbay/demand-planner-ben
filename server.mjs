@@ -14716,7 +14716,7 @@ async function productItemPayload(ref, supplierScope) {
         to_char((SELECT min(r.dev_start) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
         coalesce((SELECT r.approval_method FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'') approval_method
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
-      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku
+      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku, length_cm::float8 length_cm, width_cm::float8 width_cm, height_cm::float8 height_cm, coalesce(library_code,'') library_code
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
@@ -14819,7 +14819,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
         FROM planner.product_dev_size_dimensions WHERE size_id IN (SELECT s.id FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1)`, [ref]),
       pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments
         WHERE category='product_dim' AND po IN (SELECT 'PDIM-'||sd.id FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1) ORDER BY version NULLS LAST, uploaded_at`, [ref]),
-      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku
+      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku, length_cm::float8 length_cm, width_cm::float8 width_cm, height_cm::float8 height_cm, coalesce(library_code,'') library_code
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort,
         coalesce((SELECT array_agg(DISTINCT rq.supplier_name) FROM planner.product_dev_request_components rc JOIN planner.product_dev_requests rq ON rq.id=rc.request_id WHERE rc.component_id=product_dev_components.id),'{}') req_suppliers
@@ -15246,16 +15246,38 @@ app.post('/api/product/reports/catalogue/pdf', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="catalogue_' + season.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() + '_' + today + '.pdf"'); res.send(Buffer.from(bytes));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.520: {ref, size_label} as before, or {ref, library_code} = a size from the library (label + L / W / H cm copied in; editable after).
 app.post('/api/product/size', async (req, res) => {
-  const b = req.body || {}, ref = (b.ref || '').trim(), label = (b.size_label || '').trim();
-  if (!ref || !label) return res.status(400).json({ error: 'ref and size_label required' });
-  try { const it = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]; if (!it) return res.status(404).json({ error: 'item not found' });
+  const b = req.body || {}, ref = (b.ref || '').trim(); let label = (b.size_label || '').trim(), lib = null;
+  try { if (b.library_code) { lib = (await pool.query(`SELECT code, label, length_cm, width_cm, height_cm FROM planner.product_size_library WHERE upper(code)=upper($1)`, [String(b.library_code).trim()])).rows[0]; if (!lib) return res.status(404).json({ error: 'size not in the library' }); if (!label) label = lib.label; }
+    if (!ref || !label) return res.status(400).json({ error: 'ref and size_label required' });
+    const it = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]; if (!it) return res.status(404).json({ error: 'item not found' });
     const so = (await pool.query(`SELECT coalesce(max(sort),0)+1 n FROM planner.product_dev_sizes WHERE item_id=$1`, [it.id])).rows[0].n;
-    const r = await pool.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3) RETURNING id`, [it.id, label, so]);
+    const r = await pool.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort, library_code, length_cm, width_cm, height_cm) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [it.id, label, so, lib ? lib.code : null, lib ? lib.length_cm : null, lib ? lib.width_cm : null, lib ? lib.height_cm : null]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id', (req, res) =>
-  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', working_sku: 'text', approved_sample_id: 'bigint' }, req.body, 'bigint'));
+  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', working_sku: 'text', approved_sample_id: 'bigint', length_cm: 'numeric', width_cm: 'numeric', height_cm: 'numeric', library_code: 'text' }, req.body, 'bigint'));
+// v28.520 size library (migration 393; PRODUCT ▸ Config ▸ Sizes and the searchable "+ Add size" picker). GET ?all=1 includes retired sizes.
+app.get('/api/product/size-library', async (req, res) => {
+  try { const all = String(req.query.all || '') === '1';
+    const r = await pool.query(`SELECT id, code, label, length_cm::float8 length_cm, width_cm::float8 width_cm, height_cm::float8 height_cm, active, sort,
+        (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE upper(s.library_code)=upper(l.code)) used
+      FROM planner.product_size_library l ${all ? '' : 'WHERE active'} ORDER BY sort NULLS LAST, code`);
+    res.set('Cache-Control', 'no-store').json({ sizes: r.rows });
+  } catch (e) { if (e.code === '42P01') return res.json({ sizes: [], missing: true }); log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/size-library', async (req, res) => {   // {id?, code, label, length_cm, width_cm, height_cm, active, sort}: add or edit
+  try { const b = req.body || {}, code = String(b.code || '').trim().toUpperCase(), label = String(b.label || '').trim(), by = (req.me && req.me.email) || null;
+    if (!code || !label) return res.status(400).json({ error: 'code and label are required' });
+    const n = v => (v === '' || v == null || isNaN(Number(v))) ? null : Number(v);
+    const vals = [code, label, n(b.length_cm), n(b.width_cm), n(b.height_cm), b.active !== false, b.sort === '' || b.sort == null ? null : Number(b.sort) || null, by];
+    const r = Number(b.id) ? await pool.query(`UPDATE planner.product_size_library SET code=$1, label=$2, length_cm=$3, width_cm=$4, height_cm=$5, active=$6, sort=$7, updated_by=$8, updated_at=now() WHERE id=$9 RETURNING id`, [...vals, Number(b.id)])
+      : await pool.query(`INSERT INTO planner.product_size_library (code, label, length_cm, width_cm, height_cm, active, sort, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, vals);
+    if (!r.rowCount) return res.status(404).json({ error: 'size not found' }); res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { if (e.code === '23505') return res.status(400).json({ error: 'There is already a size with code ' + String((req.body || {}).code || '').toUpperCase() }); log500(e); res.status(500).json({ error: e.message }); }
+});
 // Product SIZES master (phase 2): claim / release a Workshop-pool barcode (mig 293) for a size. Transactional so the
 // pool's status stays in sync — one barcode ↔ one size. Body {barcode:'<ean>'} to claim (frees the size's old code first),
 // or {barcode:null|''} to release. A code already assigned to ANOTHER size is rejected.
