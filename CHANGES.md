@@ -1,3 +1,9 @@
+## v28.523 (28-Oct-26) PO actions clear silently as you fix them
+- Ben (PO473 ▸ Payments): "had 3 actions, i actioned them but the messages stayed and the counter stayed on drawer and po grid until i refreshed the page. can they all remove silently as actions are closed like adding dates or fulfil links or deposits etc".
+- Cause: actions are worked out from the PO's grid row, and saves such as assigning a deposit or linking a Fulfil PO did not re-read that row.
+- Now any successful save that names a PO (every /api/supply/po/<po>… write: fields, dates, deposits, Linked records, extra Fulfil POs; or any write whose body names the PO) re-reads that PO's row half a second later, once per burst of saves. Silently, with no re-render or reload, it updates the grid row and its action badge (left alone while you are typing in that row), the nav counts, and in any open PO drawer or expansion the sub-tab badges, the Open actions banner and each tab's Open actions strip (closed actions drop out; an emptied strip goes).
+- Front end only (supply/inject.html). No migration, no new routes.
+
 ## v28.522 (28-Oct-26) PO ▸ Linked records: add more than one Fulfil PO
 - Ben: "i want to be able to add multiple fulfil po links not just change under master data & docs" (PO-57UKBL1 = Fulfil PO226 + PO474 / PO-57UKBL1-2). Chose: extra links; the main link stays the push / sync target.
 - Linked records ▸ Fulfil now lists extra Fulfil POs under the main one (number, reference, open ↗, ✕ remove) with "＋ add another Fulfil PO", which opens the same live Fulfil search (read only).

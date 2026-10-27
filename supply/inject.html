@@ -1126,9 +1126,16 @@
   var MEMO_RE=[/^\/api\/supply\/lookups(\?|$)/,/^\/api\/supply\/skus(\?|$)/,/^\/api\/supply\/productions(\?|$)/,/^\/api\/supply\/likely-dates\/all(\?|$)/,/^\/api\/supply\/portal-line-costs(\?|$)/];
   function memoable(u){ for(var i=0;i<MEMO_RE.length;i++)if(MEMO_RE[i].test(u))return true; return false; }
   window.__hzFetchBust=function(){ memo={}; };
+  // v28.523 (Ben 28-Oct-26, PO473: "had 3 actions, i actioned them but the messages stayed and the counter stayed on drawer and po grid until i
+  // refreshed"): any successful write that names a PO (URL /api/supply/po/<po>…, or a JSON body with "po") re-reads that PO's row a moment later
+  // so its actions, badges and counts update silently (window.__hzPoChanged, defined with the PO grid). One re-read per PO per burst of saves.
+  var _poTouchT={};
+  function poTouched(url,init){ try{ var mm=/^\/api\/supply\/po\/([^\/?#]+)/.exec(url), po=mm?decodeURIComponent(mm[1]):'';
+    if(!po&&init&&typeof init.body==='string'&&init.body.charAt(0)==='{'){ var b=JSON.parse(init.body); if(b&&typeof b.po==='string')po=b.po; }
+    if(!po||!window.__hzPoChanged)return; clearTimeout(_poTouchT[po]); _poTouchT[po]=setTimeout(function(){ delete _poTouchT[po]; window.__hzPoChanged(po); },500); }catch(e){} }
   window.fetch=function(input,init){
     var url=(typeof input==='string')?input:((input&&input.url)||''); var m=((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
-    if(url.indexOf('/api/')!==0||m!=='GET'||(init&&init.body)){ var w=_f(input,init); if(m!=='GET'&&url.indexOf('/api/')===0)w.then(function(){memo={};},function(){}); return w; }
+    if(url.indexOf('/api/')!==0||m!=='GET'||(init&&init.body)){ var w=_f(input,init); if(m!=='GET'&&url.indexOf('/api/')===0)w.then(function(r){ memo={}; if(r&&r.ok)poTouched(url,init); },function(){}); return w; }
     var now=Date.now(), h=memo[url]; if(h&&now-h.at<MEMO_MS){ try{ return Promise.resolve(h.res.clone()); }catch(e){ delete memo[url]; } }
     if(inflight[url]) return inflight[url].then(function(r){ return r.clone(); });
     // v28.385 (Ben 15-Oct-26, "didnt load on first click ... loaded on second"): a GET that fails on the network or with 502 / 503 / 504
@@ -3097,6 +3104,22 @@
         if(n>0){ var ttl=n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':''); if(bd){ bd.textContent=n; bd.title=ttl; } else btn.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+ttl+'">'+n+'</span>'); }
         else if(bd){ bd.remove(); } }); });
   }
+  // v28.523: silent refresh of one PO after a save (see poTouched): fresh grid row (unless the user is typing in it), nav counts, and in every
+  // open drawer / expansion for the PO the sub-tab badges, the Open actions banner and each tab's Open actions strip, without re-rendering.
+  function poChanged(po){
+    fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){ return r.json(); }).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(!rr||!rr.po)return;
+      var key=_cssEsc(po), btn=document.querySelector('#sup-grid .po-exp[data-po="'+key+'"]'), tr=btn&&btn.closest('tr'), ae=document.activeElement;
+      if(tr&&!(ae&&tr.contains(ae))&&window.__poRowApply)window.__poRowApply(rr); else poBy[po]=rr;
+      try{ invalidateDerived(); }catch(e){}
+      refreshActInPlace(po,'');
+      document.querySelectorAll('[id^="podet-"]').forEach(function(pd){ var nav=pd.querySelector('.po-subnav'); if(!nav||!nav.querySelector('.potab[data-po="'+key+'"]'))return;
+        var exc=poExceptions(rr,pd._poDetail), live={}; ['pay','landed','dates','oplan','ship','client','master'].forEach(function(k){ (exc[k]||[]).forEach(function(l){ live[l]=1; }); });
+        pd.querySelectorAll('.po-tab-acts').forEach(function(st){ var n=0; st.querySelectorAll('[data-lbl]').forEach(function(row){ if(live[row.dataset.lbl]||/awaiting approval$/.test(row.dataset.lbl))n++; else row.remove(); });
+          if(!n)st.remove(); else { var bd=st.querySelector('.ex-badge'); if(bd)bd.textContent=n; } });
+        var ban=pd.querySelector('.po-actions-banner'); if(ban){ var wasOpen=ban.open, t=document.createElement('div'); t.innerHTML=poOpenActionsPanel(po,pd._poDetail);
+          var nb=t.firstElementChild; if(nb){ nb.open=wasOpen; ban.replaceWith(nb); nb.querySelectorAll('.poact-chip,.poact-line').forEach(function(b){ b.onclick=function(){ var tb=pd.querySelector('.potab[data-pt="'+b.dataset.pt+'"]'); if(tb)tb.click(); }; }); } else ban.remove(); } });
+    }).catch(function(){}); }
+  try{ window.__hzPoChanged=poChanged; }catch(e){}
   function loadPoActState(cb){ fetch('/api/supply/actions/state').then(function(r){return r.json();}).then(function(rows){ _poActState={}; (rows||[]).forEach(function(s){ _poActState[s.action_key]=s; }); _poActStateLoaded=true; if(cb)cb(); }).catch(function(){ _poActStateLoaded=true; if(cb)cb(); }); }
   function poSnoozeSet(po,cond,days,cb){ var ind=(days<0), snz=(ind||days>0); fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:poActKey(po,cond),status:(snz?'snoozed':'open'),snooze_days:(days>0?days:7),indefinite:ind,restore:!snz})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
   // all matched conditions for a PO (unfiltered); poActions() drops snoozed unless "show snoozed" is on.
@@ -5865,7 +5888,7 @@
       return '<div class="po-tab-acts" style="margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);border-left:3px solid var(--neg);border-radius:8px;background:var(--hover);text-align:left">'
         +'<div style="font-weight:700;font-size:12px;margin-bottom:4px">⚠ Open actions <span class="ex-badge">'+lbls.length+'</span></div>'
         +lbls.map(function(l){ var c=_KC[l]||(l.indexOf('documents awaiting')>=0?'docs_awaiting':null); var help=(c&&ACT_HELP[c])||'';
-          return '<div style="padding:4px 0;border-top:1px solid var(--line)"><div style="font-size:12px;font-weight:600">'+esc(l)+(c?' '+actMark(po,c):'')+'</div>'+(help?'<div class="mut tiny" style="white-space:normal;max-width:900px">'+esc(help)+'</div>':'')+'</div>'; }).join('')+'</div>'; };
+          return '<div data-lbl="'+esc(l)+'" style="padding:4px 0;border-top:1px solid var(--line)"><div style="font-size:12px;font-weight:600">'+esc(l)+(c?' '+actMark(po,c):'')+'</div>'+(help?'<div class="mut tiny" style="white-space:normal;max-width:900px">'+esc(help)+'</div>':'')+'</div>'; }).join('')+'</div>'; };
     var _docsLbl=_docsAwaiting?[_docsAwaiting+' supplier document'+(_docsAwaiting>1?'s':'')+' awaiting approval']:[];
     payH2=_strip(_EX.pay.concat(_EX.landed))+payH2; masterH2=_strip((_EX.master||[]).concat(_docsLbl))+masterH2;
     p.dates=_strip(_EX.dates)+p.dates; p.client=_strip(_EX.client)+p.client; oplanH=_strip(_EX.oplan)+oplanH; shipH=_strip(_EX.ship)+shipH; timelineH=_strip(_EX.timeline)+timelineH;
