@@ -17982,6 +17982,36 @@
       if(/^image\//i.test(file.type||'')){ var url=URL.createObjectURL(file), im=new Image(); im.onload=function(){ try{ fin(toPng(im,im.naturalWidth,im.naturalHeight)); }catch(e){ fin(null); } URL.revokeObjectURL(url); }; im.onerror=function(){ URL.revokeObjectURL(url); fin(null); }; im.src=url; return; }
       if(/pdf$/i.test(file.type||'')||/\.pdf$/i.test(file.name||'')){ file.arrayBuffer().then(function(ab){ return import('/vendor/pdfjs/pdf.min.mjs').then(function(lib){ try{ lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs'; }catch(e){} return lib.getDocument({data:ab}).promise; }); }).then(function(pdf){ return pdf.getPage(1); }).then(function(page){ var vp=page.getViewport({scale:1}); var s=MAX/Math.max(vp.width,vp.height); var v2=page.getViewport({scale:s}); var cv=document.createElement('canvas'); cv.width=Math.ceil(v2.width); cv.height=Math.ceil(v2.height); var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height); return page.render({canvasContext:cx,viewport:v2}).promise.then(function(){ fin(cv.toDataURL('image/png')); }); }).catch(function(){ fin(null); }); return; }
       fin(null); }catch(e){ resolve(null); } }); }
+  // v28.519 (Ben 27-Oct-26: "any way to have a preview of each uploaded file saved for hover over visibility?"): hover any link to an uploaded
+  // file (/api/supply/portal-attachment/<id> or /api/product/doc/<id>) for a preview of it. The saved preview is used when there is one; an
+  // image with none shows itself; a PDF with none (e.g. the monday import's design PDFs) is drawn once here (page 1, pdf.js, 480 px JPEG) and
+  // saved for everyone. Other file types say so.
+  (function(){ var tip=null, cur=null, tmr=0, cache={}, MAXB=80*1024*1024;
+    function idOf(el){ var h=el.getAttribute('href')||el.getAttribute('data-src')||''; if(/\/thumb(\?|$)/.test(h))return null; var m=/\/api\/(?:supply\/portal-attachment|product\/doc)\/(\d+)(?:[?#]|$)/.exec(h); return m?m[1]:null; }
+    function box(){ if(!tip){ tip=document.createElement('div'); tip.id='hz-fprev'; tip.style.cssText='position:fixed;z-index:200000;display:none;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 30px rgba(15,23,42,.25);padding:6px;pointer-events:none;max-width:380px;font:12px/1.4 system-ui,sans-serif;color:#475569'; document.body.appendChild(tip); } return tip; }
+    function place(x,y){ var t=box(), w=t.offsetWidth||200, h=t.offsetHeight||60, L=x+16, T=y+16; if(L+w>innerWidth-8)L=Math.max(8,x-w-16); if(T+h>innerHeight-8)T=Math.max(8,innerHeight-h-8); t.style.left=L+'px'; t.style.top=T+'px'; }
+    function paint(id){ if(cur!==id||!tip)return; var c=cache[id];
+      tip.innerHTML=!c?'<div style="padding:6px 8px">Loading preview…</div>':c.url?'<img src="'+c.url+'" alt="" style="display:block;max-width:360px;max-height:360px;border-radius:4px">':'<div style="padding:6px 8px">'+esc(c.msg||'No preview')+'</div>'; }
+    function makePdf(id){ return import('/vendor/pdfjs/pdf.min.mjs').then(function(lib){ try{ lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs'; }catch(e){}
+        return lib.getDocument({url:'/api/supply/portal-attachment/'+id, disableAutoFetch:true, disableStream:true}).promise; })
+      .then(function(pdf){ return pdf.getPage(1); }).then(function(pg){ var v=pg.getViewport({scale:1}), s=480/Math.max(v.width,v.height), vp=pg.getViewport({scale:s}), cv=document.createElement('canvas'); cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
+        var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height); return pg.render({canvasContext:cx, viewport:vp}).promise.then(function(){ return cv.toDataURL('image/jpeg',0.82); }); }); }
+    function load(id){ if(cache[id])return paint(id); cache[id]=null; paint(id);
+      fetch('/api/supply/portal-attachment/'+id+'/thumb').then(function(r){
+        if(r.ok)return r.blob().then(function(b){ cache[id]={url:URL.createObjectURL(b)}; paint(id); });
+        return r.json().catch(function(){ return {}; }).then(function(j){
+          if(!j.make){ cache[id]={msg:j.mime?'No preview for this file type':'No preview'}; return paint(id); }
+          if(j.bytes>MAXB){ cache[id]={msg:'Too large to preview ('+Math.round(j.bytes/1048576)+' MB)'}; return paint(id); }
+          cache[id]=null; if(tip&&cur===id)tip.innerHTML='<div style="padding:6px 8px">Making a preview (first time only)…</div>';
+          return makePdf(id).then(function(du){ cache[id]={url:du}; paint(id); fetch('/api/supply/portal-attachment/'+id+'/thumb',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({data_url:du})}).catch(function(){}); })
+            .catch(function(){ cache[id]={msg:'Could not make a preview'}; paint(id); }); }); })
+      .catch(function(){ cache[id]={msg:'No preview'}; paint(id); }); }
+    function hide(){ clearTimeout(tmr); cur=null; if(tip)tip.style.display='none'; }
+    try{ document.addEventListener('mouseover',function(e){ var el=e.target&&e.target.closest&&e.target.closest('a[href],[data-src]'), id=el&&idOf(el); if(!id){ return; } if(cur===id)return;
+        clearTimeout(tmr); var x=e.clientX, y=e.clientY; tmr=setTimeout(function(){ cur=id; box().style.display='block'; load(id); paint(id); place(x,y); setTimeout(function(){ place(x,y); },350); },300); },true);
+      document.addEventListener('mouseout',function(e){ var el=e.target&&e.target.closest&&e.target.closest('a[href],[data-src]'); if(!el||!idOf(el))return; if(e.relatedTarget&&el.contains(e.relatedTarget))return; hide(); },true);
+      document.addEventListener('mousemove',function(e){ if(cur&&tip&&tip.style.display==='block')place(e.clientX,e.clientY); },{passive:true});
+      document.addEventListener('mousedown',hide,true); window.addEventListener('scroll',hide,{passive:true}); }catch(e){} })();   // page scroll only (inner panels scroll on their own while the preview loads)
   function hzCatColourOf(rows,cat){ for(var i=0;i<(rows||[]).length;i++){ if((rows[i].category||'')===cat&&rows[i].category_colour)return rows[i].category_colour; } return ''; }   // colour from the items payload (category_colour) for a group header
   function prodStageChipHtml(v){ var own=stageMeta(v)[2]; var ownTxt=(own==='Supplier'||own==='D&B')?('with '+own):own; return prodStageChip(v)+'<span class="pg-stage-own2">'+esc(ownTxt)+'</span>'; }
   function prodStageOwner(v){ return stageMeta(v)[2]; }
