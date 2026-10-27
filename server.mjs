@@ -6103,6 +6103,12 @@ async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil cap
   return out;
 }
 let _fulfilImportBusy = null;   // v28.116 (review S9): single-flight — the 6h timer, the n8n webhook and a manual call could overlap, and their NOT-IN prunes deleted each other's rows
+// v28.510 (Ben 27-Oct-26, PO379 "PO-1881865 (DXKI10774-23)" never linked to PO-1881865): the HORIZON PO a Fulfil PO reference names.
+// Order: the whole reference, the part after the last / or | ("SO/client PO/PO-1895877"), then either of those without a trailing
+// bracketed note or anything after the first space. has(x) = x is a HORIZON PO. null when nothing matches.
+function ffRefPo(ref, has) { const r = String(ref || '').trim(); if (!r) return null; const tail = (r.split(/[\/|]/).pop() || '').trim();
+  const bare = x => x.replace(/\s*\(.*$/, '').trim().split(/\s+/)[0] || '';
+  for (const c of [r, tail, bare(r), bare(tail)]) if (c && has(c)) return c; return null; }
 async function fulfilImportPOs() { if (_fulfilImportBusy) return _fulfilImportBusy; _fulfilImportBusy = _fulfilImportPOsRun().finally(() => { _fulfilImportBusy = null; }); return _fulfilImportBusy; }
 async function _fulfilImportPOsRun() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
@@ -6120,8 +6126,9 @@ async function _fulfilImportPOsRun() {
   const _grp = new Map((await pool.query(`SELECT fulfil_id, po FROM planner.po_fulfil_group`).catch(() => ({ rows: [] }))).rows.map(r => [Number(r.fulfil_id), r.po]));   // v28.374: client PO groups
   const _have = new Set(list.map(p => Number(p.id))), _missing = [...new Set([..._link.keys(), ..._grp.keys()])].filter(id => !_have.has(id));
   for (let i = 0; i < _missing.length; i += 200) { try { (await fulfilSearchAll(FULFIL_MAP.poModel, [['id', 'in', _missing.slice(i, i + 200)]], _flds)).forEach(p => list.push(p)); } catch (_) {} }
-  list.forEach(p => { const ref = String(p.reference || '').trim(), tail = (ref.split(/[\/|]/).pop() || '').trim();
-    p._po = _hz.has(ref) ? ref : (_link.get(Number(p.id)) || (_hz.has(tail) ? tail : ref || null));
+  const _exact = new Set(list.map(p => String(p.reference || '').trim()).filter(r => _hz.has(r)));   // v28.510: a PO whose exact reference is in Fulfil keeps it
+  list.forEach(p => { const ref = String(p.reference || '').trim(), hit = ffRefPo(ref, x => _hz.has(x) && (x === ref || !_exact.has(x)));
+    p._po = _hz.has(ref) ? ref : (_link.get(Number(p.id)) || hit || ref || null);
     if (_grp.has(Number(p.id))) { p._grp = _grp.get(Number(p.id)); if (p._po === p._grp) p._po = null; } });   // v28.374: a group member never takes the HORIZON PO's mirror row (the group sum does)
   const ids = list.map(p => p.id);
   const byPo = {};
@@ -10369,7 +10376,7 @@ async function fulfilBillPoLinks() {
   const xb = (await pool.query(`SELECT invoice_id, lower(region) region, invoice_number, reference, total::float8 total FROM planner.xero_bills WHERE upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')
       AND (upper(trim(invoice_number)) = ANY($1::text[]) OR upper(trim(reference)) = ANY($1::text[]))`, [refs])).rows;
   const ffLink = {}; (await pool.query(`SELECT po, external_id FROM planner.po_links WHERE system='fulfil' AND status='linked' AND external_id = ANY($1::text[])`, [pIds.map(String)])).rows.forEach(r => { ffLink[r.external_id] = r.po; });
-  const pRefs = [...new Set(Object.values(purch).map(p => String(p.reference || '').trim()).filter(Boolean))];
+  const pRefs = [...new Set(Object.values(purch).flatMap(p => { const r = String(p.reference || '').trim(), t = (r.split(/[\/|]/).pop() || '').trim(), b = x => x.replace(/\s*\(.*$/, '').trim().split(/\s+/)[0] || ''; return [r, t, b(r), b(t)]; }).filter(Boolean))];
   const known = new Set(pRefs.length ? (await pool.query(`SELECT po FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [pRefs])).rows.map(r => r.po) : []);
   const inGroup = new Set((await pool.query(`SELECT fulfil_id FROM planner.po_fulfil_group WHERE fulfil_id = ANY($1::bigint[])`, [pIds]).catch(() => ({ rows: [] }))).rows.map(r => Number(r.fulfil_id)));
   const cand = {}, gmap = {};   // HORIZON PO -> { bill id -> { bill, ff } }; Fulfil PO number -> { invoice_id, region }
@@ -10379,7 +10386,7 @@ async function fulfilBillPoLinks() {
     out.matched++;
     b.purchases.forEach(pid => { const p = purch[pid]; if (!p || /^cancel/.test(p.state || '')) return;
       if (inGroup.has(Number(pid))) { gmap[p.number] = { invoice_id: hit[0].invoice_id, region }; out.group++; return; }
-      const po = ffLink[String(pid)] || (known.has(String(p.reference || '').trim()) ? String(p.reference).trim() : null); if (!po) return;
+      const po = ffLink[String(pid)] || ffRefPo(p.reference, x => known.has(x)); if (!po) return;   // v28.510: "PO-1881865 (DXKI10774-23)" -> PO-1881865
       ((cand[po] = cand[po] || {})[hit[0].invoice_id] = { bill: hit[0], ff: b }); }); });
   try { await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('fulfil_bill_xero_map', $1, 'fulfil-bill sync', now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(gmap)]); _ffBillMap = { at: Date.now(), map: gmap }; } catch (e) { console.warn('[fulfil-bills] map save failed: ' + e.message); }
   const pos = Object.keys(cand); if (!pos.length) return out;
