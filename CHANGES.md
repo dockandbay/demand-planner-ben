@@ -1,3 +1,9 @@
+## v28.511 (27-Oct-26) PO drawer no longer loops for PO numbers with spaces ("PO-1892095  - PO475")
+- Ben: "the drawer is corrupted clicking on PO-1892095 (PO475)" ... "i think the name ... in the url is having an issue". Seen on live: the drawer opened, then the page changed its URL 30 times in 4 s, re-rendering the grid under a see-through drawer.
+- Cause: writeHash remembers the hash it wrote with raw spaces, but the browser stores it percent-encoded (%20). The router's "is this my own change?" check compared the two, saw a difference, re-ran the route (grid re-render + drawer reopen), which wrote the hash again: an endless loop for any name with a space or other encoded character (live: PO-1892095  - PO475, PO-1892096 - PO476, PO-1892097 - PO477).
+- Fix: writeHash and the hashchange guard compare decoded forms (hzHashKey). All 48 writeHash callers unchanged.
+- Check: jsdom with the real encoding: old logic re-runs the route on its own write, new logic does not. No migration, no new env.
+
 ## v28.510 (27-Oct-26) Fulfil PO references with a note now link: PO379 "PO-1881865 (DXKI10774-23)" -> PO-1881865
 - Ben: "the fulfil and xero bill relink didnt pick up this po PO-1881865 ... as name is PO379 (PO-1881865 (DXKI10774-23))". HORIZON matched a Fulfil PO to a HORIZON PO only when its reference was exactly the PO number (or the part after the last /), so the mirror stored it as "PO-1881865 (DXKI10774-23)" and neither the Fulfil link nor the v28.509 merged-bill link (Fulfil bill 120 = supplier ref 1723, UK, 98,648.00, 10 POs) found it.
 - New ffRefPo: the whole reference, the part after the last / or |, then either without a trailing bracketed note or anything after the first space. Used by the Fulfil PO mirror import and by the merged-bill link. A HORIZON PO that another Fulfil PO names exactly keeps that one.

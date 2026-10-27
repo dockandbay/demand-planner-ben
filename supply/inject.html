@@ -14105,7 +14105,10 @@
   // Report keys route here even when called via selectSection (cross-nav / internal refresh) so the sub-nav stays.
   // ── Hash deep-linking: #/supply/<section>[/<sub>]  e.g. #/supply/reports/pipeline · #/supply/config/freight
   var _expectedHash=null, _routed=false;
-  function writeHash(parts){ var h='#/'+parts.filter(function(p){return p!=null&&p!=='';}).join('/'); _expectedHash=h; if(location.hash!==h){ try{ location.hash=h; }catch(e){} } }
+  // v28.511 (Ben 27-Oct-26, "PO-1892095  - PO475" drawer looping): the browser stores the hash percent-encoded (a space = %20), so compare
+  // decoded forms; comparing raw to encoded made every write look external, re-run the route, reopen the drawer and write again (30x / 4 s).
+  function hzHashKey(h){ h=String(h||''); try{ return decodeURIComponent(h); }catch(e){ return h; } }
+  function writeHash(parts){ var h='#/'+parts.filter(function(p){return p!=null&&p!=='';}).join('/'); _expectedHash=h; if(hzHashKey(location.hash)!==hzHashKey(h)){ try{ location.hash=h; }catch(e){} } }
   window.writeHash=writeHash; // exposed so the core artifact's DEMAND/REPORTS sub-tabs can sync the URL
   window.openPODrawer=openPODrawer;   // let the DEMAND buy-plan (FBA inbound tooltip) open a PO in the drawer
   window.hzPoExists=function(po){ try{ return !!po && Array.isArray(poLookupList) && poLookupList.indexOf(String(po))>=0; }catch(e){ return false; } };   // is this an ACTIVE PO in the grid? (poLookupList = /api/supply/lookups d.pos)
@@ -14194,7 +14197,7 @@
       if(!pick())setTimeout(pick,40); }
     else if(seg[0]){
       var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
-  window.addEventListener('hashchange',function(){ if(location.hash===_expectedHash)return; applyRoute(); });
+  window.addEventListener('hashchange',function(){ if(hzHashKey(location.hash)===hzHashKey(_expectedHash))return; applyRoute(); });   // v28.511: decoded compare
 
   // BI & REPORTS L2 tab shows ONE combined counter (Ben) = high-priority Actions + ERP Compare + DTC Mismatch + Reallocate.
   var _actHi=0, _dtcCount=0;   // _erpcCount / _reallocCount declared below
