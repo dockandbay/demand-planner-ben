@@ -1,3 +1,9 @@
+## v28.526 (28-Oct-26) Fulfil links made while the Fulfil PO was a draft now show its PO number
+- Ben (PO-1903237 ▸ Master data): "is linked to TAG10793-57/7484 (manual) but it doesnt say PO483 and i would expect it would".
+- Cause: the link is right (Fulfil id 656 = PO483, XR Textile), but it was made at 23:31 on 27-Oct while PO483 was still a draft with no number (Fulfil numbered it two minutes later), so HORIZON saved the reference instead.
+- Now, opening a PO whose hand-made Fulfil link shows a reference instead of a PO number reads that Fulfil PO once and, if it has a number, saves it (PO483). The reference moves into the link note on new links. Links the resolver makes are unchanged (they name the HORIZON PO by design).
+- Sandbox check: a hand link to sandbox Fulfil 169 saved as "TAG-TEST-REF" showed and stored PO79 on open; test row removed.
+
 ## v28.525 (28-Oct-26) Claude connector can now make changes to purchase orders, shipments and PRODUCT
 - Ben: "can you extend MCP for horizon to allow WRITE to purchase orders and shipments and product. leave demand plan out for now", then: edits and notes, "also updating links to fulfil and xero and flexport. updating order plan lines. updating dates".
 - 11 write tools: update_purchase_order (dates, status, deposit, branch, notes, client / DTC, packing, payment milestones…), set_po_lines (order plan quantities; 0 removes a SKU), add_po_note (team-only unless to_supplier), link_po_record (Fulfil main or extra, Xero bill, Flexport shipment), update_shipment, assign_po_to_shipment, add_shipment_note, update_product_item, add_product_note, update_sample_request, set_sample_feedback.

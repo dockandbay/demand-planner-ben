@@ -8533,6 +8533,14 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
       cached = (await pool.query(`SELECT system, external_id, external_ref, url, status, note, found_by, found_at, updated_at FROM planner.po_links WHERE po=$1`, [po])).rows;
     }
     const byS = {}; cached.forEach(r => { byS[r.system] = r; });
+    // v28.526 (Ben 28-Oct-26, PO-1903237: "linked to TAG10793-57/7484 (manual) but it doesnt say PO483"): a Fulfil PO linked while still a draft has no
+    // number yet, so its reference was saved. Once Fulfil numbers it, store the number (one live Fulfil read, then never again for that link).
+    const _fl = byS.fulfil;
+    if (_fl && _fl.status === 'linked' && _fl.found_by === 'manual' && /^[0-9]+$/.test(String(_fl.external_id || '')) && !/^PO\d+$/i.test(String(_fl.external_ref || ''))) {
+      try { const fp = (await fulfilStrictSearch(FULFIL_MAP.poModel, [['id', '=', Number(_fl.external_id)]], ['id', 'number', 'reference', 'state'], 1, 'Fulfil PO'))[0];
+        if (fp && fp.number) { _fl.external_ref = fp.number;   // the bare Fulfil number: other code matches on it (ERP compare, leftover-copy suggest)
+          await pool.query(`UPDATE planner.po_links SET external_ref=$3 WHERE po=$1 AND system='fulfil' AND external_id=$2`, [po, String(_fl.external_id), _fl.external_ref]); } }
+      catch (e) { /* Fulfil unreachable: show the saved reference, try again next open */ } }
     const shipped = _poShipped(poRow);
     const actions = [];
     // RULE: a SHIPPED PO with no Xero bill is an open action.
@@ -8577,7 +8585,7 @@ app.post('/api/supply/po/:po/links', async (req, res) => {
         `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
          VALUES ($1,'fulfil',$2,$3,$4,'linked',$5,'manual',now(),now())
          ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, found_by='manual', updated_at=now()`,
-        [po, String(fp.id), fp.number || fp.reference || String(fp.id), furl, ('manual link: ' + (fp.number || '') + ' ' + (fp['party.name'] || '') + ' (' + (fp.state || '') + ')').trim()]);
+        [po, String(fp.id), fp.number || fp.reference || String(fp.id), furl, ('manual link: ' + (fp.number || '') + ' ' + (fp['party.name'] || '') + (fp.reference ? ', ref ' + fp.reference : '') + ' (' + (fp.state || '') + ')').trim()]);   // v28.526: reference kept in the note
       logPoChange(po, 'Linked records', 'Fulfil PO linked: ' + (fp.number || fp.id) + ' (id ' + fp.id + ', ' + (fp['party.name'] || '') + ')', authUser(req));
       return res.json({ ok: true, fulfil_id: fp.id, number: fp.number || null });
     }

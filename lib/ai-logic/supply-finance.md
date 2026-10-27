@@ -210,7 +210,7 @@ fingerprints:
   server.mjs::fulfilExistingCandidates: 4a108d8a257b
   server.mjs::FULFIL_CLIENT_PO_SQL: 1dfcdf1c9fe5
   server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
-  server.mjs::/api/supply/po/:po/links: be268f5a2f86
+  server.mjs::/api/supply/po/:po/links: 7bb90b5c8d07
   server.mjs::poFulfilExtras: 5649f4f9f1fc
   server.mjs::ffExtraOn: acafa58afa08
   server.mjs::/api/supply/po/:po/fulfil-extra: 4472ed8c5070
@@ -328,7 +328,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.525
+verified_version: v28.526
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -772,6 +772,7 @@ verified_version: v28.525
 ## Xero read retries (v28.365)
 - Every Xero GET (contact lookups, accounts, bills reads) is retried twice with backoff on a passing Xero 500 / 502 / 504 ("An error occurred in Xero"), as well as on 429 / 503. POST / PUT are never retried on 5xx (they may have processed).
 - v28.366: after a successful "Push bill to Xero" the Reconcile drawer hides the email / PDF pane (no PDF reload) and shows the confirmation plus a blue "Open bill in Xero" button next to Close.
+- v28.526 (Ben 28-Oct-26): a hand-made Fulfil link saved while the Fulfil PO was a draft (no number yet, so its reference was stored) is fixed when the PO's Linked records open: one live Fulfil read by id, and the Fulfil PO number (e.g. PO483) replaces the stored reference. Resolver links are untouched. (source: server.mjs :: /api/supply/po/:po/links)
 - v28.522 (Ben 28-Oct-26): a HORIZON PO can carry EXTRA Fulfil POs (planner.po_fulfil_extra) besides its main Fulfil link. The main link (po_links fulfil, or the mirror) stays the only push / sync target; extras are listed under Linked records (＋ add another Fulfil PO, ✕ remove), found by HORIZON search, and mapped to the PO when matching Fulfil bills to Xero bills (fulfilBillPoLinks). A Fulfil PO is an extra on one HORIZON PO at most (moving asks), and is refused when cancelled, another PO's main link or mirror, or in a client PO group. HORIZON lines and totals do not change. (source: server.mjs :: poFulfilExtras, /api/supply/po/:po/fulfil-extra, fulfilBillPoLinks; supply/inject.html :: fulfilPoPicker)
 - v28.521 (Ben 28-Oct-26): Push bill to Xero is off until the Xero contact, Account and Tax are all filled and the receipt can still be billed. Blank required fields show light red (not yellow); hovering the greyed button gives the reason in the 120 ms tooltip ("Fill in Tax to push (marked red)", "Cannot push: <reason>", "Checking the bill…"). (source: supply/inject.html :: acDrWhy, acDrMark, acDrPaint)
 
