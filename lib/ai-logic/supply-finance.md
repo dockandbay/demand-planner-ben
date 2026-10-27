@@ -168,8 +168,8 @@ fingerprints:
   server.mjs::cashflowResponse: cf5b17407ac2
   server.mjs::shipFreightSrv: e1966d570076
   server.mjs::seaEstSrv: 8dd7c54cd23c
-  server.mjs::computeXeroRunPlan: 7735852c91e5
-  server.mjs::/api/supply/payments/xero-post: 69de3f2fc5e6
+  server.mjs::computeXeroRunPlan: 95c189a540cf
+  server.mjs::/api/supply/payments/xero-post: 420dcfad00f1
   server.mjs::/api/supply/xero/deposit-credit-note: f24292c48a0a
   server.mjs::_poXeroRegion: 844d7ad9c549
   server.mjs::/api/supply/payments/xero-preflight: 0e54d381e8ff
@@ -201,7 +201,7 @@ fingerprints:
   server.mjs::fulfilExistingCandidates: 4a108d8a257b
   server.mjs::FULFIL_CLIENT_PO_SQL: 1dfcdf1c9fe5
   server.mjs::/api/supply/fulfil/po-search: f0bef6ad0581
-  server.mjs::/api/supply/po/:po/links: 57b777e68775
+  server.mjs::/api/supply/po/:po/links: 6d3a47f8aeb4
   server.mjs::sovAnalyse: 9b73b85176ff
   server.mjs::sovLineBlock: bf5806a2f16a
   server.mjs::sovModeBlock: daa8ceb2c541
@@ -267,7 +267,7 @@ fingerprints:
   supply/inject.html::isFOBdest: 608131abe18e
   supply/inject.html::poErpMisaligned: 15f1c87a5307
   supply/inject.html::upfxDownload: 13f375924b7e
-  server.mjs::syncXeroBills: 5059e27a5511
+  server.mjs::syncXeroBills: 526e1a6f6e06
   server.mjs::_syncXeroBillsRun: 96082099a446
   server.mjs::xbUpsert: 7f5a5479a726
   server.mjs::xbLastSync: 29ebc29cc1f8
@@ -313,7 +313,7 @@ fingerprints:
   server.mjs::/api/client/commission/history-all: ef3bffff9609
   supply/inject.html::cphRows: ddfdbd3daac2
   supply/inject.html::cphDraw: 675b893af57b
-verified_version: v28.508
+verified_version: v28.509
 ---
 ## Purchase order lifecycle
 - PO statuses, in order: FUTURE, PRODUCTION, READY TO SHIP, SHIPPED TO MASTER, SHIPPING, DELIVERED, COMPLETE. Status pills group them: Future; Production (PRODUCTION, READY TO SHIP and anything unknown); Shipping (SHIPPING, DELIVERED); Complete. (source: supply/inject.html :: PO_STATUSES, stGroup)
@@ -416,6 +416,7 @@ verified_version: v28.508
 - Settlement against the linked PO bill comes from the same account the line is coded to (602.1 or the production account), at the supplier-payment bill's currency rate. A pre-P58 deposit uses deposits.xero_fx. A cross-org line settles in the home org from that org's 901 loan, at Xero's own daily rate. (source: server.mjs :: xero-post)
 - P58+ deposits post no payment: they draw down by credit note (ACCPAYCREDIT to 602, tagged with the production). Deposits never cross orgs: a cross-org deposit is blocked, and deposits from two orgs in one run are blocked. (source: server.mjs :: computeXeroRunPlan, deposit-credit-note)
 - The post is refused if: the supplier's Xero contact is not found in the paying org (v28.176); a PO's linked bill was voided in Xero and has no single replacement (v28.183, "choose a bill"); a payment exceeds the bill's AmountDue; an account is missing, archived or not payments-enabled; or the run already has a non-voided bill (unless re-post is confirmed). Admin and confirm are required. (source: server.mjs :: xero-post)
+- Several POs on ONE Xero bill (v28.509, Ben 27-Oct-26, Ballast 1723: Fulfil merged 10 POs into one supplier bill): the POs in a run whose payments go to the same bill post as ONE Xero payment for their total, with the PO numbers as the payment reference. The amount-due check is on that total (preview: "One payment per bill: 1723 pays 2 POs, 60,000.00 of 69,878.00 due"). The other POs show as paid with it, or skipped with it if it fails. POs on one bill that settle from different accounts or rates block the post ("pay them in separate runs"). Before this, the payment log's one-payment-per-bill-per-run rule skipped the second PO as "already paid by this run" and the run still read as complete. (source: server.mjs :: computeXeroRunPlan bill_share, xero-post _shareLead)
 - Preflight badges (from v28.173): on the Payments Report, each unposted run that shows the XERO button gets a badge from the same plan and checks as the Create in Xero popup, read only (Xero GETs only, nothing written). Red "⚠ N" = N problems that stop the post: the supplier's Xero contact not found in the paying org (from v28.176), a cross-org or mixed-org deposit, a payment above the bill's AmountDue, a settle account that is missing, archived or not payments-enabled, a missing 901 loan account, or a line with no account mapped. Amber "⚠" = warnings only: a P58+ deposit (credit note, no payment), no linked Xero bill (payment skipped), a bill amount due that could not be read, a cross-org line settling via loan 901, or a warn-level check. A faint tick = all clear; "?" = the check could not read Xero; nothing when Xero is not connected or the run has nothing to post. Posted ("done") rows show no badge. Results are cached 10 minutes per run and line set; any post or deposit credit note clears the cache. Xero calls are paced to 30 a minute per org, one batch at a time. (source: server.mjs :: /api/supply/payments/xero-preflight, _xeroPlanIssues)
 - A failed Xero call reports Xero's own validation messages (every ValidationErrors entry, including nested ones) rather than the generic "A validation exception occurred". (source: server.mjs :: _xeroErrMsg)
 - Supplier Xero contact (from v28.176): every supplier bill and credit note HORIZON posts (supplier-payment bill, deposit credit note, push-queue bill or credit note, AU bill migration) references the supplier's Xero contact by ContactID, never by name, because Xero silently creates a new contact when a posted name does not match. The contact name is suppliers.xero_contact_uk or xero_contact_au for that org (SUPPLY ▸ CONFIG ▸ Suppliers, and the Manage supplier drawer); when blank it is "<name> - <code>" for a kind=supplier row with a code (Fulfil's convention, e.g. "Nice Look - NL"), otherwise the supplier name. Fulfil builds the name from ITS supplier name, so migration 330 (v28.177) seeds the three that differ from HORIZON: MQ = "MQ Print - MQ", JM = "Jinma (merry) - JM", Huzhou Double Qing (Ribbon) = "Huzhou Double Qing (Ribbon) - HDQ". On 06-Oct-26 all 11 Fulfil suppliers had their "- CODE" contact in Xero UK and AU; Chilly Bottles, Foamie, Forming Reality, Kangxun and Zhongshan Huiming are not in Fulfil and posting for them is blocked until their contact exists or is configured. It is looked up by exact name among ACTIVE contacts in that org (GET only); found contacts are cached 10 minutes per org, misses 1 minute, and the post itself re-checks fresh. (source: server.mjs :: xeroContactFor, xeroContactLookup, xeroContactTarget, xeroContactDefault)
@@ -429,6 +430,7 @@ verified_version: v28.508
 - Sync on visit: opening SUPPLY > Payments > Payments Report or Xero payments starts a background sync only when the last completed sync is older than 12 hours; the page never waits and refreshes its preflight badges / exceptions when bills changed. "↻ Sync now" next to "Xero bills synced dd-mmm-yy hh:mm" (admins) always syncs straight away. (source: server.mjs :: /api/supply/xero/bills-sync-visit; supply/inject.html :: xbsVisit, xbsSync)
 - Resync all bills (SUPPLY > CONFIG > Xero > Xero bills cache): re-reads every bill of both orgs (ordered by InvoiceID, 1000 per page; about 11 Xero calls, a minute or so), shows progress, logs etl_runs job xero_bills_full_resync. A cached bill it did not see is deleted only when that org's set was complete (bills read = Xero's item count) and no PO link points at it. (source: server.mjs :: xeroBillsFullResync, /api/supply/xero/bills-resync-all)
 - Which bill belongs to a PO: the bill number or reference must START with the PO number (or the PO plus digits, a deposit / balance bill), never merely contain it; a leading token that is itself another PO's number (PO-44UKXR1 vs PO-44UKXR10) is that PO's bill. Voided / deleted bills are never linked (the live resolver and the manual link both refuse them). (source: server.mjs :: xbLeadMatch, resolvePoLinks, /api/supply/po/:po/links)
+- Merged Fulfil bills (v28.509): after every bill sync HORIZON reads LIVE Fulfil's posted supplier bills from the last 180 days that carry POs (read only), finds each one's Xero bill in the cache (same org: Fulfil company 1 = UK, 3 = AU; Xero bill number or reference = the Fulfil bill's supplier reference; same total) and links it to every HORIZON PO on it (the Fulfil PO's linked HORIZON PO, else the PO named by the Fulfil PO's reference). It only fills a PO with no Xero link (or an 'unknown' one), never replaces one; a PO on two Fulfil bills is left to link by hand. Links show found by 'fulfil-bill' and the resolver never swaps them for a guess. Client POs of a master PO are not linked: their Fulfil PO number -> bill is kept in app_settings 'fulfil_bill_xero_map' so master PO shares find a merged bill. The manual bills sync (POST /api/supply/xero/bills-sync) returns what it linked. (source: server.mjs :: fulfilBillPoLinks, _fgBillsFor)
 - Auto-heal: when a PO's linked bill is VOIDED or DELETED, HORIZON looks for its replacement: non-voided ACCPAY bills in either org that match the PO (rule above) and whose contact is the PO's supplier ("<name>", "<name> - <code>" or the configured Xero contact all count as the same supplier). Exactly one: the link moves to it (found_by auto-heal, the note keeps the old bill, health event xero:link_healed). None or several: no guess; the link turns to "action" with "linked bill voided: choose a bill", the Linked records panel shows ⚠ voided and the change-bill picker, and a payment run for that PO is blocked. A manual link is only healed to a bill of the same supplier as the voided bill. (source: server.mjs :: xeroHealPoLinks)
 - Where it runs: payment runs (preview, preflight badges, post) re-read the linked bills live first and heal before planning; the PO's Linked records read heals from the cache, and "Find / refresh links" re-reads live and also searches Xero for the PO; every bill sync heals from the cache. (source: server.mjs :: computeXeroRunPlan, /api/supply/po/:po/links, xeroHealAllVoided)
 - Change-bill picker (PO drawer > MASTER DATA & DOCS > Linked records): lists cached bills (voided ones last), always including the current link; when it opens it re-checks the listed bills and the current one live in Xero (GET Invoices?IDs, 50 per call, per org) and searches Xero for the typed text so a bill created since the last sync appears. Voided / deleted bills are struck through and cannot be picked; a voided current link shows "⚠ voided". (source: supply/inject.html :: xeroBillPicker; server.mjs :: /api/supply/xero/bills/search, /api/supply/xero/bills/verify, xbRefreshLive)

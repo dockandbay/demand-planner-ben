@@ -8515,6 +8515,7 @@ app.get('/api/supply/po/:po/links', async (req, res) => {
         // v28.183 (Ben): a voided link waiting for a choice is not overwritten by a guess between several bills (or by nothing)
         if (sys === 'xero' && prev && prev.status === 'action' && String(prev.note || '').startsWith(XB_VOID_NOTE) && (v.status !== 'linked' || v.multi)) continue;
         if (sys === 'xero' && prev && prev.found_by === 'auto-heal' && prev.external_id === v.external_id) continue;   // keep the heal's audit note
+        if (sys === 'xero' && prev && prev.found_by === 'fulfil-bill' && prev.status === 'linked' && (v.status !== 'linked' || v.multi)) continue;   // v28.509: a link from Fulfil's own bill is never replaced by a guess
         await pool.query(
           `INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,'auto',now(),now())
@@ -8930,6 +8931,10 @@ async function _fgBillsFor(numbers) {   // Fulfil PO number -> its live Xero bil
       FROM planner.xero_bills WHERE upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED') AND (${nums.map((_, i) => `reference ~* $${i + 1} OR invoice_number ~* $${i + 1}`).join(' OR ')})`, nums.map(tok))).rows;
   nums.forEach(n => { const re = new RegExp(tok(n), 'i'), hit = rows.filter(r => re.test(r.reference || '') || re.test(r.invoice_number || ''));
     if (hit.length === 1) out[n] = hit[0]; else if (hit.length > 1) out[n] = { ambiguous: hit.map(h => h.invoice_number || h.invoice_id) }; });
+  // v28.509: a client PO on a merged Fulfil bill (reference = the supplier's invoice number) -> that bill, from the Fulfil bill sync
+  const miss = nums.filter(n => !out[n]); if (miss.length) { const m = await _ffBillMapGet(), ids = [...new Set(miss.map(n => m[n] && m[n].invoice_id).filter(Boolean))];
+    if (ids.length) { const br = {}; (await pool.query(`SELECT invoice_id, lower(region) region, invoice_number, reference, upper(coalesce(status,'')) status, coalesce(amount_due,0)::float8 due, total::float8 total FROM planner.xero_bills WHERE invoice_id = ANY($1::text[]) AND upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')`, [ids])).rows.forEach(r => { br[r.invoice_id] = r; });
+      miss.forEach(n => { const b = m[n] && br[m[n].invoice_id]; if (b) out[n] = b; }); } }
   return out;
 }
 async function _fgSettleAcct(org, payingOrg) {   // same org as the money -> Supplier Payments 602.1; the other org -> its loan 901
@@ -9315,7 +9320,23 @@ async function computeXeroRunPlan(run, ctx) {
       else { l.bill_due = null; l.pay_ok = null; }   // couldn't read the bill (older/deleted, or wrong org) → can't validate
     }
   });
+  // v28.509 (Ben 27-Oct-26, Ballast 1723: Fulfil merged 10 POs into one supplier bill): POs whose lines pay the SAME bill in one run post as
+  // ONE Xero payment for their total (the payment log allows one payment per bill per run, so a second PO was skipped as "already paid by
+  // this run"), and the amount-due check is on that total, not per PO. Lines on one bill must settle from the same account at the same rate.
+  const billSets = {};
+  outLines.filter(l => l.will_pay).forEach(l => { const k = l.settle_org + '|' + l.linked_bill.id; (billSets[k] = billSets[k] || []).push(l); });
+  const shareMix = [];
+  Object.values(billSets).filter(g => g.length > 1).forEach(g => {
+    const tot = Math.round(g.reduce((s, x) => s + (Number(x.amount) || 0), 0) * 100) / 100, pos = g.map(x => x.reference);
+    const mixed = new Set(g.map(x => (x.settle_account_id || '') + '|' + (x.cross ? 'x' : (x.legacy && /deposit/i.test(String(x.type || '')) ? 'dep:' + (x.deposit_rate != null ? x.deposit_rate : '') : 'run')))).size > 1;
+    if (mixed) shareMix.push((g[0].linked_bill.number || g[0].linked_bill.id) + ' (' + pos.join(', ') + ')');
+    g.forEach((x, i) => { x.bill_share = { lead: i === 0, n: g.length, total: tot, pos };
+      if (x.bill_due != null) x.pay_ok = !xbDead(x.bill_status) && tot <= x.bill_due + 0.01; });
+  });
   const checks = [];
+  const shared = Object.values(billSets).filter(g => g.length > 1);
+  if (shared.length) checks.push({ level: 'ok', msg: 'One payment per bill: ' + shared.map(g => (g[0].linked_bill.number || 'bill') + ' pays ' + g.length + ' POs, ' + g[0].bill_share.total.toFixed(2) + (g[0].bill_due != null ? ' of ' + Number(g[0].bill_due).toFixed(2) + ' due' : '')).join('; ') });
+  if (shareMix.length) checks.push({ level: 'error', msg: 'POs on the same Xero bill settle from different accounts or rates, so they cannot be one payment: ' + shareMix.join('; ') + '. Pay them in separate runs.' });
   // v28.176 (Ben): Xero contact for the supplier-payment bill (exact name, active, in the paying org).
   const _xcWillCreate = !contact.ok && !contact.lookup_failed && !!contact.target;   // v28.350: created by the push
   checks.push(contact.ok ? { level: 'ok', msg: 'Xero contact (' + paying.toUpperCase() + '): ' + contact.Name } : _xcWillCreate ? { level: 'warn', msg: "Xero contact '" + contact.target + "' is not in " + paying.toUpperCase() + ': it will be created when you push' } : { level: 'error', msg: contact.error });
@@ -9558,7 +9579,9 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     const missLoan = plan.lines.filter(l => l.will_pay && l.settle_from === 'loan' && !l.settle_account_id);
     if (missLoan.length) return res.status(400).json({ error: 'Intercompany loan (901) account not found in Xero ' + [...new Set(missLoan.map(l => l.home_org.toUpperCase()))].join(' + ') + ' — bind it in SUPPLY ▸ CONFIG ▸ Xero (admin)' });
     const overpay = plan.lines.filter(l => l.pay_ok === false);
-    if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.amount) + ' > ' + _usd(l.bill_due) + ')').join('; ') });
+    if (overpay.length) return res.status(400).json({ error: 'Payment exceeds amount due for: ' + overpay.map(l => l.reference + ' (' + _usd(l.bill_share ? l.bill_share.total : l.amount) + (l.bill_share ? ' with ' + (l.bill_share.n - 1) + ' other PO' + (l.bill_share.n > 2 ? 's' : '') + ' on this bill' : '') + ' > ' + _usd(l.bill_due) + ')').join('; ') });
+    const shareMix = (plan.checks || []).filter(c => c.level === 'error' && /^POs on the same Xero bill/.test(c.msg || ''));   // v28.509
+    if (shareMix.length) return res.status(400).json({ error: shareMix[0].msg + ' Nothing posted.' });
     // v28.151 (review D5): server-side idempotency on run_key. A run that already has a recorded supplier-payment bill that
     // is not VOIDED/DELETED is refused (409 ALREADY_POSTED) unless the caller sends repost:true (the redo button asks the
     // user first). The check + post run under a per-run_key advisory lock so two admins can't post the same run at once.
@@ -9596,6 +9619,7 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
     // 2) a payment against each PO bill, IN ITS SETTLE ORG. Same-org → from the paying org's USD bank at the run rate
     //    (a pre-P58 same-org deposit at the deposit-reference rate). Cross-org completion → in the HOME org from that
     //    org's loan (901); we let Xero apply the home org's own daily USD rate (each entity books at its own rate).
+    const _shareLead = {};   // v28.509: settle_org|bill id -> the lead PO's payment result, for the other POs on that bill
     for (const l of plan.lines) {
       const isDep = /deposit/i.test(String(l.type || ''));
       if (l.blocked) { out.skipped.push({ po: l.reference, reason: l.blocked }); continue; }
@@ -9605,22 +9629,32 @@ app.post('/api/supply/payments/xero-post', async (req, res) => {   // v28.305 (B
         (out.group = out.group || []).push({ po: l.reference, type: l.type, amount: l.amount, applied: g.applied, pending: g.pending, errors: g.errors, results: (g.results || []).map(x => ({ number: x.number, amount: x.amount, status: x.status, error: x.error || null })) });
         (g.results || []).filter(x => x.status === 'error').forEach(x => out.skipped.push({ po: l.reference, reason: 'master PO share ' + x.number, error: x.error })); continue; }
       if (!l.linked_bill || !l.linked_bill.id) { out.skipped.push({ po: l.reference, reason: 'no linked Xero bill' }); continue; }
-      if (!l.settle_account_id) { out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'payment') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
+      // v28.509: POs sharing one bill: the lead line pays the total once; the others ride on that payment (or are skipped with it).
+      const _bk = l.settle_org + '|' + l.linked_bill.id;
+      if (l.bill_share && !l.bill_share.lead) { const ld = _shareLead[_bk];
+        if (ld && ld.payment_id) out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: ld.payment_id, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: ld.rate, combined_with: ld.po });
+        else if (ld && ld.already) out.skipped.push({ po: l.reference, reason: 'already paid by this run (one payment with ' + ld.po + ')' });
+        else out.skipped.push({ po: l.reference, reason: 'shares bill ' + (l.linked_bill.number || '') + ' with ' + ((ld && ld.po) || 'another PO') + ', whose payment ' + ((ld && ld.reason) || 'did not post'), error: !!(ld && ld.error) });
+        continue; }
+      const _amt = l.bill_share ? l.bill_share.total : l.amount, _lead = l.bill_share ? (_shareLead[_bk] = { po: l.reference, payment_id: null, rate: null, reason: null, error: false, already: false }) : null;
+      if (!l.settle_account_id) { if (_lead) _lead.reason = 'had no payment account'; out.skipped.push({ po: l.reference, reason: 'no ' + (l.settle_from === 'loan' ? 'loan (901)' : 'payment') + ' account in ' + String(l.settle_org || '').toUpperCase() }); continue; }
       const rate = l.cross ? null : ((isDep && l.legacy) ? (l.deposit_rate != null && l.deposit_rate > 0 ? l.deposit_rate : runRate) : runRate);
       // v28.347: one log row per PO bill per run, written BEFORE the Xero call (unique run_key + invoice_id while creating /
       // created, migration 360): a retry or a second click never pays the same PO bill twice for this run.
       let lgp = null;
       try { lgp = (await pool.query(`INSERT INTO planner.xero_run_payments (run_key, region, invoice_id, invoice_number, bank_account_id, bank_name, amount, currency, currency_rate, payment_date, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'creating',$11) RETURNING id`,
-          [_rk, l.settle_org, l.linked_bill.id, l.linked_bill.number || null, l.settle_account_id, 'PO bill from ' + (l.settle_from === 'loan' ? 'loan 901' : 'account'), Math.round(l.amount * 100) / 100, plan.currency || 'USD', rate, date, authUser(req) || 'system'])).rows[0].id; }
-      catch (le) { if (/duplicate key/.test(le.message)) { out.skipped.push({ po: l.reference, reason: 'already paid by this run' }); continue; } throw le; }
+          [_rk, l.settle_org, l.linked_bill.id, l.linked_bill.number || null, l.settle_account_id, 'PO bill from ' + (l.settle_from === 'loan' ? 'loan 901' : 'account'), Math.round(_amt * 100) / 100, plan.currency || 'USD', rate, date, authUser(req) || 'system'])).rows[0].id; }
+      catch (le) { if (/duplicate key/.test(le.message)) { if (_lead) _lead.already = true; out.skipped.push({ po: l.reference, reason: 'already paid by this run' }); continue; } if (_lead) { _lead.reason = 'could not be logged'; _lead.error = true; } throw le; }
       try {
-        const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: l.settle_account_id }, Date: date, Amount: Math.round(l.amount * 100) / 100 };
+        const payObj = { Invoice: { InvoiceID: l.linked_bill.id }, Account: { AccountID: l.settle_account_id }, Date: date, Amount: Math.round(_amt * 100) / 100 };
+        if (l.bill_share) payObj.Reference = String(l.bill_share.pos.join(' + ')).slice(0, 255);   // v28.509: the POs this one payment covers
         if (rate != null && rate > 0) payObj.CurrencyRate = rate;
         const pr = await xeroFetch(l.settle_org, '/api.xro/2.0/Payments', { method: 'PUT', body: { Payments: [payObj] } });
         const pay = pr && pr.Payments && pr.Payments[0];
         await pool.query(`UPDATE planner.xero_run_payments SET status='created', xero_payment_id=$2 WHERE id=$1`, [lgp, pay && pay.PaymentID]).catch(() => {});
-        out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill') });
-      } catch (pe) { console.error('[xero-post] payment ' + l.reference + ' failed:', pe.message); if (lgp) await pool.query(`UPDATE planner.xero_run_payments SET status='error', error=$2 WHERE id=$1`, [lgp, String(pe.message).slice(0, 400)]).catch(() => {}); out.skipped.push({ po: l.reference, reason: pe.message, error: true }); }
+        if (_lead) { _lead.payment_id = (pay && pay.PaymentID) || null; _lead.rate = rate; if (!_lead.payment_id) _lead.reason = 'returned no payment id'; }
+        out.payments.push({ po: l.reference, type: l.type, amount: l.amount, payment_id: pay && pay.PaymentID, bill: l.linked_bill.number, org: l.settle_org, from: l.settle_from, cross: !!l.cross, rate: rate, rate_src: l.cross ? 'home-org daily' : ((isDep && l.legacy) ? 'deposit-ref' : 'bill'), combined_total: l.bill_share ? _amt : undefined });
+      } catch (pe) { if (_lead) { _lead.reason = 'failed (' + String(pe.message).slice(0, 120) + ')'; _lead.error = true; } console.error('[xero-post] payment ' + l.reference + ' failed:', pe.message); if (lgp) await pool.query(`UPDATE planner.xero_run_payments SET status='error', error=$2 WHERE id=$1`, [lgp, String(pe.message).slice(0, 400)]).catch(() => {}); out.skipped.push({ po: l.reference, reason: pe.message, error: true }); }
     }
     // v28.151 (review D5): a payment that FAILED (not a by-design skip) makes the post ok:false so it can't read as complete.
     const _failed = out.skipped.filter(x => x.error).length;
@@ -10162,6 +10196,7 @@ async function syncXeroBills(opts) {
     const r = await _syncXeroBillsRun(opts);
     try { const h = await xeroHealAllVoided(); r.healed = h.healed.length; r.flagged = h.flagged.length; } catch (e) { r.heal_error = e.message; }
     try { const s = await xeroVoidLinkFinding(); r.voided_links = s ? s.meta.n : 0; if (s) await pool.query(HZ_FINDINGS_UPSERT, [JSON.stringify([s]), APP_VERSION]); } catch (e) { console.warn('[xero-bills] sanity check failed: ' + e.message); }
+    try { const fb = await fulfilBillPoLinks(); r.fulfil_bills = { bills: fb.bills, matched: fb.matched, linked: (fb.linked || []), kept: (fb.kept || []).slice(0, 30), ambiguous: (fb.ambiguous || []).slice(0, 30), no_xero: (fb.no_xero || []).length, group: fb.group }; if ((fb.linked || []).length) { r.changed = (r.changed || 0) + fb.linked.length; console.log('[fulfil-bills] linked ' + fb.linked.join('; ')); } } catch (e) { r.fulfil_bills_error = e.message; console.warn('[fulfil-bills] ' + e.message); }   // v28.509
     if (r.changed || r.healed || r.flagged) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); xeroPreflightBust(); }
     // v28.376: master PO shares waiting for their client PO bill are applied once the bill is in the copy. PRODUCTION ONLY: the sandbox talks
     // to the same live Xero companies, so it never posts shares on its own (Apply pending on the PO is the manual route there).
@@ -10312,6 +10347,60 @@ async function xbRefreshLive(ids, opts) {
 // Reference STARTS with the PO, or the PO plus a purely numeric suffix (PO-x2 deposit / balance), never merely contains it.
 function xbLeadMatch(po, str) { const p = String(po || ''), first = String(str || '').trim().split(/[\s/]+/)[0] || '';
   return !!p && (first === p || (first.startsWith(p) && /^\d+$/.test(first.slice(p.length)))); }
+// v28.509 (Ben 27-Oct-26, Ballast 1723): Fulfil can merge several POs into one supplier bill, which reaches Xero with the supplier's invoice
+// number ("1723"), so no PO is at the start of its reference and nothing linked. Fulfil knows the POs on each bill: read its posted supplier
+// bills (last 180 days, LIVE Fulfil, read only), find each one's Xero bill in HORIZON's copy (same org, bill number or reference = the
+// Fulfil bill's supplier reference, same total) and link it to every HORIZON PO on it. A HORIZON PO is the Fulfil PO's linked PO, else the
+// PO whose number is the Fulfil PO's reference. Only fills POs with no Xero link yet (or an 'unknown' one); never replaces a link. Client POs
+// of a master PO are not linked here: their Fulfil PO number -> Xero bill goes to app_settings 'fulfil_bill_xero_map' for _fgBillsFor.
+const FF_BILL_REGION = { 1: 'uk', 3: 'au' };   // Fulfil company -> Xero org
+async function fulfilBillPoLinks() {
+  const cfg = fulfilConfigFor('live'); if (!cfg.configured) return { skipped: 'Fulfil live not configured' };
+  const since = new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10), bills = [];
+  for (let off = 0; off < 5000; off += 500) {
+    const rows = await fulfilFetchCfg(cfg, 'PUT', '/model/account.invoice/search_read', [[['type', '=', 'in'], ['state', 'in', ['posted', 'paid']], ['invoice_date', '>=', since]], off, 500, null, ['id', 'number', 'reference', 'company', 'total_amount', 'purchases']]);
+    (rows || []).forEach(r => { if ((r.purchases || []).length && FF_BILL_REGION[r.company] && String(r.reference || '').trim()) bills.push(r); });
+    if (!rows || rows.length < 500) break; }
+  const out = { bills: bills.length, matched: 0, linked: [], kept: [], ambiguous: [], no_xero: [], group: 0 };
+  if (!bills.length) return out;
+  const pIds = [...new Set(bills.flatMap(b => b.purchases))], purch = {};
+  for (let i = 0; i < pIds.length; i += 300) (await fulfilFetchCfg(cfg, 'PUT', '/model/purchase.purchase/search_read', [[['id', 'in', pIds.slice(i, i + 300)]], 0, 300, null, ['id', 'number', 'reference', 'state']]) || []).forEach(p => { purch[p.id] = p; });
+  const refs = [...new Set(bills.map(b => String(b.reference).trim().toUpperCase()))];
+  const xb = (await pool.query(`SELECT invoice_id, lower(region) region, invoice_number, reference, total::float8 total FROM planner.xero_bills WHERE upper(coalesce(status,'')) NOT IN ('VOIDED','DELETED')
+      AND (upper(trim(invoice_number)) = ANY($1::text[]) OR upper(trim(reference)) = ANY($1::text[]))`, [refs])).rows;
+  const ffLink = {}; (await pool.query(`SELECT po, external_id FROM planner.po_links WHERE system='fulfil' AND status='linked' AND external_id = ANY($1::text[])`, [pIds.map(String)])).rows.forEach(r => { ffLink[r.external_id] = r.po; });
+  const pRefs = [...new Set(Object.values(purch).map(p => String(p.reference || '').trim()).filter(Boolean))];
+  const known = new Set(pRefs.length ? (await pool.query(`SELECT po FROM planner.purchase_orders WHERE po = ANY($1::text[])`, [pRefs])).rows.map(r => r.po) : []);
+  const inGroup = new Set((await pool.query(`SELECT fulfil_id FROM planner.po_fulfil_group WHERE fulfil_id = ANY($1::bigint[])`, [pIds]).catch(() => ({ rows: [] }))).rows.map(r => Number(r.fulfil_id)));
+  const cand = {}, gmap = {};   // HORIZON PO -> { bill id -> { bill, ff } }; Fulfil PO number -> { invoice_id, region }
+  bills.forEach(b => { const ref = String(b.reference).trim().toUpperCase(), region = FF_BILL_REGION[b.company], tot = Number((b.total_amount && b.total_amount.decimal) != null ? b.total_amount.decimal : b.total_amount) || 0;
+    const hit = xb.filter(x => x.region === region && (String(x.invoice_number || '').trim().toUpperCase() === ref || String(x.reference || '').trim().toUpperCase() === ref) && Math.abs((Number(x.total) || 0) - tot) < 0.02);
+    if (hit.length !== 1) { (hit.length ? out.ambiguous : out.no_xero).push(region.toUpperCase() + ' ' + b.reference + ' (Fulfil ' + b.number + ')'); return; }
+    out.matched++;
+    b.purchases.forEach(pid => { const p = purch[pid]; if (!p || /^cancel/.test(p.state || '')) return;
+      if (inGroup.has(Number(pid))) { gmap[p.number] = { invoice_id: hit[0].invoice_id, region }; out.group++; return; }
+      const po = ffLink[String(pid)] || (known.has(String(p.reference || '').trim()) ? String(p.reference).trim() : null); if (!po) return;
+      ((cand[po] = cand[po] || {})[hit[0].invoice_id] = { bill: hit[0], ff: b }); }); });
+  try { await pool.query(`INSERT INTO planner.app_settings (key, value, updated_by, updated_at) VALUES ('fulfil_bill_xero_map', $1, 'fulfil-bill sync', now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [JSON.stringify(gmap)]); _ffBillMap = { at: Date.now(), map: gmap }; } catch (e) { console.warn('[fulfil-bills] map save failed: ' + e.message); }
+  const pos = Object.keys(cand); if (!pos.length) return out;
+  const cur = {}; (await pool.query(`SELECT po, status, external_id FROM planner.po_links WHERE system='xero' AND po = ANY($1::text[])`, [pos])).rows.forEach(r => { cur[r.po] = r; });
+  for (const po of pos) { const opts = Object.values(cand[po]);
+    if (opts.length > 1) { out.ambiguous.push(po + ': on ' + opts.length + ' Fulfil bills (' + opts.map(o => o.bill.region.toUpperCase() + ' ' + o.bill.invoice_number).join(', ') + '), link by hand'); continue; }
+    const c = cur[po], o = opts[0]; if (c && c.status !== 'unknown') { if (c.external_id !== o.bill.invoice_id) out.kept.push(po); continue; }
+    const n = o.ff.purchases.length, note = o.bill.region.toUpperCase() + ', Fulfil bill ' + o.ff.number + (n > 1 ? ' (' + n + ' POs on one bill)' : '');
+    await pool.query(`INSERT INTO planner.po_links (po, system, external_id, external_ref, url, status, note, found_by, found_at, updated_at) VALUES ($1,'xero',$2,$3,$4,'linked',$5,'fulfil-bill',now(),now())
+      ON CONFLICT (po, system) DO UPDATE SET external_id=$2, external_ref=$3, url=$4, status='linked', note=$5, found_by='fulfil-bill', updated_at=now() WHERE planner.po_links.status='unknown'`,
+      [po, o.bill.invoice_id, o.bill.invoice_number, 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + o.bill.invoice_id, note]);
+    out.linked.push(po + ' -> ' + o.bill.region.toUpperCase() + ' ' + o.bill.invoice_number); }
+  if (out.linked.length) { _xeroExcCache = { at: 0, data: null }; swrDrop('xero:exc'); xeroPreflightBust(); }
+  return out;
+}
+let _ffBillMap = { at: 0, map: null };
+async function _ffBillMapGet() {   // Fulfil PO number -> { invoice_id, region } for client POs on merged Fulfil bills (60 s memo)
+  if (_ffBillMap.map && Date.now() - _ffBillMap.at < 60000) return _ffBillMap.map;
+  let m = {}; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fulfil_bill_xero_map'`)).rows[0]; m = r && r.value ? JSON.parse(r.value) : {}; } catch (_) {}
+  _ffBillMap = { at: Date.now(), map: m }; return m;
+}
 const XB_VOID_NOTE = 'linked bill voided: choose a bill';
 // Heal the Xero links of the given POs whose linked bill is VOIDED/DELETED. opts.live: first re-read the linked bills in
 // Xero (and, for a dead one, search both orgs for the PO's bills); otherwise the cache decides. Replacement = exactly ONE
