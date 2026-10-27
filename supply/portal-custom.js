@@ -5,6 +5,8 @@
 // the production zip is replaced by a file list (full quality TIFFs make one zip GBs): every file with downloaded / not downloaded
 // (recorded by the Customiser), Download remaining / ticked / one, made and downloaded ONE AT A TIME through ?link=1 (the browser
 // fetches each file straight from storage, nothing large passes through HORIZON). Lines cancelled by the customer show as such.
+// v28.518 (Ben 27-Oct-26: suppliers "can also create a batch"; "supplier can choose, or choose all"): Ready to batch, the lines waiting
+// for this supplier, with Create batch from ticked / with all. The new batch starts accepted and in production (one batch per node).
 // Data comes through HORIZON's proxy to the Customiser (server.mjs custProxy): /api/portal/custom/* for suppliers,
 // /api/supply/custom-portal/<supplier>/* for the staff preview. Used by supply/portal.html and the CONFIG ▸ Portal preview in inject.html.
 (function () {
@@ -28,7 +30,7 @@
 
   // opts: { base: '/api/portal/custom/' (ends with /), canWrite: bool, onCount: fn(n) }
   function render(host, opts) {
-    var base = opts.base, ST = { list: null, open: null, flagLabel: {}, files: null, done: {}, fst: {}, ferr: {}, pick: {}, running: false, stop: false };
+    var base = opts.base, ST = { list: null, open: null, flagLabel: {}, waiting: null, wpick: {}, files: null, done: {}, fst: {}, ferr: {}, pick: {}, running: false, stop: false };
     if (!document.getElementById('hzc-css')) { var st = document.createElement('style'); st.id = 'hzc-css'; st.textContent = CSS; document.head.appendChild(st); }
     function api(path, body) {
       return fetch(base + path, body === undefined ? { headers: { accept: 'application/json' } } : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -36,14 +38,15 @@
     }
     function loadList() {
       host.innerHTML = '<div class="hzc"><div class="hzc-msg">Loading custom orders…</div></div>';
-      api('batches').then(function (j) { ST.list = j.batches || []; ST.flagLabel = j.flag_label || {}; ST.example = j.example; drawList(); })
+      Promise.all([api('batches'), api('waiting').catch(function () { return { lines: [] }; })]).then(function (r) { var j = r[0]; ST.list = j.batches || []; ST.flagLabel = j.flag_label || {}; ST.example = j.example; ST.waiting = r[1].lines || []; ST.wpick = {}; drawList(); })
         .catch(function (e) { host.innerHTML = '<div class="hzc"><div class="hzc-msg err">' + esc(e.message) + '</div></div>'; });
     }
     function drawList() {
       var L = ST.list, todo = L.filter(function (b) { return b.status === 'sent' || b.status === 'confirmed' || (b.status === 'made' && b.n_awb < Math.max(1, b.n_cartons)); }).length;
       if (opts.onCount) opts.onCount(todo);
-      var h = '<div class="hzc"><div class="hzc-card"><h3>Custom orders</h3><div class="hzc-mut2">Personalised towels from the Dock &amp; Bay Customiser. A new batch arrives every Tuesday: accept it by Wednesday, make it within the week (by the due Tuesday), then enter the cartons with their DHL AWB.' + (ST.example ? ' <b>These are example batches for testing.</b>' : '') + '</div></div>';
-      if (!L.length) { host.innerHTML = h + '<div class="hzc-msg">No custom order batches yet.</div></div>'; return; }
+      var h = '<div class="hzc"><div class="hzc-card"><h3>Custom orders</h3><div class="hzc-mut2">Personalised towels from the Dock &amp; Bay Customiser. Make a batch from the lines ready to batch (or accept one Dock &amp; Bay sends you), make it within the week, then enter the cartons with their DHL AWB.' + (ST.example ? ' <b>These are example batches for testing.</b>' : '') + '</div></div>';
+      h += waitingCard();
+      if (!L.length) { host.innerHTML = h + '<div class="hzc-msg">No custom order batches yet.</div></div>'; wireWaiting(); return; }
       h += '<div class="hzc-card hzc-scroll"><table><thead><tr><th>PO</th><th>Tuesday</th><th>Accept by</th><th>Made by</th><th>Lines</th><th>Towels</th><th>Progress</th><th>Cartons</th><th>Status</th></tr></thead><tbody>';
       L.forEach(function (b) {
         var flags = (b.flags || []).map(function (f) { return pill('neg', ST.flagLabel[f] || f); }).join(' ');
@@ -53,6 +56,30 @@
       });
       host.innerHTML = h + '</tbody></table></div></div>';
       host.querySelectorAll('tr.hzc-row').forEach(function (tr) { tr.onclick = function () { openBatch(tr.dataset.id); }; });
+      wireWaiting();
+    }
+    // ── ready to batch (v28.518) ──
+    function waitingCard() {
+      var W = ST.waiting || [], ro = !opts.canWrite; if (!W.length) return '<div class="hzc-card"><h3>Ready to batch</h3><div class="hzc-mut2">No lines are waiting. New custom orders appear here once they are approved.</div></div>';
+      var n = W.filter(function (l) { return ST.wpick[l.id]; }).length, towels = W.reduce(function (a, l) { return a + (l.qty || 0); }, 0);
+      var h = '<div class="hzc-card hzc-scroll"><h3>Ready to batch: ' + W.length + ' line' + (W.length === 1 ? '' : 's') + ', ' + towels + ' towel' + (towels === 1 ? '' : 's') + '</h3>'
+        + '<div class="hzc-mut2">Make a batch from the lines you choose, or all of them. It starts accepted and in production; download the files from the batch.</div>'
+        + '<div class="hzc-row2"><button class="hzc-btn pri" data-wall' + (ro ? ' disabled' : '') + '>Create batch with all (' + W.length + ')</button><button class="hzc-btn" data-wtick' + (ro || !n ? ' disabled' : '') + '>Create batch from ticked (' + n + ')</button><span class="hzc-msg" data-wm></span></div>'
+        + '<table><thead><tr><th><input type="checkbox" data-wallpick aria-label="Tick all"' + (n === W.length ? ' checked' : '') + '></th><th>Order</th><th>Ordered</th><th>Towel</th><th>Design</th><th>Qty</th><th>Goes to</th></tr></thead><tbody>';
+      W.forEach(function (l) { h += '<tr><td><input type="checkbox" data-wpick="' + esc(l.id) + '" aria-label="Tick ' + esc(l.external_ref) + '"' + (ST.wpick[l.id] ? ' checked' : '') + '></td><td>' + esc(l.external_ref || '') + '<div class="hzc-mut2">' + esc(l.market || '') + '</div></td><td>' + fd(l.ordered_at) + '</td>'
+        + '<td>' + esc(l.product_name || l.product_code) + '</td><td>' + esc(l.design || l.kind || '') + '</td><td>' + (l.qty || 0) + '</td><td class="hzc-mut2">' + esc(l.via_node ? 'carton to ' + l.via_node : l.node === 'CHINA_DIRECT' ? 'DHL direct to the customer' : '') + '</td></tr>'; });
+      return h + '</tbody></table></div>';
+    }
+    function wireWaiting() {
+      var W = ST.waiting || [];
+      var al = q('[data-wallpick]'); if (al) al.onchange = function () { W.forEach(function (l) { ST.wpick[l.id] = al.checked; }); drawList(); };
+      host.querySelectorAll('[data-wpick]').forEach(function (c) { c.onchange = function () { ST.wpick[c.dataset.wpick] = c.checked; drawList(); }; });
+      function create(body, btn) { var m = q('[data-wm]'); if (!opts.canWrite) { m.className = 'hzc-msg err'; m.textContent = 'Read only: SUPPLY edit rights are needed to change this in the preview.'; return; }
+        btn.disabled = true; m.className = 'hzc-msg'; m.textContent = 'Creating the batch…';
+        api('batches/create', body).then(function (j) { var bs = j.batches || []; if (bs.length === 1) openBatch(bs[0].batch_id); else loadList(); })
+          .catch(function (e) { btn.disabled = false; m.className = 'hzc-msg err'; m.textContent = e.message; }); }
+      var a = q('[data-wall]'); if (a) a.onclick = function () { create({ all: true }, a); };
+      var t = q('[data-wtick]'); if (t) t.onclick = function () { create({ line_ids: W.filter(function (l) { return ST.wpick[l.id]; }).map(function (l) { return l.id; }) }, t); };
     }
     function openBatch(id) {
       host.innerHTML = '<div class="hzc"><div class="hzc-msg">Loading the batch…</div></div>';

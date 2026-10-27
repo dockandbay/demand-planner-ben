@@ -1,3 +1,10 @@
+## v28.518 (27-Oct-26) Custom orders: the supplier makes its own batch
+- Ben: suppliers "can also create a batch"; "supplier can choose, or choose all"; supplier side focus is the HORIZON supplier portal.
+- ORDERS > Custom orders list: a Ready to batch card lists the custom order lines waiting for this supplier (order, date, towel, design, qty, where the carton goes; no prices or customer details). Tick lines and Create batch from ticked, or Create batch with all. The batch is made in the Customiser (one per factory node), starts accepted and in production, and opens so the files can be downloaded.
+- server.mjs custProxy: allows GET `waiting` and POST `batches/create` ({ line_ids } or { all: true }).
+- Check (jsdom, stubbed proxy): card shows 2 lines / 4 towels, ticked create posts the line ids, create all posts all:true, the new batch opens, read-only preview cannot create. v28.517 checks still pass.
+- Deploy: no new env vars, no migration. Needs the Customiser with GET /api/horizon/supplier/waiting and POST /api/horizon/supplier/batches/create (Customiser commit after cbae711, 27-Oct-26). Without it the card shows "No lines are waiting".
+
 ## v28.517 (27-Oct-26) Custom orders: production file list (no zip); cancelled lines shown
 - Ben: "a batch download should be controlled via a download modal, controlling which files are already downloaded or which need to be downloaded and importing one at a time" and "the supplier will be the ones downloading". Lixin needs TIFF at full quality, so one batch zip would run to GBs.
 - Supplier portal ORDERS > Custom orders, batch view: "Production files (zip)" replaced by a Production files list. Every file (front / back TIFF or PDF, pouch labels, manifest) with Downloaded (date) or Not downloaded, from the Customiser's own record (so it survives a reload); Download remaining, Download ticked, or one file; files are made and downloaded one at a time, with Stop.

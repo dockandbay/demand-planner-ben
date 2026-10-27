@@ -18076,6 +18076,26 @@ app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
   try { await pool.query(`UPDATE planner.supplier_submissions SET status='dismissed' WHERE id=$1`, [req.params.id]); res.json({ dismissed: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v28.517 (Ben 27-Oct-26: "any way to have a preview of each uploaded file saved for hover over visibility?"): hover previews for any
+// attachment link. GET answers the saved preview (portal_attachments.thumb, made at upload since v27.708), redirects an image with no
+// preview to the file itself, else 404 {make:true, mime, bytes} so the browser renders page 1 (pdf.js) once and POSTs it back; saved only
+// when the file has no preview yet (an upload-time one is never replaced), PNG / JPEG data URL up to 600 KB.
+app.get('/api/supply/portal-attachment/:id/thumb', staffOnly, async (req, res) => {
+  try { const r = (await pool.query(`SELECT thumb, thumb_mime, mime, coalesce(byte_size, octet_length(data), 0)::bigint bytes FROM planner.portal_attachments WHERE id=$1`, [Number(req.params.id) || 0])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    if (r.thumb) { res.setHeader('Content-Type', r.thumb_mime || 'image/png'); res.setHeader('Cache-Control', 'private, max-age=86400'); return res.end(r.thumb); }
+    if (/^image\//i.test(r.mime || '')) return res.redirect(302, '/api/supply/portal-attachment/' + Number(req.params.id));
+    res.status(404).json({ make: /pdf/i.test(r.mime || ''), mime: r.mime || '', bytes: Number(r.bytes) || 0 });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/portal-attachment/:id/thumb', async (req, res) => {
+  try { const m = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/.exec(String((req.body && req.body.data_url) || ''));
+    if (!m) return res.status(400).json({ error: 'a PNG or JPEG data URL is required' });
+    const buf = Buffer.from(m[2], 'base64'); if (buf.length > 600 * 1024) return res.status(400).json({ error: 'preview too large' });
+    const r = await pool.query(`UPDATE planner.portal_attachments SET thumb=$2, thumb_mime=$3 WHERE id=$1 AND thumb IS NULL`, [Number(req.params.id) || 0, buf, m[1]]);
+    res.json({ ok: true, saved: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/portal-attachment/:id', staffOnly, async (req, res) => {   // v28.186 (Ben, C2): staff only; the portal uses /api/portal/attachment/:id
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
@@ -33331,8 +33351,8 @@ app.post('/api/portal/logout', async (req, res) => {
 // the signed-in portal session (never from the browser) and the user's email; the Customiser maps names to its suppliers
 // (custom.suppliers.horizon_supplier, set in Customiser ops ▸ Settings ▸ Production files) and applies its own portal rules, so saving
 // an AWB still ships the orders and emails the customers there. Staff see the same tab in CONFIG ▸ Portal preview (writes need SUPPLY edit).
-const CUST_PATH_RE = /^(status|batches|batches\/[0-9a-f-]{36}(\/(respond|lines|photo|made|cartons|po|artwork|production))?|files\/[0-9a-f-]{36})$/i;
-const CUST_POST_RE = /^batches\/[0-9a-f-]{36}\/(respond|lines|photo|made|cartons)$/i;
+const CUST_PATH_RE = /^(status|waiting|batches|batches\/create|batches\/[0-9a-f-]{36}(\/(respond|lines|photo|made|cartons|po|artwork|production))?|files\/[0-9a-f-]{36})$/i;
+const CUST_POST_RE = /^batches\/(create|[0-9a-f-]{36}\/(respond|lines|photo|made|cartons))$/i;   // create: v28.518 the supplier makes a batch
 function custConfigured() { return !!(process.env.CUSTOMISER_API_URL && String(process.env.CUSTOMISER_API_KEY || '').length >= 24); }
 async function custProxy(req, res, suppliers, actor, path) {
   if (!CUST_PATH_RE.test(path)) return res.status(404).json({ error: 'not found' });
