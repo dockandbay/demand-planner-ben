@@ -40,3 +40,11 @@ Result: 18 PDFs uploaded (0.2 to 39 MB), 18 notes linked. The two Garden Prep To
 - Sample versions: one per sample date per item, colourways listed together (Pantry Party, Hot Off The Vine, Morning Matcha Club, Good To Grow each had 2 to 4 same-date versions; now 1).
 - Timeline: a message posted on two colourways of one item (same author, same text apart from the PDF name) is one note naming both designs and listing both PDFs.
 - `tt_fix_2026-10-23.cjs` (sandbox only) cleared the old samples / notes of those 4 items and moved the 2 PDFs; then tt_import.cjs + tt_files.cjs were re-run. Sandbox now: 17 items, 17 requests, 12 sample versions. For live, only the fixed tt_import.cjs + tt_files.cjs are needed (no fix script).
+
+## LIVE 27-Oct-26 (Ben: "you can push monday data into live after the next commit", after v28.520)
+- The live write connection string was refused (password) and the LIVE_DATABASE_URL role may not insert into PRODUCT tables, so the import ran through the Supabase connection as SQL made by `tt_live_sql.cjs` from tt_data.json (same logic as tt_import.cjs; every row looked up by ref and guarded, so a re-run adds nothing), in 4 chunks, each one all-or-nothing DO block. The generated SQL is not kept in git (it holds the monday message text); regenerate with `node tt_live_sql.cjs tt_data.json > tt_live.sql`.
+- Checked first: the sandbox already holds all of it, and the SQL run there inside a rolled-back transaction added 0 rows.
+- Live before → after: items 9 → 17, Lixin requests 1 → 17 (all Draft), sample versions 0 → 12, monday notes 0 → 32, components 3 → 19. No duplicate sample dates, no duplicate notes, all notes read.
+- The monday board was re-read 27-Oct-26: no 2nd+ sample dates and no changes since tt_data.json (23-Oct).
+- NOT done on live: the design PDFs (tt_files.cjs). It needs live Supabase storage (URL + service role key of the live project), not in .env. Once added, run tt_files.cjs against live; it uploads the PDFs and links them to these notes.
+- tt_import.cjs now also accepts `--live` with TT_LIVE_OK=1 (refuses otherwise).

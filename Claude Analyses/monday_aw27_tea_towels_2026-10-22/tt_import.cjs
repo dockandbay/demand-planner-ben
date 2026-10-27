@@ -4,7 +4,9 @@ require('dotenv').config({ quiet: true });
 const { Client } = require('pg'); const fs = require('fs');
 const DATA = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const DRY = process.argv.includes('--dry');
-if (/oolwklahstnvocaugryg/.test(process.env.DATABASE_URL || '')) { console.error('REFUSING: DATABASE_URL points at LIVE'); process.exit(1); }
+// 27-Oct-26 (Ben: "you can push monday data into live after the next commit"): live only with --live AND TT_LIVE_OK=1; then DATABASE_URL must be live.
+const LIVE = process.argv.includes('--live') && process.env.TT_LIVE_OK === '1';
+if (/oolwklahstnvocaugryg/.test(process.env.DATABASE_URL || '') !== LIVE) { console.error(LIVE ? 'REFUSING: --live but DATABASE_URL is not live' : 'REFUSING: DATABASE_URL points at LIVE (use --live with TT_LIVE_OK=1)'); process.exit(1); }
 const LIVE_ITEMS = [  // copied from live (read-only query 22-Oct-26)
   ['AW27-TEATO-CHRISTMAS','Christmas',null,'set of three xmas tea towels',9,'libby@dockandbay.com'],
   ['AW27-TEATO-PANTRYPARTY','PANTRY PARTY','PANTRY PARTY','TEA TOWEL PRINT',7,'sofia@dockandbay.com'],
