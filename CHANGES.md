@@ -1,3 +1,9 @@
+## v28.561 (28-Oct-26) DEMAND Exceptions: full SKUs, Apply per row
+- Ben: "skus are a bit cut off in exception report, they should never cut off, and a little apply button on each row next to proposal column".
+- The SKU column no longer clips: the page-wide table rules (fixed layout, hidden overflow) squeezed it to about 180px; the Exceptions table now sizes to the longest SKU (checked: 0 clipped on Forecast < Actual, Forecast > Run-rate, Selling no forecast).
+- Forecast < Actual and Forecast > Run-rate: an Apply button next to each Proposal sets that SKU's current-month forecast (one undo step; the row stays on screen as UPDATED).
+- No new env vars, migrations or cron routes.
+
 ## v28.560 (28-Oct-26) DEMAND Exceptions: accept proposals, undo, whole numbers, MTD
 - Katherine's feedback (via Ben); tick layout picked from a mockup.
 - Forecast < Actual and Forecast > Run-rate: new Proposal column (this month's run-rate rounded up, never below actual). Tick SKUs or tick all, then "Accept proposal (n)" sets the current-month forecast for every ticked SKU in one step. The Override box stays for another number.

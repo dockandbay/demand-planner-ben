@@ -41,7 +41,7 @@ sources:
   - server.mjs :: biConsolidations
 fingerprints:
   artifact_v16.7.html::renderKlaviyoBisView: 11d050a5f9ac
-  artifact_v16.7.html::renderExceptionsView: c44edd2fbdd2
+  artifact_v16.7.html::renderExceptionsView: bca129e0a8d4
   artifact_v16.7.html::skuMonthlyMap: ae7c95a355f4
   artifact_v16.7.html::renderDemandActionsView: 1de6fa6286fd
   artifact_v16.7.html::daClientDetectors: 57025c59e925
@@ -78,7 +78,7 @@ fingerprints:
   server.mjs::biReallocations: f0f5e04b882e
   server.mjs::biContainerFill: 029cb0d37134
   server.mjs::biConsolidations: 4575240948b1
-verified_version: v28.560
+verified_version: v28.561
 ---
 ## DEMAND Exceptions: shared rules
 - Nine sub-tabs: Forecast < Actual, Forecast > Run-rate, Selling no forecast, Forecast anomalies, No availability, Available no cover, Discontinued active, Recommendations, Data & config. (source: artifact_v16.7.html :: renderExceptionsView)
@@ -98,7 +98,7 @@ verified_version: v28.560
 - RED = forecast > 0 and actual >= forecast. The buy plan then assumes 0 further demand this month.
 - AMBER = actual < forecast but run-rate > forecast.
 - Delta = actual minus forecast.
-- Proposal (v28.560, Katherine) = this month's run-rate rounded up (never below actual), so accepting it clears the exception. Tick SKUs (or tick all shown) and press Accept proposal: the current-month SKU forecast is set to the Proposal for every ticked row, as one undo step. The inline override sets a different number.
+- Proposal (v28.560, Katherine) = this month's run-rate rounded up (never below actual), so accepting it clears the exception. Tick SKUs (or tick all shown) and press Accept proposal: the current-month SKU forecast is set to the Proposal for every ticked row, as one undo step. Apply next to a row's Proposal does the same for that one SKU (v28.561). The inline override sets a different number.
 
 ## Exceptions: Forecast > Run-rate
 - Fires only if forecast > 0, actual > 0, and at least 34% of the month has elapsed.

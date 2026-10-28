@@ -13367,7 +13367,7 @@ function renderExceptionsView(body){
       if(isSku)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',co:co,ch:ch,fc:fc,act:act,run:run,prop:Math.max(act,Math.ceil(run-1e-9)),tk:sku+'|'+co+'|'+ch,status:status,delta:delta});   // v28.560 proposal = this month's run-rate
       else { var k=co+'|'+ch+'|'+(_catOf(sku)); var g=catMap[k]||(catMap[k]={path:[co,ch],label:_catOf(sku),co:co,ch:ch,fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; } });
     if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; g.run=elapsed>0?(g.act/elapsed*total):g.act; if(EXC_SUBTAB==='fgtr'){g.delta=g.fc-g.run;g.status=(g.fc>0&&g.act>0&&frac>=0.34)?(g.run<g.fc*0.5?'RED':(g.run<g.fc*0.75?'AMBER':'')):'';} else {g.delta=g.act-g.fc;g.status=(g.fc>0&&g.act>=g.fc)?'RED':((g.fc>0&&g.run>g.fc&&g.act<g.fc)?'AMBER':'');} if(g.status)flat.push(g); });
-    flat.forEach(function(r){ var _g=Math.round(r.delta||0); r.vals=[fn(r.fc)].concat(hasOv?['<b>'+fn(r.prop)+'</b>',ovCell(r)]:[]).concat([fn(r.act),fn(r.run),(_g>0?'+':'')+fn(_g)]); });   // v28.435 (Ben): Gap = what Min gap filters on (fclt: actual − forecast; fgtr: forecast − run-rate)
+    flat.forEach(function(r){ var _g=Math.round(r.delta||0); r.vals=[fn(r.fc)].concat(hasOv?['<span style="white-space:nowrap"><b>'+fn(r.prop)+'</b><button class="exc-ap1" data-tk="'+esc(r.tk)+'" title="Set '+esc(curLbl)+' forecast to '+fn(r.prop)+'" style="font-size:10.5px;font-weight:700;border:1px solid var(--blue);background:var(--card);color:var(--blue);border-radius:4px;padding:0 6px;margin-left:6px;cursor:pointer">Apply</button></span>',ovCell(r)]:[]).concat([fn(r.act),fn(r.run),(_g>0?'+':'')+fn(_g)]); });   // v28.435 (Ben): Gap = what Min gap filters on (fclt: actual − forecast; fgtr: forecast − run-rate)
     return {rows:flat, ticks:hasOv, cols:['Forecast'].concat(hasOv?['Proposal','Override']:[]).concat(['Actual ('+curLbl+')','Run-rate','Gap'])};
   }
   function buildNoAvail(){ var flat=[], catMap={};
@@ -13521,7 +13521,7 @@ function renderExceptionsView(body){
   rows.forEach(function(r){ var node=tree; (r.path||['(all)']).forEach(function(k){ node.__c=node.__c||{}; node=node.__c[k]||(node.__c[k]={__k:k}); }); (node.__rows=node.__rows||[]).push(r); });
   function agg(node){ var a={red:0,amber:0}; if(node.__rows)node.__rows.forEach(function(r){ if(r.status==='RED')a.red++; else if(r.status==='AMBER')a.amber++; }); if(node.__c)Object.keys(node.__c).forEach(function(k){ var c=agg(node.__c[k]); a.red+=c.red; a.amber+=c.amber; }); return a; }
   function leaf(r,depth){ var pl=8+depth*16;
-    return '<tr><td style="'+TL+';padding-left:'+pl+'px;padding-right:28px;min-width:260px;font-weight:600;white-space:nowrap">'+(TICKS&&r.tk?'<input type="checkbox" class="exc-tk" data-tk="'+esc(r.tk)+'"'+(EXC_TICK.has(r.tk)?' checked':'')+' aria-label="Tick '+esc(r.label)+'" style="margin:0 8px 0 0;vertical-align:-2px">':'')+esc(r.label)+'</td>'
+    return '<tr><td style="'+TL+';padding-left:'+pl+'px;padding-right:28px;min-width:260px;font-weight:600;white-space:nowrap;overflow:visible">'+(TICKS&&r.tk?'<input type="checkbox" class="exc-tk" data-tk="'+esc(r.tk)+'"'+(EXC_TICK.has(r.tk)?' checked':'')+' aria-label="Tick '+esc(r.label)+'" style="margin:0 8px 0 0;vertical-align:-2px">':'')+esc(r.label)+'</td>'
       +(r.vals||[]).map(function(v){return '<td style="'+TC+'">'+v+'</td>';}).join('')
       +'<td style="'+TC+'">'+chipOf(r.status)+'</td></tr>'; }
   var treeHtml='';
@@ -13536,7 +13536,7 @@ function renderExceptionsView(body){
     +'<a href="#/supply/config/mfgbom" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--violet);background:var(--violet-bg);border:1px solid #ddd6fe;border-radius:6px;padding:6px 12px;text-decoration:none">&#8593; Upload BOM &mdash; CONFIG &#9656; BOM</a>'
     +'<span style="font-size:11px;color:var(--faint)">Map set SKUs to their components on the <b>Build on Fly Sets</b> tab (and prepacks on <b>Prepack sets</b>).</span></div>'):'';
   body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend+dcBanner
-    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+headHtml+treeHtml+'</table></div>')
+    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;table-layout:auto;border-collapse:collapse;font-size:12.5px">'+headHtml+treeHtml+'</table></div>')
       :'<div style="color:var(--faint);font-size:13px;padding:24px;text-align:center">'+(built.loadingData?'Loading…':'No exceptions for this selection.')+'</div>')
     +'</div>';
   body.querySelectorAll('.exc-mkt').forEach(function(b){ b.onclick=function(){ EXC_MKT=b.dataset.v; renderExceptionsView(body); }; });
@@ -13550,6 +13550,9 @@ function renderExceptionsView(body){
   var _acc=body.querySelector('.exc-accept'); if(_acc)_acc.onclick=function(){ var ks=Array.from(EXC_TICK).filter(function(k){ return shownTk[k]; }); if(!ks.length)return;
     try{ undoMark(); }catch(e){} var n=0; ks.forEach(function(k){ var r=shownTk[k]; EXC_KEEP.add(k); try{ skuCommitOv(k+'|'+_cm, String(r.prop), r.fc||0); n++; }catch(e){} });
     try{ undoLabel('accept proposal for '+n+' SKU'+(n===1?'':'s')); }catch(e){} try{ markDirty(); }catch(e){} EXC_TICK.clear(); EXC_MSG='Accepted '+n+' proposal'+(n===1?'':'s')+' ('+curLbl+'); saving'; renderExceptionsView(body); };
+  body.querySelectorAll('.exc-ap1').forEach(function(b){ b.onclick=function(){ var k=b.dataset.tk, r=shownTk[k]; if(!r)return;   // v28.561 (Ben): apply one row's proposal
+    try{ undoMark(); }catch(e){} EXC_KEEP.add(k); try{ skuCommitOv(k+'|'+_cm, String(r.prop), r.fc||0); }catch(e){} try{ undoLabel('apply proposal '+r.label); }catch(e){} try{ markDirty(); }catch(e){}
+    EXC_TICK.delete(k); EXC_MSG='Applied '+r.label+' ('+curLbl+' '+fn(r.prop)+'); saving'; renderExceptionsView(body); }; });
   var _und=body.querySelector('.exc-undo'); if(_und)_und.onclick=function(){ if(!_UNDO.length)return; try{ undoApply(); }catch(e){} EXC_MSG='Undone'; renderExceptionsView(body); };
   var excInt=function(inp){ var v=inp.value.replace(/[,\s]/g,''); if(v==='')return null; if(!/^\d+$/.test(v)){ inp.style.borderColor='var(--neg)'; inp.value=''; inp.placeholder='whole no.'; EXC_MSG=''; var w=body.querySelector('.exc-warn'); if(w){ w.textContent='Not saved: "'+inp.value+String(v).slice(0,12)+'" is not a whole number of units'; w.hidden=false; } return null; } return v; };
   body.querySelectorAll('.exc-ov').forEach(function(inp){ inp.onchange=function(){ var v=excInt(this); if(v==null)return; try{ undoMark(); }catch(e){} EXC_KEEP.add(this.dataset.sku+'|'+this.dataset.co+'|'+this.dataset.ch);
