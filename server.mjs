@@ -6119,6 +6119,17 @@ let _fulfilImportBusy = null;   // v28.116 (review S9): single-flight — the 6h
 function ffRefPo(ref, has) { const r = String(ref || '').trim(); if (!r) return null; const tail = (r.split(/[\/|]/).pop() || '').trim();
   const bare = x => x.replace(/\s*\(.*$/, '').trim().split(/\s+/)[0] || '';
   for (const c of [r, tail, bare(r), bare(tail)]) if (c && has(c)) return c; return null; }
+// v28.535 (Ben 28-Oct-26, PO-1892095 - PO475: "no invoice due date but the balance defaults to the production end date ... this supplier has terms"):
+// a PO with a supplier NAME but no supplier_id gets none of that supplier's terms (deposit / balance %, credit days, production days), so dates
+// and payments fall back to defaults. Link it to the supplier of exactly that name (case / spaces ignored). Runs on every PO save and every
+// Fulfil refresh; po limits it to one PO. Returns the POs fixed.
+async function poSupplierIdHeal(po) {
+  try { return (await pool.query(`UPDATE planner.purchase_orders p SET supplier_id = s.id FROM planner.suppliers s
+      WHERE p.supplier_id IS NULL AND coalesce(trim(p.supplier_name),'') <> '' AND lower(trim(s.name)) = lower(trim(p.supplier_name))
+        AND (SELECT count(*) FROM planner.suppliers s2 WHERE lower(trim(s2.name)) = lower(trim(p.supplier_name))) = 1
+        AND ($1::text IS NULL OR p.po = $1) RETURNING p.po`, [po || null])).rows.map(r => r.po); }
+  catch (e) { console.error('[supplier heal]', e && e.message); return []; }
+}
 async function fulfilImportPOs() { if (_fulfilImportBusy) return _fulfilImportBusy; _fulfilImportBusy = _fulfilImportPOsRun().finally(() => { _fulfilImportBusy = null; }); return _fulfilImportBusy; }
 async function _fulfilImportPOsRun() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
@@ -6157,6 +6168,7 @@ async function _fulfilImportPOsRun() {
   // the other Fulfil tenant). Guarded: only when this run imported at least 20 POs, so a failed / partial fetch never empties the mirror.
   // v28.151 (review D8): never prune off a truncated pull (the 50k cap would delete every PO past the cap).
   let pruned = 0; if (n >= 20 && !list.truncated) { const keep = list.filter(p => p._po).map(p => String(p._po)).concat([..._gPos]); pruned = (await pool.query(`DELETE FROM planner.fulfil_purchase_orders WHERE NOT (po = ANY($1::text[]))`, [keep])).rowCount; }
+  const _supHealed = await poSupplierIdHeal(); if (_supHealed.length) { console.log('[supplier heal] linked supplier on ' + _supHealed.join(', ')); try { invalidateSupplyCaches('po'); } catch (_) {} }   // v28.535
   let erp = null; if (!list.truncated) { try { erp = await fulfilErpQtyFromMirror(); } catch (e) { erp = { ok: false, error: e.message }; } }
   return { ok: true, imported: n, pruned, env: cfg.env, truncated: !!list.truncated, erp_qty: erp };
 }
@@ -23250,6 +23262,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
   if (_trackKeys.length) { try { _trackOld = (await pool.query(
     `SELECT ${_trackKeys.map(k => `${k}::text AS ${k}`).join(',')} FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0] || {}; } catch (e) {} }
   const _trackBy = authUser(req) || null;
+  await poSupplierIdHeal(req.params.po);   // v28.535: a missing supplier link means no supplier terms on this PO
   if (body.end_production_overide && /^\d{4}-\d{2}-\d{2}/.test(String(body.end_production_overide))) {   // v28.532: setting the end date to the supplier's pending date = done
     try { await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_by=$3, applied_at=now() WHERE po=$1 AND kind='completion_date' AND status='pending' AND left(coalesce(value,''),10)=$2`,
       [req.params.po, String(body.end_production_overide).slice(0, 10), (_trackBy || 'internal') + ' (end date set to the same date)']); } catch (_) {} }

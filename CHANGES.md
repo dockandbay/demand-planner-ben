@@ -1,3 +1,10 @@
+## v28.535 (28-Oct-26) POs with a supplier name but no supplier link get linked (so supplier terms apply)
+- Ben (PO-1892095 - PO475 ▸ Payments): "no invoice due date but the balance defaults to the production end date ... this supplier has terms".
+- Cause: the PO has supplier_name "XR Textile" but no supplier_id, so none of XR Textile's terms (deposit / completion / balance %, credit days and type, production days) reach it; the balance due date falls back to the production end. On live 22 POs are like this (10 open, all Direct to Client POs created Aug to Sep, e.g. PO-1891958, PO-1903237, PO-1892097 - PO477); 12 have an exactly matching supplier.
+- Now the PO is linked to the supplier of exactly that name (case / spaces ignored, only when one supplier has that name): on every save of the PO, and for all POs on every Fulfil refresh (every few hours, or the Refresh button). The first refresh after deploy links the 12 on live.
+- Note: XR Textile's terms in CONFIG are 60 credit days, on clearance (not 90).
+- Sandbox dry run (rolled back): 35 POs would be linked.
+
 ## v28.534 (28-Oct-26) Order plan: link to the Fulfil PO next to Push to Fulfil
 - Ben (PO-58UKLX1 ▸ Order plan): "can we have the fulfil link on this page", placed next to Push to Fulfil (chosen from two layouts).
 - After "⬆ Push to Fulfil (full)" the toolbar now shows "↗ PO483" (or "↗ Fulfil PO" when HORIZON knows only the Fulfil id, as for automatically linked POs like PO-58UKLX1 / Fulfil id 345), opening the linked Fulfil PO in a new tab, plus one link per extra Fulfil PO (v28.522). From the PO's Linked records, falling back to the grid's Fulfil status; "not in Fulfil yet" when there is none.
