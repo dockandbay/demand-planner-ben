@@ -15873,6 +15873,7 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
   var n=function(v){ return v==null?'<span class="mut">—</span>':Math.round(v).toLocaleString('en-GB'); }, sg=function(v){ return v==null?'<span class="mut">—</span>':(v>0?'+':'')+Math.round(v).toLocaleString('en-GB'); };
   var dt=function(iso){ if(!iso)return ''; var a=inv3plAge(iso); return a.stamp; };
   var uk=function(iso){ try{ var p={}; new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(iso)).forEach(function(x){ p[x.type]=x.value; }); return p.day+'-'+p.month+'-'+p.year+' '+p.hour+':'+p.minute+' UK'; }catch(e){ return dt(iso); } };   // the report time is UK time whatever the viewer's zone
+  var mob=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);   // v28.554 (Ben): slimline 2-line cards on a phone
   var h='<div id="ilg-root" style="font-size:12px">';
   h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px">'+Object.keys(P).map(function(k){ var on=k===ILG.pool, c=d&&d.counts?d.counts[k]:null;
     return '<button class="ilg-pool" data-p="'+k+'" style="padding:5px 14px;border-radius:8px;border:1px solid '+(on?'var(--blue)':'var(--line)')+';background:'+(on?'var(--blue-soft)':'var(--card)')+';color:'+(on?'var(--blue-ink)':'var(--muted)')+';font-weight:700;cursor:pointer">'+E(P[k].label)+(c!=null?' <span class="mut" style="font-weight:500">'+c+'</span>':'')+'</button>'; }).join('')+'</div>';
@@ -15895,8 +15896,24 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
       +'<span class="mut">Status</span>'+sel('ilg-status',f.status,[['','All']].concat(Object.keys(stats).sort().map(function(s){ return [s,s]; })))
       +'<span class="mut">Diff</span>'+sel('ilg-dir',f.dir,[['','± any'],['ilg','ILG higher (+)'],['ff','Fulfil higher (−)']])
       +'<span class="mut">Ignore under</span><input id="ilg-min" type="number" min="0" value="'+E(f.min)+'" style="width:56px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><span class="mut">units</span></div>';
-    h+='<div style="display:flex;gap:12px;align-items:center;margin-bottom:6px"><label style="cursor:pointer"><input type="checkbox" id="ilg-all"'+(allOn?' checked':'')+'> Select all '+rows.filter(function(r){ return r.diff&&r.product_id!=null; }).length+' shown</label>'
-      +'<span>Selected <b>'+selRows.length+'</b> · net <b>'+sg(net)+'</b> units</span>'+(selRows.length?' <a href="javascript:void 0" id="ilg-clear" style="color:var(--blue)">clear</a>':'')+'</div>';
+    var ilgReview='';
+    if(ILG.review&&selRows.length){ var up=selRows.filter(function(r){ return r.diff>0; }), dn=selRows.filter(function(r){ return r.diff<0; });
+      ilgReview='<div style="margin:0 0 8px;padding:12px 14px;border:1px solid var(--amber);border-radius:10px;background:var(--amber-bg)"><div style="font-weight:800;margin-bottom:6px">Review: one stock count in Fulfil warehouse "'+E(P[ILG.pool].warehouse||P[ILG.pool].label)+'" (Storage Zone)</div>'
+        +'<div>'+selRows.length+' SKU lines · '+up.length+' up ('+sg(up.reduce(function(a,r){return a+r.diff;},0))+') · '+dn.length+' down ('+sg(dn.reduce(function(a,r){return a+r.diff;},0))+') · net <b>'+sg(net)+'</b> units. Each SKU is set to its Storage Zone quantity now plus the difference; Fulfil books the change to Lost and Found. The quantities are recalculated against Fulfil when you press Send.</div>'
+        +'<div style="margin-top:8px;display:flex;gap:8px"><button class="save-btn" id="ilg-send" style="background:var(--neg);color:#fff"'+(ILG.busy?' disabled':'')+'>'+(ILG.busy?'Sending…':'Send to Fulfil')+'</button><button class="save-btn light" id="ilg-cancel">Back</button></div></div>'; }
+    h+='<div style="display:flex;gap:'+(mob?'8px':'12px')+';align-items:center;flex-wrap:wrap;margin-bottom:6px"><label style="cursor:pointer"><input type="checkbox" id="ilg-all"'+(allOn?' checked':'')+'> '+(mob?'All ':'Select all ')+rows.filter(function(r){ return r.diff&&r.product_id!=null; }).length+' shown</label>'
+      +'<span>Selected <b>'+selRows.length+'</b> · net <b>'+sg(net)+'</b> units</span>'+(selRows.length?' <a href="javascript:void 0" id="ilg-clear" style="color:var(--blue)">clear</a>':'')
+      // v28.554 (Ben 28-Oct-26): the Rebaseline button sits in this bar above the table (was below it); the review panel opens right under it
+      +(ILG.review?'':'<button class="save-btn" id="ilg-rb"'+(selRows.length&&selRows.length<=500?'':' disabled')+' style="background:var(--nav);color:#fff">Rebaseline '+selRows.length+' SKU'+(selRows.length===1?'':'s')+(mob?'':' in Fulfil')+'</button>'+(selRows.length>500?'<span style="color:var(--amber)">At most 500 per rebaseline</span>':mob?'':'<span class="mut">Review first; nothing is sent until you press Send.</span>'))+'</div>';
+    h+=ilgReview;
+    if(mob){ h+='<div style="border:1px solid var(--line);border-radius:8px;overflow:hidden">'+rows.slice(0,1500).map(function(r,ix){ var can=r.diff&&r.product_id!=null;
+        return '<label style="display:block;padding:6px 10px;'+(ix?'border-top:1px solid var(--line2);':'')+'cursor:'+(can?'pointer':'default')+'"><div style="display:flex;gap:8px;align-items:center">'
+          +(can?'<input type="checkbox" class="ilg-ck" data-s="'+E(r.sku)+'"'+(ILG.sel[r.sku]?' checked':'')+'>':'<span style="width:13px;flex:none"></span>')
+          +'<span style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+E(r.description||'')+'">'+E(r.sku)+'</span>'
+          +'<span style="font-weight:700;font-variant-numeric:tabular-nums;color:'+(r.diff>0?'var(--pos)':r.diff<0?'var(--neg)':'var(--muted)')+'">'+sg(r.diff)+'</span></div>'
+          +'<div class="mut" style="padding-left:21px;font-size:11px;font-variant-numeric:tabular-nums">ILG '+n(r.report)+' · Fulfil '+n(r.fulfil_at_report)+(r.diff?' · set '+n(Math.max(0,r.set_to)):'')+(!r.in_fulfil?' · <span style="color:var(--neg)">not in Fulfil</span>':'')+(!r.in_report?' · not in report':'')+'</div></label>'; }).join('')
+        +(rows.length?'':'<div class="mut" style="padding:10px">Nothing matches these filters.</div>')+'</div>'; }
+    else {
     h+='<div style="overflow:auto;max-height:calc(100vh - 330px);border:1px solid var(--line);border-radius:8px"><table style="width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums"><thead><tr style="position:sticky;top:0;background:var(--hdr-tint);z-index:1">'
       +['','SKU','Description','Report '+(rep?uk(rep.report_at).slice(10,15):''),'Fulfil at report','Moved since','Diff','Storage now','Set to'].map(function(t,i){ return '<th style="padding:6px 8px;border-bottom:1px solid var(--line);text-align:'+(i>=3?'right':'left')+'">'+E(t)+'</th>'; }).join('')+'</tr></thead><tbody>';
     rows.slice(0,1500).forEach(function(r){ var can=r.diff&&r.product_id!=null, st=Object.keys(r.statuses||{}).filter(function(s){ return s!=='Good'; });
@@ -15906,14 +15923,9 @@ function ilgRender(){ var panel=document.getElementById('inv3pl-panel'); if(!pan
         +'<td style="padding:4px 8px;text-align:right">'+n(r.report)+'</td><td style="padding:4px 8px;text-align:right">'+n(r.fulfil_at_report)+'</td><td style="padding:4px 8px;text-align:right">'+(r.moved_since?sg(r.moved_since):'<span class="mut">0</span>')+'</td>'
         +'<td style="padding:4px 8px;text-align:right;font-weight:700;color:'+(r.diff>0?'var(--pos)':r.diff<0?'var(--neg)':'var(--muted)')+'">'+sg(r.diff)+'</td><td style="padding:4px 8px;text-align:right">'+n(r.storage_now)+'</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+(r.diff?n(Math.max(0,r.set_to)):'<span class="mut">—</span>')+'</td></tr>'; });
     if(!rows.length)h+='<tr><td colspan="9" class="mut" style="padding:10px">Nothing matches these filters.</td></tr>';
-    h+='</tbody></table></div>';
+    h+='</tbody></table></div>'; }
     if(rows.length>1500)h+='<div class="mut">Showing the first 1,500 rows.</div>';
-    h+='<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+(ILG.review?''
-        :'<button class="save-btn" id="ilg-rb"'+(selRows.length?'':' disabled')+' style="background:var(--nav);color:#fff">Rebaseline '+selRows.length+' SKU'+(selRows.length===1?'':'s')+' in Fulfil</button><span class="mut">Review first; nothing is sent until you press Send.</span>')+'</div>';
-    if(ILG.review&&selRows.length){ var up=selRows.filter(function(r){ return r.diff>0; }), dn=selRows.filter(function(r){ return r.diff<0; });
-      h+='<div style="margin-top:10px;padding:12px 14px;border:1px solid var(--amber);border-radius:10px;background:var(--amber-bg)"><div style="font-weight:800;margin-bottom:6px">Review: one stock count in Fulfil warehouse "'+E(P[ILG.pool].warehouse||P[ILG.pool].label)+'" (Storage Zone)</div>'
-        +'<div>'+selRows.length+' SKU lines · '+up.length+' up ('+sg(up.reduce(function(a,r){return a+r.diff;},0))+') · '+dn.length+' down ('+sg(dn.reduce(function(a,r){return a+r.diff;},0))+') · net <b>'+sg(net)+'</b> units. Each SKU is set to its Storage Zone quantity now plus the difference; Fulfil books the change to Lost and Found. The quantities are recalculated against Fulfil when you press Send.</div>'
-        +'<div style="margin-top:8px;display:flex;gap:8px"><button class="save-btn" id="ilg-send" style="background:var(--neg);color:#fff"'+(ILG.busy?' disabled':'')+'>'+(ILG.busy?'Sending…':'Send to Fulfil')+'</button><button class="save-btn light" id="ilg-cancel">Back</button></div></div>'; } }
+  }
   var B=(d.batches||[]).filter(function(b){ return b.pool===ILG.pool; });
   if(B.length){ h+='<div class="sect-h" style="margin-top:18px">Rebaseline history</div><table style="border-collapse:collapse;text-align:left"><tbody>'+B.map(function(b){ var c={pending:'var(--amber)',sent:'var(--blue)',done:'var(--pos)',error:'var(--neg)',cancelled:'var(--muted)'}[b.status]||'var(--muted)';
       return '<tr><td style="padding:3px 10px 3px 0">#'+b.id+'</td><td style="padding:3px 10px 3px 0">'+E(dt(b.created_at))+' '+E(inv3plUser(b.created_by))+'</td><td style="padding:3px 10px 3px 0">'+b.n_lines+' lines · net '+sg(Number(b.net))+'</td>'

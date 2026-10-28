@@ -19813,7 +19813,7 @@ app.post('/api/cron/ilg-stock-import', async (req, res) => {   // n8n "Ops | ILG
 app.post('/api/supply/ilg/rebaseline', async (req, res) => {
   const b = req.body || {}, poolKey = String(b.pool || '').toUpperCase(), skus = Array.from(new Set((Array.isArray(b.skus) ? b.skus : []).map(String)));
   if (!ILG_POOLS[poolKey]) return res.status(400).json({ error: 'Unknown pool' }); if (!skus.length) return res.status(400).json({ error: 'Tick at least one SKU' });
-  if (skus.length > 1000) return res.status(400).json({ error: 'At most 1000 SKUs per rebaseline' });
+  if (skus.length > 500) return res.status(400).json({ error: 'At most 500 SKUs per rebaseline (Fulfil reads 500 rows a page); send the rest as a second batch' });   // v28.554
   try { const rep = await ilgLatest(b.report_id ? Number(b.report_id) : null); if (!rep) return res.status(400).json({ error: 'No ILG report imported yet' });
     const open = (await pool.query(`SELECT id FROM planner.ilg_rebaseline_batches WHERE pool=$1 AND status IN ('pending','sent') LIMIT 1`, [poolKey])).rows[0];
     if (open) return res.status(409).json({ error: 'Rebaseline #' + open.id + ' for this warehouse is still being written to Fulfil. Wait for it to finish (or cancel it if it is still pending).' });
